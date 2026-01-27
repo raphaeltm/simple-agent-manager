@@ -39,7 +39,7 @@ workspacesRoutes.get('/', async (c) => {
   const status = c.req.query('status');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  let query = db
+  const query = db
     .select()
     .from(schema.workspaces)
     .where(eq(schema.workspaces.userId, userId))

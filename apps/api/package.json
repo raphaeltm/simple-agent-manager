@@ -8,13 +8,11 @@
   "scripts": {
     "build": "tsc",
     "dev": "wrangler dev",
-    "dev:mock": "tsx --env-file=../../.env.mock src/node-server.ts",
-    "dev:wrangler-mock": "wrangler dev --env mock",
-    "test": "vitest run",
+        "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src tests",
+    "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'",
     "deploy": "wrangler deploy",
     "deploy:staging": "wrangler deploy --env staging"
   },

@@ -13,7 +13,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src tests",
+    "lint": "eslint 'src/**/*.{ts,tsx}' 'tests/**/*.{ts,tsx}'",
     "deploy": "pnpm build && wrangler pages deploy dist",
     "deploy:staging": "pnpm build && wrangler pages deploy dist --env staging"
   },

@@ -18,7 +18,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src tests"
+    "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^7.0.0",
