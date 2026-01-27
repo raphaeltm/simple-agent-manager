@@ -1,0 +1,52 @@
+{
+  "name": "cloud-ai-workspaces",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Serverless platform to spin up AI coding agent environments on-demand",
+  "keywords": ["claude-code", "ai-workspaces", "devcontainers", "cloudflare-workers"],
+  "license": "MIT",
+  "author": "Cloud AI Workspaces Contributors",
+  "type": "module",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "dev:mock": "turbo run dev:mock",
+    "test": "turbo run test",
+    "test:coverage": "turbo run test:coverage",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint -- --fix",
+    "typecheck": "turbo run typecheck",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "deploy": "turbo run deploy",
+    "deploy:staging": "turbo run deploy:staging",
+    "setup": "tsx scripts/setup.ts",
+    "generate-keys": "tsx scripts/generate-keys.ts",
+    "teardown": "tsx scripts/teardown.ts",
+    "teardown:staging": "tsx scripts/teardown.ts --env staging",
+    "db:migrate": "wrangler d1 migrations apply workspaces --remote",
+    "db:migrate:staging": "wrangler d1 migrations apply workspaces-staging --remote",
+    "db:migrate:local": "wrangler d1 migrations apply workspaces --local",
+    "upload-agent": "tsx scripts/upload-agent.ts",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.0.0",
+    "@commitlint/config-conventional": "^19.0.0",
+    "@types/node": "^20.0.0",
+    "husky": "^9.0.0",
+    "lint-staged": "^15.0.0",
+    "prettier": "^3.0.0",
+    "turbo": "^2.0.0",
+    "typescript": "^5.0.0"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": ["eslint --fix", "prettier --write"],
+    "*.{json,md,yaml,yml}": ["prettier --write"]
+  }
+}

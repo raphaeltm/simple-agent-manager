@@ -1,0 +1,346 @@
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="Cloud AI Workspaces" width="400" />
+</p>
+
+<p align="center">
+  <strong>Spin up AI coding environments on-demand. Zero cost when idle.</strong>
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#features">Features</a> •
+  <a href="docs/">Documentation</a> •
+  <a href="ROADMAP.md">Roadmap</a> •
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License" /></a>
+</p>
+
+---
+
+Cloud AI Workspaces is a serverless platform for creating ephemeral cloud development environments optimized for [Claude Code](https://www.anthropic.com/claude-code). Point it at any GitHub repository and get a fully configured workspace with Claude Code pre-installed—accessible from your browser in minutes.
+
+Think **GitHub Codespaces, but built for AI-assisted development** and with automatic shutdown to eliminate surprise bills.
+
+## Why Cloud AI Workspaces?
+
+| | GitHub Codespaces | Cloud AI Workspaces |
+|---|---|---|
+| **Cost** | $0.18–$0.36/hour | ~$0.07–$0.15/hour |
+| **Idle shutdown** | Manual or 30min timeout | Automatic with AI-aware detection |
+| **Claude Code** | Manual setup required | Pre-installed and optimized |
+| **Private repos** | Native GitHub support | GitHub App integration |
+| **Control plane** | Managed | Self-hosted (free tier) |
+
+### Key Differentiators
+
+- **5-10x cheaper** than hosted alternatives using Hetzner Cloud VMs
+- **AI-aware idle detection** — won't shut down while Claude is actively working
+- **Zero ongoing cost** — VMs self-terminate, control plane runs on Cloudflare's free tier
+- **Claude Code first** — pre-installed, session persistence, MCP server support
+- **Private repository support** — secure GitHub App integration for your org
+
+## Features
+
+- **Instant Workspaces** — Create a cloud VM from any Git repository in minutes
+- **Web-Based IDE** — Access via CloudCLI with integrated file explorer and terminal
+- **DevContainer Support** — Automatically detects and uses your `.devcontainer/devcontainer.json`
+- **Multiple VM Sizes** — Small (1 vCPU/2GB), Medium (2 vCPU/4GB), Large (4 vCPU/8GB)
+- **Automatic Cleanup** — Idle workspaces shut down after 30 minutes of inactivity
+- **GitHub Integration** — Works with both public and private repositories
+
+## Quick Start
+
+### Prerequisites
+
+#### Prerequisites
+
+- [Node.js](https://nodejs.org/) 20+
+- [pnpm](https://pnpm.io/) 9+
+- [Cloudflare account](https://cloudflare.com/) (free tier works)
+- [Hetzner Cloud account](https://hetzner.cloud/)
+- A domain managed by Cloudflare
+
+#### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/YOUR_ORG/cloud-ai-workspaces.git
+cd cloud-ai-workspaces
+
+# Install dependencies
+pnpm install
+
+# Copy environment template
+cp .env.example .env
+# Edit .env with your API tokens and domain
+```
+
+### Configuration
+
+Create your `.env` file with the following:
+
+```bash
+# Cloudflare (for DNS and hosting)
+CF_API_TOKEN=your-cloudflare-api-token
+CF_ZONE_ID=your-zone-id
+CF_ACCOUNT_ID=your-account-id
+
+# Domain for workspace URLs (e.g., workspaces.example.com)
+BASE_DOMAIN=example.com
+
+# GitHub OAuth (create at https://github.com/settings/developers)
+GITHUB_CLIENT_ID=your-github-oauth-client-id
+GITHUB_CLIENT_SECRET=your-github-oauth-client-secret
+
+# GitHub App (create at https://github.com/settings/apps)
+GITHUB_APP_ID=your-github-app-id
+GITHUB_APP_PRIVATE_KEY=your-github-app-private-key-base64
+
+# JWT Keys (generate with: pnpm generate-keys)
+JWT_PRIVATE_KEY=your-jwt-private-key-base64
+JWT_PUBLIC_KEY=your-jwt-public-key-base64
+
+# Encryption key for credential storage (32 bytes, base64)
+ENCRYPTION_KEY=your-encryption-key-base64
+```
+
+> **Note:** Run `pnpm generate-keys` to generate JWT and encryption keys.
+> User Hetzner tokens are stored encrypted per-user, not as environment variables.
+
+### Development
+
+```bash
+# Start development servers (API + Web UI)
+pnpm dev
+
+# Run tests
+pnpm test
+
+# Type checking
+pnpm typecheck
+
+# Build for production
+pnpm build
+```
+
+### Deployment
+
+```bash
+# Deploy to Cloudflare
+pnpm deploy
+
+# Deploy to staging
+pnpm deploy:staging
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Your Browser                             │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Cloudflare Pages (UI)                         │
+│                      React + Vite                                │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  Cloudflare Workers (API)                        │
+│                     Hono + TypeScript                            │
+│  ┌──────────────┬──────────────┬──────────────┬──────────────┐  │
+│  │  Workspace   │    GitHub    │     DNS      │  Cloud-Init  │  │
+│  │   Service    │   Service    │   Service    │  Generator   │  │
+│  └──────────────┴──────────────┴──────────────┴──────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+           │                │                │
+           ▼                ▼                ▼
+    ┌────────────┐   ┌────────────┐   ┌────────────┐
+    │  Hetzner   │   │   GitHub   │   │ Cloudflare │
+    │   Cloud    │   │    API     │   │    DNS     │
+    └────────────┘   └────────────┘   └────────────┘
+           │
+           ▼
+    ┌─────────────────────────────────────────────┐
+    │            Hetzner Cloud VM                  │
+    │  ┌─────────────────────────────────────┐    │
+    │  │  Docker + DevContainer               │    │
+    │  │  ┌───────────────────────────────┐  │    │
+    │  │  │         Your Code             │  │    │
+    │  │  └───────────────────────────────┘  │    │
+    │  └─────────────────────────────────────┘    │
+    │  ┌─────────────────────────────────────┐    │
+    │  │  VM Agent (Go)                       │    │
+    │  │  • WebSocket terminal (xterm.js)    │    │
+    │  │  • JWT authentication               │    │
+    │  │  • Idle detection + auto-shutdown   │    │
+    │  └─────────────────────────────────────┘    │
+    └─────────────────────────────────────────────┘
+```
+
+## Project Structure
+
+```
+apps/
+├── api/              # Cloudflare Worker API (Hono)
+│   └── src/
+│       ├── routes/       # API endpoints
+│       ├── services/     # Business logic
+│       └── lib/          # Utilities
+└── web/              # Control Plane UI (React + Vite)
+    └── src/
+        ├── pages/        # Dashboard views
+        ├── components/   # UI components
+        └── services/     # API client
+
+packages/
+├── shared/           # Shared types and validation
+├── providers/        # Cloud provider abstraction
+├── cloud-init/       # VM cloud-init template generation
+└── vm-agent/         # Go agent for WebSocket terminal + idle detection
+
+scripts/
+├── vm/               # VM-side config templates
+├── generate-keys.ts  # Generate JWT and encryption keys
+├── setup.ts          # Initial setup script
+└── deploy.ts         # Deployment automation
+
+specs/                # Feature specifications
+docs/                 # Documentation
+```
+
+## API Reference
+
+### Authentication
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/auth/*` | `*` | BetterAuth authentication routes |
+| `/api/auth/me` | `GET` | Get current user |
+
+### Credentials
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/credentials` | `GET` | List credentials |
+| `/api/credentials` | `POST` | Create/update credential |
+| `/api/credentials/:provider` | `DELETE` | Delete credential |
+
+### GitHub
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/github/installations` | `GET` | List GitHub App installations |
+| `/api/github/install-url` | `GET` | Get GitHub App install URL |
+| `/api/github/repositories` | `GET` | List accessible repositories |
+| `/api/github/webhook` | `POST` | GitHub webhook handler |
+| `/api/github/callback` | `GET` | GitHub App OAuth callback |
+
+### Workspaces
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/workspaces` | `GET` | List user's workspaces |
+| `/api/workspaces` | `POST` | Create a new workspace |
+| `/api/workspaces/:id` | `GET` | Get workspace details |
+| `/api/workspaces/:id` | `DELETE` | Delete workspace |
+| `/api/workspaces/:id/stop` | `POST` | Stop workspace |
+| `/api/workspaces/:id/restart` | `POST` | Restart workspace |
+| `/api/workspaces/:id/ready` | `POST` | VM ready callback |
+| `/api/workspaces/:id/heartbeat` | `POST` | VM heartbeat |
+
+### Terminal
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/terminal/token` | `POST` | Get terminal access token |
+| `/.well-known/jwks.json` | `GET` | JWKS for JWT verification |
+
+### VM Agent
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/agent/download` | `GET` | Download VM agent binary (query: os, arch) |
+| `/api/agent/version` | `GET` | Get current agent version |
+| `/api/agent/install-script` | `GET` | Get VM agent install script |
+
+Authentication is session-based via cookies (BetterAuth + GitHub OAuth).
+
+## Use Cases
+
+### Instant Prototyping
+
+Spin up a workspace to try a new library without polluting your local environment. Claude Code is ready to help you explore and implement.
+
+```bash
+# Create workspace via web UI or API
+# Authentication is handled via GitHub OAuth session
+curl -X POST https://api.example.com/api/workspaces \
+  -H "Content-Type: application/json" \
+  --cookie "session=..." \
+  -d '{"name": "my-workspace", "repository": "user/repo", "installationId": "...", "vmSize": "medium"}'
+```
+
+### Private Codebase Development
+
+Connect your GitHub organization, create workspaces from private repositories, and let Claude help with refactoring while keeping everything in ephemeral environments.
+
+### Team Onboarding
+
+New team members can spin up fully configured development environments in minutes—no local setup required.
+
+## Roadmap
+
+| Phase | Target | Features |
+|-------|--------|----------|
+| **1. MVP** | Complete | Core workspace management, GitHub OAuth, auto-shutdown |
+| **2. Browser Terminal** | Current | Web terminal, VM agent, idle detection |
+| **3. Enhanced UX** | Q1 2026 | Logs, SSH access, templates, persistent storage |
+| **4. Multi-Tenancy** | Q2 2026 | Teams, usage quotas, billing |
+| **5. Enterprise** | Q3 2026 | VPC, SSO, compliance, multi-region |
+
+See [ROADMAP.md](ROADMAP.md) for details.
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| **API Runtime** | [Cloudflare Workers](https://workers.cloudflare.com/) |
+| **API Framework** | [Hono](https://hono.dev/) |
+| **Web UI** | [React](https://react.dev/) + [Vite](https://vitejs.dev/) |
+| **Cloud Provider** | [Hetzner Cloud](https://hetzner.cloud/) |
+| **DNS** | [Cloudflare DNS](https://cloudflare.com/) |
+| **Data Storage** | [Cloudflare D1](https://developers.cloudflare.com/d1/) (database) + [KV](https://developers.cloudflare.com/kv/) (sessions) + [R2](https://developers.cloudflare.com/r2/) (binaries) |
+| **Testing** | [Vitest](https://vitest.dev/) + [Miniflare](https://miniflare.dev/) |
+| **Monorepo** | [pnpm](https://pnpm.io/) + [Turborepo](https://turbo.build/) |
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+```bash
+# Setup development environment
+pnpm install
+
+# Run tests before submitting
+pnpm test
+pnpm typecheck
+
+# Format code
+pnpm format
+```
+
+## Related Projects
+
+- [DevPod](https://github.com/loft-sh/devpod) — Client-only devcontainer management
+- [Coder](https://github.com/coder/coder) — Self-hosted cloud development environments
+- [Daytona](https://github.com/daytonaio/daytona) — Open source dev environment manager
+
+## License
+
+[MIT](LICENSE)
+
+---
+
+<p align="center">
+  Built with <a href="https://hono.dev/">Hono</a> on <a href="https://cloudflare.com/">Cloudflare</a>
+</p>

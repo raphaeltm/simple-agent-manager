@@ -1,0 +1,10 @@
+github.com/MicahParks/jwkset v0.5.19 h1:xm5bsy1Y1TN/d/6brLQn5mjNMgWP9VY5X3V6J2CZiE0=
+github.com/MicahParks/jwkset v0.5.19/go.mod h1:q8ptTGn/Z9c4MwbcfeCDssADeVQb3Pk7PnVxrvi+2QY=
+github.com/MicahParks/keyfunc/v3 v3.3.5 h1:7ceAJLUAldnoueHDNzNl/lSBPHCnKolX/tMtUD+HGPQ=
+github.com/MicahParks/keyfunc/v3 v3.3.5/go.mod h1:SdCCyMJn/bYqWDvARdkCPNJilwlMKfFX4kXMQqyRWGw=
+github.com/creack/pty v1.1.21 h1:1/QdRyBGHvKyKATCdXNgq8fTMqGp0SkzNqOb+e+gyXQ=
+github.com/creack/pty v1.1.21/go.mod h1:MOBLtS5ELMKEGVHSHNh/2bqWFl4D+4IRbiDL54QPDRU=
+github.com/golang-jwt/jwt/v5 v5.2.1 h1:OuVbFODueb089Lh128TAcimifWaLhJwVflnrgM17wHk=
+github.com/golang-jwt/jwt/v5 v5.2.1/go.mod h1:pqrtFR0X4osieyHYxtmOUWsAWrfe1Q5UVIyoH402zdk=
+github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
+github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=

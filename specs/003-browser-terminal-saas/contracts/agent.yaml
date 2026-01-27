@@ -1,0 +1,261 @@
+openapi: 3.1.0
+info:
+  title: Browser Terminal SaaS - VM Agent API
+  version: 1.0.0
+  description: |
+    REST and WebSocket API for the VM Agent running on workspace VMs.
+    Handles terminal sessions, health checks, and idle detection.
+  contact:
+    name: API Support
+  license:
+    name: MIT
+
+servers:
+  - url: https://ws-{workspaceId}.workspaces.example.com
+    description: Workspace VM
+    variables:
+      workspaceId:
+        default: abc123
+        description: Workspace ID
+
+tags:
+  - name: health
+    description: Health and readiness checks
+  - name: terminal
+    description: Terminal WebSocket and UI
+  - name: session
+    description: Session management
+
+paths:
+  # ===========================================================================
+  # Health
+  # ===========================================================================
+  /health:
+    get:
+      tags: [health]
+      summary: Health check
+      description: Returns agent health status
+      responses:
+        '200':
+          description: Agent is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Agent is unhealthy
+
+  /ready:
+    get:
+      tags: [health]
+      summary: Readiness check
+      description: Returns true when agent is ready to serve terminal sessions
+      responses:
+        '200':
+          description: Agent is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ready:
+                    type: boolean
+                  devcontainer:
+                    type: boolean
+                    description: Whether devcontainer is running
+                required:
+                  - ready
+                  - devcontainer
+        '503':
+          description: Agent is not ready
+
+  # ===========================================================================
+  # Terminal UI
+  # ===========================================================================
+  /:
+    get:
+      tags: [terminal]
+      summary: Terminal UI
+      description: Serves the embedded React/xterm.js terminal UI
+      responses:
+        '200':
+          description: HTML page
+          content:
+            text/html:
+              schema:
+                type: string
+        '302':
+          description: Redirect to auth if not authenticated
+
+  /assets/{path}:
+    get:
+      tags: [terminal]
+      summary: Static assets
+      description: Serves embedded static assets (JS, CSS)
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Asset content
+        '404':
+          description: Asset not found
+
+  # ===========================================================================
+  # Authentication
+  # ===========================================================================
+  /auth/callback:
+    get:
+      tags: [session]
+      summary: Auth callback
+      description: Receives JWT token and sets session cookie
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: JWT from control plane
+      responses:
+        '302':
+          description: Redirect to terminal UI
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: Session cookie
+        '401':
+          description: Invalid or expired token
+
+  /auth/logout:
+    post:
+      tags: [session]
+      summary: Logout
+      description: Clears session cookie
+      responses:
+        '302':
+          description: Redirect to landing
+
+  # ===========================================================================
+  # Terminal WebSocket
+  # ===========================================================================
+  /ws/terminal:
+    get:
+      tags: [terminal]
+      summary: Terminal WebSocket
+      description: |
+        WebSocket endpoint for terminal I/O.
+
+        ## Protocol
+
+        ### Binary Frames (Terminal I/O)
+        - Client → Server: stdin data
+        - Server → Client: stdout/stderr data
+
+        ### Text Frames (Control Messages)
+        ```json
+        // Resize terminal
+        {"type": "resize", "rows": 24, "cols": 80}
+
+        // Heartbeat
+        {"type": "ping"}
+        {"type": "pong"}
+        ```
+
+        ## Authentication
+        Requires valid session cookie set by /auth/callback.
+      responses:
+        '101':
+          description: Switching Protocols (WebSocket upgrade)
+        '401':
+          description: Not authenticated
+        '503':
+          description: Devcontainer not ready
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        version:
+          type: string
+          description: VM Agent version
+        uptime:
+          type: integer
+          description: Uptime in seconds
+        devcontainer:
+          type: string
+          enum: [running, starting, stopped, error]
+        activeSessions:
+          type: integer
+          description: Number of active terminal sessions
+        lastActivity:
+          type: string
+          format: date-time
+          nullable: true
+        idleSeconds:
+          type: integer
+          description: Seconds since last activity
+      required:
+        - status
+        - version
+        - uptime
+        - devcontainer
+        - activeSessions
+        - idleSeconds
+
+    TerminalMessage:
+      oneOf:
+        - $ref: '#/components/schemas/ResizeMessage'
+        - $ref: '#/components/schemas/PingMessage'
+        - $ref: '#/components/schemas/PongMessage'
+
+    ResizeMessage:
+      type: object
+      properties:
+        type:
+          type: string
+          const: resize
+        rows:
+          type: integer
+          minimum: 1
+          maximum: 500
+        cols:
+          type: integer
+          minimum: 1
+          maximum: 500
+      required:
+        - type
+        - rows
+        - cols
+
+    PingMessage:
+      type: object
+      properties:
+        type:
+          type: string
+          const: ping
+      required:
+        - type
+
+    PongMessage:
+      type: object
+      properties:
+        type:
+          type: string
+          const: pong
+      required:
+        - type
+
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: vm_session
+      description: Session cookie set after JWT validation

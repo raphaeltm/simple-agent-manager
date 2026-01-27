@@ -1,0 +1,48 @@
+{
+  "name": "@cloud-ai-workspaces/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Worker API for Cloud AI Workspaces",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "wrangler dev",
+    "dev:mock": "tsx --env-file=../../.env.mock src/node-server.ts",
+    "dev:wrangler-mock": "wrangler dev --env mock",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging"
+  },
+  "dependencies": {
+    "@cloud-ai-workspaces/providers": "workspace:*",
+    "@cloud-ai-workspaces/shared": "workspace:*",
+    "@workspace/cloud-init": "workspace:*",
+    "@hono/node-server": "^1.19.9",
+    "better-auth": "^1.0.0",
+    "better-auth-cloudflare": "^0.2.9",
+    "drizzle-orm": "^0.34.0",
+    "hono": "^4.0.0",
+    "jose": "^6.1.3",
+    "tsx": "^4.21.0",
+    "ulid": "^2.3.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.5.0",
+    "@cloudflare/workers-types": "^4.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vitest/coverage-v8": "^2.0.0",
+    "drizzle-kit": "^0.26.0",
+    "eslint": "^8.0.0",
+    "execa": "^8.0.1",
+    "miniflare": "^3.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0",
+    "wrangler": "^3.0.0"
+  }
+}

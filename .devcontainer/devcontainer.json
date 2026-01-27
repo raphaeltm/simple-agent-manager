@@ -1,0 +1,50 @@
+{
+	"name": "Cloud AI Workspaces",
+	"image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm",
+	// Ensure Claude CLI uses a config directory within the workspace
+	"containerEnv": {
+		"CLAUDE_CONFIG_DIR": "/workspaces/claude-home"
+	},
+	"features": {
+		// Docker-in-Docker for running workspace devcontainers
+		"ghcr.io/devcontainers/features/docker-in-docker:2": {}
+	},
+	// Ports for local development
+	"forwardPorts": [
+		8787, // API server
+		5173, // Web dev server (Vite)
+		3001 // CloudCLI (workspace access)
+	],
+	"portsAttributes": {
+		"8787": {
+			"label": "API",
+			"onAutoForward": "notify"
+		},
+		"5173": {
+			"label": "Web UI",
+			"onAutoForward": "notify"
+		},
+		"3001": {
+			"label": "CloudCLI",
+			"onAutoForward": "notify"
+		}
+	},
+	// Install dependencies after container creation
+	"postCreateCommand": "bash .devcontainer/setup.sh",
+	// Create Claude config dir at container start (workspace-mounted path)
+	"postStartCommand": "mkdir -p /workspaces/claude-home",
+	// VS Code extensions for better DX
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"dbaeumer.vscode-eslint",
+				"esbenp.prettier-vscode",
+				"bradlc.vscode-tailwindcss"
+			],
+			"settings": {
+				"editor.formatOnSave": true,
+				"editor.defaultFormatter": "esbenp.prettier-vscode"
+			}
+		}
+	}
+}

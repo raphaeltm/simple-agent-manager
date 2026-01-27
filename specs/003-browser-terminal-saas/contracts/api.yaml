@@ -1,0 +1,796 @@
+openapi: 3.1.0
+info:
+  title: Browser Terminal SaaS - Control Plane API
+  version: 1.0.0
+  description: |
+    REST API for the Browser Terminal SaaS control plane.
+    Handles authentication, cloud credentials, GitHub integrations, and workspace management.
+  contact:
+    name: API Support
+  license:
+    name: MIT
+
+servers:
+  - url: https://api.workspaces.example.com
+    description: Production
+  - url: https://api-staging.workspaces.example.com
+    description: Staging
+  - url: http://localhost:8787
+    description: Development
+
+tags:
+  - name: auth
+    description: Authentication via BetterAuth
+  - name: credentials
+    description: Cloud provider credential management
+  - name: github
+    description: GitHub App installations and repositories
+  - name: workspaces
+    description: Workspace lifecycle management
+  - name: terminal
+    description: Terminal access tokens
+  - name: agent
+    description: VM Agent binary distribution
+
+paths:
+  # ===========================================================================
+  # Authentication (BetterAuth)
+  # ===========================================================================
+  /api/auth/{betterauth}:
+    get:
+      tags: [auth]
+      summary: BetterAuth handler (GET)
+      description: Handles OAuth callbacks, session checks, etc.
+      parameters:
+        - name: betterauth
+          in: path
+          required: true
+          schema:
+            type: string
+          description: BetterAuth route path
+      responses:
+        '200':
+          description: Success
+        '302':
+          description: Redirect (OAuth flow)
+    post:
+      tags: [auth]
+      summary: BetterAuth handler (POST)
+      description: Handles sign-in, sign-out, etc.
+      parameters:
+        - name: betterauth
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+        '302':
+          description: Redirect
+
+  /api/auth/me:
+    get:
+      tags: [auth]
+      summary: Get current user
+      description: Returns the authenticated user's profile
+      security:
+        - session: []
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ===========================================================================
+  # Credentials
+  # ===========================================================================
+  /api/credentials:
+    get:
+      tags: [credentials]
+      summary: List credentials
+      description: Returns all configured cloud provider credentials (without sensitive data)
+      security:
+        - session: []
+      responses:
+        '200':
+          description: List of credentials
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CredentialResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [credentials]
+      summary: Add or update credential
+      description: Validates and stores an encrypted cloud provider token
+      security:
+        - session: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCredentialRequest'
+      responses:
+        '201':
+          description: Credential created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/credentials/{provider}:
+    delete:
+      tags: [credentials]
+      summary: Delete credential
+      description: Removes a cloud provider credential
+      security:
+        - session: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/CredentialProvider'
+      responses:
+        '204':
+          description: Credential deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ===========================================================================
+  # GitHub
+  # ===========================================================================
+  /api/github/installations:
+    get:
+      tags: [github]
+      summary: List GitHub App installations
+      description: Returns all GitHub App installations for the user
+      security:
+        - session: []
+      responses:
+        '200':
+          description: List of installations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GitHubInstallation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/github/install-url:
+    get:
+      tags: [github]
+      summary: Get GitHub App install URL
+      description: Returns the URL to install the GitHub App
+      security:
+        - session: []
+      responses:
+        '200':
+          description: Install URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    format: uri
+                required:
+                  - url
+
+  /api/github/repositories:
+    get:
+      tags: [github]
+      summary: List accessible repositories
+      description: Returns repositories the user can access via installed GitHub Apps
+      security:
+        - session: []
+      parameters:
+        - name: installation_id
+          in: query
+          schema:
+            type: string
+          description: Filter by installation ID
+      responses:
+        '200':
+          description: List of repositories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Repository'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/github/webhook:
+    post:
+      tags: [github]
+      summary: GitHub App webhook
+      description: Receives GitHub App events (installation, uninstallation)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Webhook processed
+        '400':
+          description: Invalid signature
+
+  # ===========================================================================
+  # Workspaces
+  # ===========================================================================
+  /api/workspaces:
+    get:
+      tags: [workspaces]
+      summary: List workspaces
+      description: Returns all workspaces for the authenticated user
+      security:
+        - session: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/WorkspaceStatus'
+          description: Filter by status
+      responses:
+        '200':
+          description: List of workspaces
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkspaceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [workspaces]
+      summary: Create workspace
+      description: Provisions a new workspace with VM and DNS
+      security:
+        - session: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkspaceRequest'
+      responses:
+        '201':
+          description: Workspace created (provisioning started)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          description: Hetzner credential required
+        '409':
+          description: Workspace quota exceeded
+
+  /api/workspaces/{id}:
+    get:
+      tags: [workspaces]
+      summary: Get workspace
+      description: Returns a single workspace by ID
+      security:
+        - session: []
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '200':
+          description: Workspace details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [workspaces]
+      summary: Delete workspace
+      description: Stops and deletes a workspace
+      security:
+        - session: []
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '204':
+          description: Workspace deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/workspaces/{id}/stop:
+    post:
+      tags: [workspaces]
+      summary: Stop workspace
+      description: Stops a running workspace (keeps record for restart)
+      security:
+        - session: []
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '200':
+          description: Workspace stopping
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Workspace not in running state
+
+  /api/workspaces/{id}/restart:
+    post:
+      tags: [workspaces]
+      summary: Restart workspace
+      description: Provisions a new VM for a stopped workspace
+      security:
+        - session: []
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '200':
+          description: Workspace restarting
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Workspace not in stopped state
+
+  /api/workspaces/{id}/heartbeat:
+    post:
+      tags: [workspaces]
+      summary: Workspace heartbeat
+      description: Called by VM Agent to report status and activity
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeartbeatRequest'
+      responses:
+        '200':
+          description: Heartbeat received
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeartbeatResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ===========================================================================
+  # Terminal
+  # ===========================================================================
+  /api/terminal/token:
+    post:
+      tags: [terminal]
+      summary: Get terminal access token
+      description: Generates a short-lived JWT for terminal authentication
+      security:
+        - session: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                workspaceId:
+                  type: string
+              required:
+                - workspaceId
+      responses:
+        '200':
+          description: Terminal token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: JWT for terminal authentication
+                  expiresAt:
+                    type: string
+                    format: date-time
+                required:
+                  - token
+                  - expiresAt
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Not authorized for this workspace
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /.well-known/jwks.json:
+    get:
+      tags: [terminal]
+      summary: JWKS endpoint
+      description: Returns public keys for JWT validation
+      responses:
+        '200':
+          description: JWKS
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JWKS'
+
+  # ===========================================================================
+  # Agent
+  # ===========================================================================
+  /api/agent/download:
+    get:
+      tags: [agent]
+      summary: Download VM Agent binary
+      description: Serves the VM Agent binary from R2
+      parameters:
+        - name: arch
+          in: query
+          schema:
+            type: string
+            enum: [amd64, arm64]
+            default: amd64
+          description: Target architecture
+      responses:
+        '200':
+          description: VM Agent binary
+          headers:
+            X-Agent-Version:
+              schema:
+                type: string
+              description: Agent version
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Binary not found
+
+components:
+  # ===========================================================================
+  # Security Schemes
+  # ===========================================================================
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: session
+      description: BetterAuth session cookie
+
+  # ===========================================================================
+  # Parameters
+  # ===========================================================================
+  parameters:
+    WorkspaceId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Workspace ID
+
+  # ===========================================================================
+  # Responses
+  # ===========================================================================
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  # ===========================================================================
+  # Schemas
+  # ===========================================================================
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required:
+        - error
+        - message
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        githubId:
+          type: string
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - githubId
+        - email
+        - createdAt
+
+    CredentialProvider:
+      type: string
+      enum: [hetzner]
+
+    CredentialResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        provider:
+          $ref: '#/components/schemas/CredentialProvider'
+        connected:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - provider
+        - connected
+        - createdAt
+
+    CreateCredentialRequest:
+      type: object
+      properties:
+        provider:
+          $ref: '#/components/schemas/CredentialProvider'
+        token:
+          type: string
+          description: Cloud provider API token
+      required:
+        - provider
+        - token
+
+    GitHubInstallation:
+      type: object
+      properties:
+        id:
+          type: string
+        installationId:
+          type: string
+        accountType:
+          type: string
+          enum: [personal, organization]
+        accountName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - installationId
+        - accountType
+        - accountName
+        - createdAt
+
+    Repository:
+      type: object
+      properties:
+        id:
+          type: integer
+        fullName:
+          type: string
+          description: "owner/repo format"
+        name:
+          type: string
+        private:
+          type: boolean
+        defaultBranch:
+          type: string
+        installationId:
+          type: string
+      required:
+        - id
+        - fullName
+        - name
+        - private
+        - defaultBranch
+        - installationId
+
+    WorkspaceStatus:
+      type: string
+      enum: [pending, creating, running, stopping, stopped, error]
+
+    VMSize:
+      type: string
+      enum: [small, medium, large]
+
+    VMLocation:
+      type: string
+      enum: [nbg1, fsn1, hel1]
+
+    WorkspaceResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        repository:
+          type: string
+        branch:
+          type: string
+        status:
+          $ref: '#/components/schemas/WorkspaceStatus'
+        vmSize:
+          $ref: '#/components/schemas/VMSize'
+        vmLocation:
+          $ref: '#/components/schemas/VMLocation'
+        url:
+          type: string
+          format: uri
+          description: Workspace terminal URL
+        lastActivityAt:
+          type: string
+          format: date-time
+          nullable: true
+        errorMessage:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - repository
+        - branch
+        - status
+        - vmSize
+        - vmLocation
+        - url
+        - createdAt
+        - updatedAt
+
+    CreateWorkspaceRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        repository:
+          type: string
+          pattern: '^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$'
+          description: "owner/repo format"
+        branch:
+          type: string
+          default: main
+        vmSize:
+          $ref: '#/components/schemas/VMSize'
+        vmLocation:
+          $ref: '#/components/schemas/VMLocation'
+      required:
+        - name
+        - repository
+        - vmSize
+        - vmLocation
+
+    HeartbeatRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded]
+        lastActivity:
+          type: string
+          format: date-time
+        idleSeconds:
+          type: integer
+          minimum: 0
+      required:
+        - status
+        - lastActivity
+        - idleSeconds
+
+    HeartbeatResponse:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [continue, shutdown]
+          description: Action for VM Agent to take
+        idleThreshold:
+          type: integer
+          description: Idle threshold in seconds
+      required:
+        - action
+        - idleThreshold
+
+    JWKS:
+      type: object
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            properties:
+              kty:
+                type: string
+              kid:
+                type: string
+              use:
+                type: string
+              alg:
+                type: string
+              n:
+                type: string
+              e:
+                type: string
+      required:
+        - keys

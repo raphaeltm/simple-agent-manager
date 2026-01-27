@@ -1,0 +1,63 @@
+# GoReleaser configuration for VM Agent
+project_name: vm-agent
+
+before:
+  hooks:
+    - go mod tidy
+    - cd ui && pnpm install && pnpm build
+    - make embed
+
+builds:
+  - id: vm-agent
+    main: .
+    binary: vm-agent
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: binary
+    format: binary
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: your-org
+    name: cloud-ai-workspaces
+  prerelease: auto
+  draft: false
+  name_template: "VM Agent v{{.Version}}"
+
+# Upload binaries to R2 after release
+publishers:
+  - name: r2-upload
+    cmd: |
+      for file in dist/vm-agent-*; do
+        name=$(basename $file)
+        wrangler r2 object put agents/$name --file $file
+      done
+    env:
+      - CLOUDFLARE_API_TOKEN={{ .Env.CLOUDFLARE_API_TOKEN }}
