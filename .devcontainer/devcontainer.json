@@ -1,5 +1,5 @@
 {
-	"name": "Cloud AI Workspaces",
+	"name": "Simple Agent Manager",
 	"image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm",
 	// Ensure Claude CLI uses a config directory within the workspace
 	"containerEnv": {

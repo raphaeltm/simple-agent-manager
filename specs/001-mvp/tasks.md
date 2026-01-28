@@ -1,4 +1,4 @@
-# Tasks: Cloud AI Coding Workspaces MVP
+# Tasks: Simple Agent Manager MVP
 
 **Input**: Design documents from `/specs/001-mvp/`
 **Prerequisites**: plan.md ✓, spec.md ✓, research.md ✓, data-model.md ✓, contracts/ ✓, quickstart.md ✓

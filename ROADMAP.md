@@ -1,6 +1,6 @@
 # Roadmap
 
-This document outlines the planned development phases for Cloud AI Workspaces.
+This document outlines the planned development phases for Simple Agent Manager (SAM).
 
 ## Complete: MVP (Phase 1)
 

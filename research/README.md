@@ -1,4 +1,4 @@
-# Cloud AI Coding Workspaces - Research Documentation
+# Simple Agent Manager - Research Documentation
 
 This folder contains research and planning documents for a lightweight, serverless platform to spin up AI coding agent environments on-demand.
 

@@ -1,0 +1,312 @@
+openapi: 3.1.0
+info:
+  title: Simple Agent Manager API - MVP Hardening
+  description: |
+    API changes for MVP hardening feature.
+    This document covers new and modified endpoints only.
+  version: 1.1.0
+
+servers:
+  - url: https://api.example.com
+    description: Production
+  - url: http://localhost:8787
+    description: Development
+
+paths:
+  /api/bootstrap/{token}:
+    post:
+      summary: Redeem bootstrap token
+      description: |
+        Called by VM during cloud-init to retrieve operational credentials.
+        Token is single-use and deleted after successful redemption.
+        No authentication required (token itself is the credential).
+      operationId: redeemBootstrapToken
+      tags:
+        - Bootstrap
+      parameters:
+        - name: token
+          in: path
+          required: true
+          description: Bootstrap token (UUID)
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Credentials retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootstrapResponse'
+        '401':
+          description: Invalid or expired token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limited (possible brute force attempt)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/workspaces:
+    get:
+      summary: List user's workspaces
+      description: |
+        Returns only workspaces owned by the authenticated user.
+        Modified to include shutdownDeadline for ready workspaces.
+      operationId: listWorkspaces
+      tags:
+        - Workspaces
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of workspaces
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkspaceResponse'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/workspaces/{id}:
+    get:
+      summary: Get workspace details
+      description: |
+        Returns workspace details if owned by authenticated user.
+        Returns 404 for non-existent OR non-owned workspaces (no information disclosure).
+      operationId: getWorkspace
+      tags:
+        - Workspaces
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Workspace details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceResponse'
+        '404':
+          description: Workspace not found (or not owned by user)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Delete workspace
+      description: |
+        Deletes workspace and cleans up cloud resources (VM, DNS).
+        Works for any workspace status. Returns 404 for non-owned workspaces.
+      operationId: deleteWorkspace
+      tags:
+        - Workspaces
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Workspace deleted successfully
+        '404':
+          description: Workspace not found (or not owned by user)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/workspaces/{id}/heartbeat:
+    post:
+      summary: VM heartbeat
+      description: |
+        Called by VM Agent to report status and receive instructions.
+        Modified response now includes shutdownDeadline.
+      operationId: workspaceHeartbeat
+      tags:
+        - Agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeartbeatRequest'
+      responses:
+        '200':
+          description: Heartbeat acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeartbeatResponse'
+        '401':
+          description: Invalid callback token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/terminal/{id}:
+    get:
+      summary: WebSocket terminal connection
+      description: |
+        Establishes WebSocket connection for terminal access.
+        Validates workspace ownership before establishing connection.
+        Requires valid session token.
+      operationId: terminalConnect
+      tags:
+        - Terminal
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Workspace ID
+          schema:
+            type: string
+      responses:
+        '101':
+          description: Switching protocols to WebSocket
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Workspace not found (or not owned by user)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    BootstrapResponse:
+      type: object
+      required:
+        - hetznerToken
+        - callbackToken
+        - githubToken
+      properties:
+        hetznerToken:
+          type: string
+          description: Decrypted Hetzner API token for VM self-destruct
+        callbackToken:
+          type: string
+          description: JWT for authenticating API callbacks
+        githubToken:
+          type: string
+          description: Decrypted GitHub token for git operations
+
+    WorkspaceResponse:
+      type: object
+      required:
+        - id
+        - name
+        - repository
+        - branch
+        - status
+        - createdAt
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        repository:
+          type: string
+        branch:
+          type: string
+        status:
+          type: string
+          enum: [pending, creating, ready, stopped, error]
+        url:
+          type: string
+          description: Workspace URL (only when status is 'ready')
+        createdAt:
+          type: string
+          format: date-time
+        errorReason:
+          type: string
+          description: Human-readable error message (only when status is 'error')
+        shutdownDeadline:
+          type: string
+          format: date-time
+          description: Auto-shutdown time in ISO 8601 (only when status is 'ready')
+
+    HeartbeatRequest:
+      type: object
+      required:
+        - workspaceId
+      properties:
+        workspaceId:
+          type: string
+        idleSeconds:
+          type: integer
+          deprecated: true
+          description: Deprecated - use shutdownDeadline instead
+        idle:
+          type: boolean
+          deprecated: true
+          description: Deprecated - use shutdownDeadline instead
+        hasActivity:
+          type: boolean
+          description: Whether activity was detected since last heartbeat
+
+    HeartbeatResponse:
+      type: object
+      required:
+        - action
+        - shutdownDeadline
+      properties:
+        action:
+          type: string
+          enum: [continue, shutdown]
+          description: Instruction for VM (continue running or initiate shutdown)
+        shutdownDeadline:
+          type: string
+          format: date-time
+          description: Current shutdown deadline in ISO 8601
+
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+        code:
+          type: string
+          description: Error code for programmatic handling

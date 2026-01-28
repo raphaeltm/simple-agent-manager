@@ -1,12 +1,12 @@
 # Self-Hosting Guide
 
-This guide covers deploying Cloud AI Workspaces to your own infrastructure.
+This guide covers deploying Simple Agent Manager to your own infrastructure.
 
 ## Infrastructure Requirements
 
 ### Cloudflare (Required)
 
-Cloud AI Workspaces uses Cloudflare for:
+Simple Agent Manager uses Cloudflare for:
 - **Workers**: API hosting (serverless)
 - **Pages**: Web UI hosting (static site)
 - **D1**: SQLite database
@@ -36,8 +36,8 @@ You'll need:
 ### 1. Fork and Clone
 
 ```bash
-git clone https://github.com/your-org/cloud-ai-workspaces.git
-cd cloud-ai-workspaces
+git clone https://github.com/your-org/simple-agent-manager.git
+cd simple-agent-manager
 pnpm install
 ```
 
@@ -48,13 +48,13 @@ pnpm install
 wrangler login
 
 # Create D1 database
-wrangler d1 create cloud-ai-workspaces
+wrangler d1 create simple-agent-manager
 
 # Create KV namespace for sessions
 wrangler kv:namespace create sessions
 
 # Create R2 bucket for binaries
-wrangler r2 bucket create cloud-ai-workspaces
+wrangler r2 bucket create simple-agent-manager
 ```
 
 ### 3. Configure Environment
@@ -88,11 +88,11 @@ npx tsx scripts/generate-keys.ts --env >> .env
 Edit `apps/api/wrangler.toml`:
 
 ```toml
-name = "cloud-ai-workspaces-api"
+name = "simple-agent-manager-api"
 
 [[d1_databases]]
 binding = "DATABASE"
-database_name = "cloud-ai-workspaces"
+database_name = "simple-agent-manager"
 database_id = "your-database-id"
 
 [[kv_namespaces]]
@@ -101,7 +101,7 @@ id = "your-kv-namespace-id"
 
 [[r2_buckets]]
 binding = "R2"
-bucket_name = "cloud-ai-workspaces"
+bucket_name = "simple-agent-manager"
 
 [vars]
 BASE_DOMAIN = "workspaces.yourdomain.com"
@@ -155,7 +155,7 @@ Add these DNS records in Cloudflare:
 1. Go to [GitHub Settings > Developer Settings > GitHub Apps](https://github.com/settings/apps)
 2. Click "New GitHub App"
 3. Configure:
-   - **App name**: Cloud AI Workspaces
+   - **App name**: Simple Agent Manager
    - **Homepage URL**: `https://app.yourdomain.com`
    - **Callback URL**: `https://api.yourdomain.com/api/github/callback`
    - **Setup URL**: `https://app.yourdomain.com/settings`
@@ -187,7 +187,7 @@ For user authentication:
 1. Go to [GitHub Settings > Developer Settings > OAuth Apps](https://github.com/settings/developers)
 2. Click "New OAuth App"
 3. Configure:
-   - **Application name**: Cloud AI Workspaces Login
+   - **Application name**: Simple Agent Manager Login
    - **Homepage URL**: `https://app.yourdomain.com`
    - **Authorization callback URL**: `https://api.yourdomain.com/api/auth/github/callback`
 
@@ -202,7 +202,7 @@ wrangler tail
 ### Database Migrations
 
 ```bash
-wrangler d1 migrations apply cloud-ai-workspaces
+wrangler d1 migrations apply simple-agent-manager
 ```
 
 ### Update VM Agent

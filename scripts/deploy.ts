@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Deploy script for Cloud AI Workspaces.
+ * Deploy script for Simple Agent Manager.
  * Deploys both API and Web to production.
  */
 
@@ -61,7 +61,7 @@ async function deployWeb(): Promise<void> {
   run('pnpm build', webDir);
 
   // Deploy (using Cloudflare Pages)
-  run(`wrangler pages deploy dist --project-name cloud-ai-workspaces`, webDir);
+  run(`wrangler pages deploy dist --project-name simple-agent-manager`, webDir);
 
   console.log('\n✅ Web UI deployed successfully');
 }
@@ -101,7 +101,7 @@ async function runMigrations(): Promise<void> {
 
   const apiDir = path.join(process.cwd(), 'apps', 'api');
 
-  run(`wrangler d1 migrations apply cloud-ai-workspaces --env ${PRODUCTION_ENV}`, apiDir);
+  run(`wrangler d1 migrations apply simple-agent-manager --env ${PRODUCTION_ENV}`, apiDir);
 
   console.log('\n✅ Migrations applied');
 }
@@ -114,7 +114,7 @@ async function main() {
   const agentOnly = args.includes('--agent');
   const migrationsOnly = args.includes('--migrations');
 
-  console.log('🚀 Cloud AI Workspaces Deploy\n');
+  console.log('🚀 Simple Agent Manager Deploy\n');
   console.log('─'.repeat(50) + '\n');
 
   if (!skipChecks && !checkPrerequisites()) {

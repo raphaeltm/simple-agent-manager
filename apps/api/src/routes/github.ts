@@ -11,7 +11,7 @@ import {
   generateAppJWT,
 } from '../services/github-app';
 import * as schema from '../db/schema';
-import type { GitHubInstallation, Repository } from '@cloud-ai-workspaces/shared';
+import type { GitHubInstallation, Repository } from '@simple-agent-manager/shared';
 
 const githubRoutes = new Hono<{ Bindings: Env }>();
 
@@ -45,7 +45,7 @@ githubRoutes.get('/installations', requireAuth(), async (c) => {
  */
 githubRoutes.get('/install-url', requireAuth(), async (c) => {
   // The app name should be configured or derived from GITHUB_APP_ID
-  const appName = 'cloud-ai-workspaces'; // This should match the GitHub App's slug
+  const appName = 'simple-agent-manager'; // This should match the GitHub App's slug
   const url = `https://github.com/apps/${appName}/installations/new`;
   return c.json({ url });
 });
@@ -202,7 +202,7 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
             Authorization: `Bearer ${jwt}`,
             Accept: 'application/vnd.github+json',
             'X-GitHub-Api-Version': '2022-11-28',
-            'User-Agent': 'Cloud-AI-Workspaces',
+            'User-Agent': 'Simple-Agent-Manager',
           },
         }
       );

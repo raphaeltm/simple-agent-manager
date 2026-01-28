@@ -6,7 +6,7 @@ import { requireAuth, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { signTerminalToken } from '../services/jwt';
 import * as schema from '../db/schema';
-import type { TerminalTokenResponse } from '@cloud-ai-workspaces/shared';
+import type { TerminalTokenResponse } from '@simple-agent-manager/shared';
 
 const terminalRoutes = new Hono<{ Bindings: Env }>();
 

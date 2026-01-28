@@ -116,7 +116,7 @@ echo "VM Agent installed successfully"
 # Create systemd service
 cat > /etc/systemd/system/vm-agent.service << 'EOF'
 [Unit]
-Description=Cloud AI Workspaces VM Agent
+Description=Simple Agent Manager VM Agent
 After=network.target
 
 [Service]

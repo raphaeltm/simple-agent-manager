@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { StatusBadge } from './StatusBadge';
-import type { WorkspaceResponse } from '@cloud-ai-workspaces/shared';
+import type { WorkspaceResponse } from '@simple-agent-manager/shared';
 
 interface WorkspaceCardProps {
   workspace: WorkspaceResponse;
@@ -46,6 +46,17 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
         {workspace.errorMessage && (
           <div className="mt-3 p-2 bg-red-50 rounded text-xs text-red-600">
             {workspace.errorMessage}
+          </div>
+        )}
+
+        {workspace.shutdownDeadline && (
+          <div className="mt-3 p-2 bg-amber-50 rounded text-xs text-amber-700 flex items-center">
+            <svg className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>
+              Auto-shutdown at {new Date(workspace.shutdownDeadline).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
           </div>
         )}
 

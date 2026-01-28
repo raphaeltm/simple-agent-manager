@@ -59,6 +59,10 @@ id = "your-production-kv-id"
 binding = "R2"
 bucket_name = "workspaces-assets"
 
+# Cron trigger for provisioning timeout checks (every 5 minutes)
+[triggers]
+crons = ["*/5 * * * *"]
+
 # Secrets (set via wrangler secret put):
 # - GITHUB_CLIENT_ID
 # - GITHUB_CLIENT_SECRET

@@ -1,4 +1,4 @@
-# Data Model: Cloud AI Coding Workspaces MVP
+# Data Model: Simple Agent Manager MVP
 
 **Feature**: [spec.md](./spec.md) | **Plan**: [plan.md](./plan.md)
 **Phase**: 1 - Design
@@ -380,7 +380,7 @@ Workspace metadata stored as Hetzner server labels:
 ```typescript
 const labels = {
   // Identification
-  'managed-by': 'cloud-ai-workspaces',
+  'managed-by': 'simple-agent-manager',
   'workspace-id': 'ws-abc123',
 
   // Configuration
@@ -595,5 +595,5 @@ export * from './lib/id';
 Usage in other packages:
 
 ```typescript
-import { Workspace, CreateWorkspaceRequest, WorkspaceStatus } from '@cloud-ai-workspaces/shared';
+import { Workspace, CreateWorkspaceRequest, WorkspaceStatus } from '@simple-agent-manager/shared';
 ```

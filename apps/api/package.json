@@ -1,8 +1,8 @@
 {
-  "name": "@cloud-ai-workspaces/api",
+  "name": "@simple-agent-manager/api",
   "version": "0.1.0",
   "private": true,
-  "description": "Cloudflare Worker API for Cloud AI Workspaces",
+  "description": "Cloudflare Worker API for Simple Agent Manager",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -17,8 +17,8 @@
     "deploy:staging": "wrangler deploy --env staging"
   },
   "dependencies": {
-    "@cloud-ai-workspaces/providers": "workspace:*",
-    "@cloud-ai-workspaces/shared": "workspace:*",
+    "@simple-agent-manager/providers": "workspace:*",
+    "@simple-agent-manager/shared": "workspace:*",
     "@workspace/cloud-init": "workspace:*",
     "@hono/node-server": "^1.19.9",
     "better-auth": "^1.0.0",

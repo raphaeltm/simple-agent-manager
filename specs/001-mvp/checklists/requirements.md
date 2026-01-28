@@ -1,4 +1,4 @@
-# Specification Quality Checklist: Cloud AI Coding Workspaces MVP
+# Specification Quality Checklist: Simple Agent Manager MVP
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-01-24

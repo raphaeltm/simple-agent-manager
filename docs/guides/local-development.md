@@ -4,7 +4,7 @@
 
 ## Overview
 
-This guide explains how to run the Cloud AI Workspaces control plane locally for development.
+This guide explains how to run the Simple Agent Manager control plane locally for development.
 
 ---
 
@@ -30,8 +30,8 @@ This guide explains how to run the Cloud AI Workspaces control plane locally for
 ### 1. Clone and Install
 
 ```bash
-git clone https://github.com/your-org/cloud-ai-workspaces.git
-cd cloud-ai-workspaces
+git clone https://github.com/your-org/simple-agent-manager.git
+cd simple-agent-manager
 pnpm install
 ```
 

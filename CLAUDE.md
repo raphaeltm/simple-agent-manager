@@ -1,10 +1,10 @@
-# Cloud AI Coding Workspaces
+# Simple Agent Manager (SAM)
 
 A serverless platform to spin up AI coding agent environments on-demand with zero ongoing cost.
 
 ## Project Overview
 
-This is a monorepo containing a Cloudflare-based platform for managing ephemeral Claude Code workspaces. Users can create cloud VMs with Claude Code pre-installed from any git repository, access them via a web-based interface (CloudCLI), and have them automatically terminate when idle.
+This is a monorepo containing a Cloudflare-based platform for managing ephemeral Claude Code workspaces. Users can create cloud VMs with Claude Code pre-installed from any git repository, access them via a web-based interface, and have them automatically terminate when idle.
 
 ## Tech Stack
 
@@ -25,7 +25,10 @@ apps/
 
 packages/
 ├── shared/       # Shared types and utilities
-└── providers/    # Cloud provider abstraction (Hetzner)
+├── providers/    # Cloud provider abstraction (Hetzner)
+├── terminal/     # Shared terminal component (@simple-agent-manager/terminal)
+├── cloud-init/   # Cloud-init template generator
+└── vm-agent/     # Go VM agent (PTY, WebSocket, idle detection)
 
 scripts/
 └── vm/           # VM-side scripts (cloud-init, idle detection)
@@ -66,11 +69,13 @@ pnpm format
 
 ## API Endpoints
 
-- `POST /vms` - Create workspace
-- `GET /vms` - List workspaces
-- `GET /vms/:id` - Get workspace details
-- `DELETE /vms/:id` - Stop workspace
-- `POST /vms/:id/cleanup` - Cleanup callback (called by VM)
+- `POST /api/workspaces` - Create workspace
+- `GET /api/workspaces` - List user's workspaces
+- `GET /api/workspaces/:id` - Get workspace details
+- `DELETE /api/workspaces/:id` - Stop workspace
+- `POST /api/workspaces/:id/heartbeat` - VM heartbeat with idle detection
+- `POST /api/bootstrap/:token` - Redeem one-time bootstrap token (VM startup)
+- `POST /api/terminal/:workspaceId/token` - Get terminal WebSocket token
 
 ## Environment Variables
 
@@ -89,8 +94,11 @@ See `.env.example` for required configuration:
 - TypeScript 5.x + BetterAuth + Drizzle ORM + jose (API), React + Vite + TailwindCSS + xterm.js (Web) (003-browser-terminal-saas)
 - Go 1.22+ + creack/pty + gorilla/websocket + golang-jwt (VM Agent) (003-browser-terminal-saas)
 - Cloudflare D1 (SQLite) + KV (sessions) + R2 (binaries) (003-browser-terminal-saas)
+- TypeScript 5.x (API, Web, packages) + Go 1.22+ (VM Agent) + Hono (API), React + Vite (Web), xterm.js (Terminal), Drizzle ORM (Database) (004-mvp-hardening)
+- Cloudflare D1 (workspaces), Cloudflare KV (sessions, bootstrap tokens) (004-mvp-hardening)
 
 ## Recent Changes
+- 004-mvp-hardening: Secure bootstrap tokens, workspace ownership validation, provisioning timeouts, shared terminal package, WebSocket reconnection, idle deadline tracking
 - 003-browser-terminal-saas: Added multi-tenant SaaS with GitHub OAuth, VM Agent (Go), browser terminal
 - 002-local-mock-mode: Added local mock mode with devcontainers CLI
 - 001-mvp: Added TypeScript 5.x + Hono (API), React + Vite (UI), Cloudflare Workers

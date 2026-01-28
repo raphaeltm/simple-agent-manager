@@ -34,6 +34,32 @@ export async function signTerminalToken(
 }
 
 /**
+ * Sign a callback token for VM-to-API authentication.
+ * Used by VM agent to call back to control plane (heartbeat, ready, etc.)
+ */
+export async function signCallbackToken(
+  workspaceId: string,
+  env: Env
+): Promise<string> {
+  const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+  const token = await new SignJWT({
+    workspace: workspaceId,
+    type: 'callback',
+  })
+    .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+    .setIssuer(ISSUER)
+    .setSubject(workspaceId)
+    .setAudience('workspace-callback')
+    .setExpirationTime(expiresAt)
+    .setIssuedAt()
+    .sign(privateKey);
+
+  return token;
+}
+
+/**
  * Get the JWKS (JSON Web Key Set) for JWT validation.
  */
 export async function getJWKS(env: Env) {

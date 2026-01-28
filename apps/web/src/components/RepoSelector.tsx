@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { listRepositories } from '../lib/api';
-import type { Repository } from '@cloud-ai-workspaces/shared';
+import type { Repository } from '@simple-agent-manager/shared';
 
 interface RepoSelectorProps {
   id?: string;

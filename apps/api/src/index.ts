@@ -8,6 +8,8 @@ import { githubRoutes } from './routes/github';
 import { workspacesRoutes } from './routes/workspaces';
 import { terminalRoutes } from './routes/terminal';
 import { agentRoutes } from './routes/agent';
+import { bootstrapRoutes } from './routes/bootstrap';
+import { checkProvisioningTimeouts } from './services/timeout';
 
 // Cloudflare bindings type
 export interface Env {
@@ -74,6 +76,7 @@ app.route('/api/github', githubRoutes);
 app.route('/api/workspaces', workspacesRoutes);
 app.route('/api/terminal', terminalRoutes);
 app.route('/api/agent', agentRoutes);
+app.route('/api/bootstrap', bootstrapRoutes);
 
 // 404 handler
 app.notFound((c) => {
@@ -83,4 +86,24 @@ app.notFound((c) => {
   }, 404);
 });
 
-export default app;
+// Export handler with scheduled (cron) support
+export default {
+  fetch: app.fetch,
+
+  /**
+   * Scheduled (cron) handler for background tasks.
+   * Runs every 5 minutes (configured in wrangler.toml).
+   */
+  async scheduled(
+    _controller: ScheduledController,
+    env: Env,
+    _ctx: ExecutionContext
+  ): Promise<void> {
+    console.log('Cron triggered:', new Date().toISOString());
+
+    // Check for stuck provisioning workspaces
+    const timedOut = await checkProvisioningTimeouts(env.DATABASE);
+
+    console.log(`Cron completed: ${timedOut} workspace(s) timed out`);
+  },
+};

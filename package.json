@@ -1,11 +1,11 @@
 {
-  "name": "cloud-ai-workspaces",
+  "name": "simple-agent-manager",
   "version": "0.1.0",
   "private": true,
   "description": "Serverless platform to spin up AI coding agent environments on-demand",
   "keywords": ["claude-code", "ai-workspaces", "devcontainers", "cloudflare-workers"],
   "license": "MIT",
-  "author": "Cloud AI Workspaces Contributors",
+  "author": "Simple Agent Manager Contributors",
   "type": "module",
   "scripts": {
     "build": "turbo run build",

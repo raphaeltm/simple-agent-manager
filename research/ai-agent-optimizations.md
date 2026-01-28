@@ -9,7 +9,7 @@ The current architecture reads like a generic devcontainer orchestration system.
 ## Positioning Shift
 
 **Before:** "Serverless Dev Container Manager"
-**After:** "Cloud AI Coding Workspaces" or "Remote Claude Code Environments"
+**After:** "Simple Agent Manager" or "Remote Claude Code Environments"
 
 The platform should feel like "GitHub Codespaces, but optimized for AI coding agents."
 

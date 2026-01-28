@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { listGitHubInstallations, getGitHubInstallUrl } from '../lib/api';
-import type { GitHubInstallation } from '@cloud-ai-workspaces/shared';
+import type { GitHubInstallation } from '@simple-agent-manager/shared';
 
 /**
  * GitHub App section for settings page.

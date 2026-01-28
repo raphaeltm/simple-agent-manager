@@ -23,7 +23,7 @@ Templates Status:
 Follow-up TODOs: None
 -->
 
-# Cloud AI Coding Workspaces Constitution
+# Simple Agent Manager Constitution
 
 ## Core Principles
 
@@ -189,7 +189,7 @@ Complexity is the enemy. Every abstraction, pattern, and dependency MUST justify
 ### Repository Structure
 
 ```
-cloud-ai-workspaces/
+simple-agent-manager/
 ├── apps/
 │   ├── web/                 # Control plane UI (Cloudflare Pages)
 │   └── api/                 # Worker API (Cloudflare Workers + Hono)
@@ -307,17 +307,17 @@ Consistent naming enables identification and automation:
 
 | Resource Type | Pattern | Example |
 |---------------|---------|---------|
-| Workers | `{project}-{env}` | `cloud-ai-workspaces-staging` |
-| KV Namespaces | `{project}-{env}-{purpose}` | `cloud-ai-workspaces-prod-sessions` |
-| R2 Buckets | `{project}-{env}-{purpose}` | `cloud-ai-workspaces-prod-backups` |
-| D1 Databases | `{project}-{env}` | `cloud-ai-workspaces-staging` |
+| Workers | `{project}-{env}` | `simple-agent-manager-staging` |
+| KV Namespaces | `{project}-{env}-{purpose}` | `simple-agent-manager-prod-sessions` |
+| R2 Buckets | `{project}-{env}-{purpose}` | `simple-agent-manager-prod-backups` |
+| D1 Databases | `{project}-{env}` | `simple-agent-manager-staging` |
 | DNS Records | `*.{vm-id}.vm.{domain}` | `*.abc123.vm.example.com` |
 | Hetzner VMs | `ws-{workspace-id}` | `ws-abc123` |
 
 **Rules:**
 - All names lowercase with hyphens (no underscores or camelCase)
 - Include environment in name for clarity
-- VM labels include `managed-by: cloud-ai-workspaces` for filtering
+- VM labels include `managed-by: simple-agent-manager` for filtering
 
 ### Cloud-Init Scripts
 

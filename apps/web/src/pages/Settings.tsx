@@ -4,7 +4,7 @@ import { UserMenu } from '../components/UserMenu';
 import { HetznerTokenForm } from '../components/HetznerTokenForm';
 import { GitHubAppSection } from '../components/GitHubAppSection';
 import { listCredentials } from '../lib/api';
-import type { CredentialResponse } from '@cloud-ai-workspaces/shared';
+import type { CredentialResponse } from '@simple-agent-manager/shared';
 
 /**
  * Settings page with credentials management.

@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="docs/assets/logo.svg" alt="Cloud AI Workspaces" width="400" />
+  <img src="docs/assets/logo.svg" alt="Simple Agent Manager" width="400" />
 </p>
 
 <p align="center">
-  <strong>Spin up AI coding environments on-demand. Zero cost when idle.</strong>
+  <strong>Simple Agent Manager (SAM) - Spin up AI coding environments on-demand. Zero cost when idle.</strong>
 </p>
 
 <p align="center">
@@ -20,13 +20,13 @@
 
 ---
 
-Cloud AI Workspaces is a serverless platform for creating ephemeral cloud development environments optimized for [Claude Code](https://www.anthropic.com/claude-code). Point it at any GitHub repository and get a fully configured workspace with Claude Code pre-installed—accessible from your browser in minutes.
+Simple Agent Manager (SAM) is a serverless platform for creating ephemeral cloud development environments optimized for [Claude Code](https://www.anthropic.com/claude-code). Point it at any GitHub repository and get a fully configured workspace with Claude Code pre-installed—accessible from your browser in minutes.
 
 Think **GitHub Codespaces, but built for AI-assisted development** and with automatic shutdown to eliminate surprise bills.
 
-## Why Cloud AI Workspaces?
+## Why Simple Agent Manager?
 
-| | GitHub Codespaces | Cloud AI Workspaces |
+| | GitHub Codespaces | Simple Agent Manager |
 |---|---|---|
 | **Cost** | $0.18–$0.36/hour | ~$0.07–$0.15/hour |
 | **Idle shutdown** | Manual or 30min timeout | Automatic with AI-aware detection |
@@ -67,8 +67,8 @@ Think **GitHub Codespaces, but built for AI-assisted development** and with auto
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_ORG/cloud-ai-workspaces.git
-cd cloud-ai-workspaces
+git clone https://github.com/YOUR_ORG/simple-agent-manager.git
+cd simple-agent-manager
 
 # Install dependencies
 pnpm install
@@ -202,6 +202,7 @@ packages/
 ├── shared/           # Shared types and validation
 ├── providers/        # Cloud provider abstraction
 ├── cloud-init/       # VM cloud-init template generation
+├── terminal/         # Shared terminal component (xterm.js + WebSocket)
 └── vm-agent/         # Go agent for WebSocket terminal + idle detection
 
 scripts/
@@ -263,7 +264,35 @@ docs/                 # Documentation
 | `/api/agent/version` | `GET` | Get current agent version |
 | `/api/agent/install-script` | `GET` | Get VM agent install script |
 
+### Bootstrap (VM Credential Delivery)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/bootstrap/:token` | `POST` | Redeem one-time bootstrap token for credentials |
+
 Authentication is session-based via cookies (BetterAuth + GitHub OAuth).
+
+## Security
+
+### Secure Credential Delivery (Bootstrap Tokens)
+
+VMs receive credentials securely using one-time bootstrap tokens:
+
+1. **Workspace creation**: API generates a one-time bootstrap token stored in KV with 5-minute TTL
+2. **Cloud-init**: VM receives only the bootstrap URL (no embedded secrets)
+3. **VM startup**: VM agent calls `POST /api/bootstrap/:token` to redeem credentials
+4. **Token invalidation**: Token is deleted immediately after first use
+
+This ensures:
+- No sensitive tokens in cloud-init user data (visible in Hetzner console)
+- Single-use tokens prevent replay attacks
+- Short TTL limits exposure window
+
+### Workspace Access Control
+
+All workspace operations validate ownership to prevent IDOR attacks:
+- Non-owners receive `404 Not Found` (not `403 Forbidden`) to prevent information disclosure
+- Workspace lists are filtered by authenticated user
+- Terminal WebSocket tokens are scoped to workspace owner
 
 ## Use Cases
 

@@ -15,13 +15,13 @@ No database is required for the MVP.
 ### Package Dependencies
 
 ```
-@cloud-ai-workspaces/shared
+@simple-agent-manager/shared
     ↑
-@cloud-ai-workspaces/providers
+@simple-agent-manager/providers
     ↑
-@cloud-ai-workspaces/api
+@simple-agent-manager/api
     ↑
-@cloud-ai-workspaces/web
+@simple-agent-manager/web
 ```
 
 Build order matters: shared → providers → api/web
@@ -139,9 +139,9 @@ export const WorkspaceCard: FC<Props> = ({ workspace }) => {
 
 Run builds in dependency order:
 ```bash
-pnpm --filter @cloud-ai-workspaces/shared build
-pnpm --filter @cloud-ai-workspaces/providers build
-pnpm --filter @cloud-ai-workspaces/api build
+pnpm --filter @simple-agent-manager/shared build
+pnpm --filter @simple-agent-manager/providers build
+pnpm --filter @simple-agent-manager/api build
 ```
 
 ### Test Failures

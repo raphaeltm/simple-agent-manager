@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Generate security keys for Cloud AI Workspaces.
+ * Generate security keys for Simple Agent Manager.
  * Creates RSA key pair for JWT and AES key for encryption.
  */
 

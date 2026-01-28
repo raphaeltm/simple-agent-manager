@@ -1,6 +1,9 @@
 /**
  * Cloud-init template for VM provisioning.
  * Uses mustache-style {{ variable }} placeholders.
+ *
+ * SECURITY: No sensitive tokens are embedded in this template.
+ * The VM agent redeems a bootstrap token on startup to receive credentials.
  */
 export const CLOUD_INIT_TEMPLATE = `#cloud-config
 
@@ -43,27 +46,11 @@ runcmd:
     curl -Lo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}"
     chmod +x /usr/local/bin/vm-agent
 
-  # Clone repository
-  - |
-    mkdir -p /home/workspace
-    cd /home/workspace
-    git clone https://x-access-token:{{ github_token }}@github.com/{{ repository }}.git workspace
-    cd workspace
-    git checkout {{ branch }}
-    chown -R workspace:workspace /home/workspace
-
   # Install devcontainers CLI
   - npm install -g @devcontainers/cli
 
-  # Build and start devcontainer
-  - |
-    cd /home/workspace/workspace
-    if [ -f .devcontainer/devcontainer.json ] || [ -d .devcontainer ]; then
-      devcontainer build --workspace-folder .
-      devcontainer up --workspace-folder . --remove-existing-container
-    fi
-
-  # Create VM Agent systemd service
+  # Create VM Agent systemd service with bootstrap token
+  # The agent will redeem the bootstrap token to get credentials on startup
   - |
     cat > /etc/systemd/system/vm-agent.service << 'EOF'
     [Unit]
@@ -77,6 +64,9 @@ runcmd:
     Environment=WORKSPACE_ID={{ workspace_id }}
     Environment=CONTROL_PLANE_URL={{ control_plane_url }}
     Environment=JWKS_URL={{ jwks_url }}
+    Environment=BOOTSTRAP_TOKEN={{ bootstrap_token }}
+    Environment=REPOSITORY={{ repository }}
+    Environment=BRANCH={{ branch }}
     ExecStart=/usr/local/bin/vm-agent
     Restart=always
     RestartSec=5
@@ -87,12 +77,6 @@ runcmd:
     systemctl daemon-reload
     systemctl enable vm-agent
     systemctl start vm-agent
-
-  # Signal workspace is ready
-  - |
-    curl -X POST "{{ control_plane_url }}/api/workspaces/{{ workspace_id }}/ready" \\
-      -H "Content-Type: application/json" \\
-      -H "Authorization: Bearer {{ callback_token }}"
 
 # Write files
 write_files:
@@ -107,5 +91,5 @@ write_files:
     permissions: '0644'
 
 # Final message
-final_message: "Cloud AI Workspace {{ workspace_id }} is ready!"
+final_message: "Simple Agent Manager workspace {{ workspace_id }} provisioning started!"
 `;

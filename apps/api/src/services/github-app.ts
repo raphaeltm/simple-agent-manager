@@ -35,7 +35,7 @@ export async function getInstallationToken(
         Authorization: `Bearer ${jwt}`,
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'Cloud-AI-Workspaces',
+        'User-Agent': 'Simple-Agent-Manager',
       },
     }
   );
@@ -68,7 +68,7 @@ export async function getInstallationRepositories(
         Authorization: `Bearer ${token}`,
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'Cloud-AI-Workspaces',
+        'User-Agent': 'Simple-Agent-Manager',
       },
     }
   );
@@ -110,7 +110,7 @@ export async function getAppInstallations(
         Authorization: `Bearer ${jwt}`,
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'Cloud-AI-Workspaces',
+        'User-Agent': 'Simple-Agent-Manager',
       },
     }
   );

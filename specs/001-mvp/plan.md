@@ -1,4 +1,4 @@
-# Implementation Plan: Cloud AI Coding Workspaces MVP
+# Implementation Plan: Simple Agent Manager MVP
 
 **Branch**: `001-mvp` | **Date**: 2026-01-24 | **Updated**: 2026-01-25 | **Spec**: [spec.md](./spec.md)
 **Input**: Feature specification from `/specs/001-mvp/spec.md`

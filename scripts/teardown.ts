@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Teardown script for Cloud AI Workspaces.
+ * Teardown script for Simple Agent Manager.
  * Removes deployed resources.
  */
 
@@ -30,7 +30,7 @@ function run(command: string): void {
 }
 
 async function main() {
-  console.log('⚠️  Cloud AI Workspaces Teardown\n');
+  console.log('⚠️  Simple Agent Manager Teardown\n');
   console.log('This will remove all deployed resources.\n');
   console.log('─'.repeat(50) + '\n');
 
@@ -48,16 +48,16 @@ async function main() {
 
   // Delete Cloudflare Worker
   console.log('Deleting API Worker...');
-  run('wrangler delete --name cloud-ai-workspaces-api');
+  run('wrangler delete --name simple-agent-manager-api');
 
   // Delete Cloudflare Pages
   console.log('\nDeleting Web Pages project...');
-  run('wrangler pages project delete cloud-ai-workspaces --yes');
+  run('wrangler pages project delete simple-agent-manager --yes');
 
   if (shouldDeleteData) {
     // Delete D1 database
     console.log('\nDeleting D1 database...');
-    run('wrangler d1 delete cloud-ai-workspaces --yes');
+    run('wrangler d1 delete simple-agent-manager --yes');
 
     // Delete KV namespace
     console.log('\nDeleting KV namespace...');
@@ -65,7 +65,7 @@ async function main() {
 
     // Delete R2 bucket
     console.log('\nDeleting R2 bucket...');
-    run('wrangler r2 bucket delete cloud-ai-workspaces --yes');
+    run('wrangler r2 bucket delete simple-agent-manager --yes');
   }
 
   console.log('\n' + '─'.repeat(50));
@@ -74,9 +74,9 @@ async function main() {
   if (!shouldDeleteData) {
     console.log('\nNote: Database and storage were preserved.');
     console.log('To delete them manually:');
-    console.log('  wrangler d1 delete cloud-ai-workspaces');
+    console.log('  wrangler d1 delete simple-agent-manager');
     console.log('  wrangler kv:namespace delete --namespace-id <ID>');
-    console.log('  wrangler r2 bucket delete cloud-ai-workspaces');
+    console.log('  wrangler r2 bucket delete simple-agent-manager');
   }
 
   rl.close();

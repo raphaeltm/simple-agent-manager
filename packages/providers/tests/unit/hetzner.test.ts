@@ -280,7 +280,7 @@ describe('HetznerProvider', () => {
       const result = await provider.listVMs();
 
       expect(fetch).toHaveBeenCalledWith(
-        expect.stringContaining('label_selector=managed-by=cloud-ai-workspaces'),
+        expect.stringContaining('label_selector=managed-by=simple-agent-manager'),
         expect.any(Object)
       );
 

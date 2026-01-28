@@ -8,7 +8,7 @@ import type {
   Repository,
   TerminalTokenResponse,
   ApiError,
-} from '@cloud-ai-workspaces/shared';
+} from '@simple-agent-manager/shared';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 

@@ -5,10 +5,12 @@ import { ulid } from 'ulid';
 import type { Env } from '../index';
 import { requireAuth, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { decrypt } from '../services/encryption';
+import { encrypt, decrypt } from '../services/encryption';
 import { createServer, deleteServer, SERVER_TYPES } from '../services/hetzner';
 import { createDNSRecord, deleteDNSRecord, getWorkspaceUrl } from '../services/dns';
 import { getInstallationToken } from '../services/github-app';
+import { generateBootstrapToken, storeBootstrapToken } from '../services/bootstrap';
+import { signCallbackToken } from '../services/jwt';
 import { generateCloudInit, validateCloudInitSize } from '@workspace/cloud-init';
 import * as schema from '../db/schema';
 import type {
@@ -16,8 +18,9 @@ import type {
   CreateWorkspaceRequest,
   HeartbeatRequest,
   HeartbeatResponse,
-} from '@cloud-ai-workspaces/shared';
-import { MAX_WORKSPACES_PER_USER, IDLE_TIMEOUT_SECONDS, HETZNER_IMAGE } from '@cloud-ai-workspaces/shared';
+  BootstrapTokenData,
+} from '@simple-agent-manager/shared';
+import { MAX_WORKSPACES_PER_USER, IDLE_TIMEOUT_SECONDS, HETZNER_IMAGE } from '@simple-agent-manager/shared';
 
 const workspacesRoutes = new Hono<{ Bindings: Env }>();
 
@@ -63,6 +66,7 @@ workspacesRoutes.get('/', async (c) => {
     vmIp: ws.vmIp,
     lastActivityAt: ws.lastActivityAt,
     errorMessage: ws.errorMessage,
+    shutdownDeadline: ws.shutdownDeadline,
     createdAt: ws.createdAt,
     updatedAt: ws.updatedAt,
     url: ws.vmIp ? getWorkspaceUrl(ws.id, c.env.BASE_DOMAIN) : undefined,
@@ -106,6 +110,7 @@ workspacesRoutes.get('/:id', async (c) => {
     vmIp: ws.vmIp,
     lastActivityAt: ws.lastActivityAt,
     errorMessage: ws.errorMessage,
+    shutdownDeadline: ws.shutdownDeadline,
     createdAt: ws.createdAt,
     updatedAt: ws.updatedAt,
     url: ws.vmIp ? getWorkspaceUrl(ws.id, c.env.BASE_DOMAIN) : undefined,
@@ -207,6 +212,7 @@ workspacesRoutes.post('/', async (c) => {
         installationId: installation.installationId,
       },
       hetznerToken,
+      { encryptedToken: cred.encryptedToken, iv: cred.iv },
       c.env,
       db
     )
@@ -223,6 +229,7 @@ workspacesRoutes.post('/', async (c) => {
     vmIp: null,
     lastActivityAt: null,
     errorMessage: null,
+    shutdownDeadline: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -394,6 +401,7 @@ workspacesRoutes.post('/:id/restart', async (c) => {
         installationId: installRestart.installationId,
       },
       hetznerToken,
+      { encryptedToken: credRestart.encryptedToken, iv: credRestart.iv },
       c.env,
       db
     )
@@ -521,10 +529,15 @@ workspacesRoutes.post('/:id/heartbeat', async (c) => {
   const idleSeconds = (Date.now() - lastActivity.getTime()) / 1000;
   const shouldShutdown = idleSeconds >= IDLE_TIMEOUT_SECONDS;
 
+  // Calculate shutdown deadline (when idle timeout will be reached)
+  const remainingSeconds = Math.max(0, IDLE_TIMEOUT_SECONDS - idleSeconds);
+  const shutdownDeadline = new Date(Date.now() + remainingSeconds * 1000).toISOString();
+
   const response: HeartbeatResponse = {
     action: shouldShutdown ? 'shutdown' : 'continue',
     idleSeconds: Math.floor(idleSeconds),
     maxIdleSeconds: IDLE_TIMEOUT_SECONDS,
+    shutdownDeadline,
   };
 
   return c.json(response);
@@ -532,6 +545,7 @@ workspacesRoutes.post('/:id/heartbeat', async (c) => {
 
 /**
  * Provision a workspace (create VM, DNS, etc.)
+ * Uses bootstrap tokens for secure credential delivery - no secrets in cloud-init.
  */
 async function provisionWorkspace(
   workspaceId: string,
@@ -544,6 +558,7 @@ async function provisionWorkspace(
     installationId: string;
   },
   hetznerToken: string,
+  hetznerCredential: { encryptedToken: string; iv: string },
   env: Env,
   db: ReturnType<typeof drizzle>
 ): Promise<void> {
@@ -553,16 +568,35 @@ async function provisionWorkspace(
     // Get GitHub installation token for cloning
     const { token: githubToken } = await getInstallationToken(config.installationId, env);
 
-    // Generate cloud-init config
+    // Encrypt the GitHub token for storage
+    const { ciphertext: encGithub, iv: ivGithub } = await encrypt(githubToken, env.ENCRYPTION_KEY);
+
+    // Generate callback token for VM-to-API authentication
+    const callbackToken = await signCallbackToken(workspaceId, env);
+
+    // Generate bootstrap token and store encrypted credentials
+    const bootstrapToken = generateBootstrapToken();
+    const bootstrapData: BootstrapTokenData = {
+      workspaceId,
+      encryptedHetznerToken: hetznerCredential.encryptedToken,
+      hetznerTokenIv: hetznerCredential.iv,
+      callbackToken,
+      encryptedGithubToken: encGithub,
+      githubTokenIv: ivGithub,
+      createdAt: now(),
+    };
+
+    await storeBootstrapToken(env.KV, bootstrapToken, bootstrapData);
+
+    // Generate cloud-init config (NO SECRETS - only bootstrap token)
     const cloudInit = generateCloudInit({
       workspaceId,
       hostname: `ws-${workspaceId}`,
       repository: config.repository,
       branch: config.branch,
-      githubToken,
       controlPlaneUrl: `https://api.${env.BASE_DOMAIN}`,
       jwksUrl: `https://api.${env.BASE_DOMAIN}/.well-known/jwks.json`,
-      callbackToken: 'callback-token', // TODO: Generate secure callback token
+      bootstrapToken,
     });
 
     if (!validateCloudInitSize(cloudInit)) {
@@ -578,7 +612,7 @@ async function provisionWorkspace(
       userData: cloudInit,
       labels: {
         workspace: workspaceId,
-        managed: 'cloud-ai-workspaces',
+        managed: 'simple-agent-manager',
       },
     });
 
@@ -603,7 +637,7 @@ async function provisionWorkspace(
       })
       .where(eq(schema.workspaces.id, workspaceId));
 
-    // VM will call /ready endpoint when fully provisioned
+    // VM agent will redeem bootstrap token on startup, then call /ready endpoint
   } catch (err) {
     console.error('Provisioning failed:', err);
     await db

@@ -1,4 +1,4 @@
-# API Contract: Cloud AI Coding Workspaces MVP
+# API Contract: Simple Agent Manager MVP
 
 **Feature**: [spec.md](../spec.md) | **Plan**: [plan.md](../plan.md)
 **Phase**: 1 - Design
@@ -248,7 +248,7 @@ Authorization: Bearer {token}
 
 **Response** (302 Redirect):
 ```
-Location: https://github.com/apps/cloud-ai-workspaces/installations/new
+Location: https://github.com/apps/simple-agent-manager/installations/new
 ```
 
 ---

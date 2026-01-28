@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Setup wizard for Cloud AI Workspaces.
+ * Setup wizard for Simple Agent Manager.
  * Guides the user through initial configuration.
  */
 
@@ -27,7 +27,7 @@ function generateSecureKey(length: number = 32): string {
 }
 
 async function main() {
-  console.log('\n🚀 Cloud AI Workspaces Setup Wizard\n');
+  console.log('\n🚀 Simple Agent Manager Setup Wizard\n');
   console.log('This wizard will help you configure your environment.\n');
   console.log('─'.repeat(50) + '\n');
 
