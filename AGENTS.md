@@ -42,6 +42,19 @@ Build order matters: shared → providers → api/web
 - Use Miniflare for Worker integration tests
 - Critical paths require >90% coverage
 
+### Documentation & File Naming
+
+When creating documentation or implementation notes:
+
+- **Location**: Never put documentation files in package roots
+  - Ephemeral working notes (implementation summaries, checklists): `docs/notes/`
+  - Permanent documentation (guides, architecture): `docs/`
+  - Feature specs and design docs: `specs/<feature>/`
+- **Naming**: Use kebab-case for all markdown files
+  - Good: `phase8-implementation-summary.md`, `idle-detection-design.md`
+  - Bad: `PHASE8_IMPLEMENTATION_SUMMARY.md`, `IdleDetectionDesign.md`
+- **Exceptions**: Only `README.md`, `LICENSE`, `CONTRIBUTING.md`, `CHANGELOG.md` use UPPER_CASE
+
 ### Error Handling
 
 All API errors should follow this format:
