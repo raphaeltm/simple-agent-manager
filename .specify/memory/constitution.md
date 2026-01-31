@@ -1,18 +1,14 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version Change: 1.2.0 → 1.3.0
-Bump Rationale: MINOR - Added Self-Contained Deployment section, updated Distribution Strategy
+Version Change: 1.4.0 → 1.5.0
+Bump Rationale: MINOR - Added "No Hardcoded Values" principle (XI) as NON-NEGOTIABLE
 
 Modified Principles: None
-Modified Sections:
-  - VM Agent Guidelines > Distribution Strategy: Changed from GitHub Releases to control plane serving
+Modified Sections: None
 
 Added Sections:
-  - Self-Contained Deployment (new)
-    - Rationale for self-hostability
-    - Rules for artifacts we build vs allowed external dependencies
-    - Version consistency requirements
+  - Principle XI: No Hardcoded Values (NON-NEGOTIABLE) - All business logic values must be configurable
 
 Templates Status:
   - plan-template.md: ✅ Compatible (Constitution Check section references this file)
@@ -20,7 +16,9 @@ Templates Status:
   - tasks-template.md: ✅ Compatible (test-first aligns with Principle II)
   - checklist-template.md: ✅ Compatible (no direct dependency)
 
-Follow-up TODOs: None
+Follow-up TODOs:
+  - Audit all code for hardcoded values (see DEPLOYMENT_AUDIT.md)
+  - Fix JWT issuer, GitHub App URL, and other hardcoded values
 -->
 
 # Simple Agent Manager Constitution
@@ -181,8 +179,39 @@ Complexity is the enemy. Every abstraction, pattern, and dependency MUST justify
 - Configuration has sensible defaults; advanced options are optional
 - Architecture can be explained in a single diagram
 - If something takes >30 minutes to understand, it needs refactoring or documentation
+- **Official SDKs First**: When interacting with external services (APIs, cloud providers), ALWAYS prefer official SDKs over custom HTTP/API code. Official SDKs provide type safety, handle edge cases, support retries, and are maintained by the service provider. Custom API wrappers are only acceptable when no official SDK exists.
 
-**Rationale:** Simple systems are easier to operate, debug, and extend. Complexity compounds over time.
+**Rationale:** Simple systems are easier to operate, debug, and extend. Complexity compounds over time. Official SDKs reduce maintenance burden and improve reliability.
+
+### XI. No Hardcoded Values (NON-NEGOTIABLE)
+
+All business logic values, URLs, timeouts, limits, and configuration MUST be configurable. Hardcoded values create technical debt and make the system inflexible.
+
+**Rules:**
+- **NO hardcoded URLs**: All API endpoints, callback URLs, and service addresses MUST derive from environment variables or configuration
+- **NO hardcoded timeouts**: All duration values (idle timeout, token expiry, retry delays) MUST be configurable via environment variables with sensible defaults
+- **NO hardcoded limits**: All limits (max workspaces, max sessions, rate limits) MUST be configurable
+- **NO hardcoded identifiers**: Issuer names, audience values, key IDs MUST derive from deployment configuration
+- **Defaults are acceptable**: A hardcoded DEFAULT value with env var override is the correct pattern
+- **Constants for truly constant values**: Only mathematical constants, protocol versions, and similar invariants may be hardcoded
+
+**Correct Pattern:**
+```typescript
+// ✅ GOOD: Configurable with sensible default
+const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT_SECONDS || '1800');
+const ISSUER = `https://api.${env.BASE_DOMAIN}`;
+
+// ❌ BAD: Hardcoded values
+const IDLE_TIMEOUT = 1800;
+const ISSUER = 'https://api.workspaces.example.com';
+```
+
+**Configuration Sources (in order of precedence):**
+1. Environment variables (runtime)
+2. Cloudflare Worker bindings (env.VAR_NAME)
+3. Default values in code (fallback only)
+
+**Rationale:** Hardcoded values require code changes for configuration. This violates twelve-factor principles, complicates deployment across environments, and creates hidden coupling between code and infrastructure.
 
 ## Code Organization Guidelines
 
@@ -237,21 +266,39 @@ This project manages cloud infrastructure (Cloudflare Workers, Pages, R2, KV, DN
 
 ### IaC Tooling Strategy
 
-**Primary Tool: Wrangler**
-- All Cloudflare resources (Workers, Pages, R2, KV, D1) are managed via `wrangler.toml`
-- `wrangler.toml` is version-controlled and the source of truth for deployments
-- Use Wrangler's auto-provisioning for R2/KV/D1 (no manual resource creation)
-- Deployments happen via `wrangler deploy` in CI/CD
+**Hybrid Approach: Pulumi + Wrangler**
 
-**Secondary Tool: Pulumi/Terraform (Optional)**
-- Use only when Wrangler cannot manage a resource (e.g., complex DNS rules, external services)
-- Infrastructure code lives in `infra/` directory if needed
-- Prefer Wrangler simplicity over Pulumi/Terraform complexity when possible
+The project uses a deliberate separation of concerns between two tools:
+
+**Pulumi (Infrastructure Provisioning)**
+- Provisions Cloudflare resources: D1 databases, KV namespaces, R2 buckets, DNS records
+- Uses official `@pulumi/cloudflare` provider (TypeScript)
+- State stored in Cloudflare R2 bucket (S3-compatible, self-hosted, no Pulumi Cloud)
+- Infrastructure code lives in `infra/` directory
+- Provides proper state management, drift detection, and idempotency
+
+**Wrangler (Application Deployment)**
+- Deploys Workers and Pages projects (application code)
+- Runs D1 database migrations
+- Configures Worker secrets
+- Uses `wrangler.toml` for deployment configuration (not resource creation)
+
+**Why This Split:**
+- Pulumi excels at infrastructure lifecycle (create/update/delete with state tracking)
+- Wrangler excels at deployment workflows (it understands Workers internals)
+- Wrangler's "auto-provisioning" is limited and lacks state management
+- Custom API code is brittle and duplicates SDK functionality
+
+**Official SDK Usage:**
+- Use `cloudflare` npm package (official TypeScript SDK) for any direct API calls
+- Use `@pulumi/cloudflare` for infrastructure provisioning
+- NEVER write custom HTTP wrappers for Cloudflare APIs
 
 **Rules:**
 - All infrastructure changes go through PR review (no manual console changes)
 - Infrastructure drift is checked quarterly (compare deployed state vs config)
 - Never use `--force` or bypass flags without documented justification
+- Pulumi state bucket is the ONE manual prerequisite for deployment
 
 ### Environment Management
 
@@ -707,4 +754,4 @@ and other project documentation, this Constitution takes precedence.
 - Violations should be addressed constructively with reference to specific principles
 - Repeated violations may result in contribution restrictions per Code of Conduct
 
-**Version**: 1.3.0 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-01-26
+**Version**: 1.5.0 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-01-30

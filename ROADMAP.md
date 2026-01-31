@@ -44,6 +44,7 @@ Improvements to user experience and reliability:
 - [ ] SSH access to workspaces
 - [ ] Persistent storage (R2)
 - [ ] Cost estimation display
+- [ ] Configurable subdomains (api/app/workspace prefixes)
 
 ## Planned: Multi-Tenancy (Phase 4)
 
@@ -70,6 +71,14 @@ Features for enterprise deployments:
 - [ ] Multi-region support
 - [ ] Custom VM images
 - [ ] API rate limiting
+
+## Security Improvements
+
+**Target**: Future
+
+- [ ] VM callback token exchange flow (one-time code → JWT + refresh token)
+- [ ] Token rotation for long-lived workspaces
+- [ ] Workspace audit logging
 
 ## Future Considerations
 

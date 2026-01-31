@@ -1,0 +1,174 @@
+name: Teardown Setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type DELETE to confirm teardown'
+        required: true
+        type: string
+      environment:
+        description: 'Target environment to teardown'
+        required: true
+        type: choice
+        options:
+          - production
+          - staging
+      keep_data:
+        description: 'Preserve database (D1) during teardown'
+        required: false
+        type: boolean
+        default: false
+      pulumi_state_bucket:
+        description: 'R2 bucket name for Pulumi state'
+        required: false
+        type: string
+        default: 'sam-pulumi-state'  # Can be customized per deployment
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  teardown:
+    name: Teardown Cloudflare Resources
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    if: ${{ github.event.inputs.confirm == 'DELETE' }}
+
+    steps:
+      - name: Validate Confirmation
+        if: ${{ inputs.confirm != 'DELETE' }}
+        run: |
+          echo "::error::Confirmation required. Type 'DELETE' to confirm teardown."
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Pulumi CLI
+        uses: pulumi/actions@v5
+        with:
+          command: version
+
+      - name: Login to Pulumi R2 Backend
+        run: |
+          # Using standard Cloudflare R2 endpoint format
+          R2_ENDPOINT="${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          pulumi login "s3://${{ inputs.pulumi_state_bucket }}?endpoint=${R2_ENDPOINT}&region=auto"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+      - name: Select Pulumi Stack
+        working-directory: infra
+        run: |
+          STACK_NAME="${{ inputs.environment == 'production' && 'prod' || inputs.environment }}"
+          pulumi stack select $STACK_NAME
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+      - name: Preview Destroy
+        working-directory: infra
+        run: |
+          echo "📋 Resources to be destroyed:"
+          pulumi preview --diff --target-dependents
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Pulumi Destroy
+        working-directory: infra
+        run: |
+          DESTROY_ARGS="--yes"
+
+          # If keeping data, protect the D1 database from deletion
+          if [ "${{ inputs.keep_data }}" = "true" ]; then
+            echo "⚠️ Keeping data: D1 database will be preserved"
+            # Target everything except the database
+            DESTROY_ARGS="$DESTROY_ARGS --target 'urn:pulumi:*::sam-infra::cloudflare:index/workersKvNamespace:WorkersKvNamespace::*'"
+            DESTROY_ARGS="$DESTROY_ARGS --target 'urn:pulumi:*::sam-infra::cloudflare:index/r2Bucket:R2Bucket::*'"
+            DESTROY_ARGS="$DESTROY_ARGS --target 'urn:pulumi:*::sam-infra::cloudflare:index/record:Record::*'"
+          fi
+
+          pulumi destroy $DESTROY_ARGS
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Remove Pulumi Stack (if full teardown)
+        if: ${{ !inputs.keep_data }}
+        working-directory: infra
+        run: |
+          STACK_NAME="${{ inputs.environment == 'production' && 'prod' || inputs.environment }}"
+          pulumi stack rm $STACK_NAME --yes || true
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+      - name: Write Job Summary
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "## Teardown Complete 🧹" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Removed Resources" >> $GITHUB_STEP_SUMMARY
+            if [ "${{ inputs.keep_data }}" = "true" ]; then
+              echo "- ~~D1 Database~~ (preserved)" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- D1 Database" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "- KV Namespace" >> $GITHUB_STEP_SUMMARY
+            echo "- R2 Bucket" >> $GITHUB_STEP_SUMMARY
+            echo "- DNS Records (api, app, wildcard)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Note" >> $GITHUB_STEP_SUMMARY
+            echo "The Pulumi state bucket (\`${{ inputs.pulumi_state_bucket }}\`) was **NOT** deleted." >> $GITHUB_STEP_SUMMARY
+            echo "Delete it manually in the Cloudflare dashboard if no longer needed." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Teardown Failed ❌" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Check the logs above for error details." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Troubleshooting" >> $GITHUB_STEP_SUMMARY
+            echo "- Verify PULUMI_CONFIG_PASSPHRASE matches the one used during deployment" >> $GITHUB_STEP_SUMMARY
+            echo "- Check that R2 credentials are correct" >> $GITHUB_STEP_SUMMARY
+            echo "- Ensure the Pulumi stack exists" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Confirmation job that runs first if confirm != DELETE
+  validate:
+    name: Validate Confirmation
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirm != 'DELETE' }}
+    steps:
+      - name: Confirmation Required
+        run: |
+          echo "::error::Teardown requires confirmation. Type 'DELETE' in the confirm field."
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Teardown Cancelled ⚠️" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "You must type \`DELETE\` in the confirmation field to proceed with teardown." >> $GITHUB_STEP_SUMMARY
+          exit 1

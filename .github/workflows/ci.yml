@@ -67,9 +67,6 @@ jobs:
       - name: Build packages
         run: pnpm build
 
-      - name: Run tests
-        run: pnpm test
-
       - name: Run tests with coverage
         run: pnpm test:coverage
 
@@ -91,3 +88,53 @@ jobs:
 
       - name: Build all packages
         run: pnpm build
+
+  deploy-scripts:
+    name: Validate Deploy Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check deployment scripts
+        run: npx tsc --project scripts/deploy/tsconfig.json --noEmit
+
+      - name: Validate script syntax
+        run: |
+          # Verify scripts can be parsed
+          npx tsx --check scripts/deploy/setup-github.ts
+          npx tsx --check scripts/deploy/sync-wrangler-config.ts
+          npx tsx --check scripts/deploy/generate-keys.ts
+
+  pulumi-infra:
+    name: Pulumi Infrastructure Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check Pulumi infra
+        working-directory: infra
+        run: pnpm typecheck
+
+      - name: Run Pulumi unit tests
+        working-directory: infra
+        run: pnpm test

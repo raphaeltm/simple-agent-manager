@@ -27,11 +27,16 @@ export interface Env {
   GITHUB_CLIENT_SECRET: string;
   GITHUB_APP_ID: string;
   GITHUB_APP_PRIVATE_KEY: string;
+  GITHUB_APP_SLUG?: string; // GitHub App slug for install URL
   CF_API_TOKEN: string;
   CF_ZONE_ID: string;
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
   ENCRYPTION_KEY: string;
+  // Optional configurable values (per constitution principle XI)
+  IDLE_TIMEOUT_SECONDS?: string;
+  TERMINAL_TOKEN_EXPIRY_MS?: string;
+  CALLBACK_TOKEN_EXPIRY_MS?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();

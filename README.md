@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/logo.svg" alt="Simple Agent Manager" width="400" />
+  <img src="assets/images/logo.png" alt="Simple Agent Manager" width="400" />
 </p>
 
 <p align="center">
@@ -24,15 +24,17 @@ Simple Agent Manager (SAM) is a serverless platform for creating ephemeral cloud
 
 Think **GitHub Codespaces, but built for AI-assisted development** and with automatic shutdown to eliminate surprise bills.
 
+## **WARNING** this thing is fully vibe coded, with some code review, but not a lot yet. It has not yet beeen tested, so you should not use it at the moment.
+
 ## Why Simple Agent Manager?
 
-| | GitHub Codespaces | Simple Agent Manager |
-|---|---|---|
-| **Cost** | $0.18–$0.36/hour | ~$0.07–$0.15/hour |
+|                   | GitHub Codespaces       | Simple Agent Manager              |
+| ----------------- | ----------------------- | --------------------------------- |
+| **Cost**          | $0.18–$0.36/hour        | ~$0.07–$0.15/hour                 |
 | **Idle shutdown** | Manual or 30min timeout | Automatic with AI-aware detection |
-| **Claude Code** | Manual setup required | Pre-installed and optimized |
-| **Private repos** | Native GitHub support | GitHub App integration |
-| **Control plane** | Managed | Self-hosted (free tier) |
+| **Claude Code**   | Manual setup required   | Pre-installed and optimized       |
+| **Private repos** | Native GitHub support   | GitHub App integration            |
+| **Control plane** | Managed                 | Self-hosted (free tier)           |
 
 ### Key Differentiators
 
@@ -218,55 +220,62 @@ docs/                 # Documentation
 ## API Reference
 
 ### Authentication
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/auth/*` | `*` | BetterAuth authentication routes |
-| `/api/auth/me` | `GET` | Get current user |
+
+| Endpoint       | Method | Description                      |
+| -------------- | ------ | -------------------------------- |
+| `/api/auth/*`  | `*`    | BetterAuth authentication routes |
+| `/api/auth/me` | `GET`  | Get current user                 |
 
 ### Credentials
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/credentials` | `GET` | List credentials |
-| `/api/credentials` | `POST` | Create/update credential |
-| `/api/credentials/:provider` | `DELETE` | Delete credential |
+
+| Endpoint                     | Method   | Description              |
+| ---------------------------- | -------- | ------------------------ |
+| `/api/credentials`           | `GET`    | List credentials         |
+| `/api/credentials`           | `POST`   | Create/update credential |
+| `/api/credentials/:provider` | `DELETE` | Delete credential        |
 
 ### GitHub
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/github/installations` | `GET` | List GitHub App installations |
-| `/api/github/install-url` | `GET` | Get GitHub App install URL |
-| `/api/github/repositories` | `GET` | List accessible repositories |
-| `/api/github/webhook` | `POST` | GitHub webhook handler |
-| `/api/github/callback` | `GET` | GitHub App OAuth callback |
+
+| Endpoint                    | Method | Description                   |
+| --------------------------- | ------ | ----------------------------- |
+| `/api/github/installations` | `GET`  | List GitHub App installations |
+| `/api/github/install-url`   | `GET`  | Get GitHub App install URL    |
+| `/api/github/repositories`  | `GET`  | List accessible repositories  |
+| `/api/github/webhook`       | `POST` | GitHub webhook handler        |
+| `/api/github/callback`      | `GET`  | GitHub App OAuth callback     |
 
 ### Workspaces
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/workspaces` | `GET` | List user's workspaces |
-| `/api/workspaces` | `POST` | Create a new workspace |
-| `/api/workspaces/:id` | `GET` | Get workspace details |
-| `/api/workspaces/:id` | `DELETE` | Delete workspace |
-| `/api/workspaces/:id/stop` | `POST` | Stop workspace |
-| `/api/workspaces/:id/restart` | `POST` | Restart workspace |
-| `/api/workspaces/:id/ready` | `POST` | VM ready callback |
-| `/api/workspaces/:id/heartbeat` | `POST` | VM heartbeat |
+
+| Endpoint                        | Method   | Description            |
+| ------------------------------- | -------- | ---------------------- |
+| `/api/workspaces`               | `GET`    | List user's workspaces |
+| `/api/workspaces`               | `POST`   | Create a new workspace |
+| `/api/workspaces/:id`           | `GET`    | Get workspace details  |
+| `/api/workspaces/:id`           | `DELETE` | Delete workspace       |
+| `/api/workspaces/:id/stop`      | `POST`   | Stop workspace         |
+| `/api/workspaces/:id/restart`   | `POST`   | Restart workspace      |
+| `/api/workspaces/:id/ready`     | `POST`   | VM ready callback      |
+| `/api/workspaces/:id/heartbeat` | `POST`   | VM heartbeat           |
 
 ### Terminal
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/terminal/token` | `POST` | Get terminal access token |
-| `/.well-known/jwks.json` | `GET` | JWKS for JWT verification |
+
+| Endpoint                 | Method | Description               |
+| ------------------------ | ------ | ------------------------- |
+| `/api/terminal/token`    | `POST` | Get terminal access token |
+| `/.well-known/jwks.json` | `GET`  | JWKS for JWT verification |
 
 ### VM Agent
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/agent/download` | `GET` | Download VM agent binary (query: os, arch) |
-| `/api/agent/version` | `GET` | Get current agent version |
-| `/api/agent/install-script` | `GET` | Get VM agent install script |
+
+| Endpoint                    | Method | Description                                |
+| --------------------------- | ------ | ------------------------------------------ |
+| `/api/agent/download`       | `GET`  | Download VM agent binary (query: os, arch) |
+| `/api/agent/version`        | `GET`  | Get current agent version                  |
+| `/api/agent/install-script` | `GET`  | Get VM agent install script                |
 
 ### Bootstrap (VM Credential Delivery)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
+
+| Endpoint                | Method | Description                                     |
+| ----------------------- | ------ | ----------------------------------------------- |
 | `/api/bootstrap/:token` | `POST` | Redeem one-time bootstrap token for credentials |
 
 Authentication is session-based via cookies (BetterAuth + GitHub OAuth).
@@ -283,6 +292,7 @@ VMs receive credentials securely using one-time bootstrap tokens:
 4. **Token invalidation**: Token is deleted immediately after first use
 
 This ensures:
+
 - No sensitive tokens in cloud-init user data (visible in Hetzner console)
 - Single-use tokens prevent replay attacks
 - Short TTL limits exposure window
@@ -290,6 +300,7 @@ This ensures:
 ### Workspace Access Control
 
 All workspace operations validate ownership to prevent IDOR attacks:
+
 - Non-owners receive `404 Not Found` (not `403 Forbidden`) to prevent information disclosure
 - Workspace lists are filtered by authenticated user
 - Terminal WebSocket tokens are scoped to workspace owner
@@ -319,28 +330,28 @@ New team members can spin up fully configured development environments in minute
 
 ## Roadmap
 
-| Phase | Target | Features |
-|-------|--------|----------|
-| **1. MVP** | Complete | Core workspace management, GitHub OAuth, auto-shutdown |
-| **2. Browser Terminal** | Current | Web terminal, VM agent, idle detection |
-| **3. Enhanced UX** | Q1 2026 | Logs, SSH access, templates, persistent storage |
-| **4. Multi-Tenancy** | Q2 2026 | Teams, usage quotas, billing |
-| **5. Enterprise** | Q3 2026 | VPC, SSO, compliance, multi-region |
+| Phase                   | Target   | Features                                               |
+| ----------------------- | -------- | ------------------------------------------------------ |
+| **1. MVP**              | Complete | Core workspace management, GitHub OAuth, auto-shutdown |
+| **2. Browser Terminal** | Current  | Web terminal, VM agent, idle detection                 |
+| **3. Enhanced UX**      | Q1 2026  | Logs, SSH access, templates, persistent storage        |
+| **4. Multi-Tenancy**    | Q2 2026  | Teams, usage quotas, billing                           |
+| **5. Enterprise**       | Q3 2026  | VPC, SSO, compliance, multi-region                     |
 
 See [ROADMAP.md](ROADMAP.md) for details.
 
 ## Tech Stack
 
-| Component | Technology |
-|-----------|------------|
-| **API Runtime** | [Cloudflare Workers](https://workers.cloudflare.com/) |
-| **API Framework** | [Hono](https://hono.dev/) |
-| **Web UI** | [React](https://react.dev/) + [Vite](https://vitejs.dev/) |
-| **Cloud Provider** | [Hetzner Cloud](https://hetzner.cloud/) |
-| **DNS** | [Cloudflare DNS](https://cloudflare.com/) |
-| **Data Storage** | [Cloudflare D1](https://developers.cloudflare.com/d1/) (database) + [KV](https://developers.cloudflare.com/kv/) (sessions) + [R2](https://developers.cloudflare.com/r2/) (binaries) |
-| **Testing** | [Vitest](https://vitest.dev/) + [Miniflare](https://miniflare.dev/) |
-| **Monorepo** | [pnpm](https://pnpm.io/) + [Turborepo](https://turbo.build/) |
+| Component          | Technology                                                                                                                                                                          |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **API Runtime**    | [Cloudflare Workers](https://workers.cloudflare.com/)                                                                                                                               |
+| **API Framework**  | [Hono](https://hono.dev/)                                                                                                                                                           |
+| **Web UI**         | [React](https://react.dev/) + [Vite](https://vitejs.dev/)                                                                                                                           |
+| **Cloud Provider** | [Hetzner Cloud](https://hetzner.cloud/)                                                                                                                                             |
+| **DNS**            | [Cloudflare DNS](https://cloudflare.com/)                                                                                                                                           |
+| **Data Storage**   | [Cloudflare D1](https://developers.cloudflare.com/d1/) (database) + [KV](https://developers.cloudflare.com/kv/) (sessions) + [R2](https://developers.cloudflare.com/r2/) (binaries) |
+| **Testing**        | [Vitest](https://vitest.dev/) + [Miniflare](https://miniflare.dev/)                                                                                                                 |
+| **Monorepo**       | [pnpm](https://pnpm.io/) + [Turborepo](https://turbo.build/)                                                                                                                        |
 
 ## Contributing
 

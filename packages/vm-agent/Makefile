@@ -19,7 +19,7 @@ build: build-ui embed
 
 # Build the embedded React UI
 build-ui:
-	cd ui && pnpm install && pnpm build
+	cd ui && pnpm build
 
 # Copy built UI to static directory for embedding
 embed:
@@ -74,4 +74,3 @@ version:
 # Install dependencies
 deps:
 	$(GO) mod download
-	cd ui && pnpm install

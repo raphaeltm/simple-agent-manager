@@ -39,12 +39,11 @@ CF_API_TOKEN=your-cloudflare-api-token
 CF_ZONE_ID=your-zone-id
 BASE_DOMAIN=vm.yourdomain.com
 
-# Hetzner Cloud configuration
-HETZNER_TOKEN=your-hetzner-api-token
-
-# API authentication
-API_TOKEN=your-secret-api-token
+# Security keys (auto-generated if not provided)
+ENCRYPTION_KEY=your-encryption-key
 ```
+
+> **Note**: Hetzner API tokens are NOT platform configuration. Users provide their own tokens through the Settings UI after logging in. See `docs/architecture/credential-security.md` for details on the bring-your-own-cloud model.
 
 ### 4. Build All Packages
 

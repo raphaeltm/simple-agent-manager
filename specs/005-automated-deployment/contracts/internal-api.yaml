@@ -1,0 +1,421 @@
+# Internal API Contract: Deployment Module
+# Date: 2026-01-29
+# Feature: 005-automated-deployment
+
+openapi: 3.0.0
+info:
+  title: Deployment Module Internal API
+  version: 1.0.0
+  description: Internal TypeScript module interfaces for deployment
+
+paths:
+  /internal/deployment/preflight:
+    post:
+      operationId: runPreflightChecks
+      description: Run pre-deployment validation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeploymentConfig'
+      responses:
+        '200':
+          description: Preflight check results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreflightResult'
+
+  /internal/deployment/provision:
+    post:
+      operationId: provisionResources
+      description: Create or verify Cloudflare resources
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProvisionRequest'
+      responses:
+        '200':
+          description: Provisioned resource IDs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvisionResult'
+
+  /internal/deployment/deploy:
+    post:
+      operationId: deployComponents
+      description: Deploy Worker and Pages
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployRequest'
+      responses:
+        '200':
+          description: Deployment URLs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployResult'
+
+  /internal/deployment/health:
+    post:
+      operationId: runHealthChecks
+      description: Validate deployment health
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HealthCheckRequest'
+      responses:
+        '200':
+          description: Health check results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResult'
+
+  /internal/deployment/rollback:
+    post:
+      operationId: rollbackDeployment
+      description: Rollback to previous version
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RollbackRequest'
+      responses:
+        '200':
+          description: Rollback completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RollbackResult'
+
+components:
+  schemas:
+    DeploymentConfig:
+      type: object
+      required:
+        - environment
+        - cloudflare
+      properties:
+        environment:
+          type: string
+          enum: [development, staging, production]
+        cloudflare:
+          type: object
+          properties:
+            accountId:
+              type: string
+            apiToken:
+              type: string
+            zoneId:
+              type: string
+            baseDomain:
+              type: string
+        github:
+          type: object
+          properties:
+            clientId:
+              type: string
+            clientSecret:
+              type: string
+            appId:
+              type: string
+            appPrivateKey:
+              type: string
+        options:
+          type: object
+          properties:
+            skipHealthCheck:
+              type: boolean
+            skipDns:
+              type: boolean
+            verbose:
+              type: boolean
+            dryRun:
+              type: boolean
+
+    PreflightResult:
+      type: object
+      properties:
+        passed:
+          type: boolean
+        checks:
+          type: object
+          properties:
+            nodeVersion:
+              $ref: '#/components/schemas/Check'
+            pnpmVersion:
+              $ref: '#/components/schemas/Check'
+            wranglerVersion:
+              $ref: '#/components/schemas/Check'
+            cloudflareAuth:
+              $ref: '#/components/schemas/Check'
+            domainOwnership:
+              $ref: '#/components/schemas/Check'
+            githubAppValid:
+              $ref: '#/components/schemas/Check'
+        warnings:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            type: string
+
+    Check:
+      type: object
+      properties:
+        passed:
+          type: boolean
+        message:
+          type: string
+        details:
+          type: string
+
+    ProvisionRequest:
+      type: object
+      properties:
+        environment:
+          type: string
+        accountId:
+          type: string
+        dryRun:
+          type: boolean
+
+    ProvisionResult:
+      type: object
+      properties:
+        d1:
+          type: object
+          properties:
+            databaseId:
+              type: string
+            databaseName:
+              type: string
+            created:
+              type: boolean
+        kv:
+          type: object
+          properties:
+            namespaceId:
+              type: string
+            namespaceName:
+              type: string
+            created:
+              type: boolean
+        r2:
+          type: object
+          properties:
+            bucketName:
+              type: string
+            created:
+              type: boolean
+
+    DeployRequest:
+      type: object
+      properties:
+        environment:
+          type: string
+        resources:
+          $ref: '#/components/schemas/ProvisionResult'
+        secrets:
+          type: object
+          additionalProperties:
+            type: string
+        dryRun:
+          type: boolean
+
+    DeployResult:
+      type: object
+      properties:
+        worker:
+          type: object
+          properties:
+            name:
+              type: string
+            url:
+              type: string
+            version:
+              type: string
+        pages:
+          type: object
+          properties:
+            projectName:
+              type: string
+            url:
+              type: string
+            deploymentId:
+              type: string
+        migrations:
+          type: object
+          properties:
+            applied:
+              type: array
+              items:
+                type: string
+            pending:
+              type: array
+              items:
+                type: string
+
+    HealthCheckRequest:
+      type: object
+      properties:
+        urls:
+          type: object
+          properties:
+            api:
+              type: string
+            web:
+              type: string
+        retries:
+          type: integer
+          default: 3
+        timeout:
+          type: integer
+          default: 30000
+
+    HealthCheckResult:
+      type: object
+      properties:
+        healthy:
+          type: boolean
+        endpoints:
+          type: object
+          properties:
+            api:
+              $ref: '#/components/schemas/EndpointHealth'
+            web:
+              $ref: '#/components/schemas/EndpointHealth'
+        resources:
+          type: object
+          properties:
+            d1:
+              type: object
+              properties:
+                connected:
+                  type: boolean
+                tableCount:
+                  type: integer
+            kv:
+              type: object
+              properties:
+                accessible:
+                  type: boolean
+            r2:
+              type: object
+              properties:
+                accessible:
+                  type: boolean
+                objectCount:
+                  type: integer
+        dns:
+          type: object
+          properties:
+            recordsCreated:
+              type: boolean
+            resolvable:
+              type: object
+              additionalProperties:
+                type: boolean
+
+    EndpointHealth:
+      type: object
+      properties:
+        url:
+          type: string
+        status:
+          type: integer
+        responseTime:
+          type: number
+        healthy:
+          type: boolean
+
+    RollbackRequest:
+      type: object
+      properties:
+        environment:
+          type: string
+        targetVersion:
+          type: string
+        components:
+          type: array
+          items:
+            type: string
+            enum: [worker, pages, migrations]
+
+    RollbackResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        previousVersion:
+          type: string
+        currentVersion:
+          type: string
+        rolledBack:
+          type: array
+          items:
+            type: string
+
+    DeploymentState:
+      type: object
+      properties:
+        version:
+          type: string
+        environment:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [pending, in_progress, completed, failed, rolled_back]
+        resources:
+          $ref: '#/components/schemas/ProvisionResult'
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeploymentStep'
+
+    DeploymentStep:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed, skipped]
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        error:
+          type: string
+        output:
+          type: string
+
+# TypeScript Implementation Example:
+#
+# interface DeploymentManager {
+#   preflight(config: DeploymentConfig): Promise<PreflightResult>;
+#   provision(request: ProvisionRequest): Promise<ProvisionResult>;
+#   deploy(request: DeployRequest): Promise<DeployResult>;
+#   health(request: HealthCheckRequest): Promise<HealthCheckResult>;
+#   rollback(request: RollbackRequest): Promise<RollbackResult>;
+#   getState(): DeploymentState;
+#   saveState(state: DeploymentState): Promise<void>;
+# }

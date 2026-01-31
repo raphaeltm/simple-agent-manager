@@ -1,0 +1,335 @@
+# Cloudflare API Contract: Resource Management
+# Date: 2026-01-29
+# Feature: 005-automated-deployment
+
+openapi: 3.0.0
+info:
+  title: Cloudflare API Integration
+  version: 1.0.0
+  description: Cloudflare API calls used for deployment
+
+servers:
+  - url: https://api.cloudflare.com/client/v4
+
+paths:
+  /zones/{zoneId}/dns_records:
+    parameters:
+      - name: zoneId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Cloudflare Zone ID
+
+    get:
+      operationId: listDnsRecords
+      description: List existing DNS records
+      parameters:
+        - name: name
+          in: query
+          schema:
+            type: string
+          description: Filter by record name
+      responses:
+        '200':
+          description: DNS records list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DnsRecordList'
+
+    post:
+      operationId: createDnsRecord
+      description: Create new DNS record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DnsRecord'
+      responses:
+        '200':
+          description: DNS record created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DnsRecordResponse'
+
+  /zones/{zoneId}/dns_records/{recordId}:
+    parameters:
+      - name: zoneId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: recordId
+        in: path
+        required: true
+        schema:
+          type: string
+
+    put:
+      operationId: updateDnsRecord
+      description: Update existing DNS record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DnsRecord'
+      responses:
+        '200':
+          description: DNS record updated
+
+    delete:
+      operationId: deleteDnsRecord
+      description: Delete DNS record
+      responses:
+        '200':
+          description: DNS record deleted
+
+  /accounts/{accountId}/d1/database:
+    parameters:
+      - name: accountId
+        in: path
+        required: true
+        schema:
+          type: string
+
+    get:
+      operationId: listD1Databases
+      description: List D1 databases
+      responses:
+        '200':
+          description: D1 databases list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/D1DatabaseList'
+
+  /accounts/{accountId}/storage/kv/namespaces:
+    parameters:
+      - name: accountId
+        in: path
+        required: true
+        schema:
+          type: string
+
+    get:
+      operationId: listKvNamespaces
+      description: List KV namespaces
+      responses:
+        '200':
+          description: KV namespaces list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KvNamespaceList'
+
+  /accounts/{accountId}/r2/buckets:
+    parameters:
+      - name: accountId
+        in: path
+        required: true
+        schema:
+          type: string
+
+    get:
+      operationId: listR2Buckets
+      description: List R2 buckets
+      responses:
+        '200':
+          description: R2 buckets list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/R2BucketList'
+
+components:
+  schemas:
+    DnsRecord:
+      type: object
+      required:
+        - type
+        - name
+        - content
+      properties:
+        type:
+          type: string
+          enum: [A, AAAA, CNAME, TXT, MX]
+        name:
+          type: string
+          description: DNS record name (e.g., api, app, *)
+        content:
+          type: string
+          description: Record content (IP or domain)
+        ttl:
+          type: integer
+          default: 1
+          description: TTL in seconds (1 = automatic)
+        proxied:
+          type: boolean
+          default: true
+          description: Orange-cloud proxy through Cloudflare
+        comment:
+          type: string
+          description: Record comment
+
+    DnsRecordResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        result:
+          type: object
+          properties:
+            id:
+              type: string
+            zone_id:
+              type: string
+            zone_name:
+              type: string
+            name:
+              type: string
+            type:
+              type: string
+            content:
+              type: string
+            proxiable:
+              type: boolean
+            proxied:
+              type: boolean
+            ttl:
+              type: integer
+            created_on:
+              type: string
+              format: date-time
+            modified_on:
+              type: string
+              format: date-time
+
+    DnsRecordList:
+      type: object
+      properties:
+        success:
+          type: boolean
+        result:
+          type: array
+          items:
+            $ref: '#/components/schemas/DnsRecordResponse'
+        result_info:
+          type: object
+          properties:
+            page:
+              type: integer
+            per_page:
+              type: integer
+            total_pages:
+              type: integer
+            count:
+              type: integer
+            total_count:
+              type: integer
+
+    D1Database:
+      type: object
+      properties:
+        uuid:
+          type: string
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    D1DatabaseList:
+      type: object
+      properties:
+        success:
+          type: boolean
+        result:
+          type: array
+          items:
+            $ref: '#/components/schemas/D1Database'
+
+    KvNamespace:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        supports_url_encoding:
+          type: boolean
+
+    KvNamespaceList:
+      type: object
+      properties:
+        success:
+          type: boolean
+        result:
+          type: array
+          items:
+            $ref: '#/components/schemas/KvNamespace'
+
+    R2Bucket:
+      type: object
+      properties:
+        name:
+          type: string
+        creation_date:
+          type: string
+          format: date-time
+        location:
+          type: string
+
+    R2BucketList:
+      type: object
+      properties:
+        success:
+          type: boolean
+        result:
+          type: object
+          properties:
+            buckets:
+              type: array
+              items:
+                $ref: '#/components/schemas/R2Bucket'
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Cloudflare API Token
+
+security:
+  - BearerAuth: []
+
+# Example DNS Records Created:
+#
+# 1. API endpoint:
+#    {
+#      "type": "CNAME",
+#      "name": "api",
+#      "content": "workspaces-api.workers.dev",
+#      "proxied": true,
+#      "comment": "SAM API endpoint"
+#    }
+#
+# 2. Web UI:
+#    {
+#      "type": "CNAME",
+#      "name": "app",
+#      "content": "workspaces-web.pages.dev",
+#      "proxied": true,
+#      "comment": "SAM Web UI"
+#    }
+#
+# 3. Workspace wildcard:
+#    {
+#      "type": "CNAME",
+#      "name": "*",
+#      "content": "workspaces-api.workers.dev",
+#      "proxied": true,
+#      "comment": "SAM workspace subdomains"
+#    }

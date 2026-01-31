@@ -42,11 +42,15 @@ githubRoutes.get('/installations', requireAuth(), async (c) => {
 
 /**
  * GET /api/github/install-url - Get GitHub App installation URL
+ * Requires GITHUB_APP_SLUG env var per constitution principle XI (no hardcoded values).
  */
 githubRoutes.get('/install-url', requireAuth(), async (c) => {
-  // The app name should be configured or derived from GITHUB_APP_ID
-  const appName = 'simple-agent-manager'; // This should match the GitHub App's slug
-  const url = `https://github.com/apps/${appName}/installations/new`;
+  // The app slug must be configured via environment variable
+  const appSlug = c.env.GITHUB_APP_SLUG;
+  if (!appSlug) {
+    throw errors.internal('GITHUB_APP_SLUG environment variable not configured');
+  }
+  const url = `https://github.com/apps/${appSlug}/installations/new`;
   return c.json({ url });
 });
 

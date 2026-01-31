@@ -19,25 +19,29 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "deploy": "turbo run deploy",
     "deploy:staging": "turbo run deploy:staging",
-    "setup": "tsx scripts/setup.ts",
-    "generate-keys": "tsx scripts/generate-keys.ts",
-    "teardown": "tsx scripts/teardown.ts",
-    "teardown:staging": "tsx scripts/teardown.ts --env staging",
-    "db:migrate": "wrangler d1 migrations apply workspaces --remote",
-    "db:migrate:staging": "wrangler d1 migrations apply workspaces-staging --remote",
-    "db:migrate:local": "wrangler d1 migrations apply workspaces --local",
-    "upload-agent": "tsx scripts/upload-agent.ts",
+    "db:migrate": "tsx scripts/deploy/run-migrations.ts --env production",
+    "db:migrate:staging": "tsx scripts/deploy/run-migrations.ts --env staging",
+    "db:migrate:local": "tsx scripts/deploy/run-migrations.ts --local",
+    "setup:github": "tsx scripts/deploy/setup-github.ts",
+    "setup:local": "tsx scripts/deploy/setup-local-dev.ts",
+    "test:infra": "pnpm --filter @simple-agent-manager/infra test",
     "prepare": "husky"
+  },
+  "dependencies": {
+    "@iarna/toml": "^2.2.5"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.0.0",
+    "@types/iarna__toml": "^2.0.5",
     "@commitlint/config-conventional": "^19.0.0",
     "@types/node": "^20.0.0",
     "husky": "^9.0.0",
     "lint-staged": "^15.0.0",
     "prettier": "^3.0.0",
     "turbo": "^2.0.0",
-    "typescript": "^5.0.0"
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "zod": "^3.23.0"
   },
   "packageManager": "pnpm@9.0.0",
   "engines": {

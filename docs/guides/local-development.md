@@ -1,10 +1,46 @@
 # Local Development Guide
 
-**Last Updated**: 2025-01-26
+**Last Updated**: 2026-01-30
 
-## Overview
+---
 
-This guide explains how to run the Simple Agent Manager control plane locally for development.
+## ⚠️ Important: Cloudflare-First Development
+
+**This project uses a Cloudflare-first development approach.** Per the [project constitution](./../.specify/memory/constitution.md#development-workflow):
+
+> "No complex local testing setups. Iterate directly on Cloudflare infrastructure."
+
+**Why?** This project has many moving pieces (Workers, D1, KV, DNS, VMs, VM Agent). Setting up a realistic local environment is impractical. Instead, we deploy frequently to staging and test there.
+
+### Recommended Workflow
+
+1. **Make changes locally** - Use your IDE, run lint/typecheck
+2. **Deploy to staging** - `pnpm deploy:staging`
+3. **Test on Cloudflare** - Real D1, real KV, real Workers
+4. **Merge to main** - Triggers production deployment
+
+---
+
+## What Still Works Locally
+
+For **quick iteration on API logic**, you can use Wrangler's local emulator:
+
+```bash
+pnpm dev
+```
+
+This starts:
+- **API** at `http://localhost:8787` (Wrangler dev server with miniflare)
+- **Web UI** at `http://localhost:5173` (Vite dev server)
+
+### Limitations of Local Dev
+
+- **No real GitHub OAuth** - Callbacks won't work without tunnel setup
+- **No real DNS** - Workspace URLs won't resolve
+- **No real VMs** - Workspaces can't be created
+- **D1/KV/R2 emulation** - May differ from production behavior
+
+**For any meaningful testing, deploy to staging.**
 
 ---
 
@@ -21,128 +57,115 @@ This guide explains how to run the Simple Agent Manager control plane locally fo
    pnpm install
    ```
 
-3. **Environment variables** configured (see below)
-
 ---
 
-## Setup
+## Basic Local Setup (Limited Use)
 
-### 1. Clone and Install
+### 1. Install Dependencies
 
 ```bash
-git clone https://github.com/your-org/simple-agent-manager.git
-cd simple-agent-manager
 pnpm install
 ```
 
-### 2. Generate Keys
+### 2. Generate Development Keys
 
 ```bash
-pnpm generate-keys
+pnpm tsx scripts/deploy/generate-keys.ts
 ```
 
-This generates JWT and encryption keys and outputs them for your `.dev.vars` file.
+### 3. Create `.dev.vars` (Optional)
 
-### 3. Configure Environment
-
-Create `apps/api/.dev.vars` with your development credentials:
+Create `apps/api/.dev.vars` with minimal configuration:
 
 ```bash
-# Cloudflare (for DNS)
-CF_API_TOKEN=your-cloudflare-api-token
-CF_ZONE_ID=your-zone-id
-
-# Domain
-BASE_DOMAIN=localhost
-
-# GitHub OAuth (create a dev app at https://github.com/settings/developers)
-GITHUB_CLIENT_ID=your-dev-github-client-id
-GITHUB_CLIENT_SECRET=your-dev-github-client-secret
-
-# GitHub App (create at https://github.com/settings/apps)
-GITHUB_APP_ID=your-github-app-id
-GITHUB_APP_PRIVATE_KEY=base64-encoded-private-key
-
-# JWT Keys (from pnpm generate-keys)
-JWT_PRIVATE_KEY=base64-encoded-private-key
-JWT_PUBLIC_KEY=base64-encoded-public-key
-
-# Encryption Key (from pnpm generate-keys)
-ENCRYPTION_KEY=base64-encoded-key
+# Minimal local dev config
+BASE_DOMAIN=localhost:8787
+ENCRYPTION_KEY=<from generate-keys>
+JWT_PRIVATE_KEY=<from generate-keys>
+JWT_PUBLIC_KEY=<from generate-keys>
 ```
 
-### 4. Initialize Local Database
-
-```bash
-pnpm db:migrate:local
-```
-
----
-
-## Running Locally
+### 4. Run Local Server
 
 ```bash
 pnpm dev
 ```
 
-This starts:
-- **API** at `http://localhost:8787` (Wrangler dev server)
-- **Web UI** at `http://localhost:5173` (Vite dev server)
-
----
-
-## Architecture Notes
-
-The local development setup uses:
-- **Wrangler** to emulate Cloudflare Workers locally
-- **Local D1** SQLite database (`.wrangler/state/`)
-- **Real GitHub OAuth** (you need a dev OAuth app)
-- **Real Hetzner** if creating workspaces (user provides their token)
-
 ---
 
 ## Testing
+
+Tests run locally without Cloudflare:
 
 ```bash
 # Run all tests
 pnpm test
 
-# Run tests in watch mode
-pnpm test:watch
+# Run tests with coverage
+pnpm test:coverage
 
 # Type checking
 pnpm typecheck
+
+# Lint
+pnpm lint
 ```
+
+---
+
+## Staging Deployment (Recommended for Testing)
+
+### Prerequisites
+
+1. Cloudflare account with Workers, D1, KV, R2 enabled
+2. GitHub secrets configured (see [self-hosting guide](./self-hosting.md))
+
+### Deploy to Staging
+
+```bash
+# Via GitHub Actions (recommended)
+# Trigger the "Deploy Setup" workflow with environment=staging
+
+# Or via CLI (if configured)
+pnpm deploy:staging
+```
+
+### Teardown Staging
+
+```bash
+# Via GitHub Actions
+# Trigger the "Teardown Setup" workflow with environment=staging
+```
+
+---
+
+## Deprecated Features
+
+### Mock Mode (Removed)
+
+The previous mock mode (`pnpm dev:mock`) that used local devcontainers has been **removed**. It was:
+- Overly complex to maintain
+- Didn't accurately represent production behavior
+- Required Docker and devcontainers CLI
+
+The Cloudflare-first approach replaces this entirely.
+
+### setup-local-dev.ts (Deprecated)
+
+The `pnpm setup:local` script exists for historical reasons but is **not recommended**. Use staging deployment instead.
 
 ---
 
 ## Troubleshooting
 
-### "OAuth callback failed"
+### "Can't test OAuth locally"
 
-Ensure your GitHub OAuth app has the correct callback URL:
-- Development: `http://localhost:5173/api/auth/callback/github`
+Deploy to staging with proper GitHub OAuth app configured. Local OAuth requires tunnel setup which is complex and error-prone.
 
-### "D1 database not found"
+### "Workspace creation fails locally"
 
-Run the local migration:
-```bash
-pnpm db:migrate:local
-```
+Workspace creation requires real Hetzner VMs and DNS. This cannot work in local emulation. Deploy to staging.
 
-### "JWT verification failed"
+### "D1/KV behavior differs"
 
-Regenerate your keys:
-```bash
-pnpm generate-keys
-```
-
-And update your `.dev.vars` file.
-
----
-
-## Deprecated: Mock Mode
-
-> **Note**: The previous mock mode (`pnpm dev:mock`) that used local devcontainers is no longer functional. The API has been rewritten to use D1/KV/R2 storage and BetterAuth, which requires the Wrangler development environment.
-
-For local testing without cloud resources, use the standard `pnpm dev` with a local D1 database. Workspace creation will still require a Hetzner account.
+Local emulation (miniflare) may differ from production. Always verify important changes in staging.

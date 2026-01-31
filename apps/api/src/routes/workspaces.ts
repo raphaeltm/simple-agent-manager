@@ -10,7 +10,7 @@ import { createServer, deleteServer, SERVER_TYPES } from '../services/hetzner';
 import { createDNSRecord, deleteDNSRecord, getWorkspaceUrl } from '../services/dns';
 import { getInstallationToken } from '../services/github-app';
 import { generateBootstrapToken, storeBootstrapToken } from '../services/bootstrap';
-import { signCallbackToken } from '../services/jwt';
+import { signCallbackToken, verifyCallbackToken } from '../services/jwt';
 import { generateCloudInit, validateCloudInitSize } from '@workspace/cloud-init';
 import * as schema from '../db/schema';
 import type {
@@ -20,7 +20,17 @@ import type {
   HeartbeatResponse,
   BootstrapTokenData,
 } from '@simple-agent-manager/shared';
-import { MAX_WORKSPACES_PER_USER, IDLE_TIMEOUT_SECONDS, HETZNER_IMAGE } from '@simple-agent-manager/shared';
+import { MAX_WORKSPACES_PER_USER, HETZNER_IMAGE } from '@simple-agent-manager/shared';
+
+/**
+ * Get idle timeout in seconds from environment.
+ * Default: 30 minutes (1800 seconds)
+ * Configurable via IDLE_TIMEOUT_SECONDS env var per constitution principle XI.
+ */
+function getIdleTimeoutSeconds(env: Env): number {
+  const envValue = env.IDLE_TIMEOUT_SECONDS;
+  return envValue ? parseInt(envValue, 10) : 30 * 60;
+}
 
 const workspacesRoutes = new Hono<{ Bindings: Env }>();
 
@@ -476,9 +486,28 @@ workspacesRoutes.delete('/:id', async (c) => {
 
 /**
  * POST /api/workspaces/:id/ready - VM callback when workspace is ready
+ * Requires valid callback token in Authorization header.
  */
 workspacesRoutes.post('/:id/ready', async (c) => {
   const workspaceId = c.req.param('id');
+
+  // Validate callback token from Authorization header
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    throw errors.unauthorized('Missing or invalid Authorization header');
+  }
+
+  const token = authHeader.slice(7);
+  try {
+    const payload = await verifyCallbackToken(token, c.env);
+    // Verify the token is for this specific workspace
+    if (payload.workspace !== workspaceId) {
+      throw errors.forbidden('Token workspace mismatch');
+    }
+  } catch (err) {
+    throw errors.unauthorized(err instanceof Error ? err.message : 'Invalid callback token');
+  }
+
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date().toISOString();
 
@@ -496,12 +525,36 @@ workspacesRoutes.post('/:id/ready', async (c) => {
 
 /**
  * POST /api/workspaces/:id/heartbeat - VM heartbeat for idle detection
+ * Requires valid callback token in Authorization header.
+ *
+ * NOTE: The VM Agent manages its own idle timeout locally and will self-terminate.
+ * This endpoint provides visibility and allows the control plane to track workspace status,
+ * but does NOT extend the VM's lifetime. The Go agent uses IDLE_TIMEOUT env var (default 30min).
  */
 workspacesRoutes.post('/:id/heartbeat', async (c) => {
   const workspaceId = c.req.param('id');
+
+  // Validate callback token from Authorization header
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    throw errors.unauthorized('Missing or invalid Authorization header');
+  }
+
+  const token = authHeader.slice(7);
+  try {
+    const payload = await verifyCallbackToken(token, c.env);
+    // Verify the token is for this specific workspace
+    if (payload.workspace !== workspaceId) {
+      throw errors.forbidden('Token workspace mismatch');
+    }
+  } catch (err) {
+    throw errors.unauthorized(err instanceof Error ? err.message : 'Invalid callback token');
+  }
+
   const body = await c.req.json<HeartbeatRequest>();
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date().toISOString();
+  const idleTimeoutSeconds = getIdleTimeoutSeconds(c.env);
 
   const workspaces = await db
     .select()
@@ -522,21 +575,21 @@ workspacesRoutes.post('/:id/heartbeat', async (c) => {
       .where(eq(schema.workspaces.id, workspaceId));
   }
 
-  // Check if idle timeout reached
+  // Check if idle timeout reached (informational - VM agent decides shutdown)
   const lastActivity = wsHeartbeat.lastActivityAt
     ? new Date(wsHeartbeat.lastActivityAt)
     : new Date(wsHeartbeat.createdAt);
   const idleSeconds = (Date.now() - lastActivity.getTime()) / 1000;
-  const shouldShutdown = idleSeconds >= IDLE_TIMEOUT_SECONDS;
+  const shouldShutdown = idleSeconds >= idleTimeoutSeconds;
 
   // Calculate shutdown deadline (when idle timeout will be reached)
-  const remainingSeconds = Math.max(0, IDLE_TIMEOUT_SECONDS - idleSeconds);
+  const remainingSeconds = Math.max(0, idleTimeoutSeconds - idleSeconds);
   const shutdownDeadline = new Date(Date.now() + remainingSeconds * 1000).toISOString();
 
   const response: HeartbeatResponse = {
     action: shouldShutdown ? 'shutdown' : 'continue',
     idleSeconds: Math.floor(idleSeconds),
-    maxIdleSeconds: IDLE_TIMEOUT_SECONDS,
+    maxIdleSeconds: idleTimeoutSeconds,
     shutdownDeadline,
   };
 

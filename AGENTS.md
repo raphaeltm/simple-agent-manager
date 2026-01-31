@@ -7,6 +7,7 @@ This document provides detailed instructions for AI coding agents working on thi
 ### Stateless Design
 
 The MVP uses a stateless architecture where workspace state is derived from:
+
 1. **Hetzner server labels** - Metadata stored with VM
 2. **Cloudflare DNS records** - Existence implies active workspace
 
@@ -58,6 +59,7 @@ When creating documentation or implementation notes:
 ### Error Handling
 
 All API errors should follow this format:
+
 ```typescript
 {
   error: "error_code",
@@ -68,15 +70,19 @@ All API errors should follow this format:
 ### Environment Variables
 
 Workers secrets are set via:
+
 ```bash
 wrangler secret put SECRET_NAME
 ```
 
 Local development uses `.dev.vars`:
+
 ```
 CF_API_TOKEN=...
-HETZNER_TOKEN=...
+ENCRYPTION_KEY=...
 ```
+
+**Note**: Hetzner tokens are NOT platform secrets. Users provide their own tokens through the Settings UI, stored encrypted per-user in the database. See `docs/architecture/credential-security.md`.
 
 ## Code Patterns
 
@@ -151,6 +157,7 @@ export const WorkspaceCard: FC<Props> = ({ workspace }) => {
 ### Build Errors
 
 Run builds in dependency order:
+
 ```bash
 pnpm --filter @simple-agent-manager/shared build
 pnpm --filter @simple-agent-manager/providers build

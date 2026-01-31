@@ -1,0 +1,12 @@
+# Dependencies
+node_modules/
+
+# Build output
+bin/
+
+# Pulumi
+Pulumi.*.yaml.bak
+
+# IDE
+.idea/
+.vscode/

@@ -10,7 +10,14 @@ import type {
   ApiError,
 } from '@simple-agent-manager/shared';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
+// In production, VITE_API_URL must be explicitly set
+const API_URL = (() => {
+  const url = import.meta.env.VITE_API_URL;
+  if (!url && import.meta.env.PROD) {
+    throw new Error('VITE_API_URL is required in production builds');
+  }
+  return url || 'http://localhost:8787';
+})();
 
 export class ApiClientError extends Error {
   constructor(
