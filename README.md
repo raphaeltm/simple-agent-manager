@@ -28,18 +28,18 @@ Think **GitHub Codespaces, but built for AI-assisted development** and with auto
 
 ## Why Simple Agent Manager?
 
-|                   | GitHub Codespaces       | Simple Agent Manager              |
-| ----------------- | ----------------------- | --------------------------------- |
-| **Cost**          | $0.18–$0.36/hour        | ~$0.07–$0.15/hour                 |
-| **Idle shutdown** | Manual or 30min timeout | Automatic with AI-aware detection |
-| **Claude Code**   | Manual setup required   | Pre-installed and optimized       |
-| **Private repos** | Native GitHub support   | GitHub App integration            |
-| **Control plane** | Managed                 | Self-hosted (free tier)           |
+|                   | GitHub Codespaces       | Simple Agent Manager                 |
+| ----------------- | ----------------------- | ------------------------------------ |
+| **Cost**          | $0.18–$0.36/hour        | ~$0.07–$0.15/hour                    |
+| **Idle shutdown** | Manual or 30min timeout | Automatic with PTY activity tracking |
+| **Claude Code**   | Manual setup required   | Pre-installed and optimized          |
+| **Private repos** | Native GitHub support   | GitHub App integration               |
+| **Control plane** | Managed                 | Self-hosted (free tier)              |
 
 ### Key Differentiators
 
-- **5-10x cheaper** than hosted alternatives using Hetzner Cloud VMs
-- **AI-aware idle detection** — won't shut down while Claude is actively working
+- **2-3x cheaper** than hosted alternatives using Hetzner Cloud VMs
+- **Smart idle detection** — tracks terminal activity to prevent premature shutdown
 - **Zero ongoing cost** — VMs self-terminate, control plane runs on Cloudflare's free tier
 - **Claude Code first** — pre-installed, session persistence, MCP server support
 - **Private repository support** — secure GitHub App integration for your org
@@ -47,17 +47,15 @@ Think **GitHub Codespaces, but built for AI-assisted development** and with auto
 ## Features
 
 - **Instant Workspaces** — Create a cloud VM from any Git repository in minutes
-- **Web-Based IDE** — Access via CloudCLI with integrated file explorer and terminal
+- **Web Terminal** — Access via browser-based xterm.js terminal with WebSocket connection
 - **DevContainer Support** — Automatically detects and uses your `.devcontainer/devcontainer.json`
-- **Multiple VM Sizes** — Small (1 vCPU/2GB), Medium (2 vCPU/4GB), Large (4 vCPU/8GB)
-- **Automatic Cleanup** — Idle workspaces shut down after 30 minutes of inactivity
+- **Multiple VM Sizes** — Small (2 vCPU/4GB), Medium (4 vCPU/8GB), Large (8 vCPU/16GB)
+- **Automatic Cleanup** — Idle workspaces shut down after configurable inactivity (default 30 minutes)
 - **GitHub Integration** — Works with both public and private repositories
 
 ## Quick Start
 
 ### Prerequisites
-
-#### Prerequisites
 
 - [Node.js](https://nodejs.org/) 20+
 - [pnpm](https://pnpm.io/) 9+
@@ -65,7 +63,7 @@ Think **GitHub Codespaces, but built for AI-assisted development** and with auto
 - [Hetzner Cloud account](https://hetzner.cloud/)
 - A domain managed by Cloudflare
 
-#### Installation
+### Installation
 
 ```bash
 # Clone the repository
@@ -100,8 +98,9 @@ GITHUB_CLIENT_SECRET=your-github-oauth-client-secret
 # GitHub App (create at https://github.com/settings/apps)
 GITHUB_APP_ID=your-github-app-id
 GITHUB_APP_PRIVATE_KEY=your-github-app-private-key-base64
+GITHUB_APP_SLUG=your-github-app-slug
 
-# JWT Keys (generate with: pnpm generate-keys)
+# JWT Keys (generate with: tsx scripts/deploy/generate-keys.ts)
 JWT_PRIVATE_KEY=your-jwt-private-key-base64
 JWT_PUBLIC_KEY=your-jwt-public-key-base64
 
@@ -109,7 +108,7 @@ JWT_PUBLIC_KEY=your-jwt-public-key-base64
 ENCRYPTION_KEY=your-encryption-key-base64
 ```
 
-> **Note:** Run `pnpm generate-keys` to generate JWT and encryption keys.
+> **Note:** Run `tsx scripts/deploy/generate-keys.ts` to generate JWT and encryption keys.
 > User Hetzner tokens are stored encrypted per-user, not as environment variables.
 
 ### Development
@@ -193,7 +192,7 @@ apps/
 │   └── src/
 │       ├── routes/       # API endpoints
 │       ├── services/     # Business logic
-│       └── lib/          # Utilities
+│       └── db/           # Database schema and migrations
 └── web/              # Control Plane UI (React + Vite)
     └── src/
         ├── pages/        # Dashboard views
@@ -208,11 +207,14 @@ packages/
 └── vm-agent/         # Go agent for WebSocket terminal + idle detection
 
 scripts/
-├── vm/               # VM-side config templates
-├── generate-keys.ts  # Generate JWT and encryption keys
-├── setup.ts          # Initial setup script
-└── deploy.ts         # Deployment automation
+├── vm/               # VM-side config templates (cloud-init.yaml, default-devcontainer.json)
+└── deploy/           # Deployment utilities
+    ├── generate-keys.ts    # Generate JWT and encryption keys
+    ├── setup-github.ts     # GitHub App setup
+    ├── setup-local-dev.ts  # Local development setup
+    └── run-migrations.ts   # Database migrations
 
+infra/                # Pulumi infrastructure as code
 specs/                # Feature specifications
 docs/                 # Documentation
 ```
