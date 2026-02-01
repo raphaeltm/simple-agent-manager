@@ -129,13 +129,17 @@ pnpm build
 
 ### Deployment
 
-```bash
-# Deploy to Cloudflare
-pnpm deploy
+**Continuous Deployment:** Merge to `main` automatically deploys to production.
 
-# Deploy to staging
-pnpm deploy:staging
-```
+Before your first deployment, configure the GitHub Environment:
+
+1. Go to **Settings → Environments → New environment**
+2. Create environment named `production`
+3. Add required variables and secrets (see [CLAUDE.md](CLAUDE.md#deployment) for full list):
+   - Variables: `BASE_DOMAIN`
+   - Secrets: `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `PULUMI_CONFIG_PASSPHRASE`, `GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`
+
+Then push to main or manually trigger the Deploy workflow.
 
 ## Architecture
 

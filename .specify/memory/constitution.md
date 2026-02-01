@@ -1,14 +1,15 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version Change: 1.4.0 → 1.5.0
-Bump Rationale: MINOR - Added "No Hardcoded Values" principle (XI) as NON-NEGOTIABLE
+Version Change: 1.5.0 → 1.6.0
+Bump Rationale: MINOR - Added Continuous Deployment workflow and GitHub Environments configuration
 
 Modified Principles: None
-Modified Sections: None
+Modified Sections:
+  - Development Workflow: Completely rewritten for continuous deployment
 
 Added Sections:
-  - Principle XI: No Hardcoded Values (NON-NEGOTIABLE) - All business logic values must be configurable
+  - Continuous Deployment: Philosophy, rules, GitHub Environment configuration table, deployment pipeline
 
 Templates Status:
   - plan-template.md: ✅ Compatible (Constitution Check section references this file)
@@ -17,8 +18,8 @@ Templates Status:
   - checklist-template.md: ✅ Compatible (no direct dependency)
 
 Follow-up TODOs:
-  - Audit all code for hardcoded values (see DEPLOYMENT_AUDIT.md)
-  - Fix JWT issuer, GitHub App URL, and other hardcoded values
+  - Configure GitHub Environment 'production' with required variables and secrets
+  - Test continuous deployment workflow on merge to main
 -->
 
 # Simple Agent Manager Constitution
@@ -662,27 +663,65 @@ This enables self-hosting in air-gapped or restricted environments and ensures v
 **Philosophy:** No complex local testing setups. Iterate directly on Cloudflare infrastructure.
 
 **Rationale:** This project has many moving pieces (Workers, D1, KV, DNS, VMs, VM Agent). Setting up
-a realistic local environment is impractical. Instead, we deploy frequently to staging and test there.
+a realistic local environment is impractical. Instead, we deploy frequently and test on real infrastructure.
 
 **Rules:**
-- `pnpm dev` starts local development servers (Workers miniflare, Vite)
-- `pnpm deploy:staging` deploys everything to Cloudflare staging
-- `pnpm deploy` deploys to production
-- `pnpm teardown:staging` destroys staging environment completely
-- First-time setup: `pnpm setup` (interactive, sets secrets)
+- `pnpm dev` starts local development servers (Workers miniflare, Vite) for rapid iteration
+- Merge to `main` triggers automatic deployment to production
+- Manual deployment available via workflow_dispatch
 
-**Deploy Script Requirements:**
-- Idempotent (safe to run multiple times)
-- Creates D1 database if missing
-- Creates KV namespace if missing
-- Runs database migrations
-- Deploys Workers and Pages
-- Reports URLs on completion
+### Continuous Deployment
 
-**Teardown Script Requirements:**
-- Requires confirmation (destructive action)
-- Deletes Workers, Pages, D1, KV
-- Does NOT delete secrets (they're reset on next setup)
+**Philosophy:** Merge to main = deploy to production. Configuration lives in GitHub, visible and editable.
+
+**Rationale:** Deployment should be automatic and predictable. Configuration should be visible in the GitHub UI,
+not buried in one-time scripts or hidden state files. This enables easy auditing and modification.
+
+**Rules:**
+- Push/merge to `main` automatically deploys to production
+- All configuration lives in **GitHub Environments** (Settings → Environments → production)
+- Environment **variables** (visible) for non-sensitive config: `BASE_DOMAIN`, `RESOURCE_PREFIX`
+- Environment **secrets** (hidden) for sensitive values: API tokens, keys, credentials
+- Deployment is idempotent: safe to re-run, only updates changed resources
+- Concurrent deployments are queued, not cancelled
+
+**GitHub Environment Configuration:**
+
+| Type | Name | Description |
+|------|------|-------------|
+| Variable | `BASE_DOMAIN` | Base domain for deployment (e.g., `example.com`) |
+| Variable | `RESOURCE_PREFIX` | Prefix for resources (default: `sam`) |
+| Variable | `PULUMI_STATE_BUCKET` | R2 bucket for Pulumi state (default: `sam-pulumi-state`) |
+| Secret | `CF_API_TOKEN` | Cloudflare API token |
+| Secret | `CF_ACCOUNT_ID` | Cloudflare account ID |
+| Secret | `CF_ZONE_ID` | Cloudflare zone ID |
+| Secret | `R2_ACCESS_KEY_ID` | R2 access key for Pulumi state |
+| Secret | `R2_SECRET_ACCESS_KEY` | R2 secret key for Pulumi state |
+| Secret | `PULUMI_CONFIG_PASSPHRASE` | Encryption passphrase for Pulumi state |
+| Secret | `GH_CLIENT_ID` | GitHub OAuth client ID |
+| Secret | `GH_CLIENT_SECRET` | GitHub OAuth client secret |
+| Secret | `GH_APP_ID` | GitHub App ID |
+| Secret | `GH_APP_PRIVATE_KEY` | GitHub App private key |
+| Secret | `GH_APP_SLUG` | GitHub App slug |
+| Secret | `ENCRYPTION_KEY` | AES-256 key (optional, auto-generated) |
+| Secret | `JWT_PRIVATE_KEY` | JWT signing key (optional, auto-generated) |
+| Secret | `JWT_PUBLIC_KEY` | JWT verification key (optional, auto-generated) |
+
+**Deployment Pipeline:**
+1. **Validate** - Check all required configuration exists
+2. **Infrastructure** - Pulumi provisions D1, KV, R2, DNS records
+3. **Configuration** - Sync Pulumi outputs to Wrangler, generate keys if needed
+4. **Applications** - Build and deploy API Worker + Web UI via Wrangler
+5. **Migrations** - Run database migrations
+6. **Secrets** - Configure Worker secrets
+7. **VM Agent** - Build and upload agent binaries to R2
+8. **Validation** - Health check the deployed API
+
+**Teardown:**
+- Manual workflow_dispatch only (requires typing "DELETE")
+- Uses same GitHub Environment for configuration
+- Pulumi destroy removes infrastructure
+- Optional: preserve database data
 
 ### Branch Strategy
 
@@ -754,4 +793,4 @@ and other project documentation, this Constitution takes precedence.
 - Violations should be addressed constructively with reference to specific principles
 - Repeated violations may result in contribution restrictions per Code of Conduct
 
-**Version**: 1.5.0 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-01-30
+**Version**: 1.6.0 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-02-01

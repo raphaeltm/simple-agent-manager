@@ -1,50 +1,115 @@
-name: Deploy Setup
+name: Deploy
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
-      hostname:
-        description: 'Base domain for deployment (e.g., example.com) - creates api.example.com and app.example.com'
-        required: true
-        type: string
-      environment:
-        description: 'Target environment'
-        required: false
-        type: choice
-        options:
-          - production
-          - staging
-        default: production
-      pulumi_state_bucket:
-        description: 'R2 bucket name for Pulumi state'
-        required: false
-        type: string
-        default: 'sam-pulumi-state'  # Can be customized per deployment
-      dry_run:
-        description: 'Preview changes without applying'
-        required: false
-        type: boolean
-        default: false
       skip_agent:
         description: 'Skip VM Agent build and upload'
         required: false
         type: boolean
         default: false
+      dry_run:
+        description: 'Preview changes without applying'
+        required: false
+        type: boolean
+        default: false
+
+# Only one deployment at a time, queue subsequent ones
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
 
 env:
   NODE_VERSION: '22'
   GO_VERSION: '1.22'
 
 jobs:
+  # Validate required configuration exists before attempting deployment
+  validate:
+    name: Validate Configuration
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      config_valid: ${{ steps.check.outputs.valid }}
+    steps:
+      - name: Check Required Configuration
+        id: check
+        run: |
+          MISSING=""
+
+          # Check required environment variables
+          if [ -z "${{ vars.BASE_DOMAIN }}" ]; then
+            MISSING="$MISSING\n  - vars.BASE_DOMAIN"
+          fi
+
+          # Check required secrets (we can't read values, but we can check if they're set)
+          # This is done by checking if the secret resolves to empty string
+          if [ -z "${{ secrets.CF_API_TOKEN }}" ]; then
+            MISSING="$MISSING\n  - secrets.CF_API_TOKEN"
+          fi
+          if [ -z "${{ secrets.CF_ACCOUNT_ID }}" ]; then
+            MISSING="$MISSING\n  - secrets.CF_ACCOUNT_ID"
+          fi
+          if [ -z "${{ secrets.CF_ZONE_ID }}" ]; then
+            MISSING="$MISSING\n  - secrets.CF_ZONE_ID"
+          fi
+          if [ -z "${{ secrets.R2_ACCESS_KEY_ID }}" ]; then
+            MISSING="$MISSING\n  - secrets.R2_ACCESS_KEY_ID"
+          fi
+          if [ -z "${{ secrets.R2_SECRET_ACCESS_KEY }}" ]; then
+            MISSING="$MISSING\n  - secrets.R2_SECRET_ACCESS_KEY"
+          fi
+          if [ -z "${{ secrets.PULUMI_CONFIG_PASSPHRASE }}" ]; then
+            MISSING="$MISSING\n  - secrets.PULUMI_CONFIG_PASSPHRASE"
+          fi
+          if [ -z "${{ secrets.GH_CLIENT_ID }}" ]; then
+            MISSING="$MISSING\n  - secrets.GH_CLIENT_ID"
+          fi
+          if [ -z "${{ secrets.GH_CLIENT_SECRET }}" ]; then
+            MISSING="$MISSING\n  - secrets.GH_CLIENT_SECRET"
+          fi
+          if [ -z "${{ secrets.GH_APP_ID }}" ]; then
+            MISSING="$MISSING\n  - secrets.GH_APP_ID"
+          fi
+          if [ -z "${{ secrets.GH_APP_PRIVATE_KEY }}" ]; then
+            MISSING="$MISSING\n  - secrets.GH_APP_PRIVATE_KEY"
+          fi
+          if [ -z "${{ secrets.GH_APP_SLUG }}" ]; then
+            MISSING="$MISSING\n  - secrets.GH_APP_SLUG"
+          fi
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing required configuration in GitHub Environment 'production':$MISSING"
+            echo ""
+            echo "## ❌ Missing Configuration" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The following configuration is required in the GitHub Environment 'production':" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo -e "$MISSING" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Setup Instructions" >> $GITHUB_STEP_SUMMARY
+            echo "1. Go to **Settings → Environments → production**" >> $GITHUB_STEP_SUMMARY
+            echo "2. Add the missing variables and secrets" >> $GITHUB_STEP_SUMMARY
+            echo "3. Re-run this workflow" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "See [docs/guides/deployment-troubleshooting.md](../docs/guides/deployment-troubleshooting.md) for details." >> $GITHUB_STEP_SUMMARY
+            echo "valid=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          echo "✅ All required configuration present"
+          echo "valid=true" >> $GITHUB_OUTPUT
+
   deploy:
     name: Deploy to Cloudflare
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    needs: validate
+    environment: production
     outputs:
       api_url: ${{ steps.output.outputs.api_url }}
       app_url: ${{ steps.output.outputs.app_url }}
-      deployment_id: ${{ steps.pulumi.outputs.deployment_id }}
-      pulumi_stack: ${{ steps.pulumi-select.outputs.stack_name }}
 
     steps:
       # ========================================
@@ -75,17 +140,13 @@ jobs:
       # ========================================
       - name: Create Pulumi State Bucket (if not exists)
         run: |
+          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || 'sam-pulumi-state' }}"
+
           # Create the R2 bucket for Pulumi state if it doesn't already exist
-          if npx wrangler r2 bucket create ${{ inputs.pulumi_state_bucket }}; then
-            echo "✅ Created R2 bucket: ${{ inputs.pulumi_state_bucket }}"
+          if npx wrangler r2 bucket create $BUCKET_NAME 2>&1; then
+            echo "✅ Created R2 bucket: $BUCKET_NAME"
           else
-            # Check if it's because the bucket already exists
-            if npx wrangler r2 bucket list | grep -q "^${{ inputs.pulumi_state_bucket }}$"; then
-              echo "✅ R2 bucket already exists: ${{ inputs.pulumi_state_bucket }}"
-            else
-              echo "❌ Failed to create R2 bucket. Check CF_API_TOKEN permissions."
-              exit 1
-            fi
+            echo "✅ R2 bucket already exists or was created: $BUCKET_NAME"
           fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -93,9 +154,9 @@ jobs:
 
       - name: Login to Pulumi R2 Backend
         run: |
-          # Using standard Cloudflare R2 endpoint format
+          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || 'sam-pulumi-state' }}"
           R2_ENDPOINT="${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com"
-          pulumi login "s3://${{ inputs.pulumi_state_bucket }}?endpoint=${R2_ENDPOINT}&region=auto"
+          pulumi login "s3://${BUCKET_NAME}?endpoint=${R2_ENDPOINT}&region=auto"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -104,7 +165,7 @@ jobs:
         id: pulumi-select
         working-directory: infra
         run: |
-          STACK_NAME="${{ inputs.environment == 'production' && 'prod' || inputs.environment }}"
+          STACK_NAME="prod"
           echo "stack_name=$STACK_NAME" >> $GITHUB_OUTPUT
 
           # Try to select existing stack, create if not exists
@@ -115,8 +176,7 @@ jobs:
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
       - name: Pulumi Preview
-        if: ${{ inputs.dry_run }}
-        id: pulumi-preview
+        if: ${{ inputs.dry_run == true }}
         working-directory: infra
         run: pulumi preview --diff
         env:
@@ -126,16 +186,13 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           PULUMI_CONFIG_cloudflareAccountId: ${{ secrets.CF_ACCOUNT_ID }}
           PULUMI_CONFIG_cloudflareZoneId: ${{ secrets.CF_ZONE_ID }}
-          PULUMI_CONFIG_baseDomain: ${{ inputs.hostname }}
-          PULUMI_CONFIG_resourcePrefix: sam
+          PULUMI_CONFIG_baseDomain: ${{ vars.BASE_DOMAIN }}
+          PULUMI_CONFIG_resourcePrefix: ${{ vars.RESOURCE_PREFIX || 'sam' }}
 
       - name: Pulumi Up
-        if: ${{ !inputs.dry_run }}
-        id: pulumi
+        if: ${{ inputs.dry_run != true }}
         working-directory: infra
-        run: |
-          pulumi up --yes --skip-preview
-          echo "deployment_id=$(date +%Y%m%d%H%M%S)" >> $GITHUB_OUTPUT
+        run: pulumi up --yes --skip-preview
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -143,14 +200,14 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           PULUMI_CONFIG_cloudflareAccountId: ${{ secrets.CF_ACCOUNT_ID }}
           PULUMI_CONFIG_cloudflareZoneId: ${{ secrets.CF_ZONE_ID }}
-          PULUMI_CONFIG_baseDomain: ${{ inputs.hostname }}
-          PULUMI_CONFIG_resourcePrefix: sam
+          PULUMI_CONFIG_baseDomain: ${{ vars.BASE_DOMAIN }}
+          PULUMI_CONFIG_resourcePrefix: ${{ vars.RESOURCE_PREFIX || 'sam' }}
 
       # ========================================
       # Phase 2: Configuration
       # ========================================
       - name: Sync Pulumi Outputs to Wrangler
-        if: ${{ !inputs.dry_run }}
+        if: ${{ inputs.dry_run != true }}
         run: pnpm tsx scripts/deploy/sync-wrangler-config.ts
         env:
           PULUMI_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
@@ -160,7 +217,7 @@ jobs:
 
       - name: Generate Security Keys (if needed)
         id: generate_keys
-        if: ${{ !inputs.dry_run }}
+        if: ${{ inputs.dry_run != true }}
         run: pnpm tsx scripts/deploy/generate-keys.ts
         env:
           FORCE_REGENERATE: 'false'
@@ -171,27 +228,27 @@ jobs:
       # Phase 3: Application (Wrangler)
       # ========================================
       - name: Build Applications
-        if: ${{ !inputs.dry_run }}
+        if: ${{ inputs.dry_run != true }}
         run: pnpm build
         env:
-          VITE_API_URL: https://api.${{ inputs.hostname }}
+          VITE_API_URL: https://api.${{ vars.BASE_DOMAIN }}
 
       - name: Deploy API Worker
-        if: ${{ !inputs.dry_run }}
-        run: pnpm --filter @simple-agent-manager/api exec wrangler deploy --env ${{ inputs.environment }}
+        if: ${{ inputs.dry_run != true }}
+        run: pnpm --filter @simple-agent-manager/api exec wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
       - name: Deploy Web UI
-        if: ${{ !inputs.dry_run }}
+        if: ${{ inputs.dry_run != true }}
         run: |
-          PROJECT_NAME="sam-web-${{ inputs.environment == 'production' && 'prod' || inputs.environment }}"
+          PROJECT_NAME="${{ vars.RESOURCE_PREFIX || 'sam' }}-web-prod"
           pnpm --filter @simple-agent-manager/web exec wrangler pages deploy dist --project-name $PROJECT_NAME
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
       - name: Run Database Migrations
-        if: ${{ !inputs.dry_run }}
+        if: ${{ inputs.dry_run != true }}
         working-directory: infra
         run: |
           DB_NAME=$(pulumi stack output d1DatabaseName)
@@ -204,8 +261,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
       - name: Configure Worker Secrets
-        if: ${{ !inputs.dry_run }}
-        run: bash scripts/deploy/configure-secrets.sh ${{ inputs.environment }}
+        if: ${{ inputs.dry_run != true }}
+        run: bash scripts/deploy/configure-secrets.sh production
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -226,17 +283,17 @@ jobs:
       # Phase 4: VM Agent
       # ========================================
       - name: Setup Go
-        if: ${{ !inputs.dry_run && !inputs.skip_agent }}
+        if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Build VM Agent
-        if: ${{ !inputs.dry_run && !inputs.skip_agent }}
+        if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
         run: make -C packages/vm-agent build-all
 
       - name: Upload VM Agent Binaries
-        if: ${{ !inputs.dry_run && !inputs.skip_agent }}
+        if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
         working-directory: infra
         run: |
           R2_BUCKET=$(pulumi stack output r2Name)
@@ -253,9 +310,9 @@ jobs:
       # Phase 5: Validation
       # ========================================
       - name: Health Check
-        if: ${{ !inputs.dry_run }}
+        if: ${{ inputs.dry_run != true }}
         run: |
-          API_URL="https://api.${{ inputs.hostname }}"
+          API_URL="https://api.${{ vars.BASE_DOMAIN }}"
           echo "Waiting for API to be ready at $API_URL..."
 
           for i in {1..30}; do
@@ -272,16 +329,10 @@ jobs:
 
       - name: Output Deployment URLs
         id: output
-        if: ${{ !inputs.dry_run }}
+        if: ${{ inputs.dry_run != true }}
         run: |
-          echo "api_url=https://api.${{ inputs.hostname }}" >> $GITHUB_OUTPUT
-          echo "app_url=https://app.${{ inputs.hostname }}" >> $GITHUB_OUTPUT
-
-          echo ""
-          echo "✅ Deployment Complete"
-          echo ""
-          echo "API URL: https://api.${{ inputs.hostname }}"
-          echo "App URL: https://app.${{ inputs.hostname }}"
+          echo "api_url=https://api.${{ vars.BASE_DOMAIN }}" >> $GITHUB_OUTPUT
+          echo "app_url=https://app.${{ vars.BASE_DOMAIN }}" >> $GITHUB_OUTPUT
 
       # ========================================
       # Job Summary
@@ -293,54 +344,41 @@ jobs:
             echo "## Pulumi Preview Complete 🔍" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "This was a **dry run**. No changes were applied." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Review the Pulumi Preview step above to see planned changes." >> $GITHUB_STEP_SUMMARY
           elif [ "${{ job.status }}" = "success" ]; then
             echo "## Deployment Complete! 🚀" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-            echo "**Base Domain:** ${{ inputs.hostname }}" >> $GITHUB_STEP_SUMMARY
-            echo "**Pulumi Stack:** ${{ steps.pulumi-select.outputs.stack_name }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Base Domain:** ${{ vars.BASE_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### Access URLs" >> $GITHUB_STEP_SUMMARY
-            echo "- **API:** https://api.${{ inputs.hostname }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **Web UI:** https://app.${{ inputs.hostname }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **API:** https://api.${{ vars.BASE_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Web UI:** https://app.${{ vars.BASE_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Infrastructure (Pulumi-managed)" >> $GITHUB_STEP_SUMMARY
-            echo "- D1 Database" >> $GITHUB_STEP_SUMMARY
-            echo "- KV Namespace" >> $GITHUB_STEP_SUMMARY
-            echo "- R2 Bucket" >> $GITHUB_STEP_SUMMARY
-            echo "- DNS Records (api, app, wildcard)" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Idempotency" >> $GITHUB_STEP_SUMMARY
-            echo "This workflow is idempotent. Re-running will only update changed resources." >> $GITHUB_STEP_SUMMARY
+            echo "### What Was Deployed" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Infrastructure (Pulumi): D1, KV, R2, DNS" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ API Worker" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Web UI (Pages)" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Database migrations" >> $GITHUB_STEP_SUMMARY
+            if [ "${{ inputs.skip_agent }}" != "true" ]; then
+              echo "- ✅ VM Agent binaries" >> $GITHUB_STEP_SUMMARY
+            fi
           else
             echo "## Deployment Failed ❌" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "Check the logs above for error details." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Troubleshooting" >> $GITHUB_STEP_SUMMARY
-            echo "- Verify all required secrets are configured" >> $GITHUB_STEP_SUMMARY
-            echo "- Check that the R2 state bucket exists: \`${{ inputs.pulumi_state_bucket }}\`" >> $GITHUB_STEP_SUMMARY
-            echo "- Verify Cloudflare API token has all required permissions" >> $GITHUB_STEP_SUMMARY
-            echo "- Check PULUMI_CONFIG_PASSPHRASE matches previous deployments" >> $GITHUB_STEP_SUMMARY
           fi
 
-      # Note: GitHub secrets are now REQUIRED.
-      # configure-secrets.sh will fail if they're not provided.
-      # The platform requires GitHub OAuth for user authentication.
-
-      - name: Security Keys Generated Info
-        if: ${{ !inputs.dry_run && steps.generate_keys.outputs.keys_generated == 'true' }}
+      - name: Security Keys Generated Notice
+        if: ${{ inputs.dry_run != true && steps.generate_keys.outputs.keys_generated == 'true' }}
         run: |
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🔐 Security Keys Auto-Generated" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "New security keys were automatically generated and stored in Cloudflare Worker secrets:" >> $GITHUB_STEP_SUMMARY
-          echo "- \`ENCRYPTION_KEY\` - AES-256 encryption key" >> $GITHUB_STEP_SUMMARY
-          echo "- \`JWT_PRIVATE_KEY\` - RSA-2048 private key for JWT signing" >> $GITHUB_STEP_SUMMARY
-          echo "- \`JWT_PUBLIC_KEY\` - RSA-2048 public key for JWT verification" >> $GITHUB_STEP_SUMMARY
+          echo "New security keys were generated and stored in Cloudflare Worker secrets." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "These keys are stored securely in your Cloudflare Worker and do not need to be added to GitHub Secrets." >> $GITHUB_STEP_SUMMARY
+          echo "**Recommendation:** Copy these to GitHub Secrets for persistence across deployments:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ENCRYPTION_KEY\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`JWT_PRIVATE_KEY\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`JWT_PUBLIC_KEY\`" >> $GITHUB_STEP_SUMMARY

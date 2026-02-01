@@ -196,39 +196,43 @@ pnpm lint
 pnpm format
 ```
 
-## Deployment Commands
+## Deployment
 
-```bash
-# Deploy to Cloudflare (automated)
-pnpm deploy:setup --environment production
+**Continuous Deployment:** Merge to `main` automatically deploys to production.
 
-# Deploy with dry run (see what would happen)
-pnpm deploy:setup --dry-run
+### Configuration (GitHub Environment)
 
-# Resume a failed deployment
-pnpm deploy:setup --resume
+All configuration lives in **GitHub Settings → Environments → production**:
 
-# Validate an existing deployment
-pnpm validate:setup
-
-# Setup GitHub App authentication
-pnpm setup:github --domain your-domain.com
-
-# Teardown all resources
-pnpm teardown:setup --environment production
-
-# Teardown but keep data (D1, R2)
-pnpm teardown:setup --keep-data
-```
+| Type | Name | Required |
+|------|------|----------|
+| Variable | `BASE_DOMAIN` | Yes |
+| Variable | `RESOURCE_PREFIX` | No (default: `sam`) |
+| Variable | `PULUMI_STATE_BUCKET` | No (default: `sam-pulumi-state`) |
+| Secret | `CF_API_TOKEN` | Yes |
+| Secret | `CF_ACCOUNT_ID` | Yes |
+| Secret | `CF_ZONE_ID` | Yes |
+| Secret | `R2_ACCESS_KEY_ID` | Yes |
+| Secret | `R2_SECRET_ACCESS_KEY` | Yes |
+| Secret | `PULUMI_CONFIG_PASSPHRASE` | Yes |
+| Secret | `GH_CLIENT_ID` | Yes |
+| Secret | `GH_CLIENT_SECRET` | Yes |
+| Secret | `GH_APP_ID` | Yes |
+| Secret | `GH_APP_PRIVATE_KEY` | Yes |
+| Secret | `GH_APP_SLUG` | Yes |
+| Secret | `ENCRYPTION_KEY` | No (auto-generated) |
+| Secret | `JWT_PRIVATE_KEY` | No (auto-generated) |
+| Secret | `JWT_PUBLIC_KEY` | No (auto-generated) |
 
 ### GitHub Actions Workflows
 
-- **Deploy Setup**: Deploys the entire stack via workflow_dispatch
-  - Required secrets: `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`
-  - Required secrets: `GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG` (platform requires authentication)
+- **CI** (`ci.yml`): Runs on all pushes/PRs - lint, typecheck, test, build
+- **Deploy** (`deploy.yml`): Runs on push to main - full Pulumi + Wrangler deployment
+- **Teardown** (`teardown.yml`): Manual only - destroys all resources (type "DELETE" to confirm)
 
-- **Teardown Setup**: Removes all deployed resources
-  - Requires typing "DELETE" to confirm
+### Manual Deployment
+
+You can also trigger deployment manually via GitHub Actions → Deploy → Run workflow.
 
 ## Key Concepts
 
