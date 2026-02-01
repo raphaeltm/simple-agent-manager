@@ -4,7 +4,7 @@
 
 ## Overview
 
-Deploy your own Simple Agent Manager instance using GitHub Actions. This guide covers the one-time setup and deployment process using Pulumi for infrastructure and Wrangler for application deployment.
+Deploy your own Simple Agent Manager instance using GitHub Actions. **Deployment is automatic on every push to main.** This guide covers the one-time setup process using Pulumi for infrastructure and Wrangler for application deployment.
 
 ## Prerequisites
 
@@ -15,7 +15,7 @@ Deploy your own Simple Agent Manager instance using GitHub Actions. This guide c
 
 **GitHub Repository**:
 - Fork of the Simple Agent Manager repository
-- Access to repository secrets configuration
+- Access to repository Environments configuration
 
 ## One-Time Setup (Manual Steps)
 
@@ -66,12 +66,27 @@ openssl rand -base64 32
 
 **Important**: Save this passphrase securely (password manager recommended). If lost, you cannot decrypt existing state and must recreate infrastructure.
 
-### Step 4: Configure GitHub Secrets
+### Step 4: Create GitHub Environment
 
-In your forked repository:
+Configuration lives in a **GitHub Environment** (not repository secrets). This makes configuration visible and editable in the GitHub UI.
 
-1. Go to **Settings** → **Secrets and variables** → **Actions**
-2. Add these **Repository secrets**:
+1. Go to **Settings** → **Environments**
+2. Click **New environment**
+3. Name it `production` and click **Configure environment**
+
+### Step 5: Configure Environment Variables
+
+Add these **Environment variables** (visible in UI):
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `BASE_DOMAIN` | Your base domain | `example.com` |
+| `RESOURCE_PREFIX` | Resource naming prefix (optional) | `sam` |
+| `PULUMI_STATE_BUCKET` | State bucket name (optional) | `sam-pulumi-state` |
+
+### Step 6: Configure Environment Secrets
+
+Add these **Environment secrets**:
 
 | Secret Name | Value |
 |-------------|-------|
@@ -81,44 +96,41 @@ In your forked repository:
 | `R2_ACCESS_KEY_ID` | R2 API token access key |
 | `R2_SECRET_ACCESS_KEY` | R2 API token secret key |
 | `PULUMI_CONFIG_PASSPHRASE` | Your generated passphrase |
+| `GH_CLIENT_ID` | GitHub OAuth App client ID |
+| `GH_CLIENT_SECRET` | GitHub OAuth App client secret |
+| `GH_APP_ID` | GitHub App ID |
+| `GH_APP_PRIVATE_KEY` | GitHub App private key (base64 encoded) |
+| `GH_APP_SLUG` | GitHub App slug (URL name) |
 
-**Where to find IDs**:
+**Where to find Cloudflare IDs**:
 - Account ID: Cloudflare Dashboard sidebar (right side)
 - Zone ID: Domain overview page (right sidebar)
-
-### Step 5: Configure GitHub Variables (Optional)
-
-Add these **Repository variables** (or provide as workflow inputs):
-
-| Variable Name | Value | Example |
-|---------------|-------|---------|
-| `HOSTNAME` | Your deployment hostname | `app.example.com` |
-| `PULUMI_STATE_BUCKET` | State bucket name | `sam-pulumi-state` |
 
 ---
 
 ## Deployment
 
-### Deploy via GitHub Actions
+### Automatic Deployment
 
-1. Go to your repository → **Actions** tab
-2. Select **"Deploy Setup"** workflow
-3. Click **"Run workflow"**
-4. Fill in:
-   - **Hostname**: Your base domain (e.g., `example.com`) - creates `api.example.com` and `app.example.com`
-   - **Environment**: `production` (default)
-5. Click **"Run workflow"**
+**Every push to `main` automatically triggers deployment.** You can also trigger manually.
+
+### First Deployment
+
+1. Ensure the GitHub Environment is fully configured (Steps 4-6)
+2. Push any commit to `main`, OR
+3. Go to **Actions** → **"Deploy"** → **"Run workflow"** for manual trigger
 
 The workflow will:
-1. ✅ Provision infrastructure via Pulumi (D1, KV, R2, DNS)
-2. ✅ Sync configuration to wrangler.toml
-3. ✅ Generate security keys (if not already configured)
-4. ✅ Deploy API Worker via Wrangler
-5. ✅ Deploy Web UI to Cloudflare Pages
-6. ✅ Run database migrations
-7. ✅ Configure Worker secrets (including auto-generated keys)
-8. ✅ Build and upload VM Agent binaries
-9. ✅ Validate deployment health
+1. ✅ Validate all required configuration exists
+2. ✅ Provision infrastructure via Pulumi (D1, KV, R2, DNS)
+3. ✅ Sync configuration to wrangler.toml
+4. ✅ Generate security keys (if not already configured)
+5. ✅ Deploy API Worker via Wrangler
+6. ✅ Deploy Web UI to Cloudflare Pages
+7. ✅ Run database migrations
+8. ✅ Configure Worker secrets
+9. ✅ Build and upload VM Agent binaries
+10. ✅ Validate deployment health
 
 ### Deployment Output
 
@@ -142,10 +154,11 @@ Visit your App URL to verify the deployment works. You should see the Simple Age
 
 ## Updating Your Deployment
 
-To deploy code changes:
+**Deployment is automatic.** Just push or merge to `main`:
 
-1. Push changes to `main` branch
-2. Run the **"Deploy Setup"** workflow again
+1. Make your changes
+2. Push to `main` (or merge a PR)
+3. The Deploy workflow runs automatically
 
 Pulumi handles updates idempotently - only changed resources are updated.
 
@@ -155,7 +168,7 @@ Pulumi handles updates idempotently - only changed resources are updated.
 
 To remove all deployed resources:
 
-1. Go to **Actions** → **"Teardown Setup"** workflow
+1. Go to **Actions** → **"Teardown"** workflow
 2. Click **"Run workflow"**
 3. Type `DELETE` to confirm
 4. Click **"Run workflow"**
@@ -165,33 +178,46 @@ To remove all deployed resources:
 ### Teardown Options
 
 - **Full teardown**: Removes all resources including data
-- **Keep data** (`--keep-data`): Preserves D1 database for potential recovery
+- **Keep data** (checkbox): Preserves D1 database for potential recovery
 
 ---
 
-## Optional: GitHub App Setup
+## GitHub App Setup (Required)
 
-For full repository access functionality, create a GitHub App:
+SAM requires a GitHub OAuth App (for login) and a GitHub App (for repository access).
+
+### Create GitHub OAuth App
+
+1. Go to **GitHub Settings** → **Developer settings** → **OAuth Apps**
+2. Click **"New OAuth App"**
+3. Configure:
+   - **Application name**: `Simple Agent Manager`
+   - **Homepage URL**: `https://app.YOUR_DOMAIN.com`
+   - **Authorization callback URL**: `https://api.YOUR_DOMAIN.com/api/auth/callback/github`
+4. Click **Register application**
+5. Note the **Client ID**
+6. Click **Generate a new client secret** and save it
+
+### Create GitHub App
 
 1. Go to **GitHub Settings** → **Developer settings** → **GitHub Apps**
 2. Click **"New GitHub App"**
 3. Configure:
    - **Name**: `Simple Agent Manager - YourOrg`
-   - **Homepage URL**: `https://app.example.com`
-   - **Callback URL**: `https://api.example.com/api/auth/callback/github`
-   - **Repository permissions**: Contents (Read), Metadata (Read)
+   - **Homepage URL**: `https://app.YOUR_DOMAIN.com`
+   - **Callback URL**: `https://api.YOUR_DOMAIN.com/api/github/callback`
+   - **Webhook URL**: `https://api.YOUR_DOMAIN.com/api/github/webhook`
+   - **Repository permissions**: Contents (Read-only), Metadata (Read-only)
 4. Create the app and note:
-   - App ID
-   - Client ID
-5. Generate a **Client Secret** and save it
-6. Generate a **Private Key** (downloads .pem file)
-7. Add to GitHub secrets:
-   - `GITHUB_APP_ID`: App ID
-   - `GITHUB_CLIENT_ID`: Client ID
-   - `GITHUB_CLIENT_SECRET`: Client Secret
-   - `GITHUB_APP_PRIVATE_KEY`: Contents of .pem file (base64 encoded)
+   - **App ID** (number at top of page)
+   - **App slug** (the URL-friendly name, e.g., `simple-agent-manager-yourorg`)
+5. Generate a **Private Key** (downloads .pem file)
+6. Base64 encode the private key:
+   ```bash
+   cat your-key.pem | base64 -w0
+   ```
 
-Re-run the deploy workflow to apply GitHub App configuration.
+Add all these values to your GitHub Environment secrets (see Step 6 above).
 
 ---
 
@@ -240,6 +266,14 @@ Pulumi tracks state and handles existing resources. If you see conflicts:
 
 ## Configuration Reference
 
+### Environment Variables (Visible)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `BASE_DOMAIN` | Yes | Your base domain (e.g., `example.com`) |
+| `RESOURCE_PREFIX` | No | Prefix for resources (default: `sam`) |
+| `PULUMI_STATE_BUCKET` | No | State bucket name (default: `sam-pulumi-state`) |
+
 ### Required Secrets
 
 | Secret | Description |
@@ -250,6 +284,11 @@ Pulumi tracks state and handles existing resources. If you see conflicts:
 | `R2_ACCESS_KEY_ID` | R2 S3-compatible access key |
 | `R2_SECRET_ACCESS_KEY` | R2 S3-compatible secret key |
 | `PULUMI_CONFIG_PASSPHRASE` | Passphrase for state encryption |
+| `GH_CLIENT_ID` | GitHub OAuth App client ID |
+| `GH_CLIENT_SECRET` | GitHub OAuth App client secret |
+| `GH_APP_ID` | GitHub App ID |
+| `GH_APP_PRIVATE_KEY` | GitHub App private key (base64 encoded) |
+| `GH_APP_SLUG` | GitHub App slug (URL name) |
 
 ### Auto-Generated Secrets
 
@@ -261,16 +300,7 @@ These security keys are **automatically generated** on first deployment and stor
 | `JWT_PRIVATE_KEY` | RSA-2048 private key for signing terminal tokens |
 | `JWT_PUBLIC_KEY` | RSA-2048 public key for token verification |
 
-You do not need to add these to GitHub Secrets. If you want to use pre-existing keys, add them to GitHub Secrets and they will be used instead of generating new ones.
-
-### Optional Secrets
-
-| Secret | Description |
-|--------|-------------|
-| `GITHUB_APP_ID` | GitHub App ID |
-| `GITHUB_CLIENT_ID` | GitHub OAuth Client ID |
-| `GITHUB_CLIENT_SECRET` | GitHub OAuth Client Secret |
-| `GITHUB_APP_PRIVATE_KEY` | GitHub App private key (base64) |
+You do not need to add these to GitHub Secrets. For persistence across fresh deployments, copy them from Cloudflare Worker secrets to GitHub Secrets after first deployment.
 
 ### Resources Created
 

@@ -6,7 +6,7 @@ This comprehensive guide walks you through deploying Simple Agent Manager (SAM) 
 
 ## Quick Start (Automated Deployment)
 
-For the fastest deployment experience, use the automated GitHub Actions workflow with Pulumi infrastructure management.
+For the fastest deployment experience, use the automated GitHub Actions workflow with Pulumi infrastructure management. **Deployment is automatic on every push to main.**
 
 **For detailed step-by-step instructions, see the [Quickstart Guide](../../specs/005-automated-deployment/quickstart.md)**.
 
@@ -22,14 +22,30 @@ For the fastest deployment experience, use the automated GitHub Actions workflow
    - Go to Cloudflare Dashboard → R2 → **Manage R2 API Tokens**
    - Create token with **Object Read & Write** permissions
    - Note: The state bucket is created automatically by the workflow
-6. **Generate a Pulumi passphrase** for encrypting state:
+6. **Create GitHub OAuth App and GitHub App** (see [GitHub Setup](#github-setup) below)
+7. **Generate a Pulumi passphrase** for encrypting state:
    ```bash
    openssl rand -base64 32
    ```
 
-### Repository Secrets
+### GitHub Environment Configuration
 
-Add these secrets in your fork's Settings → Secrets → Actions:
+All configuration lives in a **GitHub Environment** named `production`. This makes configuration visible and editable in the GitHub UI.
+
+**Create the environment:**
+1. Go to your fork's **Settings → Environments**
+2. Click **New environment**
+3. Name it `production` and click **Configure environment**
+
+**Add environment variables** (visible in UI):
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `BASE_DOMAIN` | Your domain for the deployment | `example.com` |
+| `RESOURCE_PREFIX` | Prefix for Cloudflare resources (optional) | `sam` |
+| `PULUMI_STATE_BUCKET` | R2 bucket for Pulumi state (optional) | `sam-pulumi-state` |
+
+**Add environment secrets** (hidden):
 
 | Secret | Description |
 |--------|-------------|
@@ -39,28 +55,38 @@ Add these secrets in your fork's Settings → Secrets → Actions:
 | `R2_ACCESS_KEY_ID` | R2 API token access key |
 | `R2_SECRET_ACCESS_KEY` | R2 API token secret key |
 | `PULUMI_CONFIG_PASSPHRASE` | Your generated passphrase |
+| `GH_CLIENT_ID` | GitHub OAuth App client ID |
+| `GH_CLIENT_SECRET` | GitHub OAuth App client secret |
+| `GH_APP_ID` | GitHub App ID |
+| `GH_APP_PRIVATE_KEY` | GitHub App private key (base64 encoded) |
+| `GH_APP_SLUG` | GitHub App slug (URL name) |
 
-> **Note**: Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`) are **automatically generated** on first deployment and stored directly in Cloudflare Worker secrets. You do not need to add them to GitHub Secrets.
+> **Note**: Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`) are **automatically generated** on first deployment and stored directly in Cloudflare Worker secrets. For persistence across fresh deployments, copy them to GitHub Secrets after first deployment.
 
 ### Deploy
 
-1. Go to **Actions** → **"Deploy Setup"**
-2. Click **"Run workflow"**
-3. Enter your base domain (e.g., `example.com`) - this creates `api.example.com` and `app.example.com`
-4. Click **"Run workflow"**
+**Automatic deployment**: Every push to `main` triggers a deployment automatically.
 
-The workflow provisions all infrastructure via Pulumi and deploys the application via Wrangler. Re-running is safe and idempotent.
+**First deployment**:
+1. Configure the GitHub Environment (see above)
+2. Push any commit to `main`, OR
+3. Go to **Actions** → **"Deploy"** → **"Run workflow"** for manual trigger
 
-### Optional: GitHub App
-
-For full GitHub authentication, add these additional secrets and re-run the deploy workflow:
-- `GH_APP_ID`, `GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_PRIVATE_KEY`
-
-See the [Quickstart Guide](../../specs/005-automated-deployment/quickstart.md#optional-github-app-setup) for detailed instructions.
+**Subsequent deployments**: Just merge PRs to `main`. The workflow:
+- Validates all required configuration exists
+- Provisions infrastructure via Pulumi (idempotent)
+- Deploys API Worker and Web UI via Wrangler
+- Runs database migrations
+- Builds and uploads VM Agent binaries
+- Runs health check
 
 ### Teardown
 
-To remove all resources, run the **"Teardown Setup"** workflow and type `DELETE` to confirm.
+To remove all resources:
+1. Go to **Actions** → **"Teardown"**
+2. Click **"Run workflow"**
+3. Type `DELETE` to confirm
+4. Click **"Run workflow"**
 
 For more control or troubleshooting, continue with the manual setup below.
 
@@ -209,7 +235,7 @@ SAM needs a Cloudflare API token with specific permissions:
 
 ### Step 5: Create Cloudflare Resources
 
-> **Note**: If using the [Quick Start (Automated Deployment)](#quick-start-automated-deployment), skip this step. Pulumi automatically creates D1, KV, and R2 resources.
+> **Note**: If using the [Quick Start (Automated Deployment)](#quick-start-automated-deployment), skip this step. Pulumi automatically creates D1, KV, and R2 resources when you push to main.
 
 <details>
 <summary>Manual resource creation (optional)</summary>
@@ -352,7 +378,7 @@ This generates:
 
 ### Step 3: Configure Environment Variables (Local Development)
 
-> **Note**: For production deployment via GitHub Actions, use [Repository Secrets](#repository-secrets) instead. This step is only needed for local development.
+> **Note**: For production deployment via GitHub Actions, use [GitHub Environment Configuration](#github-environment-configuration) instead. This step is only needed for local development.
 
 Create your `.env` file:
 
@@ -689,8 +715,8 @@ wrangler secret put ENCRYPTION_KEY
 
 **Fix**:
 1. Verify the Pulumi state bucket exists in Cloudflare R2
-2. Check R2 credentials (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`)
-3. Verify the bucket name matches the `pulumi_state_bucket` input
+2. Check R2 credentials (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`) in your GitHub Environment
+3. Verify the bucket name matches the `PULUMI_STATE_BUCKET` environment variable (default: `sam-pulumi-state`)
 
 #### "error: stack 'prod' not found"
 
@@ -822,4 +848,4 @@ VMs are billed hourly and self-terminate after 30 minutes of inactivity.
 
 ---
 
-*Last updated: January 2026*
+*Last updated: February 2026*
