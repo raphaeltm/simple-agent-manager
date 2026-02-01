@@ -395,11 +395,12 @@ export interface WranglerTomlBindings {
 /**
  * Partial wrangler.toml structure
  */
-export interface WranglerToml {
+export interface WranglerToml extends WranglerTomlBindings {
   name?: string;
   main?: string;
   compatibility_date?: string;
   compatibility_flags?: string[];
+  vars?: Record<string, string>;
   env?: Record<string, WranglerEnvConfig>;
   [key: string]: unknown;
 }
