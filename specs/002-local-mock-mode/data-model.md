@@ -78,7 +78,7 @@ Tracks the current workspace state in memory.
 |-------|------|-------------|
 | workspaceId | string | Workspace identifier |
 | containerId | string | Docker container ID |
-| workspaceFolder | string | Path to cloned repo (e.g., /tmp/cloud-ai-workspaces/{id}) |
+| workspaceFolder | string | Path to cloned repo (e.g., /tmp/simple-agent-manager/{id}) |
 | repoUrl | string | Original repository URL |
 | status | VMInstance['status'] | Current status |
 | createdAt | Date | Creation timestamp |

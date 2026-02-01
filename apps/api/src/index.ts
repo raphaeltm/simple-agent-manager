@@ -8,6 +8,8 @@ import { githubRoutes } from './routes/github';
 import { workspacesRoutes } from './routes/workspaces';
 import { terminalRoutes } from './routes/terminal';
 import { agentRoutes } from './routes/agent';
+import { bootstrapRoutes } from './routes/bootstrap';
+import { checkProvisioningTimeouts } from './services/timeout';
 
 // Cloudflare bindings type
 export interface Env {
@@ -25,11 +27,16 @@ export interface Env {
   GITHUB_CLIENT_SECRET: string;
   GITHUB_APP_ID: string;
   GITHUB_APP_PRIVATE_KEY: string;
+  GITHUB_APP_SLUG?: string; // GitHub App slug for install URL
   CF_API_TOKEN: string;
   CF_ZONE_ID: string;
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
   ENCRYPTION_KEY: string;
+  // Optional configurable values (per constitution principle XI)
+  IDLE_TIMEOUT_SECONDS?: string;
+  TERMINAL_TOKEN_EXPIRY_MS?: string;
+  CALLBACK_TOKEN_EXPIRY_MS?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -74,6 +81,7 @@ app.route('/api/github', githubRoutes);
 app.route('/api/workspaces', workspacesRoutes);
 app.route('/api/terminal', terminalRoutes);
 app.route('/api/agent', agentRoutes);
+app.route('/api/bootstrap', bootstrapRoutes);
 
 // 404 handler
 app.notFound((c) => {
@@ -83,4 +91,24 @@ app.notFound((c) => {
   }, 404);
 });
 
-export default app;
+// Export handler with scheduled (cron) support
+export default {
+  fetch: app.fetch,
+
+  /**
+   * Scheduled (cron) handler for background tasks.
+   * Runs every 5 minutes (configured in wrangler.toml).
+   */
+  async scheduled(
+    _controller: ScheduledController,
+    env: Env,
+    _ctx: ExecutionContext
+  ): Promise<void> {
+    console.log('Cron triggered:', new Date().toISOString());
+
+    // Check for stuck provisioning workspaces
+    const timedOut = await checkProvisioningTimeouts(env.DATABASE);
+
+    console.log(`Cron completed: ${timedOut} workspace(s) timed out`);
+  },
+};

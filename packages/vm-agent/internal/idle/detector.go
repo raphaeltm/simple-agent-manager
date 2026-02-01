@@ -18,21 +18,24 @@ type Detector struct {
 	workspaceID       string
 	callbackToken     string
 
-	lastActivity time.Time
-	mu           sync.RWMutex
-	done         chan struct{}
-	shutdownCh   chan struct{}
+	lastActivity     time.Time
+	shutdownDeadline time.Time
+	mu               sync.RWMutex
+	done             chan struct{}
+	shutdownCh       chan struct{}
 }
 
 // NewDetector creates a new idle detector.
 func NewDetector(timeout, heartbeatInterval time.Duration, controlPlaneURL, workspaceID, callbackToken string) *Detector {
+	now := time.Now()
 	return &Detector{
 		timeout:           timeout,
 		heartbeatInterval: heartbeatInterval,
 		controlPlaneURL:   controlPlaneURL,
 		workspaceID:       workspaceID,
 		callbackToken:     callbackToken,
-		lastActivity:      time.Now(),
+		lastActivity:      now,
+		shutdownDeadline:  now.Add(timeout),
 		done:              make(chan struct{}),
 		shutdownCh:        make(chan struct{}),
 	}
@@ -58,10 +61,12 @@ func (d *Detector) Stop() {
 	close(d.done)
 }
 
-// RecordActivity records user activity.
+// RecordActivity records user activity and extends the shutdown deadline.
 func (d *Detector) RecordActivity() {
+	now := time.Now()
 	d.mu.Lock()
-	d.lastActivity = time.Now()
+	d.lastActivity = now
+	d.shutdownDeadline = now.Add(d.timeout)
 	d.mu.Unlock()
 }
 
@@ -72,14 +77,21 @@ func (d *Detector) GetLastActivity() time.Time {
 	return d.lastActivity
 }
 
+// GetDeadline returns the shutdown deadline.
+func (d *Detector) GetDeadline() time.Time {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.shutdownDeadline
+}
+
 // GetIdleTime returns how long the workspace has been idle.
 func (d *Detector) GetIdleTime() time.Duration {
 	return time.Since(d.GetLastActivity())
 }
 
-// IsIdle returns true if the workspace has been idle longer than the timeout.
+// IsIdle returns true if the current time has passed the shutdown deadline.
 func (d *Detector) IsIdle() bool {
-	return d.GetIdleTime() > d.timeout
+	return time.Now().After(d.GetDeadline())
 }
 
 // ShutdownChannel returns a channel that's closed when shutdown is requested.
@@ -90,13 +102,15 @@ func (d *Detector) ShutdownChannel() <-chan struct{} {
 // sendHeartbeat sends a heartbeat to the control plane.
 func (d *Detector) sendHeartbeat() {
 	idleTime := d.GetIdleTime()
-	isIdle := idleTime > d.timeout
+	deadline := d.GetDeadline()
+	isIdle := time.Now().After(deadline)
 
 	payload := map[string]interface{}{
-		"workspaceId":     d.workspaceID,
-		"idleSeconds":     int(idleTime.Seconds()),
-		"idle":            isIdle,
-		"lastActivityAt":  d.GetLastActivity().Format(time.RFC3339),
+		"workspaceId":      d.workspaceID,
+		"idleSeconds":      int(idleTime.Seconds()),
+		"idle":             isIdle,
+		"lastActivityAt":   d.GetLastActivity().Format(time.RFC3339),
+		"shutdownDeadline": deadline.Format(time.RFC3339),
 	}
 
 	jsonData, err := json.Marshal(payload)
@@ -150,14 +164,14 @@ func (d *Detector) sendHeartbeat() {
 // GetWarningTime returns how much warning time is left before shutdown.
 // Returns 0 if no warning should be shown.
 func (d *Detector) GetWarningTime() time.Duration {
-	idleTime := d.GetIdleTime()
-	warningThreshold := d.timeout - 5*time.Minute // Warn 5 minutes before
+	deadline := d.GetDeadline()
+	warningThreshold := 5 * time.Minute
 
-	if idleTime > warningThreshold {
-		remaining := d.timeout - idleTime
-		if remaining > 0 {
-			return remaining
-		}
+	timeUntilShutdown := time.Until(deadline)
+	
+	if timeUntilShutdown > 0 && timeUntilShutdown <= warningThreshold {
+		return timeUntilShutdown
 	}
+	
 	return 0
 }

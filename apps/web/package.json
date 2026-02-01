@@ -1,8 +1,8 @@
 {
-  "name": "@cloud-ai-workspaces/web",
+  "name": "@simple-agent-manager/web",
   "version": "0.1.0",
   "private": true,
-  "description": "Control plane UI for Cloud AI Workspaces",
+  "description": "Control plane UI for Simple Agent Manager",
   "type": "module",
   "scripts": {
     "build": "vite build",
@@ -18,7 +18,8 @@
     "deploy:staging": "pnpm build && wrangler pages deploy dist --env staging"
   },
   "dependencies": {
-    "@cloud-ai-workspaces/shared": "workspace:*",
+    "@simple-agent-manager/shared": "workspace:*",
+    "@simple-agent-manager/terminal": "workspace:*",
     "better-auth": "^1.0.0",
     "lucide-react": "^0.460.0",
     "react": "^18.0.0",

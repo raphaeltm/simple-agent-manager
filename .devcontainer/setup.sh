@@ -1,5 +1,5 @@
 #!/bin/bash
-# Post-create setup script for Cloud AI Workspaces devcontainer
+# Post-create setup script for Simple Agent Manager devcontainer
 set -e
 
 echo "=== Installing Claude ==="
@@ -14,7 +14,7 @@ claude mcp add context7 npx -- -y @upstash/context7-mcp
 npm install -g happy-coder
 
 
-echo "=== Setting up Cloud AI Workspaces development environment ==="
+echo "=== Setting up Simple Agent Manager development environment ==="
 
 # Install project dependencies
 echo "Installing project dependencies..."

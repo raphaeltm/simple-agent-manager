@@ -7,7 +7,7 @@ import {
   listGitHubInstallations,
   listCredentials,
 } from '../lib/api';
-import type { GitHubInstallation } from '@cloud-ai-workspaces/shared';
+import type { GitHubInstallation } from '@simple-agent-manager/shared';
 
 const VM_SIZES = [
   { value: 'small', label: 'Small', description: '2 vCPUs, 4GB RAM' },

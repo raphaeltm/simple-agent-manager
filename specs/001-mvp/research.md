@@ -1,4 +1,4 @@
-# Technical Research: Cloud AI Coding Workspaces MVP
+# Technical Research: Simple Agent Manager MVP
 
 **Feature**: [spec.md](./spec.md) | **Plan**: [plan.md](./plan.md)
 **Phase**: 0 - Technical Research
@@ -606,7 +606,7 @@ openssl pkcs8 -topk8 -inform PEM -outform PEM \
 ### GitHub App Configuration
 
 **Required Settings**:
-- Name: "Cloud AI Workspaces"
+- Name: "Simple Agent Manager"
 - Callback URL: `https://api.{domain}/github/callback`
 - Setup URL: `https://api.{domain}/github/setup` (optional)
 - Webhook URL: Not required for MVP
@@ -709,7 +709,7 @@ export class DockerProvider implements Provider {
         },
       },
       Labels: {
-        'managed-by': 'cloud-ai-workspaces',
+        'managed-by': 'simple-agent-manager',
         'workspace-id': config.workspaceId,
       },
     });

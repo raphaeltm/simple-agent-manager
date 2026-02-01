@@ -1,5 +1,5 @@
 import type { Context, Next } from 'hono';
-import type { ApiError } from '@cloud-ai-workspaces/shared';
+import type { ApiError } from '@simple-agent-manager/shared';
 
 /**
  * Custom error class for API errors with status codes.

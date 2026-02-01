@@ -1,32 +1,37 @@
 import { CLOUD_INIT_TEMPLATE } from './template';
 
+/**
+ * Variables for cloud-init generation.
+ * SECURITY: No sensitive tokens are included - credentials are delivered via bootstrap.
+ */
 export interface CloudInitVariables {
   workspaceId: string;
   hostname: string;
   repository: string;
   branch: string;
-  githubToken: string;
   controlPlaneUrl: string;
   jwksUrl: string;
-  callbackToken: string;
+  /** One-time bootstrap token for credential retrieval (not a secret, just an opaque key) */
+  bootstrapToken: string;
 }
 
 /**
  * Generate cloud-init configuration from template with variables.
+ * No sensitive tokens are embedded - the VM agent retrieves credentials via bootstrap.
  */
 export function generateCloudInit(variables: CloudInitVariables): string {
   let config = CLOUD_INIT_TEMPLATE;
 
   // Replace all template variables
+  // NOTE: No sensitive tokens (github_token, callback_token) are embedded
   const replacements: Record<string, string> = {
     '{{ workspace_id }}': variables.workspaceId,
     '{{ hostname }}': variables.hostname,
     '{{ repository }}': variables.repository,
     '{{ branch }}': variables.branch,
-    '{{ github_token }}': variables.githubToken,
     '{{ control_plane_url }}': variables.controlPlaneUrl,
     '{{ jwks_url }}': variables.jwksUrl,
-    '{{ callback_token }}': variables.callbackToken,
+    '{{ bootstrap_token }}': variables.bootstrapToken,
   };
 
   for (const [placeholder, value] of Object.entries(replacements)) {

@@ -58,6 +58,7 @@ export const workspaces = sqliteTable('workspaces', {
   dnsRecordId: text('dns_record_id'),
   lastActivityAt: text('last_activity_at'),
   errorMessage: text('error_message'),
+  shutdownDeadline: text('shutdown_deadline'),
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });

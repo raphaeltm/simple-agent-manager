@@ -85,7 +85,7 @@ This is a monorepo with:
 - [x] T019 [US2] Implement Docker availability check in DevcontainerProvider (throws actionable error if Docker not running)
 - [x] T020 [US2] Implement devcontainer CLI availability check in DevcontainerProvider (throws actionable error if CLI missing)
 - [x] T021 [US2] Implement single workspace enforcement in DevcontainerProvider.createVM() per FR-012
-- [x] T022 [US2] Implement repository cloning to /tmp/cloud-ai-workspaces/{workspaceId}/ in DevcontainerProvider.createVM()
+- [x] T022 [US2] Implement repository cloning to /tmp/simple-agent-manager/{workspaceId}/ in DevcontainerProvider.createVM()
 - [x] T023 [US2] Implement default devcontainer.json creation for repos without one in DevcontainerProvider.createVM()
 - [x] T024 [US2] Implement devcontainer up execution with JSON output parsing in DevcontainerProvider.createVM()
 - [x] T025 [US2] Implement container IP extraction from Docker inspect in DevcontainerProvider.createVM()
@@ -108,7 +108,7 @@ This is a monorepo with:
 
 - [x] T030 [US3] Implement DevcontainerProvider.deleteVM() to run docker stop and docker rm
 - [x] T031 [US3] Handle graceful deletion of already-stopped containers in DevcontainerProvider.deleteVM()
-- [x] T032 [US3] Clean up workspace folder in /tmp/cloud-ai-workspaces/{id}/ on delete
+- [x] T032 [US3] Clean up workspace folder in /tmp/simple-agent-manager/{id}/ on delete
 - [x] T033 [US3] Update MockDNSService.deleteRecord() to remove record from in-memory Map
 
 **Checkpoint**: Full workspace lifecycle works: create → view → stop → verify removed

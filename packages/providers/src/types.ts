@@ -1,4 +1,4 @@
-import type { VMSize } from '@cloud-ai-workspaces/shared';
+import type { VMSize } from '@simple-agent-manager/shared';
 
 /**
  * Configuration for creating a VM

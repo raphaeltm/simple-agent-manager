@@ -1,0 +1,3 @@
+name: sam-infra
+runtime: nodejs
+description: Simple Agent Manager Infrastructure - Cloudflare resources managed by Pulumi

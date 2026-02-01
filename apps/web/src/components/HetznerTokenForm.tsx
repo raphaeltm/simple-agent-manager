@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { createCredential, deleteCredential } from '../lib/api';
-import type { CredentialResponse } from '@cloud-ai-workspaces/shared';
+import type { CredentialResponse } from '@simple-agent-manager/shared';
 
 interface HetznerTokenFormProps {
   credential?: CredentialResponse | null;

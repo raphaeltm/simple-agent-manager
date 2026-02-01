@@ -5,7 +5,7 @@
 
 ## Overview
 
-Run the Cloud AI Workspaces control plane locally without cloud credentials. Workspaces are created as local devcontainers instead of cloud VMs.
+Run the Simple Agent Manager control plane locally without cloud credentials. Workspaces are created as local devcontainers instead of cloud VMs.
 
 ---
 
@@ -25,8 +25,8 @@ Run the Cloud AI Workspaces control plane locally without cloud credentials. Wor
 
 3. **Repository cloned** with dependencies installed
    ```bash
-   git clone https://github.com/your-org/cloud-ai-workspaces.git
-   cd cloud-ai-workspaces
+   git clone https://github.com/your-org/simple-agent-manager.git
+   cd simple-agent-manager
    pnpm install
    ```
 
@@ -55,7 +55,7 @@ This starts:
 5. Click "Create"
 
 The workspace will:
-1. Clone the repository to `/tmp/cloud-ai-workspaces/{id}/`
+1. Clone the repository to `/tmp/simple-agent-manager/{id}/`
 2. Create a devcontainer from the repo's config (or a default if none exists)
 3. Show as "Running" when ready
 

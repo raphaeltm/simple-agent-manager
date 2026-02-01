@@ -5,7 +5,7 @@ import { UserMenu } from '../components/UserMenu';
 import { WorkspaceCard } from '../components/WorkspaceCard';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { listWorkspaces, stopWorkspace, restartWorkspace, deleteWorkspace } from '../lib/api';
-import type { WorkspaceResponse } from '@cloud-ai-workspaces/shared';
+import type { WorkspaceResponse } from '@simple-agent-manager/shared';
 
 /**
  * Dashboard page showing user profile and workspaces.
@@ -95,7 +95,7 @@ export function Dashboard() {
       <header className="bg-white shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
           <h1 className="text-xl font-semibold text-gray-900">
-            Cloud AI Workspaces
+            Simple Agent Manager
           </h1>
           <UserMenu />
         </div>

@@ -1,4 +1,4 @@
-import type { WorkspaceStatus } from '@cloud-ai-workspaces/shared';
+import type { WorkspaceStatus } from '@simple-agent-manager/shared';
 
 interface StatusBadgeProps {
   status: WorkspaceStatus | string;

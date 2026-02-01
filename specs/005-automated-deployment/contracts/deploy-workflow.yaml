@@ -1,0 +1,321 @@
+# GitHub Actions Workflow Contract: Deploy Setup
+# This defines the inputs, outputs, and secrets for the deployment workflow
+
+name: Deploy Setup
+description: |
+  Deploys Simple Agent Manager to Cloudflare using Pulumi for infrastructure
+  and Wrangler for application deployment.
+
+# Workflow Trigger
+on:
+  workflow_dispatch:
+    inputs:
+      hostname:
+        description: 'Full hostname for deployment (e.g., app.example.com)'
+        required: true
+        type: string
+      environment:
+        description: 'Target environment'
+        required: false
+        type: choice
+        options:
+          - production
+          - staging
+        default: production
+      pulumi_state_bucket:
+        description: 'R2 bucket name for Pulumi state'
+        required: false
+        type: string
+        default: 'sam-pulumi-state'
+      dry_run:
+        description: 'Preview changes without applying'
+        required: false
+        type: boolean
+        default: false
+
+# Required Secrets
+secrets:
+  # Cloudflare Configuration
+  CF_API_TOKEN:
+    required: true
+    description: 'Cloudflare API token with D1, KV, R2, DNS, Workers, Pages permissions'
+  CF_ACCOUNT_ID:
+    required: true
+    description: 'Cloudflare account ID (32-character hex string)'
+  CF_ZONE_ID:
+    required: true
+    description: 'Cloudflare zone ID for the domain (32-character hex string)'
+
+  # Pulumi Backend (R2)
+  R2_ACCESS_KEY_ID:
+    required: true
+    description: 'R2 API access key for Pulumi state storage'
+  R2_SECRET_ACCESS_KEY:
+    required: true
+    description: 'R2 API secret key for Pulumi state storage'
+  PULUMI_CONFIG_PASSPHRASE:
+    required: true
+    description: 'Passphrase for encrypting secrets in Pulumi state'
+
+  # GitHub App (Optional)
+  GITHUB_APP_ID:
+    required: false
+    description: 'GitHub App ID for repository access'
+  GITHUB_CLIENT_ID:
+    required: false
+    description: 'GitHub OAuth Client ID'
+  GITHUB_CLIENT_SECRET:
+    required: false
+    description: 'GitHub OAuth Client Secret'
+  GITHUB_APP_PRIVATE_KEY:
+    required: false
+    description: 'GitHub App private key (base64 encoded PEM)'
+
+# Workflow Outputs
+outputs:
+  api_url:
+    description: 'Deployed API URL'
+    value: ${{ jobs.deploy.outputs.api_url }}
+  app_url:
+    description: 'Deployed Web UI URL'
+    value: ${{ jobs.deploy.outputs.app_url }}
+  deployment_id:
+    description: 'Pulumi deployment identifier (for tracking)'
+    value: ${{ jobs.deploy.outputs.deployment_id }}
+  pulumi_stack:
+    description: 'Pulumi stack name'
+    value: ${{ jobs.deploy.outputs.pulumi_stack }}
+
+# Job Definition
+jobs:
+  deploy:
+    name: Deploy to Cloudflare
+    runs-on: ubuntu-latest
+    outputs:
+      api_url: ${{ steps.output.outputs.api_url }}
+      app_url: ${{ steps.output.outputs.app_url }}
+      deployment_id: ${{ steps.pulumi.outputs.deployment_id }}
+      pulumi_stack: ${{ steps.pulumi.outputs.stack_name }}
+
+    steps:
+      # Phase 0: Setup
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Phase 1: Infrastructure (Pulumi)
+      - name: Login to Pulumi R2 Backend
+        run: |
+          pulumi login 's3://${{ inputs.pulumi_state_bucket }}?endpoint=${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com&region=auto'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+      - name: Pulumi Up
+        id: pulumi
+        uses: pulumi/actions@v5
+        with:
+          command: ${{ inputs.dry_run && 'preview' || 'up' }}
+          stack-name: ${{ inputs.environment == 'production' && 'prod' || inputs.environment }}
+          work-dir: infra
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          # Stack config via env vars
+          PULUMI_CONFIG_cloudflareAccountId: ${{ secrets.CF_ACCOUNT_ID }}
+          PULUMI_CONFIG_cloudflareZoneId: ${{ secrets.CF_ZONE_ID }}
+          PULUMI_CONFIG_baseDomain: ${{ inputs.hostname }}
+
+      # Phase 2: Configuration
+      - name: Sync Pulumi Outputs to Wrangler
+        if: ${{ !inputs.dry_run }}
+        run: pnpm tsx scripts/deploy/sync-wrangler-config.ts
+        env:
+          PULUMI_STACK: ${{ inputs.environment == 'production' && 'prod' || inputs.environment }}
+
+      - name: Generate Security Keys
+        if: ${{ !inputs.dry_run }}
+        run: pnpm tsx scripts/deploy/generate-keys.ts
+        env:
+          FORCE_REGENERATE: 'false'
+
+      # Phase 3: Application (Wrangler)
+      - name: Build Applications
+        if: ${{ !inputs.dry_run }}
+        run: pnpm build
+
+      - name: Deploy API Worker
+        if: ${{ !inputs.dry_run }}
+        run: pnpm --filter @simple-agent-manager/api exec wrangler deploy --env ${{ inputs.environment }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Deploy Web UI
+        if: ${{ !inputs.dry_run }}
+        run: pnpm --filter @simple-agent-manager/web exec wrangler pages deploy dist --project-name sam-web-${{ inputs.environment }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Run Database Migrations
+        if: ${{ !inputs.dry_run }}
+        run: |
+          DB_NAME=$(pulumi stack output --cwd infra d1DatabaseName)
+          pnpm --filter @simple-agent-manager/api exec wrangler d1 migrations apply $DB_NAME --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Configure Worker Secrets
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "${{ secrets.GITHUB_CLIENT_SECRET }}" | pnpm wrangler secret put GITHUB_CLIENT_SECRET --env ${{ inputs.environment }} || true
+          # ... additional secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      # Phase 4: VM Agent
+      - name: Setup Go
+        if: ${{ !inputs.dry_run }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build VM Agent
+        if: ${{ !inputs.dry_run }}
+        run: make -C packages/vm-agent build-all
+
+      - name: Upload VM Agent Binaries
+        if: ${{ !inputs.dry_run }}
+        run: |
+          R2_BUCKET=$(pulumi stack output --cwd infra r2BucketName)
+          pnpm wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-amd64 --file packages/vm-agent/bin/vm-agent-linux-amd64
+          pnpm wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-arm64 --file packages/vm-agent/bin/vm-agent-linux-arm64
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      # Phase 5: Validation
+      - name: Health Check
+        if: ${{ !inputs.dry_run }}
+        run: |
+          API_URL="https://api.${{ inputs.hostname }}"
+          for i in {1..30}; do
+            if curl -sf "$API_URL/health" > /dev/null; then
+              echo "✅ API is healthy"
+              break
+            fi
+            echo "Waiting for API... ($i/30)"
+            sleep 10
+          done
+
+      - name: Output Deployment URLs
+        id: output
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "api_url=https://api.${{ inputs.hostname }}" >> $GITHUB_OUTPUT
+          echo "app_url=https://app.${{ inputs.hostname }}" >> $GITHUB_OUTPUT
+          echo ""
+          echo "✅ Deployment Complete"
+          echo ""
+          echo "API URL: https://api.${{ inputs.hostname }}"
+          echo "App URL: https://app.${{ inputs.hostname }}"
+
+---
+# Teardown Workflow Contract
+
+name: Teardown Setup
+description: |
+  Removes all Simple Agent Manager resources from Cloudflare using Pulumi destroy.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type DELETE to confirm teardown'
+        required: true
+        type: string
+      environment:
+        description: 'Target environment to teardown'
+        required: true
+        type: choice
+        options:
+          - production
+          - staging
+      keep_data:
+        description: 'Preserve database (D1) during teardown'
+        required: false
+        type: boolean
+        default: false
+      pulumi_state_bucket:
+        description: 'R2 bucket name for Pulumi state'
+        required: false
+        type: string
+        default: 'sam-pulumi-state'
+
+jobs:
+  teardown:
+    name: Teardown Cloudflare Resources
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirm == 'DELETE' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Login to Pulumi R2 Backend
+        run: |
+          pulumi login 's3://${{ inputs.pulumi_state_bucket }}?endpoint=${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com&region=auto'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+      - name: Pulumi Destroy
+        uses: pulumi/actions@v5
+        with:
+          command: destroy
+          stack-name: ${{ inputs.environment == 'production' && 'prod' || inputs.environment }}
+          work-dir: infra
+          remove: true
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Teardown Complete
+        run: |
+          echo "✅ Teardown Complete"
+          echo ""
+          echo "Removed resources:"
+          echo "- D1 Database"
+          echo "- KV Namespace"
+          echo "- R2 Bucket"
+          echo "- DNS Records"
+          echo "- Worker"
+          echo "- Pages Project"
+          echo ""
+          echo "Note: Pulumi state bucket was NOT deleted."
+          echo "Delete manually if no longer needed: sam-pulumi-state"

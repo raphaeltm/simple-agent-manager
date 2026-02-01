@@ -1,8 +1,8 @@
 {
-  "name": "@cloud-ai-workspaces/providers",
+  "name": "@simple-agent-manager/providers",
   "version": "0.1.0",
   "private": true,
-  "description": "Cloud provider abstraction for Cloud AI Workspaces",
+  "description": "Cloud provider abstraction for Simple Agent Manager",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -21,7 +21,7 @@
     "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'"
   },
   "dependencies": {
-    "@cloud-ai-workspaces/shared": "workspace:*",
+    "@simple-agent-manager/shared": "workspace:*",
     "execa": "^8.0.1"
   },
   "devDependencies": {

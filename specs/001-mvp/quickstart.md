@@ -1,4 +1,4 @@
-# Quickstart Guide: Cloud AI Coding Workspaces
+# Quickstart Guide: Simple Agent Manager
 
 **Feature**: [spec.md](./spec.md) | **Plan**: [plan.md](./plan.md)
 **Phase**: 1 - Design
@@ -30,8 +30,8 @@ Before setting up the development environment, ensure you have:
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/cloud-ai-workspaces.git
-cd cloud-ai-workspaces
+git clone https://github.com/your-org/simple-agent-manager.git
+cd simple-agent-manager
 
 # Install dependencies
 pnpm install
@@ -89,8 +89,8 @@ wrangler secret put BASE_DOMAIN
 pnpm dev
 
 # Or start individual apps:
-pnpm --filter @cloud-ai-workspaces/api dev    # API on localhost:8787
-pnpm --filter @cloud-ai-workspaces/web dev    # UI on localhost:5173
+pnpm --filter @simple-agent-manager/api dev    # API on localhost:8787
+pnpm --filter @simple-agent-manager/web dev    # UI on localhost:5173
 ```
 
 ---
@@ -107,8 +107,8 @@ pnpm test
 pnpm test:coverage
 
 # Run specific package tests
-pnpm --filter @cloud-ai-workspaces/api test
-pnpm --filter @cloud-ai-workspaces/providers test
+pnpm --filter @simple-agent-manager/api test
+pnpm --filter @simple-agent-manager/providers test
 ```
 
 ### Building for Production
@@ -118,7 +118,7 @@ pnpm --filter @cloud-ai-workspaces/providers test
 pnpm build
 
 # Build specific package
-pnpm --filter @cloud-ai-workspaces/api build
+pnpm --filter @simple-agent-manager/api build
 ```
 
 ### Linting and Formatting
@@ -149,20 +149,20 @@ pnpm typecheck
 
 ```bash
 # Deploy API to staging
-pnpm --filter @cloud-ai-workspaces/api deploy:staging
+pnpm --filter @simple-agent-manager/api deploy:staging
 
 # Deploy UI to staging
-pnpm --filter @cloud-ai-workspaces/web deploy:staging
+pnpm --filter @simple-agent-manager/web deploy:staging
 ```
 
 ### Deploy to Production
 
 ```bash
 # Deploy API to production
-pnpm --filter @cloud-ai-workspaces/api deploy
+pnpm --filter @simple-agent-manager/api deploy
 
 # Deploy UI to production
-pnpm --filter @cloud-ai-workspaces/web deploy
+pnpm --filter @simple-agent-manager/web deploy
 ```
 
 ---
@@ -170,7 +170,7 @@ pnpm --filter @cloud-ai-workspaces/web deploy
 ## Project Structure
 
 ```
-cloud-ai-workspaces/
+simple-agent-manager/
 ├── apps/
 │   ├── api/                 # Cloudflare Worker API
 │   │   ├── src/

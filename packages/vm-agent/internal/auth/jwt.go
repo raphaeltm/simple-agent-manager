@@ -38,7 +38,7 @@ func NewJWTValidator(jwksURL, workspaceID string) (*JWTValidator, error) {
 	return &JWTValidator{
 		jwks:        k,
 		audience:    "vm-agent",
-		issuer:      "cloud-ai-workspaces",
+		issuer:      "simple-agent-manager",
 		workspaceID: workspaceID,
 	}, nil
 }

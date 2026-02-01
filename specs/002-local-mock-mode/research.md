@@ -39,7 +39,7 @@ Use `@devcontainers/cli` via child process execution (execa or Node's spawn).
 ## 2. Workspace Storage Location
 
 ### Decision
-Store cloned repositories in `/tmp/cloud-ai-workspaces/{workspaceId}/`
+Store cloned repositories in `/tmp/simple-agent-manager/{workspaceId}/`
 
 ### Rationale
 - Temporary directory is appropriate for development artifacts
@@ -49,13 +49,13 @@ Store cloned repositories in `/tmp/cloud-ai-workspaces/{workspaceId}/`
 
 ### Implementation Notes
 ```typescript
-const workspaceDir = `/tmp/cloud-ai-workspaces/${workspaceId}`;
+const workspaceDir = `/tmp/simple-agent-manager/${workspaceId}`;
 await fs.mkdir(workspaceDir, { recursive: true });
 await execa('git', ['clone', repoUrl, workspaceDir]);
 ```
 
 ### Alternatives Considered
-- **User home directory (~/.cloud-ai-workspaces/)**: Persists across reboots, but spec says no persistence needed
+- **User home directory (~/.simple-agent-manager/)**: Persists across reboots, but spec says no persistence needed
 - **Project-local directory**: Could conflict with git, gets messy
 
 ---
@@ -73,14 +73,14 @@ Use Docker labels to track managed containers.
 ### Labels Applied
 ```
 workspace-id={workspaceId}
-managed-by=cloud-ai-workspaces
+managed-by=simple-agent-manager
 provider=devcontainer
 repo-url={encodedRepoUrl}
 ```
 
 ### Finding Containers
 ```bash
-docker ps --filter "label=managed-by=cloud-ai-workspaces" --filter "label=provider=devcontainer"
+docker ps --filter "label=managed-by=simple-agent-manager" --filter "label=provider=devcontainer"
 ```
 
 ---
@@ -98,7 +98,7 @@ Use a minimal default devcontainer.json for repos without one.
 ### Default Configuration
 ```json
 {
-  "name": "Cloud AI Workspace",
+  "name": "Simple Agent Manager Workspace",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
   "features": {
     "ghcr.io/devcontainers/features/git:1": {},

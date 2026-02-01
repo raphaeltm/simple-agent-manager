@@ -1,11 +1,11 @@
-# Contributing to Cloud AI Workspaces
+# Contributing to Simple Agent Manager
 
 Thank you for your interest in contributing! This document provides guidelines for contributing to the project.
 
 ## Getting Started
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/your-username/cloud-ai-workspaces.git`
+2. Clone your fork: `git clone https://github.com/your-username/simple-agent-manager.git`
 3. Install dependencies: `pnpm install`
 4. Create a branch: `git checkout -b feature/your-feature`
 
@@ -77,7 +77,7 @@ docs/
 pnpm test
 
 # Run tests for a specific package
-pnpm --filter @cloud-ai-workspaces/api test
+pnpm --filter @simple-agent-manager/api test
 
 # Run with coverage
 pnpm test:coverage
@@ -88,7 +88,7 @@ pnpm test:coverage
 Integration tests use mocked APIs. No real cloud resources are used.
 
 ```bash
-pnpm --filter @cloud-ai-workspaces/api test
+pnpm --filter @simple-agent-manager/api test
 ```
 
 ## Adding a New Feature

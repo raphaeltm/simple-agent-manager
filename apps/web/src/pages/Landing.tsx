@@ -29,7 +29,7 @@ export function Landing() {
       <div className="max-w-md w-full space-y-8 text-center">
         <div>
           <h1 className="text-4xl font-bold text-white mb-2">
-            Cloud AI Workspaces
+            Simple Agent Manager
           </h1>
           <p className="text-gray-400 text-lg">
             Spin up AI coding environments in seconds

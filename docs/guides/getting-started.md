@@ -1,6 +1,6 @@
-# Getting Started with Cloud AI Workspaces
+# Getting Started with Simple Agent Manager
 
-This guide will help you set up and run Cloud AI Workspaces locally for development.
+This guide will help you set up and run Simple Agent Manager locally for development.
 
 ## Prerequisites
 
@@ -13,8 +13,8 @@ This guide will help you set up and run Cloud AI Workspaces locally for developm
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-org/cloud-ai-workspaces.git
-cd cloud-ai-workspaces
+git clone https://github.com/your-org/simple-agent-manager.git
+cd simple-agent-manager
 ```
 
 ### 2. Install Dependencies
@@ -39,12 +39,11 @@ CF_API_TOKEN=your-cloudflare-api-token
 CF_ZONE_ID=your-zone-id
 BASE_DOMAIN=vm.yourdomain.com
 
-# Hetzner Cloud configuration
-HETZNER_TOKEN=your-hetzner-api-token
-
-# API authentication
-API_TOKEN=your-secret-api-token
+# Security keys (auto-generated if not provided)
+ENCRYPTION_KEY=your-encryption-key
 ```
+
+> **Note**: Hetzner API tokens are NOT platform configuration. Users provide their own tokens through the Settings UI after logging in. See `docs/architecture/credential-security.md` for details on the bring-your-own-cloud model.
 
 ### 4. Build All Packages
 
@@ -71,7 +70,7 @@ This starts:
 ## Project Structure
 
 ```
-cloud-ai-workspaces/
+simple-agent-manager/
 ├── apps/
 │   ├── api/          # Cloudflare Workers API
 │   └── web/          # React web UI
@@ -149,9 +148,9 @@ pnpm deploy
 Make sure to build packages in order:
 
 ```bash
-pnpm --filter @cloud-ai-workspaces/shared build
-pnpm --filter @cloud-ai-workspaces/providers build
-pnpm --filter @cloud-ai-workspaces/api build
+pnpm --filter @simple-agent-manager/shared build
+pnpm --filter @simple-agent-manager/providers build
+pnpm --filter @simple-agent-manager/api build
 ```
 
 ### DNS Issues

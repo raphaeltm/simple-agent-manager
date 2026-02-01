@@ -46,7 +46,7 @@ changelog:
 release:
   github:
     owner: your-org
-    name: cloud-ai-workspaces
+    name: simple-agent-manager
   prerelease: auto
   draft: false
   name_template: "VM Agent v{{.Version}}"

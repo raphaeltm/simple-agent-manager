@@ -30,7 +30,7 @@ We will use a **stateless architecture** where workspace state is derived from:
 
 ```typescript
 const labels = {
-  'managed-by': 'cloud-ai-workspaces',
+  'managed-by': 'simple-agent-manager',
   'workspace-id': 'ws-abc123',
   'repo-url': encodeURIComponent('https://github.com/user/repo'),
   'size': 'medium',

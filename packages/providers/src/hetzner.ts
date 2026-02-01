@@ -1,4 +1,4 @@
-import type { VMSize } from '@cloud-ai-workspaces/shared';
+import type { VMSize } from '@simple-agent-manager/shared';
 import type { Provider, ProviderConfig, SizeConfig, VMConfig, VMInstance } from './types';
 
 const HETZNER_API_URL = 'https://api.hetzner.cloud/v1';
@@ -27,7 +27,7 @@ const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
   },
 };
 
-const MANAGED_BY_LABEL = 'cloud-ai-workspaces';
+const MANAGED_BY_LABEL = 'simple-agent-manager';
 
 interface HetznerServerResponse {
   server: {

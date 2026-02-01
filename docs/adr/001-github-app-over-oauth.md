@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Cloud AI Workspaces needs to clone user repositories when creating workspaces. There are two main approaches for accessing user repositories on GitHub:
+Simple Agent Manager needs to clone user repositories when creating workspaces. There are two main approaches for accessing user repositories on GitHub:
 
 1. **GitHub OAuth App**: User grants broad permissions, we store long-lived access tokens
 2. **GitHub App**: User installs app on specific repos, we get short-lived installation tokens

@@ -8,7 +8,7 @@ import { errors } from '../middleware/error';
 import { encrypt, decrypt } from '../services/encryption';
 import { validateHetznerToken } from '../services/hetzner';
 import * as schema from '../db/schema';
-import type { CredentialResponse } from '@cloud-ai-workspaces/shared';
+import type { CredentialResponse } from '@simple-agent-manager/shared';
 
 const credentialsRoutes = new Hono<{ Bindings: Env }>();
 

@@ -7,6 +7,7 @@ This document provides detailed instructions for AI coding agents working on thi
 ### Stateless Design
 
 The MVP uses a stateless architecture where workspace state is derived from:
+
 1. **Hetzner server labels** - Metadata stored with VM
 2. **Cloudflare DNS records** - Existence implies active workspace
 
@@ -15,13 +16,13 @@ No database is required for the MVP.
 ### Package Dependencies
 
 ```
-@cloud-ai-workspaces/shared
+@simple-agent-manager/shared
     ↑
-@cloud-ai-workspaces/providers
+@simple-agent-manager/providers
     ↑
-@cloud-ai-workspaces/api
+@simple-agent-manager/api
     ↑
-@cloud-ai-workspaces/web
+@simple-agent-manager/web
 ```
 
 Build order matters: shared → providers → api/web
@@ -42,9 +43,23 @@ Build order matters: shared → providers → api/web
 - Use Miniflare for Worker integration tests
 - Critical paths require >90% coverage
 
+### Documentation & File Naming
+
+When creating documentation or implementation notes:
+
+- **Location**: Never put documentation files in package roots
+  - Ephemeral working notes (implementation summaries, checklists): `docs/notes/`
+  - Permanent documentation (guides, architecture): `docs/`
+  - Feature specs and design docs: `specs/<feature>/`
+- **Naming**: Use kebab-case for all markdown files
+  - Good: `phase8-implementation-summary.md`, `idle-detection-design.md`
+  - Bad: `PHASE8_IMPLEMENTATION_SUMMARY.md`, `IdleDetectionDesign.md`
+- **Exceptions**: Only `README.md`, `LICENSE`, `CONTRIBUTING.md`, `CHANGELOG.md` use UPPER_CASE
+
 ### Error Handling
 
 All API errors should follow this format:
+
 ```typescript
 {
   error: "error_code",
@@ -55,15 +70,19 @@ All API errors should follow this format:
 ### Environment Variables
 
 Workers secrets are set via:
+
 ```bash
 wrangler secret put SECRET_NAME
 ```
 
 Local development uses `.dev.vars`:
+
 ```
 CF_API_TOKEN=...
-HETZNER_TOKEN=...
+ENCRYPTION_KEY=...
 ```
+
+**Note**: Hetzner tokens are NOT platform secrets. Users provide their own tokens through the Settings UI, stored encrypted per-user in the database. See `docs/architecture/credential-security.md`.
 
 ## Code Patterns
 
@@ -138,10 +157,11 @@ export const WorkspaceCard: FC<Props> = ({ workspace }) => {
 ### Build Errors
 
 Run builds in dependency order:
+
 ```bash
-pnpm --filter @cloud-ai-workspaces/shared build
-pnpm --filter @cloud-ai-workspaces/providers build
-pnpm --filter @cloud-ai-workspaces/api build
+pnpm --filter @simple-agent-manager/shared build
+pnpm --filter @simple-agent-manager/providers build
+pnpm --filter @simple-agent-manager/api build
 ```
 
 ### Test Failures

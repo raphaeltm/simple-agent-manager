@@ -122,6 +122,7 @@ export interface Workspace {
   dnsRecordId: string | null;
   lastActivityAt: string | null;
   errorMessage: string | null;
+  shutdownDeadline: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -138,6 +139,7 @@ export interface WorkspaceResponse {
   vmIp: string | null;
   lastActivityAt: string | null;
   errorMessage: string | null;
+  shutdownDeadline: string | null;
   createdAt: string;
   updatedAt: string;
   url?: string;
@@ -167,6 +169,7 @@ export interface HeartbeatResponse {
   action: 'continue' | 'shutdown';
   idleSeconds: number;
   maxIdleSeconds: number;
+  shutdownDeadline: string | null;
 }
 
 // =============================================================================
@@ -180,6 +183,30 @@ export interface TerminalTokenResponse {
   token: string;
   expiresAt: string;
   workspaceUrl?: string;
+}
+
+// =============================================================================
+// Bootstrap Token (Secure Credential Delivery)
+// =============================================================================
+
+/** Internal: Bootstrap token data stored in KV */
+export interface BootstrapTokenData {
+  workspaceId: string;
+  encryptedHetznerToken: string;
+  hetznerTokenIv: string;
+  callbackToken: string;
+  encryptedGithubToken: string | null;
+  githubTokenIv: string | null;
+  createdAt: string;
+}
+
+/** API response when VM redeems bootstrap token */
+export interface BootstrapResponse {
+  workspaceId: string;
+  hetznerToken: string;
+  callbackToken: string;
+  githubToken: string | null;
+  controlPlaneUrl: string;
 }
 
 // =============================================================================

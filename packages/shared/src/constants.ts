@@ -47,19 +47,35 @@ export const DEFAULT_VM_LOCATION: VMLocation = 'nbg1';
 export const DEFAULT_BRANCH = 'main';
 
 // =============================================================================
-// Limits
+// Default Limits (configurable via environment variables)
+// Per constitution principle XI: all values must be configurable
 // =============================================================================
-export const MAX_WORKSPACES_PER_USER = 10;
-export const IDLE_TIMEOUT_SECONDS = 30 * 60; // 30 minutes
-export const IDLE_WARNING_SECONDS = 25 * 60; // 25 minutes (5 min before shutdown)
+
+/** Default max workspaces per user. Override via MAX_WORKSPACES_PER_USER env var. */
+export const DEFAULT_MAX_WORKSPACES_PER_USER = 10;
+
+/** Backwards compatibility alias - use DEFAULT_MAX_WORKSPACES_PER_USER */
+export const MAX_WORKSPACES_PER_USER = DEFAULT_MAX_WORKSPACES_PER_USER;
+
+/** Default idle timeout in seconds (30 minutes). Override via IDLE_TIMEOUT_SECONDS env var. */
+export const DEFAULT_IDLE_TIMEOUT_SECONDS = 30 * 60;
+
+/** Default idle warning threshold (5 minutes before shutdown). */
+export const DEFAULT_IDLE_WARNING_SECONDS = 25 * 60;
+
+/** Maximum workspace name length. */
 export const WORKSPACE_NAME_MAX_LENGTH = 64;
 
 // =============================================================================
-// URLs
+// Hetzner Configuration
 // =============================================================================
-export const GITHUB_APP_INSTALL_URL = 'https://github.com/apps/your-app-name/installations/new';
 
-// =============================================================================
-// Hetzner Image
-// =============================================================================
-export const HETZNER_IMAGE = 'ubuntu-24.04';
+/** Default Hetzner image. Override via HETZNER_IMAGE env var. */
+export const DEFAULT_HETZNER_IMAGE = 'ubuntu-24.04';
+
+/** Backwards compatibility alias - use DEFAULT_HETZNER_IMAGE */
+export const HETZNER_IMAGE = DEFAULT_HETZNER_IMAGE;
+
+// Note: GitHub App install URL is NOT provided as a constant.
+// It must be derived from the actual GitHub App configuration at runtime.
+// Format: https://github.com/apps/{app-slug}/installations/new

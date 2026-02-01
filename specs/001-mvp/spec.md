@@ -1,4 +1,4 @@
-# Feature Specification: Cloud AI Coding Workspaces MVP
+# Feature Specification: Simple Agent Manager MVP
 
 **Feature Branch**: `001-mvp`
 **Created**: 2026-01-24

@@ -1,0 +1,9 @@
+config:
+  # Cloudflare account configuration
+  # These values come from environment variables in GitHub Actions:
+  # - PULUMI_CONFIG_cloudflareAccountId
+  # - PULUMI_CONFIG_cloudflareZoneId
+  # - PULUMI_CONFIG_baseDomain
+
+  # Resource naming prefix
+  sam-infra:resourcePrefix: sam

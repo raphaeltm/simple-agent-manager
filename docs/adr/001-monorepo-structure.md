@@ -6,7 +6,7 @@
 
 ## Context
 
-We need to organize the Cloud AI Workspaces codebase for:
+We need to organize the Simple Agent Manager codebase for:
 - Multiple deployable applications (API, Web UI)
 - Shared code between applications
 - Independent package versioning
@@ -17,7 +17,7 @@ We need to organize the Cloud AI Workspaces codebase for:
 We will use a **monorepo structure** with pnpm workspaces and Turborepo:
 
 ```
-cloud-ai-workspaces/
+simple-agent-manager/
 ├── apps/
 │   ├── api/          # Cloudflare Workers API
 │   └── web/          # React web UI
@@ -32,13 +32,13 @@ cloud-ai-workspaces/
 ### Package Dependencies
 
 ```
-@cloud-ai-workspaces/shared
+@simple-agent-manager/shared
     ↑
-@cloud-ai-workspaces/providers
+@simple-agent-manager/providers
     ↑
-@cloud-ai-workspaces/api
+@simple-agent-manager/api
     ↑
-@cloud-ai-workspaces/web
+@simple-agent-manager/web
 ```
 
 ### Tool Choices

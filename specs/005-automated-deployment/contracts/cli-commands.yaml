@@ -1,0 +1,411 @@
+# CLI Commands Contract: Automated Deployment
+# Date: 2026-01-29
+# Feature: 005-automated-deployment
+
+openapi: 3.0.0
+info:
+  title: Deployment CLI Commands
+  version: 1.0.0
+  description: Command-line interface for automated deployment
+
+paths:
+  /cli/deploy:
+    summary: Main deployment command
+    post:
+      operationId: deploy
+      description: Deploy Simple Agent Manager to Cloudflare
+      parameters:
+        - name: environment
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [development, staging, production]
+            default: production
+          description: Target environment
+
+        - name: config
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Path to configuration file
+
+        - name: skip-health-check
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Skip post-deployment health check
+
+        - name: skip-dns
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Skip DNS record creation
+
+        - name: verbose
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Verbose output
+
+        - name: dry-run
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Simulate deployment without making changes
+
+        - name: resume
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Resume from previous failed deployment
+
+      responses:
+        '0':
+          description: Successful deployment
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  ✅ Deployment completed successfully!
+
+                  API URL: https://api.workspaces.example.com
+                  Web URL: https://app.workspaces.example.com
+
+                  Next steps:
+                  1. Visit https://app.workspaces.example.com to sign in
+                  2. Create your first workspace
+
+        '1':
+          description: Deployment failed
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  ❌ Deployment failed
+
+                  Error: Failed to create D1 database
+                  Details: Quota exceeded for D1 databases
+
+                  Run with --verbose for detailed logs
+
+  /cli/teardown:
+    summary: Teardown deployment
+    post:
+      operationId: teardown
+      description: Remove all deployed resources
+      parameters:
+        - name: environment
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [development, staging, production]
+            default: production
+          description: Target environment
+
+        - name: force
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Skip confirmation prompts
+
+        - name: keep-data
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Keep D1 database and R2 buckets
+
+      responses:
+        '0':
+          description: Successful teardown
+        '1':
+          description: Teardown failed
+
+  /cli/setup-github:
+    summary: GitHub App setup wizard
+    post:
+      operationId: setupGitHub
+      description: Interactive GitHub App creation guide
+      parameters:
+        - name: open-browser
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+          description: Open browser to GitHub App settings
+
+      responses:
+        '0':
+          description: GitHub App configured successfully
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  GitHub App created successfully!
+
+                  App ID: 12345
+                  Client ID: Iv1.abcd1234
+
+                  Private key saved to: github-app.private-key.pem
+
+                  ⚠️  Keep the private key secure and never commit it to git
+
+  /cli/validate:
+    summary: Validate deployment
+    post:
+      operationId: validate
+      description: Run health checks on existing deployment
+      parameters:
+        - name: environment
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [development, staging, production]
+            default: production
+          description: Target environment
+
+        - name: verbose
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Show detailed validation results
+
+      responses:
+        '0':
+          description: All health checks passed
+        '1':
+          description: Some health checks failed
+
+components:
+  schemas:
+    DeploymentConfig:
+      type: object
+      required:
+        - environment
+        - cloudflare
+        - github
+      properties:
+        environment:
+          type: string
+          enum: [development, staging, production]
+
+        cloudflare:
+          type: object
+          required:
+            - accountId
+            - apiToken
+            - zoneId
+            - baseDomain
+          properties:
+            accountId:
+              type: string
+              description: Cloudflare account ID
+            apiToken:
+              type: string
+              description: Cloudflare API token with appropriate permissions
+              format: password
+            zoneId:
+              type: string
+              description: Cloudflare DNS zone ID
+            baseDomain:
+              type: string
+              description: Base domain for deployment
+              example: workspaces.example.com
+
+        github:
+          type: object
+          required:
+            - clientId
+            - clientSecret
+            - appId
+            - appPrivateKey
+          properties:
+            clientId:
+              type: string
+              description: GitHub OAuth App client ID
+            clientSecret:
+              type: string
+              description: GitHub OAuth App client secret
+              format: password
+            appId:
+              type: string
+              description: GitHub App ID
+            appPrivateKey:
+              type: string
+              description: GitHub App private key (PEM format)
+              format: password
+
+        hetzner:
+          type: object
+          properties:
+            apiToken:
+              type: string
+              description: Hetzner Cloud API token
+              format: password
+
+        security:
+          type: object
+          description: Auto-generated if not provided
+          properties:
+            encryptionKey:
+              type: string
+              description: AES-256 encryption key (base64)
+              format: password
+            jwtPrivateKey:
+              type: string
+              description: RSA private key for JWT signing (PEM)
+              format: password
+            jwtPublicKey:
+              type: string
+              description: RSA public key for JWT verification (PEM)
+
+    DeploymentOutput:
+      type: object
+      properties:
+        environment:
+          type: string
+        urls:
+          type: object
+          properties:
+            api:
+              type: string
+              description: API endpoint URL
+            web:
+              type: string
+              description: Web UI URL
+        resources:
+          type: object
+          properties:
+            d1:
+              type: object
+              properties:
+                databaseId:
+                  type: string
+                databaseName:
+                  type: string
+            kv:
+              type: object
+              properties:
+                namespaceId:
+                  type: string
+                namespaceName:
+                  type: string
+            r2:
+              type: object
+              properties:
+                bucketName:
+                  type: string
+        quickstart:
+          type: string
+          description: Path to generated quickstart guide
+
+    ValidationResult:
+      type: object
+      properties:
+        healthy:
+          type: boolean
+        endpoints:
+          type: object
+          properties:
+            api:
+              $ref: '#/components/schemas/EndpointHealth'
+            web:
+              $ref: '#/components/schemas/EndpointHealth'
+        resources:
+          type: object
+          properties:
+            d1:
+              $ref: '#/components/schemas/ResourceHealth'
+            kv:
+              $ref: '#/components/schemas/ResourceHealth'
+            r2:
+              $ref: '#/components/schemas/ResourceHealth'
+        dns:
+          type: object
+          properties:
+            recordsCreated:
+              type: boolean
+            resolvable:
+              type: object
+              properties:
+                api:
+                  type: boolean
+                app:
+                  type: boolean
+                wildcard:
+                  type: boolean
+        issues:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+
+    EndpointHealth:
+      type: object
+      properties:
+        url:
+          type: string
+        status:
+          type: integer
+        responseTime:
+          type: number
+          description: Response time in milliseconds
+        healthy:
+          type: boolean
+        version:
+          type: string
+
+    ResourceHealth:
+      type: object
+      properties:
+        accessible:
+          type: boolean
+        details:
+          type: object
+          additionalProperties: true
+
+# CLI Usage Examples:
+#
+# First-time deployment:
+#   pnpm deploy:setup
+#
+# Deploy to staging:
+#   pnpm deploy:setup --environment staging
+#
+# Dry run:
+#   pnpm deploy:setup --dry-run
+#
+# Resume failed deployment:
+#   pnpm deploy:setup --resume
+#
+# Teardown staging:
+#   pnpm teardown:setup --environment staging
+#
+# Validate production:
+#   pnpm validate:setup --verbose

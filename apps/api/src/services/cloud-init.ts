@@ -1,4 +1,4 @@
-import type { VMConfig } from '@cloud-ai-workspaces/providers';
+import type { VMConfig } from '@simple-agent-manager/providers';
 
 /**
  * Service for generating cloud-init scripts

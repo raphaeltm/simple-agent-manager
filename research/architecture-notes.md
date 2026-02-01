@@ -1,4 +1,4 @@
-# Cloud AI Coding Workspaces - Architecture Research
+# Simple Agent Manager - Architecture Research
 
 > **Related docs:** [AI Agent Optimizations](./ai-agent-optimizations.md) | [DNS & Security](./dns-security-persistence-plan.md) | [Multi-tenancy](./multi-tenancy-interfaces.md) | [Index](./README.md)
 

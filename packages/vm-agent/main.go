@@ -1,4 +1,4 @@
-// VM Agent - Terminal server for Cloud AI Workspaces
+// VM Agent - Terminal server for Simple Agent Manager
 package main
 
 import (

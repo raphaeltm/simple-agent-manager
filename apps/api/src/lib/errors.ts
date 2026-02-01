@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import type { ApiError } from '@cloud-ai-workspaces/shared';
+import type { ApiError } from '@simple-agent-manager/shared';
 
 /**
  * Standard error codes

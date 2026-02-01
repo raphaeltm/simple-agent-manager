@@ -1,4 +1,4 @@
-import type { VMSize } from '@cloud-ai-workspaces/shared';
+import type { VMSize } from '@simple-agent-manager/shared';
 import type { Provider, SizeConfig, VMConfig, VMInstance, ExecResult } from './types';
 
 const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
@@ -25,9 +25,9 @@ const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
   },
 };
 
-const MANAGED_BY_LABEL = 'cloud-ai-workspaces';
+const MANAGED_BY_LABEL = 'simple-agent-manager';
 const PROVIDER_LABEL = 'devcontainer';
-const WORKSPACE_BASE_DIR = '/tmp/cloud-ai-workspaces';
+const WORKSPACE_BASE_DIR = '/tmp/simple-agent-manager';
 
 /**
  * Default devcontainer.json for repositories without one.
@@ -35,7 +35,7 @@ const WORKSPACE_BASE_DIR = '/tmp/cloud-ai-workspaces';
  * See docs/architecture/cloudcli.md for details.
  */
 const DEFAULT_DEVCONTAINER_CONFIG = {
-  name: 'Cloud AI Workspace',
+  name: 'Simple Agent Manager Workspace',
   image: 'mcr.microsoft.com/devcontainers/base:ubuntu-22.04',
   features: {
     'ghcr.io/devcontainers/features/git:1': {},
