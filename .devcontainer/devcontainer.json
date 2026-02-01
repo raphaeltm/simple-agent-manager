@@ -32,9 +32,9 @@
 		}
 	},
 	// Install dependencies after container creation
-	"postCreateCommand": "bash .devcontainer/setup.sh",
+	"postCreateCommand": "bash .devcontainer/post-create.sh",
 	// Create Claude config dir at container start (workspace-mounted path)
-	"postStartCommand": "mkdir -p /workspaces/claude-home",
+	"postStartCommand": "bash .devcontainer/post-start.sh",
 	// VS Code extensions for better DX
 	"customizations": {
 		"vscode": {
