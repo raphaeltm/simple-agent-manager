@@ -200,6 +200,12 @@ importers:
       '@pulumi/pulumi':
         specifier: ^3.140.0
         version: 3.217.1(typescript@5.9.3)
+      '@pulumi/random':
+        specifier: ^4.16.0
+        version: 4.19.1(typescript@5.9.3)
+      '@pulumi/tls':
+        specifier: ^5.0.0
+        version: 5.3.0(typescript@5.9.3)
     devDependencies:
       '@types/node':
         specifier: ^22.10.0
@@ -1794,6 +1800,12 @@ packages:
         optional: true
       typescript:
         optional: true
+
+  '@pulumi/random@4.19.1':
+    resolution: {integrity: sha512-gDotQyxtl+pcJb4oaGfbi6PsK8OtzjBmF1D8PYLvr13kCup98KTIIv/8wF2xbgbFf7ljJn3EblADxZ0u8AC/Dg==}
+
+  '@pulumi/tls@5.3.0':
+    resolution: {integrity: sha512-yCij6Frm8V/Tsd6oQi15bKN3IhABazNcAmbMBJAxDezOV7Uv/Sc6BhEe+ncJRf00OYGmZXb3K6NyKTxbf6A+fg==}
 
   '@remix-run/router@1.23.2':
     resolution: {integrity: sha512-Ic6m2U/rMjTkhERIa/0ZtXJP17QUi2CbWE7cqx4J58M8aA3QTfW+2UlQ4psvTX9IO1RfNVhK3pcpdjej7L+t2w==}
@@ -6397,6 +6409,22 @@ snapshots:
       typescript: 5.9.3
     transitivePeerDependencies:
       - supports-color
+
+  '@pulumi/random@4.19.1(typescript@5.9.3)':
+    dependencies:
+      '@pulumi/pulumi': 3.217.1(typescript@5.9.3)
+    transitivePeerDependencies:
+      - supports-color
+      - ts-node
+      - typescript
+
+  '@pulumi/tls@5.3.0(typescript@5.9.3)':
+    dependencies:
+      '@pulumi/pulumi': 3.217.1(typescript@5.9.3)
+    transitivePeerDependencies:
+      - supports-color
+      - ts-node
+      - typescript
 
   '@remix-run/router@1.23.2': {}
 

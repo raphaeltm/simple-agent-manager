@@ -63,7 +63,7 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 
 > **Naming Convention**: GitHub secrets use `GH_*` prefix (not `GITHUB_*`) because GitHub reserves `GITHUB_*` for its own variables. The deployment workflow automatically maps `GH_*` → `GITHUB_*` when setting Cloudflare Worker secrets.
 
-> **Note**: Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`) are **automatically generated** on first deployment and stored directly in Cloudflare Worker secrets. For persistence across fresh deployments, copy them to GitHub Secrets after first deployment.
+> **Note**: Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`) are **automatically generated and persisted** via Pulumi state in R2. No manual intervention required—keys are created on first deployment and reused automatically on subsequent deployments.
 
 ### Deploy
 
@@ -362,21 +362,19 @@ cd simple-agent-manager
 pnpm install
 ```
 
-### Step 2: Generate Security Keys
+### Step 2: Generate Security Keys (Local Development Only)
+
+> **Note**: For production deployments, security keys are automatically managed by Pulumi and persist in R2. This step is only needed for local development.
 
 ```bash
-# Generate JWT and encryption keys
-pnpm generate-keys --env >> keys.txt
-
-# View the generated keys
-cat keys.txt
+# Generate JWT and encryption keys for local development
+pnpm tsx scripts/deploy/generate-keys.ts
 ```
 
 This generates:
 - **ENCRYPTION_KEY**: AES-256 key for encrypting stored credentials
 - **JWT_PRIVATE_KEY**: RSA private key for signing terminal access tokens
 - **JWT_PUBLIC_KEY**: RSA public key for token verification
-- **JWT_KEY_ID**: Key identifier for JWKS endpoint
 
 ### Step 3: Configure Environment Variables (Local Development)
 
@@ -412,11 +410,10 @@ GITHUB_APP_ID=123456
 # cat your-key.pem | base64 -w0
 GITHUB_APP_PRIVATE_KEY=LS0tLS1CRUdJTi4uLi4=
 
-# Security Keys (from pnpm generate-keys)
+# Security Keys (from generate-keys.ts script)
 ENCRYPTION_KEY=your-encryption-key-from-generate-keys
 JWT_PRIVATE_KEY=your-jwt-private-key
 JWT_PUBLIC_KEY=your-jwt-public-key
-JWT_KEY_ID=key-2026-01
 ```
 
 ### Step 4: Update wrangler.toml
@@ -681,19 +678,38 @@ wrangler d1 migrations apply workspaces --remote
 
 ### Rotating Security Keys
 
-Generate new keys and update secrets:
+Security keys are managed by Pulumi and normally don't need rotation. If you need to rotate keys:
 
+**Option 1: Force Pulumi to recreate keys**
 ```bash
-pnpm generate-keys --env
+# Remove protection from key resources (temporarily)
+cd infra
+pulumi state unprotect "urn:pulumi:prod::infra::random:index/randomId:RandomId::encryption-key"
+pulumi state unprotect "urn:pulumi:prod::infra::tls:index/privateKey:PrivateKey::jwt-signing-key"
 
-# Update the secrets
+# Delete the resources
+pulumi state delete "urn:pulumi:prod::infra::random:index/randomId:RandomId::encryption-key"
+pulumi state delete "urn:pulumi:prod::infra::tls:index/privateKey:PrivateKey::jwt-signing-key"
+
+# Re-deploy to create new keys
+pulumi up
+```
+
+**Option 2: Manual rotation**
+```bash
+# Generate new keys locally
+pnpm tsx scripts/deploy/generate-keys.ts
+
+# Update secrets directly
 cd apps/api
 wrangler secret put JWT_PRIVATE_KEY
 wrangler secret put JWT_PUBLIC_KEY
 wrangler secret put ENCRYPTION_KEY
 ```
 
-**Warning**: Rotating JWT keys will invalidate all active terminal sessions.
+**Warning**: Rotating keys will:
+- Invalidate all active terminal sessions (JWT keys)
+- Make existing encrypted credentials unreadable (ENCRYPTION_KEY) - users will need to re-enter their Hetzner tokens
 
 ---
 

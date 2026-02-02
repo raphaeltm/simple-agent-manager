@@ -215,14 +215,37 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
-      - name: Generate Security Keys (if needed)
-        id: generate_keys
+      - name: Read Security Keys from Pulumi State
+        id: pulumi_keys
         if: ${{ inputs.dry_run != true }}
-        run: pnpm tsx scripts/deploy/generate-keys.ts
+        working-directory: infra
+        run: |
+          # Read security keys from Pulumi state (they persist automatically)
+          # Use heredoc syntax for multi-line PEM keys
+
+          echo "Reading encryption key..."
+          ENCRYPTION_KEY=$(pulumi stack output encryptionKey --show-secrets 2>/dev/null || echo "")
+          echo "encryption_key=$ENCRYPTION_KEY" >> $GITHUB_OUTPUT
+
+          echo "Reading JWT private key..."
+          JWT_PRIVATE_KEY=$(pulumi stack output jwtPrivateKey --show-secrets 2>/dev/null || echo "")
+          DELIMITER="EOF_PRIVATE_$(date +%s)"
+          echo "jwt_private_key<<$DELIMITER" >> $GITHUB_OUTPUT
+          echo "$JWT_PRIVATE_KEY" >> $GITHUB_OUTPUT
+          echo "$DELIMITER" >> $GITHUB_OUTPUT
+
+          echo "Reading JWT public key..."
+          JWT_PUBLIC_KEY=$(pulumi stack output jwtPublicKey --show-secrets 2>/dev/null || echo "")
+          DELIMITER="EOF_PUBLIC_$(date +%s)"
+          echo "jwt_public_key<<$DELIMITER" >> $GITHUB_OUTPUT
+          echo "$JWT_PUBLIC_KEY" >> $GITHUB_OUTPUT
+          echo "$DELIMITER" >> $GITHUB_OUTPUT
+
+          echo "Security keys read from Pulumi state"
         env:
-          FORCE_REGENERATE: 'false'
-          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
-          JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
       # ========================================
       # Phase 3: Application (Wrangler)
@@ -272,9 +295,11 @@ jobs:
           GH_APP_ID: ${{ secrets.GH_APP_ID }}
           GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
           GH_APP_SLUG: ${{ secrets.GH_APP_SLUG }}
-          GENERATED_ENCRYPTION_KEY: ${{ steps.generate_keys.outputs.encryption_key }}
-          GENERATED_JWT_PRIVATE_KEY: ${{ steps.generate_keys.outputs.jwt_private_key }}
-          GENERATED_JWT_PUBLIC_KEY: ${{ steps.generate_keys.outputs.jwt_public_key }}
+          # Security keys from Pulumi state (primary source, persists automatically)
+          PULUMI_ENCRYPTION_KEY: ${{ steps.pulumi_keys.outputs.encryption_key }}
+          PULUMI_JWT_PRIVATE_KEY: ${{ steps.pulumi_keys.outputs.jwt_private_key }}
+          PULUMI_JWT_PUBLIC_KEY: ${{ steps.pulumi_keys.outputs.jwt_public_key }}
+          # GitHub secrets (backwards compatibility for existing deployments)
           SECRET_ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
           SECRET_JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
           SECRET_JWT_PUBLIC_KEY: ${{ secrets.JWT_PUBLIC_KEY }}
@@ -370,15 +395,20 @@ jobs:
             echo "Check the logs above for error details." >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Security Keys Generated Notice
-        if: ${{ inputs.dry_run != true && steps.generate_keys.outputs.keys_generated == 'true' }}
+      - name: Security Keys Status
+        if: ${{ inputs.dry_run != true }}
         run: |
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔐 Security Keys Auto-Generated" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔐 Security Keys" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "New security keys were generated and stored in Cloudflare Worker secrets." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Recommendation:** Copy these to GitHub Secrets for persistence across deployments:" >> $GITHUB_STEP_SUMMARY
-          echo "- \`ENCRYPTION_KEY\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`JWT_PRIVATE_KEY\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`JWT_PUBLIC_KEY\`" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ secrets.ENCRYPTION_KEY }}" ]; then
+            echo "Using keys from **GitHub Secrets** (backwards compatibility mode)." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "To migrate to automatic persistence via Pulumi state:" >> $GITHUB_STEP_SUMMARY
+            echo "1. Delete \`ENCRYPTION_KEY\`, \`JWT_PRIVATE_KEY\`, \`JWT_PUBLIC_KEY\` from GitHub Secrets" >> $GITHUB_STEP_SUMMARY
+            echo "2. Re-deploy to use Pulumi-managed keys" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **Note:** Migration creates new keys, invalidating existing encrypted data." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Keys managed by **Pulumi state** - no manual persistence needed." >> $GITHUB_STEP_SUMMARY
+          fi

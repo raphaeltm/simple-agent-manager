@@ -47,9 +47,12 @@ set_worker_secret() {
 
 # Parse arguments
 ENVIRONMENT="${1:-production}"
-GENERATED_ENCRYPTION_KEY="${GENERATED_ENCRYPTION_KEY:-}"
-GENERATED_JWT_PRIVATE_KEY="${GENERATED_JWT_PRIVATE_KEY:-}"
-GENERATED_JWT_PUBLIC_KEY="${GENERATED_JWT_PUBLIC_KEY:-}"
+
+# Security keys from different sources
+# Priority: GitHub secrets (backwards compat) > Pulumi state (primary) > Generated (legacy)
+PULUMI_ENCRYPTION_KEY="${PULUMI_ENCRYPTION_KEY:-}"
+PULUMI_JWT_PRIVATE_KEY="${PULUMI_JWT_PRIVATE_KEY:-}"
+PULUMI_JWT_PUBLIC_KEY="${PULUMI_JWT_PUBLIC_KEY:-}"
 SECRET_ENCRYPTION_KEY="${SECRET_ENCRYPTION_KEY:-}"
 SECRET_JWT_PRIVATE_KEY="${SECRET_JWT_PRIVATE_KEY:-}"
 SECRET_JWT_PUBLIC_KEY="${SECRET_JWT_PUBLIC_KEY:-}"
@@ -57,10 +60,25 @@ SECRET_JWT_PUBLIC_KEY="${SECRET_JWT_PUBLIC_KEY:-}"
 echo "Configuring secrets for environment: $ENVIRONMENT"
 echo ""
 
-# Use generated keys if available, otherwise fall back to GitHub secrets
-ENCRYPTION_KEY="${GENERATED_ENCRYPTION_KEY:-$SECRET_ENCRYPTION_KEY}"
-JWT_PRIVATE_KEY="${GENERATED_JWT_PRIVATE_KEY:-$SECRET_JWT_PRIVATE_KEY}"
-JWT_PUBLIC_KEY="${GENERATED_JWT_PUBLIC_KEY:-$SECRET_JWT_PUBLIC_KEY}"
+# Determine key source with priority:
+# 1. GitHub secrets (backwards compatibility for existing deployments)
+# 2. Pulumi state (primary source, persists automatically)
+if [ -n "$SECRET_ENCRYPTION_KEY" ]; then
+  echo "Using security keys from GitHub Secrets (backwards compatibility)"
+  ENCRYPTION_KEY="$SECRET_ENCRYPTION_KEY"
+  JWT_PRIVATE_KEY="$SECRET_JWT_PRIVATE_KEY"
+  JWT_PUBLIC_KEY="$SECRET_JWT_PUBLIC_KEY"
+elif [ -n "$PULUMI_ENCRYPTION_KEY" ]; then
+  echo "Using security keys from Pulumi state (auto-persisted)"
+  ENCRYPTION_KEY="$PULUMI_ENCRYPTION_KEY"
+  JWT_PRIVATE_KEY="$PULUMI_JWT_PRIVATE_KEY"
+  JWT_PUBLIC_KEY="$PULUMI_JWT_PUBLIC_KEY"
+else
+  echo -e "${RED}ERROR: No security keys available from GitHub Secrets or Pulumi state${NC}"
+  echo "This should not happen - Pulumi should have created the keys."
+  exit 1
+fi
+echo ""
 
 # Track if any required secrets fail
 FAILED=false

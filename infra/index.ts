@@ -11,6 +11,11 @@ import {
   dnsRecordIds,
   dnsHostnames,
 } from "./resources/dns";
+import {
+  encryptionKey,
+  jwtPrivateKey,
+  jwtPublicKey,
+} from "./resources/secrets";
 
 // Export resource references for internal use
 export {
@@ -30,6 +35,10 @@ export const kvName = kvNamespaceName;
 export const r2Name = r2BucketName;
 export const dnsIds = dnsRecordIds;
 export const hostnames = dnsHostnames;
+
+// Export security keys (persisted in Pulumi state, encrypted in R2)
+// These are marked as secrets - use `pulumi stack output --show-secrets` to view
+export { encryptionKey, jwtPrivateKey, jwtPublicKey };
 
 // Stack summary output
 const config = new pulumi.Config();
