@@ -39,6 +39,50 @@ Before committing any business logic changes, verify:
 
 ---
 
+## CRITICAL: Environment Variable Naming (NON-NEGOTIABLE)
+
+**GitHub secrets and Cloudflare Worker secrets use DIFFERENT naming conventions. Confusing them causes deployment failures.**
+
+### The Two Naming Conventions
+
+| Context | Prefix | Example | Where Used |
+|---------|--------|---------|------------|
+| **GitHub Environment** | `GH_` | `GH_CLIENT_ID` | GitHub Settings → Environments → production |
+| **Cloudflare Worker** | `GITHUB_` | `GITHUB_CLIENT_ID` | Worker runtime, local `.env` files |
+
+### Why Different Names?
+
+GitHub Actions reserves `GITHUB_*` environment variables for its own use. Using `GITHUB_CLIENT_ID` as a GitHub secret would conflict. So we use `GH_*` in GitHub, and the deployment script maps them to `GITHUB_*` Worker secrets.
+
+### The Mapping (done by `configure-secrets.sh`)
+
+```
+GitHub Secret          →  Cloudflare Worker Secret
+─────────────────────────────────────────────────
+GH_CLIENT_ID           →  GITHUB_CLIENT_ID
+GH_CLIENT_SECRET       →  GITHUB_CLIENT_SECRET
+GH_APP_ID              →  GITHUB_APP_ID
+GH_APP_PRIVATE_KEY     →  GITHUB_APP_PRIVATE_KEY
+GH_APP_SLUG            →  GITHUB_APP_SLUG
+```
+
+### Documentation Rules
+
+When documenting environment variables:
+1. **GitHub Environment config** → Use `GH_*` prefix
+2. **Cloudflare Worker secrets** → Use `GITHUB_*` prefix
+3. **Local `.env` files** → Use `GITHUB_*` prefix (same as Worker)
+4. **ALWAYS** specify which context you're documenting
+5. **NEVER** mix prefixes in the same table without explanation
+
+### Quick Reference
+
+- **User configuring GitHub**: Tell them to use `GH_CLIENT_ID`
+- **Code reading from env**: Use `env.GITHUB_CLIENT_ID`
+- **Local development**: Use `GITHUB_CLIENT_ID` in `.env`
+
+---
+
 ## CRITICAL: Architecture Research Requirements
 
 **Before making ANY changes related to architecture, secrets, credentials, data models, or security:**
@@ -255,7 +299,9 @@ You can also trigger deployment manually via GitHub Actions → Deploy → Run w
 
 ### Platform Secrets (Cloudflare Worker Secrets)
 
-Set during deployment via `wrangler secret put`:
+These are the secrets the **Worker code reads at runtime**. They use the `GITHUB_*` prefix.
+
+> **Note**: In GitHub Environment config, use `GH_*` prefix instead. See [Environment Variable Naming](#critical-environment-variable-naming-non-negotiable) for the mapping.
 
 | Secret | Purpose | Required |
 |--------|---------|----------|

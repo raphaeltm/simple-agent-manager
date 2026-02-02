@@ -102,6 +102,8 @@ Add these **Environment secrets**:
 | `GH_APP_PRIVATE_KEY` | GitHub App private key (base64 encoded) |
 | `GH_APP_SLUG` | GitHub App slug (URL name) |
 
+> **Naming Convention**: GitHub secrets use `GH_*` prefix because GitHub reserves `GITHUB_*` for its own variables. The deployment workflow maps `GH_*` → `GITHUB_*` when setting Cloudflare Worker secrets.
+
 **Where to find Cloudflare IDs**:
 - Account ID: Cloudflare Dashboard sidebar (right side)
 - Zone ID: Domain overview page (right sidebar)

@@ -78,9 +78,11 @@ cp .env.example .env
 # Edit .env with your API tokens and domain
 ```
 
-### Configuration
+### Configuration (Local Development)
 
-Create your `.env` file with the following:
+Create your `.env` file with the following.
+
+> **Note**: These `GITHUB_*` names are for **local `.env` files only**. For GitHub Actions deployment, use `GH_*` prefix in GitHub Environment secrets (e.g., `GH_CLIENT_ID` instead of `GITHUB_CLIENT_ID`). The deployment workflow maps between them automatically.
 
 ```bash
 # Cloudflare (for DNS and hosting)

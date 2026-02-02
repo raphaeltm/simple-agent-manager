@@ -707,6 +707,8 @@ not buried in one-time scripts or hidden state files. This enables easy auditing
 | Secret | `JWT_PRIVATE_KEY` | JWT signing key (optional, auto-generated) |
 | Secret | `JWT_PUBLIC_KEY` | JWT verification key (optional, auto-generated) |
 
+**Naming Convention**: GitHub secrets use `GH_*` prefix for GitHub-related credentials because GitHub reserves `GITHUB_*` environment variables for its own use. The deployment workflow (`configure-secrets.sh`) maps these to `GITHUB_*` Cloudflare Worker secrets (e.g., `GH_CLIENT_ID` → `GITHUB_CLIENT_ID`).
+
 **Deployment Pipeline:**
 1. **Validate** - Check all required configuration exists
 2. **Infrastructure** - Pulumi provisions D1, KV, R2, DNS records

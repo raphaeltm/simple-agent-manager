@@ -61,6 +61,8 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | `GH_APP_PRIVATE_KEY` | GitHub App private key (base64 encoded) |
 | `GH_APP_SLUG` | GitHub App slug (URL name) |
 
+> **Naming Convention**: GitHub secrets use `GH_*` prefix (not `GITHUB_*`) because GitHub reserves `GITHUB_*` for its own variables. The deployment workflow automatically maps `GH_*` → `GITHUB_*` when setting Cloudflare Worker secrets.
+
 > **Note**: Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`) are **automatically generated** on first deployment and stored directly in Cloudflare Worker secrets. For persistence across fresh deployments, copy them to GitHub Secrets after first deployment.
 
 ### Deploy
@@ -379,6 +381,8 @@ This generates:
 ### Step 3: Configure Environment Variables (Local Development)
 
 > **Note**: For production deployment via GitHub Actions, use [GitHub Environment Configuration](#github-environment-configuration) instead. This step is only needed for local development.
+
+> **Naming Convention**: Local `.env` files use `GITHUB_*` prefix (e.g., `GITHUB_CLIENT_ID`) because that's what the Worker code reads. This differs from GitHub Environment secrets which use `GH_*` prefix. The deployment workflow maps between them.
 
 Create your `.env` file:
 
