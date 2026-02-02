@@ -25,7 +25,8 @@ type JWTValidator struct {
 }
 
 // NewJWTValidator creates a new JWT validator that fetches keys from the JWKS endpoint.
-func NewJWTValidator(jwksURL, workspaceID string) (*JWTValidator, error) {
+// The issuer and audience should be derived from configuration, not hardcoded.
+func NewJWTValidator(jwksURL, workspaceID, issuer, audience string) (*JWTValidator, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -37,8 +38,8 @@ func NewJWTValidator(jwksURL, workspaceID string) (*JWTValidator, error) {
 
 	return &JWTValidator{
 		jwks:        k,
-		audience:    "vm-agent",
-		issuer:      "simple-agent-manager",
+		audience:    audience,
+		issuer:      issuer,
 		workspaceID: workspaceID,
 	}, nil
 }
@@ -59,20 +60,29 @@ func (v *JWTValidator) Validate(tokenString string) (*Claims, error) {
 		return nil, fmt.Errorf("invalid claims type")
 	}
 
-	// Validate audience
+	// Validate audience - must match the configured audience exactly
 	aud, err := claims.GetAudience()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get audience: %w", err)
 	}
 	audienceValid := false
 	for _, a := range aud {
-		if a == v.audience || a == "workspace-terminal" {
+		if a == v.audience {
 			audienceValid = true
 			break
 		}
 	}
 	if !audienceValid {
-		return nil, fmt.Errorf("invalid audience")
+		return nil, fmt.Errorf("invalid audience: expected %s", v.audience)
+	}
+
+	// Validate issuer
+	iss, err := claims.GetIssuer()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get issuer: %w", err)
+	}
+	if iss != v.issuer {
+		return nil, fmt.Errorf("invalid issuer: expected %s, got %s", v.issuer, iss)
 	}
 
 	// Validate workspace ID

@@ -287,13 +287,36 @@ You can also trigger deployment manually via GitHub Actions → Deploy → Run w
 
 ## API Endpoints
 
+### Workspace Management
 - `POST /api/workspaces` - Create workspace
 - `GET /api/workspaces` - List user's workspaces
 - `GET /api/workspaces/:id` - Get workspace details
-- `DELETE /api/workspaces/:id` - Stop workspace
+- `POST /api/workspaces/:id/stop` - Stop a running workspace
+- `POST /api/workspaces/:id/restart` - Restart a workspace
+- `DELETE /api/workspaces/:id` - Delete a workspace (permanently removes it)
+- `GET /api/workspaces/:id/ready` - Check workspace readiness
+
+### VM Communication
 - `POST /api/workspaces/:id/heartbeat` - VM heartbeat with idle detection
 - `POST /api/bootstrap/:token` - Redeem one-time bootstrap token (VM startup)
-- `POST /api/terminal/:workspaceId/token` - Get terminal WebSocket token
+- `POST /api/agent/ready` - VM agent ready callback
+- `POST /api/agent/activity` - VM agent activity report
+
+### Terminal Access
+- `POST /api/terminal/token` - Get terminal WebSocket token (workspaceId in request body)
+
+### Authentication (BetterAuth)
+- `POST /api/auth/sign-in/social` - GitHub OAuth login
+- `GET /api/auth/session` - Get current session
+- `POST /api/auth/sign-out` - Sign out
+
+### Credentials
+- `GET /api/credentials` - Get user's cloud provider credentials (encrypted)
+- `PUT /api/credentials` - Save cloud provider credentials
+
+### GitHub Integration
+- `GET /api/github/installations` - List user's GitHub App installations
+- `GET /api/github/repos` - List accessible repositories
 
 ## Environment Variables
 

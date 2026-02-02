@@ -2,6 +2,22 @@ import type { Env } from '../index';
 
 const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
 
+/** Default DNS TTL in seconds (1 minute) */
+const DEFAULT_DNS_TTL = 60;
+
+/**
+ * Get DNS TTL from env or use default (per constitution principle XI).
+ */
+export function getDnsTTL(env?: { DNS_TTL_SECONDS?: string }): number {
+  if (env?.DNS_TTL_SECONDS) {
+    const ttl = parseInt(env.DNS_TTL_SECONDS, 10);
+    if (!isNaN(ttl) && ttl > 0) {
+      return ttl;
+    }
+  }
+  return DEFAULT_DNS_TTL;
+}
+
 /**
  * DNS Record interface
  */
@@ -32,13 +48,14 @@ export class DNSService implements DNSServiceInterface {
 
   async createRecord(workspaceId: string, ip: string, _baseDomain: string): Promise<DNSRecord> {
     const id = await createDNSRecord(workspaceId, ip, this.env);
+    const ttl = getDnsTTL(this.env);
     return {
       id,
       name: `ws-${workspaceId}`,
       type: 'A',
       content: ip,
       proxied: true,
-      ttl: 60,
+      ttl,
     };
   }
 
@@ -77,7 +94,7 @@ export async function createDNSRecord(
         type: 'A',
         name: `ws-${workspaceId}`,
         content: ip,
-        ttl: 60, // 1 minute TTL for fast updates
+        ttl: getDnsTTL(env), // Configurable TTL (default 1 minute for fast updates)
         proxied: true, // Enable Cloudflare proxy for HTTPS
       }),
     }

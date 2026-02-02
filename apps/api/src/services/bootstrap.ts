@@ -10,8 +10,19 @@ import type { BootstrapTokenData } from '@simple-agent-manager/shared';
 /** KV key prefix for bootstrap tokens */
 const BOOTSTRAP_PREFIX = 'bootstrap:';
 
-/** Bootstrap token TTL in seconds (5 minutes) */
-const BOOTSTRAP_TTL = 300;
+/** Default bootstrap token TTL in seconds (5 minutes) */
+const DEFAULT_BOOTSTRAP_TTL = 300;
+
+/** Get bootstrap TTL from env or use default (per constitution principle XI) */
+export function getBootstrapTTL(env?: { BOOTSTRAP_TOKEN_TTL_SECONDS?: string }): number {
+  if (env?.BOOTSTRAP_TOKEN_TTL_SECONDS) {
+    const ttl = parseInt(env.BOOTSTRAP_TOKEN_TTL_SECONDS, 10);
+    if (!isNaN(ttl) && ttl > 0) {
+      return ttl;
+    }
+  }
+  return DEFAULT_BOOTSTRAP_TTL;
+}
 
 /**
  * Generate a cryptographically secure bootstrap token (UUID v4 format).
@@ -21,20 +32,23 @@ export function generateBootstrapToken(): string {
 }
 
 /**
- * Store bootstrap token data in KV with 5-minute TTL.
+ * Store bootstrap token data in KV with configurable TTL.
  * Token auto-expires after TTL, no cleanup needed.
  *
  * @param kv - Cloudflare KV namespace
  * @param token - Bootstrap token (UUID)
  * @param data - Credential data to store
+ * @param env - Environment for reading configurable TTL
  */
 export async function storeBootstrapToken(
   kv: KVNamespace,
   token: string,
-  data: BootstrapTokenData
+  data: BootstrapTokenData,
+  env?: { BOOTSTRAP_TOKEN_TTL_SECONDS?: string }
 ): Promise<void> {
+  const ttl = getBootstrapTTL(env);
   await kv.put(`${BOOTSTRAP_PREFIX}${token}`, JSON.stringify(data), {
-    expirationTtl: BOOTSTRAP_TTL,
+    expirationTtl: ttl,
   });
 }
 

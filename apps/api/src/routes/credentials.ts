@@ -59,10 +59,13 @@ credentialsRoutes.post('/', async (c) => {
   }
 
   // Validate the token
+  // Note: We sanitize error messages to avoid leaking details about the Hetzner API
   try {
     await validateHetznerToken(body.token);
   } catch (err) {
-    throw errors.badRequest(err instanceof Error ? err.message : 'Invalid token');
+    // Log the actual error for debugging, but return a generic message to the user
+    console.error('Hetzner token validation failed:', err instanceof Error ? err.message : err);
+    throw errors.badRequest('Invalid or unauthorized Hetzner API token');
   }
 
   // Encrypt the token

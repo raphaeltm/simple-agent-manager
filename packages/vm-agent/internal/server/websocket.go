@@ -5,18 +5,79 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		// Allow all origins for now, CORS middleware handles restrictions
-		return true
-	},
+// createUpgrader creates a WebSocket upgrader with proper origin validation.
+// WebSocket upgrades bypass CORS, so we must validate origins explicitly.
+// Buffer sizes are configurable via environment variables.
+func (s *Server) createUpgrader() websocket.Upgrader {
+	return websocket.Upgrader{
+		ReadBufferSize:  s.config.WSReadBufferSize,
+		WriteBufferSize: s.config.WSWriteBufferSize,
+		CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				// No origin header - likely same-origin or non-browser client
+				return true
+			}
+			return s.isOriginAllowed(origin)
+		},
+	}
+}
+
+// isOriginAllowed checks if the given origin is in the allowed list.
+// Supports wildcard patterns like "https://*.example.com".
+func (s *Server) isOriginAllowed(origin string) bool {
+	for _, allowed := range s.config.AllowedOrigins {
+		if allowed == "*" {
+			// Wildcard allows all - only for development
+			return true
+		}
+		if allowed == origin {
+			// Exact match
+			return true
+		}
+		// Check for wildcard subdomain pattern (e.g., "https://*.example.com")
+		if strings.Contains(allowed, "*") {
+			if matchWildcardOrigin(origin, allowed) {
+				return true
+			}
+		}
+	}
+	log.Printf("WebSocket origin rejected: %s (allowed: %v)", origin, s.config.AllowedOrigins)
+	return false
+}
+
+// matchWildcardOrigin checks if origin matches a wildcard pattern.
+// Pattern format: "https://*.example.com" matches "https://foo.example.com"
+func matchWildcardOrigin(origin, pattern string) bool {
+	// Split pattern at wildcard
+	parts := strings.SplitN(pattern, "*", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	prefix := parts[0] // e.g., "https://"
+	suffix := parts[1] // e.g., ".example.com"
+
+	// Origin must start with prefix and end with suffix
+	if !strings.HasPrefix(origin, prefix) {
+		return false
+	}
+	if !strings.HasSuffix(origin, suffix) {
+		return false
+	}
+
+	// The middle part (subdomain) must not contain "/"
+	middle := origin[len(prefix) : len(origin)-len(suffix)]
+	if strings.Contains(middle, "/") {
+		return false
+	}
+
+	return true
 }
 
 // WebSocket message types
@@ -61,7 +122,8 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Upgrade to WebSocket
+	// Upgrade to WebSocket with origin validation
+	upgrader := s.createUpgrader()
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade failed: %v", err)

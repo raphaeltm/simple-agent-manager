@@ -9,25 +9,39 @@ import { drizzle } from 'drizzle-orm/d1';
 import { eq, and, lt } from 'drizzle-orm';
 import * as schema from '../db/schema';
 
-/** Provisioning timeout in milliseconds (10 minutes) */
-const PROVISIONING_TIMEOUT_MS = 10 * 60 * 1000;
+/** Default provisioning timeout in milliseconds (10 minutes) */
+const DEFAULT_PROVISIONING_TIMEOUT_MS = 10 * 60 * 1000;
 
-/** Error message for timed out workspaces */
-const TIMEOUT_ERROR_MESSAGE = 'Provisioning timed out after 10 minutes';
+/**
+ * Get provisioning timeout from env or use default (per constitution principle XI).
+ */
+export function getProvisioningTimeoutMs(env?: { PROVISIONING_TIMEOUT_MS?: string }): number {
+  if (env?.PROVISIONING_TIMEOUT_MS) {
+    const timeout = parseInt(env.PROVISIONING_TIMEOUT_MS, 10);
+    if (!isNaN(timeout) && timeout > 0) {
+      return timeout;
+    }
+  }
+  return DEFAULT_PROVISIONING_TIMEOUT_MS;
+}
 
 /**
  * Check for and handle workspaces stuck in 'creating' status.
  * Marks them as 'error' with a descriptive message.
  *
  * @param database - D1 database binding
+ * @param env - Environment for reading configurable timeout
  * @returns Number of workspaces that timed out
  */
 export async function checkProvisioningTimeouts(
-  database: D1Database
+  database: D1Database,
+  env?: { PROVISIONING_TIMEOUT_MS?: string }
 ): Promise<number> {
   const db = drizzle(database, { schema });
   const now = new Date();
-  const cutoff = new Date(now.getTime() - PROVISIONING_TIMEOUT_MS);
+  const timeoutMs = getProvisioningTimeoutMs(env);
+  const cutoff = new Date(now.getTime() - timeoutMs);
+  const timeoutMinutes = Math.round(timeoutMs / 60000);
 
   // Find workspaces stuck in 'creating' status past timeout threshold
   const stuckWorkspaces = await db
@@ -45,12 +59,13 @@ export async function checkProvisioningTimeouts(
   }
 
   // Update all stuck workspaces to error status
+  const timeoutMessage = `Provisioning timed out after ${timeoutMinutes} minutes`;
   for (const workspace of stuckWorkspaces) {
     await db
       .update(schema.workspaces)
       .set({
         status: 'error',
-        errorMessage: TIMEOUT_ERROR_MESSAGE,
+        errorMessage: timeoutMessage,
         updatedAt: now.toISOString(),
       })
       .where(eq(schema.workspaces.id, workspace.id));

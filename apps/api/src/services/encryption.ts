@@ -50,27 +50,40 @@ export async function encrypt(
 /**
  * Decrypt a ciphertext string using AES-256-GCM.
  * Returns the original plaintext.
+ * Logs decryption failures for security monitoring.
  */
 export async function decrypt(
   ciphertext: string,
   iv: string,
   keyBase64: string
 ): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    base64ToBuffer(keyBase64),
-    { name: 'AES-GCM' },
-    false,
-    ['decrypt']
-  );
+  try {
+    const key = await crypto.subtle.importKey(
+      'raw',
+      base64ToBuffer(keyBase64),
+      { name: 'AES-GCM' },
+      false,
+      ['decrypt']
+    );
 
-  const decrypted = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: base64ToBuffer(iv) },
-    key,
-    base64ToBuffer(ciphertext)
-  );
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: base64ToBuffer(iv) },
+      key,
+      base64ToBuffer(ciphertext)
+    );
 
-  return new TextDecoder().decode(decrypted);
+    return new TextDecoder().decode(decrypted);
+  } catch (error) {
+    // Log decryption failures for security monitoring
+    // This could indicate key rotation issues, data corruption, or tampering
+    console.error('Decryption failed:', {
+      event: 'decryption_failure',
+      timestamp: new Date().toISOString(),
+      error: error instanceof Error ? error.message : 'unknown error',
+      // Don't log sensitive data like ciphertext or IV
+    });
+    throw error;
+  }
 }
 
 /**

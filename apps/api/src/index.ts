@@ -37,6 +37,14 @@ export interface Env {
   IDLE_TIMEOUT_SECONDS?: string;
   TERMINAL_TOKEN_EXPIRY_MS?: string;
   CALLBACK_TOKEN_EXPIRY_MS?: string;
+  BOOTSTRAP_TOKEN_TTL_SECONDS?: string;
+  PROVISIONING_TIMEOUT_MS?: string;
+  DNS_TTL_SECONDS?: string;
+  // Rate limiting (per hour)
+  RATE_LIMIT_WORKSPACE_CREATE?: string;
+  RATE_LIMIT_TERMINAL_TOKEN?: string;
+  RATE_LIMIT_CREDENTIAL_UPDATE?: string;
+  RATE_LIMIT_ANONYMOUS?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -68,9 +76,12 @@ app.get('/health', (c) => {
 });
 
 // JWKS endpoint (must be at root level)
+// Add cache headers per constitution principle XI
 app.get('/.well-known/jwks.json', async (c) => {
   const { getJWKS } = await import('./services/jwt');
   const jwks = await getJWKS(c.env);
+  c.header('Cache-Control', 'public, max-age=3600');
+  c.header('X-Content-Type-Options', 'nosniff');
   return c.json(jwks);
 });
 

@@ -31,14 +31,20 @@ type Server struct {
 
 // New creates a new server instance.
 func New(cfg *config.Config) (*Server, error) {
-	// Create JWT validator
-	jwtValidator, err := auth.NewJWTValidator(cfg.JWKSEndpoint, cfg.WorkspaceID)
+	// Create JWT validator with configurable issuer and audience
+	jwtValidator, err := auth.NewJWTValidator(cfg.JWKSEndpoint, cfg.WorkspaceID, cfg.JWTIssuer, cfg.JWTAudience)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create JWT validator: %w", err)
 	}
 
-	// Create session manager
-	sessionManager := auth.NewSessionManager(cfg.CookieName, cfg.CookieSecure, cfg.SessionTTL)
+	// Create session manager with full configuration
+	sessionManager := auth.NewSessionManagerWithConfig(auth.SessionManagerConfig{
+		CookieName:      cfg.CookieName,
+		Secure:          cfg.CookieSecure,
+		TTL:             cfg.SessionTTL,
+		CleanupInterval: cfg.SessionCleanupInterval,
+		MaxSessions:     cfg.SessionMaxCount,
+	})
 
 	// Create idle detector
 	idleDetector := idle.NewDetector(cfg.IdleTimeout, cfg.HeartbeatInterval, cfg.ControlPlaneURL, cfg.WorkspaceID, cfg.CallbackToken)
@@ -64,13 +70,13 @@ func New(cfg *config.Config) (*Server, error) {
 	mux := http.NewServeMux()
 	s.setupRoutes(mux)
 
-	// Create HTTP server
+	// Create HTTP server with configurable timeouts
 	s.httpServer = &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 		Handler:      corsMiddleware(mux, cfg.AllowedOrigins),
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  cfg.HTTPReadTimeout,
+		WriteTimeout: cfg.HTTPWriteTimeout,
+		IdleTimeout:  cfg.HTTPIdleTimeout,
 	}
 
 	return s, nil

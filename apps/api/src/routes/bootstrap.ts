@@ -14,6 +14,30 @@ import { decrypt } from '../services/encryption';
 export const bootstrapRoutes = new Hono<{ Bindings: Env }>();
 
 /**
+ * Log bootstrap redemption attempt for security auditing.
+ */
+function logBootstrapAttempt(
+  success: boolean,
+  ip: string,
+  workspaceId?: string,
+  tokenAge?: number
+): void {
+  const logEntry = {
+    event: 'bootstrap_redemption',
+    success,
+    ip,
+    workspaceId: workspaceId || 'unknown',
+    tokenAge: tokenAge !== undefined ? `${tokenAge}ms` : 'unknown',
+    timestamp: new Date().toISOString(),
+  };
+  if (success) {
+    console.log('Bootstrap token redeemed:', JSON.stringify(logEntry));
+  } else {
+    console.warn('Bootstrap token redemption failed:', JSON.stringify(logEntry));
+  }
+}
+
+/**
  * POST /api/bootstrap/:token
  *
  * Redeem a bootstrap token and receive decrypted credentials.
@@ -24,11 +48,14 @@ export const bootstrapRoutes = new Hono<{ Bindings: Env }>();
  */
 bootstrapRoutes.post('/:token', async (c) => {
   const token = c.req.param('token');
+  const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown';
+  const requestTime = Date.now();
 
   // Attempt to redeem token (get + delete)
   const tokenData = await redeemBootstrapToken(c.env.KV, token);
 
   if (!tokenData) {
+    logBootstrapAttempt(false, ip);
     return c.json(
       {
         error: 'INVALID_TOKEN',
@@ -37,6 +64,11 @@ bootstrapRoutes.post('/:token', async (c) => {
       401
     );
   }
+
+  // Calculate token age (time since token was created)
+  const tokenCreatedAt = tokenData.createdAt ? new Date(tokenData.createdAt).getTime() : undefined;
+  const tokenAge = tokenCreatedAt ? requestTime - tokenCreatedAt : undefined;
+  logBootstrapAttempt(true, ip, tokenData.workspaceId, tokenAge);
 
   // Decrypt the Hetzner token
   const hetznerToken = await decrypt(
