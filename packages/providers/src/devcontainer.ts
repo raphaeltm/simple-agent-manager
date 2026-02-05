@@ -31,8 +31,7 @@ const WORKSPACE_BASE_DIR = '/tmp/simple-agent-manager';
 
 /**
  * Default devcontainer.json for repositories without one.
- * Includes CloudCLI (claude-code-ui) for web-based Claude Code access.
- * See docs/architecture/cloudcli.md for details.
+ * Provides a standard development environment with Claude Code CLI.
  */
 const DEFAULT_DEVCONTAINER_CONFIG = {
   name: 'Simple Agent Manager Workspace',
@@ -40,22 +39,10 @@ const DEFAULT_DEVCONTAINER_CONFIG = {
   features: {
     'ghcr.io/devcontainers/features/git:1': {},
     'ghcr.io/devcontainers/features/node:1': { version: '22' },
+    'ghcr.io/anthropics/devcontainer-features/claude-code:1.0': {},
   },
   remoteUser: 'vscode',
-  // Install Claude Code and CloudCLI (claude-code-ui) for web access
-  postCreateCommand: 'npm install -g @anthropic-ai/claude-code @siteboon/claude-code-ui',
-  // Start CloudCLI on container start (binds to 0.0.0.0 by default)
-  postStartCommand: 'nohup cloudcli --port 3001 > /tmp/cloudcli.log 2>&1 &',
-  // Map port 3001 to host for direct browser access (no proxy needed)
-  runArgs: ['-p', '3001:3001'],
-  // CloudCLI runs on port 3001
-  forwardPorts: [3001],
-  portsAttributes: {
-    '3001': {
-      label: 'CloudCLI',
-      onAutoForward: 'notify',
-    },
-  },
+  postCreateCommand: 'claude --version',
 };
 
 /**
@@ -248,7 +235,6 @@ export class DevcontainerProvider implements Provider {
       workspaceId: config.workspaceId,
       containerId,
       ip: containerIp,
-      accessUrl: 'http://localhost:3001',
     });
 
     return instance;

@@ -52,6 +52,14 @@ type Config struct {
 	DefaultShell    string
 	DefaultRows     int
 	DefaultCols     int
+
+	// Container settings - exec into devcontainer instead of host shell
+	ContainerMode       bool
+	ContainerUser       string
+	ContainerWorkDir    string
+	ContainerLabelKey   string
+	ContainerLabelValue string
+	ContainerCacheTTL   time.Duration
 }
 
 // Load reads configuration from environment variables.
@@ -95,6 +103,13 @@ func Load() (*Config, error) {
 		DefaultShell:      getEnv("DEFAULT_SHELL", "/bin/bash"),
 		DefaultRows:       getEnvInt("DEFAULT_ROWS", 24),
 		DefaultCols:       getEnvInt("DEFAULT_COLS", 80),
+
+		ContainerMode:       getEnvBool("CONTAINER_MODE", true),
+		ContainerUser:       getEnv("CONTAINER_USER", "vscode"),
+		ContainerWorkDir:    getEnv("CONTAINER_WORK_DIR", "/workspaces"),
+		ContainerLabelKey:   getEnv("CONTAINER_LABEL_KEY", "devcontainer.local_folder"),
+		ContainerLabelValue: getEnv("CONTAINER_LABEL_VALUE", "/workspace"),
+		ContainerCacheTTL:   getEnvDuration("CONTAINER_CACHE_TTL", 30*time.Second),
 	}
 
 	// Validate required fields

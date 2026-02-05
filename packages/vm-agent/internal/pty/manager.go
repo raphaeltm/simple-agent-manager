@@ -9,35 +9,45 @@ import (
 	"time"
 )
 
+// ContainerResolver returns the current devcontainer ID.
+// Returns ("", nil) if container mode is disabled.
+type ContainerResolver func() (string, error)
+
 // Manager manages multiple PTY sessions.
 type Manager struct {
-	sessions     map[string]*Session
-	mu           sync.RWMutex
-	defaultShell string
-	defaultRows  int
-	defaultCols  int
-	workDir      string
-	onActivity   func() // Called when any session has activity
+	sessions           map[string]*Session
+	mu                 sync.RWMutex
+	defaultShell       string
+	defaultRows        int
+	defaultCols        int
+	workDir            string
+	onActivity         func() // Called when any session has activity
+	containerResolver  ContainerResolver
+	containerUser      string
 }
 
 // ManagerConfig holds configuration for the session manager.
 type ManagerConfig struct {
-	DefaultShell string
-	DefaultRows  int
-	DefaultCols  int
-	WorkDir      string
-	OnActivity   func()
+	DefaultShell      string
+	DefaultRows       int
+	DefaultCols       int
+	WorkDir           string
+	OnActivity        func()
+	ContainerResolver ContainerResolver
+	ContainerUser     string
 }
 
 // NewManager creates a new session manager.
 func NewManager(cfg ManagerConfig) *Manager {
 	return &Manager{
-		sessions:     make(map[string]*Session),
-		defaultShell: cfg.DefaultShell,
-		defaultRows:  cfg.DefaultRows,
-		defaultCols:  cfg.DefaultCols,
-		workDir:      cfg.WorkDir,
-		onActivity:   cfg.OnActivity,
+		sessions:          make(map[string]*Session),
+		defaultShell:      cfg.DefaultShell,
+		defaultRows:       cfg.DefaultRows,
+		defaultCols:       cfg.DefaultCols,
+		workDir:           cfg.WorkDir,
+		onActivity:        cfg.OnActivity,
+		containerResolver: cfg.ContainerResolver,
+		containerUser:     cfg.ContainerUser,
 	}
 }
 
@@ -55,13 +65,24 @@ func (m *Manager) CreateSession(userID string, rows, cols int) (*Session, error)
 		cols = m.defaultCols
 	}
 
+	// Resolve container ID if container mode is active
+	var containerID string
+	if m.containerResolver != nil {
+		containerID, err = m.containerResolver()
+		if err != nil {
+			return nil, fmt.Errorf("devcontainer not available: %w", err)
+		}
+	}
+
 	session, err := NewSession(SessionConfig{
-		ID:      sessionID,
-		UserID:  userID,
-		Shell:   m.defaultShell,
-		Rows:    rows,
-		Cols:    cols,
-		WorkDir: m.workDir,
+		ID:            sessionID,
+		UserID:        userID,
+		Shell:         m.defaultShell,
+		Rows:          rows,
+		Cols:          cols,
+		WorkDir:       m.workDir,
+		ContainerID:   containerID,
+		ContainerUser: m.containerUser,
 		OnClose: func() {
 			m.removeSession(sessionID)
 		},

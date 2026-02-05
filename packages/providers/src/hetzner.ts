@@ -160,36 +160,11 @@ package_update: true
 packages:
   - docker.io
   - docker-compose
-  - caddy
   - jq
   - curl
   - git
 
 write_files:
-  - path: /etc/caddy/Caddyfile
-    content: |
-      {
-        email admin@${config.baseDomain}
-      }
-
-      *.${config.workspaceId}.vm.${config.baseDomain} {
-        tls {
-          dns cloudflare {env.CF_API_TOKEN}
-        }
-
-        @ui host ui.${config.workspaceId}.vm.${config.baseDomain}
-        handle @ui {
-          basicauth {
-            admin $HASHED_PASSWORD
-          }
-          reverse_proxy localhost:3001
-        }
-
-        handle {
-          respond "Not Found" 404
-        }
-      }
-
   - path: /etc/workspace/config
     permissions: '0600'
     content: |
@@ -198,7 +173,6 @@ write_files:
       BASE_DOMAIN=${config.baseDomain}
       API_URL=${config.apiUrl}
       API_TOKEN=${config.apiToken}
-      AUTH_PASSWORD=${config.authPassword}
       # Note: ANTHROPIC_API_KEY is NOT set - users authenticate via 'claude login'
       ${config.githubToken ? `GITHUB_TOKEN=${config.githubToken}` : '# No GitHub token (public repo)'}
 
@@ -214,8 +188,8 @@ write_files:
 
       is_active() {
         [ -n "$(find /workspace -type f -mmin -$CHECK_INTERVAL 2>/dev/null | head -1)" ] && return 0
-        pgrep -f "claude|@anthropic-ai|claude-code-ui" >/dev/null && return 0
-        [ "$(ss -tnp 2>/dev/null | grep -c ':3001.*ESTAB')" -gt 0 ] && return 0
+        docker exec $(docker ps -q --filter "label=devcontainer.local_folder=/workspace" | head -1) pgrep -f "claude|node" >/dev/null 2>&1 && return 0
+        [ "$(ss -tnp 2>/dev/null | grep -c ':8080.*ESTAB')" -gt 0 ] && return 0
         [ "$(who | wc -l)" -gt 0 ] && return 0
         return 1
       }
@@ -254,28 +228,6 @@ runcmd:
   # Install devcontainer CLI
   - npm install -g @devcontainers/cli
 
-  # Install CloudCLI
-  - npm install -g @siteboon/claude-code-ui
-
-  # Clone repository (uses git credentials if GITHUB_TOKEN is set)
-  - |
-    source /etc/workspace/config
-    if [ -n "$GITHUB_TOKEN" ]; then
-      # For private repos, use the token for authentication
-      REPO_URL_WITH_TOKEN=$(echo "${config.repoUrl}" | sed "s|https://github.com|https://x-access-token:$GITHUB_TOKEN@github.com|")
-      git clone "$REPO_URL_WITH_TOKEN" /workspace || mkdir -p /workspace
-    else
-      git clone ${config.repoUrl} /workspace || mkdir -p /workspace
-    fi
-
-  # Generate hashed password for Caddy
-  - export HASHED_PASSWORD=$(caddy hash-password --plaintext '${config.authPassword}')
-  - envsubst < /etc/caddy/Caddyfile > /etc/caddy/Caddyfile.tmp && mv /etc/caddy/Caddyfile.tmp /etc/caddy/Caddyfile
-
-  # Start Caddy
-  - systemctl enable caddy
-  - systemctl start caddy
-
   # Configure git credentials if GitHub token provided (for private repos)
   - |
     source /etc/workspace/config
@@ -285,8 +237,17 @@ runcmd:
       chmod 600 ~/.git-credentials
     fi
 
+  # Clone repository (uses git credentials if GITHUB_TOKEN is set)
+  - |
+    source /etc/workspace/config
+    if [ -n "$GITHUB_TOKEN" ]; then
+      REPO_URL_WITH_TOKEN=$(echo "${config.repoUrl}" | sed "s|https://github.com|https://x-access-token:$GITHUB_TOKEN@github.com|")
+      git clone "$REPO_URL_WITH_TOKEN" /workspace || mkdir -p /workspace
+    else
+      git clone ${config.repoUrl} /workspace || mkdir -p /workspace
+    fi
+
   # Setup devcontainer if exists, otherwise use default
-  # Note: ANTHROPIC_API_KEY is NOT set - users authenticate via 'claude login' in CloudCLI terminal
   - |
     if [ ! -f /workspace/.devcontainer/devcontainer.json ]; then
       mkdir -p /workspace/.devcontainer
@@ -308,9 +269,6 @@ runcmd:
 
   # Start devcontainer
   - cd /workspace && devcontainer up --workspace-folder .
-
-  # Start CloudCLI (in the devcontainer context)
-  - claude-code-ui --port 3001 --workspace /workspace &
 
   # Setup idle check cron
   - echo "*/5 * * * * root /usr/local/bin/idle-check.sh" > /etc/cron.d/idle-check

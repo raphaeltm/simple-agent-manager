@@ -9,4 +9,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 )
 
-require github.com/MicahParks/jwkset v0.5.19 // indirect
+require (
+	github.com/MicahParks/jwkset v0.5.19 // indirect
+	golang.org/x/time v0.5.0 // indirect
+)
