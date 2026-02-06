@@ -8,10 +8,10 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"time"
 
 	"github.com/workspace/vm-agent/internal/auth"
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/idle"
 	"github.com/workspace/vm-agent/internal/pty"
 )
@@ -49,13 +49,34 @@ func New(cfg *config.Config) (*Server, error) {
 	// Create idle detector
 	idleDetector := idle.NewDetector(cfg.IdleTimeout, cfg.HeartbeatInterval, cfg.ControlPlaneURL, cfg.WorkspaceID, cfg.CallbackToken)
 
+	// Setup container discovery for devcontainer exec
+	var containerResolver pty.ContainerResolver
+	containerWorkDir := "/workspace" // host fallback
+	containerUser := ""
+
+	if cfg.ContainerMode {
+		discovery := container.NewDiscovery(container.Config{
+			LabelKey:   cfg.ContainerLabelKey,
+			LabelValue: cfg.ContainerLabelValue,
+			CacheTTL:   cfg.ContainerCacheTTL,
+		})
+		containerResolver = discovery.GetContainerID
+		containerWorkDir = cfg.ContainerWorkDir
+		containerUser = cfg.ContainerUser
+		log.Printf("Container mode enabled: user=%s, workDir=%s", containerUser, containerWorkDir)
+	} else {
+		log.Printf("Container mode disabled: PTY sessions will run on host")
+	}
+
 	// Create PTY manager
 	ptyManager := pty.NewManager(pty.ManagerConfig{
-		DefaultShell: cfg.DefaultShell,
-		DefaultRows:  cfg.DefaultRows,
-		DefaultCols:  cfg.DefaultCols,
-		WorkDir:      "/workspace",
-		OnActivity:   idleDetector.RecordActivity,
+		DefaultShell:      cfg.DefaultShell,
+		DefaultRows:       cfg.DefaultRows,
+		DefaultCols:       cfg.DefaultCols,
+		WorkDir:           containerWorkDir,
+		OnActivity:        idleDetector.RecordActivity,
+		ContainerResolver: containerResolver,
+		ContainerUser:     containerUser,
 	})
 
 	s := &Server{
