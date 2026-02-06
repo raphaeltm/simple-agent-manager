@@ -4,7 +4,7 @@ import type { VMSize } from '@simple-agent-manager/shared';
  * Configuration for creating a VM
  *
  * Note: anthropicApiKey is NOT included.
- * Users authenticate via `claude login` in CloudCLI terminal.
+ * Users authenticate via `claude login` in the terminal.
  * ANTHROPIC_API_KEY env var must NOT be set on VMs.
  */
 export interface VMConfig {

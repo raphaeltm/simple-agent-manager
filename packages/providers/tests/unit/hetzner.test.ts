@@ -62,8 +62,6 @@ describe('HetznerProvider', () => {
   });
 
   describe('generateCloudInit', () => {
-    // Note: anthropicApiKey removed (2026-01-25)
-    // Users authenticate via 'claude login' in CloudCLI terminal
     const vmConfig: VMConfig = {
       workspaceId: 'ws-abc123',
       name: 'test-project',
@@ -104,15 +102,18 @@ describe('HetznerProvider', () => {
       expect(cloudInit).toContain('@devcontainers/cli');
     });
 
-    it('should include CloudCLI installation', () => {
+    it('should NOT include CloudCLI (removed)', () => {
       const cloudInit = provider.generateCloudInit(vmConfig);
-      expect(cloudInit).toContain('@siteboon/claude-code-ui');
+      expect(cloudInit).not.toContain('@siteboon/claude-code-ui');
+      expect(cloudInit).not.toContain('claude-code-ui');
+      expect(cloudInit).not.toContain('cloudcli');
+      expect(cloudInit).not.toContain('reverse_proxy localhost:3001');
     });
 
-    it('should include Caddy configuration', () => {
+    it('should check devcontainer processes for idle detection', () => {
       const cloudInit = provider.generateCloudInit(vmConfig);
-      expect(cloudInit).toContain('/etc/caddy/Caddyfile');
-      expect(cloudInit).toContain('reverse_proxy localhost:3001');
+      expect(cloudInit).toContain('docker exec');
+      expect(cloudInit).toContain('devcontainer.local_folder');
     });
 
     it('should setup cron for idle check', () => {
@@ -149,8 +150,6 @@ describe('HetznerProvider', () => {
   });
 
   describe('createVM', () => {
-    // Note: anthropicApiKey removed (2026-01-25)
-    // Users authenticate via 'claude login' in CloudCLI terminal
     const vmConfig: VMConfig = {
       workspaceId: 'ws-abc123',
       name: 'test-project',

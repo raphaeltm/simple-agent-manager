@@ -27,14 +27,16 @@ type Session struct {
 
 // SessionConfig holds configuration for creating a new session.
 type SessionConfig struct {
-	ID       string
-	UserID   string
-	Shell    string
-	Rows     int
-	Cols     int
-	Env      []string
-	WorkDir  string
-	OnClose  func()
+	ID            string
+	UserID        string
+	Shell         string
+	Rows          int
+	Cols          int
+	Env           []string
+	WorkDir       string
+	OnClose       func()
+	ContainerID   string // If set, exec into this Docker container
+	ContainerUser string // User to run as inside the container
 }
 
 // NewSession creates a new PTY session.
@@ -54,14 +56,33 @@ func NewSession(cfg SessionConfig) (*Session, error) {
 		cols = 80
 	}
 
-	cmd := exec.Command(shell)
-	cmd.Env = append(os.Environ(), cfg.Env...)
-	if cfg.WorkDir != "" {
-		cmd.Dir = cfg.WorkDir
-	}
+	var cmd *exec.Cmd
 
-	// Set TERM for proper terminal handling
-	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
+	if cfg.ContainerID != "" {
+		// Exec into the devcontainer via docker exec
+		args := []string{"exec", "-it"}
+		if cfg.ContainerUser != "" {
+			args = append(args, "-u", cfg.ContainerUser)
+		}
+		if cfg.WorkDir != "" {
+			args = append(args, "-w", cfg.WorkDir)
+		}
+		// Pass environment variables into the container
+		for _, env := range cfg.Env {
+			args = append(args, "-e", env)
+		}
+		args = append(args, "-e", "TERM=xterm-256color")
+		args = append(args, cfg.ContainerID, shell)
+		cmd = exec.Command("docker", args...)
+	} else {
+		// Direct host shell (fallback)
+		cmd = exec.Command(shell)
+		cmd.Env = append(os.Environ(), cfg.Env...)
+		cmd.Env = append(cmd.Env, "TERM=xterm-256color")
+		if cfg.WorkDir != "" {
+			cmd.Dir = cfg.WorkDir
+		}
+	}
 
 	// Start PTY
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{

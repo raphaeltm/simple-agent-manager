@@ -6,36 +6,11 @@ package_update: true
 packages:
   - docker.io
   - docker-compose
-  - caddy
   - jq
   - curl
   - git
 
 write_files:
-  - path: /etc/caddy/Caddyfile
-    content: |
-      {
-        email admin@${BASE_DOMAIN}
-      }
-
-      *.${WORKSPACE_ID}.vm.${BASE_DOMAIN} {
-        tls {
-          dns cloudflare {env.CF_API_TOKEN}
-        }
-
-        @ui host ui.${WORKSPACE_ID}.vm.${BASE_DOMAIN}
-        handle @ui {
-          basicauth {
-            admin $HASHED_PASSWORD
-          }
-          reverse_proxy localhost:3001
-        }
-
-        handle {
-          respond "Not Found" 404
-        }
-      }
-
   - path: /etc/workspace/config
     permissions: '0600'
     content: |
@@ -44,8 +19,6 @@ write_files:
       BASE_DOMAIN=${BASE_DOMAIN}
       API_URL=${API_URL}
       API_TOKEN=${API_TOKEN}
-      AUTH_PASSWORD=${AUTH_PASSWORD}
-      ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
 
   - path: /usr/local/bin/idle-check.sh
     permissions: '0755'
@@ -62,17 +35,14 @@ write_files:
         # 1. Recent file changes in workspace
         [ -n "$(find /workspace -type f -mmin -$CHECK_INTERVAL 2>/dev/null | head -1)" ] && return 0
 
-        # 2. Active Claude/Node processes
-        pgrep -f "claude|@anthropic-ai|claude-code-ui" >/dev/null && return 0
+        # 2. Active Claude/Node processes (check inside devcontainer)
+        docker exec $(docker ps -q --filter "label=devcontainer.local_folder=/workspace" | head -1) pgrep -f "claude|node" >/dev/null 2>&1 && return 0
 
-        # 3. Active web connections (CloudCLI on port 3001)
-        [ "$(ss -tnp 2>/dev/null | grep -c ':3001.*ESTAB')" -gt 0 ] && return 0
+        # 3. Active VM agent WebSocket connections (port 8080)
+        [ "$(ss -tnp 2>/dev/null | grep -c ':8080.*ESTAB')" -gt 0 ] && return 0
 
         # 4. SSH sessions
         [ "$(who | wc -l)" -gt 0 ] && return 0
-
-        # 5. Recent Claude session activity
-        [ -n "$(find ~/.claude/sessions -type f -mmin -$CHECK_INTERVAL 2>/dev/null | head -1)" ] && return 0
 
         return 1
       }
@@ -120,19 +90,8 @@ runcmd:
   # Install devcontainer CLI
   - npm install -g @devcontainers/cli
 
-  # Install CloudCLI
-  - npm install -g @siteboon/claude-code-ui
-
   # Clone repository
   - git clone ${REPO_URL} /workspace || mkdir -p /workspace
-
-  # Generate hashed password for Caddy
-  - export HASHED_PASSWORD=$(caddy hash-password --plaintext '${AUTH_PASSWORD}')
-  - envsubst < /etc/caddy/Caddyfile > /etc/caddy/Caddyfile.tmp && mv /etc/caddy/Caddyfile.tmp /etc/caddy/Caddyfile
-
-  # Start Caddy
-  - systemctl enable caddy
-  - systemctl start caddy
 
   # Setup devcontainer if doesn't exist
   - |
@@ -148,9 +107,6 @@ runcmd:
           "ghcr.io/devcontainers/features/node:1": { "version": "22" },
           "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
         },
-        "containerEnv": {
-          "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"
-        },
         "postCreateCommand": "claude --version",
         "remoteUser": "vscode"
       }
@@ -159,9 +115,6 @@ runcmd:
 
   # Start devcontainer
   - cd /workspace && devcontainer up --workspace-folder .
-
-  # Start CloudCLI
-  - claude-code-ui --port 3001 --workspace /workspace &
 
   # Setup idle check cron (every 5 minutes)
   - echo "*/5 * * * * root /usr/local/bin/idle-check.sh" > /etc/cron.d/idle-check

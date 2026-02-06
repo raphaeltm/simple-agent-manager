@@ -1,29 +1,19 @@
-# CloudCLI - DEPRECATED
+# CloudCLI - REMOVED
 
-> **Status: DEPRECATED** - We are no longer using CloudCLI. See [Browser Terminal Architecture](../../research/browser-terminal-options.md) for the replacement approach.
+> **Status: REMOVED** - CloudCLI has been fully removed from the codebase.
 
-## Why We Moved Away
+## Why It Was Removed
 
-CloudCLI (claude-code-ui) proved unstable and overly complex for our needs. We've replaced it with a simpler architecture using **ttyd** - a lightweight terminal server that provides browser-based terminal access directly into devcontainers.
+CloudCLI (`@siteboon/claude-code-ui`) was a third-party terminal UI that proved unstable and overly complex. It has been replaced by:
 
-## New Architecture
+1. **VM Agent's embedded terminal UI** - A lightweight xterm.js frontend served by the Go VM Agent
+2. **Control plane embedded terminal** - The `@simple-agent-manager/terminal` package used in the web dashboard
+
+## Current Architecture
 
 ```
-Browser ──HTTPS──► Cloudflare ──HTTP──► VM:7681 ──► devcontainer
-        (xterm.js)   (proxy)           (ttyd)      (Claude Code CLI)
+Browser ──WebSocket──► VM Agent (port 8080) ──docker exec──► devcontainer
+        (xterm.js)         (Go, PTY mgmt)                    (default user)
 ```
 
-Key benefits of the new approach:
-- Battle-tested components (ttyd, xterm.js)
-- Simpler architecture with fewer moving parts
-- Terminal runs on host, executes into container via `devcontainer exec`
-- No custom UI to maintain
-
-## Historical Reference
-
-CloudCLI was:
-- Package: `@siteboon/claude-code-ui`
-- Port: 3001
-- GitHub: https://github.com/siteboon/claudecodeui
-
-This information is preserved for historical context only. Do not use CloudCLI for new development.
+All terminal sessions exec into the devcontainer as the configured user (default: `vscode`), ensuring commands run in the correct environment with the right tools installed.
