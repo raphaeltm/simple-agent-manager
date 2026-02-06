@@ -13,9 +13,7 @@
 		// Go for VM Agent development
 		"ghcr.io/devcontainers/features/go:1": {
 			"version": "1.22"
-		},
-		// Devcontainer CLI for testing devcontainer definitions
-		"ghcr.io/devcontainers/features/devcontainer-cli:0": {}
+		}
 	},
 	// Ports for local development
 	"forwardPorts": [
