@@ -45,6 +45,7 @@ Improvements to user experience and reliability:
 - [ ] Persistent storage (R2)
 - [ ] Cost estimation display
 - [ ] Configurable subdomains (api/app/workspace prefixes)
+- [ ] Caddy on VMs for TLS cert provisioning (Let's Encrypt) — enables multi-level subdomain BASE_DOMAINs (e.g., `sam.company.com`) that Cloudflare free Universal SSL doesn't cover
 
 ## Planned: Multi-Tenancy (Phase 4)
 
