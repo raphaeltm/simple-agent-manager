@@ -140,6 +140,129 @@ export const workspaces = sqliteTable('workspaces', {
   updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+// =============================================================================
+// UI Governance
+// =============================================================================
+export const uiStandards = sqliteTable('ui_standards', {
+  id: text('id').primaryKey(),
+  version: text('version').notNull().unique(),
+  status: text('status').notNull(),
+  name: text('name').notNull(),
+  visualDirection: text('visual_direction').notNull(),
+  mobileFirstRulesRef: text('mobile_first_rules_ref').notNull(),
+  accessibilityRulesRef: text('accessibility_rules_ref').notNull(),
+  ownerRole: text('owner_role').notNull(),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  statusIdx: index('idx_ui_standards_status').on(table.status),
+}));
+
+export const themeTokens = sqliteTable('theme_tokens', {
+  id: text('id').primaryKey(),
+  standardId: text('standard_id').notNull().references(() => uiStandards.id, { onDelete: 'cascade' }),
+  tokenNamespace: text('token_namespace').notNull(),
+  tokenName: text('token_name').notNull(),
+  tokenValue: text('token_value').notNull(),
+  mode: text('mode').notNull().default('default'),
+  isDeprecated: integer('is_deprecated', { mode: 'boolean' }).notNull().default(false),
+  replacementToken: text('replacement_token'),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  standardIdIdx: index('idx_theme_tokens_standard_id').on(table.standardId),
+}));
+
+export const componentDefinitions = sqliteTable('component_definitions', {
+  id: text('id').primaryKey(),
+  standardId: text('standard_id').notNull().references(() => uiStandards.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  category: text('category').notNull(),
+  supportedSurfacesJson: text('supported_surfaces_json').notNull(),
+  requiredStatesJson: text('required_states_json').notNull(),
+  usageGuidance: text('usage_guidance').notNull(),
+  accessibilityNotes: text('accessibility_notes').notNull(),
+  mobileBehavior: text('mobile_behavior').notNull(),
+  desktopBehavior: text('desktop_behavior').notNull(),
+  status: text('status').notNull(),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  standardIdIdx: index('idx_component_defs_standard_id').on(table.standardId),
+}));
+
+export const complianceChecklists = sqliteTable('compliance_checklists', {
+  id: text('id').primaryKey(),
+  standardId: text('standard_id').notNull().references(() => uiStandards.id, { onDelete: 'cascade' }),
+  version: text('version').notNull(),
+  itemsJson: text('items_json').notNull(),
+  appliesToJson: text('applies_to_json').notNull(),
+  isActive: integer('is_active', { mode: 'boolean' }).notNull().default(false),
+  publishedAt: text('published_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  standardIdIdx: index('idx_checklists_standard_id').on(table.standardId),
+}));
+
+export const agentInstructionSets = sqliteTable('agent_instruction_sets', {
+  id: text('id').primaryKey(),
+  standardId: text('standard_id').notNull().references(() => uiStandards.id, { onDelete: 'cascade' }),
+  version: text('version').notNull(),
+  instructionBlocksJson: text('instruction_blocks_json').notNull(),
+  examplesRef: text('examples_ref'),
+  requiredChecklistVersion: text('required_checklist_version').notNull(),
+  isActive: integer('is_active', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  standardIdIdx: index('idx_instruction_sets_standard_id').on(table.standardId),
+}));
+
+export const exceptionRequests = sqliteTable('exception_requests', {
+  id: text('id').primaryKey(),
+  standardId: text('standard_id').notNull().references(() => uiStandards.id, { onDelete: 'cascade' }),
+  requestedBy: text('requested_by').notNull(),
+  rationale: text('rationale').notNull(),
+  scope: text('scope').notNull(),
+  expirationDate: text('expiration_date').notNull(),
+  approver: text('approver'),
+  status: text('status').notNull(),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  standardIdIdx: index('idx_exception_requests_standard_id').on(table.standardId),
+}));
+
+export const complianceRuns = sqliteTable('compliance_runs', {
+  id: text('id').primaryKey(),
+  standardId: text('standard_id').notNull().references(() => uiStandards.id, { onDelete: 'cascade' }),
+  checklistVersion: text('checklist_version').notNull(),
+  authorType: text('author_type').notNull(),
+  changeRef: text('change_ref').notNull(),
+  status: text('status').notNull(),
+  findingsJson: text('findings_json'),
+  reviewedBy: text('reviewed_by'),
+  exceptionRequestId: text('exception_request_id').references(() => exceptionRequests.id, { onDelete: 'set null' }),
+  completedAt: text('completed_at'),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  standardIdIdx: index('idx_compliance_runs_standard_id').on(table.standardId),
+}));
+
+export const migrationWorkItems = sqliteTable('migration_work_items', {
+  id: text('id').primaryKey(),
+  standardId: text('standard_id').notNull().references(() => uiStandards.id, { onDelete: 'cascade' }),
+  surface: text('surface').notNull(),
+  targetRef: text('target_ref').notNull(),
+  priority: text('priority').notNull(),
+  status: text('status').notNull(),
+  owner: text('owner').notNull(),
+  dueMilestone: text('due_milestone'),
+  notes: text('notes'),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  standardIdIdx: index('idx_migration_items_standard_id').on(table.standardId),
+}));
+
 // Type exports for inference
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -149,3 +272,19 @@ export type GitHubInstallation = typeof githubInstallations.$inferSelect;
 export type NewGitHubInstallation = typeof githubInstallations.$inferInsert;
 export type Workspace = typeof workspaces.$inferSelect;
 export type NewWorkspace = typeof workspaces.$inferInsert;
+export type UIStandard = typeof uiStandards.$inferSelect;
+export type NewUIStandard = typeof uiStandards.$inferInsert;
+export type ThemeToken = typeof themeTokens.$inferSelect;
+export type NewThemeToken = typeof themeTokens.$inferInsert;
+export type ComponentDefinition = typeof componentDefinitions.$inferSelect;
+export type NewComponentDefinition = typeof componentDefinitions.$inferInsert;
+export type ComplianceChecklist = typeof complianceChecklists.$inferSelect;
+export type NewComplianceChecklist = typeof complianceChecklists.$inferInsert;
+export type AgentInstructionSet = typeof agentInstructionSets.$inferSelect;
+export type NewAgentInstructionSet = typeof agentInstructionSets.$inferInsert;
+export type ExceptionRequest = typeof exceptionRequests.$inferSelect;
+export type NewExceptionRequest = typeof exceptionRequests.$inferInsert;
+export type ComplianceRun = typeof complianceRuns.$inferSelect;
+export type NewComplianceRun = typeof complianceRuns.$inferInsert;
+export type MigrationWorkItem = typeof migrationWorkItems.$inferSelect;
+export type NewMigrationWorkItem = typeof migrationWorkItems.$inferInsert;

@@ -1,0 +1,29 @@
+:root {
+  --sam-color-bg-canvas: #0b1110;
+  --sam-color-bg-surface: #13201d;
+  --sam-color-fg-primary: #e6f2ee;
+  --sam-color-fg-muted: #9fb7ae;
+  --sam-color-border-default: #29423b;
+  --sam-color-accent-primary: #16a34a;
+  --sam-color-accent-primary-hover: #15803d;
+  --sam-color-success: #22c55e;
+  --sam-color-warning: #f59e0b;
+  --sam-color-danger: #ef4444;
+  --sam-color-focus-ring: #34d399;
+
+  --sam-space-1: 4px;
+  --sam-space-2: 8px;
+  --sam-space-3: 12px;
+  --sam-space-4: 16px;
+  --sam-space-6: 24px;
+  --sam-space-8: 32px;
+
+  --sam-radius-sm: 6px;
+  --sam-radius-md: 10px;
+  --sam-radius-lg: 14px;
+}
+
+[data-ui-theme='sam'] {
+  color: var(--sam-color-fg-primary);
+  background-color: var(--sam-color-bg-canvas);
+}

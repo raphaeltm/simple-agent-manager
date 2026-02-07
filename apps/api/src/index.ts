@@ -10,6 +10,7 @@ import { terminalRoutes } from './routes/terminal';
 import { agentRoutes } from './routes/agent';
 import { agentsCatalogRoutes } from './routes/agents-catalog';
 import { bootstrapRoutes } from './routes/bootstrap';
+import { uiGovernanceRoutes } from './routes/ui-governance';
 import { checkProvisioningTimeouts } from './services/timeout';
 
 // Cloudflare bindings type
@@ -116,6 +117,7 @@ app.route('/api/terminal', terminalRoutes);
 app.route('/api/agent', agentRoutes);
 app.route('/api/agents', agentsCatalogRoutes);
 app.route('/api/bootstrap', bootstrapRoutes);
+app.route('/api/ui-governance', uiGovernanceRoutes);
 
 // 404 handler
 app.notFound((c) => {

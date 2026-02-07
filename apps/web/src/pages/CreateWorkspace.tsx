@@ -8,6 +8,7 @@ import {
   listCredentials,
 } from '../lib/api';
 import type { GitHubInstallation } from '@simple-agent-manager/shared';
+import { Button, Card, Input } from '@simple-agent-manager/ui';
 
 const VM_SIZES = [
   { value: 'small', label: 'Small', description: '2 vCPUs, 4GB RAM' },
@@ -127,7 +128,7 @@ export function CreateWorkspace() {
       {/* Main content */}
       <main className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {!canCreate ? (
-          <div className="bg-white rounded-lg shadow p-6">
+          <Card className="p-6">
             <div className="text-center py-8">
               <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -162,14 +163,15 @@ export function CreateWorkspace() {
                   <span>Install GitHub App</span>
                 </li>
               </ul>
-              <button
+              <Button
                 onClick={() => navigate('/settings')}
-                className="mt-6 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                className="mt-6"
+                size="lg"
               >
                 Go to Settings
-              </button>
+              </Button>
             </div>
-          </div>
+          </Card>
         ) : (
           <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow p-6 space-y-6">
             {error && (
@@ -182,13 +184,13 @@ export function CreateWorkspace() {
               <label htmlFor="name" className="block text-sm font-medium text-gray-700">
                 Workspace Name
               </label>
-              <input
+              <Input
                 id="name"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="my-project"
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                className="mt-1"
                 required
                 maxLength={64}
               />
@@ -210,13 +212,13 @@ export function CreateWorkspace() {
               <label htmlFor="branch" className="block text-sm font-medium text-gray-700">
                 Branch
               </label>
-              <input
+              <Input
                 id="branch"
                 type="text"
                 value={branch}
                 onChange={(e) => setBranch(e.target.value)}
                 placeholder="main"
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                className="mt-1"
               />
             </div>
 
@@ -282,20 +284,22 @@ export function CreateWorkspace() {
             </div>
 
             <div className="flex justify-end space-x-3 pt-4">
-              <button
+              <Button
                 type="button"
                 onClick={() => navigate('/dashboard')}
-                className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+                variant="secondary"
+                size="md"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
                 disabled={loading || !name || !repository}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                size="lg"
+                loading={loading}
               >
-                {loading ? 'Creating...' : 'Create Workspace'}
-              </button>
+                Create Workspace
+              </Button>
             </div>
           </form>
         )}
