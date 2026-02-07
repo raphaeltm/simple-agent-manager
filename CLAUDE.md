@@ -200,8 +200,9 @@ packages/
 ├── shared/       # Shared types and utilities
 ├── providers/    # Cloud provider abstraction (Hetzner)
 ├── terminal/     # Shared terminal component (@simple-agent-manager/terminal)
+├── acp-client/   # ACP client hooks and components (@simple-agent-manager/acp-client)
 ├── cloud-init/   # Cloud-init template generator
-└── vm-agent/     # Go VM agent (PTY, WebSocket, idle detection)
+└── vm-agent/     # Go VM agent (PTY, WebSocket, idle detection, ACP gateway)
 
 scripts/
 └── vm/           # VM-side scripts (cloud-init, idle detection)
@@ -333,6 +334,16 @@ You can also trigger deployment manually via GitHub Actions → Deploy → Run w
 ### Credentials
 - `GET /api/credentials` - Get user's cloud provider credentials (encrypted)
 - `PUT /api/credentials` - Save cloud provider credentials
+
+### Agent Credentials
+- `GET /api/agents` - List agent catalog with user's configured status
+- `GET /api/credentials/agent` - List user's agent API keys (masked)
+- `PUT /api/credentials/agent` - Save/update an agent API key
+- `DELETE /api/credentials/agent/:agentType` - Remove an agent API key
+- `POST /api/workspaces/:id/agent-key` - Fetch decrypted agent key (VM Agent internal)
+
+### VM Agent Endpoints (on workspace VM)
+- `GET /agent/ws` - ACP gateway WebSocket (browser-to-agent bridge)
 
 ### GitHub Integration
 - `GET /api/github/installations` - List user's GitHub App installations

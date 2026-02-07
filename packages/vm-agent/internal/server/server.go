@@ -8,7 +8,9 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"sync"
 
+	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/auth"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/container"
@@ -27,6 +29,9 @@ type Server struct {
 	sessionManager *auth.SessionManager
 	ptyManager     *pty.Manager
 	idleDetector   *idle.Detector
+	acpConfig      acp.GatewayConfig
+	acpMu          sync.Mutex
+	acpActive      bool
 }
 
 // New creates a new server instance.
@@ -79,12 +84,26 @@ func New(cfg *config.Config) (*Server, error) {
 		ContainerUser:     containerUser,
 	})
 
+	// Build ACP gateway configuration
+	acpGatewayConfig := acp.GatewayConfig{
+		InitTimeoutMs:      cfg.ACPInitTimeoutMs,
+		MaxRestartAttempts: cfg.ACPMaxRestartAttempts,
+		ControlPlaneURL:    cfg.ControlPlaneURL,
+		WorkspaceID:        cfg.WorkspaceID,
+		CallbackToken:      cfg.CallbackToken,
+		ContainerResolver:  containerResolver,
+		ContainerUser:      containerUser,
+		ContainerWorkDir:   containerWorkDir,
+		OnActivity:         idleDetector.RecordActivity,
+	}
+
 	s := &Server{
 		config:         cfg,
 		jwtValidator:   jwtValidator,
 		sessionManager: sessionManager,
 		ptyManager:     ptyManager,
 		idleDetector:   idleDetector,
+		acpConfig:      acpGatewayConfig,
 	}
 
 	// Setup routes
@@ -140,6 +159,9 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// Terminal WebSocket
 	mux.HandleFunc("GET /terminal/ws", s.handleTerminalWS)
 	mux.HandleFunc("POST /terminal/resize", s.handleTerminalResize)
+
+	// ACP Agent WebSocket
+	mux.HandleFunc("GET /agent/ws", s.handleAgentWS)
 
 	// Static files (embedded UI)
 	staticFS, err := fs.Sub(staticFiles, "static")

@@ -39,7 +39,7 @@ Agent definitions live in code as a typed registry. They are not stored in the d
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | string | Unique identifier: `'claude-code'`, `'openai-codex'`, `'google-gemini'` |
-| `name` | string | Display name: `'Claude Code'`, `'Codex'`, `'Gemini CLI'` |
+| `name` | string | Display name: `'Claude Code'`, `'OpenAI Codex'`, `'Gemini CLI'` |
 | `description` | string | Short description for UI display |
 | `provider` | string | API key provider: `'anthropic'`, `'openai'`, `'google'` |
 | `envVarName` | string | Environment variable for API key: `'ANTHROPIC_API_KEY'`, `'OPENAI_API_KEY'`, `'GEMINI_API_KEY'` |
@@ -154,17 +154,18 @@ in Settings UI     →    (provider-specific)  →   AES-256-GCM
 
 ```
 User selects agent          Control plane             VM Agent
-in workspace UI        →    fetches encrypted    →    decrypts key
-                            key from D1               and injects as
-                                                      env var in
-                                                      docker exec
+in workspace UI        →    fetches encrypted    →    receives decrypted
+                            key from D1,              key over HTTPS and
+                            decrypts it               injects as env var
+                            (has ENCRYPTION_KEY)      in docker exec
 ```
 
 **Security constraints**:
-- API keys are decrypted only at point of use (VM Agent, just-in-time)
+- API keys are decrypted by the control plane (which holds `ENCRYPTION_KEY`) and transmitted to the VM Agent over HTTPS via `POST /api/workspaces/:id/agent-key`
+- The VM Agent does NOT have `ENCRYPTION_KEY` — it receives the plaintext key only over a secure channel
 - Keys are never logged, never returned to the browser in plaintext
-- Keys are transmitted from control plane to VM Agent over HTTPS (bootstrap token or on-demand API call)
-- Failed decryption attempts are logged for security monitoring
+- Keys are transmitted from control plane to VM Agent over HTTPS, authenticated via the VM Agent's JWT
+- Failed decryption attempts are logged for security monitoring on the control plane
 
 ## Relationships
 

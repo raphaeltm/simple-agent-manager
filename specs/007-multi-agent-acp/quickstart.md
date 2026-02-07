@@ -149,7 +149,7 @@ Deploy to staging per the Cloudflare-first development approach. Real agent test
 | ACP WS Transport | `packages/acp-client/src/transport/websocket.ts` | Browser WebSocket adapter |
 | Agent Panel UI | `packages/acp-client/src/components/AgentPanel.tsx` | Main conversation view |
 | Credential Routes | `apps/api/src/routes/credentials.ts` | API key storage endpoints |
-| Agent Routes | `apps/api/src/routes/agents.ts` | Agent catalog endpoint |
+| Agent Routes | `apps/api/src/routes/agents-catalog.ts` | Agent catalog endpoint |
 | Workspace Page | `apps/web/src/pages/Workspace.tsx` | Dual-mode ACP/PTY view |
 | Settings Page | `apps/web/src/pages/Settings.tsx` | Agent API key management |
 | Cloud-Init | `packages/cloud-init/src/template.ts` | Agent installation in VMs |

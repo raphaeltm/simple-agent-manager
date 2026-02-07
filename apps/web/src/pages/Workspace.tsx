@@ -1,13 +1,48 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Terminal } from '@simple-agent-manager/terminal';
+import { useAcpSession, useAcpMessages, AgentPanel } from '@simple-agent-manager/acp-client';
+import type { AcpSessionState } from '@simple-agent-manager/acp-client';
 import { UserMenu } from '../components/UserMenu';
 import { StatusBadge } from '../components/StatusBadge';
+import { AgentSelector } from '../components/AgentSelector';
 import { getWorkspace, getTerminalToken, stopWorkspace, restartWorkspace } from '../lib/api';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
 
+/** Map ACP session state to a human-readable label */
+function agentStatusLabel(state: AcpSessionState, agentType: string | null): string {
+  if (!agentType) return 'No Agent Selected';
+  switch (state) {
+    case 'initializing': return `${agentType}: Initializing...`;
+    case 'ready': return `${agentType}: Ready`;
+    case 'prompting': return `${agentType}: Prompting`;
+    case 'error': return `${agentType}: Error`;
+    case 'connecting': return `${agentType}: Connecting...`;
+    case 'reconnecting': return `${agentType}: Reconnecting...`;
+    case 'no_session': return 'No Agent Selected';
+    case 'disconnected': return 'Disconnected';
+    default: return 'No Agent Selected';
+  }
+}
+
+/** CSS dot color class for the agent status indicator */
+function agentStatusDotClass(state: AcpSessionState): string {
+  switch (state) {
+    case 'ready': return 'bg-green-400';
+    case 'initializing':
+    case 'connecting':
+    case 'reconnecting': return 'bg-yellow-400 animate-pulse';
+    case 'prompting': return 'bg-blue-400 animate-pulse';
+    case 'error': return 'bg-red-400';
+    default: return 'bg-gray-400';
+  }
+}
+
+/** View modes: terminal (existing) or conversation (Phase 5 placeholder) */
+type ViewMode = 'terminal' | 'conversation';
+
 /**
- * Workspace detail page with terminal access.
+ * Workspace detail page with terminal access and ACP agent integration.
  */
 export function Workspace() {
   const { id } = useParams<{ id: string }>();
@@ -18,6 +53,31 @@ export function Workspace() {
   const [actionLoading, setActionLoading] = useState(false);
   const [wsUrl, setWsUrl] = useState<string | null>(null);
   const [terminalLoading, setTerminalLoading] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('terminal');
+
+  // ACP WebSocket URL (separate from terminal WS)
+  const [acpWsUrl, setAcpWsUrl] = useState<string | null>(null);
+
+  // ACP session and messages hooks
+  const acpMessages = useAcpMessages();
+  const acpSession = useAcpSession({ wsUrl: acpWsUrl, onAcpMessage: acpMessages.processMessage });
+  const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
+
+  // Auto-fallback: switch to terminal when ACP session errors out (T040)
+  useEffect(() => {
+    if (acpSession.state === 'error' && viewMode === 'conversation') {
+      setViewMode('terminal');
+      setFallbackNotice('Structured view unavailable — using terminal mode');
+    }
+  }, [acpSession.state, viewMode]);
+
+  // Auto-switch to conversation mode when agent becomes ready
+  useEffect(() => {
+    if (acpSession.state === 'ready' && acpSession.agentType && viewMode === 'terminal') {
+      setViewMode('conversation');
+      setFallbackNotice(null);
+    }
+  }, [acpSession.state, acpSession.agentType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!id) return;
@@ -81,6 +141,27 @@ export function Workspace() {
     };
 
     fetchTerminalToken();
+  }, [id, workspace?.status, workspace?.url]);
+
+  // Build ACP WebSocket URL when workspace is running (same token, different path)
+  useEffect(() => {
+    if (!id || !workspace || workspace.status !== 'running' || !workspace.url) {
+      setAcpWsUrl(null);
+      return;
+    }
+
+    const fetchAcpToken = async () => {
+      try {
+        const { token } = await getTerminalToken(id);
+        const url = new URL(workspace.url!);
+        const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+        setAcpWsUrl(`${wsProtocol}//${url.host}/agent/ws?token=${encodeURIComponent(token)}`);
+      } catch {
+        // ACP connection is optional; don't block terminal
+      }
+    };
+
+    fetchAcpToken();
   }, [id, workspace?.status, workspace?.url]);
 
   // Handle terminal activity - refresh workspace data to update shutdownDeadline
@@ -202,7 +283,33 @@ export function Workspace() {
             <h1 className="text-xl font-semibold text-gray-900">{workspace?.name}</h1>
             {workspace && <StatusBadge status={workspace.status} />}
           </div>
-          <UserMenu />
+          <div className="flex items-center space-x-4">
+            {/* Agent status indicator (FR-019) — visible in both terminal and conversation modes */}
+            {workspace?.status === 'running' && (
+              <div className="flex items-center space-x-2 text-sm text-gray-600">
+                <span className={`inline-block h-2 w-2 rounded-full ${agentStatusDotClass(acpSession.state)}`} />
+                <span>{agentStatusLabel(acpSession.state, acpSession.agentType)}</span>
+              </div>
+            )}
+            {/* View mode toggle (wired in US3/US4) */}
+            {workspace?.status === 'running' && acpSession.agentType && (
+              <div className="flex rounded-md border border-gray-300 overflow-hidden">
+                <button
+                  onClick={() => setViewMode('terminal')}
+                  className={`px-3 py-1 text-xs font-medium ${viewMode === 'terminal' ? 'bg-gray-800 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                >
+                  Terminal
+                </button>
+                <button
+                  onClick={() => setViewMode('conversation')}
+                  className={`px-3 py-1 text-xs font-medium ${viewMode === 'conversation' ? 'bg-gray-800 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                >
+                  Conversation
+                </button>
+              </div>
+            )}
+            <UserMenu />
+          </div>
         </div>
       </header>
 
@@ -213,6 +320,16 @@ export function Workspace() {
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-600 flex items-center justify-between">
             <span>{error}</span>
             <button onClick={() => setError(null)} className="text-red-800 hover:text-red-900">
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* ACP fallback notification */}
+        {fallbackNotice && (
+          <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 flex items-center justify-between">
+            <span>{fallbackNotice}</span>
+            <button onClick={() => setFallbackNotice(null)} className="text-yellow-900 hover:text-yellow-700">
               Dismiss
             </button>
           </div>
@@ -263,10 +380,25 @@ export function Workspace() {
               </div>
             )}
 
-            {/* Terminal section */}
+            {/* Agent Selector — shown when workspace is running */}
+            {workspace?.status === 'running' && (
+              <div className="border-t border-gray-200 pt-4 pb-2">
+                <AgentSelector
+                  activeAgentType={acpSession.agentType}
+                  sessionState={acpSession.state}
+                  onSelectAgent={acpSession.switchAgent}
+                />
+              </div>
+            )}
+
+            {/* Terminal / Conversation section */}
             <div className="border-t border-gray-200 pt-6">
               {workspace?.status === 'running' ? (
-                wsUrl ? (
+                viewMode === 'conversation' ? (
+                  <div className="rounded-lg overflow-hidden" style={{ height: '500px' }}>
+                    <AgentPanel session={acpSession} messages={acpMessages} />
+                  </div>
+                ) : wsUrl ? (
                   <div className="bg-gray-900 rounded-lg overflow-hidden" style={{ height: '500px' }}>
                     <Terminal
                       wsUrl={wsUrl}

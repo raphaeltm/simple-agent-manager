@@ -35,7 +35,7 @@ The core technical change is adding an ACP WebSocket gateway to the Go VM Agent 
 | **VIII. AI-Friendly Repo** | PASS | CLAUDE.md updated with agent endpoints, agent registry types self-documenting |
 | **IX. Clean Code Architecture** | PASS | New `packages/acp-client` follows packages → apps dependency flow. No circular deps. |
 | **X. Simplicity & Official SDKs** | PASS | Uses `@agentclientprotocol/sdk` official types. Custom WebSocket transport is minimal (SDK provides stdio only). |
-| **XI. No Hardcoded Values** | PASS | Agent init timeout: `ACP_INIT_TIMEOUT_MS` env var. Agent commands/args: configurable via agent registry. Reconnect delay: `ACP_RECONNECT_DELAY_MS` env var. All URLs derived from `BASE_DOMAIN`. |
+| **XI. No Hardcoded Values** | PASS | Agent init timeout: `ACP_INIT_TIMEOUT_MS` env var. Agent commands/args: configurable via agent registry. Reconnect delay: `ACP_RECONNECT_DELAY_MS` env var. Reconnect total timeout: `ACP_RECONNECT_TIMEOUT_MS` env var. Max restart attempts: `ACP_MAX_RESTART_ATTEMPTS` env var. All URLs derived from `BASE_DOMAIN`. |
 
 **No violations.** All principles satisfied without justification needed.
 
@@ -100,7 +100,7 @@ apps/
 │   └── src/
 │       ├── routes/
 │       │   ├── credentials.ts      # MODIFIED: support agent-api-key credential type
-│       │   └── agents.ts           # NEW: agent catalog endpoint
+│       │   └── agents-catalog.ts    # NEW: agent catalog endpoint
 │       └── db/
 │           └── schema.ts           # MODIFIED: credentials table agent fields
 │

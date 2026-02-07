@@ -18,6 +18,7 @@
     "deploy:staging": "pnpm build && wrangler pages deploy dist --env staging"
   },
   "dependencies": {
+    "@simple-agent-manager/acp-client": "workspace:*",
     "@simple-agent-manager/shared": "workspace:*",
     "@simple-agent-manager/terminal": "workspace:*",
     "better-auth": "^1.0.0",

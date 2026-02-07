@@ -8,6 +8,9 @@ import type {
   Repository,
   TerminalTokenResponse,
   ApiError,
+  AgentInfo,
+  AgentCredentialInfo,
+  SaveAgentCredentialRequest,
 } from '@simple-agent-manager/shared';
 
 // In production, VITE_API_URL must be explicitly set
@@ -151,5 +154,29 @@ export async function getTerminalToken(workspaceId: string): Promise<TerminalTok
   return request<TerminalTokenResponse>('/api/terminal/token', {
     method: 'POST',
     body: JSON.stringify({ workspaceId }),
+  });
+}
+
+// =============================================================================
+// Agents
+// =============================================================================
+export async function listAgents(): Promise<{ agents: AgentInfo[] }> {
+  return request<{ agents: AgentInfo[] }>('/api/agents');
+}
+
+export async function listAgentCredentials(): Promise<{ credentials: AgentCredentialInfo[] }> {
+  return request<{ credentials: AgentCredentialInfo[] }>('/api/credentials/agent');
+}
+
+export async function saveAgentCredential(data: SaveAgentCredentialRequest): Promise<AgentCredentialInfo> {
+  return request<AgentCredentialInfo>('/api/credentials/agent', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteAgentCredential(agentType: string): Promise<void> {
+  return request<void>(`/api/credentials/agent/${agentType}`, {
+    method: 'DELETE',
   });
 }

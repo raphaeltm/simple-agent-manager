@@ -20,7 +20,8 @@ import type {
   HeartbeatResponse,
   BootstrapTokenData,
 } from '@simple-agent-manager/shared';
-import { MAX_WORKSPACES_PER_USER, HETZNER_IMAGE } from '@simple-agent-manager/shared';
+import { MAX_WORKSPACES_PER_USER, HETZNER_IMAGE, isValidAgentType } from '@simple-agent-manager/shared';
+import { getDecryptedAgentKey } from './credentials';
 
 /**
  * Get idle timeout in seconds from environment.
@@ -34,11 +35,11 @@ function getIdleTimeoutSeconds(env: Env): number {
 
 const workspacesRoutes = new Hono<{ Bindings: Env }>();
 
-// Apply auth middleware to all routes except callbacks
+// Apply auth middleware to all routes except VM Agent callbacks
 workspacesRoutes.use('/*', async (c, next) => {
   const path = c.req.path;
-  // Skip auth for callback endpoints
-  if (path.endsWith('/ready') || path.endsWith('/heartbeat')) {
+  // Skip session auth for VM Agent callback endpoints (they use JWT Bearer auth)
+  if (path.endsWith('/ready') || path.endsWith('/heartbeat') || path.endsWith('/agent-key')) {
     return next();
   }
   return requireAuth()(c, next);
@@ -594,6 +595,66 @@ workspacesRoutes.post('/:id/heartbeat', async (c) => {
   };
 
   return c.json(response);
+});
+
+/**
+ * POST /api/workspaces/:id/agent-key - Fetch a decrypted agent API key
+ * Internal endpoint called by VM Agent. Requires callback JWT auth.
+ * The control plane decrypts the key (it holds ENCRYPTION_KEY) and returns it
+ * over HTTPS. The decrypted key MUST NOT be logged (SC-006).
+ */
+workspacesRoutes.post('/:id/agent-key', async (c) => {
+  const workspaceId = c.req.param('id');
+
+  // Validate callback token from Authorization header
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    throw errors.unauthorized('Missing or invalid Authorization header');
+  }
+
+  const token = authHeader.slice(7);
+  try {
+    const payload = await verifyCallbackToken(token, c.env);
+    if (payload.workspace !== workspaceId) {
+      throw errors.forbidden('Token workspace mismatch');
+    }
+  } catch (err) {
+    throw errors.unauthorized(err instanceof Error ? err.message : 'Invalid callback token');
+  }
+
+  const body = await c.req.json<{ agentType: string }>();
+
+  if (!body.agentType || !isValidAgentType(body.agentType)) {
+    throw errors.badRequest('Valid agentType is required');
+  }
+
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  // Find the workspace owner
+  const workspaces = await db
+    .select({ userId: schema.workspaces.userId })
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+
+  const ws = workspaces[0];
+  if (!ws) {
+    throw errors.notFound('Workspace');
+  }
+
+  // Decrypt the agent API key for the workspace owner
+  const apiKey = await getDecryptedAgentKey(
+    db,
+    ws.userId,
+    body.agentType,
+    c.env.ENCRYPTION_KEY
+  );
+
+  if (!apiKey) {
+    throw errors.notFound('Agent credential');
+  }
+
+  return c.json({ apiKey });
 });
 
 /**

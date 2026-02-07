@@ -53,6 +53,12 @@ type Config struct {
 	DefaultRows     int
 	DefaultCols     int
 
+	// ACP settings - configurable per constitution principle XI
+	ACPInitTimeoutMs      int
+	ACPReconnectDelayMs   int
+	ACPReconnectTimeoutMs int
+	ACPMaxRestartAttempts int
+
 	// Container settings - exec into devcontainer instead of host shell
 	ContainerMode       bool
 	ContainerUser       string
@@ -103,6 +109,12 @@ func Load() (*Config, error) {
 		DefaultShell:      getEnv("DEFAULT_SHELL", "/bin/bash"),
 		DefaultRows:       getEnvInt("DEFAULT_ROWS", 24),
 		DefaultCols:       getEnvInt("DEFAULT_COLS", 80),
+
+		// ACP settings - configurable per constitution principle XI
+		ACPInitTimeoutMs:      getEnvInt("ACP_INIT_TIMEOUT_MS", 30000),
+		ACPReconnectDelayMs:   getEnvInt("ACP_RECONNECT_DELAY_MS", 2000),
+		ACPReconnectTimeoutMs: getEnvInt("ACP_RECONNECT_TIMEOUT_MS", 30000),
+		ACPMaxRestartAttempts: getEnvInt("ACP_MAX_RESTART_ATTEMPTS", 3),
 
 		ContainerMode:       getEnvBool("CONTAINER_MODE", true),
 		ContainerUser:       getEnv("CONTAINER_USER", "vscode"),
