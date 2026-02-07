@@ -18,7 +18,7 @@ type Claims struct {
 
 // JWTValidator validates JWTs using a remote JWKS endpoint.
 type JWTValidator struct {
-	jwks         *keyfunc.Keyfunc
+	jwks         keyfunc.Keyfunc
 	audience     string
 	issuer       string
 	workspaceID  string
