@@ -231,8 +231,8 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
     }
   }
 
-  // Redirect to settings on the app subdomain
-  const redirectUrl = `https://app.${c.env.BASE_DOMAIN}/settings`;
+  // Redirect to settings on the app subdomain with success indicator
+  const redirectUrl = `https://app.${c.env.BASE_DOMAIN}/settings?github_app=installed`;
   return c.redirect(redirectUrl);
 });
 
