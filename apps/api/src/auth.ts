@@ -68,13 +68,29 @@ export function createAuth(env: Env) {
 
           let email = user.email as string | null;
           if (!email) {
-            // Fetch emails endpoint for private email addresses
-            const emailsRes = await fetch('https://api.github.com/user/emails', {
-              headers: { Authorization: `Bearer ${token.accessToken}`, 'User-Agent': 'SAM-Auth' },
-            });
-            const emails = await emailsRes.json() as Array<{ email: string; primary: boolean; verified: boolean }>;
-            const primary = emails.find((e) => e.primary && e.verified);
-            email = primary?.email || emails.find((e) => e.verified)?.email || null;
+            // Fetch emails endpoint for private email addresses.
+            // Note: GitHub App needs "Email Addresses: Read-Only" permission,
+            // otherwise this returns {"message":"Not Found"} instead of an array.
+            try {
+              const emailsRes = await fetch('https://api.github.com/user/emails', {
+                headers: { Authorization: `Bearer ${token.accessToken}`, 'User-Agent': 'SAM-Auth' },
+              });
+              const emailsData = await emailsRes.json();
+              if (Array.isArray(emailsData)) {
+                const emails = emailsData as Array<{ email: string; primary: boolean; verified: boolean }>;
+                const primary = emails.find((e) => e.primary && e.verified);
+                email = primary?.email || emails.find((e) => e.verified)?.email || null;
+              } else {
+                console.error('[Auth] /user/emails returned non-array:', JSON.stringify(emailsData));
+              }
+            } catch (err) {
+              console.error('[Auth] Failed to fetch /user/emails:', err);
+            }
+          }
+
+          // Last resort: use GitHub noreply email
+          if (!email && user.login) {
+            email = `${user.id}+${user.login}@users.noreply.github.com`;
           }
 
           if (!email) {
