@@ -18,10 +18,10 @@ curl -X GET "https://api.cloudflare.com/client/v4/user/tokens/verify" \
   -H "Content-Type: application/json"
 
 # Check API health
-curl https://api.YOUR_DOMAIN.com/health
+curl https://api.example.com/health
 
 # Check Web UI
-curl -I https://app.YOUR_DOMAIN.com
+curl -I https://app.example.com
 ```
 
 ---
@@ -418,7 +418,7 @@ env | grep -E "^(CF_|BASE_|DEPLOY_)" | sed 's/TOKEN=.*/TOKEN=***/'
 
 ### Report Issues
 
-File issues at: [GitHub Issues](https://github.com/YOUR_ORG/simple-agent-manager/issues)
+File issues at: [GitHub Issues](https://github.com/your-org/simple-agent-manager/issues)
 
 Include:
 1. Error message/code

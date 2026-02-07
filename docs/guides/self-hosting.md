@@ -284,12 +284,12 @@ SAM uses a single **GitHub App** for both user login (OAuth) and repository acce
 | Field | Value |
 |-------|-------|
 | **GitHub App name** | Simple Agent Manager |
-| **Homepage URL** | `https://app.YOUR_DOMAIN/` |
+| **Homepage URL** | `https://app.example.com` |
 
 **Identifying and authorizing users:**
 | Field | Value |
 |-------|-------|
-| **Callback URL** | `https://api.YOUR_DOMAIN/api/auth/callback/github` |
+| **Callback URL** | `https://api.example.com/api/auth/callback/github` |
 | **Expire user authorization tokens** | ✓ Checked |
 | **Request user authorization (OAuth) during installation** | ☐ **Unchecked** |
 | **Enable Device Flow** | ☐ Unchecked |
@@ -299,16 +299,16 @@ SAM uses a single **GitHub App** for both user login (OAuth) and repository acce
 **Post installation:**
 | Field | Value |
 |-------|-------|
-| **Setup URL (optional)** | `https://api.YOUR_DOMAIN/api/github/callback` |
+| **Setup URL (optional)** | `https://api.example.com/api/github/callback` |
 | **Redirect on update** | ✓ Checked |
 
-> **Note**: The Setup URL points to the API, not the web UI. The API records the installation in the database and then redirects the user to `https://app.YOUR_DOMAIN/settings`.
+> **Note**: The Setup URL points to the API, not the web UI. The API records the installation in the database and then redirects the user to `https://app.example.com/settings`.
 
 **Webhook:**
 | Field | Value |
 |-------|-------|
 | **Active** | ✓ Checked |
-| **Webhook URL** | `https://api.YOUR_DOMAIN/api/github/webhook` |
+| **Webhook URL** | `https://api.example.com/api/github/webhook` |
 | **Webhook secret** | Generate a random string (save it!) |
 
 **Permissions:**
@@ -349,7 +349,7 @@ SAM uses a single **GitHub App** for both user login (OAuth) and repository acce
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_ORG/simple-agent-manager.git
+git clone https://github.com/your-org/simple-agent-manager.git
 cd simple-agent-manager
 
 # Install dependencies
@@ -596,13 +596,13 @@ Test each component to ensure everything works.
 ### Test 1: API Health Check
 
 ```bash
-curl https://api.YOUR_DOMAIN.com/api/health
+curl https://api.example.com/api/health
 # Should return: {"status":"ok"}
 ```
 
 ### Test 2: Web UI Access
 
-Open `https://app.YOUR_DOMAIN.com` in your browser. You should see the login page.
+Open `https://app.example.com` in your browser. You should see the login page.
 
 ### Test 3: GitHub OAuth Login
 
@@ -613,7 +613,7 @@ Open `https://app.YOUR_DOMAIN.com` in your browser. You should see the login pag
 ### Test 4: Agent Binary Download
 
 ```bash
-curl -I "https://api.YOUR_DOMAIN.com/api/agent/download?os=linux&arch=amd64"
+curl -I "https://api.example.com/api/agent/download?os=linux&arch=amd64"
 # Should return: HTTP/2 200 with Content-Type: application/octet-stream
 ```
 
@@ -777,8 +777,8 @@ wrangler secret put ENCRYPTION_KEY
 **Cause**: Callback URL mismatch or incorrect GitHub App settings
 
 **Fix**:
-1. Check your GitHub App's **Callback URL** matches exactly: `https://api.YOUR_DOMAIN/api/auth/callback/github`
-2. Check your GitHub App's **Setup URL** is set to: `https://api.YOUR_DOMAIN/api/github/callback`
+1. Check your GitHub App's **Callback URL** matches exactly: `https://api.example.com/api/auth/callback/github`
+2. Check your GitHub App's **Setup URL** is set to: `https://api.example.com/api/github/callback`
 3. Ensure **"Request user authorization (OAuth) during installation"** is **unchecked** — when checked, it disables the Setup URL and causes post-installation redirects to hit BetterAuth, which fails
 4. Ensure HTTPS is used (not HTTP)
 5. Verify the domain in Cloudflare is active
@@ -826,7 +826,7 @@ wrangler d1 migrations apply workspaces --remote
 1. Verify nameservers changed at registrar
 2. Check DNS records in Cloudflare dashboard
 3. Wait up to 24 hours for propagation
-4. Test with: `dig +short api.YOUR_DOMAIN.com`
+4. Test with: `dig +short api.example.com`
 
 ---
 
@@ -870,7 +870,7 @@ VMs are billed hourly and self-terminate after 30 minutes of inactivity.
 
 ## Getting Help
 
-- **Issues**: [GitHub Issues](https://github.com/YOUR_ORG/simple-agent-manager/issues)
+- **Issues**: [GitHub Issues](https://github.com/your-org/simple-agent-manager/issues)
 - **Documentation**: [docs/](../)
 - **Architecture**: [Architecture Decision Records](../adr/)
 

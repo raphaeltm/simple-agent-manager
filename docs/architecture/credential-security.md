@@ -167,5 +167,4 @@ If `ENCRYPTION_KEY` needs to be rotated:
 ## Related Documentation
 
 - [Secrets Taxonomy](./secrets-taxonomy.md) - Full breakdown of all secrets
-- [Access Control](./access-control.md) - How ownership is validated
 - [spec/003-browser-terminal-saas](../../specs/003-browser-terminal-saas/data-model.md) - Original data model

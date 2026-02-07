@@ -1,5 +1,7 @@
 # Multi-Tenancy Interface Design
 
+> **HISTORICAL DOCUMENT**: This is early design research from January 2025. Implementation status: The BYOC (Bring-Your-Own-Cloud) model described as "Model B" has been implemented — users provide their own Hetzner tokens via the Settings UI. The shared infrastructure "Model A" (SaaS) and team/organization features remain planned for future phases. Interface designs below informed the current implementation but specific APIs may differ. See `apps/api/src/routes/` for actual API implementation.
+
 > **Related docs:** [Architecture Notes](./architecture-notes.md) | [AI Agent Optimizations](./ai-agent-optimizations.md) | [DNS & Security](./dns-security-persistence-plan.md) | [Index](./README.md)
 
 ## Overview

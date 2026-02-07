@@ -18,9 +18,9 @@ Core functionality for workspace management with GitHub OAuth:
 - [x] D1 database for persistence
 - [x] Encrypted credential storage (user Hetzner tokens)
 
-## Current: Browser Terminal (Phase 2)
+## Complete: Browser Terminal (Phase 2)
 
-**Status**: In Development
+**Status**: Complete (core features)
 
 Web-based terminal access to running workspaces:
 
@@ -28,6 +28,12 @@ Web-based terminal access to running workspaces:
 - [x] JWT-based terminal authentication
 - [x] Idle detection and heartbeat system
 - [x] xterm.js terminal UI
+- [x] Secure bootstrap token credential delivery
+- [x] Workspace ownership validation
+- [x] WebSocket reconnection handling
+- [x] Automated deployment via Pulumi + GitHub Actions (spec 005)
+- [x] Multi-Agent ACP protocol support (spec 007)
+- [x] UI component governance system (spec 009)
 - [ ] File explorer integration
 - [ ] Terminal session persistence
 

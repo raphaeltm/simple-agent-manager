@@ -1,5 +1,7 @@
 # DNS, Security & Persistence Planning
 
+> **HISTORICAL DOCUMENT**: This is early research from January 2025. The R2 workspace persistence features described here are not yet implemented (planned for Phase 3 per ROADMAP.md). DNS and security sections informed the current implementation but specific details may differ. See [docs/architecture/](../docs/architecture/) for actual architecture.
+
 > **Related docs:** [Architecture Notes](./architecture-notes.md) | [AI Agent Optimizations](./ai-agent-optimizations.md) | [Multi-tenancy](./multi-tenancy-interfaces.md) | [Index](./README.md)
 
 ## Resolved Questions from Previous Research

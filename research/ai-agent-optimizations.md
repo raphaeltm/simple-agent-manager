@@ -1,5 +1,7 @@
 # AI Coding Agent UX Optimizations
 
+> **HISTORICAL DOCUMENT**: This is early research from January 2025. Sections referencing CloudCLI implementation details are obsolete. The current implementation uses a custom Go VM Agent with browser-based xterm.js terminal. See [docs/architecture/](../docs/architecture/) for actual architecture.
+
 > **Related docs:** [Architecture Notes](./architecture-notes.md) | [DNS & Security](./dns-security-persistence-plan.md) | [Multi-tenancy](./multi-tenancy-interfaces.md) | [Index](./README.md)
 
 ## The Problem

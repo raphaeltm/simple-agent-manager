@@ -6,7 +6,7 @@
 
 ## ⚠️ Important: Cloudflare-First Development
 
-**This project uses a Cloudflare-first development approach.** Per the [project constitution](./../.specify/memory/constitution.md#development-workflow):
+**This project uses a Cloudflare-first development approach.** Per the [project constitution](../../.specify/memory/constitution.md#development-workflow):
 
 > "No complex local testing setups. Iterate directly on Cloudflare infrastructure."
 

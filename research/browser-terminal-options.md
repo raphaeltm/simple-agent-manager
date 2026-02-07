@@ -1,7 +1,9 @@
 # Browser Terminal Architecture - Comprehensive Design
 
+> **HISTORICAL DOCUMENT**: This research from January 2025 informed the terminal architecture decision. The terminal solution has been decided and implemented as a custom Go VM Agent with embedded xterm.js UI, JWT authentication, and WebSocket protocol. See `packages/vm-agent/` for the implementation.
+
 **Date**: 2025-01-26
-**Status**: Research Complete
+**Status**: Research Complete — Decision implemented as VM Agent
 **Context**: Replacing complex Claude Code UI with simple, secure browser terminal access
 
 ---
