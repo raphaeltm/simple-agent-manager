@@ -57,6 +57,44 @@ export function createAuth(env: Env) {
         clientId: env.GITHUB_CLIENT_ID,
         clientSecret: env.GITHUB_CLIENT_SECRET,
         scope: ['read:user', 'user:email'],
+        // Custom getUserInfo to handle GitHub private emails.
+        // GitHub Apps need "Email Addresses: Read-Only" permission,
+        // AND we fetch from /user/emails as fallback for private emails.
+        getUserInfo: async (token) => {
+          const userRes = await fetch('https://api.github.com/user', {
+            headers: { Authorization: `Bearer ${token.accessToken}`, 'User-Agent': 'SAM-Auth' },
+          });
+          const user = await userRes.json() as Record<string, unknown>;
+
+          let email = user.email as string | null;
+          if (!email) {
+            // Fetch emails endpoint for private email addresses
+            const emailsRes = await fetch('https://api.github.com/user/emails', {
+              headers: { Authorization: `Bearer ${token.accessToken}`, 'User-Agent': 'SAM-Auth' },
+            });
+            const emails = await emailsRes.json() as Array<{ email: string; primary: boolean; verified: boolean }>;
+            const primary = emails.find((e) => e.primary && e.verified);
+            email = primary?.email || emails.find((e) => e.verified)?.email || null;
+          }
+
+          if (!email) {
+            return null;
+          }
+
+          return {
+            user: {
+              id: String(user.id),
+              email,
+              name: (user.name as string) || (user.login as string) || '',
+              image: user.avatar_url as string,
+              emailVerified: true,
+            },
+            data: {
+              githubId: String(user.id),
+              avatarUrl: user.avatar_url as string,
+            },
+          };
+        },
       },
     },
     user: {
