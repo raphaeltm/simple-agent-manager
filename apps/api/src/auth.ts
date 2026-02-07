@@ -7,23 +7,14 @@ import type { Env } from './index';
 /**
  * Create BetterAuth instance with Cloudflare D1 + KV configuration.
  * Uses GitHub OAuth as the social provider.
- *
- * When DEBUG_AUTH=true, enables verbose error tracing:
- * - Throws errors instead of returning opaque 500s
- * - Logs all errors with full details
- * - Enables adapter debug logging
- *
- * TODO: Remove DEBUG_AUTH support once auth flow is stable
  */
 export function createAuth(env: Env) {
   const db = drizzle(env.DATABASE, { schema });
-  const debugAuth = env.DEBUG_AUTH === 'true';
 
   return betterAuth({
     database: drizzleAdapter(db, {
       provider: 'sqlite',
       usePlural: true,
-      debugLogs: debugAuth,
     }),
     basePath: '/api/auth',
     baseURL: `https://api.${env.BASE_DOMAIN}`,
@@ -35,17 +26,6 @@ export function createAuth(env: Env) {
       'http://localhost:5173',
       'http://localhost:3000',
     ],
-    // TODO: Remove onAPIError.throw once auth is stable
-    onAPIError: {
-      throw: debugAuth,
-      onError: (error) => {
-        console.error('[BetterAuth:onAPIError]', JSON.stringify({
-          message: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
-          name: error instanceof Error ? error.name : undefined,
-        }));
-      },
-    },
     session: {
       cookieCache: {
         enabled: true,
