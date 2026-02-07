@@ -132,8 +132,6 @@ jobs:
 
       - name: Install Pulumi CLI
         uses: pulumi/actions@v5
-        with:
-          command: version
 
       # ========================================
       # Phase 1: Infrastructure (Pulumi)
