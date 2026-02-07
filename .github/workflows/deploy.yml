@@ -366,8 +366,8 @@ jobs:
         run: |
           R2_BUCKET=$(pulumi stack output r2Name)
           cd ..
-          pnpm wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-amd64 --file packages/vm-agent/bin/vm-agent-linux-amd64
-          pnpm wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-arm64 --file packages/vm-agent/bin/vm-agent-linux-arm64
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-amd64 --file packages/vm-agent/bin/vm-agent-linux-amd64
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-arm64 --file packages/vm-agent/bin/vm-agent-linux-arm64
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
