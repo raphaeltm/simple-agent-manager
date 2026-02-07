@@ -274,7 +274,7 @@ jobs:
 
       - name: Deploy API Worker
         if: ${{ inputs.dry_run != true }}
-        run: pnpm --filter @simple-agent-manager/api exec wrangler deploy
+        run: pnpm --filter @simple-agent-manager/api exec wrangler deploy --env production
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
@@ -292,7 +292,7 @@ jobs:
         run: |
           DB_NAME=$(pulumi stack output d1DatabaseName)
           cd ../apps/api
-          pnpm exec wrangler d1 migrations apply $DB_NAME --remote
+          pnpm exec wrangler d1 migrations apply $DB_NAME --remote --env production
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
