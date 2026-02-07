@@ -173,6 +173,19 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
+      - name: Set Pulumi Configuration (Dry Run)
+        if: ${{ inputs.dry_run == true }}
+        working-directory: infra
+        run: |
+          pulumi config set cloudflareAccountId ${{ secrets.CF_ACCOUNT_ID }}
+          pulumi config set cloudflareZoneId ${{ secrets.CF_ZONE_ID }}
+          pulumi config set baseDomain ${{ vars.BASE_DOMAIN }}
+          pulumi config set resourcePrefix ${{ vars.RESOURCE_PREFIX || 'sam' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
       - name: Pulumi Preview
         if: ${{ inputs.dry_run == true }}
         working-directory: infra
@@ -182,10 +195,19 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          PULUMI_CONFIG_sam-infra:cloudflareAccountId: ${{ secrets.CF_ACCOUNT_ID }}
-          PULUMI_CONFIG_sam-infra:cloudflareZoneId: ${{ secrets.CF_ZONE_ID }}
-          PULUMI_CONFIG_sam-infra:baseDomain: ${{ vars.BASE_DOMAIN }}
-          PULUMI_CONFIG_sam-infra:resourcePrefix: ${{ vars.RESOURCE_PREFIX || 'sam' }}
+
+      - name: Set Pulumi Configuration
+        if: ${{ inputs.dry_run != true }}
+        working-directory: infra
+        run: |
+          pulumi config set cloudflareAccountId ${{ secrets.CF_ACCOUNT_ID }}
+          pulumi config set cloudflareZoneId ${{ secrets.CF_ZONE_ID }}
+          pulumi config set baseDomain ${{ vars.BASE_DOMAIN }}
+          pulumi config set resourcePrefix ${{ vars.RESOURCE_PREFIX || 'sam' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
       - name: Pulumi Up
         if: ${{ inputs.dry_run != true }}
@@ -196,10 +218,6 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          PULUMI_CONFIG_sam-infra:cloudflareAccountId: ${{ secrets.CF_ACCOUNT_ID }}
-          PULUMI_CONFIG_sam-infra:cloudflareZoneId: ${{ secrets.CF_ZONE_ID }}
-          PULUMI_CONFIG_sam-infra:baseDomain: ${{ vars.BASE_DOMAIN }}
-          PULUMI_CONFIG_sam-infra:resourcePrefix: ${{ vars.RESOURCE_PREFIX || 'sam' }}
 
       # ========================================
       # Phase 2: Configuration
