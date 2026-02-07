@@ -67,6 +67,7 @@ function updateEnvironmentBindings(
       ...envConfig.vars,
       BASE_DOMAIN: outputs.stackSummary.baseDomain,
       VERSION: DEPLOYMENT_CONFIG.version,
+      PAGES_PROJECT_NAME: outputs.pagesName,
     },
     d1_databases: [
       {

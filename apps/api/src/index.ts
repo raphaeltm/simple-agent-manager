@@ -33,6 +33,8 @@ export interface Env {
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
   ENCRYPTION_KEY: string;
+  // Pages project name for proxying app.* requests
+  PAGES_PROJECT_NAME?: string;
   // Optional configurable values (per constitution principle XI)
   IDLE_TIMEOUT_SECONDS?: string;
   TERMINAL_TOKEN_EXPIRY_MS?: string;
@@ -48,6 +50,20 @@ export interface Env {
 }
 
 const app = new Hono<{ Bindings: Env }>();
+
+// Proxy requests for the web UI subdomain (app.*) to Cloudflare Pages.
+// The Worker wildcard route *.{domain}/* intercepts ALL subdomains including app.*,
+// so we proxy app.* requests to the Pages deployment before any other middleware runs.
+app.use('*', async (c, next) => {
+  const hostname = new URL(c.req.url).hostname;
+  const baseDomain = c.env?.BASE_DOMAIN || '';
+  if (baseDomain && hostname === `app.${baseDomain}`) {
+    const pagesUrl = new URL(c.req.url);
+    pagesUrl.hostname = `${c.env.PAGES_PROJECT_NAME || 'sam-web-prod'}.pages.dev`;
+    return fetch(new Request(pagesUrl.toString(), c.req.raw));
+  }
+  await next();
+});
 
 // Middleware
 app.use('*', logger());
