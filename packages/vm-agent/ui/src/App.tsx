@@ -15,6 +15,12 @@ interface HealthResponse {
   idle: string;
 }
 
+interface AgentInstructionResponse {
+  id: string;
+  version: string;
+  requiredChecklistVersion: string;
+}
+
 function App() {
   const [auth, setAuth] = useState<AuthState>({
     authenticated: false,
@@ -24,6 +30,7 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [workspaceId, setWorkspaceId] = useState<string | undefined>();
   const [idleWarning, setIdleWarning] = useState<number>(0);
+  const [complianceContext, setComplianceContext] = useState<AgentInstructionResponse | null>(null);
 
   // Get token from URL params
   const urlParams = new URLSearchParams(window.location.search);
@@ -103,14 +110,36 @@ function App() {
     }
   }, []);
 
+  const fetchComplianceContext = useCallback(async () => {
+    try {
+      const response = await fetch('/api/ui-governance/agent-instructions/active', {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        setComplianceContext(null);
+        return;
+      }
+      const data = await response.json() as AgentInstructionResponse;
+      setComplianceContext(data);
+    } catch (error) {
+      console.error('Compliance context fetch failed:', error);
+      setComplianceContext(null);
+    }
+  }, []);
+
   useEffect(() => {
     checkSession();
     fetchHealth();
+    fetchComplianceContext();
 
     // Poll health every 30 seconds
     const healthInterval = setInterval(fetchHealth, 30000);
-    return () => clearInterval(healthInterval);
-  }, [checkSession, fetchHealth]);
+    const complianceInterval = setInterval(fetchComplianceContext, 60000);
+    return () => {
+      clearInterval(healthInterval);
+      clearInterval(complianceInterval);
+    };
+  }, [checkSession, fetchHealth, fetchComplianceContext]);
 
   // Loading state
   if (auth.loading) {
@@ -200,6 +229,19 @@ function App() {
         backgroundColor: '#1e1e1e',
       }}
     >
+      {complianceContext && (
+        <div
+          style={{
+            backgroundColor: '#13201d',
+            color: '#e6f2ee',
+            fontSize: '12px',
+            padding: '6px 12px',
+            borderBottom: '1px solid #29423b',
+          }}
+        >
+          UI Compliance: instruction set {complianceContext.version} · checklist {complianceContext.requiredChecklistVersion}
+        </div>
+      )}
       <StatusBar
         connected={connected}
         workspaceId={workspaceId}

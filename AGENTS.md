@@ -38,8 +38,13 @@ Build order matters: shared → providers → api/web
 
 ### Writing Tests
 
+- **MANDATORY**: Any new feature or behavior change MUST include tests before the work is considered complete.
 - Unit tests: `tests/unit/` in each package
+- Unit tests are required for all new or changed business logic, utilities, and UI behavior.
 - Integration tests: `apps/api/tests/integration/`
+- Add integration tests when a change crosses boundaries (route ↔ service ↔ database, API ↔ UI data loading, etc.).
+- Add end-to-end tests for critical user journeys where applicable (especially primary UI flows and regression-prone paths).
+- Do not mark implementation complete unless the relevant test suites pass locally and in CI.
 - Use Miniflare for Worker integration tests
 - Critical paths require >90% coverage
 
@@ -192,6 +197,27 @@ A serverless platform to spin up AI coding agent environments on-demand with zer
 5. **MUST NOT** mark work as complete until this validation passes
 
 This prevents scope drift and ensures the user gets exactly what they asked for.
+
+---
+
+## CRITICAL: Feature Testing Requirements (NON-NEGOTIABLE)
+
+**If you build or modify a feature, you MUST add tests that prove it works before calling the task complete.**
+
+1. **MUST** add unit tests for new and changed logic/components
+2. **MUST** add integration tests when multiple layers interact (API routes/services/DB, UI + API data loading, auth flows)
+3. **SHOULD** add end-to-end tests for user-critical flows (login, workspace lifecycle, settings, primary CTAs), when applicable
+4. **MUST** run relevant test suites and confirm they pass before completion
+5. **MUST NOT** treat manual QA alone as sufficient coverage for feature delivery
+
+### Quick Testing Gate
+
+Before marking feature work complete:
+- [ ] Unit tests added/updated for all changed behavior
+- [ ] Integration tests added where cross-layer behavior exists
+- [ ] E2E coverage added or explicitly justified as not applicable
+- [ ] Local test run passes for impacted packages
+- [ ] CI test checks are expected to pass with the changes
 
 ---
 
@@ -564,9 +590,29 @@ See `apps/api/.env.example`:
 - Cloudflare D1 (SQLite), KV (sessions/tokens), R2 (binaries) (005-automated-deployment)
 - TypeScript 5.x (Node.js 20+) + `@pulumi/pulumi`, `@pulumi/cloudflare`, `wrangler`, `@iarna/toml` (005-automated-deployment)
 - Cloudflare R2 (Pulumi state), D1 (app data), KV (sessions) (005-automated-deployment)
+- TypeScript 5.x + React 18 + Vite 5 + shadcn-compatible open-code component workflow, Radix UI primitives, Tailwind-style design tokens/utilities, existing `lucide-react` icons (009-ui-system-standards)
+- Git-tracked specification artifacts and shared package source files (no new runtime database storage) (009-ui-system-standards)
 
 ## Recent Changes
 - 004-mvp-hardening: Secure bootstrap tokens, workspace ownership validation, provisioning timeouts, shared terminal package, WebSocket reconnection, idle deadline tracking
 - 003-browser-terminal-saas: Added multi-tenant SaaS with GitHub OAuth, VM Agent (Go), browser terminal
 - 002-local-mock-mode: Added local mock mode with devcontainers CLI
 - 001-mvp: Added TypeScript 5.x + Hono (API), React + Vite (UI), Cloudflare Workers
+
+## UI Agent Rules
+
+For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
+
+1. Prefer shared components from `@simple-agent-manager/ui` when available.
+2. Use semantic tokens from `packages/ui/src/tokens/semantic-tokens.ts` and CSS vars from `packages/ui/src/tokens/theme.css`.
+3. Maintain mobile-first behavior:
+   - single-column baseline at small widths
+   - primary action target minimum 56px on mobile
+   - no required horizontal scrolling at 320px for core flows
+4. Preserve accessibility:
+   - keyboard-accessible interactions
+   - visible focus states
+   - clear non-color-only status communication
+5. If a shared component is missing, either:
+   - add/extend it in `packages/ui`, or
+   - document a temporary exception with rationale and expiration.

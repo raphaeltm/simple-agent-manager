@@ -1,0 +1,10 @@
+@import './tokens/theme.css';
+
+:root {
+  color-scheme: light dark;
+}
+
+[data-ui-theme='sam'] {
+  background: var(--sam-color-bg-canvas);
+  color: var(--sam-color-fg-primary);
+}
