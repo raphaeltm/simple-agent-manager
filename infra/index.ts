@@ -16,12 +16,14 @@ import {
   jwtPrivateKey,
   jwtPublicKey,
 } from "./resources/secrets";
+import { pagesProject, pagesProjectName } from "./resources/pages";
 
 // Export resource references for internal use
 export {
   database,
   kvNamespace,
   r2Bucket,
+  pagesProject,
   apiDnsRecord,
   appDnsRecord,
   wildcardDnsRecord,
@@ -33,6 +35,7 @@ export const d1DatabaseName = databaseName;
 export const kvId = kvNamespaceId;
 export const kvName = kvNamespaceName;
 export const r2Name = r2BucketName;
+export const pagesName = pagesProjectName;
 export const dnsIds = dnsRecordIds;
 export const hostnames = dnsHostnames;
 
