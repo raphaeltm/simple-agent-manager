@@ -282,8 +282,8 @@ jobs:
 
           if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
             echo "workers.dev subdomain ready: ${SUBDOMAIN}.workers.dev"
-          elif echo "$BODY" | grep -q "already been registered"; then
-            echo "workers.dev subdomain already registered (OK)"
+          elif [ "$HTTP_CODE" -eq 409 ]; then
+            echo "workers.dev subdomain already configured (OK)"
           else
             echo "::warning::Failed to set workers.dev subdomain (HTTP ${HTTP_CODE}): ${BODY}"
             echo "Cron triggers may not work. Initialize manually: CF Dashboard > Workers & Pages > Settings > Domains & Routes"
