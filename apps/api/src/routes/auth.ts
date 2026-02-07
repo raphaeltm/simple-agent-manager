@@ -13,8 +13,15 @@ const authRoutes = new Hono<{ Bindings: Env }>();
  * - GET /api/auth/session - Get current session
  */
 authRoutes.on(['GET', 'POST'], '/*', async (c) => {
-  const auth = createAuth(c.env);
-  return auth.handler(c.req.raw);
+  try {
+    const auth = createAuth(c.env);
+    const response = await auth.handler(c.req.raw);
+    return response;
+  } catch (err) {
+    console.error('BetterAuth error:', err instanceof Error ? err.message : err);
+    console.error('BetterAuth stack:', err instanceof Error ? err.stack : 'no stack');
+    return c.json({ error: 'AUTH_ERROR', message: err instanceof Error ? err.message : 'Unknown auth error' }, 500);
+  }
 });
 
 /**
