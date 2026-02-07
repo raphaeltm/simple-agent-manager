@@ -409,6 +409,7 @@ export interface WranglerToml extends WranglerTomlBindings {
 export interface WranglerEnvConfig {
   name?: string;
   account_id?: string;
+  routes?: Array<{ pattern: string; zone_name?: string; zone_id?: string; custom_domain?: boolean }>;
   d1_databases?: WranglerTomlBindings["d1_databases"];
   kv_namespaces?: WranglerTomlBindings["kv_namespaces"];
   r2_buckets?: WranglerTomlBindings["r2_buckets"];

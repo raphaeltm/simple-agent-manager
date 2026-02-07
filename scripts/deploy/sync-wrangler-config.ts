@@ -56,6 +56,11 @@ function updateEnvironmentBindings(
     ...envConfig,
     // Set account_id for authentication
     account_id: outputs.cloudflareAccountId,
+    // Add routes for custom domains
+    routes: [
+      { pattern: `api.${outputs.stackSummary.baseDomain}`, zone_name: outputs.stackSummary.baseDomain },
+      { pattern: `*.${outputs.stackSummary.baseDomain}`, zone_name: outputs.stackSummary.baseDomain }
+    ],
     vars: {
       ...envConfig.vars,
       BASE_DOMAIN: outputs.stackSummary.baseDomain,
