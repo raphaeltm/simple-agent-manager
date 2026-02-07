@@ -22,7 +22,7 @@ For the fastest deployment experience, use the automated GitHub Actions workflow
    - Go to Cloudflare Dashboard → R2 → **Manage R2 API Tokens**
    - Create token with **Object Read & Write** permissions
    - Note: The state bucket is created automatically by the workflow
-6. **Create GitHub OAuth App and GitHub App** (see [GitHub Setup](#github-setup) below)
+6. **Create GitHub App** (see [GitHub Setup](#github-setup) below)
 7. **Generate a Pulumi passphrase** for encrypting state:
    ```bash
    openssl rand -base64 32
@@ -55,8 +55,8 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | `R2_ACCESS_KEY_ID` | R2 API token access key |
 | `R2_SECRET_ACCESS_KEY` | R2 API token secret key |
 | `PULUMI_CONFIG_PASSPHRASE` | Your generated passphrase |
-| `GH_CLIENT_ID` | GitHub OAuth App client ID |
-| `GH_CLIENT_SECRET` | GitHub OAuth App client secret |
+| `GH_CLIENT_ID` | GitHub App client ID |
+| `GH_CLIENT_SECRET` | GitHub App client secret |
 | `GH_APP_ID` | GitHub App ID |
 | `GH_APP_PRIVATE_KEY` | GitHub App private key (base64 encoded) |
 | `GH_APP_SLUG` | GitHub App slug (URL name) |
@@ -272,29 +272,9 @@ npx wrangler r2 bucket create workspaces-assets
 
 ## GitHub Setup
 
-SAM requires two separate GitHub applications:
-1. **OAuth App**: For user login
-2. **GitHub App**: For repository access with fine-grained permissions
+SAM uses a single **GitHub App** for both user login (OAuth) and repository access.
 
-### Step 1: Create GitHub OAuth App (for Login)
-
-1. Go to [GitHub Developer Settings](https://github.com/settings/developers)
-2. Click **"OAuth Apps"** → **"New OAuth App"**
-3. Fill in the form:
-
-| Field | Value |
-|-------|-------|
-| **Application name** | Simple Agent Manager Login |
-| **Homepage URL** | `https://app.YOUR_DOMAIN.com` |
-| **Authorization callback URL** | `https://api.YOUR_DOMAIN.com/api/auth/callback/github` |
-
-4. Click **"Register application"**
-5. Copy the **Client ID**
-6. Click **"Generate a new client secret"** and copy it immediately
-
-**Important**: OAuth apps only support ONE callback URL. You'll need separate apps for development and production.
-
-### Step 2: Create GitHub App (for Repository Access)
+### Step 1: Create GitHub App
 
 1. Go to [GitHub App Settings](https://github.com/settings/apps)
 2. Click **"New GitHub App"**
@@ -304,36 +284,47 @@ SAM requires two separate GitHub applications:
 | Field | Value |
 |-------|-------|
 | **GitHub App name** | Simple Agent Manager |
-| **Homepage URL** | `https://app.YOUR_DOMAIN.com` |
+| **Homepage URL** | `https://app.YOUR_DOMAIN/` |
 
 **Identifying and authorizing users:**
 | Field | Value |
 |-------|-------|
-| **Callback URL** | `https://api.YOUR_DOMAIN.com/api/github/callback` |
+| **Callback URL** | `https://api.YOUR_DOMAIN/api/auth/callback/github` |
 | **Expire user authorization tokens** | ✓ Checked |
-| **Request user authorization (OAuth) during installation** | ✓ Checked |
+| **Request user authorization (OAuth) during installation** | ☐ **Unchecked** |
 | **Enable Device Flow** | ☐ Unchecked |
+
+> **Important**: "Request user authorization (OAuth) during installation" MUST be unchecked. When checked, it disables the Setup URL and causes the post-installation redirect to hit the OAuth callback, which fails because BetterAuth didn't initiate the flow. Users log in separately via the app's login button.
 
 **Post installation:**
 | Field | Value |
 |-------|-------|
-| **Setup URL (optional)** | `https://app.YOUR_DOMAIN.com/settings` |
+| **Setup URL (optional)** | `https://api.YOUR_DOMAIN/api/github/callback` |
 | **Redirect on update** | ✓ Checked |
+
+> **Note**: The Setup URL points to the API, not the web UI. The API records the installation in the database and then redirects the user to `https://app.YOUR_DOMAIN/settings`.
 
 **Webhook:**
 | Field | Value |
 |-------|-------|
 | **Active** | ✓ Checked |
-| **Webhook URL** | `https://api.YOUR_DOMAIN.com/api/github/webhook` |
+| **Webhook URL** | `https://api.YOUR_DOMAIN/api/github/webhook` |
 | **Webhook secret** | Generate a random string (save it!) |
 
-**Repository permissions:**
+**Permissions:**
+
+*Repository permissions:*
 | Permission | Access |
 |------------|--------|
 | **Contents** | Read-only |
 | **Metadata** | Read-only |
 
-**Account permissions**: None needed
+*Account permissions:*
+| Permission | Access |
+|------------|--------|
+| **Email addresses** | Read-only |
+
+> **Note**: Email addresses permission is required for login. GitHub users with private emails would otherwise get an `email_not_found` error during OAuth.
 
 **Where can this GitHub App be installed?**: Select based on your needs:
 - **Only on this account**: For personal use
@@ -341,8 +332,9 @@ SAM requires two separate GitHub applications:
 
 4. Click **"Create GitHub App"**
 5. Note the **App ID** (number shown at top)
+6. Copy the **Client ID** and generate a **Client Secret** — you'll need both for OAuth login
 
-### Step 3: Generate GitHub App Private Key
+### Step 2: Generate GitHub App Private Key
 
 1. On the GitHub App page, scroll to **"Private keys"**
 2. Click **"Generate a private key"**
@@ -402,11 +394,9 @@ CF_ACCOUNT_ID=your-account-id-from-step-3
 # Use your workspace subdomain (workspaces will be ws-xxx.workspaces.example.com)
 BASE_DOMAIN=workspaces.example.com
 
-# GitHub OAuth App (from OAuth App setup)
-GITHUB_CLIENT_ID=Iv1.xxxxxxxxxxxx
-GITHUB_CLIENT_SECRET=your-oauth-client-secret
-
 # GitHub App (from GitHub App setup)
+GITHUB_CLIENT_ID=Iv1.xxxxxxxxxxxx
+GITHUB_CLIENT_SECRET=your-github-app-client-secret
 GITHUB_APP_ID=123456
 # For the private key, base64 encode the entire .pem file:
 # cat your-key.pem | base64 -w0
@@ -782,14 +772,16 @@ wrangler secret put ENCRYPTION_KEY
 
 ---
 
-### "OAuth callback failed"
+### "OAuth callback failed" or BetterAuth "unknown" error
 
-**Cause**: Callback URL mismatch
+**Cause**: Callback URL mismatch or incorrect GitHub App settings
 
 **Fix**:
-1. Check your GitHub OAuth App callback URL matches exactly: `https://api.YOUR_DOMAIN.com/api/auth/callback/github`
-2. Ensure HTTPS is used (not HTTP)
-3. Verify the domain in Cloudflare is active
+1. Check your GitHub App's **Callback URL** matches exactly: `https://api.YOUR_DOMAIN/api/auth/callback/github`
+2. Check your GitHub App's **Setup URL** is set to: `https://api.YOUR_DOMAIN/api/github/callback`
+3. Ensure **"Request user authorization (OAuth) during installation"** is **unchecked** — when checked, it disables the Setup URL and causes post-installation redirects to hit BetterAuth, which fails
+4. Ensure HTTPS is used (not HTTP)
+5. Verify the domain in Cloudflare is active
 
 ### "D1_ERROR: no such table"
 

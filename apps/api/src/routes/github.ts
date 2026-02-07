@@ -175,14 +175,14 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
   // setup_action is available via c.req.query('setup_action') if needed for logging
 
   if (!installationId) {
-    // Redirect to settings without installation
-    return c.redirect('/settings');
+    // Redirect to settings on the app subdomain
+    return c.redirect(`https://app.${c.env.BASE_DOMAIN}/settings`);
   }
 
   const auth = c.get('auth');
   if (!auth) {
-    // User not logged in, redirect to login
-    return c.redirect(`/?installation_id=${installationId}`);
+    // User not logged in, redirect to login on the app subdomain
+    return c.redirect(`https://app.${c.env.BASE_DOMAIN}/?installation_id=${installationId}`);
   }
 
   const db = drizzle(c.env.DATABASE, { schema });
@@ -231,8 +231,8 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
     }
   }
 
-  // Redirect to settings
-  const redirectUrl = `https://${c.env.BASE_DOMAIN}/settings`;
+  // Redirect to settings on the app subdomain
+  const redirectUrl = `https://app.${c.env.BASE_DOMAIN}/settings`;
   return c.redirect(redirectUrl);
 });
 

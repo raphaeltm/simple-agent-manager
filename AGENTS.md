@@ -102,6 +102,24 @@ ENCRYPTION_KEY=...
 
 **Note**: Hetzner tokens are NOT platform secrets. Users provide their own tokens through the Settings UI, stored encrypted per-user in the database. See `docs/architecture/credential-security.md`.
 
+## CRITICAL: URL Construction Rules (NON-NEGOTIABLE)
+
+**When constructing URLs using `BASE_DOMAIN`, you MUST use the correct subdomain prefix.** The root domain does NOT serve any application.
+
+| Destination | URL Pattern | Example |
+|-------------|-------------|---------|
+| **Web UI** (user-facing pages) | `https://app.${BASE_DOMAIN}/...` | `https://app.simple-agent-manager.org/settings` |
+| **API** (worker endpoints) | `https://api.${BASE_DOMAIN}/...` | `https://api.simple-agent-manager.org/health` |
+| **Workspace** (VM terminal) | `https://ws-${id}.${BASE_DOMAIN}` | `https://ws-abc123.simple-agent-manager.org` |
+
+**NEVER** use `https://${BASE_DOMAIN}/...` (bare root domain) for redirects or links. This is always a bug.
+
+### Redirect Rules
+
+- All user-facing redirects (e.g., after GitHub App installation, after login) MUST go to `app.${BASE_DOMAIN}`
+- All API-to-API references MUST use `api.${BASE_DOMAIN}`
+- Relative redirects (e.g., `c.redirect('/settings')`) are WRONG in the API worker — they resolve to the API subdomain, not the app subdomain
+
 ## Code Patterns
 
 ### Provider Implementation
