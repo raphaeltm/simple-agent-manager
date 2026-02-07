@@ -16,7 +16,7 @@ For the fastest deployment experience, use the automated GitHub Actions workflow
 2. **Have a domain configured in Cloudflare** with nameservers pointing to Cloudflare
 3. **Create a Cloudflare API Token** with these permissions:
    - Account: D1, Workers KV Storage, Workers R2 Storage, Workers Scripts, Cloudflare Pages (Edit)
-   - Zone: DNS (Edit), Zone (Read)
+   - Zone: DNS (Edit), Workers Routes (Edit), Zone (Read)
 4. **Note your Account ID and Zone ID** from the Cloudflare dashboard (domain overview, right sidebar)
 5. **Create an R2 API Token** (separate from above - for Pulumi state storage):
    - Go to Cloudflare Dashboard → R2 → **Manage R2 API Tokens**
@@ -225,7 +225,9 @@ SAM needs a Cloudflare API token with specific permissions:
 | **Account** | Workers KV Storage | Edit |
 | **Account** | Workers R2 Storage | Edit |
 | **Account** | Workers Scripts | Edit |
+| **Account** | Cloudflare Pages | Edit |
 | **Zone** | DNS | Edit |
+| **Zone** | Workers Routes | Edit |
 | **Zone** | Zone | Read |
 
 **Zone Resources**: Select **Include** → **Specific zone** → *your domain*
@@ -754,6 +756,20 @@ wrangler secret put ENCRYPTION_KEY
    pulumi import cloudflare:index/d1Database:D1Database sam-database <database-id>
    ```
 2. Or delete the resource in Cloudflare Dashboard and re-run deployment
+
+#### "You need a workers.dev subdomain in order to proceed"
+
+**Cause**: Cron triggers (used for provisioning timeout checks) require the account's `workers.dev` subdomain to be initialized. The deploy workflow handles this automatically via the Cloudflare API, but it may fail if the API token lacks the `Workers Scripts` permission.
+
+**Fix**:
+1. **Automatic**: The deployment workflow includes an "Ensure workers.dev Subdomain" step that initializes it. Verify your API token has `Account: Workers Scripts (Edit)` permission.
+2. **Manual**: Go to **Cloudflare Dashboard** → **Workers & Pages** → click on any worker → **Settings** → **Domains & Routes** → enable the `workers.dev` route.
+
+#### "Unable to authenticate request" on Pages deploy
+
+**Cause**: `wrangler pages deploy` needs the account ID but doesn't read it from `wrangler.toml`.
+
+**Fix**: Ensure `CF_ACCOUNT_ID` is set as a secret in your GitHub Environment. The deploy workflow passes it as `CLOUDFLARE_ACCOUNT_ID` to the Pages deploy step.
 
 #### "Deployment succeeded but health check failed"
 

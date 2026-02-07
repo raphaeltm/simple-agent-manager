@@ -263,6 +263,32 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
+      - name: Ensure workers.dev Subdomain
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          # Cron triggers require a workers.dev subdomain to be initialized.
+          # This is idempotent — if already set, the API returns the existing subdomain.
+          SUBDOMAIN="${{ vars.RESOURCE_PREFIX || 'sam' }}"
+          echo "Ensuring workers.dev subdomain is initialized: ${SUBDOMAIN}.workers.dev"
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/workers/subdomain" \
+            -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"subdomain\": \"${SUBDOMAIN}\"}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "workers.dev subdomain ready: ${SUBDOMAIN}.workers.dev"
+          elif echo "$BODY" | grep -q "already been registered"; then
+            echo "workers.dev subdomain already registered (OK)"
+          else
+            echo "::warning::Failed to set workers.dev subdomain (HTTP ${HTTP_CODE}): ${BODY}"
+            echo "Cron triggers may not work. Initialize manually: CF Dashboard > Workers & Pages > Settings > Domains & Routes"
+          fi
+
       # ========================================
       # Phase 3: Application (Wrangler)
       # ========================================
@@ -285,6 +311,7 @@ jobs:
           pnpm --filter @simple-agent-manager/web exec wrangler pages deploy dist --project-name $PROJECT_NAME
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Run Database Migrations
         if: ${{ inputs.dry_run != true }}

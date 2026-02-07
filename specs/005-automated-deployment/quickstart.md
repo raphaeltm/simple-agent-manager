@@ -50,6 +50,7 @@ Create a token with permissions for all Cloudflare resources.
 | Account - Workers Scripts | Edit |
 | Account - Cloudflare Pages | Edit |
 | Zone - DNS | Edit |
+| Zone - Workers Routes | Edit |
 | Zone - Zone | Read |
 
 4. Zone Resources: Include your domain's zone
