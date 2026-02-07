@@ -49,6 +49,13 @@ Build order matters: shared → providers → api/web
 - Use Miniflare for Worker integration tests
 - Critical paths require >90% coverage
 
+### Post-Push CI Procedure (Required)
+
+- After every push, check GitHub Actions runs for the pushed commit/branch.
+- If any workflow fails, inspect the failing job logs immediately and implement fixes.
+- Push follow-up commits and repeat until all required workflows are green.
+- For pull requests, keep the PR template filled (including Agent Preflight block) so quality gates can pass.
+
 ### Documentation & File Naming
 
 When creating documentation or implementation notes:
