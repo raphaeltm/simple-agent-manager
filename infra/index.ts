@@ -16,7 +16,7 @@ import {
   jwtPrivateKey,
   jwtPublicKey,
 } from "./resources/secrets";
-import { pagesProject, pagesProjectName } from "./resources/pages";
+import { pagesProject, pagesProjectName, pagesCustomDomain } from "./resources/pages";
 
 // Export resource references for internal use
 export {
@@ -24,6 +24,7 @@ export {
   kvNamespace,
   r2Bucket,
   pagesProject,
+  pagesCustomDomain,
   apiDnsRecord,
   appDnsRecord,
   wildcardDnsRecord,
