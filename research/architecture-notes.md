@@ -1,5 +1,7 @@
 # Simple Agent Manager - Architecture Research
 
+> **HISTORICAL DOCUMENT**: This is early research from January 2025. References to ttyd, CloudCLI, and Happy Coder are obsolete. The current terminal implementation is a custom Go VM Agent with embedded xterm.js UI. See [docs/architecture/](../docs/architecture/) for actual architecture.
+
 > **Related docs:** [AI Agent Optimizations](./ai-agent-optimizations.md) | [DNS & Security](./dns-security-persistence-plan.md) | [Multi-tenancy](./multi-tenancy-interfaces.md) | [Index](./README.md)
 
 ## Overview

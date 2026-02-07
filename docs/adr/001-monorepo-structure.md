@@ -19,13 +19,21 @@ We will use a **monorepo structure** with pnpm workspaces and Turborepo:
 ```
 simple-agent-manager/
 ├── apps/
-│   ├── api/          # Cloudflare Workers API
-│   └── web/          # React web UI
+│   ├── api/          # Cloudflare Workers API (Hono)
+│   └── web/          # Control Plane UI (React + Vite)
 ├── packages/
 │   ├── shared/       # Types, validation, utilities
-│   └── providers/    # Cloud provider implementations
+│   ├── providers/    # Cloud provider implementations (Hetzner)
+│   ├── cloud-init/   # VM cloud-init template generation
+│   ├── terminal/     # Shared terminal component (xterm.js + WebSocket)
+│   ├── ui/           # Shared UI component library
+│   ├── vm-agent/     # Go agent for WebSocket terminal + idle detection
+│   └── acp-client/   # Agent Communication Protocol client
+├── infra/            # Pulumi infrastructure as code
 ├── scripts/
-│   └── vm/           # VM setup scripts
+│   ├── vm/           # VM-side config templates
+│   └── deploy/       # Deployment utilities
+├── specs/            # Feature specifications
 └── docs/             # Documentation
 ```
 
@@ -36,9 +44,14 @@ simple-agent-manager/
     ↑
 @simple-agent-manager/providers
     ↑
-@simple-agent-manager/api
+@simple-agent-manager/cloud-init
     ↑
-@simple-agent-manager/web
+@simple-agent-manager/api ←── @simple-agent-manager/terminal
+    ↑
+@simple-agent-manager/web ←── @simple-agent-manager/ui
+
+(vm-agent is a standalone Go binary, not part of the TypeScript dependency chain)
+(acp-client is a standalone package for Agent Communication Protocol)
 ```
 
 ### Tool Choices

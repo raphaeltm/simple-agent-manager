@@ -67,7 +67,7 @@ Think **GitHub Codespaces, but built for AI-assisted development** and with auto
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_ORG/simple-agent-manager.git
+git clone https://github.com/your-org/simple-agent-manager.git
 cd simple-agent-manager
 
 # Install dependencies

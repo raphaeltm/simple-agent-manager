@@ -70,17 +70,45 @@ CI validates this section on pull requests.
 
 ```
 apps/
-  api/         - Cloudflare Workers API
-  web/         - React web UI
+  api/             - Cloudflare Worker API (Hono + TypeScript)
+  web/             - Control Plane UI (React + Vite)
 packages/
-  shared/      - Shared types and utilities
-  providers/   - Cloud provider implementations
+  shared/          - Shared types and utilities
+  providers/       - Cloud provider abstraction (Hetzner)
+  cloud-init/      - VM cloud-init template generation
+  terminal/        - Shared terminal component (xterm.js + WebSocket)
+  ui/              - Shared UI component library
+  vm-agent/        - Go agent for WebSocket terminal + idle detection
+  acp-client/      - Agent Communication Protocol client
+infra/             - Pulumi infrastructure as code
 scripts/
-  vm/          - VM setup scripts
+  vm/              - VM-side config templates
+  deploy/          - Deployment utilities
 docs/
-  guides/      - User guides
-  adr/         - Architecture Decision Records
+  guides/          - User guides
+  adr/             - Architecture Decision Records
+  architecture/    - Architecture documentation
+specs/             - Feature specifications
 ```
+
+### Go Development (VM Agent)
+
+The `packages/vm-agent/` directory contains a Go binary that runs on workspace VMs:
+
+```bash
+cd packages/vm-agent
+
+# Install Go dependencies
+go mod download
+
+# Build for all platforms
+make build-all
+
+# Run tests
+go test ./...
+```
+
+Requirements: Go 1.22+
 
 ## Testing
 

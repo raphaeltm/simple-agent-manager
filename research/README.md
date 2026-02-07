@@ -1,5 +1,7 @@
 # Simple Agent Manager - Research Documentation
 
+> **HISTORICAL DOCUMENT**: This folder contains early research and planning documents from January 2025. The current implementation differs significantly from what is described here. For the actual architecture, see [docs/architecture/](../docs/architecture/) and [AGENTS.md](../AGENTS.md). Key changes since this research: the terminal is now a custom Go VM Agent with embedded xterm.js (not CloudCLI or ttyd), the database is Cloudflare D1 (not stateless labels), and authentication uses BetterAuth with GitHub OAuth.
+
 This folder contains research and planning documents for a lightweight, serverless platform to spin up AI coding agent environments on-demand.
 
 ## Project Vision

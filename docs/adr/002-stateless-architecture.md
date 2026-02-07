@@ -1,8 +1,11 @@
 # ADR 002: Stateless Architecture
 
-**Status**: Accepted
+**Status**: Superseded
 **Date**: 2026-01-24
 **Deciders**: Development Team
+**Superseded By**: The project now uses Cloudflare D1 (SQLite) as the primary database for workspace metadata, user sessions, and credentials. See `apps/api/src/db/schema.ts` for the current schema and `apps/api/src/db/migrations/` for migration history.
+
+> **Note**: This ADR describes the original stateless architecture used during the MVP phase. The migration path described below was executed as part of the Browser Terminal SaaS phase (spec 003). The original content is preserved as a historical record.
 
 ## Context
 
