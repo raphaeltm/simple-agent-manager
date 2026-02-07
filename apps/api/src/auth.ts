@@ -18,6 +18,13 @@ export function createAuth(env: Env) {
     }),
     baseURL: `https://api.${env.BASE_DOMAIN}`,
     secret: env.ENCRYPTION_KEY,
+    trustedOrigins: [
+      `https://app.${env.BASE_DOMAIN}`,
+      `https://api.${env.BASE_DOMAIN}`,
+      // Allow localhost for development
+      'http://localhost:5173',
+      'http://localhost:3000',
+    ],
     session: {
       cookieCache: {
         enabled: true,
