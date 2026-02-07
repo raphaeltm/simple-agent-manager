@@ -8,7 +8,8 @@ import { errors } from '../middleware/error';
 import { encrypt, decrypt } from '../services/encryption';
 import { validateHetznerToken } from '../services/hetzner';
 import * as schema from '../db/schema';
-import type { CredentialResponse } from '@simple-agent-manager/shared';
+import type { CredentialResponse, AgentCredentialInfo, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
+import { isValidAgentType, getAgentDefinition } from '@simple-agent-manager/shared';
 
 const credentialsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -29,7 +30,12 @@ credentialsRoutes.get('/', async (c) => {
       createdAt: schema.credentials.createdAt,
     })
     .from(schema.credentials)
-    .where(eq(schema.credentials.userId, userId));
+    .where(
+      and(
+        eq(schema.credentials.userId, userId),
+        eq(schema.credentials.credentialType, 'cloud-provider')
+      )
+    );
 
   const response: CredentialResponse[] = creds.map((cred) => ({
     id: cred.id,
@@ -153,6 +159,204 @@ credentialsRoutes.delete('/:provider', async (c) => {
 
   return c.json({ success: true });
 });
+
+// =============================================================================
+// Agent API Key Endpoints
+// =============================================================================
+
+/**
+ * GET /api/credentials/agent - List agent API key credentials (masked)
+ */
+credentialsRoutes.get('/agent', async (c) => {
+  const userId = getUserId(c);
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  const creds = await db
+    .select({
+      agentType: schema.credentials.agentType,
+      provider: schema.credentials.provider,
+      encryptedToken: schema.credentials.encryptedToken,
+      iv: schema.credentials.iv,
+      createdAt: schema.credentials.createdAt,
+      updatedAt: schema.credentials.updatedAt,
+    })
+    .from(schema.credentials)
+    .where(
+      and(
+        eq(schema.credentials.userId, userId),
+        eq(schema.credentials.credentialType, 'agent-api-key')
+      )
+    );
+
+  const credentials: AgentCredentialInfo[] = await Promise.all(
+    creds
+      .filter((cred) => cred.agentType != null)
+      .map(async (cred) => {
+        // Decrypt to get last 4 chars for masking
+        const plaintext = await decrypt(cred.encryptedToken, cred.iv, c.env.ENCRYPTION_KEY);
+        const maskedKey = `...${plaintext.slice(-4)}`;
+
+        return {
+          agentType: cred.agentType as AgentCredentialInfo['agentType'],
+          provider: cred.provider as AgentCredentialInfo['provider'],
+          maskedKey,
+          createdAt: cred.createdAt,
+          updatedAt: cred.updatedAt,
+        };
+      })
+  );
+
+  return c.json({ credentials });
+});
+
+/**
+ * PUT /api/credentials/agent - Save or update an agent API key
+ */
+credentialsRoutes.put('/agent', async (c) => {
+  const userId = getUserId(c);
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  const body = await c.req.json<SaveAgentCredentialRequest>();
+
+  if (!body.agentType || !body.apiKey) {
+    throw errors.badRequest('agentType and apiKey are required');
+  }
+
+  if (!isValidAgentType(body.agentType)) {
+    throw errors.badRequest('Invalid agent type');
+  }
+
+  const agentDef = getAgentDefinition(body.agentType);
+  if (!agentDef) {
+    throw errors.badRequest('Unknown agent type');
+  }
+
+  // Encrypt the API key
+  const { ciphertext, iv } = await encrypt(body.apiKey, c.env.ENCRYPTION_KEY);
+
+  // Check if credential already exists
+  const existing = await db
+    .select()
+    .from(schema.credentials)
+    .where(
+      and(
+        eq(schema.credentials.userId, userId),
+        eq(schema.credentials.credentialType, 'agent-api-key'),
+        eq(schema.credentials.agentType, body.agentType)
+      )
+    )
+    .limit(1);
+
+  const now = new Date().toISOString();
+
+  const existingCred = existing[0];
+  if (existingCred) {
+    // Update existing credential
+    await db
+      .update(schema.credentials)
+      .set({
+        encryptedToken: ciphertext,
+        iv,
+        updatedAt: now,
+      })
+      .where(eq(schema.credentials.id, existingCred.id));
+
+    const maskedKey = `...${body.apiKey.slice(-4)}`;
+    const response: AgentCredentialInfo = {
+      agentType: body.agentType,
+      provider: agentDef.provider,
+      maskedKey,
+      createdAt: existingCred.createdAt,
+      updatedAt: now,
+    };
+
+    return c.json(response);
+  }
+
+  // Create new credential
+  const id = ulid();
+  await db.insert(schema.credentials).values({
+    id,
+    userId,
+    provider: agentDef.provider,
+    credentialType: 'agent-api-key',
+    agentType: body.agentType,
+    encryptedToken: ciphertext,
+    iv,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const maskedKey = `...${body.apiKey.slice(-4)}`;
+  const response: AgentCredentialInfo = {
+    agentType: body.agentType,
+    provider: agentDef.provider,
+    maskedKey,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  return c.json(response, 201);
+});
+
+/**
+ * DELETE /api/credentials/agent/:agentType - Remove an agent API key
+ */
+credentialsRoutes.delete('/agent/:agentType', async (c) => {
+  const userId = getUserId(c);
+  const agentType = c.req.param('agentType');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  if (!isValidAgentType(agentType)) {
+    throw errors.badRequest('Invalid agent type');
+  }
+
+  const result = await db
+    .delete(schema.credentials)
+    .where(
+      and(
+        eq(schema.credentials.userId, userId),
+        eq(schema.credentials.credentialType, 'agent-api-key'),
+        eq(schema.credentials.agentType, agentType)
+      )
+    )
+    .returning();
+
+  if (result.length === 0) {
+    throw errors.notFound('Agent credential');
+  }
+
+  return c.json({ success: true });
+});
+
+/**
+ * Helper function to get a decrypted agent API key for internal use.
+ */
+export async function getDecryptedAgentKey(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  agentType: string,
+  encryptionKey: string
+): Promise<string | null> {
+  const creds = await db
+    .select()
+    .from(schema.credentials)
+    .where(
+      and(
+        eq(schema.credentials.userId, userId),
+        eq(schema.credentials.credentialType, 'agent-api-key'),
+        eq(schema.credentials.agentType, agentType)
+      )
+    )
+    .limit(1);
+
+  const foundCred = creds[0];
+  if (!foundCred) {
+    return null;
+  }
+
+  return decrypt(foundCred.encryptedToken, foundCred.iv, encryptionKey);
+}
 
 /**
  * Helper function to get decrypted credential for internal use.

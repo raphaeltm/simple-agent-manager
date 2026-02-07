@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 // =============================================================================
@@ -87,17 +87,22 @@ export const verifications = sqliteTable('verifications', {
 }));
 
 // =============================================================================
-// Credentials (encrypted cloud provider tokens)
+// Credentials (encrypted cloud provider tokens and agent API keys)
 // =============================================================================
 export const credentials = sqliteTable('credentials', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   provider: text('provider').notNull(),
+  credentialType: text('credential_type').notNull().default('cloud-provider'),
+  agentType: text('agent_type'),
   encryptedToken: text('encrypted_token').notNull(),
   iv: text('iv').notNull(),
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+}, (table) => ({
+  userCredentialTypeAgent: uniqueIndex('idx_credentials_user_type_agent')
+    .on(table.userId, table.credentialType, table.agentType),
+}));
 
 // =============================================================================
 // GitHub App Installations

@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/server"
 )
@@ -21,6 +22,13 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
+	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), cfg.BootstrapMaxWait+30*time.Second)
+	defer bootstrapCancel()
+
+	if err := bootstrap.Run(bootstrapCtx, cfg); err != nil {
+		log.Fatalf("Bootstrap failed: %v", err)
 	}
 
 	log.Printf("Configuration loaded: workspace=%s, port=%d", cfg.WorkspaceID, cfg.Port)

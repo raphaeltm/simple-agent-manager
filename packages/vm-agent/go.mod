@@ -11,5 +11,6 @@ require (
 
 require (
 	github.com/MicahParks/jwkset v0.5.19 // indirect
+	github.com/coder/acp-go-sdk v0.6.3 // indirect
 	golang.org/x/time v0.5.0 // indirect
 )

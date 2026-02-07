@@ -3,14 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "description": "Serverless platform to spin up AI coding agent environments on-demand",
-  "keywords": ["claude-code", "ai-workspaces", "devcontainers", "cloudflare-workers"],
+  "keywords": [
+    "claude-code",
+    "ai-workspaces",
+    "devcontainers",
+    "cloudflare-workers"
+  ],
   "license": "MIT",
   "author": "Simple Agent Manager Contributors",
   "type": "module",
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-        "test": "turbo run test",
+    "test": "turbo run test",
+    "test:e2e:vm-agent-smoke": "node scripts/e2e/vm-agent-smoke.mjs",
+    "test:e2e:vm-agent-smoke:worker": "node scripts/e2e/vm-agent-smoke.mjs --control-plane=worker",
     "test:coverage": "turbo run test:coverage",
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint -- --fix",
@@ -50,7 +57,12 @@
     "pnpm": ">=9.0.0"
   },
   "lint-staged": {
-    "*.{ts,tsx,js,jsx}": ["eslint --fix", "prettier --write"],
-    "*.{json,md,yaml,yml}": ["prettier --write"]
+    "*.{ts,tsx,js,jsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yaml,yml}": [
+      "prettier --write"
+    ]
   }
 }
