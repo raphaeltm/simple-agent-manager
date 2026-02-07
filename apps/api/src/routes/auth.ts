@@ -16,9 +16,20 @@ authRoutes.on(['GET', 'POST'], '/*', async (c) => {
   try {
     const auth = createAuth(c.env);
     const response = await auth.handler(c.req.raw);
+
+    // Log errors from BetterAuth for debugging
+    if (response.status >= 400) {
+      const body = await response.clone().text();
+      console.error(`BetterAuth ${response.status}: ${body || '(empty body)'}`);
+      console.error(`Request: ${c.req.method} ${c.req.url}`);
+      // Return error body for debugging (BetterAuth sometimes returns empty 500s)
+      if (!body && response.status === 500) {
+        return c.json({ error: 'AUTH_ERROR', message: 'BetterAuth returned 500 with no details. Check Worker logs.' }, 500);
+      }
+    }
     return response;
   } catch (err) {
-    console.error('BetterAuth error:', err instanceof Error ? err.message : err);
+    console.error('BetterAuth exception:', err instanceof Error ? err.message : err);
     console.error('BetterAuth stack:', err instanceof Error ? err.stack : 'no stack');
     return c.json({ error: 'AUTH_ERROR', message: err instanceof Error ? err.message : 'Unknown auth error' }, 500);
   }
