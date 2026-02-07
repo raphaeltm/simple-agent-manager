@@ -35,6 +35,9 @@ export interface Env {
   ENCRYPTION_KEY: string;
   // Pages project name for proxying app.* requests
   PAGES_PROJECT_NAME?: string;
+  // Debug mode (set to "true" to enable verbose auth error tracing)
+  // TODO: Remove or restrict this once auth is stable
+  DEBUG_AUTH?: string;
   // Optional configurable values (per constitution principle XI)
   IDLE_TIMEOUT_SECONDS?: string;
   TERMINAL_TOKEN_EXPIRY_MS?: string;

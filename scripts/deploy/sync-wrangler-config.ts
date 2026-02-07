@@ -68,6 +68,8 @@ function updateEnvironmentBindings(
       BASE_DOMAIN: outputs.stackSummary.baseDomain,
       VERSION: DEPLOYMENT_CONFIG.version,
       PAGES_PROJECT_NAME: outputs.pagesName,
+      // TODO: Remove DEBUG_AUTH once auth flow is stable
+      DEBUG_AUTH: 'true',
     },
     d1_databases: [
       {
