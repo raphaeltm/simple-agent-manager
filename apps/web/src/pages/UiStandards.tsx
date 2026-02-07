@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UserMenu } from '../components/UserMenu';
 import { getActiveUiStandard, upsertUiStandard, type UIStandard } from '../lib/ui-governance';
+import { PageLayout, Button, Alert, Select, Spinner } from '@simple-agent-manager/ui';
 
 export function UiStandards() {
   const navigate = useNavigate();
@@ -67,126 +68,135 @@ export function UiStandards() {
     }
   };
 
+  const labelStyle = {
+    display: 'block',
+    fontSize: '0.875rem',
+    fontWeight: 500,
+    color: 'var(--sam-color-fg-muted)',
+    marginBottom: '0.25rem',
+  } as const;
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <button onClick={() => navigate('/dashboard')} className="text-gray-600 hover:text-gray-900">
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <h1 className="text-xl font-semibold text-gray-900">UI Standards</h1>
-          </div>
-          <UserMenu />
+    <PageLayout
+      title="UI Standards"
+      onBack={() => navigate('/dashboard')}
+      maxWidth="md"
+      headerRight={<UserMenu />}
+    >
+      {loading ? (
+        <div style={{ padding: 'var(--sam-space-8)', display: 'flex', justifyContent: 'center' }}>
+          <Spinner size="lg" />
         </div>
-      </header>
+      ) : (
+        <form
+          onSubmit={handleSave}
+          style={{
+            backgroundColor: 'var(--sam-color-bg-surface)',
+            borderRadius: 'var(--sam-radius-lg)',
+            border: '1px solid var(--sam-color-border-default)',
+            padding: 'var(--sam-space-6)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--sam-space-4)',
+          }}
+        >
+          {error && (
+            <Alert variant="error" onDismiss={() => setError(null)}>
+              {error}
+            </Alert>
+          )}
+          {savedMessage && (
+            <Alert variant="success" onDismiss={() => setSavedMessage(null)}>
+              {savedMessage}
+            </Alert>
+          )}
 
-      <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {loading ? (
-          <div className="p-8 flex justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <div>
+            <label htmlFor="standard-version" style={labelStyle}>Version</label>
+            <input
+              id="standard-version"
+              type="text"
+              value={version}
+              onChange={(e) => setVersion(e.target.value)}
+              required
+            />
           </div>
-        ) : (
-          <form onSubmit={handleSave} className="bg-white rounded-lg shadow p-6 space-y-4">
-            {error && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700">{error}</div>}
-            {savedMessage && <div className="p-3 bg-green-100 rounded-lg text-green-800">{savedMessage}</div>}
 
-            <div>
-              <label htmlFor="standard-version" className="block text-sm font-medium text-gray-700">Version</label>
-              <input
-                id="standard-version"
-                type="text"
-                value={version}
-                onChange={(e) => setVersion(e.target.value)}
-                required
-              />
-            </div>
+          <div>
+            <label htmlFor="standard-status" style={labelStyle}>Status</label>
+            <Select
+              id="standard-status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value as UIStandard['status'])}
+            >
+              <option value="draft">Draft</option>
+              <option value="review">Review</option>
+              <option value="active">Active</option>
+              <option value="deprecated">Deprecated</option>
+            </Select>
+          </div>
 
-            <div>
-              <label htmlFor="standard-status" className="block text-sm font-medium text-gray-700">Status</label>
-              <select
-                id="standard-status"
-                value={status}
-                onChange={(e) => setStatus(e.target.value as UIStandard['status'])}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-              >
-                <option value="draft">Draft</option>
-                <option value="review">Review</option>
-                <option value="active">Active</option>
-                <option value="deprecated">Deprecated</option>
-              </select>
-            </div>
+          <div>
+            <label htmlFor="standard-name" style={labelStyle}>Name</label>
+            <input
+              id="standard-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </div>
 
-            <div>
-              <label htmlFor="standard-name" className="block text-sm font-medium text-gray-700">Name</label>
-              <input
-                id="standard-name"
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
-            </div>
+          <div>
+            <label htmlFor="visual-direction" style={labelStyle}>Visual Direction</label>
+            <textarea
+              id="visual-direction"
+              value={visualDirection}
+              onChange={(e) => setVisualDirection(e.target.value)}
+              rows={3}
+            />
+          </div>
 
-            <div>
-              <label htmlFor="visual-direction" className="block text-sm font-medium text-gray-700">Visual Direction</label>
-              <textarea
-                id="visual-direction"
-                value={visualDirection}
-                onChange={(e) => setVisualDirection(e.target.value)}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                rows={3}
-              />
-            </div>
+          <div>
+            <label htmlFor="mobile-ref" style={labelStyle}>Mobile Rules Reference</label>
+            <input
+              id="mobile-ref"
+              type="text"
+              value={mobileFirstRulesRef}
+              onChange={(e) => setMobileFirstRulesRef(e.target.value)}
+              required
+            />
+          </div>
 
-            <div>
-              <label htmlFor="mobile-ref" className="block text-sm font-medium text-gray-700">Mobile Rules Reference</label>
-              <input
-                id="mobile-ref"
-                type="text"
-                value={mobileFirstRulesRef}
-                onChange={(e) => setMobileFirstRulesRef(e.target.value)}
-                required
-              />
-            </div>
+          <div>
+            <label htmlFor="accessibility-ref" style={labelStyle}>Accessibility Rules Reference</label>
+            <input
+              id="accessibility-ref"
+              type="text"
+              value={accessibilityRulesRef}
+              onChange={(e) => setAccessibilityRulesRef(e.target.value)}
+              required
+            />
+          </div>
 
-            <div>
-              <label htmlFor="accessibility-ref" className="block text-sm font-medium text-gray-700">Accessibility Rules Reference</label>
-              <input
-                id="accessibility-ref"
-                type="text"
-                value={accessibilityRulesRef}
-                onChange={(e) => setAccessibilityRulesRef(e.target.value)}
-                required
-              />
-            </div>
+          <div>
+            <label htmlFor="owner-role" style={labelStyle}>Owner Role</label>
+            <input
+              id="owner-role"
+              type="text"
+              value={ownerRole}
+              onChange={(e) => setOwnerRole(e.target.value)}
+              required
+            />
+          </div>
 
-            <div>
-              <label htmlFor="owner-role" className="block text-sm font-medium text-gray-700">Owner Role</label>
-              <input
-                id="owner-role"
-                type="text"
-                value={ownerRole}
-                onChange={(e) => setOwnerRole(e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="pt-2 flex justify-end">
-              <button
-                type="submit"
-                disabled={saving}
-                className="px-4 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-                style={{ minHeight: '56px' }}
-              >
-                {saving ? 'Saving...' : 'Save Standard'}
-              </button>
-            </div>
-          </form>
-        )}
-      </main>
-    </div>
+          <div style={{ paddingTop: 'var(--sam-space-2)', display: 'flex', justifyContent: 'flex-end' }}>
+            <Button type="submit" disabled={saving} loading={saving} size="lg">
+              Save Standard
+            </Button>
+          </div>
+        </form>
+      )}
+    </PageLayout>
   );
 }

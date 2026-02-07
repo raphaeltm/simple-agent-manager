@@ -10,6 +10,9 @@
   --sam-color-warning: #f59e0b;
   --sam-color-danger: #ef4444;
   --sam-color-focus-ring: #34d399;
+  --sam-color-bg-surface-hover: #1a2e29;
+  --sam-color-bg-overlay: rgba(0, 0, 0, 0.6);
+  --sam-color-bg-inset: #0e1a17;
 
   --sam-space-1: 4px;
   --sam-space-2: 8px;
@@ -26,4 +29,9 @@
 [data-ui-theme='sam'] {
   color: var(--sam-color-fg-primary);
   background-color: var(--sam-color-bg-canvas);
+}
+
+@keyframes sam-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }

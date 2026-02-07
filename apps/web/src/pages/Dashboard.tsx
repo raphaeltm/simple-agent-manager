@@ -6,6 +6,7 @@ import { WorkspaceCard } from '../components/WorkspaceCard';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { listWorkspaces, stopWorkspace, restartWorkspace, deleteWorkspace } from '../lib/api';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
+import { PageLayout, Button, Alert, Spinner } from '@simple-agent-manager/ui';
 
 /**
  * Dashboard page showing user profile and workspaces.
@@ -19,7 +20,6 @@ export function Dashboard() {
   const [deleteTarget, setDeleteTarget] = useState<WorkspaceResponse | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  // Check if any workspaces are in transitional states
   const hasTransitionalWorkspaces = useMemo(() => {
     return workspaces.some(w =>
       w.status === 'creating' || w.status === 'stopping'
@@ -40,7 +40,6 @@ export function Dashboard() {
 
   useEffect(() => {
     loadWorkspaces();
-    // Poll every 5s if transitional workspaces, otherwise every 30s
     const pollInterval = hasTransitionalWorkspaces ? 5000 : 30000;
     const interval = setInterval(loadWorkspaces, pollInterval);
     return () => clearInterval(interval);
@@ -90,125 +89,131 @@ export function Dashboard() {
   const activeCount = workspaces.filter(w => w.status === 'running').length;
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-gray-900">
-            Simple Agent Manager
-          </h1>
-          <UserMenu />
-        </div>
-      </header>
+    <PageLayout
+      title="Simple Agent Manager"
+      maxWidth="xl"
+      headerRight={<UserMenu />}
+    >
+      {/* Welcome section */}
+      <div style={{ marginBottom: 'var(--sam-space-8)' }}>
+        <h2 style={{ fontSize: 'clamp(1.25rem, 3vw, 1.5rem)', fontWeight: 700, color: 'var(--sam-color-fg-primary)' }}>
+          Welcome, {user?.name || user?.email}!
+        </h2>
+        <p style={{ color: 'var(--sam-color-fg-muted)', marginTop: 'var(--sam-space-1)' }}>
+          Manage your AI coding workspaces
+        </p>
+      </div>
 
-      {/* Main content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Welcome section */}
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold text-gray-900">
-            Welcome, {user?.name || user?.email}!
-          </h2>
-          <p className="text-gray-600 mt-1">
-            Manage your AI coding workspaces
-          </p>
+      <style>{`
+        .sam-quick-actions { grid-template-columns: 1fr; }
+        @media (min-width: 768px) { .sam-quick-actions { grid-template-columns: repeat(4, 1fr); } }
+        .sam-workspace-grid { grid-template-columns: 1fr; }
+        @media (min-width: 768px) { .sam-workspace-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (min-width: 1024px) { .sam-workspace-grid { grid-template-columns: repeat(3, 1fr); } }
+      `}</style>
+      {/* Quick actions */}
+      <div className="sam-quick-actions" style={{ display: 'grid', gap: 'var(--sam-space-4)', marginBottom: 'var(--sam-space-8)' }}>
+        <Button
+          onClick={() => navigate('/workspaces/new')}
+          size="lg"
+          style={{ width: '100%', justifyContent: 'center', gap: '0.5rem' }}
+        >
+          <svg style={{ height: 20, width: 20 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          <span>New Workspace</span>
+        </Button>
+        <Button
+          onClick={() => navigate('/settings')}
+          variant="secondary"
+          size="lg"
+          style={{ width: '100%', justifyContent: 'center', gap: '0.5rem' }}
+        >
+          <svg style={{ height: 20, width: 20 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          <span>Settings</span>
+        </Button>
+        <Button
+          onClick={() => navigate('/ui-standards')}
+          variant="secondary"
+          size="lg"
+          style={{ width: '100%', justifyContent: 'center', gap: '0.5rem' }}
+        >
+          <svg style={{ height: 20, width: 20 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+          </svg>
+          <span>UI Standards</span>
+        </Button>
+        <div style={{
+          padding: 'var(--sam-space-4)',
+          backgroundColor: 'var(--sam-color-bg-surface)',
+          border: '1px solid var(--sam-color-border-default)',
+          borderRadius: 'var(--sam-radius-md)',
+        }}>
+          <div style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Active Workspaces</div>
+          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--sam-color-fg-primary)' }}>{activeCount}</div>
         </div>
+      </div>
 
-        {/* Quick actions */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <button
-            onClick={() => navigate('/workspaces/new')}
-            className="p-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center space-x-2"
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            <span>New Workspace</span>
-          </button>
-          <button
-            onClick={() => navigate('/settings')}
-            className="p-4 bg-white text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center space-x-2"
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-            <span>Settings</span>
-          </button>
-          <button
-            onClick={() => navigate('/ui-standards')}
-            className="p-4 bg-white text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center space-x-2"
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v12m-6-6h12" />
-            </svg>
-            <span>UI Standards</span>
-          </button>
-          <div className="p-4 bg-white border border-gray-200 rounded-lg">
-            <div className="text-sm text-gray-500">Active Workspaces</div>
-            <div className="text-2xl font-bold text-gray-900">{activeCount}</div>
-          </div>
-        </div>
-
-        {/* Error message */}
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-600">
+      {/* Error message */}
+      {error && (
+        <div style={{ marginBottom: 'var(--sam-space-6)' }}>
+          <Alert variant="error" onDismiss={() => setError(null)}>
             {error}
-            <button
-              onClick={() => setError(null)}
-              className="ml-4 text-red-800 hover:text-red-900"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
+          </Alert>
+        </div>
+      )}
 
-        {/* Workspaces section */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-medium text-gray-900">Your Workspaces</h3>
-            {hasTransitionalWorkspaces && (
-              <span className="text-sm text-gray-500 flex items-center">
-                <svg className="animate-spin h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                Updating...
-              </span>
-            )}
-          </div>
-
-          {loading ? (
-            <div className="p-8 flex justify-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            </div>
-          ) : workspaces.length === 0 ? (
-            <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
-              <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
-              <p className="mt-4">No workspaces yet.</p>
-              <button
-                onClick={() => navigate('/workspaces/new')}
-                className="mt-4 inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-              >
-                Create your first workspace
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {workspaces.map((workspace) => (
-                <WorkspaceCard
-                  key={workspace.id}
-                  workspace={workspace}
-                  onStop={handleStopWorkspace}
-                  onRestart={handleRestartWorkspace}
-                  onDelete={handleDeleteWorkspace}
-                />
-              ))}
-            </div>
+      {/* Workspaces section */}
+      <div style={{ marginBottom: 'var(--sam-space-6)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--sam-space-4)' }}>
+          <h3 style={{ fontSize: '1.125rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>Your Workspaces</h3>
+          {hasTransitionalWorkspaces && (
+            <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)', display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
+              <Spinner size="sm" />
+              Updating...
+            </span>
           )}
         </div>
-      </main>
+
+        {loading ? (
+          <div style={{ padding: 'var(--sam-space-8)', display: 'flex', justifyContent: 'center' }}>
+            <Spinner size="lg" />
+          </div>
+        ) : workspaces.length === 0 ? (
+          <div style={{
+            backgroundColor: 'var(--sam-color-bg-surface)',
+            borderRadius: 'var(--sam-radius-lg)',
+            border: '1px solid var(--sam-color-border-default)',
+            padding: 'var(--sam-space-8)',
+            textAlign: 'center',
+          }}>
+            <svg style={{ margin: '0 auto', height: 48, width: 48, color: 'var(--sam-color-fg-muted)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            <p style={{ marginTop: 'var(--sam-space-4)', color: 'var(--sam-color-fg-muted)' }}>No workspaces yet.</p>
+            <div style={{ marginTop: 'var(--sam-space-4)' }}>
+              <Button onClick={() => navigate('/workspaces/new')}>
+                Create your first workspace
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="sam-workspace-grid" style={{ display: 'grid', gap: 'var(--sam-space-4)' }}>
+            {workspaces.map((workspace) => (
+              <WorkspaceCard
+                key={workspace.id}
+                workspace={workspace}
+                onStop={handleStopWorkspace}
+                onRestart={handleRestartWorkspace}
+                onDelete={handleDeleteWorkspace}
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Delete confirmation dialog */}
       <ConfirmDialog
@@ -226,6 +231,6 @@ export function Dashboard() {
         variant="danger"
         loading={deleteLoading}
       />
-    </div>
+    </PageLayout>
   );
 }

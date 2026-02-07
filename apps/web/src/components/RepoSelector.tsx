@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { listRepositories } from '../lib/api';
+import { Input, Spinner } from '@simple-agent-manager/ui';
 import type { Repository } from '@simple-agent-manager/shared';
 
 interface RepoSelectorProps {
@@ -8,7 +9,6 @@ interface RepoSelectorProps {
   onChange: (value: string) => void;
   disabled?: boolean;
   required?: boolean;
-  className?: string;
   placeholder?: string;
 }
 
@@ -18,7 +18,6 @@ export function RepoSelector({
   onChange,
   disabled = false,
   required = false,
-  className = '',
   placeholder = 'https://github.com/user/repo or select from list',
 }: RepoSelectorProps) {
   const [repositories, setRepositories] = useState<Repository[]>([]);
@@ -103,9 +102,9 @@ export function RepoSelector({
   };
 
   return (
-    <div className="relative">
-      <div className="flex items-center">
-        <input
+    <div style={{ position: 'relative' }}>
+      <div style={{ display: 'flex', alignItems: 'center' }}>
+        <Input
           ref={inputRef}
           id={id}
           type="text"
@@ -115,29 +114,10 @@ export function RepoSelector({
           disabled={disabled}
           required={required}
           placeholder={placeholder}
-          className={`flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500 ${className}`}
         />
         {loading && (
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-            <svg
-              className="animate-spin h-4 w-4 text-gray-400"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-              />
-            </svg>
+          <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }}>
+            <Spinner size="sm" />
           </div>
         )}
       </div>
@@ -146,26 +126,50 @@ export function RepoSelector({
       {showDropdown && filteredRepos.length > 0 && (
         <div
           ref={dropdownRef}
-          className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto"
+          style={{
+            position: 'absolute',
+            zIndex: 10,
+            width: '100%',
+            marginTop: '4px',
+            backgroundColor: 'var(--sam-color-bg-surface)',
+            border: '1px solid var(--sam-color-border-default)',
+            borderRadius: 'var(--sam-radius-md)',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+            maxHeight: '15rem',
+            overflowY: 'auto',
+          }}
         >
           {filteredRepos.map((repo) => (
             <button
               key={repo.fullName}
               type="button"
               onClick={() => handleRepoSelect(repo)}
-              className="w-full px-3 py-2 text-left hover:bg-gray-100 focus:bg-gray-100 focus:outline-none transition-colors"
+              style={{
+                width: '100%',
+                padding: '0.5rem 0.75rem',
+                textAlign: 'left',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--sam-color-fg-primary)',
+                transition: 'background-color 0.1s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--sam-color-bg-surface-hover)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
             >
-              <div className="flex items-center justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-sm">{repo.fullName}</span>
-                    {repo.private && (
-                      <span className="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded">
-                        Private
-                      </span>
-                    )}
-                  </div>
-                </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
+                <span style={{ fontWeight: 500, fontSize: '0.875rem' }}>{repo.fullName}</span>
+                {repo.private && (
+                  <span style={{
+                    padding: '1px 6px',
+                    fontSize: '0.7rem',
+                    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                    color: '#fbbf24',
+                    borderRadius: 'var(--sam-radius-sm)',
+                  }}>
+                    Private
+                  </span>
+                )}
               </div>
             </button>
           ))}
@@ -174,7 +178,7 @@ export function RepoSelector({
 
       {/* Info message if GitHub not connected */}
       {error && repositories.length === 0 && value && !value.startsWith('http') && !value.startsWith('git@') && (
-        <p className="mt-1 text-xs text-gray-500">
+        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
           Connect GitHub App for repository autocomplete
         </p>
       )}

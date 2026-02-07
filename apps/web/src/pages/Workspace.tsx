@@ -3,8 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Terminal } from '@simple-agent-manager/terminal';
 import { useAcpSession, useAcpMessages, AgentPanel } from '@simple-agent-manager/acp-client';
 import type { AcpSessionState } from '@simple-agent-manager/acp-client';
+import { Button, Alert, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
-import { StatusBadge } from '../components/StatusBadge';
 import { AgentSelector } from '../components/AgentSelector';
 import { getWorkspace, getTerminalToken, stopWorkspace, restartWorkspace } from '../lib/api';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
@@ -25,21 +25,67 @@ function agentStatusLabel(state: AcpSessionState, agentType: string | null): str
   }
 }
 
-/** CSS dot color class for the agent status indicator */
-function agentStatusDotClass(state: AcpSessionState): string {
+/** Inline style for the agent status dot indicator */
+function agentStatusDotStyle(state: AcpSessionState): React.CSSProperties {
+  const base: React.CSSProperties = {
+    display: 'inline-block',
+    height: 8,
+    width: 8,
+    borderRadius: '50%',
+  };
   switch (state) {
-    case 'ready': return 'bg-green-400';
+    case 'ready': return { ...base, backgroundColor: '#4ade80' };
     case 'initializing':
     case 'connecting':
-    case 'reconnecting': return 'bg-yellow-400 animate-pulse';
-    case 'prompting': return 'bg-blue-400 animate-pulse';
-    case 'error': return 'bg-red-400';
-    default: return 'bg-gray-400';
+    case 'reconnecting': return { ...base, backgroundColor: '#fbbf24', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' };
+    case 'prompting': return { ...base, backgroundColor: '#60a5fa', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' };
+    case 'error': return { ...base, backgroundColor: '#f87171' };
+    default: return { ...base, backgroundColor: '#9fb7ae' };
   }
 }
 
 /** View modes: terminal (existing) or conversation (Phase 5 placeholder) */
 type ViewMode = 'terminal' | 'conversation';
+
+/** Shared styles */
+const headerStyle: React.CSSProperties = {
+  backgroundColor: 'var(--sam-color-bg-surface)',
+  borderBottom: '1px solid var(--sam-color-border-default)',
+};
+
+const headerInnerStyle: React.CSSProperties = {
+  maxWidth: '80rem',
+  margin: '0 auto',
+  padding: 'var(--sam-space-4) var(--sam-space-4)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+};
+
+const mainStyle: React.CSSProperties = {
+  maxWidth: '80rem',
+  margin: '0 auto',
+  padding: 'var(--sam-space-8) var(--sam-space-4)',
+};
+
+const terminalPanelStyle: React.CSSProperties = {
+  backgroundColor: 'var(--sam-color-bg-canvas)',
+  borderRadius: 'var(--sam-radius-lg)',
+  padding: 'var(--sam-space-8)',
+  textAlign: 'center',
+};
+
+const infoLabelStyle: React.CSSProperties = {
+  fontSize: '0.875rem',
+  fontWeight: 500,
+  color: 'var(--sam-color-fg-muted)',
+};
+
+const infoValueStyle: React.CSSProperties = {
+  marginTop: '4px',
+  fontSize: '0.875rem',
+  color: 'var(--sam-color-fg-primary)',
+};
 
 /**
  * Workspace detail page with terminal access and ACP agent integration.
@@ -226,83 +272,108 @@ export function Workspace() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      <div style={{ minHeight: '100vh', backgroundColor: 'var(--sam-color-bg-canvas)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Spinner size="lg" />
       </div>
     );
   }
 
   if (error && !workspace) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <header className="bg-white shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-            <div className="flex items-center space-x-4">
+      <div style={{ minHeight: '100vh', backgroundColor: 'var(--sam-color-bg-canvas)' }}>
+        <header style={headerStyle}>
+          <div style={headerInnerStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-4)' }}>
               <button
                 onClick={() => navigate('/dashboard')}
-                className="text-gray-600 hover:text-gray-900"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--sam-color-fg-muted)', padding: 0 }}
               >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg style={{ height: 20, width: 20 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
-              <h1 className="text-xl font-semibold text-gray-900">Workspace</h1>
+              <h1 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--sam-color-fg-primary)' }}>Workspace</h1>
             </div>
             <UserMenu />
           </div>
         </header>
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-            <p className="text-red-600">{error}</p>
-            <button
-              onClick={() => navigate('/dashboard')}
-              className="mt-4 text-blue-600 hover:text-blue-800"
-            >
-              Back to Dashboard
-            </button>
-          </div>
+        <main style={mainStyle}>
+          <Alert variant="error">
+            <div style={{ textAlign: 'center' }}>
+              <p>{error}</p>
+              <button
+                onClick={() => navigate('/dashboard')}
+                style={{
+                  marginTop: 'var(--sam-space-4)',
+                  color: 'var(--sam-color-accent-primary)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: 'inherit',
+                }}
+              >
+                Back to Dashboard
+              </button>
+            </div>
+          </Alert>
         </main>
       </div>
     );
   }
 
+  const toggleBtnStyle = (active: boolean): React.CSSProperties => ({
+    padding: '4px 12px',
+    fontSize: '0.75rem',
+    fontWeight: 500,
+    border: 'none',
+    cursor: 'pointer',
+    backgroundColor: active ? 'var(--sam-color-accent-primary)' : 'transparent',
+    color: active ? '#ffffff' : 'var(--sam-color-fg-muted)',
+    transition: 'all 0.15s ease',
+  });
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div style={{ minHeight: '100vh', backgroundColor: 'var(--sam-color-bg-canvas)' }}>
       {/* Header */}
-      <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-4">
+      <header style={headerStyle}>
+        <div style={headerInnerStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-4)' }}>
             <button
               onClick={() => navigate('/dashboard')}
-              className="text-gray-600 hover:text-gray-900"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--sam-color-fg-muted)', padding: 0 }}
             >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg style={{ height: 20, width: 20 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
             </button>
-            <h1 className="text-xl font-semibold text-gray-900">{workspace?.name}</h1>
+            <h1 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--sam-color-fg-primary)' }}>{workspace?.name}</h1>
             {workspace && <StatusBadge status={workspace.status} />}
           </div>
-          <div className="flex items-center space-x-4">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-4)' }}>
             {/* Agent status indicator (FR-019) — visible in both terminal and conversation modes */}
             {workspace?.status === 'running' && (
-              <div className="flex items-center space-x-2 text-sm text-gray-600">
-                <span className={`inline-block h-2 w-2 rounded-full ${agentStatusDotClass(acpSession.state)}`} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
+                <span style={agentStatusDotStyle(acpSession.state)} />
                 <span>{agentStatusLabel(acpSession.state, acpSession.agentType)}</span>
               </div>
             )}
             {/* View mode toggle (wired in US3/US4) */}
             {workspace?.status === 'running' && acpSession.agentType && (
-              <div className="flex rounded-md border border-gray-300 overflow-hidden">
+              <div style={{
+                display: 'flex',
+                borderRadius: 'var(--sam-radius-md)',
+                border: '1px solid var(--sam-color-border-default)',
+                overflow: 'hidden',
+              }}>
                 <button
                   onClick={() => setViewMode('terminal')}
-                  className={`px-3 py-1 text-xs font-medium ${viewMode === 'terminal' ? 'bg-gray-800 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                  style={toggleBtnStyle(viewMode === 'terminal')}
                 >
                   Terminal
                 </button>
                 <button
                   onClick={() => setViewMode('conversation')}
-                  className={`px-3 py-1 text-xs font-medium ${viewMode === 'conversation' ? 'bg-gray-800 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                  style={toggleBtnStyle(viewMode === 'conversation')}
                 >
                   Conversation
                 </button>
@@ -314,57 +385,60 @@ export function Workspace() {
       </header>
 
       {/* Main content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main style={mainStyle}>
         {/* Error banner */}
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-600 flex items-center justify-between">
-            <span>{error}</span>
-            <button onClick={() => setError(null)} className="text-red-800 hover:text-red-900">
-              Dismiss
-            </button>
+          <div style={{ marginBottom: 'var(--sam-space-6)' }}>
+            <Alert variant="error" onDismiss={() => setError(null)}>
+              {error}
+            </Alert>
           </div>
         )}
 
         {/* ACP fallback notification */}
         {fallbackNotice && (
-          <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 flex items-center justify-between">
-            <span>{fallbackNotice}</span>
-            <button onClick={() => setFallbackNotice(null)} className="text-yellow-900 hover:text-yellow-700">
-              Dismiss
-            </button>
+          <div style={{ marginBottom: 'var(--sam-space-6)' }}>
+            <Alert variant="warning" onDismiss={() => setFallbackNotice(null)}>
+              {fallbackNotice}
+            </Alert>
           </div>
         )}
 
         {/* Workspace details */}
-        <div className="bg-white rounded-lg shadow">
-          <div className="p-6">
+        <div style={{
+          backgroundColor: 'var(--sam-color-bg-surface)',
+          borderRadius: 'var(--sam-radius-lg)',
+          border: '1px solid var(--sam-color-border-default)',
+        }}>
+          <div style={{ padding: 'var(--sam-space-6)' }}>
             {/* Info section */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <style>{`.sam-workspace-info { grid-template-columns: 1fr; } @media (min-width: 768px) { .sam-workspace-info { grid-template-columns: repeat(2, 1fr); } }`}</style>
+            <div className="sam-workspace-info" style={{ display: 'grid', gap: 'var(--sam-space-6)', marginBottom: 'var(--sam-space-6)' }}>
               <div>
-                <h3 className="text-sm font-medium text-gray-500">Repository</h3>
-                <p className="mt-1 text-sm text-gray-900">{workspace?.repository}</p>
+                <h3 style={infoLabelStyle}>Repository</h3>
+                <p style={infoValueStyle}>{workspace?.repository}</p>
               </div>
               <div>
-                <h3 className="text-sm font-medium text-gray-500">Branch</h3>
-                <p className="mt-1 text-sm text-gray-900">{workspace?.branch}</p>
+                <h3 style={infoLabelStyle}>Branch</h3>
+                <p style={infoValueStyle}>{workspace?.branch}</p>
               </div>
               <div>
-                <h3 className="text-sm font-medium text-gray-500">VM Size</h3>
-                <p className="mt-1 text-sm text-gray-900">{workspace?.vmSize}</p>
+                <h3 style={infoLabelStyle}>VM Size</h3>
+                <p style={infoValueStyle}>{workspace?.vmSize}</p>
               </div>
               <div>
-                <h3 className="text-sm font-medium text-gray-500">Location</h3>
-                <p className="mt-1 text-sm text-gray-900">{workspace?.vmLocation}</p>
+                <h3 style={infoLabelStyle}>Location</h3>
+                <p style={infoValueStyle}>{workspace?.vmLocation}</p>
               </div>
               <div>
-                <h3 className="text-sm font-medium text-gray-500">Created</h3>
-                <p className="mt-1 text-sm text-gray-900">
+                <h3 style={infoLabelStyle}>Created</h3>
+                <p style={infoValueStyle}>
                   {workspace?.createdAt && new Date(workspace.createdAt).toLocaleString()}
                 </p>
               </div>
               <div>
-                <h3 className="text-sm font-medium text-gray-500">Last Activity</h3>
-                <p className="mt-1 text-sm text-gray-900">
+                <h3 style={infoLabelStyle}>Last Activity</h3>
+                <p style={infoValueStyle}>
                   {workspace?.lastActivityAt
                     ? new Date(workspace.lastActivityAt).toLocaleString()
                     : 'No activity recorded'}
@@ -374,15 +448,19 @@ export function Workspace() {
 
             {/* Error message */}
             {workspace?.errorMessage && (
-              <div className="mb-6 p-4 bg-red-50 rounded-lg">
-                <h3 className="text-sm font-medium text-red-800">Error</h3>
-                <p className="mt-1 text-sm text-red-600">{workspace.errorMessage}</p>
+              <div style={{ marginBottom: 'var(--sam-space-6)' }}>
+                <Alert variant="error">
+                  <div>
+                    <strong>Error</strong>
+                    <p style={{ marginTop: '4px' }}>{workspace.errorMessage}</p>
+                  </div>
+                </Alert>
               </div>
             )}
 
             {/* Agent Selector — shown when workspace is running */}
             {workspace?.status === 'running' && (
-              <div className="border-t border-gray-200 pt-4 pb-2">
+              <div style={{ borderTop: '1px solid var(--sam-color-border-default)', paddingTop: 'var(--sam-space-4)', paddingBottom: 'var(--sam-space-2)' }}>
                 <AgentSelector
                   activeAgentType={acpSession.agentType}
                   sessionState={acpSession.state}
@@ -392,14 +470,14 @@ export function Workspace() {
             )}
 
             {/* Terminal / Conversation section */}
-            <div className="border-t border-gray-200 pt-6">
+            <div style={{ borderTop: '1px solid var(--sam-color-border-default)', paddingTop: 'var(--sam-space-6)' }}>
               {workspace?.status === 'running' ? (
                 viewMode === 'conversation' ? (
-                  <div className="rounded-lg overflow-hidden" style={{ height: '500px' }}>
+                  <div style={{ borderRadius: 'var(--sam-radius-lg)', overflow: 'hidden', height: 500 }}>
                     <AgentPanel session={acpSession} messages={acpMessages} />
                   </div>
                 ) : wsUrl ? (
-                  <div className="bg-gray-900 rounded-lg overflow-hidden" style={{ height: '500px' }}>
+                  <div style={{ backgroundColor: 'var(--sam-color-bg-canvas)', borderRadius: 'var(--sam-radius-lg)', overflow: 'hidden', height: 500 }}>
                     <Terminal
                       wsUrl={wsUrl}
                       shutdownDeadline={workspace.shutdownDeadline}
@@ -408,95 +486,82 @@ export function Workspace() {
                     />
                   </div>
                 ) : terminalLoading ? (
-                  <div className="bg-gray-900 rounded-lg p-8 text-center">
-                    <svg className="mx-auto h-12 w-12 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div style={terminalPanelStyle}>
+                    <svg style={{ margin: '0 auto', height: 48, width: 48, color: '#4ade80' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
-                    <h3 className="mt-4 text-lg font-medium text-white">Connecting to Terminal</h3>
-                    <p className="mt-2 text-gray-400">
+                    <h3 style={{ marginTop: 'var(--sam-space-4)', fontSize: '1.125rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>Connecting to Terminal</h3>
+                    <p style={{ marginTop: 'var(--sam-space-2)', color: 'var(--sam-color-fg-muted)' }}>
                       Establishing secure connection...
                     </p>
-                    <div className="mt-6 flex justify-center">
-                      <svg className="animate-spin h-8 w-8 text-green-400" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
+                    <div style={{ marginTop: 'var(--sam-space-6)', display: 'flex', justifyContent: 'center' }}>
+                      <Spinner size="lg" />
                     </div>
                   </div>
                 ) : (
-                  <div className="bg-gray-900 rounded-lg p-8 text-center">
-                    <svg className="mx-auto h-12 w-12 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div style={terminalPanelStyle}>
+                    <svg style={{ margin: '0 auto', height: 48, width: 48, color: '#f87171' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                     </svg>
-                    <h3 className="mt-4 text-lg font-medium text-white">Connection Failed</h3>
-                    <p className="mt-2 text-gray-400">
+                    <h3 style={{ marginTop: 'var(--sam-space-4)', fontSize: '1.125rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>Connection Failed</h3>
+                    <p style={{ marginTop: 'var(--sam-space-2)', color: 'var(--sam-color-fg-muted)' }}>
                       Unable to connect to terminal. Please try again.
                     </p>
-                    <button
-                      onClick={handleOpenTerminal}
-                      disabled={actionLoading}
-                      className="mt-6 inline-flex items-center px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      {actionLoading ? 'Connecting...' : 'Open in New Tab'}
-                    </button>
+                    <div style={{ marginTop: 'var(--sam-space-6)' }}>
+                      <Button onClick={handleOpenTerminal} disabled={actionLoading} loading={actionLoading}>
+                        {actionLoading ? 'Connecting...' : 'Open in New Tab'}
+                      </Button>
+                    </div>
                   </div>
                 )
               ) : workspace?.status === 'creating' ? (
-                <div className="bg-gray-900 rounded-lg p-8 text-center">
-                  <svg className="mx-auto h-12 w-12 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <div style={terminalPanelStyle}>
+                  <svg style={{ margin: '0 auto', height: 48, width: 48, color: '#60a5fa' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
-                  <h3 className="mt-4 text-lg font-medium text-white">Creating Workspace</h3>
-                  <p className="mt-2 text-gray-400">
+                  <h3 style={{ marginTop: 'var(--sam-space-4)', fontSize: '1.125rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>Creating Workspace</h3>
+                  <p style={{ marginTop: 'var(--sam-space-2)', color: 'var(--sam-color-fg-muted)' }}>
                     Your workspace is being created. This may take a few minutes.
                   </p>
-                  <div className="mt-6 flex justify-center">
-                    <svg className="animate-spin h-8 w-8 text-blue-400" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
+                  <div style={{ marginTop: 'var(--sam-space-6)', display: 'flex', justifyContent: 'center' }}>
+                    <Spinner size="lg" />
                   </div>
                 </div>
               ) : workspace?.status === 'stopping' ? (
-                <div className="bg-gray-900 rounded-lg p-8 text-center">
-                  <svg className="mx-auto h-12 w-12 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <div style={terminalPanelStyle}>
+                  <svg style={{ margin: '0 auto', height: 48, width: 48, color: '#fbbf24' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
-                  <h3 className="mt-4 text-lg font-medium text-white">Stopping Workspace</h3>
-                  <p className="mt-2 text-gray-400">
+                  <h3 style={{ marginTop: 'var(--sam-space-4)', fontSize: '1.125rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>Stopping Workspace</h3>
+                  <p style={{ marginTop: 'var(--sam-space-2)', color: 'var(--sam-color-fg-muted)' }}>
                     Your workspace is being stopped.
                   </p>
-                  <div className="mt-6 flex justify-center">
-                    <svg className="animate-spin h-8 w-8 text-yellow-400" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
+                  <div style={{ marginTop: 'var(--sam-space-6)', display: 'flex', justifyContent: 'center' }}>
+                    <Spinner size="lg" />
                   </div>
                 </div>
               ) : workspace?.status === 'stopped' ? (
-                <div className="bg-gray-900 rounded-lg p-8 text-center">
-                  <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <div style={terminalPanelStyle}>
+                  <svg style={{ margin: '0 auto', height: 48, width: 48, color: 'var(--sam-color-fg-muted)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
-                  <h3 className="mt-4 text-lg font-medium text-white">Workspace Stopped</h3>
-                  <p className="mt-2 text-gray-400">
+                  <h3 style={{ marginTop: 'var(--sam-space-4)', fontSize: '1.125rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>Workspace Stopped</h3>
+                  <p style={{ marginTop: 'var(--sam-space-2)', color: 'var(--sam-color-fg-muted)' }}>
                     This workspace has been stopped. Restart it to access the terminal.
                   </p>
-                  <button
-                    onClick={handleRestart}
-                    disabled={actionLoading}
-                    className="mt-6 inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {actionLoading ? 'Restarting...' : 'Restart Workspace'}
-                  </button>
+                  <div style={{ marginTop: 'var(--sam-space-6)' }}>
+                    <Button onClick={handleRestart} disabled={actionLoading} loading={actionLoading}>
+                      {actionLoading ? 'Restarting...' : 'Restart Workspace'}
+                    </Button>
+                  </div>
                 </div>
               ) : workspace?.status === 'error' ? (
-                <div className="bg-gray-900 rounded-lg p-8 text-center">
-                  <svg className="mx-auto h-12 w-12 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <div style={terminalPanelStyle}>
+                  <svg style={{ margin: '0 auto', height: 48, width: 48, color: '#f87171' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                   </svg>
-                  <h3 className="mt-4 text-lg font-medium text-white">Workspace Error</h3>
-                  <p className="mt-2 text-gray-400">
+                  <h3 style={{ marginTop: 'var(--sam-space-4)', fontSize: '1.125rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>Workspace Error</h3>
+                  <p style={{ marginTop: 'var(--sam-space-2)', color: 'var(--sam-color-fg-muted)' }}>
                     An error occurred with this workspace.
                   </p>
                 </div>
@@ -504,23 +569,28 @@ export function Workspace() {
             </div>
 
             {/* Actions */}
-            <div className="mt-6 flex justify-between items-center border-t border-gray-200 pt-6">
-              <button
-                onClick={() => navigate('/dashboard')}
-                className="px-4 py-2 text-gray-600 hover:text-gray-900"
-              >
+            <div style={{
+              marginTop: 'var(--sam-space-6)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderTop: '1px solid var(--sam-color-border-default)',
+              paddingTop: 'var(--sam-space-6)',
+            }}>
+              <Button variant="ghost" onClick={() => navigate('/dashboard')}>
                 Back to Dashboard
-              </button>
+              </Button>
 
-              <div className="flex space-x-3">
+              <div style={{ display: 'flex', gap: 'var(--sam-space-3)' }}>
                 {workspace?.status === 'running' && (
-                  <button
+                  <Button
+                    variant="danger"
                     onClick={handleStop}
                     disabled={actionLoading}
-                    className="px-4 py-2 text-orange-600 border border-orange-300 rounded-md hover:bg-orange-50 disabled:opacity-50"
+                    loading={actionLoading}
                   >
                     Stop Workspace
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>

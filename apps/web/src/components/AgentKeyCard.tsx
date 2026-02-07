@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button, Input, Alert, StatusBadge } from '@simple-agent-manager/ui';
 import type { AgentInfo, AgentCredentialInfo, AgentType } from '@simple-agent-manager/shared';
 
 interface AgentKeyCardProps {
@@ -10,7 +11,6 @@ interface AgentKeyCardProps {
 
 /**
  * Card for managing a single agent's API key.
- * Shows connection status, masked key, and save/remove actions.
  */
 export function AgentKeyCard({ agent, credential, onSave, onDelete }: AgentKeyCardProps) {
   const [apiKey, setApiKey] = useState('');
@@ -51,90 +51,80 @@ export function AgentKeyCard({ agent, credential, onSave, onDelete }: AgentKeyCa
     }
   };
 
+  const actionBtnStyle: React.CSSProperties = {
+    fontSize: '0.75rem',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    padding: '2px 8px',
+  };
+
   return (
-    <div className="border border-gray-200 rounded-lg p-4">
-      <div className="flex items-center justify-between mb-3">
+    <div style={{
+      border: '1px solid var(--sam-color-border-default)',
+      borderRadius: 'var(--sam-radius-md)',
+      padding: 'var(--sam-space-4)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--sam-space-3)' }}>
         <div>
-          <h3 className="text-sm font-medium text-gray-900">{agent.name}</h3>
-          <p className="text-xs text-gray-500">{agent.description}</p>
+          <h3 style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>{agent.name}</h3>
+          <p style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>{agent.description}</p>
         </div>
-        {credential ? (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-            Connected
-          </span>
-        ) : (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-            Not Configured
-          </span>
-        )}
+        <StatusBadge status={credential ? 'connected' : 'disconnected'} label={credential ? 'Connected' : 'Not Configured'} />
       </div>
 
       {credential && !showForm && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-md">
-            <span className="text-sm text-gray-600 font-mono">{credential.maskedKey}</span>
-            <div className="flex space-x-2">
-              <button
-                onClick={() => setShowForm(true)}
-                className="text-xs text-blue-600 hover:text-blue-800"
-              >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-3)' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: 'var(--sam-space-3)',
+            backgroundColor: 'var(--sam-color-bg-inset)',
+            borderRadius: 'var(--sam-radius-sm)',
+          }}>
+            <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)', fontFamily: 'monospace' }}>{credential.maskedKey}</span>
+            <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
+              <button onClick={() => setShowForm(true)} style={{ ...actionBtnStyle, color: 'var(--sam-color-accent-primary)' }}>
                 Update
               </button>
-              <button
-                onClick={handleDelete}
-                disabled={loading}
-                className="text-xs text-red-600 hover:text-red-800 disabled:opacity-50"
-              >
+              <button onClick={handleDelete} disabled={loading} style={{ ...actionBtnStyle, color: 'var(--sam-color-danger)', opacity: loading ? 0.5 : 1 }}>
                 {loading ? 'Removing...' : 'Remove'}
               </button>
             </div>
           </div>
-          {error && <p className="text-xs text-red-600">{error}</p>}
+          {error && <Alert variant="error">{error}</Alert>}
         </div>
       )}
 
       {(!credential || showForm) && (
-        <form onSubmit={handleSave} className="space-y-3">
+        <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-3)' }}>
           <div>
-            <input
+            <Input
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder={`Enter your ${agent.name} API key`}
-              className="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               required
             />
-            <p className="mt-1 text-xs text-gray-500">
+            <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
               Get your API key from{' '}
-              <a
-                href={agent.credentialHelpUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-600 hover:text-blue-800"
-              >
+              <a href={agent.credentialHelpUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--sam-color-accent-primary)' }}>
                 {agent.name} Console
               </a>
             </p>
           </div>
 
-          {error && <p className="text-xs text-red-600">{error}</p>}
+          {error && <Alert variant="error">{error}</Alert>}
 
-          <div className="flex space-x-2">
-            <button
-              type="submit"
-              disabled={loading || !apiKey}
-              className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? 'Saving...' : credential ? 'Update Key' : 'Save Key'}
-            </button>
+          <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
+            <Button type="submit" disabled={loading || !apiKey} loading={loading} size="sm">
+              {credential ? 'Update Key' : 'Save Key'}
+            </Button>
             {showForm && (
-              <button
-                type="button"
-                onClick={() => { setShowForm(false); setError(null); setApiKey(''); }}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
-              >
+              <Button type="button" variant="secondary" size="sm" onClick={() => { setShowForm(false); setError(null); setApiKey(''); }}>
                 Cancel
-              </button>
+              </Button>
             )}
           </div>
         </form>

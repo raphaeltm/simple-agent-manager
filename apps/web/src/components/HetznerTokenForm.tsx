@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { createCredential, deleteCredential } from '../lib/api';
+import { Button, Input, Alert } from '@simple-agent-manager/ui';
 import type { CredentialResponse } from '@simple-agent-manager/shared';
 
 interface HetznerTokenFormProps {
@@ -51,66 +52,85 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
     }
   };
 
+  const actionBtnStyle: React.CSSProperties = {
+    padding: '4px 12px',
+    fontSize: '0.875rem',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+  };
+
   if (credential && !showForm) {
     return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between p-4 bg-green-50 border border-green-200 rounded-lg">
-          <div className="flex items-center space-x-3">
-            <div className="h-10 w-10 bg-green-100 rounded-full flex items-center justify-center">
-              <svg className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-4)' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: 'var(--sam-space-4)',
+          backgroundColor: 'rgba(34, 197, 94, 0.1)',
+          border: '1px solid rgba(34, 197, 94, 0.3)',
+          borderRadius: 'var(--sam-radius-md)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
+            <div style={{
+              height: 40, width: 40,
+              backgroundColor: 'rgba(34, 197, 94, 0.15)',
+              borderRadius: '50%',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <svg style={{ height: 20, width: 20, color: '#4ade80' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             </div>
             <div>
-              <p className="font-medium text-green-900">Connected</p>
-              <p className="text-sm text-green-700">
+              <p style={{ fontWeight: 500, color: '#4ade80' }}>Connected</p>
+              <p style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
                 Added: {new Date(credential.createdAt).toLocaleDateString()}
               </p>
             </div>
           </div>
-          <div className="space-x-2">
-            <button
-              onClick={() => setShowForm(true)}
-              className="px-3 py-1 text-sm text-blue-600 hover:text-blue-800"
-            >
+          <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
+            <button onClick={() => setShowForm(true)} style={{ ...actionBtnStyle, color: 'var(--sam-color-accent-primary)' }}>
               Update
             </button>
-            <button
-              onClick={handleDelete}
-              disabled={loading}
-              className="px-3 py-1 text-sm text-red-600 hover:text-red-800 disabled:opacity-50"
-            >
+            <button onClick={handleDelete} disabled={loading} style={{ ...actionBtnStyle, color: 'var(--sam-color-danger)', opacity: loading ? 0.5 : 1 }}>
               {loading ? 'Removing...' : 'Disconnect'}
             </button>
           </div>
         </div>
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <Alert variant="error">{error}</Alert>}
       </div>
     );
   }
 
+  const labelStyle: React.CSSProperties = {
+    display: 'block',
+    fontSize: '0.875rem',
+    fontWeight: 500,
+    color: 'var(--sam-color-fg-primary)',
+    marginBottom: 'var(--sam-space-1)',
+  };
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-4)' }}>
       <div>
-        <label htmlFor="hetzner-token" className="block text-sm font-medium text-gray-700">
-          Hetzner API Token
-        </label>
-        <input
+        <label htmlFor="hetzner-token" style={labelStyle}>Hetzner API Token</label>
+        <Input
           id="hetzner-token"
           type="password"
           value={token}
           onChange={(e) => setToken(e.target.value)}
           placeholder="Enter your Hetzner Cloud API token"
-          className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
           required
         />
-        <p className="mt-1 text-xs text-gray-500">
+        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
           Get your API token from{' '}
           <a
             href="https://console.hetzner.cloud/projects"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-blue-600 hover:text-blue-800"
+            style={{ color: 'var(--sam-color-accent-primary)' }}
           >
             Hetzner Cloud Console
           </a>
@@ -118,24 +138,16 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
         </p>
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <Alert variant="error">{error}</Alert>}
 
-      <div className="flex space-x-3">
-        <button
-          type="submit"
-          disabled={loading || !token}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {loading ? 'Saving...' : credential ? 'Update Token' : 'Connect'}
-        </button>
+      <div style={{ display: 'flex', gap: 'var(--sam-space-3)' }}>
+        <Button type="submit" disabled={loading || !token} loading={loading}>
+          {credential ? 'Update Token' : 'Connect'}
+        </Button>
         {showForm && (
-          <button
-            type="button"
-            onClick={() => setShowForm(false)}
-            className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
-          >
+          <Button type="button" variant="secondary" onClick={() => setShowForm(false)}>
             Cancel
-          </button>
+          </Button>
         )}
       </div>
     </form>

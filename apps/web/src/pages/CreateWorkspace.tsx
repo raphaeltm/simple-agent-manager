@@ -8,7 +8,7 @@ import {
   listCredentials,
 } from '../lib/api';
 import type { GitHubInstallation } from '@simple-agent-manager/shared';
-import { Button, Card, Input } from '@simple-agent-manager/ui';
+import { Button, Card, Input, PageLayout, Alert, Select, Spinner } from '@simple-agent-manager/ui';
 
 const VM_SIZES = [
   { value: 'small', label: 'Small', description: '2 vCPUs, 4GB RAM' },
@@ -22,9 +22,6 @@ const VM_LOCATIONS = [
   { value: 'hel1', label: 'Helsinki, FI' },
 ];
 
-/**
- * Create workspace page with form.
- */
 export function CreateWorkspace() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -33,7 +30,6 @@ export function CreateWorkspace() {
   const [hasHetzner, setHasHetzner] = useState(false);
   const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
 
-  // Form state
   const [name, setName] = useState('');
   const [repository, setRepository] = useState('');
   const [branch, setBranch] = useState('main');
@@ -72,7 +68,6 @@ export function CreateWorkspace() {
     setError(null);
 
     try {
-      // Extract repository from URL if needed
       let repo = repository;
       if (repository.startsWith('https://github.com/')) {
         repo = repository.replace('https://github.com/', '').replace(/\.git$/, '');
@@ -97,213 +92,203 @@ export function CreateWorkspace() {
 
   if (checkingPrereqs) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      <div style={{
+        minHeight: '100vh',
+        backgroundColor: 'var(--sam-color-bg-canvas)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}>
+        <Spinner size="lg" />
       </div>
     );
   }
 
   const canCreate = hasHetzner && installations.length > 0;
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <button
-              onClick={() => navigate('/dashboard')}
-              className="text-gray-600 hover:text-gray-900"
-            >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <h1 className="text-xl font-semibold text-gray-900">Create Workspace</h1>
-          </div>
-          <UserMenu />
-        </div>
-      </header>
+  const labelStyle = {
+    display: 'block',
+    fontSize: '0.875rem',
+    fontWeight: 500,
+    color: 'var(--sam-color-fg-muted)',
+    marginBottom: '0.25rem',
+  } as const;
 
-      {/* Main content */}
-      <main className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {!canCreate ? (
-          <Card className="p-6">
-            <div className="text-center py-8">
-              <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-              <h3 className="mt-4 text-lg font-medium text-gray-900">Setup Required</h3>
-              <p className="mt-2 text-gray-500">
-                Before creating a workspace, please complete the following:
-              </p>
-              <ul className="mt-4 text-left max-w-xs mx-auto space-y-2">
-                <li className={`flex items-center space-x-2 ${hasHetzner ? 'text-green-600' : 'text-gray-500'}`}>
-                  {hasHetzner ? (
-                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : (
-                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  )}
-                  <span>Connect Hetzner Cloud account</span>
-                </li>
-                <li className={`flex items-center space-x-2 ${installations.length > 0 ? 'text-green-600' : 'text-gray-500'}`}>
-                  {installations.length > 0 ? (
-                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : (
-                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  )}
-                  <span>Install GitHub App</span>
-                </li>
-              </ul>
-              <Button
-                onClick={() => navigate('/settings')}
-                className="mt-6"
-                size="lg"
-              >
+  return (
+    <PageLayout
+      title="Create Workspace"
+      onBack={() => navigate('/dashboard')}
+      maxWidth="md"
+      headerRight={<UserMenu />}
+    >
+      {!canCreate ? (
+        <Card style={{ padding: 'var(--sam-space-6)' }}>
+          <div style={{ textAlign: 'center', padding: 'var(--sam-space-8) 0' }}>
+            <svg style={{ margin: '0 auto', height: 48, width: 48, color: 'var(--sam-color-fg-muted)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <h3 style={{ marginTop: 'var(--sam-space-4)', fontSize: '1.125rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>
+              Setup Required
+            </h3>
+            <p style={{ marginTop: 'var(--sam-space-2)', color: 'var(--sam-color-fg-muted)' }}>
+              Before creating a workspace, please complete the following:
+            </p>
+            <ul style={{ marginTop: 'var(--sam-space-4)', textAlign: 'left', maxWidth: '20rem', margin: 'var(--sam-space-4) auto 0', display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-2)', listStyle: 'none', padding: 0 }}>
+              <li style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: hasHetzner ? 'var(--sam-color-success)' : 'var(--sam-color-fg-muted)' }}>
+                <svg style={{ height: 20, width: 20, flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={hasHetzner ? 'M5 13l4 4L19 7' : 'M6 18L18 6M6 6l12 12'} />
+                </svg>
+                <span>Connect Hetzner Cloud account</span>
+              </li>
+              <li style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: installations.length > 0 ? 'var(--sam-color-success)' : 'var(--sam-color-fg-muted)' }}>
+                <svg style={{ height: 20, width: 20, flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={installations.length > 0 ? 'M5 13l4 4L19 7' : 'M6 18L18 6M6 6l12 12'} />
+                </svg>
+                <span>Install GitHub App</span>
+              </li>
+            </ul>
+            <div style={{ marginTop: 'var(--sam-space-6)' }}>
+              <Button onClick={() => navigate('/settings')} size="lg">
                 Go to Settings
               </Button>
             </div>
-          </Card>
-        ) : (
-          <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow p-6 space-y-6">
-            {error && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-                {error}
-              </div>
-            )}
+          </div>
+        </Card>
+      ) : (
+        <form
+          onSubmit={handleSubmit}
+          style={{
+            backgroundColor: 'var(--sam-color-bg-surface)',
+            borderRadius: 'var(--sam-radius-lg)',
+            border: '1px solid var(--sam-color-border-default)',
+            padding: 'var(--sam-space-6)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--sam-space-6)',
+          }}
+        >
+          {error && (
+            <Alert variant="error" onDismiss={() => setError(null)}>
+              {error}
+            </Alert>
+          )}
 
+          <div>
+            <label htmlFor="name" style={labelStyle}>Workspace Name</label>
+            <Input
+              id="name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="my-project"
+              required
+              maxLength={64}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="repository" style={labelStyle}>Repository</label>
+            <RepoSelector
+              id="repository"
+              value={repository}
+              onChange={setRepository}
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="branch" style={labelStyle}>Branch</label>
+            <Input
+              id="branch"
+              type="text"
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+              placeholder="main"
+            />
+          </div>
+
+          {installations.length > 1 && (
             <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-                Workspace Name
-              </label>
-              <Input
-                id="name"
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="my-project"
-                className="mt-1"
-                required
-                maxLength={64}
-              />
-            </div>
-
-            <div>
-              <label htmlFor="repository" className="block text-sm font-medium text-gray-700">
-                Repository
-              </label>
-              <RepoSelector
-                id="repository"
-                value={repository}
-                onChange={setRepository}
-                required
-              />
-            </div>
-
-            <div>
-              <label htmlFor="branch" className="block text-sm font-medium text-gray-700">
-                Branch
-              </label>
-              <Input
-                id="branch"
-                type="text"
-                value={branch}
-                onChange={(e) => setBranch(e.target.value)}
-                placeholder="main"
-                className="mt-1"
-              />
-            </div>
-
-            {installations.length > 1 && (
-              <div>
-                <label htmlFor="installation" className="block text-sm font-medium text-gray-700">
-                  GitHub Account
-                </label>
-                <select
-                  id="installation"
-                  value={installationId}
-                  onChange={(e) => setInstallationId(e.target.value)}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                >
-                  {installations.map((inst) => (
-                    <option key={inst.id} value={inst.id}>
-                      {inst.accountName} ({inst.accountType})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                VM Size
-              </label>
-              <div className="grid grid-cols-3 gap-3">
-                {VM_SIZES.map((size) => (
-                  <button
-                    key={size.value}
-                    type="button"
-                    onClick={() => setVmSize(size.value)}
-                    className={`p-3 border rounded-lg text-left transition-colors ${
-                      vmSize === size.value
-                        ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="font-medium">{size.label}</div>
-                    <div className="text-xs text-gray-500">{size.description}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label htmlFor="location" className="block text-sm font-medium text-gray-700">
-                Location
-              </label>
-              <select
-                id="location"
-                value={vmLocation}
-                onChange={(e) => setVmLocation(e.target.value)}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              <label htmlFor="installation" style={labelStyle}>GitHub Account</label>
+              <Select
+                id="installation"
+                value={installationId}
+                onChange={(e) => setInstallationId(e.target.value)}
               >
-                {VM_LOCATIONS.map((loc) => (
-                  <option key={loc.value} value={loc.value}>
-                    {loc.label}
+                {installations.map((inst) => (
+                  <option key={inst.id} value={inst.id}>
+                    {inst.accountName} ({inst.accountType})
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
+          )}
 
-            <div className="flex justify-end space-x-3 pt-4">
-              <Button
-                type="button"
-                onClick={() => navigate('/dashboard')}
-                variant="secondary"
-                size="md"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={loading || !name || !repository}
-                size="lg"
-                loading={loading}
-              >
-                Create Workspace
-              </Button>
+          <div>
+            <label style={{ ...labelStyle, marginBottom: '0.5rem' }}>VM Size</label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--sam-space-3)' }}>
+              {VM_SIZES.map((size) => (
+                <button
+                  key={size.value}
+                  type="button"
+                  onClick={() => setVmSize(size.value)}
+                  style={{
+                    padding: 'var(--sam-space-3)',
+                    border: vmSize === size.value
+                      ? '2px solid var(--sam-color-accent-primary)'
+                      : '1px solid var(--sam-color-border-default)',
+                    borderRadius: 'var(--sam-radius-md)',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    backgroundColor: vmSize === size.value
+                      ? 'rgba(22, 163, 74, 0.1)'
+                      : 'var(--sam-color-bg-inset)',
+                    color: 'var(--sam-color-fg-primary)',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <div style={{ fontWeight: 500 }}>{size.label}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginTop: '0.125rem' }}>{size.description}</div>
+                </button>
+              ))}
             </div>
-          </form>
-        )}
-      </main>
-    </div>
+          </div>
+
+          <div>
+            <label htmlFor="location" style={labelStyle}>Location</label>
+            <Select
+              id="location"
+              value={vmLocation}
+              onChange={(e) => setVmLocation(e.target.value)}
+            >
+              {VM_LOCATIONS.map((loc) => (
+                <option key={loc.value} value={loc.value}>
+                  {loc.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sam-space-3)', paddingTop: 'var(--sam-space-4)' }}>
+            <Button
+              type="button"
+              onClick={() => navigate('/dashboard')}
+              variant="secondary"
+              size="md"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={loading || !name || !repository}
+              size="lg"
+              loading={loading}
+            >
+              Create Workspace
+            </Button>
+          </div>
+        </form>
+      )}
+    </PageLayout>
   );
 }
