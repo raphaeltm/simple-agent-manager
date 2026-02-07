@@ -365,6 +365,8 @@ See `apps/api/.env.example`:
 - Cloudflare D1 (SQLite), KV (sessions/tokens), R2 (binaries) (005-automated-deployment)
 - TypeScript 5.x (Node.js 20+) + `@pulumi/pulumi`, `@pulumi/cloudflare`, `wrangler`, `@iarna/toml` (005-automated-deployment)
 - Cloudflare R2 (Pulumi state), D1 (app data), KV (sessions) (005-automated-deployment)
+- TypeScript 5.x (API, Web, packages) + Go 1.22+ (VM Agent) + Hono (API), React + Vite (Web), xterm.js (Terminal), @agentclientprotocol/sdk v0.14.x (ACP types), gorilla/websocket + creack/pty (VM Agent) (007-multi-agent-acp)
+- Cloudflare D1 (workspaces, credentials) + KV (sessions, tokens) + R2 (binaries) (007-multi-agent-acp)
 
 ## Recent Changes
 - 004-mvp-hardening: Secure bootstrap tokens, workspace ownership validation, provisioning timeouts, shared terminal package, WebSocket reconnection, idle deadline tracking

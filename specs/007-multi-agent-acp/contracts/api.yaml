@@ -1,0 +1,213 @@
+openapi: 3.1.0
+info:
+  title: SAM Multi-Agent API
+  description: API endpoints for multi-agent support via ACP
+  version: 0.1.0
+
+paths:
+  /api/agents:
+    get:
+      summary: List supported agents
+      description: Returns the catalog of supported AI coding agents with metadata and the current user's connection status for each.
+      tags: [Agents]
+      security:
+        - session: []
+      responses:
+        '200':
+          description: Agent catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AgentInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/credentials/agent:
+    get:
+      summary: List agent API keys
+      description: Returns the user's configured agent API keys with masked values and connection status.
+      tags: [Credentials]
+      security:
+        - session: []
+      responses:
+        '200':
+          description: Agent credentials list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credentials:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AgentCredentialInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    put:
+      summary: Save agent API key
+      description: Creates or updates an encrypted API key for a specific agent type.
+      tags: [Credentials]
+      security:
+        - session: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveAgentCredentialRequest'
+      responses:
+        '200':
+          description: Credential saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentCredentialInfo'
+        '400':
+          description: Invalid agent type or API key format
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/credentials/agent/{agentType}:
+    delete:
+      summary: Remove agent API key
+      description: Deletes the user's stored API key for a specific agent type.
+      tags: [Credentials]
+      security:
+        - session: []
+      parameters:
+        - name: agentType
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/AgentType'
+      responses:
+        '200':
+          description: Credential deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No credential found for this agent type
+
+  /api/workspaces/{id}/agent-key:
+    post:
+      summary: Fetch agent API key for workspace
+      description: >
+        Internal endpoint called by VM Agent to retrieve a decrypted agent API key
+        for a running workspace. Requires bootstrap token or VM Agent authentication.
+      tags: [Internal]
+      security:
+        - agentAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agentType]
+              properties:
+                agentType:
+                  $ref: '#/components/schemas/AgentType'
+      responses:
+        '200':
+          description: Decrypted API key
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  apiKey:
+                    type: string
+                    description: Decrypted agent API key
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No credential configured for this agent type
+
+components:
+  schemas:
+    AgentType:
+      type: string
+      enum:
+        - claude-code
+        - openai-codex
+        - google-gemini
+
+    AgentInfo:
+      type: object
+      required: [id, name, description, supportsAcp, configured]
+      properties:
+        id:
+          $ref: '#/components/schemas/AgentType'
+        name:
+          type: string
+          example: Claude Code
+        description:
+          type: string
+          example: "Anthropic's AI coding agent"
+        supportsAcp:
+          type: boolean
+          description: Whether this agent supports structured ACP communication
+        configured:
+          type: boolean
+          description: Whether the current user has an API key configured for this agent
+        credentialHelpUrl:
+          type: string
+          format: uri
+          description: URL where the user can obtain an API key
+
+    AgentCredentialInfo:
+      type: object
+      required: [agentType, provider, maskedKey, createdAt, updatedAt]
+      properties:
+        agentType:
+          $ref: '#/components/schemas/AgentType'
+        provider:
+          type: string
+          example: anthropic
+        maskedKey:
+          type: string
+          description: "Last 4 characters of the API key, e.g., '...7x9Q'"
+          example: "...7x9Q"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SaveAgentCredentialRequest:
+      type: object
+      required: [agentType, apiKey]
+      properties:
+        agentType:
+          $ref: '#/components/schemas/AgentType'
+        apiKey:
+          type: string
+          description: The agent provider API key (will be encrypted before storage)
+
+  responses:
+    Unauthorized:
+      description: Not authenticated
+
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: session
+      description: BetterAuth session cookie
+    agentAuth:
+      type: http
+      scheme: bearer
+      description: VM Agent authentication token
