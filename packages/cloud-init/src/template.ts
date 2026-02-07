@@ -49,6 +49,11 @@ runcmd:
   # Install devcontainers CLI
   - npm install -g @devcontainers/cli
 
+  # Install ACP agent adapters (pre-installed for instant agent switching)
+  - npm install -g @zed-industries/claude-code-acp
+  - npm install -g @google/gemini-cli
+  - npx --yes @zed-industries/codex-acp --version
+
   # Create VM Agent systemd service with bootstrap token
   # The agent will redeem the bootstrap token to get credentials on startup
   - |
@@ -63,7 +68,7 @@ runcmd:
     User=root
     Environment=WORKSPACE_ID={{ workspace_id }}
     Environment=CONTROL_PLANE_URL={{ control_plane_url }}
-    Environment=JWKS_URL={{ jwks_url }}
+    Environment=JWKS_ENDPOINT={{ jwks_url }}
     Environment=BOOTSTRAP_TOKEN={{ bootstrap_token }}
     Environment=REPOSITORY={{ repository }}
     Environment=BRANCH={{ branch }}

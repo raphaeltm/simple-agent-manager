@@ -8,6 +8,7 @@ import { githubRoutes } from './routes/github';
 import { workspacesRoutes } from './routes/workspaces';
 import { terminalRoutes } from './routes/terminal';
 import { agentRoutes } from './routes/agent';
+import { agentsCatalogRoutes } from './routes/agents-catalog';
 import { bootstrapRoutes } from './routes/bootstrap';
 import { uiGovernanceRoutes } from './routes/ui-governance';
 import { checkProvisioningTimeouts } from './services/timeout';
@@ -48,6 +49,11 @@ export interface Env {
   RATE_LIMIT_TERMINAL_TOKEN?: string;
   RATE_LIMIT_CREDENTIAL_UPDATE?: string;
   RATE_LIMIT_ANONYMOUS?: string;
+  // ACP configuration (passed to VMs via environment)
+  ACP_INIT_TIMEOUT_MS?: string;
+  ACP_RECONNECT_DELAY_MS?: string;
+  ACP_RECONNECT_TIMEOUT_MS?: string;
+  ACP_MAX_RESTART_ATTEMPTS?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -109,6 +115,7 @@ app.route('/api/github', githubRoutes);
 app.route('/api/workspaces', workspacesRoutes);
 app.route('/api/terminal', terminalRoutes);
 app.route('/api/agent', agentRoutes);
+app.route('/api/agents', agentsCatalogRoutes);
 app.route('/api/bootstrap', bootstrapRoutes);
 app.route('/api/ui-governance', uiGovernanceRoutes);
 

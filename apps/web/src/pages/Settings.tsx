@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { UserMenu } from '../components/UserMenu';
 import { HetznerTokenForm } from '../components/HetznerTokenForm';
 import { GitHubAppSection } from '../components/GitHubAppSection';
+import { AgentKeysSection } from '../components/AgentKeysSection';
 import { listCredentials } from '../lib/api';
 import {
   createComplianceRun,
@@ -205,6 +206,25 @@ export function Settings() {
             </div>
 
             <GitHubAppSection />
+          </div>
+
+          {/* Agent API Keys section */}
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center space-x-3 mb-4">
+              <div className="h-10 w-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                <svg className="h-6 w-6 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-lg font-medium text-gray-900">Agent API Keys</h2>
+                <p className="text-sm text-gray-500">
+                  Add API keys for AI coding agents. Keys are stored encrypted and used across all your workspaces.
+                </p>
+              </div>
+            </div>
+
+            <AgentKeysSection />
           </div>
 
           {/* Migration work item management */}
