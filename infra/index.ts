@@ -51,3 +51,6 @@ export const stackSummary = {
     r2: r2Name,
   },
 };
+
+// Export Cloudflare account ID for wrangler.toml
+export const cloudflareAccountId = config.require("cloudflareAccountId");

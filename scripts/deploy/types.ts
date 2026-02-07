@@ -370,6 +370,7 @@ export interface PulumiOutputs {
       r2: string;
     };
   };
+  cloudflareAccountId: string;
 }
 
 /**
@@ -407,6 +408,7 @@ export interface WranglerToml extends WranglerTomlBindings {
 
 export interface WranglerEnvConfig {
   name?: string;
+  account_id?: string;
   d1_databases?: WranglerTomlBindings["d1_databases"];
   kv_namespaces?: WranglerTomlBindings["kv_namespaces"];
   r2_buckets?: WranglerTomlBindings["r2_buckets"];

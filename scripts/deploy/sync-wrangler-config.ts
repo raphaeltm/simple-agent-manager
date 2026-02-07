@@ -54,6 +54,8 @@ function updateEnvironmentBindings(
 ): WranglerEnvConfig {
   return {
     ...envConfig,
+    // Set account_id for authentication
+    account_id: outputs.cloudflareAccountId,
     vars: {
       ...envConfig.vars,
       BASE_DOMAIN: outputs.stackSummary.baseDomain,
