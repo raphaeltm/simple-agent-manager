@@ -3,6 +3,8 @@ import { sql } from 'drizzle-orm';
 
 // =============================================================================
 // Users (BetterAuth compatible + custom fields)
+// BetterAuth requires integer timestamps with mode: 'timestamp_ms' so that
+// Drizzle converts Date objects to millisecond integers for D1 storage.
 // =============================================================================
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
@@ -13,8 +15,12 @@ export const users = sqliteTable('users', {
   // Custom fields
   githubId: text('github_id').unique(),
   avatarUrl: text('avatar_url'),
-  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(cast(unixepoch() * 1000 as integer))`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(cast(unixepoch() * 1000 as integer))`),
 });
 
 // =============================================================================
@@ -22,10 +28,14 @@ export const users = sqliteTable('users', {
 // =============================================================================
 export const sessions = sqliteTable('sessions', {
   id: text('id').primaryKey(),
-  expiresAt: integer('expires_at').notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
   token: text('token').notNull().unique(),
-  createdAt: integer('created_at').notNull(),
-  updatedAt: integer('updated_at').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(cast(unixepoch() * 1000 as integer))`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(cast(unixepoch() * 1000 as integer))`),
   ipAddress: text('ip_address'),
   userAgent: text('user_agent'),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -44,12 +54,16 @@ export const accounts = sqliteTable('accounts', {
   accessToken: text('access_token'),
   refreshToken: text('refresh_token'),
   idToken: text('id_token'),
-  accessTokenExpiresAt: integer('access_token_expires_at'),
-  refreshTokenExpiresAt: integer('refresh_token_expires_at'),
+  accessTokenExpiresAt: integer('access_token_expires_at', { mode: 'timestamp_ms' }),
+  refreshTokenExpiresAt: integer('refresh_token_expires_at', { mode: 'timestamp_ms' }),
   scope: text('scope'),
   password: text('password'),
-  createdAt: integer('created_at').notNull(),
-  updatedAt: integer('updated_at').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(cast(unixepoch() * 1000 as integer))`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(cast(unixepoch() * 1000 as integer))`),
 }, (table) => ({
   userIdIdx: index('idx_accounts_user_id').on(table.userId),
 }));
@@ -61,9 +75,13 @@ export const verifications = sqliteTable('verifications', {
   id: text('id').primaryKey(),
   identifier: text('identifier').notNull(),
   value: text('value').notNull(),
-  expiresAt: integer('expires_at').notNull(),
-  createdAt: integer('created_at').notNull(),
-  updatedAt: integer('updated_at').notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(cast(unixepoch() * 1000 as integer))`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(cast(unixepoch() * 1000 as integer))`),
 }, (table) => ({
   identifierIdx: index('idx_verifications_identifier').on(table.identifier),
 }));
