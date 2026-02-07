@@ -162,6 +162,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 
 	// ACP Agent WebSocket
 	mux.HandleFunc("GET /agent/ws", s.handleAgentWS)
+	mux.HandleFunc("GET /git-credential", s.handleGitCredential)
 
 	// Static files (embedded UI)
 	staticFS, err := fs.Sub(staticFiles, "static")

@@ -68,7 +68,7 @@ runcmd:
     User=root
     Environment=WORKSPACE_ID={{ workspace_id }}
     Environment=CONTROL_PLANE_URL={{ control_plane_url }}
-    Environment=JWKS_URL={{ jwks_url }}
+    Environment=JWKS_ENDPOINT={{ jwks_url }}
     Environment=BOOTSTRAP_TOKEN={{ bootstrap_token }}
     Environment=REPOSITORY={{ repository }}
     Environment=BRANCH={{ branch }}

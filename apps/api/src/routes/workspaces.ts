@@ -39,7 +39,12 @@ const workspacesRoutes = new Hono<{ Bindings: Env }>();
 workspacesRoutes.use('/*', async (c, next) => {
   const path = c.req.path;
   // Skip session auth for VM Agent callback endpoints (they use JWT Bearer auth)
-  if (path.endsWith('/ready') || path.endsWith('/heartbeat') || path.endsWith('/agent-key')) {
+  if (
+    path.endsWith('/ready') ||
+    path.endsWith('/heartbeat') ||
+    path.endsWith('/agent-key') ||
+    path.endsWith('/git-token')
+  ) {
     return next();
   }
   return requireAuth()(c, next);
@@ -655,6 +660,62 @@ workspacesRoutes.post('/:id/agent-key', async (c) => {
   }
 
   return c.json({ apiKey });
+});
+
+/**
+ * POST /api/workspaces/:id/git-token - Fetch a fresh GitHub installation token
+ * Internal endpoint called by VM Agent credential helper flow.
+ * Requires callback JWT auth.
+ */
+workspacesRoutes.post('/:id/git-token', async (c) => {
+  const workspaceId = c.req.param('id');
+
+  // Validate callback token from Authorization header
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    throw errors.unauthorized('Missing or invalid Authorization header');
+  }
+
+  const token = authHeader.slice(7);
+  try {
+    const payload = await verifyCallbackToken(token, c.env);
+    if (payload.workspace !== workspaceId) {
+      throw errors.forbidden('Token workspace mismatch');
+    }
+  } catch (err) {
+    throw errors.unauthorized(err instanceof Error ? err.message : 'Invalid callback token');
+  }
+
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  const workspaces = await db
+    .select({ installationId: schema.workspaces.installationId })
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+
+  const workspace = workspaces[0];
+  if (!workspace) {
+    throw errors.notFound('Workspace');
+  }
+  if (!workspace.installationId) {
+    throw errors.badRequest('Workspace is not linked to a GitHub installation');
+  }
+
+  const installations = await db
+    .select({ installationId: schema.githubInstallations.installationId })
+    .from(schema.githubInstallations)
+    .where(eq(schema.githubInstallations.id, workspace.installationId))
+    .limit(1);
+
+  const installation = installations[0];
+  if (!installation) {
+    throw errors.notFound('GitHub installation');
+  }
+
+  const { token: gitToken, expiresAt } = await getInstallationToken(installation.installationId, c.env);
+
+  return c.json({ token: gitToken, expiresAt });
 });
 
 /**

@@ -12,28 +12,34 @@ import (
 // Config holds all configuration values for the VM Agent.
 type Config struct {
 	// Server settings
-	Port            int
-	Host            string
-	AllowedOrigins  []string
+	Port           int
+	Host           string
+	AllowedOrigins []string
 
 	// Control plane settings
 	ControlPlaneURL string
 	JWKSEndpoint    string
 
 	// JWT settings
-	JWTAudience     string
-	JWTIssuer       string
+	JWTAudience string
+	JWTIssuer   string
 
 	// Workspace settings
-	WorkspaceID     string
-	CallbackToken   string
+	WorkspaceID        string
+	CallbackToken      string
+	BootstrapToken     string
+	Repository         string
+	Branch             string
+	WorkspaceDir       string
+	BootstrapStatePath string
+	BootstrapMaxWait   time.Duration
 
 	// Session settings
-	SessionTTL            time.Duration
+	SessionTTL             time.Duration
 	SessionCleanupInterval time.Duration
-	SessionMaxCount       int
-	CookieName            string
-	CookieSecure          bool
+	SessionMaxCount        int
+	CookieName             string
+	CookieSecure           bool
 
 	// Idle settings
 	IdleTimeout       time.Duration
@@ -49,9 +55,9 @@ type Config struct {
 	WSWriteBufferSize int
 
 	// PTY settings
-	DefaultShell    string
-	DefaultRows     int
-	DefaultCols     int
+	DefaultShell string
+	DefaultRows  int
+	DefaultCols  int
 
 	// ACP settings - configurable per constitution principle XI
 	ACPInitTimeoutMs      int
@@ -74,19 +80,25 @@ func Load() (*Config, error) {
 
 	cfg := &Config{
 		// Default values
-		Port:              getEnvInt("VM_AGENT_PORT", 8080),
-		Host:              getEnv("VM_AGENT_HOST", "0.0.0.0"),
-		AllowedOrigins:    getEnvStringSlice("ALLOWED_ORIGINS", nil), // Parsed from comma-separated list
+		Port:           getEnvInt("VM_AGENT_PORT", 8080),
+		Host:           getEnv("VM_AGENT_HOST", "0.0.0.0"),
+		AllowedOrigins: getEnvStringSlice("ALLOWED_ORIGINS", nil), // Parsed from comma-separated list
 
-		ControlPlaneURL:   controlPlaneURL,
-		JWKSEndpoint:      getEnv("JWKS_ENDPOINT", ""),
+		ControlPlaneURL: controlPlaneURL,
+		JWKSEndpoint:    getEnv("JWKS_ENDPOINT", ""),
 
 		// JWT settings - derived from control plane URL by default
-		JWTAudience:       getEnv("JWT_AUDIENCE", "workspace-terminal"),
-		JWTIssuer:         getEnv("JWT_ISSUER", ""), // Will be derived from ControlPlaneURL if not set
+		JWTAudience: getEnv("JWT_AUDIENCE", "workspace-terminal"),
+		JWTIssuer:   getEnv("JWT_ISSUER", ""), // Will be derived from ControlPlaneURL if not set
 
-		WorkspaceID:       getEnv("WORKSPACE_ID", ""),
-		CallbackToken:     getEnv("CALLBACK_TOKEN", ""),
+		WorkspaceID:        getEnv("WORKSPACE_ID", ""),
+		CallbackToken:      getEnv("CALLBACK_TOKEN", ""),
+		BootstrapToken:     getEnv("BOOTSTRAP_TOKEN", ""),
+		Repository:         getEnv("REPOSITORY", ""),
+		Branch:             getEnv("BRANCH", "main"),
+		WorkspaceDir:       getEnv("WORKSPACE_DIR", "/workspace"),
+		BootstrapStatePath: getEnv("BOOTSTRAP_STATE_PATH", "/var/lib/vm-agent/bootstrap-state.json"),
+		BootstrapMaxWait:   getEnvDuration("BOOTSTRAP_MAX_WAIT", 5*time.Minute),
 
 		SessionTTL:             getEnvDuration("SESSION_TTL", 24*time.Hour),
 		SessionCleanupInterval: getEnvDuration("SESSION_CLEANUP_INTERVAL", 1*time.Minute),
@@ -106,9 +118,9 @@ func Load() (*Config, error) {
 		WSReadBufferSize:  getEnvInt("WS_READ_BUFFER_SIZE", 1024),
 		WSWriteBufferSize: getEnvInt("WS_WRITE_BUFFER_SIZE", 1024),
 
-		DefaultShell:      getEnv("DEFAULT_SHELL", "/bin/bash"),
-		DefaultRows:       getEnvInt("DEFAULT_ROWS", 24),
-		DefaultCols:       getEnvInt("DEFAULT_COLS", 80),
+		DefaultShell: getEnv("DEFAULT_SHELL", "/bin/bash"),
+		DefaultRows:  getEnvInt("DEFAULT_ROWS", 24),
+		DefaultCols:  getEnvInt("DEFAULT_COLS", 80),
 
 		// ACP settings - configurable per constitution principle XI
 		ACPInitTimeoutMs:      getEnvInt("ACP_INIT_TIMEOUT_MS", 30000),

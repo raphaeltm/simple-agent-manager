@@ -1,0 +1,9 @@
+services:
+  workspace-e2e:
+    build:
+      context: ./workspace-mock
+    container_name: sam-e2e-workspace
+    labels:
+      devcontainer.local_folder: /workspace-e2e
+    working_dir: /workspace
+    command: ["bash", "-lc", "sleep infinity"]

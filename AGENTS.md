@@ -29,6 +29,12 @@ Build order matters: shared → providers → api/web
 
 ## Development Guidelines
 
+### No Legacy / Dead Code
+
+- This project is pre-production. Do not keep "legacy" code paths that are not used.
+- If code, files, routes, scripts, or configs are no longer referenced by the active architecture, remove them in the same change.
+- When replacing an implementation, update all related docs and instructions to point only to the current path.
+
 ### Adding New Features
 
 1. Check if types need to be added to `packages/shared`
@@ -148,9 +154,9 @@ export const WorkspaceCard: FC<Props> = ({ workspace }) => {
 
 ### Modifying Cloud-Init
 
-1. Edit `scripts/vm/cloud-init.yaml`
-2. Test locally with a VM if possible
-3. Update `apps/api/src/services/cloud-init.ts` generator
+1. Edit `packages/cloud-init/src/template.ts`
+2. Update variable wiring in `packages/cloud-init/src/generate.ts` when needed
+3. Test cloud-init generation through the workspace provisioning flow in `apps/api/src/routes/workspaces.ts`
 
 ## Troubleshooting
 
