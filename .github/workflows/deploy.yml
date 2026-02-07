@@ -132,8 +132,6 @@ jobs:
 
       - name: Install Pulumi CLI
         uses: pulumi/actions@v5
-        with:
-          command: version
 
       # ========================================
       # Phase 1: Infrastructure (Pulumi)
@@ -175,6 +173,19 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
+      - name: Set Pulumi Configuration (Dry Run)
+        if: ${{ inputs.dry_run == true }}
+        working-directory: infra
+        run: |
+          pulumi config set cloudflareAccountId ${{ secrets.CF_ACCOUNT_ID }}
+          pulumi config set cloudflareZoneId ${{ secrets.CF_ZONE_ID }}
+          pulumi config set baseDomain ${{ vars.BASE_DOMAIN }}
+          pulumi config set resourcePrefix ${{ vars.RESOURCE_PREFIX || 'sam' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
       - name: Pulumi Preview
         if: ${{ inputs.dry_run == true }}
         working-directory: infra
@@ -184,10 +195,19 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          PULUMI_CONFIG_cloudflareAccountId: ${{ secrets.CF_ACCOUNT_ID }}
-          PULUMI_CONFIG_cloudflareZoneId: ${{ secrets.CF_ZONE_ID }}
-          PULUMI_CONFIG_baseDomain: ${{ vars.BASE_DOMAIN }}
-          PULUMI_CONFIG_resourcePrefix: ${{ vars.RESOURCE_PREFIX || 'sam' }}
+
+      - name: Set Pulumi Configuration
+        if: ${{ inputs.dry_run != true }}
+        working-directory: infra
+        run: |
+          pulumi config set cloudflareAccountId ${{ secrets.CF_ACCOUNT_ID }}
+          pulumi config set cloudflareZoneId ${{ secrets.CF_ZONE_ID }}
+          pulumi config set baseDomain ${{ vars.BASE_DOMAIN }}
+          pulumi config set resourcePrefix ${{ vars.RESOURCE_PREFIX || 'sam' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
       - name: Pulumi Up
         if: ${{ inputs.dry_run != true }}
@@ -198,10 +218,6 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          PULUMI_CONFIG_cloudflareAccountId: ${{ secrets.CF_ACCOUNT_ID }}
-          PULUMI_CONFIG_cloudflareZoneId: ${{ secrets.CF_ZONE_ID }}
-          PULUMI_CONFIG_baseDomain: ${{ vars.BASE_DOMAIN }}
-          PULUMI_CONFIG_resourcePrefix: ${{ vars.RESOURCE_PREFIX || 'sam' }}
 
       # ========================================
       # Phase 2: Configuration
@@ -247,6 +263,32 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
+      - name: Ensure workers.dev Subdomain
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          # Cron triggers require a workers.dev subdomain to be initialized.
+          # This is idempotent — if already set, the API returns the existing subdomain.
+          SUBDOMAIN="${{ vars.RESOURCE_PREFIX || 'sam' }}"
+          echo "Ensuring workers.dev subdomain is initialized: ${SUBDOMAIN}.workers.dev"
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/workers/subdomain" \
+            -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"subdomain\": \"${SUBDOMAIN}\"}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "workers.dev subdomain ready: ${SUBDOMAIN}.workers.dev"
+          elif [ "$HTTP_CODE" -eq 409 ]; then
+            echo "workers.dev subdomain already configured (OK)"
+          else
+            echo "::warning::Failed to set workers.dev subdomain (HTTP ${HTTP_CODE}): ${BODY}"
+            echo "Cron triggers may not work. Initialize manually: CF Dashboard > Workers & Pages > Settings > Domains & Routes"
+          fi
+
       # ========================================
       # Phase 3: Application (Wrangler)
       # ========================================
@@ -258,7 +300,7 @@ jobs:
 
       - name: Deploy API Worker
         if: ${{ inputs.dry_run != true }}
-        run: pnpm --filter @simple-agent-manager/api exec wrangler deploy
+        run: pnpm --filter @simple-agent-manager/api exec wrangler deploy --env production
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
@@ -269,6 +311,7 @@ jobs:
           pnpm --filter @simple-agent-manager/web exec wrangler pages deploy dist --project-name $PROJECT_NAME
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Run Database Migrations
         if: ${{ inputs.dry_run != true }}
@@ -276,7 +319,7 @@ jobs:
         run: |
           DB_NAME=$(pulumi stack output d1DatabaseName)
           cd ../apps/api
-          pnpm exec wrangler d1 migrations apply $DB_NAME --remote
+          pnpm exec wrangler d1 migrations apply $DB_NAME --remote --env production
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -322,14 +365,14 @@ jobs:
         working-directory: infra
         run: |
           R2_BUCKET=$(pulumi stack output r2Name)
-          cd ..
-          pnpm wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-amd64 --file packages/vm-agent/bin/vm-agent-linux-amd64
-          pnpm wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-arm64 --file packages/vm-agent/bin/vm-agent-linux-arm64
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-amd64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-amd64
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-arm64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-arm64
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       # ========================================
       # Phase 5: Validation

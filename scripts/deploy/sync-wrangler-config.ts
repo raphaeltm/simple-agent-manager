@@ -54,10 +54,20 @@ function updateEnvironmentBindings(
 ): WranglerEnvConfig {
   return {
     ...envConfig,
+    // Set account_id for authentication
+    account_id: outputs.cloudflareAccountId,
+    // Add routes for custom domains
+    // IMPORTANT: patterns MUST end with /* to match all paths, not just the root
+    // Without /*, only the root path (/) matches and subpaths like /health get Cloudflare errors
+    routes: [
+      { pattern: `api.${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain },
+      { pattern: `*.${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain }
+    ],
     vars: {
       ...envConfig.vars,
       BASE_DOMAIN: outputs.stackSummary.baseDomain,
       VERSION: DEPLOYMENT_CONFIG.version,
+      PAGES_PROJECT_NAME: outputs.pagesName,
     },
     d1_databases: [
       {

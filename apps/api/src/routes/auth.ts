@@ -7,14 +7,26 @@ const authRoutes = new Hono<{ Bindings: Env }>();
 
 /**
  * BetterAuth handler - handles all auth routes:
- * - GET /api/auth/signin/github - Start GitHub OAuth
+ * - GET /api/auth/sign-in/social - Start GitHub OAuth
  * - GET /api/auth/callback/github - GitHub OAuth callback
- * - POST /api/auth/signout - Sign out
+ * - POST /api/auth/sign-out - Sign out
  * - GET /api/auth/session - Get current session
  */
 authRoutes.on(['GET', 'POST'], '/*', async (c) => {
-  const auth = createAuth(c.env);
-  return auth.handler(c.req.raw);
+  try {
+    const auth = createAuth(c.env);
+    const response = await auth.handler(c.req.raw);
+
+    // Log auth errors to Worker logs for debugging
+    if (response.status >= 400) {
+      const body = await response.clone().text();
+      console.error(`BetterAuth ${response.status}: ${body || '(empty body)'}`);
+    }
+    return response;
+  } catch (err) {
+    console.error('BetterAuth exception:', err instanceof Error ? err.message : err);
+    return c.json({ error: 'AUTH_ERROR', message: 'Internal auth error' }, 500);
+  }
 });
 
 /**

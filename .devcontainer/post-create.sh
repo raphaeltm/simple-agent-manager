@@ -2,16 +2,22 @@
 # Post-create setup script for Simple Agent Manager devcontainer
 set -e
 
-echo "=== Installing Claude ==="
+echo "=== Installing Claude Code (native) ==="
+curl -fsSL https://claude.ai/install.sh | bash
 
-npm i -g @anthropic-ai/claude-code @devcontainers/cli
+echo "=== Installing OpenAI Codex ==="
+npm i -g @openai/codex
+
+echo "=== Installing other global tools ==="
+npm install -g happy-coder
+
+echo "=== Configuring MCP servers ==="
 claude mcp add playwright npx -- @playwright/mcp@latest --browser chromium
 
 # Install Playwright Chromium for ARM64 compatibility (Chrome not supported on ARM64 Linux)
 npx playwright install chromium
 claude mcp add sequential-thinking npx -- -y @modelcontextprotocol/server-sequential-thinking
 claude mcp add context7 npx -- -y @upstash/context7-mcp
-npm install -g happy-coder
 
 
 echo "=== Setting up Simple Agent Manager development environment ==="

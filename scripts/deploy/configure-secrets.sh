@@ -29,7 +29,7 @@ set_worker_secret() {
   echo -n "Setting $secret_name... "
 
   # Try to set the secret and capture the output
-  if output=$(echo "$secret_value" | pnpm wrangler secret put "$secret_name" --env "$environment" 2>&1); then
+  if output=$(echo "$secret_value" | pnpm --filter @simple-agent-manager/api exec wrangler secret put "$secret_name" --env "$environment" 2>&1); then
     echo -e "${GREEN}✅${NC}"
     return 0
   else

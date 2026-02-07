@@ -16,12 +16,15 @@ import {
   jwtPrivateKey,
   jwtPublicKey,
 } from "./resources/secrets";
+import { pagesProject, pagesProjectName, pagesCustomDomain } from "./resources/pages";
 
 // Export resource references for internal use
 export {
   database,
   kvNamespace,
   r2Bucket,
+  pagesProject,
+  pagesCustomDomain,
   apiDnsRecord,
   appDnsRecord,
   wildcardDnsRecord,
@@ -33,6 +36,7 @@ export const d1DatabaseName = databaseName;
 export const kvId = kvNamespaceId;
 export const kvName = kvNamespaceName;
 export const r2Name = r2BucketName;
+export const pagesName = pagesProjectName;
 export const dnsIds = dnsRecordIds;
 export const hostnames = dnsHostnames;
 
@@ -51,3 +55,6 @@ export const stackSummary = {
     r2: r2Name,
   },
 };
+
+// Export Cloudflare account ID for wrangler.toml
+export const cloudflareAccountId = config.require("cloudflareAccountId");

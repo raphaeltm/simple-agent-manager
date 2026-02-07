@@ -135,12 +135,12 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	rows := 24
 	cols := 80
 	if r.URL.Query().Get("rows") != "" {
-		if _, err := json.Unmarshal([]byte(r.URL.Query().Get("rows")), &rows); err != nil {
+		if err := json.Unmarshal([]byte(r.URL.Query().Get("rows")), &rows); err != nil {
 			rows = 24
 		}
 	}
 	if r.URL.Query().Get("cols") != "" {
-		if _, err := json.Unmarshal([]byte(r.URL.Query().Get("cols")), &cols); err != nil {
+		if err := json.Unmarshal([]byte(r.URL.Query().Get("cols")), &cols); err != nil {
 			cols = 80
 		}
 	}

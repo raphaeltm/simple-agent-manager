@@ -39,6 +39,26 @@ Before committing any business logic changes, verify:
 
 ---
 
+## CRITICAL: Mobile-First UI Requirements (NON-NEGOTIABLE)
+
+**ALL UI changes MUST be tested for mobile usability before deployment.**
+
+1. **MUST** ensure login/primary CTAs are prominent and have min 56px touch targets
+2. **MUST** use responsive text sizes (mobile → tablet → desktop)
+3. **MUST** start with single-column layouts on mobile
+4. **MUST** test on mobile viewport before deploying
+5. **MUST** follow `docs/guides/mobile-ux-guidelines.md`
+
+### Quick Mobile Check
+
+Before deploying any UI changes:
+- [ ] Login button visible and large (min 56px height)
+- [ ] Text readable without zooming (responsive sizing)
+- [ ] Grid layouts collapse to single column on mobile
+- [ ] Tested in Chrome DevTools mobile view
+
+---
+
 ## CRITICAL: Environment Variable Naming (NON-NEGOTIABLE)
 
 **GitHub secrets and Cloudflare Worker secrets use DIFFERENT naming conventions. Confusing them causes deployment failures.**

@@ -30,9 +30,10 @@ embed:
 # Build for all platforms
 build-all: build-ui embed
 	@for platform in $(PLATFORMS); do \
-		GOOS=$$(echo $$platform | cut -d/ -f1) \
-		GOARCH=$$(echo $$platform | cut -d/ -f2) \
-		$(GO) build $(GOFLAGS) -o bin/$(BINARY_NAME)-$$GOOS-$$GOARCH .; \
+		GOOS=$$(echo $$platform | cut -d/ -f1); \
+		GOARCH=$$(echo $$platform | cut -d/ -f2); \
+		echo "Building: bin/$(BINARY_NAME)-$$GOOS-$$GOARCH"; \
+		GOOS=$$GOOS GOARCH=$$GOARCH $(GO) build $(GOFLAGS) -o bin/$(BINARY_NAME)-$$GOOS-$$GOARCH . || exit 1; \
 		echo "Built: bin/$(BINARY_NAME)-$$GOOS-$$GOARCH"; \
 	done
 
