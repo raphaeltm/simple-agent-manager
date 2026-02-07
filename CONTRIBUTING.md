@@ -51,6 +51,20 @@ refactor: extract validation utilities
 2. Update documentation if needed
 3. Add tests for new features
 4. Keep PRs focused and small
+5. Fill the PR template completely (including the Agent Preflight block)
+
+### Agent Preflight (AI-Assisted PRs)
+
+AI-assisted changes must include pre-code behavioral evidence in the PR template:
+
+- Change classification (for example `external-api-change`, `cross-component-change`)
+- Confirmation that preflight happened before code edits
+- External references used (Context7 or official docs for external API changes)
+- Codebase impact analysis across affected components
+- Documentation/spec synchronization notes
+- Constitution and risk check summary
+
+CI validates this section on pull requests.
 
 ## Project Structure
 

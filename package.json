@@ -24,6 +24,7 @@
     "db:migrate:local": "tsx scripts/deploy/run-migrations.ts --local",
     "setup:github": "tsx scripts/deploy/setup-github.ts",
     "setup:local": "tsx scripts/deploy/setup-local-dev.ts",
+    "quality:preflight": "tsx scripts/quality/check-preflight-evidence.ts",
     "test:infra": "pnpm --filter @simple-agent-manager/infra test",
     "prepare": "husky"
   },
