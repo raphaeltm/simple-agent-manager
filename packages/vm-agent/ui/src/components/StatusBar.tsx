@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { StatusBadge } from '@simple-agent-manager/ui';
 
 interface StatusBarProps {
   connected: boolean;
@@ -46,15 +47,7 @@ export function StatusBar({ connected, workspaceId, idleWarning }: StatusBarProp
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         {/* Connection status */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span
-            style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              backgroundColor: connected ? '#4caf50' : '#f44336',
-            }}
-          />
-          <span>{connected ? 'Connected' : 'Disconnected'}</span>
+          <StatusBadge status={connected ? 'connected' : 'disconnected'} />
         </div>
 
         {/* Workspace ID */}

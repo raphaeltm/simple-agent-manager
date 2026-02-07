@@ -10,6 +10,7 @@ jobs:
   preflight-evidence:
     name: Preflight Evidence
     if: github.event_name == 'pull_request'
+
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +27,25 @@ jobs:
 
       - name: Validate agent preflight evidence
         run: pnpm quality:preflight
+
+  ui-compliance:
+    name: UI Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate UI checklist evidence
+        run: node scripts/ci/check-ui-compliance.mjs
 
   lint:
     name: Lint

@@ -4,6 +4,12 @@ import { UserMenu } from '../components/UserMenu';
 import { HetznerTokenForm } from '../components/HetznerTokenForm';
 import { GitHubAppSection } from '../components/GitHubAppSection';
 import { listCredentials } from '../lib/api';
+import {
+  createComplianceRun,
+  createExceptionRequest,
+  createMigrationWorkItem,
+  getActiveUiStandard,
+} from '../lib/ui-governance';
 import type { CredentialResponse } from '@simple-agent-manager/shared';
 
 /**
@@ -14,12 +20,36 @@ export function Settings() {
   const [credentials, setCredentials] = useState<CredentialResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [migrationStandardId, setMigrationStandardId] = useState('');
+  const [migrationSurface, setMigrationSurface] = useState<'control-plane' | 'agent-ui'>('control-plane');
+  const [migrationTargetRef, setMigrationTargetRef] = useState('');
+  const [migrationPriority, setMigrationPriority] = useState<'high' | 'medium' | 'low'>('medium');
+  const [migrationOwner, setMigrationOwner] = useState('');
+  const [migrationNotes, setMigrationNotes] = useState('');
+  const [migrationSubmitting, setMigrationSubmitting] = useState(false);
+  const [migrationMessage, setMigrationMessage] = useState<string | null>(null);
+  const [complianceChangeRef, setComplianceChangeRef] = useState('');
+  const [complianceAuthorType, setComplianceAuthorType] = useState<'human' | 'agent'>('agent');
+  const [complianceSubmitting, setComplianceSubmitting] = useState(false);
+  const [complianceMessage, setComplianceMessage] = useState<string | null>(null);
+  const [exceptionScope, setExceptionScope] = useState('');
+  const [exceptionRationale, setExceptionRationale] = useState('');
+  const [exceptionRequestedBy, setExceptionRequestedBy] = useState('');
+  const [exceptionExpirationDate, setExceptionExpirationDate] = useState('');
+  const [exceptionSubmitting, setExceptionSubmitting] = useState(false);
+  const [exceptionMessage, setExceptionMessage] = useState<string | null>(null);
 
   const loadCredentials = useCallback(async () => {
     try {
       setError(null);
-      const data = await listCredentials();
+      const [data, activeStandard] = await Promise.all([
+        listCredentials(),
+        getActiveUiStandard().catch(() => null),
+      ]);
       setCredentials(data);
+      if (activeStandard?.id) {
+        setMigrationStandardId(activeStandard.id);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load credentials');
     } finally {
@@ -32,6 +62,74 @@ export function Settings() {
   }, [loadCredentials]);
 
   const hetznerCredential = credentials.find((c) => c.provider === 'hetzner');
+
+  const handleCreateMigrationItem = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setMigrationSubmitting(true);
+    setMigrationMessage(null);
+    try {
+      const result = await createMigrationWorkItem({
+        standardId: migrationStandardId,
+        surface: migrationSurface,
+        targetRef: migrationTargetRef,
+        priority: migrationPriority,
+        status: 'backlog',
+        owner: migrationOwner,
+        notes: migrationNotes || undefined,
+      });
+      setMigrationMessage(`Migration item created: ${String((result as { id?: string }).id || 'created')}`);
+      setMigrationTargetRef('');
+      setMigrationNotes('');
+    } catch (err) {
+      setMigrationMessage(err instanceof Error ? err.message : 'Failed to create migration item');
+    } finally {
+      setMigrationSubmitting(false);
+    }
+  };
+
+  const handleCreateComplianceRun = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setComplianceSubmitting(true);
+    setComplianceMessage(null);
+    try {
+      const result = await createComplianceRun({
+        standardId: migrationStandardId,
+        checklistVersion: 'v1',
+        authorType: complianceAuthorType,
+        changeRef: complianceChangeRef,
+      });
+      setComplianceMessage(`Compliance run submitted: ${String((result as { id?: string }).id || 'created')}`);
+      setComplianceChangeRef('');
+    } catch (err) {
+      setComplianceMessage(err instanceof Error ? err.message : 'Failed to submit compliance run');
+    } finally {
+      setComplianceSubmitting(false);
+    }
+  };
+
+  const handleCreateException = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setExceptionSubmitting(true);
+    setExceptionMessage(null);
+    try {
+      const result = await createExceptionRequest({
+        standardId: migrationStandardId,
+        requestedBy: exceptionRequestedBy,
+        rationale: exceptionRationale,
+        scope: exceptionScope,
+        expirationDate: exceptionExpirationDate,
+      });
+      setExceptionMessage(`Exception request submitted: ${String((result as { id?: string }).id || 'created')}`);
+      setExceptionScope('');
+      setExceptionRationale('');
+      setExceptionRequestedBy('');
+      setExceptionExpirationDate('');
+    } catch (err) {
+      setExceptionMessage(err instanceof Error ? err.message : 'Failed to submit exception');
+    } finally {
+      setExceptionSubmitting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -107,6 +205,242 @@ export function Settings() {
             </div>
 
             <GitHubAppSection />
+          </div>
+
+          {/* Migration work item management */}
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="mb-4">
+              <h2 className="text-lg font-medium text-gray-900">UI Migration Work Items</h2>
+              <p className="text-sm text-gray-500">
+                Track migration tasks from legacy screens to shared UI standards.
+              </p>
+            </div>
+
+            {migrationMessage && (
+              <div className="mb-4 p-3 bg-gray-100 rounded text-sm text-gray-700">
+                {migrationMessage}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateMigrationItem} className="space-y-4">
+              <div>
+                <label htmlFor="migration-standard-id" className="block text-sm font-medium text-gray-700">
+                  UI Standard ID
+                </label>
+                <input
+                  id="migration-standard-id"
+                  type="text"
+                  value={migrationStandardId}
+                  onChange={(e) => setMigrationStandardId(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="migration-surface" className="block text-sm font-medium text-gray-700">
+                    Surface
+                  </label>
+                  <select
+                    id="migration-surface"
+                    value={migrationSurface}
+                    onChange={(e) => setMigrationSurface(e.target.value as 'control-plane' | 'agent-ui')}
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
+                  >
+                    <option value="control-plane">Control Plane</option>
+                    <option value="agent-ui">Agent UI</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label htmlFor="migration-priority" className="block text-sm font-medium text-gray-700">
+                    Priority
+                  </label>
+                  <select
+                    id="migration-priority"
+                    value={migrationPriority}
+                    onChange={(e) => setMigrationPriority(e.target.value as 'high' | 'medium' | 'low')}
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
+                  >
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="migration-target" className="block text-sm font-medium text-gray-700">
+                  Target Screen or Flow
+                </label>
+                <input
+                  id="migration-target"
+                  type="text"
+                  value={migrationTargetRef}
+                  onChange={(e) => setMigrationTargetRef(e.target.value)}
+                  placeholder="dashboard/workspace-card"
+                  required
+                />
+              </div>
+
+              <div>
+                <label htmlFor="migration-owner" className="block text-sm font-medium text-gray-700">
+                  Owner
+                </label>
+                <input
+                  id="migration-owner"
+                  type="text"
+                  value={migrationOwner}
+                  onChange={(e) => setMigrationOwner(e.target.value)}
+                  placeholder="frontend-team"
+                  required
+                />
+              </div>
+
+              <div>
+                <label htmlFor="migration-notes" className="block text-sm font-medium text-gray-700">
+                  Notes
+                </label>
+                <textarea
+                  id="migration-notes"
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
+                  value={migrationNotes}
+                  onChange={(e) => setMigrationNotes(e.target.value)}
+                  rows={3}
+                />
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={migrationSubmitting}
+                  className="px-4 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                  style={{ minHeight: '56px' }}
+                >
+                  {migrationSubmitting ? 'Creating...' : 'Create Migration Item'}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Compliance and exception controls */}
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="mb-4">
+              <h2 className="text-lg font-medium text-gray-900">Compliance & Exceptions</h2>
+              <p className="text-sm text-gray-500">
+                Submit compliance runs and standards exceptions for UI pull requests.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <form onSubmit={handleCreateComplianceRun} className="space-y-4">
+                <h3 className="text-sm font-semibold text-gray-900">Create Compliance Run</h3>
+                {complianceMessage && (
+                  <div className="p-3 bg-gray-100 rounded text-sm text-gray-700">{complianceMessage}</div>
+                )}
+                <div>
+                  <label htmlFor="compliance-change-ref" className="block text-sm font-medium text-gray-700">
+                    Change Reference (PR or Commit)
+                  </label>
+                  <input
+                    id="compliance-change-ref"
+                    type="text"
+                    value={complianceChangeRef}
+                    onChange={(e) => setComplianceChangeRef(e.target.value)}
+                    placeholder="PR-123"
+                    required
+                  />
+                </div>
+                <div>
+                  <label htmlFor="compliance-author-type" className="block text-sm font-medium text-gray-700">
+                    Author Type
+                  </label>
+                  <select
+                    id="compliance-author-type"
+                    value={complianceAuthorType}
+                    onChange={(e) => setComplianceAuthorType(e.target.value as 'human' | 'agent')}
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
+                  >
+                    <option value="agent">Agent</option>
+                    <option value="human">Human</option>
+                  </select>
+                </div>
+                <button
+                  type="submit"
+                  disabled={complianceSubmitting}
+                  className="px-4 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                  style={{ minHeight: '56px' }}
+                >
+                  {complianceSubmitting ? 'Submitting...' : 'Submit Compliance Run'}
+                </button>
+              </form>
+
+              <form onSubmit={handleCreateException} className="space-y-4">
+                <h3 className="text-sm font-semibold text-gray-900">Request Exception</h3>
+                {exceptionMessage && (
+                  <div className="p-3 bg-gray-100 rounded text-sm text-gray-700">{exceptionMessage}</div>
+                )}
+                <div>
+                  <label htmlFor="exception-scope" className="block text-sm font-medium text-gray-700">
+                    Scope
+                  </label>
+                  <input
+                    id="exception-scope"
+                    type="text"
+                    value={exceptionScope}
+                    onChange={(e) => setExceptionScope(e.target.value)}
+                    placeholder="landing/hero-cta"
+                    required
+                  />
+                </div>
+                <div>
+                  <label htmlFor="exception-rationale" className="block text-sm font-medium text-gray-700">
+                    Rationale
+                  </label>
+                  <textarea
+                    id="exception-rationale"
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
+                    value={exceptionRationale}
+                    onChange={(e) => setExceptionRationale(e.target.value)}
+                    required
+                    rows={3}
+                  />
+                </div>
+                <div>
+                  <label htmlFor="exception-requested-by" className="block text-sm font-medium text-gray-700">
+                    Requested By
+                  </label>
+                  <input
+                    id="exception-requested-by"
+                    type="text"
+                    value={exceptionRequestedBy}
+                    onChange={(e) => setExceptionRequestedBy(e.target.value)}
+                    placeholder="frontend-lead"
+                    required
+                  />
+                </div>
+                <div>
+                  <label htmlFor="exception-expiration" className="block text-sm font-medium text-gray-700">
+                    Expiration Date
+                  </label>
+                  <input
+                    id="exception-expiration"
+                    type="date"
+                    value={exceptionExpirationDate}
+                    onChange={(e) => setExceptionExpirationDate(e.target.value)}
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={exceptionSubmitting}
+                  className="px-4 py-3 bg-gray-900 text-white rounded-md hover:bg-gray-700 disabled:opacity-50"
+                  style={{ minHeight: '56px' }}
+                >
+                  {exceptionSubmitting ? 'Submitting...' : 'Submit Exception Request'}
+                </button>
+              </form>
+            </div>
           </div>
         </div>
       </main>

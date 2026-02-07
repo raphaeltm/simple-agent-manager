@@ -127,6 +127,9 @@ importers:
       '@simple-agent-manager/terminal':
         specifier: workspace:*
         version: link:../../packages/terminal
+      '@simple-agent-manager/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       better-auth:
         specifier: ^1.0.0
         version: 1.4.17(drizzle-kit@0.26.2)(drizzle-orm@0.34.1(@cloudflare/workers-types@4.20260124.0)(@opentelemetry/api@1.9.0)(@types/react@18.3.27)(kysely@0.28.10)(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(vitest@2.1.9(@types/node@22.19.7)(jsdom@24.1.3)(terser@5.46.0))
@@ -324,8 +327,30 @@ importers:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@22.19.7)(jsdom@24.1.3)(terser@5.46.0)
 
+  packages/ui:
+    dependencies:
+      react:
+        specifier: ^18.0.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.0.0
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
+      '@types/react':
+        specifier: ^18.0.0
+        version: 18.3.27
+      '@types/react-dom':
+        specifier: ^18.0.0
+        version: 18.3.7(@types/react@18.3.27)
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.3
+
   packages/vm-agent/ui:
     dependencies:
+      '@simple-agent-manager/ui':
+        specifier: workspace:*
+        version: link:../../ui
       '@xterm/addon-fit':
         specifier: ^0.10.0
         version: 0.10.0(@xterm/xterm@5.5.0)

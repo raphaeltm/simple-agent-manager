@@ -9,6 +9,19 @@
 - [ ] `pnpm typecheck`
 - [ ] `pnpm test`
 - [ ] Additional validation run (if applicable)
+- [ ] Mobile and desktop verification notes added for UI changes
+
+## UI Compliance Checklist (Required for UI changes)
+
+- [ ] Mobile-first layout verified
+- [ ] Accessibility checks completed
+- [ ] Shared UI components used or exception documented
+
+## Exceptions (If any)
+
+- Scope:
+- Rationale:
+- Expiration:
 
 <!-- AGENT_PREFLIGHT_START -->
 

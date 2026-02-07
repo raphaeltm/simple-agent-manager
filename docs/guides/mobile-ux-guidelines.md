@@ -64,6 +64,47 @@ Before deploying any UI changes:
 - [ ] Verify forms are usable with mobile keyboard
 - [ ] Check loading states work on slow connections
 
+## Enforcement Examples
+
+### 56px Touch Target (Required for Primary CTA)
+
+```tsx
+<button
+  className="w-full px-4 py-4 text-base font-medium rounded-lg bg-blue-600 text-white"
+  style={{ minHeight: '56px' }}
+>
+  Continue
+</button>
+```
+
+### 320px Reflow Safety Check
+
+```css
+.screen-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
+  .screen-layout {
+    grid-template-columns: 2fr 1fr;
+  }
+}
+```
+
+```tsx
+<main className="screen-layout">
+  <section style={{ minWidth: 0 }}>{/* content that can wrap */}</section>
+  <aside style={{ minWidth: 0 }}>{/* avoid fixed-width cards */}</aside>
+</main>
+```
+
+Use Chrome DevTools at width `320px` and confirm:
+- no horizontal scroll for primary tasks
+- no clipped CTA labels
+- no overflowing fixed-width panels
+
 ## Common Mistakes to Avoid
 
 1. **Fixed large font sizes** - Always use responsive sizing

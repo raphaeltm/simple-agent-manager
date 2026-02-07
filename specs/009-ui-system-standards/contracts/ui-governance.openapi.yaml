@@ -1,0 +1,536 @@
+openapi: 3.1.0
+info:
+  title: UI Governance API
+  version: 0.1.0
+  description: >
+    Contract for managing UI standards, shared component definitions, compliance runs,
+    migration tracking, and agent instruction retrieval.
+servers:
+  - url: /api/ui-governance
+paths:
+  /standards/active:
+    get:
+      summary: Get active UI standard
+      operationId: getActiveStandard
+      responses:
+        "200":
+          description: Active standard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UIStandard"
+  /standards/{version}:
+    put:
+      summary: Create or update a standard version
+      operationId: upsertStandardVersion
+      parameters:
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UIStandardUpsert"
+      responses:
+        "200":
+          description: Standard updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UIStandard"
+        "201":
+          description: Standard created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UIStandard"
+  /components:
+    get:
+      summary: List component definitions
+      operationId: listComponentDefinitions
+      parameters:
+        - name: surface
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [control-plane, agent-ui]
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [draft, ready, deprecated]
+      responses:
+        "200":
+          description: Component list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ComponentDefinition"
+    post:
+      summary: Create component definition
+      operationId: createComponentDefinition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComponentDefinitionCreate"
+      responses:
+        "201":
+          description: Component created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComponentDefinition"
+  /components/{componentId}:
+    get:
+      summary: Get component definition
+      operationId: getComponentDefinition
+      parameters:
+        - name: componentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Component definition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComponentDefinition"
+    put:
+      summary: Update component definition
+      operationId: updateComponentDefinition
+      parameters:
+        - name: componentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComponentDefinitionUpdate"
+      responses:
+        "200":
+          description: Component updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComponentDefinition"
+  /compliance-runs:
+    post:
+      summary: Submit compliance run
+      operationId: createComplianceRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComplianceRunCreate"
+      responses:
+        "201":
+          description: Compliance run submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplianceRun"
+  /compliance-runs/{runId}:
+    get:
+      summary: Get compliance run result
+      operationId: getComplianceRun
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Compliance run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplianceRun"
+  /exceptions:
+    post:
+      summary: Request standards exception
+      operationId: createExceptionRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExceptionRequestCreate"
+      responses:
+        "201":
+          description: Exception request created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExceptionRequest"
+  /migration-items:
+    post:
+      summary: Create migration work item
+      operationId: createMigrationItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MigrationWorkItemCreate"
+      responses:
+        "201":
+          description: Migration item created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MigrationWorkItem"
+  /migration-items/{itemId}:
+    patch:
+      summary: Update migration work item status
+      operationId: updateMigrationItem
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [backlog, planned, in-progress, completed, verified]
+                owner:
+                  type: string
+                notes:
+                  type: string
+      responses:
+        "200":
+          description: Migration item updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MigrationWorkItem"
+  /agent-instructions/active:
+    get:
+      summary: Get active agent instruction set
+      operationId: getActiveAgentInstructions
+      responses:
+        "200":
+          description: Active instruction set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentInstructionSet"
+
+components:
+  schemas:
+    UIStandard:
+      type: object
+      required:
+        - id
+        - version
+        - status
+        - visualDirection
+      properties:
+        id:
+          type: string
+        version:
+          type: string
+        status:
+          type: string
+          enum: [draft, review, active, deprecated]
+        visualDirection:
+          type: string
+        mobileFirstRulesRef:
+          type: string
+        accessibilityRulesRef:
+          type: string
+        ownerRole:
+          type: string
+    UIStandardUpsert:
+      type: object
+      required:
+        - status
+        - visualDirection
+        - mobileFirstRulesRef
+        - accessibilityRulesRef
+      properties:
+        status:
+          type: string
+          enum: [draft, review, active, deprecated]
+        visualDirection:
+          type: string
+        mobileFirstRulesRef:
+          type: string
+        accessibilityRulesRef:
+          type: string
+        ownerRole:
+          type: string
+    ComponentDefinition:
+      type: object
+      required:
+        - id
+        - standardId
+        - name
+        - category
+        - supportedSurfaces
+        - requiredStates
+        - status
+      properties:
+        id:
+          type: string
+        standardId:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+          enum: [input, navigation, feedback, layout, display, overlay]
+        supportedSurfaces:
+          type: array
+          items:
+            type: string
+            enum: [control-plane, agent-ui]
+        requiredStates:
+          type: array
+          items:
+            type: string
+        usageGuidance:
+          type: string
+        accessibilityNotes:
+          type: string
+        mobileBehavior:
+          type: string
+        desktopBehavior:
+          type: string
+        status:
+          type: string
+          enum: [draft, ready, deprecated]
+    ComponentDefinitionCreate:
+      allOf:
+        - $ref: "#/components/schemas/ComponentDefinition"
+    ComponentDefinitionUpdate:
+      type: object
+      properties:
+        supportedSurfaces:
+          type: array
+          items:
+            type: string
+            enum: [control-plane, agent-ui]
+        requiredStates:
+          type: array
+          items:
+            type: string
+        usageGuidance:
+          type: string
+        accessibilityNotes:
+          type: string
+        mobileBehavior:
+          type: string
+        desktopBehavior:
+          type: string
+        status:
+          type: string
+          enum: [draft, ready, deprecated]
+    ComplianceRun:
+      type: object
+      required:
+        - id
+        - standardId
+        - checklistVersion
+        - authorType
+        - changeRef
+        - status
+      properties:
+        id:
+          type: string
+        standardId:
+          type: string
+        checklistVersion:
+          type: string
+        authorType:
+          type: string
+          enum: [human, agent]
+        changeRef:
+          type: string
+        status:
+          type: string
+          enum: [queued, running, passed, failed, waived]
+        findings:
+          type: array
+          items:
+            type: string
+        reviewedBy:
+          type: string
+        completedAt:
+          type: string
+          format: date-time
+    ComplianceRunCreate:
+      type: object
+      required:
+        - standardId
+        - checklistVersion
+        - authorType
+        - changeRef
+      properties:
+        standardId:
+          type: string
+        checklistVersion:
+          type: string
+        authorType:
+          type: string
+          enum: [human, agent]
+        changeRef:
+          type: string
+    ExceptionRequest:
+      type: object
+      required:
+        - id
+        - standardId
+        - requestedBy
+        - rationale
+        - scope
+        - expirationDate
+        - status
+      properties:
+        id:
+          type: string
+        standardId:
+          type: string
+        requestedBy:
+          type: string
+        rationale:
+          type: string
+        scope:
+          type: string
+        expirationDate:
+          type: string
+          format: date
+        approver:
+          type: string
+        status:
+          type: string
+          enum: [pending, approved, rejected, expired]
+    ExceptionRequestCreate:
+      type: object
+      required:
+        - standardId
+        - requestedBy
+        - rationale
+        - scope
+        - expirationDate
+      properties:
+        standardId:
+          type: string
+        requestedBy:
+          type: string
+        rationale:
+          type: string
+        scope:
+          type: string
+        expirationDate:
+          type: string
+          format: date
+    MigrationWorkItem:
+      type: object
+      required:
+        - id
+        - surface
+        - targetRef
+        - priority
+        - status
+        - owner
+      properties:
+        id:
+          type: string
+        surface:
+          type: string
+          enum: [control-plane, agent-ui]
+        targetRef:
+          type: string
+        priority:
+          type: string
+          enum: [high, medium, low]
+        status:
+          type: string
+          enum: [backlog, planned, in-progress, completed, verified]
+        owner:
+          type: string
+        dueMilestone:
+          type: string
+        notes:
+          type: string
+    MigrationWorkItemCreate:
+      type: object
+      required:
+        - surface
+        - targetRef
+        - priority
+        - status
+        - owner
+      properties:
+        surface:
+          type: string
+          enum: [control-plane, agent-ui]
+        targetRef:
+          type: string
+        priority:
+          type: string
+          enum: [high, medium, low]
+        status:
+          type: string
+          enum: [backlog, planned, in-progress, completed, verified]
+        owner:
+          type: string
+        dueMilestone:
+          type: string
+        notes:
+          type: string
+    AgentInstructionSet:
+      type: object
+      required:
+        - id
+        - standardId
+        - version
+        - instructionBlocks
+        - requiredChecklistVersion
+        - isActive
+      properties:
+        id:
+          type: string
+        standardId:
+          type: string
+        version:
+          type: string
+        instructionBlocks:
+          type: array
+          items:
+            type: string
+        examplesRef:
+          type: string
+        requiredChecklistVersion:
+          type: string
+        isActive:
+          type: boolean
