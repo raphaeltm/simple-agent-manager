@@ -354,6 +354,41 @@ When documenting environment variables:
 
 ---
 
+## CRITICAL: Agent Preflight Behavior (NON-NEGOTIABLE)
+
+**Before writing ANY code, agents MUST complete preflight behavior checks.**
+
+This policy is defined in `docs/guides/agent-preflight-behavior.md` and enforced through PR evidence checks in CI.
+
+### Mandatory Preflight Steps (Before Code Edits)
+
+1. **MUST** classify the change using one or more classes:
+   - `external-api-change`, `cross-component-change`, `business-logic-change`, `public-surface-change`
+   - `docs-sync-change`, `security-sensitive-change`, `ui-change`, `infra-change`
+2. **MUST** gather class-required context before editing files
+3. **MUST** record assumptions and impact analysis before implementation
+4. **MUST** plan documentation/spec updates when interfaces or behavior change
+5. **MUST** run constitution alignment checks relevant to the change
+
+### Required Behavioral Rules
+
+- **Up-to-date docs first**: For `external-api-change`, use Context7 when available. If unavailable, use official primary documentation and record what was used.
+- **Cross-component impact first**: For `cross-component-change`, map dependencies and affected components before edits.
+- **Code usage analysis first**: For business logic/contract changes, inspect existing usage and edge cases before implementation.
+- **Docs sync by default**: If behavior or interfaces change, update docs/specs in the same PR or explicitly justify deferral.
+
+### Speckit and Non-Speckit Enforcement
+
+- **Non-Speckit tasks**: Complete full preflight at task start before any code edits.
+- **Speckit tasks**: Complete preflight before `/speckit.plan`, and re-run preflight before `/speckit.implement`.
+
+### PR Evidence Requirement
+
+All AI-authored PRs MUST include preflight evidence using the block in `.github/pull_request_template.md`.
+CI validates this evidence on pull requests.
+
+---
+
 ## Project Overview
 
 This is a monorepo containing a Cloudflare-based platform for managing ephemeral Claude Code workspaces. Users can create cloud VMs with Claude Code pre-installed from any git repository, access them via a web-based interface, and have them automatically terminate when idle.
