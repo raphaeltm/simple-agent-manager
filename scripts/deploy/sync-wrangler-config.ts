@@ -57,9 +57,11 @@ function updateEnvironmentBindings(
     // Set account_id for authentication
     account_id: outputs.cloudflareAccountId,
     // Add routes for custom domains
+    // IMPORTANT: patterns MUST end with /* to match all paths, not just the root
+    // Without /*, only the root path (/) matches and subpaths like /health get Cloudflare errors
     routes: [
-      { pattern: `api.${outputs.stackSummary.baseDomain}`, zone_name: outputs.stackSummary.baseDomain },
-      { pattern: `*.${outputs.stackSummary.baseDomain}`, zone_name: outputs.stackSummary.baseDomain }
+      { pattern: `api.${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain },
+      { pattern: `*.${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain }
     ],
     vars: {
       ...envConfig.vars,
