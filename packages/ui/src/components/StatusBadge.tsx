@@ -1,14 +1,14 @@
 import type { CSSProperties } from 'react';
 
 const statusConfig: Record<string, { label: string; bg: string; fg: string }> = {
-  pending: { label: 'Pending', bg: '#e5e7eb', fg: '#1f2937' },
-  creating: { label: 'Creating', bg: '#dbeafe', fg: '#1e3a8a' },
-  running: { label: 'Running', bg: '#dcfce7', fg: '#166534' },
-  stopping: { label: 'Stopping', bg: '#fef3c7', fg: '#854d0e' },
-  stopped: { label: 'Stopped', bg: '#e5e7eb', fg: '#1f2937' },
-  error: { label: 'Error', bg: '#fee2e2', fg: '#991b1b' },
-  connected: { label: 'Connected', bg: '#dcfce7', fg: '#166534' },
-  disconnected: { label: 'Disconnected', bg: '#fee2e2', fg: '#991b1b' },
+  pending: { label: 'Pending', bg: 'rgba(159, 183, 174, 0.15)', fg: '#9fb7ae' },
+  creating: { label: 'Creating', bg: 'rgba(59, 130, 246, 0.15)', fg: '#60a5fa' },
+  running: { label: 'Running', bg: 'rgba(34, 197, 94, 0.15)', fg: '#4ade80' },
+  stopping: { label: 'Stopping', bg: 'rgba(245, 158, 11, 0.15)', fg: '#fbbf24' },
+  stopped: { label: 'Stopped', bg: 'rgba(159, 183, 174, 0.15)', fg: '#9fb7ae' },
+  error: { label: 'Error', bg: 'rgba(239, 68, 68, 0.15)', fg: '#f87171' },
+  connected: { label: 'Connected', bg: 'rgba(34, 197, 94, 0.15)', fg: '#4ade80' },
+  disconnected: { label: 'Disconnected', bg: 'rgba(239, 68, 68, 0.15)', fg: '#f87171' },
 };
 
 interface StatusBadgeProps {

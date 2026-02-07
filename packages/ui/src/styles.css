@@ -8,3 +8,8 @@
   background: var(--sam-color-bg-canvas);
   color: var(--sam-color-fg-primary);
 }
+
+@keyframes sam-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

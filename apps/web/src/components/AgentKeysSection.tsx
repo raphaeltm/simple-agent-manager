@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AgentKeyCard } from './AgentKeyCard';
 import { listAgents, listAgentCredentials, saveAgentCredential, deleteAgentCredential } from '../lib/api';
+import { Alert, Spinner } from '@simple-agent-manager/ui';
 import type { AgentInfo, AgentCredentialInfo, AgentType } from '@simple-agent-manager/shared';
 
 /**
  * Section for managing all agent API keys.
- * Fetches agent catalog and credentials, renders an AgentKeyCard per agent.
  */
 export function AgentKeysSection() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -35,12 +35,10 @@ export function AgentKeysSection() {
 
   const handleSave = async (agentType: AgentType, apiKey: string) => {
     const result = await saveAgentCredential({ agentType, apiKey });
-    // Optimistic update: replace or add credential
     setCredentials((prev) => {
       const filtered = prev.filter((c) => c.agentType !== agentType);
       return [...filtered, result];
     });
-    // Also update agent configured status
     setAgents((prev) =>
       prev.map((a) => a.id === agentType ? { ...a, configured: true } : a)
     );
@@ -48,7 +46,6 @@ export function AgentKeysSection() {
 
   const handleDelete = async (agentType: AgentType) => {
     await deleteAgentCredential(agentType);
-    // Optimistic update: remove credential
     setCredentials((prev) => prev.filter((c) => c.agentType !== agentType));
     setAgents((prev) =>
       prev.map((a) => a.id === agentType ? { ...a, configured: false } : a)
@@ -57,25 +54,36 @@ export function AgentKeysSection() {
 
   if (loading) {
     return (
-      <div className="flex justify-center py-4">
-        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+      <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-4)' }}>
+        <Spinner size="md" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+      <Alert variant="error">
         {error}
-        <button onClick={loadData} className="ml-2 text-red-800 underline hover:no-underline">
+        <button
+          onClick={loadData}
+          style={{
+            marginLeft: 'var(--sam-space-2)',
+            color: 'inherit',
+            textDecoration: 'underline',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: 'inherit',
+          }}
+        >
           Retry
         </button>
-      </div>
+      </Alert>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-3)' }}>
       {agents.map((agent) => (
         <AgentKeyCard
           key={agent.id}

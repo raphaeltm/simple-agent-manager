@@ -34,27 +34,48 @@ export function UserMenu() {
   if (!user) return null;
 
   return (
-    <div className="relative" ref={menuRef}>
+    <div style={{ position: 'relative' }} ref={menuRef}>
+      <style>{`.sam-user-name { display: none; } @media (min-width: 640px) { .sam-user-name { display: inline-block; } }`}</style>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center space-x-2 text-gray-700 hover:text-gray-900 focus:outline-none"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          color: 'var(--sam-color-fg-muted)',
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          padding: '4px',
+        }}
       >
         {user.image ? (
           <img
             src={user.image}
             alt={user.name || user.email}
-            className="h-8 w-8 rounded-full"
+            style={{ height: 32, width: 32, borderRadius: '50%' }}
           />
         ) : (
-          <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-medium">
+          <div style={{
+            height: 32,
+            width: 32,
+            borderRadius: '50%',
+            backgroundColor: 'var(--sam-color-accent-primary)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            fontSize: '0.875rem',
+            fontWeight: 500,
+          }}>
             {(user.name || user.email).charAt(0).toUpperCase()}
           </div>
         )}
-        <span className="hidden sm:block text-sm font-medium">
+        <span className="sam-user-name" style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>
           {user.name || user.email}
         </span>
         <svg
-          className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+          style={{ height: 16, width: 16, transition: 'transform 0.15s', transform: isOpen ? 'rotate(180deg)' : 'none' }}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -64,38 +85,67 @@ export function UserMenu() {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-10 border border-gray-200">
-          <div className="px-4 py-2 border-b border-gray-100">
-            <p className="text-sm font-medium text-gray-900 truncate">
+        <div style={{
+          position: 'absolute',
+          right: 0,
+          marginTop: '0.5rem',
+          width: '12rem',
+          backgroundColor: 'var(--sam-color-bg-surface)',
+          borderRadius: 'var(--sam-radius-md)',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+          border: '1px solid var(--sam-color-border-default)',
+          zIndex: 10,
+          overflow: 'hidden',
+        }}>
+          <div style={{ padding: '0.5rem 1rem', borderBottom: '1px solid var(--sam-color-border-default)' }}>
+            <p style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {user.name || 'User'}
             </p>
-            <p className="text-xs text-gray-500 truncate">{user.email}</p>
+            <p style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</p>
           </div>
 
-          <button
-            onClick={() => {
-              setIsOpen(false);
-              navigate('/dashboard');
-            }}
-            className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-          >
-            Dashboard
-          </button>
-          <button
-            onClick={() => {
-              setIsOpen(false);
-              navigate('/settings');
-            }}
-            className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-          >
-            Settings
-          </button>
+          {[
+            { label: 'Dashboard', path: '/dashboard' },
+            { label: 'Settings', path: '/settings' },
+          ].map((item) => (
+            <button
+              key={item.path}
+              onClick={() => { setIsOpen(false); navigate(item.path); }}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                padding: '0.5rem 1rem',
+                fontSize: '0.875rem',
+                color: 'var(--sam-color-fg-primary)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--sam-color-bg-surface-hover)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+            >
+              {item.label}
+            </button>
+          ))}
 
-          <hr className="my-1" />
+          <hr style={{ border: 'none', borderTop: '1px solid var(--sam-color-border-default)', margin: '0.25rem 0' }} />
 
           <button
             onClick={handleSignOut}
-            className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
+            style={{
+              display: 'block',
+              width: '100%',
+              textAlign: 'left',
+              padding: '0.5rem 1rem',
+              fontSize: '0.875rem',
+              color: 'var(--sam-color-danger)',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--sam-color-bg-surface-hover)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
           >
             Sign out
           </button>

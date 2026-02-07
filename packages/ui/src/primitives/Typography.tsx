@@ -8,11 +8,12 @@ type TypographyVariant =
   | 'body-muted'
   | 'caption';
 
-interface TypographyProps {
+export interface TypographyProps {
   as?: 'h1' | 'h2' | 'h3' | 'p' | 'span' | 'div';
   children: ReactNode;
   variant?: TypographyVariant;
   className?: string;
+  style?: CSSProperties;
 }
 
 const variantStyles: Record<TypographyVariant, CSSProperties> = {
@@ -59,10 +60,11 @@ export function Typography({
   children,
   variant = 'body',
   className = '',
+  style,
 }: TypographyProps) {
   const Tag = as;
   return (
-    <Tag style={variantStyles[variant]} className={className}>
+    <Tag style={{ ...variantStyles[variant], ...style }} className={className}>
       {children}
     </Tag>
   );

@@ -3,6 +3,9 @@ export type SemanticTokenMode = 'default' | 'high-contrast' | 'reduced-motion';
 export interface SemanticTokenSet {
   backgroundCanvas: string;
   backgroundSurface: string;
+  backgroundSurfaceHover: string;
+  backgroundOverlay: string;
+  backgroundInset: string;
   foregroundPrimary: string;
   foregroundMuted: string;
   borderDefault: string;
@@ -18,6 +21,9 @@ export const samSemanticTokens: Record<SemanticTokenMode, SemanticTokenSet> = {
   default: {
     backgroundCanvas: '#0b1110',
     backgroundSurface: '#13201d',
+    backgroundSurfaceHover: '#1a2e29',
+    backgroundOverlay: 'rgba(0, 0, 0, 0.6)',
+    backgroundInset: '#0e1a17',
     foregroundPrimary: '#e6f2ee',
     foregroundMuted: '#9fb7ae',
     borderDefault: '#29423b',
@@ -31,6 +37,9 @@ export const samSemanticTokens: Record<SemanticTokenMode, SemanticTokenSet> = {
   'high-contrast': {
     backgroundCanvas: '#050807',
     backgroundSurface: '#0f1614',
+    backgroundSurfaceHover: '#162320',
+    backgroundOverlay: 'rgba(0, 0, 0, 0.75)',
+    backgroundInset: '#0a1210',
     foregroundPrimary: '#f5fffb',
     foregroundMuted: '#c8dbd4',
     borderDefault: '#37534a',
@@ -44,6 +53,9 @@ export const samSemanticTokens: Record<SemanticTokenMode, SemanticTokenSet> = {
   'reduced-motion': {
     backgroundCanvas: '#0b1110',
     backgroundSurface: '#13201d',
+    backgroundSurfaceHover: '#1a2e29',
+    backgroundOverlay: 'rgba(0, 0, 0, 0.6)',
+    backgroundInset: '#0e1a17',
     foregroundPrimary: '#e6f2ee',
     foregroundMuted: '#9fb7ae',
     borderDefault: '#29423b',
