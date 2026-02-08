@@ -165,45 +165,99 @@ export async function updateDNSRecord(
 }
 
 /**
- * Find and delete any DNS records matching a workspace subdomain by name.
+ * Find and delete any DNS records matching a workspace by name.
  * This handles the case where we lost the record ID but a stale A record still exists.
- * Uses the Cloudflare API to search by name and delete all matching records.
+ * Cleans up both ws-{id} (proxied) and vm-{id} (backend) DNS records.
  */
 export async function cleanupWorkspaceDNSRecords(
   workspaceId: string,
   env: Env
 ): Promise<number> {
   const baseDomain = env.BASE_DOMAIN;
-  const recordName = `ws-${workspaceId.toLowerCase()}.${baseDomain}`;
+  const id = workspaceId.toLowerCase();
 
-  // Search for DNS records matching this workspace subdomain
-  const searchUrl = `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records?name=${encodeURIComponent(recordName)}`;
-  const response = await fetch(searchUrl, {
-    headers: {
-      Authorization: `Bearer ${env.CF_API_TOKEN}`,
-    },
-  });
-
-  if (!response.ok) {
-    console.error(`Failed to search DNS records for ${recordName}: ${response.status}`);
-    return 0;
-  }
-
-  const data = await response.json() as { result: Array<{ id: string; name: string; type: string }> };
-  const records = data.result || [];
-
+  // Clean up both ws-{id} (old proxied) and vm-{id} (backend) records
+  const prefixes = ['ws', 'vm'];
   let deleted = 0;
-  for (const record of records) {
-    try {
-      await deleteDNSRecord(record.id, env);
-      deleted++;
-      console.log(`Cleaned up stale DNS record: ${record.name} (${record.type}) id=${record.id}`);
-    } catch (err) {
-      console.error(`Failed to delete DNS record ${record.id}:`, err);
+
+  for (const prefix of prefixes) {
+    const recordName = `${prefix}-${id}.${baseDomain}`;
+    const searchUrl = `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records?name=${encodeURIComponent(recordName)}`;
+    const response = await fetch(searchUrl, {
+      headers: {
+        Authorization: `Bearer ${env.CF_API_TOKEN}`,
+      },
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to search DNS records for ${recordName}: ${response.status}`);
+      continue;
+    }
+
+    const data = await response.json() as { result: Array<{ id: string; name: string; type: string }> };
+    const records = data.result || [];
+
+    for (const record of records) {
+      try {
+        await deleteDNSRecord(record.id, env);
+        deleted++;
+        console.log(`Cleaned up DNS record: ${record.name} (${record.type}) id=${record.id}`);
+      } catch (err) {
+        console.error(`Failed to delete DNS record ${record.id}:`, err);
+      }
     }
   }
 
   return deleted;
+}
+
+/**
+ * Create a DNS-only (non-proxied) A record for a workspace VM backend.
+ * This is used by the Worker proxy to reach the VM — Cloudflare Workers cannot
+ * fetch IP addresses directly (causes Error 1003), so we use a DNS hostname.
+ *
+ * Uses the `vm-{id}` subdomain prefix to distinguish from proxied `ws-{id}` subdomains.
+ * DNS-only (grey-clouded) ensures the subrequest goes directly to the VM IP.
+ */
+export async function createBackendDNSRecord(
+  workspaceId: string,
+  ip: string,
+  env: Env
+): Promise<string> {
+  const response = await fetch(
+    `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.CF_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        type: 'A',
+        name: `vm-${workspaceId.toLowerCase()}`,
+        content: ip,
+        ttl: getDnsTTL(env),
+        proxied: false, // DNS-only — Worker subrequests go directly to VM IP
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({})) as { errors?: Array<{ message: string }> };
+    const message = error.errors?.[0]?.message || `Failed to create backend DNS record: ${response.status}`;
+    throw new Error(message);
+  }
+
+  const data = await response.json() as { result: { id: string } };
+  return data.result.id;
+}
+
+/**
+ * Get the backend hostname for a workspace VM.
+ * Used by the Worker proxy to route subrequests via DNS instead of raw IP.
+ */
+export function getBackendHostname(workspaceId: string, baseDomain: string): string {
+  return `vm-${workspaceId.toLowerCase()}.${baseDomain}`;
 }
 
 /**

@@ -7,7 +7,7 @@ import { requireAuth, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { encrypt, decrypt } from '../services/encryption';
 import { createServer, deleteServer, SERVER_TYPES } from '../services/hetzner';
-import { deleteDNSRecord, cleanupWorkspaceDNSRecords, getWorkspaceUrl } from '../services/dns';
+import { deleteDNSRecord, cleanupWorkspaceDNSRecords, createBackendDNSRecord, getWorkspaceUrl } from '../services/dns';
 import { getInstallationToken } from '../services/github-app';
 import { generateBootstrapToken, storeBootstrapToken } from '../services/bootstrap';
 import { signCallbackToken, verifyCallbackToken } from '../services/jwt';
@@ -801,19 +801,27 @@ async function provisionWorkspace(
       },
     });
 
+    // Create a DNS-only (non-proxied) A record for the VM backend.
+    // Cloudflare Workers cannot fetch IP addresses directly (Error 1003),
+    // so the Worker proxy uses vm-{id}.{domain} to reach the VM.
+    let dnsRecordId: string | null = null;
+    try {
+      dnsRecordId = await createBackendDNSRecord(workspaceId, server.publicNet.ipv4.ip, env);
+    } catch (dnsErr) {
+      console.error('Failed to create backend DNS record:', dnsErr);
+      // Continue — the workspace can still be reached via /ready callback
+    }
+
     // Update workspace with server info
     await db
       .update(schema.workspaces)
       .set({
         hetznerServerId: String(server.id),
         vmIp: server.publicNet.ipv4.ip,
+        dnsRecordId,
         updatedAt: now(),
       })
       .where(eq(schema.workspaces.id, workspaceId));
-
-    // DNS record creation is NOT needed — the wildcard DNS *.{domain} routes
-    // workspace subdomains to the Worker, which proxies to the VM via its IP.
-    // This avoids per-workspace DNS records and the associated propagation delay.
 
     // VM agent will redeem bootstrap token on startup, then call /ready endpoint
   } catch (err) {

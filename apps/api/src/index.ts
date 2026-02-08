@@ -134,35 +134,18 @@ app.use('*', async (c, next) => {
     return c.json({ error: 'NOT_READY', message: `Workspace is ${workspace.status}` }, 503);
   }
 
-  // Proxy to the VM agent — rewrite URL to point to VM IP on port 8080.
-  // IMPORTANT: We must build clean headers and NOT copy Cloudflare-specific headers
-  // (CF-Connecting-IP, CF-Ray, CF-Worker, etc.) from the original request.
-  // Forwarding these CF headers on a subrequest can cause Cloudflare's edge to
-  // misroute the request, resulting in Error 1003 "Direct IP access not allowed".
+  // Proxy to the VM agent via its DNS-only backend hostname.
+  // Cloudflare Workers cannot fetch IP addresses directly (Error 1003),
+  // so we use the vm-{id}.{domain} hostname which resolves directly to the VM IP.
+  const backendHostname = `vm-${workspaceId.toLowerCase()}.${baseDomain}`;
   const vmUrl = new URL(c.req.url);
   vmUrl.protocol = 'http:';
-  vmUrl.hostname = workspace.vmIp;
+  vmUrl.hostname = backendHostname;
   vmUrl.port = '8080';
-
-  // Build clean headers — only forward safe headers from the original request
-  const headers = new Headers();
-  headers.set('Host', `${workspace.vmIp}:8080`);
-
-  // Forward select headers that the VM agent may need
-  const forwardHeaders = [
-    'Accept', 'Accept-Encoding', 'Accept-Language', 'Content-Type',
-    'Content-Length', 'Authorization', 'Upgrade', 'Connection',
-    'Sec-WebSocket-Key', 'Sec-WebSocket-Version', 'Sec-WebSocket-Protocol',
-    'Sec-WebSocket-Extensions',
-  ];
-  for (const name of forwardHeaders) {
-    const value = c.req.header(name);
-    if (value) headers.set(name, value);
-  }
 
   return fetch(vmUrl.toString(), {
     method: c.req.raw.method,
-    headers,
+    headers: c.req.raw.headers,
     body: c.req.raw.body,
     // @ts-expect-error — Cloudflare Workers support duplex for streaming request bodies
     duplex: c.req.raw.body ? 'half' : undefined,
