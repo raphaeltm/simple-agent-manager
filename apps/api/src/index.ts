@@ -110,8 +110,9 @@ app.use('*', async (c, next) => {
   }
 
   // Extract workspace ID from subdomain: ws-{id}.{domain} → {id}
+  // DNS hostnames are case-insensitive (lowercased), but workspace IDs (ULIDs) are uppercase.
   const subdomain = hostname.replace(`.${baseDomain}`, '');
-  const workspaceId = subdomain.replace(/^ws-/, '');
+  const workspaceId = subdomain.replace(/^ws-/, '').toUpperCase();
 
   if (!workspaceId) {
     return c.json({ error: 'INVALID_WORKSPACE', message: 'Invalid workspace subdomain' }, 400);
