@@ -3,7 +3,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -77,6 +79,26 @@ type Config struct {
 // Load reads configuration from environment variables.
 func Load() (*Config, error) {
 	controlPlaneURL := getEnv("CONTROL_PLANE_URL", "")
+	repository := getEnv("REPOSITORY", "")
+
+	workspaceDir := getEnv("WORKSPACE_DIR", "")
+	if workspaceDir == "" {
+		workspaceBaseDir := getEnv("WORKSPACE_BASE_DIR", "/workspace")
+		workspaceDir = deriveWorkspaceDir(workspaceBaseDir, repository)
+	}
+
+	containerLabelValue := getEnv("CONTAINER_LABEL_VALUE", "")
+	if containerLabelValue == "" {
+		// The devcontainer CLI labels containers with the local folder path used for --workspace-folder.
+		containerLabelValue = workspaceDir
+	}
+
+	containerWorkDir := getEnv("CONTAINER_WORK_DIR", "")
+	if containerWorkDir == "" {
+		// Devcontainers mount the workspace under /workspaces/<foldername> by default, where <foldername>
+		// matches the basename of the local folder passed to --workspace-folder.
+		containerWorkDir = deriveContainerWorkDir(workspaceDir)
+	}
 
 	cfg := &Config{
 		// Default values
@@ -94,9 +116,9 @@ func Load() (*Config, error) {
 		WorkspaceID:        getEnv("WORKSPACE_ID", ""),
 		CallbackToken:      getEnv("CALLBACK_TOKEN", ""),
 		BootstrapToken:     getEnv("BOOTSTRAP_TOKEN", ""),
-		Repository:         getEnv("REPOSITORY", ""),
+		Repository:         repository,
 		Branch:             getEnv("BRANCH", "main"),
-		WorkspaceDir:       getEnv("WORKSPACE_DIR", "/workspace"),
+		WorkspaceDir:       workspaceDir,
 		BootstrapStatePath: getEnv("BOOTSTRAP_STATE_PATH", "/var/lib/vm-agent/bootstrap-state.json"),
 		BootstrapMaxWait:   getEnvDuration("BOOTSTRAP_MAX_WAIT", 5*time.Minute),
 
@@ -130,9 +152,9 @@ func Load() (*Config, error) {
 
 		ContainerMode:       getEnvBool("CONTAINER_MODE", true),
 		ContainerUser:       getEnv("CONTAINER_USER", "vscode"),
-		ContainerWorkDir:    getEnv("CONTAINER_WORK_DIR", "/workspaces"),
+		ContainerWorkDir:    containerWorkDir,
 		ContainerLabelKey:   getEnv("CONTAINER_LABEL_KEY", "devcontainer.local_folder"),
-		ContainerLabelValue: getEnv("CONTAINER_LABEL_VALUE", "/workspace"),
+		ContainerLabelValue: containerLabelValue,
 		ContainerCacheTTL:   getEnvDuration("CONTAINER_CACHE_TTL", 30*time.Second),
 	}
 
@@ -163,6 +185,79 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func deriveWorkspaceDir(workspaceBaseDir, repository string) string {
+	baseDir := strings.TrimSpace(workspaceBaseDir)
+	if baseDir == "" {
+		baseDir = "/workspace"
+	}
+
+	repoDirName := deriveRepoDirName(repository)
+	if repoDirName == "" {
+		// Preserve legacy behavior when the repo is unknown: a fixed base directory.
+		return baseDir
+	}
+
+	return filepath.Join(baseDir, repoDirName)
+}
+
+func deriveContainerWorkDir(workspaceDir string) string {
+	if strings.TrimSpace(workspaceDir) == "" {
+		return "/workspaces"
+	}
+	base := filepath.Base(workspaceDir)
+	if base == "" || base == "." || base == "/" {
+		return "/workspaces"
+	}
+	return filepath.Join("/workspaces", base)
+}
+
+func deriveRepoDirName(repository string) string {
+	repo := strings.TrimSpace(repository)
+	if repo == "" {
+		return ""
+	}
+
+	// Handle full URLs (https://github.com/org/repo.git).
+	if strings.Contains(repo, "://") {
+		if parsed, err := url.Parse(repo); err == nil {
+			repo = parsed.Path
+		}
+	}
+
+	repo = strings.Trim(repo, "/")
+	if repo == "" {
+		return ""
+	}
+
+	parts := strings.Split(repo, "/")
+	name := parts[len(parts)-1]
+	name = strings.TrimSuffix(name, ".git")
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+
+	// Keep the name filesystem-safe. This is intentionally conservative.
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_' || r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	safe := strings.Trim(b.String(), "-")
+	return safe
 }
 
 // deriveAllowedOrigins extracts allowed origins from the control plane URL.

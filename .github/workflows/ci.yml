@@ -178,3 +178,19 @@ jobs:
       - name: Run Pulumi unit tests
         working-directory: infra
         run: pnpm test
+
+  vm-agent-test:
+    name: VM Agent Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: packages/vm-agent/go.sum
+
+      - name: Run VM Agent tests
+        working-directory: packages/vm-agent
+        run: go test ./...

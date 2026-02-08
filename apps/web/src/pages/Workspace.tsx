@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Terminal } from '@simple-agent-manager/terminal';
 import { useAcpSession, useAcpMessages, AgentPanel } from '@simple-agent-manager/acp-client';
 import type { AcpSessionState } from '@simple-agent-manager/acp-client';
@@ -93,13 +93,16 @@ const infoValueStyle: React.CSSProperties = {
 export function Workspace() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const viewParam = searchParams.get('view');
+  const viewOverride: ViewMode | null = viewParam === 'terminal' || viewParam === 'conversation' ? viewParam : null;
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [wsUrl, setWsUrl] = useState<string | null>(null);
   const [terminalLoading, setTerminalLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>('terminal');
+  const [viewMode, setViewMode] = useState<ViewMode>(viewOverride ?? 'terminal');
 
   // ACP WebSocket URL (separate from terminal WS)
   const [acpWsUrl, setAcpWsUrl] = useState<string | null>(null);
@@ -119,11 +122,11 @@ export function Workspace() {
 
   // Auto-switch to conversation mode when agent becomes ready
   useEffect(() => {
-    if (acpSession.state === 'ready' && acpSession.agentType && viewMode === 'terminal') {
+    if (!viewOverride && acpSession.state === 'ready' && acpSession.agentType && viewMode === 'terminal') {
       setViewMode('conversation');
       setFallbackNotice(null);
     }
-  }, [acpSession.state, acpSession.agentType]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [acpSession.state, acpSession.agentType, viewMode, viewOverride]);
 
   useEffect(() => {
     if (!id) return;
@@ -268,6 +271,21 @@ export function Workspace() {
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const handleNewTerminalTab = () => {
+    if (!id) return;
+    const path = `/workspaces/${id}?view=terminal`;
+    const opened = window.open(path, '_blank');
+    if (opened) {
+      try {
+        opened.opener = null;
+      } catch {
+        // Ignore
+      }
+      return;
+    }
+    navigate(path);
   };
 
   if (loading) {
@@ -582,6 +600,11 @@ export function Workspace() {
               </Button>
 
               <div style={{ display: 'flex', gap: 'var(--sam-space-3)' }}>
+                {workspace?.status === 'running' && (
+                  <Button variant="secondary" onClick={handleNewTerminalTab} disabled={actionLoading}>
+                    New Terminal Tab
+                  </Button>
+                )}
                 {workspace?.status === 'running' && (
                   <Button
                     variant="danger"

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -77,6 +78,10 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
+	if err := ensureWorkspaceWritable(ctx, cfg); err != nil {
+		return err
+	}
+
 	if err := ensureGitCredentialHelper(ctx, cfg); err != nil {
 		return err
 	}
@@ -86,6 +91,106 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}
 
 	return nil
+}
+
+func ensureWorkspaceWritable(ctx context.Context, cfg *config.Config) error {
+	if cfg.WorkspaceDir == "" {
+		return nil
+	}
+	if _, err := os.Stat(cfg.WorkspaceDir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("failed to stat workspace dir: %w", err)
+	}
+
+	// Only needed for devcontainer/bind-mount workflows.
+	if !cfg.ContainerMode {
+		return nil
+	}
+
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		log.Printf("Workspace permission fix skipped: unable to locate devcontainer: %v", err)
+		return nil
+	}
+
+	uid := 0
+	gid := 0
+	user := strings.TrimSpace(cfg.ContainerUser)
+	if user != "" {
+		// Prefer configured user, but fall back to container default user.
+		if u, g, err := getContainerUserIDs(ctx, containerID, user); err != nil {
+			log.Printf("Workspace permission fix: unable to resolve user %q in devcontainer (%v), falling back to container default user", user, err)
+		} else {
+			uid, gid = u, g
+		}
+	}
+	if uid == 0 && gid == 0 {
+		u, g, err := getContainerCurrentUserIDs(ctx, containerID)
+		if err != nil {
+			log.Printf("Workspace permission fix skipped: unable to resolve devcontainer user: %v", err)
+			return nil
+		}
+		uid, gid = u, g
+	}
+
+	owner := fmt.Sprintf("%d:%d", uid, gid)
+	cmd := exec.CommandContext(ctx, "chown", "-R", owner, cfg.WorkspaceDir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		log.Printf("Workspace permission fix failed (owner=%s, dir=%s): %v: %s", owner, cfg.WorkspaceDir, err, strings.TrimSpace(string(output)))
+		return nil
+	}
+
+	return nil
+}
+
+func getContainerUserIDs(ctx context.Context, containerID, user string) (int, int, error) {
+	uidCmd := exec.CommandContext(ctx, "docker", "exec", containerID, "id", "-u", user)
+	uidOut, err := uidCmd.CombinedOutput()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get uid for %s in devcontainer: %w: %s", user, err, strings.TrimSpace(string(uidOut)))
+	}
+	uid, err := strconv.Atoi(strings.TrimSpace(string(uidOut)))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid uid output for %s in devcontainer: %q", user, strings.TrimSpace(string(uidOut)))
+	}
+
+	gidCmd := exec.CommandContext(ctx, "docker", "exec", containerID, "id", "-g", user)
+	gidOut, err := gidCmd.CombinedOutput()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get gid for %s in devcontainer: %w: %s", user, err, strings.TrimSpace(string(gidOut)))
+	}
+	gid, err := strconv.Atoi(strings.TrimSpace(string(gidOut)))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid gid output for %s in devcontainer: %q", user, strings.TrimSpace(string(gidOut)))
+	}
+
+	return uid, gid, nil
+}
+
+func getContainerCurrentUserIDs(ctx context.Context, containerID string) (int, int, error) {
+	uidCmd := exec.CommandContext(ctx, "docker", "exec", containerID, "id", "-u")
+	uidOut, err := uidCmd.CombinedOutput()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get current uid in devcontainer: %w: %s", err, strings.TrimSpace(string(uidOut)))
+	}
+	uid, err := strconv.Atoi(strings.TrimSpace(string(uidOut)))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid uid output in devcontainer: %q", strings.TrimSpace(string(uidOut)))
+	}
+
+	gidCmd := exec.CommandContext(ctx, "docker", "exec", containerID, "id", "-g")
+	gidOut, err := gidCmd.CombinedOutput()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get current gid in devcontainer: %w: %s", err, strings.TrimSpace(string(gidOut)))
+	}
+	gid, err := strconv.Atoi(strings.TrimSpace(string(gidOut)))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid gid output in devcontainer: %q", strings.TrimSpace(string(gidOut)))
+	}
+
+	return uid, gid, nil
 }
 
 func redeemBootstrapTokenWithRetry(ctx context.Context, cfg *config.Config) (*bootstrapState, error) {
