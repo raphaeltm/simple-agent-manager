@@ -1,0 +1,167 @@
+openapi: 3.0.3
+info:
+  title: Multi-Terminal API Extensions
+  version: 1.0.0
+  description: API extensions for multi-terminal support
+
+paths:
+  /api/terminal/sessions:
+    get:
+      summary: List terminal sessions for a workspace
+      operationId: listTerminalSessions
+      parameters:
+        - name: workspaceId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Workspace ID to list sessions for
+      responses:
+        200:
+          description: List of terminal sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TerminalSession'
+                required:
+                  - sessions
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+        404:
+          $ref: '#/components/responses/NotFound'
+
+  /api/terminal/config:
+    get:
+      summary: Get terminal configuration
+      operationId: getTerminalConfig
+      responses:
+        200:
+          description: Terminal configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TerminalConfig'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  schemas:
+    TerminalSession:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Session identifier
+        name:
+          type: string
+          maxLength: 50
+          description: User-defined session name
+        status:
+          type: string
+          enum: [connecting, connected, disconnected, error]
+          description: Current connection status
+        createdAt:
+          type: string
+          format: date-time
+          description: Session creation timestamp
+        lastActivityAt:
+          type: string
+          format: date-time
+          description: Last activity timestamp
+        workingDirectory:
+          type: string
+          description: Current working directory
+        isActive:
+          type: boolean
+          description: Whether this is the active tab
+      required:
+        - id
+        - name
+        - status
+        - createdAt
+        - isActive
+
+    TerminalConfig:
+      type: object
+      properties:
+        maxSessions:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+          description: Maximum concurrent terminal sessions
+        scrollbackLines:
+          type: integer
+          minimum: 100
+          maximum: 10000
+          default: 1000
+          description: Lines of scrollback per terminal
+        sessionIdleTimeout:
+          type: integer
+          minimum: 300
+          maximum: 86400
+          default: 3600
+          description: Session idle timeout in seconds
+        keyboardShortcuts:
+          type: object
+          properties:
+            newTab:
+              type: string
+              default: "Ctrl+Shift+T"
+            closeTab:
+              type: string
+              default: "Ctrl+Shift+W"
+            nextTab:
+              type: string
+              default: "Ctrl+Tab"
+            previousTab:
+              type: string
+              default: "Ctrl+Shift+Tab"
+          description: Configurable keyboard shortcuts
+      required:
+        - maxSessions
+        - scrollbackLines
+        - sessionIdleTimeout
+
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: "Authentication required"
+
+    Forbidden:
+      description: Access denied
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: "You do not have access to this workspace"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: "Workspace not found"
