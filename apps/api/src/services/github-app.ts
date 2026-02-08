@@ -2,11 +2,30 @@ import { SignJWT, importPKCS8 } from 'jose';
 import type { Env } from '../index';
 
 /**
+ * Decode a private key that may be either raw PEM or base64-encoded PEM.
+ * GitHub secrets and deployment scripts may store the key in either format.
+ */
+function decodePrivateKey(key: string): string {
+  // If it already looks like PEM, use as-is
+  if (key.includes('-----BEGIN')) {
+    return key;
+  }
+  // Otherwise, assume base64-encoded PEM and decode
+  try {
+    return atob(key);
+  } catch {
+    // If base64 decode fails, return original and let importPKCS8 handle the error
+    return key;
+  }
+}
+
+/**
  * Generate a JWT for GitHub App authentication.
  * This JWT is used to authenticate as the GitHub App.
  */
 export async function generateAppJWT(env: Env): Promise<string> {
-  const privateKey = await importPKCS8(env.GITHUB_APP_PRIVATE_KEY, 'RS256');
+  const pemKey = decodePrivateKey(env.GITHUB_APP_PRIVATE_KEY);
+  const privateKey = await importPKCS8(pemKey, 'RS256');
   const now = Math.floor(Date.now() / 1000);
 
   return new SignJWT({})

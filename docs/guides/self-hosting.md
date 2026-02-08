@@ -316,8 +316,10 @@ SAM uses a single **GitHub App** for both user login (OAuth) and repository acce
 *Repository permissions:*
 | Permission | Access |
 |------------|--------|
-| **Contents** | Read-only |
+| **Contents** | Read and write |
 | **Metadata** | Read-only |
+
+> **Note**: Contents requires **Read and write** access because workspaces need to commit and push code changes back to repositories.
 
 *Account permissions:*
 | Permission | Access |
@@ -861,7 +863,7 @@ VMs are billed hourly and self-terminate after 30 minutes of inactivity.
 ## Security Considerations
 
 1. **Rotate Keys Regularly**: Generate new JWT and encryption keys quarterly
-2. **Minimal GitHub App Permissions**: Only `Contents: Read-only` and `Metadata: Read-only`
+2. **Minimal GitHub App Permissions**: Only `Contents: Read and write` (required for committing) and `Metadata: Read-only`
 3. **No Embedded Secrets**: Bootstrap tokens ensure no secrets in cloud-init
 4. **HTTPS Only**: All traffic is encrypted via Cloudflare
 5. **Session Security**: BetterAuth handles secure session management

@@ -167,21 +167,21 @@ githubRoutes.post('/webhook', async (c) => {
 });
 
 /**
- * GET /api/github/callback - Handle OAuth callback after app installation
- * This is called when user is redirected back after installing the GitHub App
+ * GET /api/github/callback - Handle callback after GitHub App installation
+ * This is called when user is redirected back after installing the GitHub App.
+ * The Setup URL in GitHub App settings should point here.
  */
 githubRoutes.get('/callback', optionalAuth(), async (c) => {
   const installationId = c.req.query('installation_id');
-  // setup_action is available via c.req.query('setup_action') if needed for logging
+  const settingsUrl = `https://app.${c.env.BASE_DOMAIN}/settings`;
 
   if (!installationId) {
-    // Redirect to settings on the app subdomain
-    return c.redirect(`https://app.${c.env.BASE_DOMAIN}/settings`);
+    return c.redirect(settingsUrl);
   }
 
   const auth = c.get('auth');
   if (!auth) {
-    // User not logged in, redirect to login on the app subdomain
+    // User not logged in — redirect to login, preserving installation_id
     return c.redirect(`https://app.${c.env.BASE_DOMAIN}/?installation_id=${installationId}`);
   }
 
@@ -195,45 +195,51 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
     .where(eq(schema.githubInstallations.installationId, installationId))
     .limit(1);
 
-  if (existing.length === 0) {
-    // Fetch installation details from GitHub API
-    try {
-      const jwt = await generateAppJWT(c.env);
-      const response = await fetch(
-        `https://api.github.com/app/installations/${installationId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${jwt}`,
-            Accept: 'application/vnd.github+json',
-            'X-GitHub-Api-Version': '2022-11-28',
-            'User-Agent': 'Simple-Agent-Manager',
-          },
-        }
-      );
-
-      if (response.ok) {
-        const installation = await response.json() as {
-          account: { login: string; type: string };
-        };
-
-        await db.insert(schema.githubInstallations).values({
-          id: ulid(),
-          userId: auth.user.id,
-          installationId: installationId,
-          accountType: installation.account.type === 'Organization' ? 'organization' : 'personal',
-          accountName: installation.account.login,
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
-    } catch (err) {
-      console.error('Failed to fetch installation details:', err);
-    }
+  if (existing.length > 0) {
+    return c.redirect(`${settingsUrl}?github_app=installed`);
   }
 
-  // Redirect to settings on the app subdomain with success indicator
-  const redirectUrl = `https://app.${c.env.BASE_DOMAIN}/settings?github_app=installed`;
-  return c.redirect(redirectUrl);
+  // Fetch installation details from GitHub API and save to DB
+  try {
+    const jwt = await generateAppJWT(c.env);
+    const response = await fetch(
+      `https://api.github.com/app/installations/${installationId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${jwt}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'User-Agent': 'Simple-Agent-Manager',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error(`GitHub API error ${response.status} for installation ${installationId}:`, errorBody);
+      return c.redirect(`${settingsUrl}?github_app=error&reason=github_api_${response.status}`);
+    }
+
+    const installation = await response.json() as {
+      account: { login: string; type: string };
+    };
+
+    await db.insert(schema.githubInstallations).values({
+      id: ulid(),
+      userId: auth.user.id,
+      installationId: installationId,
+      accountType: installation.account.type === 'Organization' ? 'organization' : 'personal',
+      accountName: installation.account.login,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return c.redirect(`${settingsUrl}?github_app=installed`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to save installation ${installationId}:`, message);
+    return c.redirect(`${settingsUrl}?github_app=error&reason=${encodeURIComponent(message)}`);
+  }
 });
 
 /**

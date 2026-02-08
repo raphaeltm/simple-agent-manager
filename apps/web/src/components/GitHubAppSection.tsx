@@ -54,13 +54,20 @@ export function GitHubAppSection() {
     loadInstallUrl();
   }, [loadInstallations, loadInstallUrl]);
 
-  // Show success message if redirected from GitHub App installation
+  // Show feedback message if redirected from GitHub App installation
   useEffect(() => {
-    if (searchParams.get('github_app') === 'installed') {
+    const status = searchParams.get('github_app');
+    if (status === 'installed') {
       setShowSuccess(true);
-      // Clean up the URL param without triggering navigation
+    } else if (status === 'error') {
+      const reason = searchParams.get('reason') || 'Unknown error';
+      setError(`GitHub App installation failed: ${reason}`);
+    }
+    if (status) {
+      // Clean up the URL params without triggering navigation
       const newParams = new URLSearchParams(searchParams);
       newParams.delete('github_app');
+      newParams.delete('reason');
       setSearchParams(newParams, { replace: true });
     }
   }, [searchParams, setSearchParams]);
