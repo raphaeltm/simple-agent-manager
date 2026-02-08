@@ -69,7 +69,7 @@ export function errorHandler() {
       return c.json(
         {
           error: 'INTERNAL_ERROR',
-          message: process.env.NODE_ENV === 'development' ? message : 'Internal server error',
+          message,
         } satisfies ApiError,
         500
       );
