@@ -58,7 +58,7 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | `GH_CLIENT_ID` | GitHub App client ID |
 | `GH_CLIENT_SECRET` | GitHub App client secret |
 | `GH_APP_ID` | GitHub App ID |
-| `GH_APP_PRIVATE_KEY` | GitHub App private key (base64 encoded) |
+| `GH_APP_PRIVATE_KEY` | GitHub App private key (raw PEM or base64 encoded — both work) |
 | `GH_APP_SLUG` | GitHub App slug (URL name) |
 
 > **Naming Convention**: GitHub secrets use `GH_*` prefix (not `GITHUB_*`) because GitHub reserves `GITHUB_*` for its own variables. The deployment workflow automatically maps `GH_*` → `GITHUB_*` when setting Cloudflare Worker secrets.
@@ -810,6 +810,16 @@ wrangler d1 migrations apply workspaces --remote
 1. Check Hetzner console for VM status
 2. If VM is running, SSH in and check: `systemctl status vm-agent`
 3. View cloud-init logs: `cat /var/log/cloud-init-output.log`
+
+### "pkcs8 must be PKCS#8 formatted string" / GitHub App installation fails
+
+**Cause**: The GitHub App private key is stored in an unsupported format. GitHub App keys are generated as PKCS#1 (`-----BEGIN RSA PRIVATE KEY-----`), and the API automatically converts them to PKCS#8 format at runtime.
+
+**Fix**:
+1. Ensure the key is stored either as raw PEM or base64-encoded PEM (both work)
+2. For base64 encoding: `cat your-key.pem | base64 -w0`
+3. For raw PEM via wrangler: `cat your-key.pem | wrangler secret put GITHUB_APP_PRIVATE_KEY`
+4. Make sure the key isn't truncated — PKCS#1 RSA 2048 keys are ~1700 characters
 
 ### "JWT verification failed"
 

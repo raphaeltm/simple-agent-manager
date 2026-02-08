@@ -90,6 +90,16 @@ Build order matters: shared → providers → api/web
 - Push follow-up commits and repeat until all required workflows are green.
 - For pull requests, keep the PR template filled (including Agent Preflight block) so quality gates can pass.
 
+### Post-Deployment Playwright Testing (Required)
+
+**After ANY deployment to production (push to main or merged PR), you MUST verify the deployed feature works using Playwright against the live app.**
+
+1. Wait for the Deploy workflow to complete successfully in GitHub Actions.
+2. Use Playwright to navigate to `app.simple-agent-manager.org` and test the deployed feature end-to-end.
+3. Use the test credentials stored in private memory (`memory/test-credentials.md`) to authenticate.
+4. If the feature cannot be tested via Playwright (e.g., requires external service interaction), document why and what was verified manually.
+5. Report results to the user — do not assume deployment success just because CI passed.
+
 ### Documentation & File Naming
 
 When creating documentation or implementation notes:
