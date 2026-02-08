@@ -32,11 +32,19 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
     // Direct ws-* access requires a terminal token / cookie, so opening it from the
     // dashboard often looks like a 403/unauthorized to users.
     const path = `/workspaces/${workspace.id}`;
-    const opened = window.open(path, '_blank', 'noopener,noreferrer');
-    if (!opened) {
-      // Pop-up blocker fallback
-      navigate(path);
+    const opened = window.open(path, '_blank');
+    if (opened) {
+      // Best-effort noopener. Some browsers return null when `noopener` is set via
+      // window features, so we set it explicitly instead of relying on return value.
+      try {
+        opened.opener = null;
+      } catch {
+        // Ignore
+      }
+      return;
     }
+    // Pop-up blocker fallback
+    navigate(path);
   };
 
   return (

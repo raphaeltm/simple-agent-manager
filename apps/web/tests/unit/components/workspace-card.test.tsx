@@ -40,8 +40,7 @@ describe('WorkspaceCard', () => {
 
     expect(openSpy).toHaveBeenCalledWith(
       `/workspaces/${workspace.id}`,
-      '_blank',
-      'noopener,noreferrer'
+      '_blank'
     );
     expect(openSpy).not.toHaveBeenCalledWith(workspace.url, '_blank');
   });
