@@ -1,0 +1,271 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Multi-Terminal WebSocket Protocol",
+  "description": "Extended WebSocket protocol for multi-terminal session management",
+
+  "definitions": {
+    "sessionId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID v4 session identifier"
+    },
+
+    "clientMessage": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "type": {
+          "type": "string",
+          "enum": ["input", "resize", "ping", "create_session", "close_session", "rename_session"]
+        },
+        "data": {
+          "type": "object",
+          "description": "Message-specific payload"
+        }
+      },
+      "required": ["type"],
+      "additionalProperties": false
+    },
+
+    "serverMessage": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "type": {
+          "type": "string",
+          "enum": ["output", "session", "error", "pong", "session_created", "session_closed", "session_renamed", "session_list"]
+        },
+        "data": {
+          "type": "object",
+          "description": "Message-specific payload"
+        }
+      },
+      "required": ["type"],
+      "additionalProperties": false
+    },
+
+    "createSessionMessage": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "create_session" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "sessionId": { "$ref": "#/definitions/sessionId" },
+            "rows": {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 500
+            },
+            "cols": {
+              "type": "integer",
+              "minimum": 40,
+              "maximum": 500
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 50,
+              "description": "Optional session name"
+            }
+          },
+          "required": ["sessionId", "rows", "cols"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["type", "data"]
+    },
+
+    "sessionCreatedMessage": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "session_created" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "sessionId": { "$ref": "#/definitions/sessionId" },
+            "workingDirectory": {
+              "type": "string",
+              "description": "Initial working directory path"
+            },
+            "shell": {
+              "type": "string",
+              "description": "Shell type (bash, zsh, etc.)"
+            }
+          },
+          "required": ["sessionId"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["type", "data"]
+    },
+
+    "closeSessionMessage": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "close_session" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "sessionId": { "$ref": "#/definitions/sessionId" }
+          },
+          "required": ["sessionId"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["type", "data"]
+    },
+
+    "sessionClosedMessage": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "session_closed" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "sessionId": { "$ref": "#/definitions/sessionId" },
+            "reason": {
+              "type": "string",
+              "enum": ["user_requested", "idle_timeout", "process_exit", "error"],
+              "description": "Reason for session closure"
+            },
+            "exitCode": {
+              "type": "integer",
+              "description": "Process exit code if applicable"
+            }
+          },
+          "required": ["sessionId", "reason"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["type", "data"]
+    },
+
+    "renameSessionMessage": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "rename_session" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "sessionId": { "$ref": "#/definitions/sessionId" },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 50
+            }
+          },
+          "required": ["sessionId", "name"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["type", "data"]
+    },
+
+    "sessionListMessage": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "session_list" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "sessions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "sessionId": { "$ref": "#/definitions/sessionId" },
+                  "name": { "type": "string" },
+                  "workingDirectory": { "type": "string" },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "lastActivityAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": ["sessionId", "createdAt"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["sessions"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["type", "data"]
+    },
+
+    "inputMessage": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "type": { "const": "input" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "string",
+              "description": "Terminal input data"
+            }
+          },
+          "required": ["data"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["type", "data"]
+    },
+
+    "outputMessage": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "type": { "const": "output" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "string",
+              "description": "Terminal output data"
+            }
+          },
+          "required": ["data"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["sessionId", "type", "data"]
+    },
+
+    "resizeMessage": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "$ref": "#/definitions/sessionId" },
+        "type": { "const": "resize" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "rows": {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 500
+            },
+            "cols": {
+              "type": "integer",
+              "minimum": 40,
+              "maximum": 500
+            }
+          },
+          "required": ["rows", "cols"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["type", "data"]
+    }
+  },
+
+  "oneOf": [
+    { "$ref": "#/definitions/clientMessage" },
+    { "$ref": "#/definitions/serverMessage" }
+  ]
+}

@@ -24,30 +24,33 @@ type Manager struct {
 	onActivity         func() // Called when any session has activity
 	containerResolver  ContainerResolver
 	containerUser      string
+	maxSessionsPerUser int     // Maximum sessions allowed per user (0 = unlimited)
 }
 
 // ManagerConfig holds configuration for the session manager.
 type ManagerConfig struct {
-	DefaultShell      string
-	DefaultRows       int
-	DefaultCols       int
-	WorkDir           string
-	OnActivity        func()
-	ContainerResolver ContainerResolver
-	ContainerUser     string
+	DefaultShell       string
+	DefaultRows        int
+	DefaultCols        int
+	WorkDir            string
+	OnActivity         func()
+	ContainerResolver  ContainerResolver
+	ContainerUser      string
+	MaxSessionsPerUser int // Maximum sessions allowed per user (0 = unlimited)
 }
 
 // NewManager creates a new session manager.
 func NewManager(cfg ManagerConfig) *Manager {
 	return &Manager{
-		sessions:          make(map[string]*Session),
-		defaultShell:      cfg.DefaultShell,
-		defaultRows:       cfg.DefaultRows,
-		defaultCols:       cfg.DefaultCols,
-		workDir:           cfg.WorkDir,
-		onActivity:        cfg.OnActivity,
-		containerResolver: cfg.ContainerResolver,
-		containerUser:     cfg.ContainerUser,
+		sessions:           make(map[string]*Session),
+		defaultShell:       cfg.DefaultShell,
+		defaultRows:        cfg.DefaultRows,
+		defaultCols:        cfg.DefaultCols,
+		workDir:            cfg.WorkDir,
+		onActivity:         cfg.OnActivity,
+		containerResolver:  cfg.ContainerResolver,
+		containerUser:      cfg.ContainerUser,
+		maxSessionsPerUser: cfg.MaxSessionsPerUser,
 	}
 }
 
@@ -56,6 +59,28 @@ func (m *Manager) CreateSession(userID string, rows, cols int) (*Session, error)
 	sessionID, err := generateSessionID()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate session ID: %w", err)
+	}
+
+	return m.CreateSessionWithID(sessionID, userID, rows, cols)
+}
+
+// CreateSessionWithID creates a new PTY session with a specific ID.
+// This is used for multi-terminal support where the client generates the session ID.
+func (m *Manager) CreateSessionWithID(sessionID, userID string, rows, cols int) (*Session, error) {
+	// Check if session already exists
+	m.mu.RLock()
+	if _, exists := m.sessions[sessionID]; exists {
+		m.mu.RUnlock()
+		return nil, fmt.Errorf("session already exists: %s", sessionID)
+	}
+	m.mu.RUnlock()
+
+	// Check session limit for user
+	if m.maxSessionsPerUser > 0 {
+		currentCount := m.SessionCountForUser(userID)
+		if currentCount >= m.maxSessionsPerUser {
+			return nil, fmt.Errorf("maximum sessions reached for user %s: %d", userID, m.maxSessionsPerUser)
+		}
 	}
 
 	if rows <= 0 {
@@ -171,6 +196,34 @@ func (m *Manager) SessionCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.sessions)
+}
+
+// SessionCountForUser returns the number of active sessions for a specific user.
+func (m *Manager) SessionCountForUser(userID string) int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	count := 0
+	for _, s := range m.sessions {
+		if s.UserID == userID {
+			count++
+		}
+	}
+	return count
+}
+
+// GetAllSessions returns all active sessions.
+// Used for multi-terminal session listing.
+func (m *Manager) GetAllSessions() map[string]*Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Create a copy to avoid race conditions
+	sessionsCopy := make(map[string]*Session)
+	for k, v := range m.sessions {
+		sessionsCopy[k] = v
+	}
+	return sessionsCopy
 }
 
 // GetLastActivity returns the most recent activity time across all sessions.

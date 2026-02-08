@@ -47,6 +47,7 @@ Think **GitHub Codespaces, but built for AI-assisted development** and with auto
 ## Features
 
 - **Instant Workspaces** — Create a cloud VM from any Git repository in minutes
+- **Multi-Terminal Support** — Open multiple terminal sessions in tabs without new browser windows
 - **Web Terminal** — Access via browser-based xterm.js terminal with WebSocket connection
 - **DevContainer Support** — Automatically detects and uses your `.devcontainer/devcontainer.json`
 - **Multiple VM Sizes** — Small (2 vCPU/4GB), Medium (4 vCPU/8GB), Large (8 vCPU/16GB)

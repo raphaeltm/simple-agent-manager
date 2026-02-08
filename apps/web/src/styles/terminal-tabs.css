@@ -1,0 +1,371 @@
+/**
+ * Multi-Terminal Tab Styles
+ * Chrome-style horizontal tabs with overflow handling
+ */
+
+/* Tab Bar Container */
+.terminal-tab-bar {
+  display: flex;
+  align-items: center;
+  background: var(--tab-bar-bg, #1e1e1e);
+  border-bottom: 1px solid var(--tab-bar-border, #3c3c3c);
+  height: 36px;
+  position: relative;
+  user-select: none;
+}
+
+/* Tab Container with Overflow */
+.terminal-tabs-container {
+  display: flex;
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+
+.terminal-tabs-container::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Opera */
+}
+
+/* Individual Tab */
+.terminal-tab {
+  display: flex;
+  align-items: center;
+  min-width: 120px;
+  max-width: 200px;
+  height: 36px;
+  padding: 0 12px;
+  background: var(--tab-bg, #2d2d2d);
+  border-right: 1px solid var(--tab-separator, #3c3c3c);
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.2s ease;
+}
+
+.terminal-tab:hover {
+  background: var(--tab-hover-bg, #383838);
+}
+
+/* Active Tab */
+.terminal-tab.active {
+  background: var(--tab-active-bg, #1e1e1e);
+  border-bottom: 2px solid var(--tab-active-indicator, #007acc);
+}
+
+.terminal-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--tab-active-indicator, #007acc);
+}
+
+/* Tab Title */
+.terminal-tab-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--tab-text, #cccccc);
+  margin-right: 8px;
+}
+
+.terminal-tab.active .terminal-tab-title {
+  color: var(--tab-active-text, #ffffff);
+}
+
+/* Tab Name Editor (Inline) */
+.terminal-tab-name-editor {
+  flex: 1;
+  background: var(--input-bg, #3c3c3c);
+  border: 1px solid var(--input-border, #007acc);
+  border-radius: 2px;
+  padding: 2px 4px;
+  font-size: 13px;
+  color: var(--input-text, #ffffff);
+  outline: none;
+  margin-right: 8px;
+}
+
+/* Close Button */
+.terminal-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.2s ease, background-color 0.2s ease;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--tab-close-color, #cccccc);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0;
+}
+
+.terminal-tab:hover .terminal-tab-close,
+.terminal-tab.active .terminal-tab-close {
+  opacity: 0.7;
+}
+
+.terminal-tab-close:hover {
+  opacity: 1;
+  background: var(--tab-close-hover-bg, rgba(255, 255, 255, 0.1));
+}
+
+/* New Tab Button */
+.terminal-new-tab-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 4px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--tab-new-color, #cccccc);
+  font-size: 20px;
+  transition: background-color 0.2s ease;
+}
+
+.terminal-new-tab-button:hover {
+  background: var(--tab-new-hover-bg, rgba(255, 255, 255, 0.1));
+}
+
+.terminal-new-tab-button:active {
+  background: var(--tab-new-active-bg, rgba(255, 255, 255, 0.15));
+}
+
+/* Tab Overflow Menu */
+.terminal-tab-overflow-menu {
+  position: relative;
+}
+
+.terminal-tab-overflow-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 4px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--tab-overflow-color, #cccccc);
+  transition: background-color 0.2s ease;
+}
+
+.terminal-tab-overflow-button:hover {
+  background: var(--tab-overflow-hover-bg, rgba(255, 255, 255, 0.1));
+}
+
+/* Dropdown Menu */
+.terminal-tab-overflow-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  min-width: 200px;
+  background: var(--dropdown-bg, #252526);
+  border: 1px solid var(--dropdown-border, #3c3c3c);
+  border-radius: 4px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.terminal-tab-overflow-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  color: var(--dropdown-text, #cccccc);
+  font-size: 13px;
+}
+
+.terminal-tab-overflow-item:hover {
+  background: var(--dropdown-hover-bg, rgba(255, 255, 255, 0.05));
+}
+
+.terminal-tab-overflow-item.active {
+  background: var(--dropdown-active-bg, rgba(0, 122, 204, 0.3));
+  color: var(--dropdown-active-text, #ffffff);
+}
+
+/* Scroll Indicators */
+.terminal-tab-scroll-left,
+.terminal-tab-scroll-right {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(to right, var(--tab-bar-bg, #1e1e1e), transparent);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.terminal-tab-scroll-left {
+  left: 0;
+  background: linear-gradient(to right, var(--tab-bar-bg, #1e1e1e), transparent);
+}
+
+.terminal-tab-scroll-right {
+  right: 40px; /* Space for new tab button */
+  background: linear-gradient(to left, var(--tab-bar-bg, #1e1e1e), transparent);
+}
+
+.terminal-tab-scroll-left.visible,
+.terminal-tab-scroll-right.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Tab Drag and Drop */
+.terminal-tab.dragging {
+  opacity: 0.5;
+  cursor: move;
+}
+
+.terminal-tab.drag-over {
+  background: var(--tab-dragover-bg, #454545);
+}
+
+/* Mobile Responsive Styles */
+@media (max-width: 768px) {
+  .terminal-tab {
+    min-width: 80px;
+    max-width: 150px;
+    padding: 0 8px;
+  }
+
+  .terminal-tab-title {
+    font-size: 12px;
+  }
+
+  .terminal-tab-close {
+    width: 16px;
+    height: 16px;
+    font-size: 14px;
+  }
+
+  /* Always show close button on mobile */
+  .terminal-tab .terminal-tab-close {
+    opacity: 0.7;
+  }
+}
+
+@media (max-width: 640px) {
+  .terminal-tab-bar {
+    height: 32px;
+  }
+
+  .terminal-tab {
+    height: 32px;
+    min-width: 60px;
+    max-width: 120px;
+  }
+
+  /* Show only icons on very small screens */
+  .terminal-tab-title {
+    display: none;
+  }
+
+  .terminal-tab::before {
+    content: '📄';
+    font-size: 16px;
+    margin-right: 4px;
+  }
+
+  .terminal-tab.active::before {
+    content: '📝';
+  }
+}
+
+/* Animations */
+@keyframes tab-slide-in {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes tab-slide-out {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+}
+
+.terminal-tab.entering {
+  animation: tab-slide-in 0.2s ease-out;
+}
+
+.terminal-tab.exiting {
+  animation: tab-slide-out 0.2s ease-out;
+}
+
+/* Accessibility */
+.terminal-tab:focus-visible,
+.terminal-new-tab-button:focus-visible,
+.terminal-tab-close:focus-visible {
+  outline: 2px solid var(--focus-outline, #007acc);
+  outline-offset: -2px;
+}
+
+/* High Contrast Mode Support */
+@media (prefers-contrast: high) {
+  .terminal-tab {
+    border: 1px solid currentColor;
+  }
+
+  .terminal-tab.active {
+    border-width: 2px;
+  }
+
+  .terminal-tab-close,
+  .terminal-new-tab-button {
+    border: 1px solid currentColor;
+  }
+}
+
+/* Reduced Motion Support */
+@media (prefers-reduced-motion: reduce) {
+  .terminal-tab,
+  .terminal-tab-close,
+  .terminal-new-tab-button,
+  .terminal-tabs-container {
+    transition: none;
+  }
+
+  .terminal-tab.entering,
+  .terminal-tab.exiting {
+    animation: none;
+  }
+}
