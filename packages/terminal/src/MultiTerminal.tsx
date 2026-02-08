@@ -25,14 +25,11 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = ({
   className = '',
   config,
 }) => {
-  // Load configuration from environment or props
+  // Load configuration from props with defaults
   const terminalConfig: TerminalConfig = {
-    maxSessions: config?.maxSessions ||
-                 parseInt(import.meta.env.VITE_MAX_TERMINAL_SESSIONS || '10'),
-    tabSwitchAnimationMs: config?.tabSwitchAnimationMs ||
-                         parseInt(import.meta.env.VITE_TAB_SWITCH_ANIMATION_MS || '200'),
-    scrollbackLines: config?.scrollbackLines ||
-                    parseInt(import.meta.env.VITE_TERMINAL_SCROLLBACK_LINES || '1000'),
+    maxSessions: config?.maxSessions || 10,
+    tabSwitchAnimationMs: config?.tabSwitchAnimationMs || 200,
+    scrollbackLines: config?.scrollbackLines || 1000,
     shortcuts: config?.shortcuts || {
       newTab: 'Ctrl+Shift+T',
       closeTab: 'Ctrl+Shift+W',
@@ -189,15 +186,8 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = ({
     }
   }, [renameSession]);
 
-  // Register terminal instance
-  const registerTerminal = useCallback((sessionId: string, terminal: any) => {
-    terminalsRef.current.set(sessionId, terminal);
-  }, []);
-
-  // Unregister terminal instance
-  const unregisterTerminal = useCallback((sessionId: string) => {
-    terminalsRef.current.delete(sessionId);
-  }, []);
+  // Terminal instance management happens internally
+  // These callbacks are kept for potential future use
 
   // Convert sessions map to array for TabBar
   const sessionsArray = Array.from(sessions.values());

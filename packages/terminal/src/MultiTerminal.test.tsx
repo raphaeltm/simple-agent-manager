@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import React from 'react';
 import { MultiTerminal } from './MultiTerminal';
-import * as protocol from './protocol';
 
 // Mock dependencies
 vi.mock('./Terminal', () => ({
@@ -192,7 +190,6 @@ describe('MultiTerminal', () => {
   });
 
   it('should handle rename session messages', () => {
-    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
     const { container } = render(<MultiTerminal {...defaultProps} />);
 
     // Would trigger rename through TabBar callback

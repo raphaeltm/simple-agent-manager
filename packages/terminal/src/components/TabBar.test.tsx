@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import React from 'react';
 import { TabBar } from './TabBar';
 import type { TerminalSession } from '../types/multi-terminal';
 
@@ -10,24 +9,24 @@ describe('TabBar', () => {
       id: 'session-1',
       name: 'Terminal 1',
       status: 'connected',
-      createdAt: Date.now(),
-      lastActiveTime: Date.now(),
+      createdAt: new Date(),
+      lastActiveTime: new Date(),
       workingDirectory: '/workspace',
     },
     {
       id: 'session-2',
       name: 'Terminal 2',
       status: 'connecting',
-      createdAt: Date.now(),
-      lastActiveTime: Date.now(),
+      createdAt: new Date(),
+      lastActiveTime: new Date(),
       workingDirectory: '/workspace',
     },
     {
       id: 'session-3',
       name: 'Terminal 3',
       status: 'error',
-      createdAt: Date.now(),
-      lastActiveTime: Date.now(),
+      createdAt: new Date(),
+      lastActiveTime: new Date(),
       workingDirectory: '/workspace',
     },
   ];
@@ -39,7 +38,7 @@ describe('TabBar', () => {
     onTabClose: vi.fn(),
     onTabRename: vi.fn(),
     onNewTab: vi.fn(),
-    canCreateNew: true,
+    maxTabs: 10,
   };
 
   beforeEach(() => {
@@ -62,15 +61,23 @@ describe('TabBar', () => {
       expect(activeTab?.textContent).toContain('Terminal 1');
     });
 
-    it('should show new tab button when canCreateNew is true', () => {
+    it('should show new tab button when under maxTabs', () => {
       render(<TabBar {...defaultProps} />);
 
       const newTabButton = screen.getByTitle('New Terminal');
       expect(newTabButton).toBeDefined();
     });
 
-    it('should hide new tab button when canCreateNew is false', () => {
-      render(<TabBar {...defaultProps} canCreateNew={false} />);
+    it('should hide new tab button when at maxTabs', () => {
+      const maxedSessions = Array.from({ length: 10 }, (_, i) => ({
+        id: `session-${i}`,
+        name: `Terminal ${i + 1}`,
+        status: 'connected' as const,
+        createdAt: new Date(),
+        lastActiveTime: new Date(),
+        workingDirectory: '/workspace',
+      }));
+      render(<TabBar {...defaultProps} sessions={maxedSessions} maxTabs={10} />);
 
       const newTabButton = screen.queryByTitle('New Terminal');
       expect(newTabButton).toBeNull();
@@ -94,7 +101,7 @@ describe('TabBar', () => {
       render(<TabBar {...defaultProps} />);
 
       const tab2 = screen.getByText('Terminal 2').closest('button');
-      fireEvent.click(tab2!);
+      if (tab2) fireEvent.click(tab2);
 
       expect(defaultProps.onTabActivate).toHaveBeenCalledWith('session-2');
     });
@@ -113,7 +120,7 @@ describe('TabBar', () => {
       render(<TabBar {...defaultProps} />);
 
       const newTabButton = screen.getByTitle('New Terminal');
-      fireEvent.click(newTabButton);
+      if (newTabButton) fireEvent.click(newTabButton);
 
       expect(defaultProps.onNewTab).toHaveBeenCalled();
     });
@@ -201,8 +208,8 @@ describe('TabBar', () => {
         id: `session-${i}`,
         name: `Terminal ${i + 1}`,
         status: 'connected' as const,
-        createdAt: Date.now(),
-        lastActiveTime: Date.now(),
+        createdAt: new Date(),
+        lastActiveTime: new Date(),
         workingDirectory: '/workspace',
       }));
 
@@ -227,8 +234,8 @@ describe('TabBar', () => {
         id: `session-${i}`,
         name: `Terminal ${i + 1}`,
         status: 'connected' as const,
-        createdAt: Date.now(),
-        lastActiveTime: Date.now(),
+        createdAt: new Date(),
+        lastActiveTime: new Date(),
         workingDirectory: '/workspace',
       }));
 
