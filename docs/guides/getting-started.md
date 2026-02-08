@@ -60,7 +60,7 @@ JWT_PRIVATE_KEY=your-jwt-private-key-base64
 JWT_PUBLIC_KEY=your-jwt-public-key-base64
 ```
 
-> **Note**: Local `.env` files use `GITHUB_*` prefix. For GitHub Actions deployment, use `GH_*` prefix in GitHub Environment secrets. The deployment workflow maps between them. See [AGENTS.md](../../AGENTS.md#critical-environment-variable-naming-non-negotiable) for details.
+> **Note**: Local `.env` files use `GITHUB_*` prefix. For GitHub Actions deployment, use `GH_*` prefix in GitHub Environment secrets. The deployment workflow maps between them. See [CLAUDE.md](../../CLAUDE.md) and [AGENTS.md](../../AGENTS.md) for details.
 
 > **Note**: Hetzner API tokens are NOT platform configuration. Users provide their own tokens through the Settings UI after logging in. See [credential-security.md](../architecture/credential-security.md) for details.
 

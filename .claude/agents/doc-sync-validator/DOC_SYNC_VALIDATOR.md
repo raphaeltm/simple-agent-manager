@@ -23,7 +23,8 @@ You are a documentation synchronization validator for the Simple Agent Manager p
 | `docs/guides/self-hosting.md` | Deployment guide |
 | `docs/architecture/secrets-taxonomy.md` | Secrets classification |
 | `docs/architecture/credential-security.md` | Security architecture |
-| `AGENTS.md` | Agent task patterns |
+| `AGENTS.md` | Agent task patterns (non-Claude agents) |
+| `.claude/rules/*.md` | Auto-loaded behavioral rules (Claude Code) |
 
 ### Code Sources (documentation must match)
 
@@ -121,10 +122,10 @@ grep -rn "CREATE TABLE\|sqliteTable" specs/
 **Detection Commands**:
 ```bash
 # Find all internal links
-grep -rn "\[.*\](.*\.md)" docs/ CLAUDE.md AGENTS.md .specify/
+grep -rn "\[.*\](.*\.md)" docs/ CLAUDE.md AGENTS.md .claude/rules/ .specify/
 
 # Find file path references
-grep -rn "apps/\|packages/\|scripts/" docs/ CLAUDE.md AGENTS.md
+grep -rn "apps/\|packages/\|scripts/" docs/ CLAUDE.md AGENTS.md .claude/rules/
 ```
 
 **Checklist**:
@@ -247,4 +248,5 @@ Actual code
 - Check both tables AND prose descriptions
 - Version numbers should match (constitution version, package.json, etc.)
 - Consider semantic meaning - minor wording differences may be acceptable
-- AGENTS.md is for implementation patterns, CLAUDE.md is for project overview
+- AGENTS.md is for implementation patterns (non-Claude agents), CLAUDE.md is for project overview
+- `.claude/rules/*.md` contains auto-loaded behavioral rules for Claude Code

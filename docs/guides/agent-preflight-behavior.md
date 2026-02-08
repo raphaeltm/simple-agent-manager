@@ -15,7 +15,8 @@ written.
 This guide complements:
 
 - `.specify/memory/constitution.md` (authoritative principles)
-- `AGENTS.md` (operational instructions)
+- `AGENTS.md` (operational instructions for non-Claude agents)
+- `.claude/rules/*.md` (auto-loaded behavioral rules for Claude Code)
 - CI quality gates (lint, typecheck, test, build)
 
 ---
