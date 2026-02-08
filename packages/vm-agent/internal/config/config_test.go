@@ -83,3 +83,16 @@ func TestLoadDerivesWorkspaceAndContainerDefaults(t *testing.T) {
 		t.Fatalf("ContainerWorkDir=%q, want %q", cfg.ContainerWorkDir, "/workspaces/repo")
 	}
 }
+
+func TestLoadDefaultsContainerUserEmpty(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.ContainerUser != "" {
+		t.Fatalf("ContainerUser=%q, want empty string", cfg.ContainerUser)
+	}
+}
