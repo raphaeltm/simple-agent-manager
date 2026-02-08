@@ -28,10 +28,14 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
   const navigate = useNavigate();
 
   const handleOpen = () => {
-    if (workspace.url) {
-      window.open(workspace.url, '_blank');
-    } else {
-      navigate(`/workspaces/${workspace.id}`);
+    // Open the control plane workspace page (not the ws-* subdomain directly).
+    // Direct ws-* access requires a terminal token / cookie, so opening it from the
+    // dashboard often looks like a 403/unauthorized to users.
+    const path = `/workspaces/${workspace.id}`;
+    const opened = window.open(path, '_blank', 'noopener,noreferrer');
+    if (!opened) {
+      // Pop-up blocker fallback
+      navigate(path);
     }
   };
 

@@ -42,6 +42,7 @@ pnpm-debug.log*
 
 # Codex local state (CODEX_HOME defaults to ~/.codex)
 .codex/auth.json
+.codex/.credentials.json
 .codex/history.jsonl
 .codex/models_cache.json
 .codex/.personality_migration
