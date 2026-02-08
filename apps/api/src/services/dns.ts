@@ -165,6 +165,48 @@ export async function updateDNSRecord(
 }
 
 /**
+ * Find and delete any DNS records matching a workspace subdomain by name.
+ * This handles the case where we lost the record ID but a stale A record still exists.
+ * Uses the Cloudflare API to search by name and delete all matching records.
+ */
+export async function cleanupWorkspaceDNSRecords(
+  workspaceId: string,
+  env: Env
+): Promise<number> {
+  const baseDomain = env.BASE_DOMAIN;
+  const recordName = `ws-${workspaceId.toLowerCase()}.${baseDomain}`;
+
+  // Search for DNS records matching this workspace subdomain
+  const searchUrl = `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records?name=${encodeURIComponent(recordName)}`;
+  const response = await fetch(searchUrl, {
+    headers: {
+      Authorization: `Bearer ${env.CF_API_TOKEN}`,
+    },
+  });
+
+  if (!response.ok) {
+    console.error(`Failed to search DNS records for ${recordName}: ${response.status}`);
+    return 0;
+  }
+
+  const data = await response.json() as { result: Array<{ id: string; name: string; type: string }> };
+  const records = data.result || [];
+
+  let deleted = 0;
+  for (const record of records) {
+    try {
+      await deleteDNSRecord(record.id, env);
+      deleted++;
+      console.log(`Cleaned up stale DNS record: ${record.name} (${record.type}) id=${record.id}`);
+    } catch (err) {
+      console.error(`Failed to delete DNS record ${record.id}:`, err);
+    }
+  }
+
+  return deleted;
+}
+
+/**
  * Get the workspace URL from a workspace ID.
  */
 export function getWorkspaceUrl(workspaceId: string, baseDomain: string): string {

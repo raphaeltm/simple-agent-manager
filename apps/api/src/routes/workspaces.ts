@@ -7,7 +7,7 @@ import { requireAuth, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { encrypt, decrypt } from '../services/encryption';
 import { createServer, deleteServer, SERVER_TYPES } from '../services/hetzner';
-import { deleteDNSRecord, getWorkspaceUrl } from '../services/dns';
+import { deleteDNSRecord, cleanupWorkspaceDNSRecords, getWorkspaceUrl } from '../services/dns';
 import { getInstallationToken } from '../services/github-app';
 import { generateBootstrapToken, storeBootstrapToken } from '../services/bootstrap';
 import { signCallbackToken, verifyCallbackToken } from '../services/jwt';
@@ -311,6 +311,10 @@ workspacesRoutes.post('/:id/stop', async (c) => {
           if (workspace.dnsRecordId) {
             await deleteDNSRecord(workspace.dnsRecordId, c.env);
           }
+          // Always clean up any stale DNS records by name as a fallback.
+          // This handles cases where dnsRecordId was lost or a record was
+          // created by old code that didn't store the ID properly.
+          await cleanupWorkspaceDNSRecords(workspaceId, c.env);
           await db
             .update(schema.workspaces)
             .set({
@@ -480,6 +484,12 @@ workspacesRoutes.delete('/:id', async (c) => {
     } catch (err) {
       console.error('Failed to delete DNS record:', err);
     }
+  }
+  // Always clean up any stale DNS records by name as a fallback
+  try {
+    await cleanupWorkspaceDNSRecords(workspaceId, c.env);
+  } catch (err) {
+    console.error('Failed to cleanup DNS records by name:', err);
   }
 
   // Delete workspace record
