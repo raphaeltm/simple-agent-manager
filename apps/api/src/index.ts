@@ -134,13 +134,27 @@ app.use('*', async (c, next) => {
     return c.json({ error: 'NOT_READY', message: `Workspace is ${workspace.status}` }, 503);
   }
 
-  // Proxy to the VM agent — rewrite URL to point to VM IP on port 8080
+  // Proxy to the VM agent — rewrite URL to point to VM IP on port 8080.
+  // IMPORTANT: We must create a new Headers object and override the Host header.
+  // If we pass the original request as RequestInit, the original Host header
+  // (ws-{id}.simple-agent-manager.org) leaks through. Cloudflare's fetch() sees
+  // a Host matching its own zone and routes through its proxy instead of making
+  // a direct connection to the VM IP, causing Error 1003.
   const vmUrl = new URL(c.req.url);
   vmUrl.protocol = 'http:';
   vmUrl.hostname = workspace.vmIp;
   vmUrl.port = '8080';
 
-  return fetch(new Request(vmUrl.toString(), c.req.raw));
+  const headers = new Headers(c.req.raw.headers);
+  headers.set('Host', `${workspace.vmIp}:8080`);
+
+  return fetch(vmUrl.toString(), {
+    method: c.req.raw.method,
+    headers,
+    body: c.req.raw.body,
+    // @ts-expect-error — Cloudflare Workers support duplex for streaming request bodies
+    duplex: c.req.raw.body ? 'half' : undefined,
+  });
 });
 
 // Middleware
