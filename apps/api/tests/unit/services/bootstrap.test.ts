@@ -41,7 +41,7 @@ describe('Bootstrap Service', () => {
   });
 
   describe('storeBootstrapToken', () => {
-    it('should store token data in KV with 5-minute TTL', async () => {
+    it('should store token data in KV with 15-minute TTL', async () => {
       const { storeBootstrapToken } = await import(
         '../../../src/services/bootstrap'
       );
@@ -62,7 +62,7 @@ describe('Bootstrap Service', () => {
       expect(mockKV.put).toHaveBeenCalledWith(
         `bootstrap:${token}`,
         JSON.stringify(data),
-        { expirationTtl: 300 } // 5 minutes
+        { expirationTtl: 900 } // 15 minutes
       );
     });
   });
@@ -138,11 +138,11 @@ describe('Bootstrap Service', () => {
 
       await storeBootstrapToken(mockKV as unknown as KVNamespace, token, data);
 
-      // Verify TTL is set to 300 seconds (5 minutes)
+      // Verify TTL is set to 900 seconds (15 minutes)
       expect(mockKV.put).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(String),
-        expect.objectContaining({ expirationTtl: 300 })
+        expect.objectContaining({ expirationTtl: 900 })
       );
     });
   });

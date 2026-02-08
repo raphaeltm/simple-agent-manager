@@ -4,6 +4,9 @@
  *
  * SECURITY: No sensitive tokens are embedded in this template.
  * The VM agent redeems a bootstrap token on startup to receive credentials.
+ *
+ * ORDERING: VM Agent download + start is placed BEFORE optional npm installs
+ * so the agent can redeem the bootstrap token before it expires (15min TTL).
  */
 export const CLOUD_INIT_TEMPLATE = `#cloud-config
 
@@ -29,35 +32,28 @@ packages:
   - htop
   - vim
 
-# Enable and start Docker
+# Enable and start Docker, then download and start VM Agent ASAP
 runcmd:
   # Enable Docker
   - systemctl enable docker
   - systemctl start docker
   - usermod -aG docker workspace
 
-  # Download and install VM Agent
+  # Download and install VM Agent (do this early, before optional npm installs)
   - |
     ARCH=$(uname -m)
     case $ARCH in
       x86_64) ARCH="amd64" ;;
       aarch64) ARCH="arm64" ;;
     esac
-    curl -Lo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}"
+    curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}"
     chmod +x /usr/local/bin/vm-agent
 
-  # Install devcontainers CLI
-  - npm install -g @devcontainers/cli
-
-  # Install ACP agent adapters (pre-installed for instant agent switching)
-  - npm install -g @zed-industries/claude-code-acp
-  - npm install -g @google/gemini-cli
-  - npx --yes @zed-industries/codex-acp --version
-
-  # Create VM Agent systemd service with bootstrap token
-  # The agent will redeem the bootstrap token to get credentials on startup
+  # Create and start VM Agent systemd service immediately
+  # The agent redeems the bootstrap token to get credentials on startup.
+  # This MUST happen before the bootstrap token expires (15min TTL).
   - |
-    cat > /etc/systemd/system/vm-agent.service << 'EOF'
+    cat > /etc/systemd/system/vm-agent.service << 'UNIT'
     [Unit]
     Description=VM Agent
     After=network.target docker.service
@@ -78,10 +74,17 @@ runcmd:
 
     [Install]
     WantedBy=multi-user.target
-    EOF
+    UNIT
     systemctl daemon-reload
     systemctl enable vm-agent
     systemctl start vm-agent
+
+  # Install Node.js (required for devcontainers CLI and ACP adapters)
+  - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  - apt-get install -y nodejs
+
+  # Install devcontainers CLI (optional, VM agent handles devcontainer setup)
+  - npm install -g @devcontainers/cli || true
 
 # Write files
 write_files:

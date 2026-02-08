@@ -2,7 +2,7 @@
  * Bootstrap Token Service
  *
  * Manages one-time bootstrap tokens for secure credential delivery to VMs.
- * Tokens are stored in KV with a 5-minute TTL and are deleted after single use.
+ * Tokens are stored in KV with a 15-minute TTL and are deleted after single use.
  */
 
 import type { BootstrapTokenData } from '@simple-agent-manager/shared';
@@ -10,8 +10,8 @@ import type { BootstrapTokenData } from '@simple-agent-manager/shared';
 /** KV key prefix for bootstrap tokens */
 const BOOTSTRAP_PREFIX = 'bootstrap:';
 
-/** Default bootstrap token TTL in seconds (5 minutes) */
-const DEFAULT_BOOTSTRAP_TTL = 300;
+/** Default bootstrap token TTL in seconds (15 minutes) */
+const DEFAULT_BOOTSTRAP_TTL = 900;
 
 /** Get bootstrap TTL from env or use default (per constitution principle XI) */
 export function getBootstrapTTL(env?: { BOOTSTRAP_TOKEN_TTL_SECONDS?: string }): number {
