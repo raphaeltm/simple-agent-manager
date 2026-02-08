@@ -135,18 +135,30 @@ app.use('*', async (c, next) => {
   }
 
   // Proxy to the VM agent — rewrite URL to point to VM IP on port 8080.
-  // IMPORTANT: We must create a new Headers object and override the Host header.
-  // If we pass the original request as RequestInit, the original Host header
-  // (ws-{id}.simple-agent-manager.org) leaks through. Cloudflare's fetch() sees
-  // a Host matching its own zone and routes through its proxy instead of making
-  // a direct connection to the VM IP, causing Error 1003.
+  // IMPORTANT: We must build clean headers and NOT copy Cloudflare-specific headers
+  // (CF-Connecting-IP, CF-Ray, CF-Worker, etc.) from the original request.
+  // Forwarding these CF headers on a subrequest can cause Cloudflare's edge to
+  // misroute the request, resulting in Error 1003 "Direct IP access not allowed".
   const vmUrl = new URL(c.req.url);
   vmUrl.protocol = 'http:';
   vmUrl.hostname = workspace.vmIp;
   vmUrl.port = '8080';
 
-  const headers = new Headers(c.req.raw.headers);
+  // Build clean headers — only forward safe headers from the original request
+  const headers = new Headers();
   headers.set('Host', `${workspace.vmIp}:8080`);
+
+  // Forward select headers that the VM agent may need
+  const forwardHeaders = [
+    'Accept', 'Accept-Encoding', 'Accept-Language', 'Content-Type',
+    'Content-Length', 'Authorization', 'Upgrade', 'Connection',
+    'Sec-WebSocket-Key', 'Sec-WebSocket-Version', 'Sec-WebSocket-Protocol',
+    'Sec-WebSocket-Extensions',
+  ];
+  for (const name of forwardHeaders) {
+    const value = c.req.header(name);
+    if (value) headers.set(name, value);
+  }
 
   return fetch(vmUrl.toString(), {
     method: c.req.raw.method,
