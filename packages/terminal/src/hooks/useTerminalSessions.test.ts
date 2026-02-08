@@ -244,10 +244,14 @@ describe('useTerminalSessions', () => {
         result.current.reorderSessions(0, 2);
       });
 
-      const sessions = Array.from(result.current.sessions.values());
+      // Sort by order to verify reordering (Map iteration order is insertion order)
+      const sessions = Array.from(result.current.sessions.values()).sort((a, b) => a.order - b.order);
       expect(sessions[0]?.order).toBe(0);
       expect(sessions[1]?.order).toBe(1);
       expect(sessions[2]?.order).toBe(2);
+      // After moving first to last: Terminal 2, Terminal 3, Terminal 1
+      expect(sessions[0]?.name).toBe('Terminal 2');
+      expect(sessions[2]?.name).toBe('Terminal 1');
     });
   });
 

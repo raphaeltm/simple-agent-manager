@@ -50,7 +50,7 @@ export const TabBar: React.FC<TabBarProps> = ({
       const activeTab = tabsContainerRef.current.querySelector(
         `[data-session-id="${activeSessionId}"]`
       ) as HTMLElement;
-      if (activeTab) {
+      if (activeTab && activeTab.scrollIntoView) {
         activeTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
       }
     }

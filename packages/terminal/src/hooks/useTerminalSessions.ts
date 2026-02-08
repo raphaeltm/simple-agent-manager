@@ -13,6 +13,12 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const sessionCounter = useRef(1);
 
+  // Refs to avoid stale closures when multiple state updates happen in one render cycle
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+
   /**
    * Generate a unique session ID
    */
@@ -38,30 +44,25 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
       const sessionNumber = sessionCounter.current++;
       const sessionName = name || `Terminal ${sessionNumber}`;
 
-      const newSession: TerminalSession = {
-        id: sessionId,
-        name: sessionName,
-        status: 'connecting',
-        createdAt: new Date(),
-        lastActivityAt: new Date(),
-        isActive: sessions.size === 0, // First session is active by default
-        order: sessions.size,
-      };
-
       setSessions((prev) => {
         const updated = new Map(prev);
-        updated.set(sessionId, newSession);
+        updated.set(sessionId, {
+          id: sessionId,
+          name: sessionName,
+          status: 'connecting',
+          createdAt: new Date(),
+          lastActivityAt: new Date(),
+          isActive: prev.size === 0,
+          order: prev.size,
+        });
         return updated;
       });
 
-      // Activate first session or if no active session
-      if (sessions.size === 0 || !activeSessionId) {
-        setActiveSessionId(sessionId);
-      }
+      setActiveSessionId(sessionId);
 
       return sessionId;
     },
-    [sessions.size, maxSessions, activeSessionId, generateSessionId]
+    [sessions.size, maxSessions, generateSessionId]
   );
 
   /**
@@ -86,15 +87,17 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
         return updated;
       });
 
-      // If closing the active session, activate another
-      if (sessionId === activeSessionId) {
-        const remainingSessions = Array.from(sessions.values()).filter(
+      // Use refs to access current state, avoiding stale closure
+      const currentActiveId = activeSessionIdRef.current;
+      const currentSessions = sessionsRef.current;
+
+      if (sessionId === currentActiveId) {
+        const remainingSessions = Array.from(currentSessions.values()).filter(
           (s) => s.id !== sessionId
         );
 
         if (remainingSessions.length > 0) {
-          // Activate the next or previous session
-          const currentSession = sessions.get(sessionId);
+          const currentSession = currentSessions.get(sessionId);
           const currentOrder = currentSession?.order ?? 0;
 
           const nextSession = remainingSessions.find((s) => s.order > currentOrder) ||
@@ -103,14 +106,14 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
           if (nextSession) {
             setActiveSessionId(nextSession.id);
           } else {
-            setActiveSessionId(null);
+            setActiveSessionId(remainingSessions[0]!.id);
           }
         } else {
           setActiveSessionId(null);
         }
       }
     },
-    [sessions, activeSessionId]
+    []
   );
 
   /**

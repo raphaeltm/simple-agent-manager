@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
-	"github.com/simple-agent-manager/vm-agent/internal/pty"
+	"github.com/workspace/vm-agent/internal/pty"
 )
 
 // createUpgrader creates a WebSocket upgrader with proper origin validation.
@@ -418,7 +418,7 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 			// Send session created confirmation
 			createdData, _ := json.Marshal(map[string]interface{}{
 				"sessionId":        createData.SessionID,
-				"workingDirectory": ptySession.WorkDir,
+				"workingDirectory": ptySession.Cmd.Dir,
 			})
 			writeMu.Lock()
 			_ = conn.WriteJSON(wsMessage{

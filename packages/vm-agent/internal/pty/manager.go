@@ -93,6 +93,7 @@ func (m *Manager) CreateSessionWithID(sessionID, userID string, rows, cols int) 
 	// Resolve container ID if container mode is active
 	var containerID string
 	if m.containerResolver != nil {
+		var err error
 		containerID, err = m.containerResolver()
 		if err != nil {
 			return nil, fmt.Errorf("devcontainer not available: %w", err)
