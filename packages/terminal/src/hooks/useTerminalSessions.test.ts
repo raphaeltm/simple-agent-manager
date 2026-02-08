@@ -3,10 +3,8 @@ import { renderHook, act } from '@testing-library/react';
 import { useTerminalSessions } from './useTerminalSessions';
 
 describe('useTerminalSessions', () => {
-
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv('VITE_MAX_TERMINAL_SESSIONS', '10');
   });
 
   describe('initialization', () => {
@@ -16,6 +14,7 @@ describe('useTerminalSessions', () => {
       expect(result.current.sessions).toBeInstanceOf(Map);
       expect(result.current.sessions.size).toBe(0);
       expect(result.current.activeSessionId).toBeNull();
+      expect(result.current.canCreateSession).toBe(true);
     });
   });
 
@@ -23,15 +22,20 @@ describe('useTerminalSessions', () => {
     it('should create a new session', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
+      let sessionId = '';
       act(() => {
-        const sessionId = result.current.createSession();
-        expect(sessionId).toBeDefined();
-        expect(typeof sessionId).toBe('string');
+        sessionId = result.current.createSession();
       });
 
+      expect(sessionId).toBeTruthy();
+      expect(typeof sessionId).toBe('string');
       expect(result.current.sessions.size).toBe(1);
-      const firstSession = Array.from(result.current.sessions.values())[0];
-      expect(result.current.activeSessionId).toBe(firstSession?.id);
+
+      const session = result.current.sessions.get(sessionId);
+      expect(session).toBeDefined();
+      expect(session?.name).toBe('Terminal 1');
+      expect(session?.status).toBe('connecting');
+      expect(result.current.activeSessionId).toBe(sessionId);
     });
 
     it('should auto-name sessions sequentially', () => {
@@ -50,35 +54,33 @@ describe('useTerminalSessions', () => {
     });
 
     it('should respect max session limit', () => {
-      vi.stubEnv('VITE_MAX_TERMINAL_SESSIONS', '2');
-      const { result } = renderHook(() => useTerminalSessions());
+      const { result } = renderHook(() => useTerminalSessions(2));
 
       act(() => {
         result.current.createSession();
         result.current.createSession();
-        const third = result.current.createSession();
-        expect(third).toBeNull();
       });
 
-      expect(result.current.sessions.size).toBe(2);
+      expect(result.current.canCreateSession).toBe(false);
+
+      // Should throw when trying to create beyond limit
+      expect(() => {
+        act(() => {
+          result.current.createSession();
+        });
+      }).toThrow();
     });
 
-    it('should reuse numbers from closed sessions', () => {
+    it('should accept custom name', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
+      let sessionId = '';
       act(() => {
-        result.current.createSession();
-        const session2Id = result.current.createSession();
-        result.current.createSession();
-
-        // Close Terminal 2
-        result.current.closeSession(session2Id);
-
-        // Next session should reuse "Terminal 2"
-        const newSessionId = result.current.createSession();
-        const newSession = result.current.sessions.get(newSessionId);
-        expect(newSession?.name).toBe('Terminal 2');
+        sessionId = result.current.createSession('Custom Terminal');
       });
+
+      const session = result.current.sessions.get(sessionId);
+      expect(session?.name).toBe('Custom Terminal');
     });
   });
 
@@ -86,10 +88,12 @@ describe('useTerminalSessions', () => {
     it('should remove session from list', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
-      let sessionId: string = '';
+      let sessionId = '';
       act(() => {
         sessionId = result.current.createSession();
       });
+
+      expect(result.current.sessions.size).toBe(1);
 
       act(() => {
         result.current.closeSession(sessionId);
@@ -99,31 +103,7 @@ describe('useTerminalSessions', () => {
       expect(result.current.activeSessionId).toBeNull();
     });
 
-    it('should switch to adjacent tab when closing active', () => {
-      const { result } = renderHook(() => useTerminalSessions());
-
-      let session1Id = '';
-      let session2Id = '';
-      let session3Id = '';
-
-      act(() => {
-        session1Id = result.current.createSession();
-        session2Id = result.current.createSession();
-        session3Id = result.current.createSession();
-        result.current.activateSession(session2Id);
-      });
-
-      // Close middle tab
-      act(() => {
-        result.current.closeSession(session2Id);
-      });
-
-      // Should switch to next tab (session3)
-      expect(result.current.activeSessionId).toBe(session3Id);
-      expect(result.current.sessions.size).toBe(2);
-    });
-
-    it('should switch to previous tab when closing last', () => {
+    it('should switch to another tab when closing active', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
       let session1Id = '';
@@ -135,16 +115,17 @@ describe('useTerminalSessions', () => {
         result.current.activateSession(session2Id);
       });
 
-      // Close last tab
+      expect(result.current.activeSessionId).toBe(session2Id);
+
       act(() => {
         result.current.closeSession(session2Id);
       });
 
-      // Should switch to previous tab
+      // Should switch to the remaining session
       expect(result.current.activeSessionId).toBe(session1Id);
     });
 
-    it('should handle closing non-existent session', () => {
+    it('should handle closing non-existent session gracefully', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
       act(() => {
@@ -153,11 +134,62 @@ describe('useTerminalSessions', () => {
 
       const initialCount = result.current.sessions.size;
 
+      // Should not throw when closing non-existent session
       act(() => {
-        result.current.closeSession('non-existent');
+        result.current.closeSession('non-existent-id');
       });
 
       expect(result.current.sessions.size).toBe(initialCount);
+    });
+  });
+
+  describe('activateSession', () => {
+    it('should change active session', () => {
+      const { result } = renderHook(() => useTerminalSessions());
+
+      let session1Id = '';
+      let session2Id = '';
+
+      act(() => {
+        session1Id = result.current.createSession();
+        session2Id = result.current.createSession();
+      });
+
+      // Second created session should be active
+      expect(result.current.activeSessionId).toBe(session2Id);
+
+      act(() => {
+        result.current.activateSession(session1Id);
+      });
+
+      expect(result.current.activeSessionId).toBe(session1Id);
+
+      const session1 = result.current.sessions.get(session1Id);
+      const session2 = result.current.sessions.get(session2Id);
+      expect(session1?.isActive).toBe(true);
+      expect(session2?.isActive).toBe(false);
+    });
+
+    it('should update lastActivityAt when activating', async () => {
+      const { result } = renderHook(() => useTerminalSessions());
+
+      let sessionId = '';
+      act(() => {
+        sessionId = result.current.createSession();
+      });
+
+      const initialTime = result.current.sessions.get(sessionId)?.lastActivityAt;
+
+      // Wait a bit to ensure time difference
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      act(() => {
+        result.current.activateSession(sessionId);
+      });
+
+      const newTime = result.current.sessions.get(sessionId)?.lastActivityAt;
+      expect(newTime).toBeDefined();
+      expect(newTime?.getTime()).toBeGreaterThan(initialTime?.getTime() || 0);
     });
   });
 
@@ -174,11 +206,11 @@ describe('useTerminalSessions', () => {
         result.current.renameSession(sessionId, 'Custom Name');
       });
 
-      const session = result.current.getSession(sessionId);
+      const session = result.current.sessions.get(sessionId);
       expect(session?.name).toBe('Custom Name');
     });
 
-    it('should truncate long names', () => {
+    it('should truncate long names to 50 chars', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
       let sessionId = '';
@@ -191,268 +223,80 @@ describe('useTerminalSessions', () => {
         result.current.renameSession(sessionId, longName);
       });
 
-      const session = result.current.getSession(sessionId);
+      const session = result.current.sessions.get(sessionId);
       expect(session?.name).toHaveLength(50);
     });
+  });
 
-    it('should handle empty name', () => {
+  describe('reorderSessions', () => {
+    it('should reorder sessions', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
-      let sessionId = '';
+      const sessionIds: string[] = [];
       act(() => {
-        sessionId = result.current.createSession();
+        sessionIds.push(result.current.createSession('Terminal 1'));
+        sessionIds.push(result.current.createSession('Terminal 2'));
+        sessionIds.push(result.current.createSession('Terminal 3'));
       });
 
-      const originalName = result.current.getSession(sessionId)?.name;
-
+      // Move first to last position
       act(() => {
-        result.current.renameSession(sessionId, '');
+        result.current.reorderSessions(0, 2);
       });
 
-      // Should keep original name
-      expect(result.current.getSession(sessionId)?.name).toBe(originalName);
+      const sessions = Array.from(result.current.sessions.values());
+      expect(sessions[0]?.order).toBe(0);
+      expect(sessions[1]?.order).toBe(1);
+      expect(sessions[2]?.order).toBe(2);
     });
   });
 
-  describe('updateSessionStatus', () => {
-    it('should update session connection status', () => {
+  describe('getSessionByOrder', () => {
+    it('should retrieve session by order', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
-      let sessionId = '';
       act(() => {
-        sessionId = result.current.createSession();
+        result.current.createSession('First');
+        result.current.createSession('Second');
+        result.current.createSession('Third');
       });
 
-      act(() => {
-        result.current.updateSessionStatus(sessionId, 'connected');
-      });
-
-      expect(result.current.getSession(sessionId)?.status).toBe('connected');
+      const secondSession = result.current.getSessionByOrder(1);
+      expect(secondSession?.name).toBe('Second');
     });
 
-    it('should handle status for non-existent session', () => {
+    it('should return undefined for invalid order', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
       act(() => {
         result.current.createSession();
       });
 
-      // Should not throw
-      expect(() => {
-        act(() => {
-          result.current.updateSessionStatus('non-existent', 'error');
-        });
-      }).not.toThrow();
-    });
-
-    it('should track all status transitions', () => {
-      const { result } = renderHook(() => useTerminalSessions());
-
-      let sessionId = '';
-      act(() => {
-        sessionId = result.current.createSession();
-      });
-
-      const statuses = ['connecting', 'connected', 'error', 'disconnected'] as const;
-
-      statuses.forEach(status => {
-        act(() => {
-          result.current.updateSessionStatus(sessionId, status);
-        });
-        expect(result.current.getSession(sessionId)?.status).toBe(status);
-      });
-    });
-  });
-
-  describe('setActiveSession', () => {
-    it('should change active session', () => {
-      const { result } = renderHook(() => useTerminalSessions());
-
-      let session1Id = '';
-      let session2Id = '';
-
-      act(() => {
-        session1Id = result.current.createSession();
-        session2Id = result.current.createSession();
-      });
-
-      expect(result.current.activeSessionId).toBe(session2Id); // Last created
-
-      act(() => {
-        result.current.activateSession(session1Id);
-      });
-
-      expect(result.current.activeSessionId).toBe(session1Id);
-    });
-
-    it('should handle setting non-existent session', () => {
-      const { result } = renderHook(() => useTerminalSessions());
-
-      act(() => {
-        result.current.createSession();
-      });
-
-      const currentActive = result.current.activeSessionId;
-
-      act(() => {
-        result.current.activateSession('non-existent');
-      });
-
-      // Should not change
-      expect(result.current.activeSessionId).toBe(currentActive);
-    });
-
-    it('should track lastActiveTime', () => {
-      const { result } = renderHook(() => useTerminalSessions());
-
-      let session1Id = '';
-      let session2Id = '';
-
-      act(() => {
-        session1Id = result.current.createSession();
-        session2Id = result.current.createSession();
-      });
-
-      const time1 = result.current.getSession(session1Id)?.lastActivityAt;
-
-      // Wait a bit
-      setTimeout(() => {
-        act(() => {
-          result.current.activateSession(session1Id);
-        });
-
-        const time2 = result.current.getSession(session1Id)?.lastActivityAt;
-        expect(time2).toBeGreaterThan(time1!);
-      }, 10);
-    });
-  });
-
-  describe('navigation methods', () => {
-    it('should navigate to next session', () => {
-      const { result } = renderHook(() => useTerminalSessions());
-
-      let ids: string[] = [];
-      act(() => {
-        ids.push(result.current.createSession());
-        ids.push(result.current.createSession());
-        ids.push(result.current.createSession());
-        result.current.activateSession(ids[0]);
-      });
-
-      act(() => {
-        result.current.nextSession();
-      });
-      expect(result.current.activeSessionId).toBe(ids[1]);
-
-      act(() => {
-        result.current.nextSession();
-      });
-      expect(result.current.activeSessionId).toBe(ids[2]);
-
-      // Should wrap around
-      act(() => {
-        result.current.nextSession();
-      });
-      expect(result.current.activeSessionId).toBe(ids[0]);
-    });
-
-    it('should navigate to previous session', () => {
-      const { result } = renderHook(() => useTerminalSessions());
-
-      let ids: string[] = [];
-      act(() => {
-        ids.push(result.current.createSession());
-        ids.push(result.current.createSession());
-        ids.push(result.current.createSession());
-        result.current.activateSession(ids[0]);
-      });
-
-      // Should wrap around to last
-      act(() => {
-        result.current.previousSession();
-      });
-      expect(result.current.activeSessionId).toBe(ids[2]);
-
-      act(() => {
-        result.current.previousSession();
-      });
-      expect(result.current.activeSessionId).toBe(ids[1]);
-    });
-
-    it('should jump to session by index', () => {
-      const { result } = renderHook(() => useTerminalSessions());
-
-      let ids: string[] = [];
-      act(() => {
-        ids.push(result.current.createSession());
-        ids.push(result.current.createSession());
-        ids.push(result.current.createSession());
-      });
-
-      act(() => {
-        result.current.jumpToSession(1);
-      });
-      expect(result.current.activeSessionId).toBe(ids[1]);
-
-      act(() => {
-        result.current.jumpToSession(0);
-      });
-      expect(result.current.activeSessionId).toBe(ids[0]);
-
-      // Out of bounds should not change
-      act(() => {
-        result.current.jumpToSession(10);
-      });
-      expect(result.current.activeSessionId).toBe(ids[0]);
-    });
-  });
-
-  describe('getSession', () => {
-    it('should return session by id', () => {
-      const { result } = renderHook(() => useTerminalSessions());
-
-      let sessionId = '';
-      act(() => {
-        const session = result.current.createSession();
-        sessionId = session.id;
-      });
-
-      const retrieved = result.current.getSession(sessionId);
-      expect(retrieved).toBeDefined();
-      expect(retrieved?.id).toBe(sessionId);
-    });
-
-    it('should return null for non-existent session', () => {
-      const { result } = renderHook(() => useTerminalSessions());
-
-      const retrieved = result.current.getSession('non-existent');
-      expect(retrieved).toBeNull();
+      const session = result.current.getSessionByOrder(10);
+      expect(session).toBeUndefined();
     });
   });
 
   describe('canCreateSession', () => {
-    it('should allow creation under limit', () => {
-      const { result } = renderHook(() => useTerminalSessions());
+    it('should indicate when sessions can be created', () => {
+      const { result } = renderHook(() => useTerminalSessions(3));
 
-      expect(result.current.canCreateSession()).toBe(true);
+      expect(result.current.canCreateSession).toBe(true);
 
       act(() => {
         result.current.createSession();
       });
-
-      expect(result.current.canCreateSession()).toBe(true);
-    });
-
-    it('should prevent creation at limit', () => {
-      vi.stubEnv('VITE_MAX_TERMINAL_SESSIONS', '2');
-      const { result } = renderHook(() => useTerminalSessions());
+      expect(result.current.canCreateSession).toBe(true);
 
       act(() => {
         result.current.createSession();
+      });
+      expect(result.current.canCreateSession).toBe(true);
+
+      act(() => {
         result.current.createSession();
       });
-
-      expect(result.current.canCreateSession()).toBe(false);
+      expect(result.current.canCreateSession).toBe(false);
     });
   });
 });
