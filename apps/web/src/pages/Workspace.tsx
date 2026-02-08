@@ -177,7 +177,7 @@ export function Workspace() {
         // Build WebSocket URL from workspace URL
         const url = new URL(workspace.url);
         const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-        const terminalWsUrl = `${wsProtocol}//${url.host}/ws?token=${encodeURIComponent(token)}`;
+        const terminalWsUrl = `${wsProtocol}//${url.host}/terminal/ws?token=${encodeURIComponent(token)}`;
         setWsUrl(terminalWsUrl);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to get terminal token');

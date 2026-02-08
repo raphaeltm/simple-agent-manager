@@ -7,7 +7,7 @@ import { requireAuth, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { encrypt, decrypt } from '../services/encryption';
 import { createServer, deleteServer, SERVER_TYPES } from '../services/hetzner';
-import { createDNSRecord, deleteDNSRecord, getWorkspaceUrl } from '../services/dns';
+import { deleteDNSRecord, getWorkspaceUrl } from '../services/dns';
 import { getInstallationToken } from '../services/github-app';
 import { generateBootstrapToken, storeBootstrapToken } from '../services/bootstrap';
 import { signCallbackToken, verifyCallbackToken } from '../services/jwt';
@@ -801,16 +801,9 @@ async function provisionWorkspace(
       })
       .where(eq(schema.workspaces.id, workspaceId));
 
-    // Create DNS record
-    const dnsRecordId = await createDNSRecord(workspaceId, server.publicNet.ipv4.ip, env);
-
-    await db
-      .update(schema.workspaces)
-      .set({
-        dnsRecordId,
-        updatedAt: now(),
-      })
-      .where(eq(schema.workspaces.id, workspaceId));
+    // DNS record creation is NOT needed — the wildcard DNS *.{domain} routes
+    // workspace subdomains to the Worker, which proxies to the VM via its IP.
+    // This avoids per-workspace DNS records and the associated propagation delay.
 
     // VM agent will redeem bootstrap token on startup, then call /ready endpoint
   } catch (err) {

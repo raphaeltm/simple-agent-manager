@@ -1,6 +1,9 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
+import { drizzle } from 'drizzle-orm/d1';
+import { eq } from 'drizzle-orm';
+import * as schema from './db/schema';
 import { AppError } from './middleware/error';
 import { authRoutes } from './routes/auth';
 import { credentialsRoutes } from './routes/credentials';
@@ -90,6 +93,53 @@ app.use('*', async (c, next) => {
     return fetch(new Request(pagesUrl.toString(), c.req.raw));
   }
   await next();
+});
+
+// Proxy requests for workspace subdomains (ws-{id}.*) to the VM agent.
+// The wildcard DNS *.{domain} routes through this Worker, so we must proxy
+// workspace requests to the actual VM running the agent on port 8080.
+// This handles both HTTP and WebSocket (Upgrade) requests.
+app.use('*', async (c, next) => {
+  const url = new URL(c.req.url);
+  const hostname = url.hostname;
+  const baseDomain = c.env?.BASE_DOMAIN || '';
+
+  if (!baseDomain || !hostname.startsWith('ws-') || !hostname.endsWith(`.${baseDomain}`)) {
+    await next();
+    return;
+  }
+
+  // Extract workspace ID from subdomain: ws-{id}.{domain} → {id}
+  const subdomain = hostname.replace(`.${baseDomain}`, '');
+  const workspaceId = subdomain.replace(/^ws-/, '');
+
+  if (!workspaceId) {
+    return c.json({ error: 'INVALID_WORKSPACE', message: 'Invalid workspace subdomain' }, 400);
+  }
+
+  // Look up the VM IP from D1
+  const db = drizzle(c.env.DATABASE, { schema });
+  const workspace = await db
+    .select({ vmIp: schema.workspaces.vmIp, status: schema.workspaces.status })
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, workspaceId))
+    .get();
+
+  if (!workspace || !workspace.vmIp) {
+    return c.json({ error: 'NOT_FOUND', message: 'Workspace not found or has no VM IP' }, 404);
+  }
+
+  if (workspace.status !== 'running') {
+    return c.json({ error: 'NOT_READY', message: `Workspace is ${workspace.status}` }, 503);
+  }
+
+  // Proxy to the VM agent — rewrite URL to point to VM IP on port 8080
+  const vmUrl = new URL(c.req.url);
+  vmUrl.protocol = 'http:';
+  vmUrl.hostname = workspace.vmIp;
+  vmUrl.port = '8080';
+
+  return fetch(new Request(vmUrl.toString(), c.req.raw));
 });
 
 // Middleware
