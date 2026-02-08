@@ -52,7 +52,7 @@ export interface VMInstance {
   /** Provider-reported status */
   status: 'initializing' | 'running' | 'off' | 'starting' | 'stopping';
 
-  /** Server type (e.g., "cx22") */
+  /** Server type (e.g., "cx23") */
   serverType: string;
 
   /** ISO 8601 creation timestamp */

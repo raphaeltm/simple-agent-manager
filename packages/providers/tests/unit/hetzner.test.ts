@@ -30,33 +30,33 @@ describe('HetznerProvider', () => {
     it('should return small size config', () => {
       const config = provider.getSizeConfig('small');
       expect(config).toEqual({
-        type: 'cx11',
-        price: '€3.49/mo',
-        vcpu: 1,
-        ramGb: 2,
-        storageGb: 20,
-      });
-    });
-
-    it('should return medium size config', () => {
-      const config = provider.getSizeConfig('medium');
-      expect(config).toEqual({
-        type: 'cx22',
-        price: '€5.39/mo',
+        type: 'cx23',
+        price: '€3.99/mo',
         vcpu: 2,
         ramGb: 4,
         storageGb: 40,
       });
     });
 
-    it('should return large size config', () => {
-      const config = provider.getSizeConfig('large');
+    it('should return medium size config', () => {
+      const config = provider.getSizeConfig('medium');
       expect(config).toEqual({
-        type: 'cx32',
-        price: '€10.49/mo',
+        type: 'cx33',
+        price: '€7.49/mo',
         vcpu: 4,
         ramGb: 8,
         storageGb: 80,
+      });
+    });
+
+    it('should return large size config', () => {
+      const config = provider.getSizeConfig('large');
+      expect(config).toEqual({
+        type: 'cx43',
+        price: '€14.49/mo',
+        vcpu: 8,
+        ramGb: 16,
+        storageGb: 160,
       });
     });
   });

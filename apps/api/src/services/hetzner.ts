@@ -30,9 +30,9 @@ export async function validateHetznerToken(token: string): Promise<boolean> {
  * Server type mapping from our size names to Hetzner server types.
  */
 export const SERVER_TYPES: Record<string, string> = {
-  small: 'cx22',
-  medium: 'cx32',
-  large: 'cx42',
+  small: 'cx23',
+  medium: 'cx33',
+  large: 'cx43',
 };
 
 /**

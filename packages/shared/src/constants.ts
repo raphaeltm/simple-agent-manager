@@ -4,9 +4,9 @@ import type { VMSize, VMLocation } from './types';
 // VM Size Configuration
 // =============================================================================
 export const VM_SIZE_CONFIG: Record<VMSize, { hetznerType: string; cpus: number; ram: string }> = {
-  small: { hetznerType: 'cx22', cpus: 2, ram: '4GB' },
-  medium: { hetznerType: 'cx32', cpus: 4, ram: '8GB' },
-  large: { hetznerType: 'cx42', cpus: 8, ram: '16GB' },
+  small: { hetznerType: 'cx23', cpus: 2, ram: '4GB' },
+  medium: { hetznerType: 'cx33', cpus: 4, ram: '8GB' },
+  large: { hetznerType: 'cx43', cpus: 8, ram: '16GB' },
 };
 
 // =============================================================================

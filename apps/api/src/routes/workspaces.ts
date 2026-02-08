@@ -781,7 +781,7 @@ async function provisionWorkspace(
     // Create Hetzner server
     const server = await createServer(hetznerToken, {
       name: `ws-${workspaceId}`,
-      serverType: SERVER_TYPES[config.vmSize] || 'cx32',
+      serverType: SERVER_TYPES[config.vmSize] || 'cx33',
       location: config.vmLocation,
       image: HETZNER_IMAGE,
       userData: cloudInit,

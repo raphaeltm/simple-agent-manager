@@ -5,25 +5,25 @@ const HETZNER_API_URL = 'https://api.hetzner.cloud/v1';
 
 const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
   small: {
-    type: 'cx11',
-    price: '€3.49/mo',
-    vcpu: 1,
-    ramGb: 2,
-    storageGb: 20,
-  },
-  medium: {
-    type: 'cx22',
-    price: '€5.39/mo',
+    type: 'cx23',
+    price: '€3.99/mo',
     vcpu: 2,
     ramGb: 4,
     storageGb: 40,
   },
-  large: {
-    type: 'cx32',
-    price: '€10.49/mo',
+  medium: {
+    type: 'cx33',
+    price: '€7.49/mo',
     vcpu: 4,
     ramGb: 8,
     storageGb: 80,
+  },
+  large: {
+    type: 'cx43',
+    price: '€14.49/mo',
+    vcpu: 8,
+    ramGb: 16,
+    storageGb: 160,
   },
 };
 
