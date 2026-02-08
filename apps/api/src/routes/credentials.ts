@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, and } from 'drizzle-orm';
-import { ulid } from 'ulid';
+import { ulid } from '../lib/ulid';
 import type { Env } from '../index';
 import { requireAuth, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';

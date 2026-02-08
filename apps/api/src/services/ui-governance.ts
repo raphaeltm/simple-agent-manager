@@ -1,6 +1,6 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { ulid } from 'ulid';
+import { ulid } from '../lib/ulid';
 import * as schema from '../db/schema';
 
 type DB = ReturnType<typeof drizzle>;

@@ -78,9 +78,6 @@ importers:
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
-      ulid:
-        specifier: ^2.3.0
-        version: 2.4.0
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.5.0
@@ -5248,10 +5245,6 @@ packages:
 
   ufo@1.6.3:
     resolution: {integrity: sha512-yDJTmhydvl5lJzBmy/hyOAA0d+aqCBuwl818haVdYCRrWV84o7YyeVm4QlVHStqNrrJSTb6jKuFAVqAFsr+K3Q==}
-
-  ulid@2.4.0:
-    resolution: {integrity: sha512-fIRiVTJNcSRmXKPZtGzFQv9WRrZ3M9eoptl/teFJvjOzmpU+/K/JH6HZ8deBfb5vMEpicJcLn7JmvdknlMq7Zg==}
-    hasBin: true
 
   unbox-primitive@1.1.0:
     resolution: {integrity: sha512-nWJ91DjeOkej/TA8pXQ3myruKpKEYgqvpw9lz4OPHj/NWFNluYrjbz9j01CJ8yKQd2g4jFoOkINCTW2I5LEEyw==}
@@ -10682,8 +10675,6 @@ snapshots:
   typescript@5.9.3: {}
 
   ufo@1.6.3: {}
-
-  ulid@2.4.0: {}
 
   unbox-primitive@1.1.0:
     dependencies:
