@@ -108,9 +108,10 @@ describe('TabBar', () => {
     it('should handle tab click', () => {
       render(<TabBar {...defaultProps} />);
 
-      const tab2 = screen.getByText('Terminal 2').closest('button');
-      if (!tab2) throw new Error('Tab not found');
-      fireEvent.click(tab2);
+      const terminal2 = screen.getByText('Terminal 2');
+      const tab2 = terminal2.closest('button');
+      expect(tab2).toBeDefined();
+      fireEvent.click(tab2!);
 
       expect(defaultProps.onTabActivate).toHaveBeenCalledWith('session-2');
     });

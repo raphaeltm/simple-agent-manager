@@ -31,7 +31,7 @@ describe('useTerminalSessions', () => {
 
       expect(result.current.sessions.size).toBe(1);
       const firstSession = Array.from(result.current.sessions.values())[0];
-      expect(result.current.activeSessionId).toBe(firstSession.id);
+      expect(result.current.activeSessionId).toBe(firstSession?.id);
     });
 
     it('should auto-name sessions sequentially', () => {
@@ -44,9 +44,9 @@ describe('useTerminalSessions', () => {
       });
 
       const sessions = Array.from(result.current.sessions.values());
-      expect(sessions[0].name).toBe('Terminal 1');
-      expect(sessions[1].name).toBe('Terminal 2');
-      expect(sessions[2].name).toBe('Terminal 3');
+      expect(sessions[0]?.name).toBe('Terminal 1');
+      expect(sessions[1]?.name).toBe('Terminal 2');
+      expect(sessions[2]?.name).toBe('Terminal 3');
     });
 
     it('should respect max session limit', () => {
@@ -67,15 +67,16 @@ describe('useTerminalSessions', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
       act(() => {
-        const session1 = result.current.createSession();
-        const session2 = result.current.createSession();
+        result.current.createSession();
+        const session2Id = result.current.createSession();
         result.current.createSession();
 
         // Close Terminal 2
-        result.current.closeSession(session2.id);
+        result.current.closeSession(session2Id);
 
         // Next session should reuse "Terminal 2"
-        const newSession = result.current.createSession();
+        const newSessionId = result.current.createSession();
+        const newSession = result.current.sessions.get(newSessionId);
         expect(newSession?.name).toBe('Terminal 2');
       });
     });
@@ -85,10 +86,9 @@ describe('useTerminalSessions', () => {
     it('should remove session from list', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
-      let sessionId: string;
+      let sessionId: string = '';
       act(() => {
-        const session = result.current.createSession();
-        sessionId = session.id;
+        sessionId = result.current.createSession();
       });
 
       act(() => {
@@ -102,15 +102,15 @@ describe('useTerminalSessions', () => {
     it('should switch to adjacent tab when closing active', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
-      let session1Id: string;
-      let session2Id: string;
-      let session3Id: string;
+      let session1Id = '';
+      let session2Id = '';
+      let session3Id = '';
 
       act(() => {
-        session1Id = result.current.createSession().id;
-        session2Id = result.current.createSession().id;
-        session3Id = result.current.createSession().id;
-        result.current.setActiveSession(session2Id);
+        session1Id = result.current.createSession();
+        session2Id = result.current.createSession();
+        session3Id = result.current.createSession();
+        result.current.activateSession(session2Id);
       });
 
       // Close middle tab
@@ -126,13 +126,13 @@ describe('useTerminalSessions', () => {
     it('should switch to previous tab when closing last', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
-      let session1Id: string;
-      let session2Id: string;
+      let session1Id = '';
+      let session2Id = '';
 
       act(() => {
-        session1Id = result.current.createSession().id;
-        session2Id = result.current.createSession().id;
-        result.current.setActiveSession(session2Id);
+        session1Id = result.current.createSession();
+        session2Id = result.current.createSession();
+        result.current.activateSession(session2Id);
       });
 
       // Close last tab
@@ -165,9 +165,9 @@ describe('useTerminalSessions', () => {
     it('should update session name', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
-      let sessionId: string;
+      let sessionId = '';
       act(() => {
-        sessionId = result.current.createSession().id;
+        sessionId = result.current.createSession();
       });
 
       act(() => {
@@ -181,9 +181,9 @@ describe('useTerminalSessions', () => {
     it('should truncate long names', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
-      let sessionId: string;
+      let sessionId = '';
       act(() => {
-        sessionId = result.current.createSession().id;
+        sessionId = result.current.createSession();
       });
 
       const longName = 'a'.repeat(100);
@@ -198,9 +198,9 @@ describe('useTerminalSessions', () => {
     it('should handle empty name', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
-      let sessionId: string;
+      let sessionId = '';
       act(() => {
-        sessionId = result.current.createSession().id;
+        sessionId = result.current.createSession();
       });
 
       const originalName = result.current.getSession(sessionId)?.name;
@@ -218,9 +218,9 @@ describe('useTerminalSessions', () => {
     it('should update session connection status', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
-      let sessionId: string;
+      let sessionId = '';
       act(() => {
-        sessionId = result.current.createSession().id;
+        sessionId = result.current.createSession();
       });
 
       act(() => {
@@ -248,9 +248,9 @@ describe('useTerminalSessions', () => {
     it('should track all status transitions', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
-      let sessionId: string;
+      let sessionId = '';
       act(() => {
-        sessionId = result.current.createSession().id;
+        sessionId = result.current.createSession();
       });
 
       const statuses = ['connecting', 'connected', 'error', 'disconnected'] as const;
@@ -268,18 +268,18 @@ describe('useTerminalSessions', () => {
     it('should change active session', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
-      let session1Id: string;
-      let session2Id: string;
+      let session1Id = '';
+      let session2Id = '';
 
       act(() => {
-        session1Id = result.current.createSession().id;
-        session2Id = result.current.createSession().id;
+        session1Id = result.current.createSession();
+        session2Id = result.current.createSession();
       });
 
       expect(result.current.activeSessionId).toBe(session2Id); // Last created
 
       act(() => {
-        result.current.setActiveSession(session1Id);
+        result.current.activateSession(session1Id);
       });
 
       expect(result.current.activeSessionId).toBe(session1Id);
@@ -295,7 +295,7 @@ describe('useTerminalSessions', () => {
       const currentActive = result.current.activeSessionId;
 
       act(() => {
-        result.current.setActiveSession('non-existent');
+        result.current.activateSession('non-existent');
       });
 
       // Should not change
@@ -305,12 +305,12 @@ describe('useTerminalSessions', () => {
     it('should track lastActiveTime', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
-      let session1Id: string;
-      let session2Id: string;
+      let session1Id = '';
+      let session2Id = '';
 
       act(() => {
-        session1Id = result.current.createSession().id;
-        session2Id = result.current.createSession().id;
+        session1Id = result.current.createSession();
+        session2Id = result.current.createSession();
       });
 
       const time1 = result.current.getSession(session1Id)?.lastActivityAt;
@@ -318,7 +318,7 @@ describe('useTerminalSessions', () => {
       // Wait a bit
       setTimeout(() => {
         act(() => {
-          result.current.setActiveSession(session1Id);
+          result.current.activateSession(session1Id);
         });
 
         const time2 = result.current.getSession(session1Id)?.lastActivityAt;
@@ -333,10 +333,10 @@ describe('useTerminalSessions', () => {
 
       let ids: string[] = [];
       act(() => {
-        ids.push(result.current.createSession().id);
-        ids.push(result.current.createSession().id);
-        ids.push(result.current.createSession().id);
-        result.current.setActiveSession(ids[0]);
+        ids.push(result.current.createSession());
+        ids.push(result.current.createSession());
+        ids.push(result.current.createSession());
+        result.current.activateSession(ids[0]);
       });
 
       act(() => {
@@ -361,10 +361,10 @@ describe('useTerminalSessions', () => {
 
       let ids: string[] = [];
       act(() => {
-        ids.push(result.current.createSession().id);
-        ids.push(result.current.createSession().id);
-        ids.push(result.current.createSession().id);
-        result.current.setActiveSession(ids[0]);
+        ids.push(result.current.createSession());
+        ids.push(result.current.createSession());
+        ids.push(result.current.createSession());
+        result.current.activateSession(ids[0]);
       });
 
       // Should wrap around to last
@@ -384,9 +384,9 @@ describe('useTerminalSessions', () => {
 
       let ids: string[] = [];
       act(() => {
-        ids.push(result.current.createSession().id);
-        ids.push(result.current.createSession().id);
-        ids.push(result.current.createSession().id);
+        ids.push(result.current.createSession());
+        ids.push(result.current.createSession());
+        ids.push(result.current.createSession());
       });
 
       act(() => {
@@ -411,7 +411,7 @@ describe('useTerminalSessions', () => {
     it('should return session by id', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
-      let sessionId: string;
+      let sessionId = '';
       act(() => {
         const session = result.current.createSession();
         sessionId = session.id;
