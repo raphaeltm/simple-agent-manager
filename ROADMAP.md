@@ -51,7 +51,7 @@ Improvements to user experience and reliability:
 - [ ] Persistent storage (R2)
 - [ ] Cost estimation display
 - [ ] Configurable subdomains (api/app/workspace prefixes)
-- [ ] Caddy on VMs for TLS cert provisioning (Let's Encrypt) — enables multi-level subdomain BASE_DOMAINs (e.g., `sam.company.com`) that Cloudflare free Universal SSL doesn't cover
+- [ ] Caddy on VMs for TLS cert provisioning (Let's Encrypt): move workspace access to per-workspace wildcards (e.g., `*.{id}.ws.${BASE_DOMAIN}`) served directly by the VM (Caddy + agent) instead of the Worker proxy. This also enables multi-level subdomain BASE_DOMAINs (e.g., `sam.company.com`) that Cloudflare free Universal SSL doesn't cover.
 
 ## Planned: Multi-Tenancy (Phase 4)
 
@@ -86,6 +86,7 @@ Features for enterprise deployments:
 - [ ] VM callback token exchange flow (one-time code → JWT + refresh token)
 - [ ] Token rotation for long-lived workspaces
 - [ ] Workspace audit logging
+- [ ] Least-privilege Cloudflare credentials: split deployment vs runtime tokens. Runtime should use a zone-scoped DNS-only token (just enough to create/delete `vm-{id}` backend DNS records); keep broader infra permissions in CI/Pulumi only.
 
 ## Future Considerations
 
