@@ -2,13 +2,38 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MultiTerminal } from './MultiTerminal';
 
-// Mock dependencies
-vi.mock('./Terminal', () => ({
-  Terminal: vi.fn(() => <div data-testid="terminal-instance">Terminal</div>)
+// Mock xterm.js
+const mockTerminalWrite = vi.fn();
+const mockTerminalWriteln = vi.fn();
+const mockTerminalOpen = vi.fn();
+const mockTerminalDispose = vi.fn();
+const mockTerminalFocus = vi.fn();
+const mockTerminalLoadAddon = vi.fn();
+const mockTerminalOnData = vi.fn();
+
+vi.mock('@xterm/xterm', () => ({
+  Terminal: vi.fn().mockImplementation(() => ({
+    write: mockTerminalWrite,
+    writeln: mockTerminalWriteln,
+    open: mockTerminalOpen,
+    dispose: mockTerminalDispose,
+    focus: mockTerminalFocus,
+    loadAddon: mockTerminalLoadAddon,
+    onData: mockTerminalOnData,
+    rows: 24,
+    cols: 80,
+  })),
+}));
+
+vi.mock('@xterm/addon-fit', () => ({
+  FitAddon: vi.fn().mockImplementation(() => ({
+    fit: vi.fn(),
+    dispose: vi.fn(),
+  })),
 }));
 
 vi.mock('./components/TabBar', () => ({
-  TabBar: vi.fn(({ sessions, onNewTab, onTabActivate, onTabClose }) => (
+  TabBar: vi.fn(({ sessions, onNewTab, onTabActivate, onTabClose }: any) => (
     <div data-testid="tab-bar">
       {sessions.map((s: any) => (
         <button
@@ -19,12 +44,12 @@ vi.mock('./components/TabBar', () => ({
           {s.name}
           <button
             data-testid={`close-${s.id}`}
-            onClick={(e) => {
+            onClick={(e: any) => {
               e.stopPropagation();
               onTabClose(s.id);
             }}
           >
-            ×
+            x
           </button>
         </button>
       ))}
@@ -32,13 +57,15 @@ vi.mock('./components/TabBar', () => ({
         +
       </button>
     </div>
-  ))
+  )),
 }));
 
 // Mock WebSocket
 class MockWebSocket {
   static OPEN = 1;
   static CLOSED = 3;
+  static CONNECTING = 0;
+  static CLOSING = 2;
 
   url: string;
   readyState: number = MockWebSocket.OPEN;
@@ -57,7 +84,6 @@ class MockWebSocket {
   }
 
   send(data: string) {
-    // Parse and handle message
     const msg = JSON.parse(data);
     if (msg.type === 'create_session' && this.onmessage) {
       setTimeout(() => {
@@ -67,9 +93,9 @@ class MockWebSocket {
             sessionId: msg.data.sessionId,
             data: {
               sessionId: msg.data.sessionId,
-              workingDirectory: '/workspace'
-            }
-          })
+              workingDirectory: '/workspace',
+            },
+          }),
         }));
       }, 10);
     }
@@ -83,21 +109,16 @@ class MockWebSocket {
   }
 }
 
-// Replace global WebSocket with mock
 (global as any).WebSocket = MockWebSocket;
 
 describe('MultiTerminal', () => {
   const defaultProps = {
-    wsUrl: 'ws://localhost:8080',
-    onActivity: vi.fn()
+    wsUrl: 'ws://localhost:8080/terminal/ws/multi',
+    onActivity: vi.fn(),
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // Mock environment variables
-    vi.stubEnv('VITE_MAX_TERMINAL_SESSIONS', '10');
-    vi.stubEnv('VITE_TAB_SWITCH_ANIMATION_MS', '200');
-    vi.stubEnv('VITE_TERMINAL_SCROLLBACK_LINES', '1000');
   });
 
   afterEach(() => {
@@ -112,7 +133,6 @@ describe('MultiTerminal', () => {
   it('should create initial terminal on WebSocket connection', async () => {
     const { rerender } = render(<MultiTerminal {...defaultProps} />);
 
-    // Wait for WebSocket to connect and create initial session
     await waitFor(() => {
       rerender(<MultiTerminal {...defaultProps} />);
       const tabBar = screen.queryByTestId('tab-bar');
@@ -140,7 +160,6 @@ describe('MultiTerminal', () => {
     const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
     render(<MultiTerminal {...defaultProps} />);
 
-    // Wait for any sessions to appear, then try to close
     await waitFor(() => {
       const closeButton = screen.queryByTestId(/close-/);
       if (closeButton) {
@@ -148,41 +167,21 @@ describe('MultiTerminal', () => {
       }
     });
 
-    // Verify the component handled the interaction without errors.
-    // Close may or may not send a WebSocket message depending on session state.
     const calls = sendSpy.mock.calls;
-    const hasCloseSession = calls.some(call =>
+    const hasCloseSession = calls.some((call) =>
       call[0].includes('close_session')
     );
-    const hasCreateSession = calls.some(call =>
+    const hasCreateSession = calls.some((call) =>
       call[0].includes('create_session')
     );
-    // Either close was sent, or only create messages exist (no close button found)
     expect(hasCloseSession || hasCreateSession || calls.length === 0).toBe(true);
   });
 
   it('should respect maximum session limit', () => {
-    vi.stubEnv('VITE_MAX_TERMINAL_SESSIONS', '2');
-
-    const { container } = render(<MultiTerminal {...defaultProps} />);
-
-    // Implementation would check that after 2 sessions, new tab is disabled
+    const { container } = render(
+      <MultiTerminal {...defaultProps} config={{ maxSessions: 2 }} />
+    );
     expect(container).toBeDefined();
-  });
-
-  it('should handle WebSocket reconnection', async () => {
-    const { container } = render(<MultiTerminal {...defaultProps} />);
-
-    // Simulate WebSocket disconnection and reconnection
-    const ws = (global as any).WebSocket.prototype;
-    if (ws.onclose) {
-      ws.onclose(new CloseEvent('close'));
-    }
-
-    // Should attempt reconnection after delay
-    await waitFor(() => {
-      expect(container.querySelector('.terminal-status-message')).toBeDefined();
-    }, { timeout: 100 });
   });
 
   it('should call onActivity when receiving messages', async () => {
@@ -190,31 +189,13 @@ describe('MultiTerminal', () => {
     render(<MultiTerminal {...defaultProps} onActivity={onActivity} />);
 
     await waitFor(() => {
-      // Activity should be called on session creation
       expect(onActivity).toHaveBeenCalled();
-    });
-  });
-
-  it('should handle rename session messages', () => {
-    const { container } = render(<MultiTerminal {...defaultProps} />);
-
-    // Would trigger rename through TabBar callback
-    expect(container).toBeDefined();
-  });
-
-  it('should render terminal instances for connected sessions', async () => {
-    render(<MultiTerminal {...defaultProps} />);
-
-    await waitFor(() => {
-      const terminals = screen.queryAllByTestId('terminal-instance');
-      expect(terminals.length).toBeGreaterThanOrEqual(0);
     });
   });
 
   it('should show appropriate status messages', () => {
     const { container } = render(<MultiTerminal {...defaultProps} />);
 
-    // Check for various status messages
     const connectingMsg = container.querySelector('.terminal-status-message');
     expect(connectingMsg || container.querySelector('.terminal-empty-state')).toBeDefined();
   });

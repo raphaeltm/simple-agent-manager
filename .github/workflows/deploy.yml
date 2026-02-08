@@ -297,6 +297,7 @@ jobs:
         run: pnpm build
         env:
           VITE_API_URL: https://api.${{ vars.BASE_DOMAIN }}
+          VITE_FEATURE_MULTI_TERMINAL: 'true'
 
       - name: Deploy API Worker
         if: ${{ inputs.dry_run != true }}

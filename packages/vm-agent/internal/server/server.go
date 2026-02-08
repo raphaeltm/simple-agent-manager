@@ -156,8 +156,9 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/session", s.handleSessionCheck)
 	mux.HandleFunc("POST /auth/logout", s.handleLogout)
 
-	// Terminal WebSocket
+	// Terminal WebSocket (single-session and multi-session)
 	mux.HandleFunc("GET /terminal/ws", s.handleTerminalWS)
+	mux.HandleFunc("GET /terminal/ws/multi", s.handleMultiTerminalWS)
 	mux.HandleFunc("POST /terminal/resize", s.handleTerminalResize)
 
 	// ACP Agent WebSocket

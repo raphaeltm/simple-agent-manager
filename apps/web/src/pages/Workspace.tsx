@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Terminal } from '@simple-agent-manager/terminal';
+import { Terminal, MultiTerminal } from '@simple-agent-manager/terminal';
+import { useFeatureFlags } from '../config/features';
 import { useAcpSession, useAcpMessages, AgentPanel } from '@simple-agent-manager/acp-client';
 import type { AcpSessionState } from '@simple-agent-manager/acp-client';
 import { Button, Alert, Spinner, StatusBadge } from '@simple-agent-manager/ui';
@@ -94,6 +95,7 @@ export function Workspace() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const featureFlags = useFeatureFlags();
   const viewParam = searchParams.get('view');
   const viewOverride: ViewMode | null = viewParam === 'terminal' || viewParam === 'conversation' ? viewParam : null;
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
@@ -180,7 +182,8 @@ export function Workspace() {
         // Build WebSocket URL from workspace URL
         const url = new URL(workspace.url);
         const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-        const terminalWsUrl = `${wsProtocol}//${url.host}/terminal/ws?token=${encodeURIComponent(token)}`;
+        const wsPath = featureFlags.multiTerminal ? '/terminal/ws/multi' : '/terminal/ws';
+        const terminalWsUrl = `${wsProtocol}//${url.host}${wsPath}?token=${encodeURIComponent(token)}`;
         setWsUrl(terminalWsUrl);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to get terminal token');
@@ -496,12 +499,21 @@ export function Workspace() {
                   </div>
                 ) : wsUrl ? (
                   <div style={{ backgroundColor: 'var(--sam-color-bg-canvas)', borderRadius: 'var(--sam-radius-lg)', overflow: 'hidden', height: 500 }}>
-                    <Terminal
-                      wsUrl={wsUrl}
-                      shutdownDeadline={workspace.shutdownDeadline}
-                      onActivity={handleTerminalActivity}
-                      className="h-full"
-                    />
+                    {featureFlags.multiTerminal ? (
+                      <MultiTerminal
+                        wsUrl={wsUrl}
+                        shutdownDeadline={workspace.shutdownDeadline}
+                        onActivity={handleTerminalActivity}
+                        className="h-full"
+                      />
+                    ) : (
+                      <Terminal
+                        wsUrl={wsUrl}
+                        shutdownDeadline={workspace.shutdownDeadline}
+                        onActivity={handleTerminalActivity}
+                        className="h-full"
+                      />
+                    )}
                   </div>
                 ) : terminalLoading ? (
                   <div style={terminalPanelStyle}>
@@ -600,7 +612,7 @@ export function Workspace() {
               </Button>
 
               <div style={{ display: 'flex', gap: 'var(--sam-space-3)' }}>
-                {workspace?.status === 'running' && (
+                {workspace?.status === 'running' && !featureFlags.multiTerminal && (
                   <Button variant="secondary" onClick={handleNewTerminalTab} disabled={actionLoading}>
                     New Terminal Tab
                   </Button>
