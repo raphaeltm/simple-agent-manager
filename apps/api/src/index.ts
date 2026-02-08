@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { errorHandler } from './middleware/error';
+import { AppError } from './middleware/error';
 import { authRoutes } from './routes/auth';
 import { credentialsRoutes } from './routes/credentials';
 import { githubRoutes } from './routes/github';
@@ -58,6 +58,26 @@ export interface Env {
 
 const app = new Hono<{ Bindings: Env }>();
 
+// Global error handler — catches errors from all routes including subrouters.
+// Must use app.onError() instead of middleware try/catch because Hono's
+// app.route() subrouter errors don't propagate to parent middleware.
+app.onError((err, c) => {
+  console.error('Request error:', err);
+
+  if (err instanceof AppError) {
+    return c.json(err.toJSON(), err.statusCode as any);
+  }
+
+  const message = err instanceof Error ? err.message : 'Unknown error';
+  return c.json(
+    {
+      error: 'INTERNAL_ERROR',
+      message,
+    },
+    500
+  );
+});
+
 // Proxy requests for the web UI subdomain (app.*) to Cloudflare Pages.
 // The Worker wildcard route *.{domain}/* intercepts ALL subdomains including app.*,
 // so we proxy app.* requests to the Pages deployment before any other middleware runs.
@@ -74,7 +94,6 @@ app.use('*', async (c, next) => {
 
 // Middleware
 app.use('*', logger());
-app.use('*', errorHandler());
 app.use('*', cors({
   origin: (origin, c) => {
     const baseDomain = c.env?.BASE_DOMAIN || '';

@@ -1,4 +1,3 @@
-import type { Context, Next } from 'hono';
 import type { ApiError } from '@simple-agent-manager/shared';
 
 /**
@@ -49,30 +48,3 @@ export const errors = {
   internal: (message = 'Internal server error') =>
     new AppError(500, 'INTERNAL_ERROR', message),
 };
-
-/**
- * Error handling middleware for Hono.
- */
-export function errorHandler() {
-  return async (c: Context, next: Next) => {
-    try {
-      await next();
-    } catch (err) {
-      console.error('Request error:', err);
-
-      if (err instanceof AppError) {
-        return c.json(err.toJSON(), err.statusCode as any);
-      }
-
-      // Handle unknown errors
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      return c.json(
-        {
-          error: 'INTERNAL_ERROR',
-          message,
-        } satisfies ApiError,
-        500
-      );
-    }
-  };
-}
