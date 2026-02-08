@@ -97,9 +97,12 @@ export function encodeTerminalWsRenameSession(sessionId: string, name: string): 
  * Helper to check if a message is for a specific session
  */
 export function isMessageForSession(msg: TerminalWsServerMessage, sessionId: string): boolean {
-  // If no sessionId in message, it's for the default/first session
-  if (!msg.sessionId) return false;
-  return msg.sessionId === sessionId;
+  // Check if this message type supports sessionId
+  if ('sessionId' in msg) {
+    return (msg as any).sessionId === sessionId;
+  }
+  // Messages without sessionId are not session-specific
+  return false;
 }
 
 /**

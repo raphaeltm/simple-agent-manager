@@ -120,7 +120,7 @@ describe('TabBar', () => {
       render(<TabBar {...defaultProps} />);
 
       const closeButtons = screen.getAllByLabelText(/Close/);
-      fireEvent.click(closeButtons[0]);
+      if (closeButtons[0]) fireEvent.click(closeButtons[0]);
 
       expect(defaultProps.onTabClose).toHaveBeenCalledWith('session-1');
       expect(defaultProps.onTabActivate).not.toHaveBeenCalled();
@@ -138,8 +138,8 @@ describe('TabBar', () => {
     it('should prevent tab activation when clicking close', () => {
       render(<TabBar {...defaultProps} />);
 
-      const closeButton = screen.getAllByLabelText(/Close/)[1];
-      fireEvent.click(closeButton);
+      const closeButtons = screen.getAllByLabelText(/Close/);
+      if (closeButtons[1]) fireEvent.click(closeButtons[1]);
 
       expect(defaultProps.onTabClose).toHaveBeenCalledWith('session-2');
       expect(defaultProps.onTabActivate).not.toHaveBeenCalled();

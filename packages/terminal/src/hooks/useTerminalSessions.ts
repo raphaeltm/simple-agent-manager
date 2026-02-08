@@ -1,8 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import type {
   TerminalSession,
-  UseTerminalSessionsReturn,
-  MultiTerminalError
+  UseTerminalSessionsReturn
 } from '../types/multi-terminal';
 
 /**
@@ -176,7 +175,9 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
         }
 
         const [movedSession] = sessionsArray.splice(fromIndex, 1);
-        sessionsArray.splice(toIndex, 0, movedSession);
+        if (movedSession) {
+          sessionsArray.splice(toIndex, 0, movedSession);
+        }
 
         // Update order for all sessions
         sessionsArray.forEach((session, index) => {
@@ -250,5 +251,8 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
     reorderSessions,
     getSessionByOrder,
     canCreateSession: sessions.size < maxSessions,
-  };
+    // Additional methods that may be used by components
+    updateSessionStatus,
+    updateSessionWorkingDirectory,
+  } as UseTerminalSessionsReturn;
 }
