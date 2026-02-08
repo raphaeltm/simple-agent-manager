@@ -1,10 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useTerminalSessions } from './useTerminalSessions';
-import type { TerminalSession, SessionStatus } from '../types/multi-terminal';
 
 describe('useTerminalSessions', () => {
-  const mockGenerateId = () => `test-${Date.now()}`;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -15,7 +13,8 @@ describe('useTerminalSessions', () => {
     it('should start with empty sessions', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
-      expect(result.current.sessions).toEqual([]);
+      expect(result.current.sessions).toBeInstanceOf(Map);
+      expect(result.current.sessions.size).toBe(0);
       expect(result.current.activeSessionId).toBeNull();
     });
   });
@@ -25,15 +24,14 @@ describe('useTerminalSessions', () => {
       const { result } = renderHook(() => useTerminalSessions());
 
       act(() => {
-        const session = result.current.createSession();
-        expect(session).toBeDefined();
-        expect(session.id).toMatch(/^test-/);
-        expect(session.name).toBe('Terminal 1');
-        expect(session.status).toBe('connecting');
+        const sessionId = result.current.createSession();
+        expect(sessionId).toBeDefined();
+        expect(typeof sessionId).toBe('string');
       });
 
-      expect(result.current.sessions).toHaveLength(1);
-      expect(result.current.activeSessionId).toBe(result.current.sessions[0].id);
+      expect(result.current.sessions.size).toBe(1);
+      const firstSession = Array.from(result.current.sessions.values())[0];
+      expect(result.current.activeSessionId).toBe(firstSession.id);
     });
 
     it('should auto-name sessions sequentially', () => {
@@ -45,9 +43,10 @@ describe('useTerminalSessions', () => {
         result.current.createSession();
       });
 
-      expect(result.current.sessions[0].name).toBe('Terminal 1');
-      expect(result.current.sessions[1].name).toBe('Terminal 2');
-      expect(result.current.sessions[2].name).toBe('Terminal 3');
+      const sessions = Array.from(result.current.sessions.values());
+      expect(sessions[0].name).toBe('Terminal 1');
+      expect(sessions[1].name).toBe('Terminal 2');
+      expect(sessions[2].name).toBe('Terminal 3');
     });
 
     it('should respect max session limit', () => {
@@ -61,7 +60,7 @@ describe('useTerminalSessions', () => {
         expect(third).toBeNull();
       });
 
-      expect(result.current.sessions).toHaveLength(2);
+      expect(result.current.sessions.size).toBe(2);
     });
 
     it('should reuse numbers from closed sessions', () => {
@@ -96,7 +95,7 @@ describe('useTerminalSessions', () => {
         result.current.closeSession(sessionId);
       });
 
-      expect(result.current.sessions).toHaveLength(0);
+      expect(result.current.sessions.size).toBe(0);
       expect(result.current.activeSessionId).toBeNull();
     });
 
@@ -121,7 +120,7 @@ describe('useTerminalSessions', () => {
 
       // Should switch to next tab (session3)
       expect(result.current.activeSessionId).toBe(session3Id);
-      expect(result.current.sessions).toHaveLength(2);
+      expect(result.current.sessions.size).toBe(2);
     });
 
     it('should switch to previous tab when closing last', () => {
@@ -152,13 +151,13 @@ describe('useTerminalSessions', () => {
         result.current.createSession();
       });
 
-      const initialCount = result.current.sessions.length;
+      const initialCount = result.current.sessions.size;
 
       act(() => {
         result.current.closeSession('non-existent');
       });
 
-      expect(result.current.sessions).toHaveLength(initialCount);
+      expect(result.current.sessions.size).toBe(initialCount);
     });
   });
 
@@ -254,7 +253,7 @@ describe('useTerminalSessions', () => {
         sessionId = result.current.createSession().id;
       });
 
-      const statuses: SessionStatus[] = ['connecting', 'connected', 'error', 'closed'];
+      const statuses = ['connecting', 'connected', 'error', 'disconnected'] as const;
 
       statuses.forEach(status => {
         act(() => {
@@ -314,7 +313,7 @@ describe('useTerminalSessions', () => {
         session2Id = result.current.createSession().id;
       });
 
-      const time1 = result.current.getSession(session1Id)?.lastActiveTime;
+      const time1 = result.current.getSession(session1Id)?.lastActivityAt;
 
       // Wait a bit
       setTimeout(() => {
@@ -322,7 +321,7 @@ describe('useTerminalSessions', () => {
           result.current.setActiveSession(session1Id);
         });
 
-        const time2 = result.current.getSession(session1Id)?.lastActiveTime;
+        const time2 = result.current.getSession(session1Id)?.lastActivityAt;
         expect(time2).toBeGreaterThan(time1!);
       }, 10);
     });
