@@ -124,6 +124,27 @@ All API errors should follow this format:
 }
 ```
 
+**CRITICAL: Hono Error Handler Pattern**
+
+Use `app.onError()` for error handling — **NEVER** use middleware try/catch. Hono's `app.route()` subrouter errors do NOT propagate to parent middleware try/catch blocks, causing unhandled errors to return plain text "Internal Server Error" from the Workers runtime instead of JSON.
+
+```typescript
+// CORRECT — catches errors from ALL routes including subrouters
+app.onError((err, c) => {
+  if (err instanceof AppError) {
+    return c.json(err.toJSON(), err.statusCode);
+  }
+  return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
+});
+
+// WRONG — subrouter errors silently bypass this
+app.use('*', async (c, next) => {
+  try { await next(); } catch (err) { /* NEVER REACHED for subrouter errors */ }
+});
+```
+
+Throw `AppError` (from `middleware/error.ts`) in route handlers — the global `app.onError()` handler catches them.
+
 ### Environment Variables
 
 Workers secrets are set via:
@@ -177,15 +198,20 @@ export class MyProvider implements Provider {
 
 ```typescript
 import { Hono } from 'hono';
+import { errors } from '../middleware/error';
 
-const app = new Hono();
+const routes = new Hono();
 
-app.post('/endpoint', async (c) => {
+routes.post('/endpoint', async (c) => {
   const body = await c.req.json();
-  // Validate and process
+  if (!body.name) {
+    throw errors.badRequest('Name is required'); // Caught by app.onError()
+  }
   return c.json({ result: 'success' }, 201);
 });
 ```
+
+**Important**: Throw errors (don't return them) — `app.onError()` handles all thrown errors globally. See [Error Handling](#error-handling) above.
 
 ### React Component
 
