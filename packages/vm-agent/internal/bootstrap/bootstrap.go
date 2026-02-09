@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/bootlog"
 	"github.com/workspace/vm-agent/internal/config"
 )
 
@@ -39,7 +40,9 @@ type bootstrapState struct {
 }
 
 // Run redeems bootstrap credentials (if configured), prepares the workspace, and signals ready.
-func Run(ctx context.Context, cfg *config.Config) error {
+// The reporter is used to send structured boot log entries to the control plane for UI display.
+// It is safe to pass a nil reporter.
+func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) error {
 	if cfg.BootstrapToken == "" {
 		return nil
 	}
@@ -55,12 +58,16 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		}
 		log.Printf("Using cached bootstrap state from %s", cfg.BootstrapStatePath)
 		cfg.CallbackToken = state.CallbackToken
+		reporter.SetToken(state.CallbackToken)
 	} else {
+		reporter.Log("bootstrap_redeem", "started", "Redeeming bootstrap credentials")
 		state, err = redeemBootstrapTokenWithRetry(ctx, cfg)
 		if err != nil {
 			return err
 		}
 		cfg.CallbackToken = state.CallbackToken
+		reporter.SetToken(state.CallbackToken)
+		reporter.Log("bootstrap_redeem", "completed", "Bootstrap credentials redeemed")
 		if err := saveState(cfg.BootstrapStatePath, state); err != nil {
 			return fmt.Errorf("failed to persist bootstrap state: %w", err)
 		}
@@ -70,25 +77,41 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return errors.New("callback token is missing after bootstrap")
 	}
 
+	reporter.Log("git_clone", "started", "Cloning repository")
 	if err := ensureRepositoryReady(ctx, cfg, state); err != nil {
+		reporter.Log("git_clone", "failed", "Repository clone failed", err.Error())
 		return err
 	}
+	reporter.Log("git_clone", "completed", "Repository cloned")
 
+	reporter.Log("devcontainer_wait", "started", "Waiting for devcontainer CLI")
+	reporter.Log("devcontainer_up", "started", "Building devcontainer")
 	if err := ensureDevcontainerReady(ctx, cfg); err != nil {
+		reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", err.Error())
 		return err
 	}
+	reporter.Log("devcontainer_up", "completed", "Devcontainer ready")
 
+	reporter.Log("workspace_perms", "started", "Setting workspace permissions")
 	if err := ensureWorkspaceWritable(ctx, cfg); err != nil {
+		reporter.Log("workspace_perms", "failed", "Permission setup failed", err.Error())
 		return err
 	}
+	reporter.Log("workspace_perms", "completed", "Workspace permissions set")
 
+	reporter.Log("git_creds", "started", "Configuring git credentials")
 	if err := ensureGitCredentialHelper(ctx, cfg); err != nil {
+		reporter.Log("git_creds", "failed", "Git credential setup failed", err.Error())
 		return err
 	}
+	reporter.Log("git_creds", "completed", "Git credentials configured")
 
+	reporter.Log("workspace_ready", "started", "Marking workspace ready")
 	if err := markWorkspaceReady(ctx, cfg); err != nil {
+		reporter.Log("workspace_ready", "failed", "Failed to mark workspace ready", err.Error())
 		return err
 	}
+	reporter.Log("workspace_ready", "completed", "Workspace is ready")
 
 	return nil
 }

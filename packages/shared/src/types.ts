@@ -128,6 +128,15 @@ export interface Workspace {
   updatedAt: string;
 }
 
+/** Boot log entry for workspace provisioning/bootstrap progress */
+export interface BootLogEntry {
+  step: string;
+  status: 'started' | 'completed' | 'failed';
+  message: string;
+  detail?: string;
+  timestamp: string;
+}
+
 /** API response (includes computed URL) */
 export interface WorkspaceResponse {
   id: string;
@@ -145,6 +154,7 @@ export interface WorkspaceResponse {
   createdAt: string;
   updatedAt: string;
   url?: string;
+  bootLogs?: BootLogEntry[];
 }
 
 export interface CreateWorkspaceRequest {

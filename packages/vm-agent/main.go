@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/bootlog"
 	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/server"
@@ -81,10 +82,12 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
+	reporter := bootlog.New(cfg.ControlPlaneURL, cfg.WorkspaceID)
+
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), cfg.BootstrapTimeout)
 	defer bootstrapCancel()
 
-	if err := bootstrap.Run(bootstrapCtx, cfg); err != nil {
+	if err := bootstrap.Run(bootstrapCtx, cfg, reporter); err != nil {
 		log.Fatalf("Bootstrap failed: %v", err)
 	}
 

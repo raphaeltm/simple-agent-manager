@@ -57,6 +57,9 @@ export interface Env {
   ACP_RECONNECT_DELAY_MS?: string;
   ACP_RECONNECT_TIMEOUT_MS?: string;
   ACP_MAX_RESTART_ATTEMPTS?: string;
+  // Boot log configuration
+  BOOT_LOG_TTL_SECONDS?: string;
+  BOOT_LOG_MAX_ENTRIES?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
