@@ -189,6 +189,8 @@ export interface UseTerminalSessionsReturn {
   reorderSessions: (fromIndex: number, toIndex: number) => void;
   getSessionByOrder: (order: number) => TerminalSession | undefined;
   canCreateSession: boolean;
+  updateSessionStatus: (sessionId: string, status: TerminalSession['status']) => void;
+  updateSessionWorkingDirectory: (sessionId: string, workingDirectory: string) => void;
 }
 
 export interface UseTabShortcutsReturn {

@@ -36,7 +36,9 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
    */
   const createSession = useCallback(
     (name?: string): string => {
-      if (sessions.size >= maxSessions) {
+      // Use ref to check current size — avoids depending on sessions.size
+      // which would make this callback unstable (new reference every session change)
+      if (sessionsRef.current.size >= maxSessions) {
         throw new Error(`Maximum sessions reached: ${maxSessions}`);
       }
 
@@ -62,7 +64,7 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
 
       return sessionId;
     },
-    [sessions.size, maxSessions, generateSessionId]
+    [maxSessions, generateSessionId]
   );
 
   /**

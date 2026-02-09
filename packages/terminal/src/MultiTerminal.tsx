@@ -58,29 +58,36 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
     activateSession,
     renameSession,
     canCreateSession,
+    updateSessionStatus,
+    updateSessionWorkingDirectory,
   } = useTerminalSessions(terminalConfig.maxSessions);
 
   // Refs that persist across renders
   const wsRef = useRef<WebSocket | null>(null);
   const terminalsRef = useRef<Map<string, TerminalInstance>>(new Map());
-  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
-  const pingIntervalRef = useRef<ReturnType<typeof setInterval>>();
-  const sessionsRef = useRef(sessions);
-  sessionsRef.current = sessions;
-
   const [wsConnected, setWsConnected] = useState(false);
 
-  // Helper: update session status in the hook state
-  const updateSessionStatus = useCallback((sessionId: string, status: 'connecting' | 'connected' | 'error', workDir?: string) => {
-    // We access sessions via ref to avoid stale closure
-    const session = sessionsRef.current.get(sessionId);
-    if (session) {
-      session.status = status;
-      if (workDir) session.workingDirectory = workDir;
-    }
-  }, []);
+  // ── Stable refs for latest callback/state versions ──
+  // This prevents re-creating the WebSocket connection when callbacks change reference.
+  // The WS event handlers read from latestRef.current to always get the latest versions.
+  const latestRef = useRef({
+    createSession,
+    closeSession,
+    updateSessionStatus,
+    updateSessionWorkingDirectory,
+    onActivity,
+    sessions,
+  });
+  latestRef.current = {
+    createSession,
+    closeSession,
+    updateSessionStatus,
+    updateSessionWorkingDirectory,
+    onActivity,
+    sessions,
+  };
 
-  // Create xterm.js instance for a session
+  // Create xterm.js instance for a session (stable — only depends on scrollback config)
   const createTerminalInstance = useCallback((sessionId: string): TerminalInstance => {
     const terminal = new XTerm({
       cursorBlink: true,
@@ -117,7 +124,7 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
 
     // Handle user input — route through shared WebSocket with sessionId
     terminal.onData((data) => {
-      onActivity?.();
+      latestRef.current.onActivity?.();
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(encodeTerminalWsInput(data, sessionId));
@@ -127,9 +134,9 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
     const instance: TerminalInstance = { terminal, fitAddon, containerEl: null };
     terminalsRef.current.set(sessionId, instance);
     return instance;
-  }, [onActivity, terminalConfig.scrollbackLines]);
+  }, [terminalConfig.scrollbackLines]);
 
-  // Destroy xterm.js instance
+  // Destroy xterm.js instance (completely stable)
   const destroyTerminalInstance = useCallback((sessionId: string) => {
     const instance = terminalsRef.current.get(sessionId);
     if (instance) {
@@ -138,33 +145,26 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
     }
   }, []);
 
-  // Send a create_session message to the server
-  const sendCreateSession = useCallback((sessionId: string, name?: string) => {
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(encodeTerminalWsCreateSession(sessionId, 24, 80, name));
-    }
-  }, []);
-
   // Handle new tab creation
   const handleNewTab = useCallback(() => {
-    if (!canCreateSession) return;
-    const sessionId = createSession();
+    const sessionId = latestRef.current.createSession();
     createTerminalInstance(sessionId);
-    sendCreateSession(sessionId);
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(encodeTerminalWsCreateSession(sessionId, 24, 80));
+    }
     return sessionId;
-  }, [canCreateSession, createSession, createTerminalInstance, sendCreateSession]);
+  }, [createTerminalInstance]);
 
   // Handle tab close
   const handleCloseTab = useCallback((sessionId: string) => {
-    // Send close to server
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(encodeTerminalWsCloseSession(sessionId));
     }
     destroyTerminalInstance(sessionId);
-    closeSession(sessionId);
-  }, [closeSession, destroyTerminalInstance]);
+    latestRef.current.closeSession(sessionId);
+  }, [destroyTerminalInstance]);
 
   // Handle tab rename
   const handleRenameTab = useCallback((sessionId: string, name: string) => {
@@ -175,103 +175,114 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
     }
   }, [renameSession]);
 
-  // Connect to WebSocket (multi-session endpoint)
-  const connectWebSocket = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+  // ── WebSocket connection lifecycle ──
+  // This single effect manages the ENTIRE WebSocket: connect, message routing,
+  // ping heartbeat, and reconnection. It only re-runs when wsUrl changes.
+  useEffect(() => {
+    let disposed = false;
+    let reconnectTimeout: ReturnType<typeof setTimeout>;
+    let pingInterval: ReturnType<typeof setInterval>;
+    let currentWs: WebSocket | null = null;
 
-    try {
-      const ws = new WebSocket(wsUrl);
+    function connect() {
+      if (disposed) return;
 
-      ws.onopen = () => {
-        setWsConnected(true);
+      try {
+        const ws = new WebSocket(wsUrl);
+        currentWs = ws;
 
-        // Create initial terminal session if none exist
-        if (sessionsRef.current.size === 0) {
-          const sessionId = createSession();
-          createTerminalInstance(sessionId);
-          sendCreateSession(sessionId);
-        }
-      };
+        ws.onopen = () => {
+          if (disposed) { ws.close(); return; }
+          setWsConnected(true);
+          wsRef.current = ws;
 
-      ws.onmessage = (event) => {
-        if (typeof event.data !== 'string') return;
-        const msg = parseTerminalWsServerMessage(event.data);
-        if (!msg) return;
+          // Start ping heartbeat
+          pingInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(encodeTerminalWsPing());
+            }
+          }, PING_INTERVAL_MS);
 
-        if (isSessionCreatedMessage(msg) && msg.data) {
-          updateSessionStatus(msg.data.sessionId, 'connected', msg.data.workingDirectory);
-        } else if (isSessionClosedMessage(msg) && msg.data) {
-          destroyTerminalInstance(msg.data.sessionId);
-          closeSession(msg.data.sessionId);
-        } else if (isOutputMessage(msg) && msg.sessionId) {
-          const instance = terminalsRef.current.get(msg.sessionId);
-          if (instance && msg.data?.data) {
-            instance.terminal.write(msg.data.data);
-          }
-        } else if (isErrorMessage(msg)) {
-          if (msg.sessionId) {
-            updateSessionStatus(msg.sessionId, 'error');
-            const instance = terminalsRef.current.get(msg.sessionId);
-            const errorText = typeof msg.data === 'string' ? msg.data : JSON.stringify(msg.data);
-            if (instance) {
-              instance.terminal.writeln(`\r\n\x1b[31mError: ${errorText}\x1b[0m\r\n`);
+          // Create initial terminal session if none exist
+          if (latestRef.current.sessions.size === 0) {
+            const sessionId = latestRef.current.createSession();
+            createTerminalInstance(sessionId);
+            ws.send(encodeTerminalWsCreateSession(sessionId, 24, 80));
+          } else {
+            // Re-create server-side sessions for existing tabs after reconnect
+            for (const [sessionId] of terminalsRef.current) {
+              ws.send(encodeTerminalWsCreateSession(sessionId, 24, 80));
             }
           }
+        };
+
+        ws.onmessage = (event) => {
+          if (typeof event.data !== 'string') return;
+          const msg = parseTerminalWsServerMessage(event.data);
+          if (!msg) return;
+
+          if (isSessionCreatedMessage(msg) && msg.data) {
+            latestRef.current.updateSessionStatus(msg.data.sessionId, 'connected');
+            if (msg.data.workingDirectory) {
+              latestRef.current.updateSessionWorkingDirectory(msg.data.sessionId, msg.data.workingDirectory);
+            }
+          } else if (isSessionClosedMessage(msg) && msg.data) {
+            destroyTerminalInstance(msg.data.sessionId);
+            latestRef.current.closeSession(msg.data.sessionId);
+          } else if (isOutputMessage(msg) && msg.sessionId) {
+            const instance = terminalsRef.current.get(msg.sessionId);
+            if (instance && msg.data?.data) {
+              instance.terminal.write(msg.data.data);
+            }
+          } else if (isErrorMessage(msg)) {
+            if (msg.sessionId) {
+              latestRef.current.updateSessionStatus(msg.sessionId, 'error');
+              const instance = terminalsRef.current.get(msg.sessionId);
+              const errorText = typeof msg.data === 'string' ? msg.data : JSON.stringify(msg.data);
+              if (instance) {
+                instance.terminal.writeln(`\r\n\x1b[31mError: ${errorText}\x1b[0m\r\n`);
+              }
+            }
+          }
+
+          latestRef.current.onActivity?.();
+        };
+
+        ws.onerror = () => {
+          setWsConnected(false);
+        };
+
+        ws.onclose = () => {
+          setWsConnected(false);
+          wsRef.current = null;
+          clearInterval(pingInterval);
+          if (!disposed) {
+            reconnectTimeout = setTimeout(connect, RECONNECT_DELAY_MS);
+          }
+        };
+      } catch {
+        setWsConnected(false);
+        if (!disposed) {
+          reconnectTimeout = setTimeout(connect, RECONNECT_DELAY_MS);
         }
-
-        onActivity?.();
-      };
-
-      ws.onerror = () => {
-        setWsConnected(false);
-      };
-
-      ws.onclose = () => {
-        setWsConnected(false);
-        // Attempt reconnection
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connectWebSocket();
-        }, RECONNECT_DELAY_MS);
-      };
-
-      wsRef.current = ws;
-    } catch {
-      setWsConnected(false);
+      }
     }
-  }, [wsUrl, createSession, createTerminalInstance, sendCreateSession, closeSession, destroyTerminalInstance, updateSessionStatus, onActivity]);
 
-  // Initial connection
-  useEffect(() => {
-    connectWebSocket();
+    connect();
 
     return () => {
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
-      if (wsRef.current) wsRef.current.close();
+      disposed = true;
+      clearTimeout(reconnectTimeout);
+      clearInterval(pingInterval);
+      if (currentWs) currentWs.close();
+      wsRef.current = null;
       // Dispose all terminal instances
       for (const [, instance] of terminalsRef.current) {
         instance.terminal.dispose();
       }
       terminalsRef.current.clear();
     };
-  }, [connectWebSocket]);
-
-  // Heartbeat ping
-  useEffect(() => {
-    if (!wsConnected) {
-      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
-      return;
-    }
-    pingIntervalRef.current = setInterval(() => {
-      const ws = wsRef.current;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(encodeTerminalWsPing());
-      }
-    }, PING_INTERVAL_MS);
-    return () => {
-      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
-    };
-  }, [wsConnected]);
+  }, [wsUrl, createTerminalInstance, destroyTerminalInstance]);
 
   // Attach/fit xterm.js to DOM container via ref callback
   const attachTerminal = useCallback((sessionId: string, containerEl: HTMLDivElement | null) => {
@@ -358,14 +369,14 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
                 style={{ width: '100%', height: '100%' }}
               />
             ) : !wsConnected ? (
-              <div className="terminal-status-message" style={{
+              <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 height: '100%', color: '#a9b1d6', backgroundColor: '#1a1b26',
               }}>
                 Connecting to terminal...
               </div>
             ) : session.status === 'error' ? (
-              <div className="terminal-status-message error" style={{
+              <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 height: '100%', color: '#f7768e', backgroundColor: '#1a1b26',
               }}>
@@ -376,7 +387,7 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
         ))}
 
         {sessions.size === 0 && (
-          <div className="terminal-empty-state" style={{
+          <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             height: '100%', color: '#a9b1d6', backgroundColor: '#1a1b26', gap: '16px',
           }}>

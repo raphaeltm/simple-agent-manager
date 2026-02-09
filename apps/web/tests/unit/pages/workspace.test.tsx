@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const mocks = vi.hoisted(() => ({
@@ -18,6 +18,7 @@ vi.mock('../../../src/lib/api', () => ({
 
 vi.mock('@simple-agent-manager/terminal', () => ({
   Terminal: () => <div data-testid="terminal">terminal</div>,
+  MultiTerminal: () => <div data-testid="multi-terminal">multi-terminal</div>,
 }));
 
 vi.mock('@simple-agent-manager/acp-client', () => ({
@@ -76,18 +77,27 @@ describe('Workspace page', () => {
     });
   });
 
-  it('opens a new terminal tab with view=terminal', async () => {
-    const openSpy = vi.spyOn(window, 'open').mockReturnValue({} as unknown as Window);
-
+  it('renders workspace name and status in compact toolbar', async () => {
     renderWorkspace('/workspaces/ws-123');
 
     await waitFor(() => {
       expect(mocks.getWorkspace).toHaveBeenCalledWith('ws-123');
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'New Terminal Tab' }));
+    expect(await screen.findByText('Test Workspace')).toBeTruthy();
+    expect(screen.getByText('octo/repo@main')).toBeTruthy();
+  });
 
-    expect(openSpy).toHaveBeenCalledWith('/workspaces/ws-123?view=terminal', '_blank');
+  it('renders terminal when workspace is running', async () => {
+    renderWorkspace('/workspaces/ws-123');
+
+    expect(await screen.findByTestId('terminal')).toBeTruthy();
+  });
+
+  it('shows Stop button for running workspace', async () => {
+    renderWorkspace('/workspaces/ws-123');
+
+    const stopBtn = await screen.findByRole('button', { name: /stop/i });
+    expect(stopBtn).toBeTruthy();
   });
 });
-
