@@ -96,7 +96,7 @@ func (g *Gateway) Run(ctx context.Context) error {
 func (g *Gateway) handleControlMessage(ctx context.Context, data []byte) error {
 	var msg json.RawMessage
 	if err := json.Unmarshal(data, &msg); err == nil {
-		var control ControlMessage
+		var control SelectAgentMessage
 		if err := json.Unmarshal(data, &control); err == nil {
 			if control.Type == MsgSelectAgent {
 				g.handleSelectAgent(ctx, control.AgentType)
@@ -437,6 +437,33 @@ func (c *gatewayClient) ReadTextFile(_ context.Context, _ acpsdk.ReadTextFileReq
 	return acpsdk.ReadTextFileResponse{}, fmt.Errorf("ReadTextFile not supported by gateway")
 }
 
+func (c *gatewayClient) WriteTextFile(_ context.Context, _ acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error) {
+	return acpsdk.WriteTextFileResponse{}, fmt.Errorf("WriteTextFile not supported by gateway")
+}
+
+func (c *gatewayClient) CreateTerminal(_ context.Context, _ acpsdk.CreateTerminalRequest) (acpsdk.CreateTerminalResponse, error) {
+	return acpsdk.CreateTerminalResponse{}, fmt.Errorf("CreateTerminal not supported by gateway")
+}
+
+func (c *gatewayClient) KillTerminalCommand(_ context.Context, _ acpsdk.KillTerminalCommandRequest) (acpsdk.KillTerminalCommandResponse, error) {
+	return acpsdk.KillTerminalCommandResponse{}, fmt.Errorf("KillTerminalCommand not supported by gateway")
+}
+
+func (c *gatewayClient) TerminalOutput(_ context.Context, _ acpsdk.TerminalOutputRequest) (acpsdk.TerminalOutputResponse, error) {
+	return acpsdk.TerminalOutputResponse{}, fmt.Errorf("TerminalOutput not supported by gateway")
+}
+
+func (c *gatewayClient) ReleaseTerminal(_ context.Context, _ acpsdk.ReleaseTerminalRequest) (acpsdk.ReleaseTerminalResponse, error) {
+	return acpsdk.ReleaseTerminalResponse{}, fmt.Errorf("ReleaseTerminal not supported by gateway")
+}
+
+func (c *gatewayClient) WaitForTerminalExit(_ context.Context, _ acpsdk.WaitForTerminalExitRequest) (acpsdk.WaitForTerminalExitResponse, error) {
+	return acpsdk.WaitForTerminalExitResponse{}, fmt.Errorf("WaitForTerminalExit not supported by gateway")
+}
+
+// The following methods are not yet available in the current ACP SDK version
+// TODO: Uncomment when SDK is updated
+/*
 func (c *gatewayClient) ListTextFiles(_ context.Context, _ acpsdk.ListTextFilesRequest) (acpsdk.ListTextFilesResponse, error) {
 	return acpsdk.ListTextFilesResponse{}, fmt.Errorf("ListTextFiles not supported by gateway")
 }
@@ -472,6 +499,7 @@ func (c *gatewayClient) CloseTerminal(_ context.Context, _ acpsdk.CloseTerminalR
 func (c *gatewayClient) WaitForTerminalExit(_ context.Context, _ acpsdk.WaitForTerminalExitRequest) (acpsdk.WaitForTerminalExitResponse, error) {
 	return acpsdk.WaitForTerminalExitResponse{}, fmt.Errorf("WaitForTerminalExit not supported by gateway")
 }
+*/
 
 // agentCommandInfo holds the command, args, env var, and install command for an agent.
 type agentCommandInfo struct {
