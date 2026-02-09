@@ -78,17 +78,16 @@ func main() {
 	// If this was an idle shutdown, request deletion from control plane
 	// This ensures proper cleanup of Hetzner resources and DNS records
 	if idleShutdown && cfg.ControlPlaneURL != "" && cfg.WorkspaceID != "" && cfg.CallbackToken != "" {
-		// Disable systemd restart so that systemd does not restart the agent
-		// after this process exits. Without this, systemd's Restart=always
-		// policy would restart the agent, which calls /ready (resetting
-		// lastActivityAt) and creates an infinite shutdown loop.
-		// NOTE: We use "disable" WITHOUT "--now" because --now would send
-		// SIGTERM to our own process, killing us before we can call
-		// /request-shutdown below.
-		if out, err := exec.Command("systemctl", "disable", "vm-agent").CombinedOutput(); err != nil {
-			log.Printf("Warning: failed to disable vm-agent service: %v: %s", err, string(out))
+		// Mask the systemd service to prevent ALL restarts (including Restart=always).
+		// "systemctl disable" only prevents boot-time auto-start but does NOT
+		// prevent runtime restarts from Restart=always. "systemctl mask" creates
+		// a symlink to /dev/null that blocks the service from starting by any
+		// mechanism. Unlike "disable --now", mask does not send SIGTERM to the
+		// running process, so we can finish our cleanup below.
+		if out, err := exec.Command("systemctl", "mask", "vm-agent").CombinedOutput(); err != nil {
+			log.Printf("Warning: failed to mask vm-agent service: %v: %s", err, string(out))
 		} else {
-			log.Println("Disabled vm-agent systemd service to prevent restart after idle shutdown")
+			log.Println("Masked vm-agent systemd service to prevent restart after idle shutdown")
 		}
 
 		log.Println("Requesting VM deletion from control plane due to idle timeout...")
