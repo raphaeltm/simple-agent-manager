@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -78,18 +77,6 @@ func main() {
 	// If this was an idle shutdown, request deletion from control plane
 	// This ensures proper cleanup of Hetzner resources and DNS records
 	if idleShutdown && cfg.ControlPlaneURL != "" && cfg.WorkspaceID != "" && cfg.CallbackToken != "" {
-		// Mask the systemd service to prevent ALL restarts (including Restart=always).
-		// "systemctl disable" only prevents boot-time auto-start but does NOT
-		// prevent runtime restarts from Restart=always. "systemctl mask" creates
-		// a symlink to /dev/null that blocks the service from starting by any
-		// mechanism. Unlike "disable --now", mask does not send SIGTERM to the
-		// running process, so we can finish our cleanup below.
-		if out, err := exec.Command("systemctl", "mask", "vm-agent").CombinedOutput(); err != nil {
-			log.Printf("Warning: failed to mask vm-agent service: %v: %s", err, string(out))
-		} else {
-			log.Println("Masked vm-agent systemd service to prevent restart after idle shutdown")
-		}
-
 		log.Println("Requesting VM deletion from control plane due to idle timeout...")
 
 		payload := map[string]interface{}{
@@ -123,9 +110,13 @@ func main() {
 			}
 		}
 
-		// Give the control plane time to process the deletion request
-		// This helps ensure logs are captured before the VM is deleted
-		time.Sleep(5 * time.Second)
+		// Block forever after requesting shutdown. If we exit, systemd's
+		// Restart=always will restart the agent, which calls /ready and
+		// resets lastActivityAt — creating an infinite shutdown loop.
+		// The VM will be deleted by the control plane; there's no reason
+		// for this process to exit.
+		log.Println("Shutdown requested — blocking until VM is deleted")
+		select {}
 	}
 
 	log.Println("VM Agent stopped")
