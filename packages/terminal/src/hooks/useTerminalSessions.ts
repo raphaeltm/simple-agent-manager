@@ -1,14 +1,28 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type {
   TerminalSession,
   UseTerminalSessionsReturn
 } from '../types/multi-terminal';
 
+/** Serializable session metadata for sessionStorage persistence */
+interface PersistedSession {
+  name: string;
+  order: number;
+}
+
+interface PersistedState {
+  sessions: PersistedSession[];
+  counter: number;
+}
+
 /**
  * Hook for managing multiple terminal sessions
- * Handles session creation, activation, closing, and reordering
+ * Handles session creation, activation, closing, reordering, and persistence
  */
-export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessionsReturn {
+export function useTerminalSessions(
+  maxSessions: number = 10,
+  persistenceKey?: string,
+): UseTerminalSessionsReturn {
   const [sessions, setSessions] = useState<Map<string, TerminalSession>>(new Map());
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const sessionCounter = useRef(1);
@@ -19,11 +33,59 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
 
+  // --- Persistence ---
+
+  /** Save current session metadata to sessionStorage */
+  const persistSessions = useCallback((sessionsMap: Map<string, TerminalSession>) => {
+    if (!persistenceKey) return;
+    try {
+      const persisted: PersistedState = {
+        sessions: Array.from(sessionsMap.values())
+          .sort((a, b) => a.order - b.order)
+          .map((s) => ({ name: s.name, order: s.order })),
+        counter: sessionCounter.current,
+      };
+      sessionStorage.setItem(persistenceKey, JSON.stringify(persisted));
+    } catch {
+      // sessionStorage may be unavailable (private browsing, quota exceeded)
+    }
+  }, [persistenceKey]);
+
+  /** Load persisted session metadata. Returns null if nothing saved. */
+  const loadPersistedSessions = useCallback((): PersistedState | null => {
+    if (!persistenceKey) return null;
+    try {
+      const raw = sessionStorage.getItem(persistenceKey);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as PersistedState;
+      if (!parsed.sessions || !Array.isArray(parsed.sessions) || parsed.sessions.length === 0) {
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }, [persistenceKey]);
+
+  // Expose persistence loader for use by MultiTerminal on reconnect
+  const getPersistedSessions = useCallback((): PersistedSession[] | null => {
+    const state = loadPersistedSessions();
+    return state?.sessions ?? null;
+  }, [loadPersistedSessions]);
+
+  // Restore counter on mount from persisted state
+  useEffect(() => {
+    const state = loadPersistedSessions();
+    if (state) {
+      sessionCounter.current = state.counter;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /**
    * Generate a unique session ID
    */
   const generateSessionId = useCallback(() => {
-    // Generate a UUID-like ID
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
       const r = (Math.random() * 16) | 0;
       const v = c === 'x' ? r : (r & 0x3) | 0x8;
@@ -57,6 +119,7 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
           isActive: prev.size === 0,
           order: prev.size,
         });
+        persistSessions(updated);
         return updated;
       });
 
@@ -64,7 +127,7 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
 
       return sessionId;
     },
-    [maxSessions, generateSessionId]
+    [maxSessions, generateSessionId, persistSessions]
   );
 
   /**
@@ -86,6 +149,7 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
           session.order = order++;
         });
 
+        persistSessions(updated);
         return updated;
       });
 
@@ -115,7 +179,7 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
         }
       }
     },
-    []
+    [persistSessions]
   );
 
   /**
@@ -156,13 +220,14 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
         const session = updated.get(sessionId);
 
         if (session) {
-          session.name = name.slice(0, 50); // Enforce max length
+          session.name = name.slice(0, 50);
         }
 
+        persistSessions(updated);
         return updated;
       });
     },
-    []
+    [persistSessions]
   );
 
   /**
@@ -184,15 +249,15 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
           sessionsArray.splice(toIndex, 0, movedSession);
         }
 
-        // Update order for all sessions
         sessionsArray.forEach((session, index) => {
           session.order = index;
         });
 
+        persistSessions(updated);
         return updated;
       });
     },
-    []
+    [persistSessions]
   );
 
   /**
@@ -246,6 +311,16 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
     []
   );
 
+  /** Clear persisted state (e.g. when WS URL changes) */
+  const clearPersistedSessions = useCallback(() => {
+    if (!persistenceKey) return;
+    try {
+      sessionStorage.removeItem(persistenceKey);
+    } catch {
+      // ignore
+    }
+  }, [persistenceKey]);
+
   return {
     sessions,
     activeSessionId,
@@ -256,8 +331,9 @@ export function useTerminalSessions(maxSessions: number = 10): UseTerminalSessio
     reorderSessions,
     getSessionByOrder,
     canCreateSession: sessions.size < maxSessions,
-    // Additional methods that may be used by components
     updateSessionStatus,
     updateSessionWorkingDirectory,
+    getPersistedSessions,
+    clearPersistedSessions,
   } as UseTerminalSessionsReturn;
 }

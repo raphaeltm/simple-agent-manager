@@ -377,6 +377,7 @@ export function Workspace() {
                   shutdownDeadline={workspace?.shutdownDeadline}
                   onActivity={handleTerminalActivity}
                   className="h-full"
+                  persistenceKey={id ? `sam-terminal-sessions-${id}` : undefined}
                 />
               ) : (
                 <Terminal

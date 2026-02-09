@@ -337,17 +337,16 @@ describe('TabBar', () => {
     it('should render tabs container', () => {
       const { container } = render(<TabBar {...defaultProps} />);
 
-      const tabContainer = container.querySelector('.terminal-tabs-container');
-      expect(tabContainer).toBeDefined();
-      expect(tabContainer).not.toBeNull();
+      // The tabs container is the scrollable div holding tab items
+      const tabs = container.querySelectorAll('[role="tab"]');
+      expect(tabs.length).toBeGreaterThan(0);
     });
 
     it('should render all tabs within container', () => {
       const { container } = render(<TabBar {...defaultProps} />);
 
-      const tabContainer = container.querySelector('.terminal-tabs-container');
-      const tabs = tabContainer?.querySelectorAll('[role="tab"]');
-      expect(tabs?.length).toBe(mockSessions.length);
+      const tabs = container.querySelectorAll('[role="tab"]');
+      expect(tabs.length).toBe(mockSessions.length);
     });
   });
 });

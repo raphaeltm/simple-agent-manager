@@ -36,7 +36,7 @@ interface TerminalInstance {
  * Each tab has its own raw xterm.js instance for rendering.
  */
 export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
-  const { wsUrl, onActivity, className = '', config } = props;
+  const { wsUrl, onActivity, className = '', config, persistenceKey } = props;
   const terminalConfig: TerminalConfig = {
     maxSessions: config?.maxSessions || 10,
     tabSwitchAnimationMs: config?.tabSwitchAnimationMs || 200,
@@ -60,7 +60,8 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
     canCreateSession,
     updateSessionStatus,
     updateSessionWorkingDirectory,
-  } = useTerminalSessions(terminalConfig.maxSessions);
+    getPersistedSessions,
+  } = useTerminalSessions(terminalConfig.maxSessions, persistenceKey);
 
   // Refs that persist across renders
   const wsRef = useRef<WebSocket | null>(null);
@@ -77,6 +78,7 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
     updateSessionWorkingDirectory,
     onActivity,
     sessions,
+    getPersistedSessions,
   });
   latestRef.current = {
     createSession,
@@ -85,6 +87,7 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
     updateSessionWorkingDirectory,
     onActivity,
     sessions,
+    getPersistedSessions,
   };
 
   // Create xterm.js instance for a session (stable — only depends on scrollback config)
@@ -203,11 +206,21 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
             }
           }, PING_INTERVAL_MS);
 
-          // Create initial terminal session if none exist
+          // Create initial terminal sessions
           if (latestRef.current.sessions.size === 0) {
-            const sessionId = latestRef.current.createSession();
-            createTerminalInstance(sessionId);
-            ws.send(encodeTerminalWsCreateSession(sessionId, 24, 80));
+            // Check for persisted sessions (tab names survive page refresh)
+            const persisted = latestRef.current.getPersistedSessions();
+            if (persisted && persisted.length > 0) {
+              for (const p of persisted) {
+                const sessionId = latestRef.current.createSession(p.name);
+                createTerminalInstance(sessionId);
+                ws.send(encodeTerminalWsCreateSession(sessionId, 24, 80, p.name));
+              }
+            } else {
+              const sessionId = latestRef.current.createSession();
+              createTerminalInstance(sessionId);
+              ws.send(encodeTerminalWsCreateSession(sessionId, 24, 80));
+            }
           } else {
             // Re-create server-side sessions for existing tabs after reconnect
             for (const [sessionId] of terminalsRef.current) {
@@ -291,13 +304,11 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
 
     if (containerEl && instance.containerEl !== containerEl) {
       instance.containerEl = containerEl;
-      // Open the terminal into the container if not already opened
       if (!containerEl.querySelector('.xterm')) {
         instance.terminal.open(containerEl);
       }
       instance.fitAddon.fit();
 
-      // Send resize to server so PTY matches
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(encodeTerminalWsResize(instance.terminal.rows, instance.terminal.cols, sessionId));
@@ -327,7 +338,6 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
     if (!activeSessionId) return;
     const instance = terminalsRef.current.get(activeSessionId);
     if (instance && instance.containerEl) {
-      // Small delay to allow DOM to render the visible container
       requestAnimationFrame(() => {
         instance.fitAddon.fit();
         instance.terminal.focus();
@@ -353,7 +363,7 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
         maxTabs={terminalConfig.maxSessions}
       />
 
-      <div className="multi-terminal-content" style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+      <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
         {sessionsArray.map((session) => (
           <div
             key={session.id}

@@ -179,6 +179,12 @@ export interface TabBarProps {
 /**
  * Hook return types
  */
+/** Serializable session metadata for persistence */
+export interface PersistedSession {
+  name: string;
+  order: number;
+}
+
 export interface UseTerminalSessionsReturn {
   sessions: Map<string, TerminalSession>;
   activeSessionId: string | null;
@@ -191,6 +197,10 @@ export interface UseTerminalSessionsReturn {
   canCreateSession: boolean;
   updateSessionStatus: (sessionId: string, status: TerminalSession['status']) => void;
   updateSessionWorkingDirectory: (sessionId: string, workingDirectory: string) => void;
+  /** Get persisted session metadata from sessionStorage */
+  getPersistedSessions: () => PersistedSession[] | null;
+  /** Clear persisted session state */
+  clearPersistedSessions: () => void;
 }
 
 export interface UseTabShortcutsReturn {
@@ -225,6 +235,9 @@ export interface MultiTerminalProps {
 
   /** Terminal configuration */
   config?: Partial<TerminalConfig>;
+
+  /** Key for sessionStorage persistence. Sessions survive page refresh while VM is alive. */
+  persistenceKey?: string;
 }
 
 /**
