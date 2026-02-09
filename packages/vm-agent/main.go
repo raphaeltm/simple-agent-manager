@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -77,6 +78,16 @@ func main() {
 	// If this was an idle shutdown, request deletion from control plane
 	// This ensures proper cleanup of Hetzner resources and DNS records
 	if idleShutdown && cfg.ControlPlaneURL != "" && cfg.WorkspaceID != "" && cfg.CallbackToken != "" {
+		// Disable systemd restart BEFORE exiting so that systemd does not
+		// restart the agent after idle shutdown. Without this, systemd's
+		// Restart=always policy would restart the agent, which calls /ready
+		// (resetting lastActivityAt) and creates an infinite shutdown loop.
+		if out, err := exec.Command("systemctl", "disable", "--now", "vm-agent").CombinedOutput(); err != nil {
+			log.Printf("Warning: failed to disable vm-agent service: %v: %s", err, string(out))
+		} else {
+			log.Println("Disabled vm-agent systemd service to prevent restart after idle shutdown")
+		}
+
 		log.Println("Requesting VM deletion from control plane due to idle timeout...")
 
 		payload := map[string]interface{}{

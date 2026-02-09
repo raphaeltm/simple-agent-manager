@@ -539,6 +539,27 @@ workspacesRoutes.post('/:id/ready', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date().toISOString();
 
+  // Only transition to running if workspace is in 'creating' state.
+  // If the workspace is already 'stopping' or 'stopped' (e.g., after idle shutdown),
+  // the VM agent may have been restarted by systemd and is calling /ready again.
+  // We must NOT reset lastActivityAt or status in that case, as it would create
+  // an infinite shutdown/restart loop.
+  const workspaces = await db
+    .select()
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+
+  const ws = workspaces[0];
+  if (!ws) {
+    throw errors.notFound('Workspace');
+  }
+
+  if (ws.status === 'stopping' || ws.status === 'stopped') {
+    console.log(`Ignoring /ready callback for workspace ${workspaceId} in '${ws.status}' state (agent restart after idle shutdown)`);
+    return c.json({ success: false, reason: 'workspace_shutting_down' });
+  }
+
   await db
     .update(schema.workspaces)
     .set({
