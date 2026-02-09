@@ -640,6 +640,68 @@ workspacesRoutes.post('/:id/heartbeat', async (c) => {
   const shutdownDeadline = body.shutdownDeadline
     ?? new Date(Date.now() + Math.max(0, idleTimeoutSeconds - idleSeconds) * 1000).toISOString();
 
+  // Heartbeat-based shutdown fallback: if the VM reports it's idle past the
+  // deadline and the workspace is still "running", the control plane initiates
+  // deletion directly. This is a safety net for when the VM's own
+  // /request-shutdown call fails (network issues, auth errors, etc.).
+  if (shouldShutdown && wsHeartbeat.status === 'running') {
+    console.log(`Heartbeat fallback: workspace ${workspaceId} idle for ${idleSeconds}s (limit ${idleTimeoutSeconds}s), initiating deletion`);
+
+    await db
+      .update(schema.workspaces)
+      .set({ status: 'stopping', updatedAt: new Date().toISOString() })
+      .where(eq(schema.workspaces.id, workspaceId));
+
+    const creds = await db
+      .select()
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, wsHeartbeat.userId),
+          eq(schema.credentials.provider, 'hetzner')
+        )
+      )
+      .limit(1);
+
+    const cred = creds[0];
+    if (cred && wsHeartbeat.hetznerServerId) {
+      const hetznerToken = await decrypt(cred.encryptedToken, cred.iv, c.env.ENCRYPTION_KEY);
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            await deleteServer(hetznerToken, wsHeartbeat.hetznerServerId!);
+            if (wsHeartbeat.dnsRecordId) {
+              await deleteDNSRecord(wsHeartbeat.dnsRecordId, c.env);
+            }
+            await cleanupWorkspaceDNSRecords(workspaceId, c.env);
+            await db
+              .update(schema.workspaces)
+              .set({
+                status: 'stopped',
+                hetznerServerId: null,
+                vmIp: null,
+                dnsRecordId: null,
+                updatedAt: new Date().toISOString(),
+              })
+              .where(eq(schema.workspaces.id, workspaceId));
+            console.log(`Heartbeat fallback: successfully deleted idle VM ${workspaceId}`);
+          } catch (err) {
+            console.error(`Heartbeat fallback: failed to delete VM ${workspaceId}:`, err);
+            await db
+              .update(schema.workspaces)
+              .set({
+                status: 'error',
+                errorMessage: err instanceof Error ? err.message : 'Failed to delete VM via heartbeat fallback',
+                updatedAt: new Date().toISOString(),
+              })
+              .where(eq(schema.workspaces.id, workspaceId));
+          }
+        })()
+      );
+    }
+  }
+
   const response: HeartbeatResponse = {
     action: shouldShutdown ? 'shutdown' : 'continue',
     idleSeconds: Math.floor(idleSeconds),
