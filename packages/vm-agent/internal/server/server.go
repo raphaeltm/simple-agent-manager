@@ -131,6 +131,11 @@ func (s *Server) Start() error {
 	return s.httpServer.ListenAndServe()
 }
 
+// GetIdleShutdownChannel returns the channel that's closed when idle shutdown is requested.
+func (s *Server) GetIdleShutdownChannel() <-chan struct{} {
+	return s.idleDetector.ShutdownChannel()
+}
+
 // Stop gracefully stops the server.
 func (s *Server) Stop(ctx context.Context) error {
 	// Stop idle detector

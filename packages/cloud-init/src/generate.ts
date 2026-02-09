@@ -13,6 +13,8 @@ export interface CloudInitVariables {
   jwksUrl: string;
   /** One-time bootstrap token for credential retrieval (not a secret, just an opaque key) */
   bootstrapToken: string;
+  /** Idle timeout in seconds (e.g., "1800" for 30 minutes) */
+  idleTimeout: string;
 }
 
 /**
@@ -32,6 +34,7 @@ export function generateCloudInit(variables: CloudInitVariables): string {
     '{{ control_plane_url }}': variables.controlPlaneUrl,
     '{{ jwks_url }}': variables.jwksUrl,
     '{{ bootstrap_token }}': variables.bootstrapToken,
+    '{{ idle_timeout }}': variables.idleTimeout,
   };
 
   for (const [placeholder, value] of Object.entries(replacements)) {

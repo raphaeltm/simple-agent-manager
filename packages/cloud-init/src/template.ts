@@ -68,6 +68,7 @@ runcmd:
     Environment=BOOTSTRAP_TOKEN={{ bootstrap_token }}
     Environment=REPOSITORY={{ repository }}
     Environment=BRANCH={{ branch }}
+    Environment=IDLE_TIMEOUT={{ idle_timeout }}
     ExecStart=/usr/local/bin/vm-agent
     Restart=always
     RestartSec=5

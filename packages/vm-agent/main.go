@@ -51,12 +51,14 @@ func main() {
 		}
 	}()
 
-	// Wait for shutdown signal or error
+	// Wait for shutdown signal, idle timeout, or error
 	select {
 	case err := <-errCh:
 		log.Fatalf("Server error: %v", err)
 	case sig := <-sigCh:
 		log.Printf("Received signal %v, shutting down...", sig)
+	case <-srv.GetIdleShutdownChannel():
+		log.Println("Idle timeout reached, shutting down...")
 	}
 
 	// Graceful shutdown

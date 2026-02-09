@@ -774,6 +774,7 @@ async function provisionWorkspace(
     await storeBootstrapToken(env.KV, bootstrapToken, bootstrapData);
 
     // Generate cloud-init config (NO SECRETS - only bootstrap token)
+    const idleTimeoutSeconds = getIdleTimeoutSeconds(env);
     const cloudInit = generateCloudInit({
       workspaceId,
       hostname: `ws-${workspaceId}`,
@@ -782,6 +783,7 @@ async function provisionWorkspace(
       controlPlaneUrl: `https://api.${env.BASE_DOMAIN}`,
       jwksUrl: `https://api.${env.BASE_DOMAIN}/.well-known/jwks.json`,
       bootstrapToken,
+      idleTimeout: `${idleTimeoutSeconds}s`, // Format as duration string for Go's time.ParseDuration
     });
 
     if (!validateCloudInitSize(cloudInit)) {

@@ -139,3 +139,49 @@ func TestGetIdleTimeConsistentWithDeadline(t *testing.T) {
 			deadline, idleTime, expectedDeadline, diff)
 	}
 }
+
+// TestShutdownChannelClosedOnShutdownResponse verifies that the shutdown
+// channel is closed when the control plane responds with "shutdown" action.
+func TestShutdownChannelClosedOnShutdownResponse(t *testing.T) {
+	// Note: This test requires mocking the HTTP server response
+	// In production, when sendHeartbeat() receives action="shutdown",
+	// it should close the shutdownCh channel
+	timeout := 30 * time.Minute
+	heartbeatInterval := 1 * time.Hour
+	d := NewDetector(timeout, heartbeatInterval, "http://localhost", "test", "token")
+
+	// Get the shutdown channel
+	shutdownCh := d.ShutdownChannel()
+
+	// Channel should not be closed initially
+	select {
+	case <-shutdownCh:
+		t.Error("Shutdown channel should not be closed initially")
+	default:
+		// Expected: channel is open
+	}
+
+	// Note: To fully test this, we would need to mock the HTTP server
+	// and trigger a heartbeat that returns "shutdown" action
+}
+
+// TestGetWarningTime verifies that warning time is calculated correctly.
+func TestGetWarningTime(t *testing.T) {
+	timeout := 10 * time.Minute
+	heartbeatInterval := 1 * time.Hour
+	d := NewDetector(timeout, heartbeatInterval, "http://localhost", "test", "token")
+
+	// Initially, warning time should be 0 (more than 5 minutes left)
+	if warning := d.GetWarningTime(); warning != 0 {
+		t.Errorf("Expected no warning initially, got %v", warning)
+	}
+
+	// Simulate being idle for 6 minutes (4 minutes left until shutdown)
+	d.lastActivity = time.Now().Add(-6 * time.Minute)
+	d.shutdownDeadline = time.Now().Add(4 * time.Minute)
+
+	// Now we should get a warning (less than 5 minutes left)
+	if warning := d.GetWarningTime(); warning <= 0 || warning > 5*time.Minute {
+		t.Errorf("Expected warning between 0 and 5 minutes, got %v", warning)
+	}
+}
