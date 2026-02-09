@@ -3,6 +3,7 @@ package pty
 
 import (
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"sync"
@@ -15,6 +16,7 @@ import (
 type Session struct {
 	ID          string
 	UserID      string
+	Name        string
 	Cmd         *exec.Cmd
 	Pty         *os.File
 	Rows        int
@@ -23,20 +25,81 @@ type Session struct {
 	LastActive  time.Time
 	mu          sync.RWMutex
 	onClose     func()
+
+	// Persistence fields
+	IsOrphaned    bool
+	OrphanedAt    time.Time
+	ProcessExited bool
+	ExitCode      int
+	OutputBuffer  *RingBuffer
+	orphanTimer   *time.Timer
+	attachedWriter io.Writer
+}
+
+// SessionInfo is a lightweight struct for listing sessions without exposing internals.
+type SessionInfo struct {
+	ID               string
+	Name             string
+	Status           string // "running" or "exited"
+	CreatedAt        time.Time
+	LastActivityAt   time.Time
+	WorkingDirectory string
+}
+
+// SetAttachedWriter sets the writer that receives live output (typically a WebSocket).
+func (s *Session) SetAttachedWriter(w io.Writer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.attachedWriter = w
+}
+
+// GetAttachedWriter returns the current attached writer.
+func (s *Session) GetAttachedWriter() io.Writer {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.attachedWriter
+}
+
+// Info returns a SessionInfo snapshot of this session.
+func (s *Session) Info() SessionInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	status := "running"
+	if s.ProcessExited {
+		status = "exited"
+	}
+
+	dir := ""
+	if s.Cmd != nil {
+		dir = s.Cmd.Dir
+	}
+
+	return SessionInfo{
+		ID:               s.ID,
+		Name:             s.Name,
+		Status:           status,
+		CreatedAt:        s.CreatedAt,
+		LastActivityAt:   s.LastActive,
+		WorkingDirectory: dir,
+	}
 }
 
 // SessionConfig holds configuration for creating a new session.
 type SessionConfig struct {
-	ID            string
-	UserID        string
-	Shell         string
-	Rows          int
-	Cols          int
-	Env           []string
-	WorkDir       string
-	OnClose       func()
-	ContainerID   string // If set, exec into this Docker container
-	ContainerUser string // User to run as inside the container
+	ID               string
+	UserID           string
+	Name             string
+	Shell            string
+	Rows             int
+	Cols             int
+	Env              []string
+	WorkDir          string
+	OnClose          func()
+	ContainerID      string // If set, exec into this Docker container
+	ContainerUser    string // User to run as inside the container
+	OutputBufferSize int    // Ring buffer capacity in bytes (0 = default)
+	OnActivity       func() // Called when PTY output is detected
 }
 
 // NewSession creates a new PTY session.
@@ -95,15 +158,17 @@ func NewSession(cfg SessionConfig) (*Session, error) {
 
 	now := time.Now()
 	session := &Session{
-		ID:         cfg.ID,
-		UserID:     cfg.UserID,
-		Cmd:        cmd,
-		Pty:        ptmx,
-		Rows:       rows,
-		Cols:       cols,
-		CreatedAt:  now,
-		LastActive: now,
-		onClose:    cfg.OnClose,
+		ID:           cfg.ID,
+		UserID:       cfg.UserID,
+		Name:         cfg.Name,
+		Cmd:          cmd,
+		Pty:          ptmx,
+		Rows:         rows,
+		Cols:         cols,
+		CreatedAt:    now,
+		LastActive:   now,
+		onClose:      cfg.OnClose,
+		OutputBuffer: NewRingBuffer(cfg.OutputBufferSize),
 	}
 
 	return session, nil
@@ -132,6 +197,47 @@ func (s *Session) Resize(rows, cols int) error {
 		Rows: uint16(rows),
 		Cols: uint16(cols),
 	})
+}
+
+// StartOutputReader starts a persistent goroutine that reads PTY output,
+// always writes to the ring buffer, and conditionally writes to the attached writer.
+// The onOutput callback is invoked on each chunk of output (e.g., to record activity).
+// The onExit callback is invoked when the PTY read loop ends (process exited or error).
+func (s *Session) StartOutputReader(onOutput func(sessionID string, data []byte), onExit func(sessionID string)) {
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := s.Pty.Read(buf)
+			if n > 0 {
+				s.updateLastActive()
+				chunk := buf[:n]
+
+				// Always write to the ring buffer
+				s.OutputBuffer.Write(chunk)
+
+				// Invoke the output callback (e.g., for idle detection, WebSocket forwarding)
+				if onOutput != nil {
+					onOutput(s.ID, chunk)
+				}
+			}
+			if err != nil {
+				// PTY read returned an error — process likely exited
+				s.mu.Lock()
+				s.ProcessExited = true
+				if s.Cmd.ProcessState != nil {
+					s.ExitCode = s.Cmd.ProcessState.ExitCode()
+				}
+				s.mu.Unlock()
+
+				log.Printf("PTY output reader ended for session %s: %v", s.ID, err)
+
+				if onExit != nil {
+					onExit(s.ID)
+				}
+				return
+			}
+		}
+	}()
 }
 
 // Close closes the PTY session.

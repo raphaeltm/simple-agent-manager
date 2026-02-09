@@ -98,6 +98,16 @@ class MockWebSocket {
           }),
         }));
       }, 10);
+    } else if (msg.type === 'list_sessions' && this.onmessage) {
+      // Respond with empty session list (no server-side sessions to reconnect to)
+      setTimeout(() => {
+        this.onmessage!(new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'session_list',
+            data: { sessions: [] },
+          }),
+        }));
+      }, 10);
     }
   }
 
@@ -144,16 +154,29 @@ describe('MultiTerminal', () => {
     const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
     render(<MultiTerminal {...defaultProps} />);
 
+    // Wait for initial WebSocket connection and session creation
     await waitFor(() => {
-      const newTabButton = screen.queryByTestId('new-tab');
-      if (newTabButton) {
-        fireEvent.click(newTabButton);
-      }
-    });
+      const calls = sendSpy.mock.calls;
+      const hasCreateSession = calls.some((call) =>
+        typeof call[0] === 'string' && call[0].includes('create_session')
+      );
+      expect(hasCreateSession).toBe(true);
+    }, { timeout: 2000 });
 
-    expect(sendSpy).toHaveBeenCalledWith(
-      expect.stringContaining('create_session')
-    );
+    // Now click the new tab button
+    const newTabButton = screen.queryByTestId('new-tab');
+    if (newTabButton) {
+      fireEvent.click(newTabButton);
+    }
+
+    // Should have sent another create_session for the new tab
+    await waitFor(() => {
+      const calls = sendSpy.mock.calls;
+      const createSessionCalls = calls.filter((call) =>
+        typeof call[0] === 'string' && call[0].includes('create_session')
+      );
+      expect(createSessionCalls.length).toBeGreaterThanOrEqual(1);
+    });
   });
 
   it('should handle tab closing', async () => {

@@ -10,22 +10,26 @@ type MessageType string
 
 const (
 	// Client -> Server message types
-	MessageTypeInput         MessageType = "input"
-	MessageTypeResize        MessageType = "resize"
-	MessageTypePing          MessageType = "ping"
-	MessageTypeCreateSession MessageType = "create_session"
-	MessageTypeCloseSession  MessageType = "close_session"
-	MessageTypeRenameSession MessageType = "rename_session"
+	MessageTypeInput            MessageType = "input"
+	MessageTypeResize           MessageType = "resize"
+	MessageTypePing             MessageType = "ping"
+	MessageTypeCreateSession    MessageType = "create_session"
+	MessageTypeCloseSession     MessageType = "close_session"
+	MessageTypeRenameSession    MessageType = "rename_session"
+	MessageTypeListSessions     MessageType = "list_sessions"
+	MessageTypeReattachSession  MessageType = "reattach_session"
 
 	// Server -> Client message types
-	MessageTypeOutput         MessageType = "output"
-	MessageTypeSession        MessageType = "session"
-	MessageTypeError          MessageType = "error"
-	MessageTypePong           MessageType = "pong"
-	MessageTypeSessionCreated MessageType = "session_created"
-	MessageTypeSessionClosed  MessageType = "session_closed"
-	MessageTypeSessionRenamed MessageType = "session_renamed"
-	MessageTypeSessionList    MessageType = "session_list"
+	MessageTypeOutput            MessageType = "output"
+	MessageTypeSession           MessageType = "session"
+	MessageTypeError             MessageType = "error"
+	MessageTypePong              MessageType = "pong"
+	MessageTypeSessionCreated    MessageType = "session_created"
+	MessageTypeSessionClosed     MessageType = "session_closed"
+	MessageTypeSessionRenamed    MessageType = "session_renamed"
+	MessageTypeSessionList       MessageType = "session_list"
+	MessageTypeSessionReattached MessageType = "session_reattached"
+	MessageTypeScrollback        MessageType = "scrollback"
 )
 
 // BaseMessage is the common structure for all WebSocket messages
@@ -109,10 +113,30 @@ type SessionRenamedMessage struct {
 	Name      string `json:"name"`
 }
 
+// ReattachSessionMessage requests reattachment to an existing session
+type ReattachSessionMessage struct {
+	SessionID string `json:"sessionId"`
+	Rows      int    `json:"rows"`
+	Cols      int    `json:"cols"`
+}
+
+// SessionReattachedMessage confirms session reattachment
+type SessionReattachedMessage struct {
+	SessionID        string `json:"sessionId"`
+	WorkingDirectory string `json:"workingDirectory,omitempty"`
+	Shell            string `json:"shell,omitempty"`
+}
+
+// ScrollbackMessage contains buffered output to replay on reconnect
+type ScrollbackMessage struct {
+	Data string `json:"data"`
+}
+
 // SessionInfo represents information about a terminal session
 type SessionInfo struct {
 	SessionID        string    `json:"sessionId"`
 	Name             string    `json:"name,omitempty"`
+	Status           string    `json:"status"` // "running" or "exited"
 	WorkingDirectory string    `json:"workingDirectory,omitempty"`
 	CreatedAt        time.Time `json:"createdAt"`
 	LastActivityAt   time.Time `json:"lastActivityAt,omitempty"`
@@ -265,4 +289,43 @@ func ParseRenameSessionMessage(data json.RawMessage) (*RenameSessionMessage, err
 		return nil, err
 	}
 	return &msg, nil
+}
+
+// ParseReattachSessionMessage parses reattach session message data
+func ParseReattachSessionMessage(data json.RawMessage) (*ReattachSessionMessage, error) {
+	var msg ReattachSessionMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return nil, err
+	}
+	return &msg, nil
+}
+
+// NewSessionReattachedMessage creates a session reattached message
+func NewSessionReattachedMessage(sessionID, workingDir, shell string) []byte {
+	msg := BaseMessage{
+		Type:      MessageTypeSessionReattached,
+		SessionID: sessionID,
+	}
+	data, _ := json.Marshal(SessionReattachedMessage{
+		SessionID:        sessionID,
+		WorkingDirectory: workingDir,
+		Shell:            shell,
+	})
+	msg.Data = data
+	result, _ := json.Marshal(msg)
+	return result
+}
+
+// NewScrollbackMessage creates a scrollback message with buffered output
+func NewScrollbackMessage(sessionID, data string) []byte {
+	msg := BaseMessage{
+		Type:      MessageTypeScrollback,
+		SessionID: sessionID,
+	}
+	scrollData, _ := json.Marshal(ScrollbackMessage{
+		Data: data,
+	})
+	msg.Data = scrollData
+	result, _ := json.Marshal(msg)
+	return result
 }
