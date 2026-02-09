@@ -1,0 +1,1 @@
+../../../.claude/agents/go-specialist/GO_SPECIALIST.md

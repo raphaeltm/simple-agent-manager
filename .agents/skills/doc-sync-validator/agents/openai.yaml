@@ -1,0 +1,4 @@
+interface:
+  display_name: "Doc Sync Validator"
+  short_description: "Detect stale docs vs code"
+  default_prompt: "Use $doc-sync-validator to find docs that drifted from code after the change and list concrete fixes."

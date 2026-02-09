@@ -1,0 +1,4 @@
+interface:
+  display_name: "Security Auditor"
+  short_description: "Read-only security review"
+  default_prompt: "Use $security-auditor to review the current changes for auth/credential/security issues; do not modify files."

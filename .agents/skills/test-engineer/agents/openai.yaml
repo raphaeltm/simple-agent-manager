@@ -1,0 +1,4 @@
+interface:
+  display_name: "Test Engineer"
+  short_description: "Generate/extend test coverage"
+  default_prompt: "Use $test-engineer to propose and implement missing tests for the change (Vitest/Miniflare/Go), then run them."

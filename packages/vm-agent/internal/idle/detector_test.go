@@ -139,3 +139,60 @@ func TestGetIdleTimeConsistentWithDeadline(t *testing.T) {
 			deadline, idleTime, expectedDeadline, diff)
 	}
 }
+
+// TestAutonomousShutdown verifies that the VM shuts down autonomously
+// when idle timeout is reached, regardless of control plane availability.
+func TestAutonomousShutdown(t *testing.T) {
+	// Create detector with very short timeout for testing
+	timeout := 100 * time.Millisecond
+	heartbeatInterval := 1 * time.Hour // Don't send heartbeats during test
+	d := NewDetector(timeout, heartbeatInterval, "http://unreachable", "test", "token")
+
+	// Set a very short idle check interval for testing
+	d.idleCheckInterval = 50 * time.Millisecond
+
+	// Get the shutdown channel
+	shutdownCh := d.ShutdownChannel()
+
+	// Start the detector
+	go d.Start()
+	defer d.Stop()
+
+	// Channel should not be closed initially
+	select {
+	case <-shutdownCh:
+		t.Error("Shutdown channel should not be closed initially")
+	default:
+		// Expected: channel is open
+	}
+
+	// Wait for idle timeout to pass
+	// With 100ms timeout and 50ms check interval, shutdown should happen within 200ms
+	select {
+	case <-shutdownCh:
+		// Success - VM initiated shutdown autonomously
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("VM did not shut down autonomously after idle timeout")
+	}
+}
+
+// TestGetWarningTime verifies that warning time is calculated correctly.
+func TestGetWarningTime(t *testing.T) {
+	timeout := 10 * time.Minute
+	heartbeatInterval := 1 * time.Hour
+	d := NewDetector(timeout, heartbeatInterval, "http://localhost", "test", "token")
+
+	// Initially, warning time should be 0 (more than 5 minutes left)
+	if warning := d.GetWarningTime(); warning != 0 {
+		t.Errorf("Expected no warning initially, got %v", warning)
+	}
+
+	// Simulate being idle for 6 minutes (4 minutes left until shutdown)
+	d.lastActivity = time.Now().Add(-6 * time.Minute)
+	d.shutdownDeadline = time.Now().Add(4 * time.Minute)
+
+	// Now we should get a warning (less than 5 minutes left)
+	if warning := d.GetWarningTime(); warning <= 0 || warning > 5*time.Minute {
+		t.Errorf("Expected warning between 0 and 5 minutes, got %v", warning)
+	}
+}

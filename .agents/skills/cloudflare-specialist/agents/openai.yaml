@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cloudflare Specialist"
+  short_description: "Workers/D1/KV/R2 guidance"
+  default_prompt: "Use $cloudflare-specialist to review Cloudflare Workers/D1/KV/R2 usage and wrangler config; do not modify files."

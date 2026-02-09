@@ -223,7 +223,8 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if n > 0 {
-				s.idleDetector.RecordActivity()
+				// Don't record PTY output as activity - background processes
+				// and shell prompts would prevent idle shutdown
 				outputData, _ := json.Marshal(map[string]string{"data": string(buf[:n])})
 				writeMu.Lock()
 				err = conn.WriteJSON(wsMessage{Type: "output", Data: outputData})
@@ -274,7 +275,8 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "ping":
-			s.idleDetector.RecordActivity()
+			// Don't record activity for pings - they're automatic heartbeats
+			// sent every 30s regardless of user interaction
 			writeMu.Lock()
 			_ = conn.WriteJSON(wsMessage{Type: "pong"})
 			writeMu.Unlock()
@@ -658,7 +660,8 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 			writeMu.Unlock()
 
 		case "ping":
-			s.idleDetector.RecordActivity()
+			// Don't record activity for pings - they're automatic heartbeats
+			// sent every 30s regardless of user interaction
 			writeMu.Lock()
 			_ = conn.WriteJSON(wsMessage{Type: "pong", SessionID: msg.SessionID})
 			writeMu.Unlock()

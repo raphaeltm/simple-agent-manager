@@ -52,7 +52,14 @@ func New(cfg *config.Config) (*Server, error) {
 	})
 
 	// Create idle detector
-	idleDetector := idle.NewDetector(cfg.IdleTimeout, cfg.HeartbeatInterval, cfg.ControlPlaneURL, cfg.WorkspaceID, cfg.CallbackToken)
+	idleDetector := idle.NewDetectorWithConfig(idle.DetectorConfig{
+		Timeout:           cfg.IdleTimeout,
+		HeartbeatInterval: cfg.HeartbeatInterval,
+		IdleCheckInterval: cfg.IdleCheckInterval,
+		ControlPlaneURL:   cfg.ControlPlaneURL,
+		WorkspaceID:       cfg.WorkspaceID,
+		CallbackToken:     cfg.CallbackToken,
+	})
 
 	// Setup container discovery for devcontainer exec
 	var containerResolver pty.ContainerResolver
@@ -129,6 +136,11 @@ func (s *Server) Start() error {
 
 	log.Printf("Starting VM Agent on %s", s.httpServer.Addr)
 	return s.httpServer.ListenAndServe()
+}
+
+// GetIdleShutdownChannel returns the channel that's closed when idle shutdown is requested.
+func (s *Server) GetIdleShutdownChannel() <-chan struct{} {
+	return s.idleDetector.ShutdownChannel()
 }
 
 // Stop gracefully stops the server.

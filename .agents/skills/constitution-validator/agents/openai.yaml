@@ -1,0 +1,4 @@
+interface:
+  display_name: "Constitution Validator"
+  short_description: "No-hardcoded-values check"
+  default_prompt: "Use $constitution-validator to check Principle XI compliance (URLs/timeouts/limits/IDs); do not modify files."

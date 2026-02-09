@@ -1,0 +1,1 @@
+../../../.claude/agents/doc-sync-validator/DOC_SYNC_VALIDATOR.md

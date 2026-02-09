@@ -123,6 +123,7 @@ export interface Workspace {
   lastActivityAt: string | null;
   errorMessage: string | null;
   shutdownDeadline: string | null;
+  idleTimeoutSeconds: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -140,6 +141,7 @@ export interface WorkspaceResponse {
   lastActivityAt: string | null;
   errorMessage: string | null;
   shutdownDeadline: string | null;
+  idleTimeoutSeconds: number;
   createdAt: string;
   updatedAt: string;
   url?: string;
@@ -152,6 +154,7 @@ export interface CreateWorkspaceRequest {
   vmSize?: VMSize;
   vmLocation?: VMLocation;
   installationId: string;
+  idleTimeoutSeconds?: number;
 }
 
 // =============================================================================
@@ -162,7 +165,7 @@ export interface HeartbeatRequest {
   idleSeconds: number;
   idle: boolean;
   lastActivityAt: string;
-  hasActivity?: boolean; // If there was activity since last heartbeat
+  shutdownDeadline?: string;
 }
 
 export interface HeartbeatResponse {
