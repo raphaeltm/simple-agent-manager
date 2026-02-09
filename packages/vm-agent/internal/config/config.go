@@ -39,6 +39,7 @@ type Config struct {
 	WorkspaceDir       string
 	BootstrapStatePath string
 	BootstrapMaxWait   time.Duration
+	BootstrapTimeout   time.Duration // Overall bootstrap timeout including devcontainer build
 
 	// Session settings
 	SessionTTL             time.Duration
@@ -135,6 +136,7 @@ func Load() (*Config, error) {
 		WorkspaceDir:       workspaceDir,
 		BootstrapStatePath: getEnv("BOOTSTRAP_STATE_PATH", "/var/lib/vm-agent/bootstrap-state.json"),
 		BootstrapMaxWait:   getEnvDuration("BOOTSTRAP_MAX_WAIT", 5*time.Minute),
+		BootstrapTimeout:   getEnvDuration("BOOTSTRAP_TIMEOUT", 15*time.Minute),
 
 		SessionTTL:             getEnvDuration("SESSION_TTL", 24*time.Hour),
 		SessionCleanupInterval: getEnvDuration("SESSION_CLEANUP_INTERVAL", 1*time.Minute),

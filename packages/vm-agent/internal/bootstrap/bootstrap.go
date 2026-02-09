@@ -341,6 +341,13 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) error {
 		return nil
 	}
 
+	// Wait for devcontainer CLI to be available. Cloud-init installs Node.js and
+	// devcontainer CLI asynchronously AFTER the VM Agent starts — there is a race
+	// where the agent tries to run "devcontainer up" before the CLI exists.
+	if err := waitForCommand(ctx, "devcontainer"); err != nil {
+		return fmt.Errorf("devcontainer CLI never became available: %w", err)
+	}
+
 	log.Printf("Starting devcontainer for workspace at %s", cfg.WorkspaceDir)
 
 	args := []string{"up", "--workspace-folder", cfg.WorkspaceDir}
@@ -356,6 +363,34 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) error {
 	}
 
 	return nil
+}
+
+// waitForCommand polls until the given command is available in PATH or ctx is cancelled.
+func waitForCommand(ctx context.Context, name string) error {
+	if _, err := exec.LookPath(name); err == nil {
+		return nil // Already available
+	}
+
+	log.Printf("Waiting for %q to be installed (cloud-init may still be running)...", name)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	logged := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled while waiting for %q: %w", name, ctx.Err())
+		case <-ticker.C:
+			if _, err := exec.LookPath(name); err == nil {
+				log.Printf("Command %q is now available", name)
+				return nil
+			}
+			if time.Since(logged) >= 30*time.Second {
+				log.Printf("Still waiting for %q to be installed...", name)
+				logged = time.Now()
+			}
+		}
+	}
 }
 
 func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {

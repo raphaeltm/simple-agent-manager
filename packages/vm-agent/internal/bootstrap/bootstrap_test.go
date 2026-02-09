@@ -289,3 +289,42 @@ func TestRedactSecret(t *testing.T) {
 		t.Fatalf("redactSecret() = %q, want %q", got, want)
 	}
 }
+
+func TestWaitForCommandAlreadyAvailable(t *testing.T) {
+	t.Parallel()
+
+	// "ls" should be available on any system
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	if err := waitForCommand(ctx, "ls"); err != nil {
+		t.Fatalf("waitForCommand(ls) returned error for available command: %v", err)
+	}
+}
+
+func TestWaitForCommandCancelledContext(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	err := waitForCommand(ctx, "nonexistent-command-that-will-never-exist")
+	if err == nil {
+		t.Fatal("expected error for cancelled context")
+	}
+	if !strings.Contains(err.Error(), "context cancelled") && !strings.Contains(err.Error(), "context canceled") {
+		t.Fatalf("expected context cancellation error, got: %v", err)
+	}
+}
+
+func TestWaitForCommandTimesOut(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := waitForCommand(ctx, "nonexistent-command-that-will-never-exist")
+	if err == nil {
+		t.Fatal("expected error for timed out context")
+	}
+}

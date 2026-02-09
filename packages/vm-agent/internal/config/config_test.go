@@ -3,6 +3,7 @@ package config
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestDeriveRepoDirName(t *testing.T) {
@@ -121,5 +122,32 @@ func TestLoadDefaultsContainerUserEmpty(t *testing.T) {
 	}
 	if cfg.ContainerUser != "" {
 		t.Fatalf("ContainerUser=%q, want empty string", cfg.ContainerUser)
+	}
+}
+
+func TestBootstrapTimeoutDefault(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.BootstrapTimeout != 15*time.Minute {
+		t.Fatalf("BootstrapTimeout=%v, want %v", cfg.BootstrapTimeout, 15*time.Minute)
+	}
+}
+
+func TestBootstrapTimeoutOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("BOOTSTRAP_TIMEOUT", "20m")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.BootstrapTimeout != 20*time.Minute {
+		t.Fatalf("BootstrapTimeout=%v, want %v", cfg.BootstrapTimeout, 20*time.Minute)
 	}
 }

@@ -81,7 +81,7 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), cfg.BootstrapMaxWait+30*time.Second)
+	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), cfg.BootstrapTimeout)
 	defer bootstrapCancel()
 
 	if err := bootstrap.Run(bootstrapCtx, cfg); err != nil {
