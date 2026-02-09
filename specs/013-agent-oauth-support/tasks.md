@@ -59,9 +59,9 @@ Core functionality required before any user story implementation.
 
 ### Integration & Testing
 
-- [ ] T020 [P] [US1] Create integration test for OAuth credential save flow in apps/api/tests/integration/credentials.test.ts
-- [ ] T021 [P] [US1] Add test for auto-activation behavior in apps/api/tests/integration/credentials.test.ts
-- [ ] T022 [P] [US1] Test VM Agent env var injection with OAuth token in packages/vm-agent/internal/acp/gateway_test.go
+- [x] T020 [P] [US1] Create integration test for OAuth credential save flow in apps/api/tests/integration/credentials.test.ts
+- [x] T021 [P] [US1] Add test for auto-activation behavior in apps/api/tests/integration/credentials.test.ts
+- [x] T022 [P] [US1] Test VM Agent env var injection with OAuth token in packages/vm-agent/internal/acp/gateway_test.go
 
 ## Phase 4: User Story 2 - Credential Switching (P2)
 
@@ -70,35 +70,35 @@ Core functionality required before any user story implementation.
 
 ### API Endpoints
 
-- [ ] T023 [US2] Create POST /api/credentials/agent/:agentType/toggle endpoint in apps/api/src/routes/credentials.ts
-- [ ] T024 [US2] Implement credential toggle transaction logic in apps/api/src/routes/credentials.ts
-- [ ] T025 [P] [US2] Add DELETE /api/credentials/agent/:agentType/:credentialKind endpoint in apps/api/src/routes/credentials.ts
-- [ ] T026 [US2] Handle auto-activation when deleting active credential in apps/api/src/routes/credentials.ts
+- [x] T023 [US2] Create POST /api/credentials/agent/:agentType/toggle endpoint in apps/api/src/routes/credentials.ts
+- [x] T024 [US2] Implement credential toggle transaction logic in apps/api/src/routes/credentials.ts
+- [x] T025 [P] [US2] Add DELETE /api/credentials/agent/:agentType/:credentialKind endpoint in apps/api/src/routes/credentials.ts
+- [x] T026 [US2] Handle auto-activation when deleting active credential in apps/api/src/routes/credentials.ts
 
 ### UI Components
 
-- [ ] T027 [P] [US2] Create CredentialToggle component in apps/web/src/components/CredentialToggle.tsx
-- [ ] T028 [US2] Integrate CredentialToggle into AgentKeyCard in apps/web/src/components/AgentKeyCard.tsx
-- [ ] T029 [P] [US2] Add toggle API call handlers in apps/web/src/services/credentials.ts
-- [ ] T030 [US2] Update Settings page to handle credential switching in apps/web/src/pages/Settings.tsx
+- [x] T027 [P] [US2] Create CredentialToggle component in apps/web/src/components/CredentialToggle.tsx
+- [x] T028 [US2] Integrate CredentialToggle into AgentKeyCard in apps/web/src/components/AgentKeyCard.tsx
+- [x] T029 [P] [US2] Add toggle API call handlers in apps/web/src/services/credentials.ts
+- [x] T030 [US2] Update Settings page to handle credential switching in apps/web/src/pages/Settings.tsx
 
 ### Testing
 
-- [ ] T031 [P] [US2] Test credential toggle functionality in apps/api/tests/integration/credentials.test.ts
-- [ ] T032 [P] [US2] Test deletion with auto-activation in apps/api/tests/integration/credentials.test.ts
-- [ ] T033 [P] [US2] Create component tests for CredentialToggle in apps/web/tests/components/CredentialToggle.test.tsx
+- [x] T031 [P] [US2] Test credential toggle functionality in apps/api/tests/integration/credentials.test.ts
+- [x] T032 [P] [US2] Test deletion with auto-activation in apps/api/tests/integration/credentials.test.ts
+- [x] T033 [P] [US2] Create component tests for CredentialToggle in apps/web/tests/components/CredentialToggle.test.tsx
 
 ## Phase 5: Polish & Documentation
 
 Cross-cutting concerns and final polish tasks.
 
-- [ ] T034 [P] Update CLAUDE.md with OAuth authentication documentation
-- [ ] T035 [P] Add OAuth token format detection for better error messages in apps/api/src/services/validation.ts
-- [ ] T036 [P] Implement credential masking for OAuth tokens in apps/api/src/services/encryption.ts
-- [ ] T037 [P] Add error handling for expired OAuth tokens in packages/vm-agent/internal/acp/gateway.go
-- [ ] T038 Create end-to-end test for complete OAuth flow in tests/e2e/oauth-credential-flow.test.ts
-- [ ] T039 [P] Update API documentation with new credential endpoints
-- [ ] T040 [P] Add migration rollback script in case of issues
+- [x] T034 [P] Update CLAUDE.md with OAuth authentication documentation
+- [x] T035 [P] Add OAuth token format detection for better error messages in apps/api/src/services/validation.ts
+- [x] T036 [P] Implement credential masking for OAuth tokens in apps/api/src/services/encryption.ts
+- [x] T037 [P] Add error handling for expired OAuth tokens in packages/vm-agent/internal/acp/gateway.go
+- [x] T038 Create end-to-end test for complete OAuth flow in tests/e2e/oauth-credential-flow.test.ts
+- [x] T039 [P] Update API documentation with new credential endpoints
+- [x] T040 [P] Add migration rollback script in case of issues
 
 ## Task Dependencies
 

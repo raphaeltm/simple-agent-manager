@@ -112,6 +112,7 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 - **Provider**: Cloud infrastructure abstraction (currently Hetzner only)
 - **CloudCLI**: Web-based Claude Code interface (file explorer + terminal)
 - **Idle Detection**: VMs self-terminate after inactivity (default 30 minutes, configurable via `IDLE_TIMEOUT_SECONDS`)
+- **OAuth Authentication**: Claude Code supports both API keys and OAuth tokens from Claude Max/Pro subscriptions
 
 ## API Endpoints
 
@@ -176,6 +177,29 @@ Check if Miniflare bindings are configured in `vitest.config.ts`.
 
 ### Type Errors
 Run `pnpm typecheck` from root to see all issues.
+
+## Agent Authentication
+
+### Claude Code OAuth Support
+
+Claude Code now supports dual authentication methods:
+
+1. **API Keys**: Traditional pay-per-use API keys from Anthropic Console
+2. **OAuth Tokens**: Tokens from Claude Max/Pro subscriptions via `claude setup-token`
+
+#### Using OAuth Tokens
+
+1. Generate a token on your local machine: `claude setup-token`
+2. In SAM Settings, select "OAuth Token (Pro/Max)" for Claude Code
+3. Paste the token and save
+4. The system automatically injects `CLAUDE_CODE_OAUTH_TOKEN` instead of `ANTHROPIC_API_KEY`
+
+#### Credential Switching
+
+- Users can store both an API key and OAuth token
+- Toggle between them in Settings
+- New credentials auto-activate by default
+- Delete specific credential types via the API
 
 ## Active Technologies
 - Markdown (CommonMark) with GitHub Flavored Markdown extensions + None (documentation-only review) (010-docs-review)

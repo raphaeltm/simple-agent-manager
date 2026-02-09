@@ -354,7 +354,125 @@ credentialsRoutes.put('/agent', async (c) => {
 });
 
 /**
- * DELETE /api/credentials/agent/:agentType - Remove an agent API key
+ * POST /api/credentials/agent/:agentType/toggle - Toggle active credential
+ */
+credentialsRoutes.post('/agent/:agentType/toggle', async (c) => {
+  const userId = getUserId(c);
+  const agentType = c.req.param('agentType');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  if (!isValidAgentType(agentType)) {
+    throw errors.badRequest('Invalid agent type');
+  }
+
+  const body = await c.req.json<{ credentialKind: CredentialKind }>();
+
+  if (!body.credentialKind || !['api-key', 'oauth-token'].includes(body.credentialKind)) {
+    throw errors.badRequest('Invalid credential kind');
+  }
+
+  // Start transaction-like operation
+  // First, deactivate all credentials for this agent
+  await db
+    .update(schema.credentials)
+    .set({ isActive: false })
+    .where(
+      and(
+        eq(schema.credentials.userId, userId),
+        eq(schema.credentials.credentialType, 'agent-api-key'),
+        eq(schema.credentials.agentType, agentType)
+      )
+    );
+
+  // Then activate the specified credential
+  const result = await db
+    .update(schema.credentials)
+    .set({ isActive: true, updatedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(schema.credentials.userId, userId),
+        eq(schema.credentials.credentialType, 'agent-api-key'),
+        eq(schema.credentials.agentType, agentType),
+        eq(schema.credentials.credentialKind, body.credentialKind)
+      )
+    )
+    .returning();
+
+  if (result.length === 0) {
+    throw errors.notFound(`No ${body.credentialKind} found for ${agentType}`);
+  }
+
+  return c.json({ success: true, activated: body.credentialKind });
+});
+
+/**
+ * DELETE /api/credentials/agent/:agentType/:credentialKind - Remove specific credential
+ */
+credentialsRoutes.delete('/agent/:agentType/:credentialKind', async (c) => {
+  const userId = getUserId(c);
+  const agentType = c.req.param('agentType');
+  const credentialKind = c.req.param('credentialKind') as CredentialKind;
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  if (!isValidAgentType(agentType)) {
+    throw errors.badRequest('Invalid agent type');
+  }
+
+  if (!['api-key', 'oauth-token'].includes(credentialKind)) {
+    throw errors.badRequest('Invalid credential kind');
+  }
+
+  // Check if this is the active credential
+  const existing = await db
+    .select()
+    .from(schema.credentials)
+    .where(
+      and(
+        eq(schema.credentials.userId, userId),
+        eq(schema.credentials.credentialType, 'agent-api-key'),
+        eq(schema.credentials.agentType, agentType),
+        eq(schema.credentials.credentialKind, credentialKind)
+      )
+    )
+    .limit(1);
+
+  const toDelete = existing[0];
+  if (!toDelete) {
+    throw errors.notFound('Credential not found');
+  }
+
+  // Delete the credential
+  await db
+    .delete(schema.credentials)
+    .where(eq(schema.credentials.id, toDelete.id));
+
+  // If it was active, auto-activate another credential if available
+  if (toDelete.isActive) {
+    const remaining = await db
+      .select()
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, userId),
+          eq(schema.credentials.credentialType, 'agent-api-key'),
+          eq(schema.credentials.agentType, agentType)
+        )
+      )
+      .limit(1);
+
+    if (remaining.length > 0) {
+      await db
+        .update(schema.credentials)
+        .set({ isActive: true, updatedAt: new Date().toISOString() })
+        .where(eq(schema.credentials.id, remaining[0].id));
+    }
+  }
+
+  return c.json({ success: true });
+});
+
+/**
+ * DELETE /api/credentials/agent/:agentType - Remove all agent credentials
  */
 credentialsRoutes.delete('/agent/:agentType', async (c) => {
   const userId = getUserId(c);

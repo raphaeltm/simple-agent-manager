@@ -175,6 +175,19 @@ export async function saveAgentCredential(data: SaveAgentCredentialRequest): Pro
   });
 }
 
+export async function toggleAgentCredential(agentType: string, credentialKind: string): Promise<void> {
+  return request<void>(`/api/credentials/agent/${agentType}/toggle`, {
+    method: 'POST',
+    body: JSON.stringify({ credentialKind }),
+  });
+}
+
+export async function deleteAgentCredentialByKind(agentType: string, credentialKind: string): Promise<void> {
+  return request<void>(`/api/credentials/agent/${agentType}/${credentialKind}`, {
+    method: 'DELETE',
+  });
+}
+
 export async function deleteAgentCredential(agentType: string): Promise<void> {
   return request<void>(`/api/credentials/agent/${agentType}`, {
     method: 'DELETE',
