@@ -603,7 +603,7 @@ workspacesRoutes.post('/:id/heartbeat', async (c) => {
   const body = await c.req.json<HeartbeatRequest>();
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date().toISOString();
-  const idleTimeoutSeconds = getIdleTimeoutSeconds(c.env);
+  const globalIdleTimeoutSeconds = getIdleTimeoutSeconds(c.env);
 
   const workspaces = await db
     .select()
@@ -615,6 +615,9 @@ workspacesRoutes.post('/:id/heartbeat', async (c) => {
   if (!wsHeartbeat) {
     throw errors.notFound('Workspace');
   }
+
+  // Use per-workspace idle timeout if set, otherwise fall back to global default
+  const idleTimeoutSeconds = wsHeartbeat.idleTimeoutSeconds ?? globalIdleTimeoutSeconds;
 
   // Use the VM's reported lastActivityAt (authoritative) to update the control plane's view.
   // The VM agent tracks actual user input activity locally and reports it here.
