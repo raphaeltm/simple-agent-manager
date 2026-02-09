@@ -591,7 +591,10 @@ workspacesRoutes.post('/:id/heartbeat', async (c) => {
       .where(eq(schema.workspaces.id, workspaceId));
   }
 
-  // Check if idle timeout reached (informational - VM agent decides shutdown)
+  // Check if idle timeout reached
+  // NOTE: VMs self-terminate based on local idle detection. The 'shutdown' action
+  // here is informational/suggestive. VMs don't depend on the control plane being
+  // available to shut down when idle.
   const lastActivity = wsHeartbeat.lastActivityAt
     ? new Date(wsHeartbeat.lastActivityAt)
     : new Date(wsHeartbeat.createdAt);

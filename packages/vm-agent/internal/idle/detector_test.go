@@ -140,18 +140,23 @@ func TestGetIdleTimeConsistentWithDeadline(t *testing.T) {
 	}
 }
 
-// TestShutdownChannelClosedOnShutdownResponse verifies that the shutdown
-// channel is closed when the control plane responds with "shutdown" action.
-func TestShutdownChannelClosedOnShutdownResponse(t *testing.T) {
-	// Note: This test requires mocking the HTTP server response
-	// In production, when sendHeartbeat() receives action="shutdown",
-	// it should close the shutdownCh channel
-	timeout := 30 * time.Minute
-	heartbeatInterval := 1 * time.Hour
-	d := NewDetector(timeout, heartbeatInterval, "http://localhost", "test", "token")
+// TestAutonomousShutdown verifies that the VM shuts down autonomously
+// when idle timeout is reached, regardless of control plane availability.
+func TestAutonomousShutdown(t *testing.T) {
+	// Create detector with very short timeout for testing
+	timeout := 100 * time.Millisecond
+	heartbeatInterval := 1 * time.Hour // Don't send heartbeats during test
+	d := NewDetector(timeout, heartbeatInterval, "http://unreachable", "test", "token")
+
+	// Set a very short idle check interval for testing
+	d.idleCheckInterval = 50 * time.Millisecond
 
 	// Get the shutdown channel
 	shutdownCh := d.ShutdownChannel()
+
+	// Start the detector
+	go d.Start()
+	defer d.Stop()
 
 	// Channel should not be closed initially
 	select {
@@ -161,8 +166,14 @@ func TestShutdownChannelClosedOnShutdownResponse(t *testing.T) {
 		// Expected: channel is open
 	}
 
-	// Note: To fully test this, we would need to mock the HTTP server
-	// and trigger a heartbeat that returns "shutdown" action
+	// Wait for idle timeout to pass
+	// With 100ms timeout and 50ms check interval, shutdown should happen within 200ms
+	select {
+	case <-shutdownCh:
+		// Success - VM initiated shutdown autonomously
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("VM did not shut down autonomously after idle timeout")
+	}
 }
 
 // TestGetWarningTime verifies that warning time is calculated correctly.
