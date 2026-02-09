@@ -14,6 +14,7 @@ import (
 type Detector struct {
 	timeout           time.Duration
 	heartbeatInterval time.Duration
+	idleCheckInterval time.Duration // How often to check for idle timeout
 	controlPlaneURL   string
 	workspaceID       string
 	callbackToken     string
@@ -25,33 +26,80 @@ type Detector struct {
 	shutdownCh       chan struct{}
 }
 
-// NewDetector creates a new idle detector.
-func NewDetector(timeout, heartbeatInterval time.Duration, controlPlaneURL, workspaceID, callbackToken string) *Detector {
+// DetectorConfig holds configuration for the idle detector.
+type DetectorConfig struct {
+	Timeout           time.Duration
+	HeartbeatInterval time.Duration
+	IdleCheckInterval time.Duration
+	ControlPlaneURL   string
+	WorkspaceID       string
+	CallbackToken     string
+}
+
+// NewDetectorWithConfig creates a new idle detector with full configuration.
+func NewDetectorWithConfig(cfg DetectorConfig) *Detector {
 	now := time.Now()
+
+	// Default idle check interval if not specified
+	if cfg.IdleCheckInterval == 0 {
+		cfg.IdleCheckInterval = 10 * time.Second
+	}
+
 	return &Detector{
-		timeout:           timeout,
-		heartbeatInterval: heartbeatInterval,
-		controlPlaneURL:   controlPlaneURL,
-		workspaceID:       workspaceID,
-		callbackToken:     callbackToken,
+		timeout:           cfg.Timeout,
+		heartbeatInterval: cfg.HeartbeatInterval,
+		idleCheckInterval: cfg.IdleCheckInterval,
+		controlPlaneURL:   cfg.ControlPlaneURL,
+		workspaceID:       cfg.WorkspaceID,
+		callbackToken:     cfg.CallbackToken,
 		lastActivity:      now,
-		shutdownDeadline:  now.Add(timeout),
+		shutdownDeadline:  now.Add(cfg.Timeout),
 		done:              make(chan struct{}),
 		shutdownCh:        make(chan struct{}),
 	}
 }
 
+// NewDetector creates a new idle detector (backwards compatibility).
+func NewDetector(timeout, heartbeatInterval time.Duration, controlPlaneURL, workspaceID, callbackToken string) *Detector {
+	return NewDetectorWithConfig(DetectorConfig{
+		Timeout:           timeout,
+		HeartbeatInterval: heartbeatInterval,
+		IdleCheckInterval: 10 * time.Second,
+		ControlPlaneURL:   controlPlaneURL,
+		WorkspaceID:       workspaceID,
+		CallbackToken:     callbackToken,
+	})
+}
+
 // Start begins the idle detection loop.
 func (d *Detector) Start() {
-	ticker := time.NewTicker(d.heartbeatInterval)
-	defer ticker.Stop()
+	heartbeatTicker := time.NewTicker(d.heartbeatInterval)
+	defer heartbeatTicker.Stop()
+
+	// Check for idle timeout periodically
+	idleCheckTicker := time.NewTicker(d.idleCheckInterval)
+	defer idleCheckTicker.Stop()
 
 	for {
 		select {
 		case <-d.done:
 			return
-		case <-ticker.C:
+		case <-heartbeatTicker.C:
+			// Send heartbeat to control plane (informational only)
 			d.sendHeartbeat()
+		case <-idleCheckTicker.C:
+			// Check if we've exceeded the idle timeout locally
+			if d.IsIdle() {
+				log.Printf("Idle timeout reached (idle for %v, timeout is %v), initiating shutdown",
+					d.GetIdleTime(), d.timeout)
+				select {
+				case <-d.shutdownCh:
+					// Already closed
+				default:
+					close(d.shutdownCh)
+				}
+				return // Stop the detector after triggering shutdown
+			}
 		}
 	}
 }
@@ -100,6 +148,7 @@ func (d *Detector) ShutdownChannel() <-chan struct{} {
 }
 
 // sendHeartbeat sends a heartbeat to the control plane.
+// This is purely informational - the VM makes its own shutdown decisions.
 func (d *Detector) sendHeartbeat() {
 	idleTime := d.GetIdleTime()
 	deadline := d.GetDeadline()
@@ -134,23 +183,26 @@ func (d *Detector) sendHeartbeat() {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("Failed to send heartbeat: %v", err)
+		// Don't fail on heartbeat errors - VM manages its own lifecycle
+		log.Printf("Failed to send heartbeat (non-critical): %v", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("Heartbeat returned status %d", resp.StatusCode)
+		log.Printf("Heartbeat returned status %d (non-critical)", resp.StatusCode)
 		return
 	}
 
-	// Check for shutdown action in response
+	// The control plane may suggest actions, but the VM decides autonomously
+	// We can still respect immediate shutdown requests from the control plane
 	var response struct {
 		Action string `json:"action"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&response); err == nil {
 		if response.Action == "shutdown" {
-			log.Println("Shutdown requested by control plane")
+			// Control plane can request immediate shutdown (e.g., user clicked "stop")
+			log.Println("Immediate shutdown requested by control plane")
 			select {
 			case <-d.shutdownCh:
 				// Already closed
