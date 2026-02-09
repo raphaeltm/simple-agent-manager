@@ -616,6 +616,127 @@ workspacesRoutes.post('/:id/heartbeat', async (c) => {
 });
 
 /**
+ * POST /api/workspaces/:id/request-shutdown - VM requests its own deletion
+ * Internal endpoint called by VM Agent when idle timeout is reached.
+ * Requires callback JWT auth. This allows VMs to clean themselves up
+ * without having direct access to Hetzner credentials.
+ */
+workspacesRoutes.post('/:id/request-shutdown', async (c) => {
+  const workspaceId = c.req.param('id');
+
+  // Validate callback token from Authorization header
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    throw errors.unauthorized('Missing or invalid Authorization header');
+  }
+
+  const token = authHeader.slice(7);
+  try {
+    const payload = await verifyCallbackToken(token, c.env);
+    if (payload.workspace !== workspaceId) {
+      throw errors.forbidden('Token workspace mismatch');
+    }
+  } catch (err) {
+    throw errors.unauthorized(err instanceof Error ? err.message : 'Invalid callback token');
+  }
+
+  const body = await c.req.json<{ reason: string }>();
+  const reason = body.reason || 'idle_timeout';
+
+  const db = drizzle(c.env.DATABASE, { schema });
+  const now = new Date().toISOString();
+
+  // Get workspace
+  const workspaces = await db
+    .select()
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+
+  const workspace = workspaces[0];
+  if (!workspace) {
+    throw errors.notFound('Workspace');
+  }
+
+  if (workspace.status !== 'running') {
+    // Already stopping or stopped
+    return c.json({ status: workspace.status });
+  }
+
+  // Update status to stopping
+  await db
+    .update(schema.workspaces)
+    .set({
+      status: 'stopping',
+      updatedAt: now,
+      // Record the reason for shutdown in lastActivityAt for now
+      // (Could add a separate field in the future)
+    })
+    .where(eq(schema.workspaces.id, workspaceId));
+
+  // Get user's Hetzner credentials
+  const creds = await db
+    .select()
+    .from(schema.credentials)
+    .where(
+      and(
+        eq(schema.credentials.userId, workspace.userId),
+        eq(schema.credentials.provider, 'hetzner')
+      )
+    )
+    .limit(1);
+
+  const cred = creds[0];
+  if (cred && workspace.hetznerServerId) {
+    const hetznerToken = await decrypt(cred.encryptedToken, cred.iv, c.env.ENCRYPTION_KEY);
+
+    // Delete server and clean up DNS asynchronously
+    c.executionCtx.waitUntil(
+      (async () => {
+        try {
+          console.log(`VM ${workspaceId} requested self-deletion due to: ${reason}`);
+
+          // Delete Hetzner server
+          await deleteServer(hetznerToken, workspace.hetznerServerId!);
+
+          // Clean up DNS records
+          if (workspace.dnsRecordId) {
+            await deleteDNSRecord(workspace.dnsRecordId, c.env);
+          }
+          await cleanupWorkspaceDNSRecords(workspaceId, c.env);
+
+          // Update status to stopped
+          await db
+            .update(schema.workspaces)
+            .set({
+              status: 'stopped',
+              hetznerServerId: null,
+              vmIp: null,
+              dnsRecordId: null,
+              updatedAt: new Date().toISOString(),
+            })
+            .where(eq(schema.workspaces.id, workspaceId));
+
+          console.log(`Successfully deleted idle VM ${workspaceId}`);
+        } catch (err) {
+          console.error('Failed to delete VM on idle shutdown:', err);
+          await db
+            .update(schema.workspaces)
+            .set({
+              status: 'error',
+              errorMessage: err instanceof Error ? err.message : 'Failed to delete VM',
+              updatedAt: new Date().toISOString(),
+            })
+            .where(eq(schema.workspaces.id, workspaceId));
+        }
+      })()
+    );
+  }
+
+  return c.json({ status: 'stopping', reason });
+});
+
+/**
  * POST /api/workspaces/:id/agent-key - Fetch a decrypted agent API key
  * Internal endpoint called by VM Agent. Requires callback JWT auth.
  * The control plane decrypts the key (it holds ENCRYPTION_KEY) and returns it

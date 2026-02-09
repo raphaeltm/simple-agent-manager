@@ -2,8 +2,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -52,13 +55,15 @@ func main() {
 	}()
 
 	// Wait for shutdown signal, idle timeout, or error
+	var idleShutdown bool
 	select {
 	case err := <-errCh:
 		log.Fatalf("Server error: %v", err)
 	case sig := <-sigCh:
 		log.Printf("Received signal %v, shutting down...", sig)
 	case <-srv.GetIdleShutdownChannel():
-		log.Println("Idle timeout reached, shutting down...")
+		log.Println("Idle timeout reached, requesting VM deletion...")
+		idleShutdown = true
 	}
 
 	// Graceful shutdown
@@ -67,6 +72,47 @@ func main() {
 
 	if err := srv.Stop(ctx); err != nil {
 		log.Printf("Error during shutdown: %v", err)
+	}
+
+	// If this was an idle shutdown, request deletion from control plane
+	// This ensures proper cleanup of Hetzner resources and DNS records
+	if idleShutdown && cfg.ControlPlaneURL != "" && cfg.WorkspaceID != "" && cfg.CallbackToken != "" {
+		log.Println("Requesting VM deletion from control plane due to idle timeout...")
+
+		payload := map[string]interface{}{
+			"reason": "idle_timeout",
+		}
+
+		jsonData, err := json.Marshal(payload)
+		if err != nil {
+			log.Printf("Failed to marshal shutdown request: %v", err)
+		} else {
+			url := cfg.ControlPlaneURL + "/api/workspaces/" + cfg.WorkspaceID + "/request-shutdown"
+			req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+			if err != nil {
+				log.Printf("Failed to create shutdown request: %v", err)
+			} else {
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Authorization", "Bearer "+cfg.CallbackToken)
+
+				client := &http.Client{Timeout: 10 * time.Second}
+				resp, err := client.Do(req)
+				if err != nil {
+					log.Printf("Failed to send shutdown request: %v", err)
+				} else {
+					defer resp.Body.Close()
+					if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusAccepted {
+						log.Println("Successfully requested VM deletion from control plane")
+					} else {
+						log.Printf("Shutdown request returned status %d", resp.StatusCode)
+					}
+				}
+			}
+		}
+
+		// Give the control plane time to process the deletion request
+		// This helps ensure logs are captured before the VM is deleted
+		time.Sleep(5 * time.Second)
 	}
 
 	log.Println("VM Agent stopped")
