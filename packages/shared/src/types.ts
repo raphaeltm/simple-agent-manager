@@ -165,7 +165,7 @@ export interface HeartbeatRequest {
   idleSeconds: number;
   idle: boolean;
   lastActivityAt: string;
-  hasActivity?: boolean; // If there was activity since last heartbeat
+  shutdownDeadline?: string;
 }
 
 export interface HeartbeatResponse {
