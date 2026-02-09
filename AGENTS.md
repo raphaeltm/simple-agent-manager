@@ -58,6 +58,15 @@ Build order matters: shared → providers → api/web
 
 ## Development Guidelines
 
+### Claude Subagents and Codex Skills
+
+- Claude Code subagents live in `.claude/agents/`.
+- Codex discovers repo-local skills in `.agents/skills/<skill-name>/SKILL.md`.
+- This repo exposes the Claude subagents to Codex via wrapper skills in `.agents/skills/`.
+- `SKILL.md` contains Codex-valid frontmatter and brief usage instructions.
+- `CLAUDE_AGENT.md` points to the source subagent definition in `.claude/agents/`.
+- Keep `.claude/agents/*/*.md` as the source of truth. Do not add Claude-specific frontmatter keys (e.g. `tools`, `model`) to `SKILL.md` files.
+
 ### No Legacy / Dead Code
 
 - This project is pre-production. Do not keep "legacy" code paths that are not used.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Go Specialist"
+  short_description: "Review VM agent Go code"
+  default_prompt: "Use $go-specialist to review packages/vm-agent for PTY/WebSocket/JWT/idle issues and Go idioms."

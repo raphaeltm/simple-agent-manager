@@ -1,0 +1,1 @@
+../../../.claude/agents/constitution-validator/CONSTITUTION_VALIDATOR.md

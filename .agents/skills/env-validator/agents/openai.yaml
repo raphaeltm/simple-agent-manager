@@ -1,0 +1,4 @@
+interface:
+  display_name: "Env Validator"
+  short_description: "Env var prefix consistency"
+  default_prompt: "Use $env-validator to check GH_* vs GITHUB_* naming and doc/code consistency; do not modify files."
