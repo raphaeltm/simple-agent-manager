@@ -34,6 +34,15 @@ export interface AgentDefinition {
   credentialHelpUrl: string;
   /** npm global install command */
   installCommand: string;
+  /** OAuth-specific metadata */
+  oauthSupport?: {
+    /** Environment variable name for OAuth token */
+    envVarName: string;
+    /** Help text for obtaining OAuth token */
+    setupInstructions: string;
+    /** URL for OAuth subscription info */
+    subscriptionUrl: string;
+  };
 }
 
 // =============================================================================
@@ -53,6 +62,11 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     supportsAcp: true,
     credentialHelpUrl: 'https://console.anthropic.com/settings/keys',
     installCommand: 'npm install -g @zed-industries/claude-code-acp',
+    oauthSupport: {
+      envVarName: 'CLAUDE_CODE_OAUTH_TOKEN',
+      setupInstructions: 'Generate a token using "claude setup-token" or "claude login" in your terminal',
+      subscriptionUrl: 'https://claude.ai/settings/plan',
+    },
   },
   {
     id: 'openai-codex',
@@ -104,11 +118,17 @@ export interface AgentInfo {
   credentialHelpUrl: string;
 }
 
+/** Credential kinds supported by agents */
+export type CredentialKind = 'api-key' | 'oauth-token';
+
 /** Agent credential info returned by GET /api/credentials/agent */
 export interface AgentCredentialInfo {
   agentType: AgentType;
   provider: AgentProvider;
+  credentialKind: CredentialKind;
+  isActive: boolean;
   maskedKey: string;
+  label?: string; // e.g., "Pro/Max Subscription" for OAuth
   createdAt: string;
   updatedAt: string;
 }
@@ -116,5 +136,13 @@ export interface AgentCredentialInfo {
 /** Request body for PUT /api/credentials/agent */
 export interface SaveAgentCredentialRequest {
   agentType: AgentType;
-  apiKey: string;
+  credentialKind: CredentialKind;
+  credential: string; // Can be API key or OAuth token
+  autoActivate?: boolean; // Default true
+}
+
+/** Response from /api/workspaces/:id/agent-key endpoint */
+export interface AgentKeyResponse {
+  apiKey: string; // Decrypted credential (API key or OAuth token)
+  credentialKind: CredentialKind; // Type for proper env var injection
 }

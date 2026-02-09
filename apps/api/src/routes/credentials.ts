@@ -7,8 +7,9 @@ import { requireAuth, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { encrypt, decrypt } from '../services/encryption';
 import { validateHetznerToken } from '../services/hetzner';
+import { CredentialValidator } from '../services/validation';
 import * as schema from '../db/schema';
-import type { CredentialResponse, AgentCredentialInfo, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
+import type { CredentialResponse, AgentCredentialInfo, SaveAgentCredentialRequest, CredentialKind, AgentType } from '@simple-agent-manager/shared';
 import { isValidAgentType, getAgentDefinition } from '@simple-agent-manager/shared';
 
 const credentialsRoutes = new Hono<{ Bindings: Env }>();
@@ -165,7 +166,7 @@ credentialsRoutes.delete('/:provider', async (c) => {
 // =============================================================================
 
 /**
- * GET /api/credentials/agent - List agent API key credentials (masked)
+ * GET /api/credentials/agent - List agent API key and OAuth credentials (masked)
  */
 credentialsRoutes.get('/agent', async (c) => {
   const userId = getUserId(c);
@@ -175,6 +176,8 @@ credentialsRoutes.get('/agent', async (c) => {
     .select({
       agentType: schema.credentials.agentType,
       provider: schema.credentials.provider,
+      credentialKind: schema.credentials.credentialKind,
+      isActive: schema.credentials.isActive,
       encryptedToken: schema.credentials.encryptedToken,
       iv: schema.credentials.iv,
       createdAt: schema.credentials.createdAt,
@@ -196,10 +199,22 @@ credentialsRoutes.get('/agent', async (c) => {
         const plaintext = await decrypt(cred.encryptedToken, cred.iv, c.env.ENCRYPTION_KEY);
         const maskedKey = `...${plaintext.slice(-4)}`;
 
+        // Determine label based on credential kind
+        let label: string | undefined;
+        if (cred.credentialKind === 'oauth-token' && cred.agentType) {
+          const agentDef = getAgentDefinition(cred.agentType as AgentType);
+          if (agentDef?.id === 'claude-code') {
+            label = 'Pro/Max Subscription';
+          }
+        }
+
         return {
           agentType: cred.agentType as AgentCredentialInfo['agentType'],
           provider: cred.provider as AgentCredentialInfo['provider'],
+          credentialKind: cred.credentialKind as CredentialKind,
+          isActive: cred.isActive,
           maskedKey,
+          label,
           createdAt: cred.createdAt,
           updatedAt: cred.updatedAt,
         };
@@ -210,7 +225,7 @@ credentialsRoutes.get('/agent', async (c) => {
 });
 
 /**
- * PUT /api/credentials/agent - Save or update an agent API key
+ * PUT /api/credentials/agent - Save or update an agent API key or OAuth token
  */
 credentialsRoutes.put('/agent', async (c) => {
   const userId = getUserId(c);
@@ -218,8 +233,12 @@ credentialsRoutes.put('/agent', async (c) => {
 
   const body = await c.req.json<SaveAgentCredentialRequest>();
 
-  if (!body.agentType || !body.apiKey) {
-    throw errors.badRequest('agentType and apiKey are required');
+  const credential = body.credential;
+  const credentialKind = body.credentialKind || 'api-key';
+  const autoActivate = body.autoActivate !== false; // Default true
+
+  if (!body.agentType || !credential) {
+    throw errors.badRequest('agentType and credential are required');
   }
 
   if (!isValidAgentType(body.agentType)) {
@@ -231,10 +250,21 @@ credentialsRoutes.put('/agent', async (c) => {
     throw errors.badRequest('Unknown agent type');
   }
 
-  // Encrypt the API key
-  const { ciphertext, iv } = await encrypt(body.apiKey, c.env.ENCRYPTION_KEY);
+  // Validate credential format
+  const validation = CredentialValidator.validateCredential(credential, credentialKind);
+  if (!validation.valid) {
+    throw errors.badRequest(validation.error || 'Invalid credential format');
+  }
 
-  // Check if credential already exists
+  // Check if OAuth is supported for this agent
+  if (credentialKind === 'oauth-token' && !agentDef.oauthSupport) {
+    throw errors.badRequest(`OAuth tokens are not supported for ${agentDef.name}`);
+  }
+
+  // Encrypt the credential
+  const { ciphertext, iv } = await encrypt(credential, c.env.ENCRYPTION_KEY);
+
+  // Check if a credential of this type already exists
   const existing = await db
     .select()
     .from(schema.credentials)
@@ -242,12 +272,27 @@ credentialsRoutes.put('/agent', async (c) => {
       and(
         eq(schema.credentials.userId, userId),
         eq(schema.credentials.credentialType, 'agent-api-key'),
-        eq(schema.credentials.agentType, body.agentType)
+        eq(schema.credentials.agentType, body.agentType),
+        eq(schema.credentials.credentialKind, credentialKind)
       )
     )
     .limit(1);
 
   const now = new Date().toISOString();
+
+  // If auto-activating, deactivate other credentials for this agent
+  if (autoActivate) {
+    await db
+      .update(schema.credentials)
+      .set({ isActive: false })
+      .where(
+        and(
+          eq(schema.credentials.userId, userId),
+          eq(schema.credentials.credentialType, 'agent-api-key'),
+          eq(schema.credentials.agentType, body.agentType)
+        )
+      );
+  }
 
   const existingCred = existing[0];
   if (existingCred) {
@@ -257,15 +302,19 @@ credentialsRoutes.put('/agent', async (c) => {
       .set({
         encryptedToken: ciphertext,
         iv,
+        isActive: autoActivate,
         updatedAt: now,
       })
       .where(eq(schema.credentials.id, existingCred.id));
 
-    const maskedKey = `...${body.apiKey.slice(-4)}`;
+    const maskedKey = `...${credential.slice(-4)}`;
     const response: AgentCredentialInfo = {
       agentType: body.agentType,
       provider: agentDef.provider,
+      credentialKind,
+      isActive: autoActivate,
       maskedKey,
+      label: credentialKind === 'oauth-token' ? 'Pro/Max Subscription' : undefined,
       createdAt: existingCred.createdAt,
       updatedAt: now,
     };
@@ -281,17 +330,22 @@ credentialsRoutes.put('/agent', async (c) => {
     provider: agentDef.provider,
     credentialType: 'agent-api-key',
     agentType: body.agentType,
+    credentialKind,
+    isActive: autoActivate,
     encryptedToken: ciphertext,
     iv,
     createdAt: now,
     updatedAt: now,
   });
 
-  const maskedKey = `...${body.apiKey.slice(-4)}`;
+  const maskedKey = `...${credential.slice(-4)}`;
   const response: AgentCredentialInfo = {
     agentType: body.agentType,
     provider: agentDef.provider,
+    credentialKind,
+    isActive: autoActivate,
     maskedKey,
+    label: credentialKind === 'oauth-token' ? 'Pro/Max Subscription' : undefined,
     createdAt: now,
     updatedAt: now,
   };
@@ -330,14 +384,15 @@ credentialsRoutes.delete('/agent/:agentType', async (c) => {
 });
 
 /**
- * Helper function to get a decrypted agent API key for internal use.
+ * Helper function to get a decrypted agent credential for internal use.
+ * Returns the active credential (API key or OAuth token) and its type.
  */
 export async function getDecryptedAgentKey(
   db: ReturnType<typeof drizzle>,
   userId: string,
   agentType: string,
   encryptionKey: string
-): Promise<string | null> {
+): Promise<{ credential: string; credentialKind: CredentialKind } | null> {
   const creds = await db
     .select()
     .from(schema.credentials)
@@ -345,7 +400,8 @@ export async function getDecryptedAgentKey(
       and(
         eq(schema.credentials.userId, userId),
         eq(schema.credentials.credentialType, 'agent-api-key'),
-        eq(schema.credentials.agentType, agentType)
+        eq(schema.credentials.agentType, agentType),
+        eq(schema.credentials.isActive, true)
       )
     )
     .limit(1);
@@ -355,7 +411,11 @@ export async function getDecryptedAgentKey(
     return null;
   }
 
-  return decrypt(foundCred.encryptedToken, foundCred.iv, encryptionKey);
+  const credential = await decrypt(foundCred.encryptedToken, foundCred.iv, encryptionKey);
+  return {
+    credential,
+    credentialKind: foundCred.credentialKind as CredentialKind,
+  };
 }
 
 /**

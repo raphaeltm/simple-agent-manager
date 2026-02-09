@@ -793,19 +793,22 @@ workspacesRoutes.post('/:id/agent-key', async (c) => {
     throw errors.notFound('Workspace');
   }
 
-  // Decrypt the agent API key for the workspace owner
-  const apiKey = await getDecryptedAgentKey(
+  // Decrypt the agent credential for the workspace owner
+  const credentialData = await getDecryptedAgentKey(
     db,
     ws.userId,
     body.agentType,
     c.env.ENCRYPTION_KEY
   );
 
-  if (!apiKey) {
+  if (!credentialData) {
     throw errors.notFound('Agent credential');
   }
 
-  return c.json({ apiKey });
+  return c.json({
+    apiKey: credentialData.credential,
+    credentialKind: credentialData.credentialKind
+  });
 });
 
 /**

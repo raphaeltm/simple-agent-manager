@@ -1,22 +1,32 @@
 import { useState } from 'react';
 import { Button, Input, Alert, StatusBadge } from '@simple-agent-manager/ui';
-import type { AgentInfo, AgentCredentialInfo, AgentType } from '@simple-agent-manager/shared';
+import type { AgentInfo, AgentCredentialInfo, AgentType, CredentialKind, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
+import { getAgentDefinition } from '@simple-agent-manager/shared';
 
 interface AgentKeyCardProps {
   agent: AgentInfo;
-  credential?: AgentCredentialInfo | null;
-  onSave: (agentType: AgentType, apiKey: string) => Promise<void>;
-  onDelete: (agentType: AgentType) => Promise<void>;
+  credentials?: AgentCredentialInfo[] | null; // Now an array for multiple credential types
+  onSave: (request: SaveAgentCredentialRequest) => Promise<void>;
+  onDelete: (agentType: AgentType, credentialKind: CredentialKind) => Promise<void>;
 }
 
 /**
- * Card for managing a single agent's API key.
+ * Card for managing a single agent's credentials (API key and/or OAuth token).
  */
-export function AgentKeyCard({ agent, credential, onSave, onDelete }: AgentKeyCardProps) {
-  const [apiKey, setApiKey] = useState('');
+export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyCardProps) {
+  const [credential, setCredential] = useState('');
+  const [credentialKind, setCredentialKind] = useState<CredentialKind>('api-key');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+
+  // Get agent definition for OAuth support check
+  const agentDef = getAgentDefinition(agent.id);
+  const supportsOAuth = !!agentDef?.oauthSupport;
+
+  // Find active credential
+  const activeCredential = credentials?.find(c => c.isActive);
+  const hasAnyCredential = (credentials?.length ?? 0) > 0;
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,18 +34,24 @@ export function AgentKeyCard({ agent, credential, onSave, onDelete }: AgentKeyCa
     setError(null);
 
     try {
-      await onSave(agent.id, apiKey);
-      setApiKey('');
+      await onSave({
+        agentType: agent.id,
+        credentialKind,
+        credential,
+        autoActivate: true,
+      });
+      setCredential('');
       setShowForm(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save API key');
+      setError(err instanceof Error ? err.message : 'Failed to save credential');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDelete = async () => {
-    if (!confirm(`Remove the ${agent.name} API key? You won't be able to use this agent until you add a new key.`)) {
+  const handleDelete = async (kind: CredentialKind) => {
+    const typeLabel = kind === 'oauth-token' ? 'OAuth token' : 'API key';
+    if (!confirm(`Remove the ${agent.name} ${typeLabel}? You won't be able to use this agent until you add a new credential.`)) {
       return;
     }
 
@@ -43,9 +59,9 @@ export function AgentKeyCard({ agent, credential, onSave, onDelete }: AgentKeyCa
     setError(null);
 
     try {
-      await onDelete(agent.id);
+      await onDelete(agent.id, kind);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove API key');
+      setError(err instanceof Error ? err.message : `Failed to remove ${typeLabel}`);
     } finally {
       setLoading(false);
     }
@@ -70,10 +86,17 @@ export function AgentKeyCard({ agent, credential, onSave, onDelete }: AgentKeyCa
           <h3 style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>{agent.name}</h3>
           <p style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>{agent.description}</p>
         </div>
-        <StatusBadge status={credential ? 'connected' : 'disconnected'} label={credential ? 'Connected' : 'Not Configured'} />
+        <StatusBadge
+          status={hasAnyCredential ? 'connected' : 'disconnected'}
+          label={
+            hasAnyCredential
+              ? activeCredential?.label || (activeCredential?.credentialKind === 'oauth-token' ? 'Connected (OAuth)' : 'Connected')
+              : 'Not Configured'
+          }
+        />
       </div>
 
-      {credential && !showForm && (
+      {activeCredential && !showForm && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-3)' }}>
           <div style={{
             display: 'flex',
@@ -83,12 +106,20 @@ export function AgentKeyCard({ agent, credential, onSave, onDelete }: AgentKeyCa
             backgroundColor: 'var(--sam-color-bg-inset)',
             borderRadius: 'var(--sam-radius-sm)',
           }}>
-            <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)', fontFamily: 'monospace' }}>{credential.maskedKey}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-1)' }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+                {activeCredential.credentialKind === 'oauth-token' ? 'OAuth Token' : 'API Key'}
+                {activeCredential.label && ` (${activeCredential.label})`}
+              </span>
+              <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)', fontFamily: 'monospace' }}>
+                {activeCredential.maskedKey}
+              </span>
+            </div>
             <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
               <button onClick={() => setShowForm(true)} style={{ ...actionBtnStyle, color: 'var(--sam-color-accent-primary)' }}>
                 Update
               </button>
-              <button onClick={handleDelete} disabled={loading} style={{ ...actionBtnStyle, color: 'var(--sam-color-danger)', opacity: loading ? 0.5 : 1 }}>
+              <button onClick={() => handleDelete(activeCredential.credentialKind)} disabled={loading} style={{ ...actionBtnStyle, color: 'var(--sam-color-danger)', opacity: loading ? 0.5 : 1 }}>
                 {loading ? 'Removing...' : 'Remove'}
               </button>
             </div>
@@ -97,32 +128,82 @@ export function AgentKeyCard({ agent, credential, onSave, onDelete }: AgentKeyCa
         </div>
       )}
 
-      {(!credential || showForm) && (
+      {(!hasAnyCredential || showForm) && (
         <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-3)' }}>
+          {supportsOAuth && agent.id === 'claude-code' && (
+            <div style={{ display: 'flex', gap: 'var(--sam-space-2)', marginBottom: 'var(--sam-space-2)' }}>
+              <button
+                type="button"
+                onClick={() => setCredentialKind('api-key')}
+                style={{
+                  padding: '8px 12px',
+                  border: '1px solid var(--sam-color-border-default)',
+                  borderRadius: 'var(--sam-radius-sm)',
+                  backgroundColor: credentialKind === 'api-key' ? 'var(--sam-color-accent-primary)' : 'transparent',
+                  color: credentialKind === 'api-key' ? 'white' : 'var(--sam-color-fg-primary)',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                }}
+              >
+                API Key
+              </button>
+              <button
+                type="button"
+                onClick={() => setCredentialKind('oauth-token')}
+                style={{
+                  padding: '8px 12px',
+                  border: '1px solid var(--sam-color-border-default)',
+                  borderRadius: 'var(--sam-radius-sm)',
+                  backgroundColor: credentialKind === 'oauth-token' ? 'var(--sam-color-accent-primary)' : 'transparent',
+                  color: credentialKind === 'oauth-token' ? 'white' : 'var(--sam-color-fg-primary)',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                }}
+              >
+                OAuth Token (Pro/Max)
+              </button>
+            </div>
+          )}
+
           <div>
             <Input
               type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder={`Enter your ${agent.name} API key`}
+              value={credential}
+              onChange={(e) => setCredential(e.target.value)}
+              placeholder={
+                credentialKind === 'oauth-token'
+                  ? 'Paste your OAuth token from "claude setup-token"'
+                  : `Enter your ${agent.name} API key`
+              }
               required
             />
             <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
-              Get your API key from{' '}
-              <a href={agent.credentialHelpUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--sam-color-accent-primary)' }}>
-                {agent.name} Console
-              </a>
+              {credentialKind === 'oauth-token' && agentDef?.oauthSupport ? (
+                <>
+                  {agentDef.oauthSupport.setupInstructions}{' '}
+                  <a href={agentDef.oauthSupport.subscriptionUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--sam-color-accent-primary)' }}>
+                    View subscription
+                  </a>
+                </>
+              ) : (
+                <>
+                  Get your API key from{' '}
+                  <a href={agent.credentialHelpUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--sam-color-accent-primary)' }}>
+                    {agent.name} Console
+                  </a>
+                </>
+              )}
             </p>
           </div>
 
           {error && <Alert variant="error">{error}</Alert>}
 
           <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
-            <Button type="submit" disabled={loading || !apiKey} loading={loading} size="sm">
-              {credential ? 'Update Key' : 'Save Key'}
+            <Button type="submit" disabled={loading || !credential} loading={loading} size="sm">
+              {hasAnyCredential ? 'Update Credential' : 'Save Credential'}
             </Button>
             {showForm && (
-              <Button type="button" variant="secondary" size="sm" onClick={() => { setShowForm(false); setError(null); setApiKey(''); }}>
+              <Button type="button" variant="secondary" size="sm" onClick={() => { setShowForm(false); setError(null); setCredential(''); }}>
                 Cancel
               </Button>
             )}

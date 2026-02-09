@@ -1,0 +1,332 @@
+openapi: 3.0.0
+info:
+  title: Agent OAuth & Subscription Authentication API
+  version: 1.0.0
+  description: API contract for dual credential support (API key + OAuth token)
+
+paths:
+  /api/credentials/agent:
+    get:
+      summary: List agent credentials
+      description: Returns all agent credentials for the authenticated user (masked)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of agent credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credentials:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AgentCredentialInfo'
+
+    put:
+      summary: Save or update agent credential
+      description: Creates new or updates existing agent credential, auto-activates new credentials
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveAgentCredentialRequest'
+      responses:
+        '200':
+          description: Credential saved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentCredentialInfo'
+        '201':
+          description: New credential created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentCredentialInfo'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/credentials/agent/{agentType}/toggle:
+    post:
+      summary: Toggle active credential
+      description: Switch which credential type is active for an agent
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agentType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [claude-code, openai-codex, google-gemini]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - credentialKind
+              properties:
+                credentialKind:
+                  type: string
+                  enum: [api-key, oauth-token]
+                  description: Which credential type to make active
+      responses:
+        '200':
+          description: Active credential toggled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  activeCredential:
+                    $ref: '#/components/schemas/AgentCredentialInfo'
+        '404':
+          description: Credential not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/credentials/agent/{agentType}/{credentialKind}:
+    delete:
+      summary: Remove specific agent credential
+      description: Delete a specific credential type for an agent
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agentType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [claude-code, openai-codex, google-gemini]
+        - name: credentialKind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [api-key, oauth-token]
+      responses:
+        '200':
+          description: Credential removed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  autoActivated:
+                    type: string
+                    nullable: true
+                    description: ID of credential that was auto-activated after deletion
+        '404':
+          description: Credential not found
+
+  /api/workspaces/{id}/agent-key:
+    post:
+      summary: Get decrypted agent credential for workspace
+      description: VM Agent endpoint to retrieve active credential for agent authentication
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - agentType
+              properties:
+                agentType:
+                  type: string
+                  enum: [claude-code, openai-codex, google-gemini]
+      responses:
+        '200':
+          description: Active credential returned
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - apiKey
+                  - credentialKind
+                properties:
+                  apiKey:
+                    type: string
+                    description: Decrypted credential value (API key or OAuth token)
+                  credentialKind:
+                    type: string
+                    enum: [api-key, oauth-token]
+                    description: Type of credential for proper env var injection
+        '404':
+          description: No active credential found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/agents:
+    get:
+      summary: Get agent catalog with OAuth support metadata
+      description: Returns all supported agents with their authentication methods
+      responses:
+        '200':
+          description: Agent catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AgentInfo'
+
+components:
+  schemas:
+    AgentCredentialInfo:
+      type: object
+      required:
+        - agentType
+        - provider
+        - credentialKind
+        - maskedKey
+        - isActive
+        - createdAt
+        - updatedAt
+      properties:
+        agentType:
+          type: string
+          enum: [claude-code, openai-codex, google-gemini]
+        provider:
+          type: string
+          enum: [anthropic, openai, google]
+        credentialKind:
+          type: string
+          enum: [api-key, oauth-token]
+          description: Type of credential (API key vs OAuth token)
+        maskedKey:
+          type: string
+          example: "...7x9Q"
+          description: Last 4 characters of the credential
+        isActive:
+          type: boolean
+          description: Whether this credential is currently active
+        label:
+          type: string
+          example: "Pro/Max Subscription"
+          description: Human-readable label for the credential type
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SaveAgentCredentialRequest:
+      type: object
+      required:
+        - agentType
+        - credentialKind
+        - credential
+      properties:
+        agentType:
+          type: string
+          enum: [claude-code, openai-codex, google-gemini]
+        credentialKind:
+          type: string
+          enum: [api-key, oauth-token]
+          description: Type of credential being saved
+        credential:
+          type: string
+          description: The API key or OAuth token value
+        autoActivate:
+          type: boolean
+          default: true
+          description: Whether to automatically make this the active credential
+
+    AgentInfo:
+      type: object
+      required:
+        - id
+        - name
+        - description
+        - supportsAcp
+        - configured
+        - supportedAuthMethods
+      properties:
+        id:
+          type: string
+          enum: [claude-code, openai-codex, google-gemini]
+        name:
+          type: string
+          example: "Claude Code"
+        description:
+          type: string
+          example: "Anthropic's AI coding agent"
+        supportsAcp:
+          type: boolean
+        configured:
+          type: boolean
+          description: Whether user has at least one active credential configured
+        supportedAuthMethods:
+          type: array
+          items:
+            type: object
+            properties:
+              kind:
+                type: string
+                enum: [api-key, oauth-token]
+              label:
+                type: string
+                example: "API Key"
+              helpText:
+                type: string
+                example: "Get from console.anthropic.com"
+              helpUrl:
+                type: string
+                format: uri
+        activeCredentialKind:
+          type: string
+          enum: [api-key, oauth-token]
+          nullable: true
+          description: Which credential type is currently active (if any)
+
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          example: "INVALID_REQUEST"
+        message:
+          type: string
+          example: "credentialKind must be either api-key or oauth-token"
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

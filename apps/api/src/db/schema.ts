@@ -95,13 +95,19 @@ export const credentials = sqliteTable('credentials', {
   provider: text('provider').notNull(),
   credentialType: text('credential_type').notNull().default('cloud-provider'),
   agentType: text('agent_type'),
+  credentialKind: text('credential_kind').notNull().default('api-key'), // 'api-key' | 'oauth-token'
+  isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
   encryptedToken: text('encrypted_token').notNull(),
   iv: text('iv').notNull(),
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => ({
-  userCredentialTypeAgent: uniqueIndex('idx_credentials_user_type_agent')
-    .on(table.userId, table.credentialType, table.agentType),
+  userAgentKind: uniqueIndex('idx_credentials_user_agent_kind')
+    .on(table.userId, table.agentType, table.credentialKind)
+    .where(sql`credential_type = 'agent-api-key'`),
+  activeCredential: index('idx_credentials_active')
+    .on(table.userId, table.agentType, table.isActive)
+    .where(sql`credential_type = 'agent-api-key' AND is_active = 1`),
 }));
 
 // =============================================================================

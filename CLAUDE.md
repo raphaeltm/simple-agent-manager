@@ -197,6 +197,8 @@ Run `pnpm typecheck` from root to see all issues.
 - Cloudflare R2 (Pulumi state), D1 (app data), KV (sessions) (005-automated-deployment)
 - TypeScript 5.x + React 18 + Vite 5 + shadcn-compatible open-code component workflow, Radix UI primitives, Tailwind-style design tokens/utilities, existing `lucide-react` icons (009-ui-system-standards)
 - Git-tracked specification artifacts and shared package source files (no new runtime database storage) (009-ui-system-standards)
+- TypeScript 5.x (API, Web), Go 1.22 (VM Agent) + Hono (API), React 18 (Web UI), Drizzle ORM (database), creack/pty + gorilla/websocket (VM Agent) (013-agent-oauth-support)
+- Cloudflare D1 (credentials table with new schema), AES-256-GCM encryption (013-agent-oauth-support)
 
 ## Recent Changes
 - 010-docs-review: Added Markdown (CommonMark) with GitHub Flavored Markdown extensions + None (documentation-only review)
