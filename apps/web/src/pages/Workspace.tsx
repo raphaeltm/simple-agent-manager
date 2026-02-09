@@ -481,7 +481,7 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
         return <span style={{ color: '#f87171', marginRight: 8, fontSize: '0.875rem' }}>&#10007;</span>;
       case 'started':
       default:
-        return <Spinner size="sm" style={{ marginRight: 8 }} />;
+        return <span style={{ marginRight: 8, display: 'inline-flex' }}><Spinner size="sm" /></span>;
     }
   };
 
