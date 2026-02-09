@@ -342,7 +342,14 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) error {
 	}
 
 	log.Printf("Starting devcontainer for workspace at %s", cfg.WorkspaceDir)
-	cmd := exec.CommandContext(ctx, "devcontainer", "up", "--workspace-folder", cfg.WorkspaceDir)
+
+	args := []string{"up", "--workspace-folder", cfg.WorkspaceDir}
+	if cfg.AdditionalFeatures != "" {
+		log.Printf("Injecting additional devcontainer features: %s", cfg.AdditionalFeatures)
+		args = append(args, "--additional-features", cfg.AdditionalFeatures)
+	}
+
+	cmd := exec.CommandContext(ctx, "devcontainer", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("devcontainer up failed: %w: %s", err, strings.TrimSpace(string(output)))

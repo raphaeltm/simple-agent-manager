@@ -84,6 +84,33 @@ func TestLoadDerivesWorkspaceAndContainerDefaults(t *testing.T) {
 	}
 }
 
+func TestAdditionalFeaturesDefault(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.AdditionalFeatures != DefaultAdditionalFeatures {
+		t.Fatalf("AdditionalFeatures=%q, want default %q", cfg.AdditionalFeatures, DefaultAdditionalFeatures)
+	}
+}
+
+func TestAdditionalFeaturesOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("ADDITIONAL_FEATURES", `{"custom/feature:1":{}}`)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.AdditionalFeatures != `{"custom/feature:1":{}}` {
+		t.Fatalf("AdditionalFeatures=%q, want custom override", cfg.AdditionalFeatures)
+	}
+}
+
 func TestLoadDefaultsContainerUserEmpty(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("WORKSPACE_ID", "ws-123")

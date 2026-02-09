@@ -8,6 +8,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -120,6 +122,13 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 		return
 	}
 
+	// Ensure the agent binary is installed in the container (fallback if --additional-features missed it)
+	if err := g.ensureAgentInstalled(ctx, agentType); err != nil {
+		log.Printf("Agent install check failed: %v", err)
+		g.sendAgentStatus(StatusError, agentType, err.Error())
+		return
+	}
+
 	// Start the agent process
 	if err := g.startAgent(ctx, agentType, apiKey); err != nil {
 		log.Printf("Agent start failed: %v", err)
@@ -128,6 +137,40 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 	}
 
 	g.sendAgentStatus(StatusReady, agentType, "")
+}
+
+// ensureAgentInstalled checks if the agent binary exists in the container.
+// If missing, it installs the agent on-demand via docker exec npm install.
+func (g *Gateway) ensureAgentInstalled(ctx context.Context, agentType string) error {
+	info := getAgentCommandInfo(agentType)
+	if info.installCmd == "" {
+		return nil // Unknown agent, skip install check
+	}
+
+	containerID, err := g.config.ContainerResolver()
+	if err != nil {
+		return fmt.Errorf("failed to discover devcontainer: %w", err)
+	}
+
+	// Check if the binary exists
+	checkCmd := exec.CommandContext(ctx, "docker", "exec", containerID, "which", info.command)
+	if err := checkCmd.Run(); err == nil {
+		return nil // Binary already installed
+	}
+
+	// Binary missing — install it
+	log.Printf("Agent binary %q not found in container, installing via: %s", info.command, info.installCmd)
+	g.sendAgentStatus(StatusStarting, agentType, fmt.Sprintf("Installing %s...", info.command))
+
+	installArgs := []string{"exec", containerID, "sh", "-c", info.installCmd}
+	installCmd := exec.CommandContext(ctx, "docker", installArgs...)
+	output, err := installCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to install %s: %w: %s", info.command, err, strings.TrimSpace(string(output)))
+	}
+
+	log.Printf("Agent %q installed successfully", info.command)
+	return nil
 }
 
 // startAgent spawns the agent process and sets up the ACP connection.
@@ -139,14 +182,14 @@ func (g *Gateway) startAgent(ctx context.Context, agentType, apiKey string) erro
 	}
 
 	// Look up agent command and args from well-known agent definitions
-	acpCommand, acpArgs, envVarName := getAgentCommandInfo(agentType)
+	info := getAgentCommandInfo(agentType)
 
 	process, err := StartProcess(ProcessConfig{
 		ContainerID:   containerID,
 		ContainerUser: g.config.ContainerUser,
-		AcpCommand:    acpCommand,
-		AcpArgs:       acpArgs,
-		EnvVars:       []string{fmt.Sprintf("%s=%s", envVarName, apiKey)},
+		AcpCommand:    info.command,
+		AcpArgs:       info.args,
+		EnvVars:       []string{fmt.Sprintf("%s=%s", info.envVarName, apiKey)},
 		WorkDir:       g.config.ContainerWorkDir,
 	})
 	if err != nil {
@@ -442,17 +485,25 @@ func (c *gatewayClient) WaitForTerminalExit(_ context.Context, _ acpsdk.WaitForT
 	return acpsdk.WaitForTerminalExitResponse{}, fmt.Errorf("WaitForTerminalExit not supported by gateway")
 }
 
-// getAgentCommandInfo returns the ACP command, args, and env var name for a given agent type.
+// agentCommandInfo holds the command, args, env var, and install command for an agent.
+type agentCommandInfo struct {
+	command    string
+	args       []string
+	envVarName string
+	installCmd string // npm install command to run if binary is missing
+}
+
+// getAgentCommandInfo returns the ACP command, args, env var name, and install command for a given agent type.
 // These match the agent catalog defined in packages/shared/src/agents.ts.
-func getAgentCommandInfo(agentType string) (command string, args []string, envVarName string) {
+func getAgentCommandInfo(agentType string) agentCommandInfo {
 	switch agentType {
 	case "claude-code":
-		return "claude-code-acp", nil, "ANTHROPIC_API_KEY"
+		return agentCommandInfo{"claude-code-acp", nil, "ANTHROPIC_API_KEY", "npm install -g @zed-industries/claude-code-acp"}
 	case "openai-codex":
-		return "codex-acp", nil, "OPENAI_API_KEY"
+		return agentCommandInfo{"codex-acp", nil, "OPENAI_API_KEY", "npm install -g @zed-industries/codex-acp"}
 	case "google-gemini":
-		return "gemini", []string{"--experimental-acp"}, "GEMINI_API_KEY"
+		return agentCommandInfo{"gemini", []string{"--experimental-acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli"}
 	default:
-		return agentType, nil, "API_KEY"
+		return agentCommandInfo{agentType, nil, "API_KEY", ""}
 	}
 }
