@@ -11,7 +11,9 @@ export type TerminalWsServerMessage =
   | { type: 'session_created'; sessionId?: string; data?: { sessionId: string; workingDirectory?: string; shell?: string } }
   | { type: 'session_closed'; sessionId?: string; data?: { sessionId: string; reason: string; exitCode?: number } }
   | { type: 'session_renamed'; sessionId?: string; data?: { sessionId: string; name: string } }
-  | { type: 'session_list'; data?: { sessions: Array<{ sessionId: string; name?: string; workingDirectory?: string; createdAt: string; lastActivityAt?: string }> } }
+  | { type: 'session_list'; data?: { sessions: Array<{ sessionId: string; name?: string; status?: string; workingDirectory?: string; createdAt: string; lastActivityAt?: string }> } }
+  | { type: 'session_reattached'; sessionId?: string; data?: { sessionId: string; workingDirectory?: string; shell?: string } }
+  | { type: 'scrollback'; sessionId?: string; data?: { data: string } }
   | { type: string; sessionId?: string; data?: unknown };
 
 export type TerminalWsClientMessage =
@@ -21,6 +23,8 @@ export type TerminalWsClientMessage =
   | { type: 'create_session'; data: { sessionId: string; rows: number; cols: number; name?: string } }
   | { type: 'close_session'; data: { sessionId: string } }
   | { type: 'rename_session'; data: { sessionId: string; name: string } }
+  | { type: 'list_sessions' }
+  | { type: 'reattach_session'; data: { sessionId: string; rows: number; cols: number } }
   | { type: string; sessionId?: string; data?: unknown };
 
 export function parseTerminalWsServerMessage(text: string): TerminalWsServerMessage | null {
@@ -122,5 +126,32 @@ export function isSessionClosedMessage(msg: TerminalWsServerMessage): msg is { t
 
 export function isErrorMessage(msg: TerminalWsServerMessage): msg is { type: 'error'; sessionId?: string; data?: unknown } {
   return msg.type === 'error';
+}
+
+export function isSessionReattachedMessage(msg: TerminalWsServerMessage): msg is { type: 'session_reattached'; sessionId?: string; data?: { sessionId: string; workingDirectory?: string; shell?: string } } {
+  return msg.type === 'session_reattached';
+}
+
+export function isScrollbackMessage(msg: TerminalWsServerMessage): msg is { type: 'scrollback'; sessionId?: string; data?: { data: string } } {
+  return msg.type === 'scrollback';
+}
+
+export function isSessionListMessage(msg: TerminalWsServerMessage): msg is { type: 'session_list'; data?: { sessions: Array<{ sessionId: string; name?: string; status?: string; workingDirectory?: string; createdAt: string; lastActivityAt?: string }> } } {
+  return msg.type === 'session_list';
+}
+
+/**
+ * New message encoders for session persistence
+ */
+
+export function encodeTerminalWsListSessions(): string {
+  return JSON.stringify({ type: 'list_sessions' });
+}
+
+export function encodeTerminalWsReattachSession(sessionId: string, rows: number, cols: number): string {
+  return JSON.stringify({
+    type: 'reattach_session',
+    data: { sessionId, rows, cols }
+  });
 }
 

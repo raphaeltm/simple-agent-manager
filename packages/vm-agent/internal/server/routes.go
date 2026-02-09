@@ -12,11 +12,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	deadline := s.idleDetector.GetDeadline()
 	
 	response := map[string]interface{}{
-		"status":           "healthy",
-		"workspaceId":      s.config.WorkspaceID,
-		"sessions":         s.ptyManager.SessionCount(),
-		"idle":             s.idleDetector.GetIdleTime().String(),
-		"shutdownDeadline": deadline.Format(http.TimeFormat),
+		"status":            "healthy",
+		"workspaceId":       s.config.WorkspaceID,
+		"sessions":          s.ptyManager.SessionCount(),
+		"orphanedSessions":  s.ptyManager.GetOrphanedSessionCount(),
+		"idle":              s.idleDetector.GetIdleTime().String(),
+		"shutdownDeadline":  deadline.Format(http.TimeFormat),
 	}
 	writeJSON(w, http.StatusOK, response)
 }

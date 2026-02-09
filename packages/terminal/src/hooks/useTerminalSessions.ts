@@ -8,6 +8,8 @@ import type {
 interface PersistedSession {
   name: string;
   order: number;
+  /** Server-assigned session ID for reconnection matching */
+  serverSessionId?: string;
 }
 
 interface PersistedState {
@@ -42,7 +44,7 @@ export function useTerminalSessions(
       const persisted: PersistedState = {
         sessions: Array.from(sessionsMap.values())
           .sort((a, b) => a.order - b.order)
-          .map((s) => ({ name: s.name, order: s.order })),
+          .map((s) => ({ name: s.name, order: s.order, serverSessionId: (s as any).serverSessionId })),
         counter: sessionCounter.current,
       };
       sessionStorage.setItem(persistenceKey, JSON.stringify(persisted));
@@ -311,6 +313,22 @@ export function useTerminalSessions(
     []
   );
 
+  /** Update server-assigned session ID for reconnection matching */
+  const updateServerSessionId = useCallback(
+    (sessionId: string, serverSessionId: string) => {
+      setSessions((prev) => {
+        const updated = new Map(prev);
+        const session = updated.get(sessionId);
+        if (session) {
+          (session as any).serverSessionId = serverSessionId;
+        }
+        persistSessions(updated);
+        return updated;
+      });
+    },
+    [persistSessions]
+  );
+
   /** Clear persisted state (e.g. when WS URL changes) */
   const clearPersistedSessions = useCallback(() => {
     if (!persistenceKey) return;
@@ -333,6 +351,7 @@ export function useTerminalSessions(
     canCreateSession: sessions.size < maxSessions,
     updateSessionStatus,
     updateSessionWorkingDirectory,
+    updateServerSessionId,
     getPersistedSessions,
     clearPersistedSessions,
   } as UseTerminalSessionsReturn;
