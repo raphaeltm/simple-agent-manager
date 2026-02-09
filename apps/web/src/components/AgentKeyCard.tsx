@@ -169,7 +169,7 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
             <Input
               type="password"
               value={credential}
-              onChange={(e) => setCredential(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCredential(e.target.value)}
               placeholder={
                 credentialKind === 'oauth-token'
                   ? 'Paste your OAuth token from "claude setup-token"'

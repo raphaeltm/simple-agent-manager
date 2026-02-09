@@ -45,17 +45,17 @@ Core functionality required before any user story implementation.
 
 ### UI Components
 
-- [ ] T012 [P] [US1] Add OAuth token input option to AgentKeyCard in apps/web/src/components/AgentKeyCard.tsx
-- [ ] T013 [P] [US1] Display credential type labels (API Key vs OAuth Token) in apps/web/src/components/AgentKeyCard.tsx
-- [ ] T014 [US1] Show active credential indicator when both types exist in apps/web/src/components/AgentKeyCard.tsx
-- [ ] T015 [P] [US1] Add OAuth help text with claude setup-token instructions in apps/web/src/components/AgentKeyCard.tsx
+- [x] T012 [P] [US1] Add OAuth token input option to AgentKeyCard in apps/web/src/components/AgentKeyCard.tsx
+- [x] T013 [P] [US1] Display credential type labels (API Key vs OAuth Token) in apps/web/src/components/AgentKeyCard.tsx
+- [x] T014 [US1] Show active credential indicator when both types exist in apps/web/src/components/AgentKeyCard.tsx
+- [x] T015 [P] [US1] Add OAuth help text with claude setup-token instructions in apps/web/src/components/AgentKeyCard.tsx
 
 ### VM Agent Updates
 
-- [ ] T016 [US1] Modify gateway.go to receive credentialKind from API in packages/vm-agent/internal/acp/gateway.go
-- [ ] T017 [US1] Update getAgentCommandInfo to return both env var names in packages/vm-agent/internal/acp/gateway.go
-- [ ] T018 [US1] Implement env var selection logic based on credentialKind in packages/vm-agent/internal/acp/gateway.go
-- [ ] T019 [US1] Update StartProcess to inject correct environment variable in packages/vm-agent/internal/acp/process.go
+- [x] T016 [US1] Modify gateway.go to receive credentialKind from API in packages/vm-agent/internal/acp/gateway.go
+- [x] T017 [US1] Update getAgentCommandInfo to return both env var names in packages/vm-agent/internal/acp/gateway.go
+- [x] T018 [US1] Implement env var selection logic based on credentialKind in packages/vm-agent/internal/acp/gateway.go
+- [x] T019 [US1] Update StartProcess to inject correct environment variable in packages/vm-agent/internal/acp/process.go
 
 ### Integration & Testing
 

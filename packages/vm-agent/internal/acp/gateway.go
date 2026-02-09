@@ -111,17 +111,17 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 	// Send starting status
 	g.sendAgentStatus(StatusStarting, agentType, "")
 
-	// Fetch API key from control plane
-	apiKey, err := g.fetchAgentKey(ctx, agentType)
+	// Fetch credential from control plane
+	cred, err := g.fetchAgentKey(ctx, agentType)
 	if err != nil {
-		errMsg := fmt.Sprintf("Failed to fetch API key for %s — check Settings", agentType)
-		log.Printf("Agent key fetch failed: %v", err)
+		errMsg := fmt.Sprintf("Failed to fetch credential for %s — check Settings", agentType)
+		log.Printf("Agent credential fetch failed: %v", err)
 		g.sendAgentStatus(StatusError, agentType, errMsg)
 		return
 	}
 
 	// Start the agent process
-	if err := g.startAgent(ctx, agentType, apiKey); err != nil {
+	if err := g.startAgent(ctx, agentType, cred); err != nil {
 		log.Printf("Agent start failed: %v", err)
 		g.sendAgentStatus(StatusError, agentType, err.Error())
 		return
@@ -131,7 +131,7 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 }
 
 // startAgent spawns the agent process and sets up the ACP connection.
-func (g *Gateway) startAgent(ctx context.Context, agentType, apiKey string) error {
+func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentCredential) error {
 	// Resolve container ID
 	containerID, err := g.config.ContainerResolver()
 	if err != nil {
@@ -139,14 +139,15 @@ func (g *Gateway) startAgent(ctx context.Context, agentType, apiKey string) erro
 	}
 
 	// Look up agent command and args from well-known agent definitions
-	acpCommand, acpArgs, envVarName := getAgentCommandInfo(agentType)
+	// Pass the credential kind to determine the correct environment variable
+	acpCommand, acpArgs, envVarName := getAgentCommandInfo(agentType, cred.credentialKind)
 
 	process, err := StartProcess(ProcessConfig{
 		ContainerID:   containerID,
 		ContainerUser: g.config.ContainerUser,
 		AcpCommand:    acpCommand,
 		AcpArgs:       acpArgs,
-		EnvVars:       []string{fmt.Sprintf("%s=%s", envVarName, apiKey)},
+		EnvVars:       []string{fmt.Sprintf("%s=%s", envVarName, cred.credential)},
 		WorkDir:       g.config.ContainerWorkDir,
 	})
 	if err != nil {
@@ -163,7 +164,7 @@ func (g *Gateway) startAgent(ctx context.Context, agentType, apiKey string) erro
 	go g.monitorStderr(process)
 
 	// Monitor process exit for crash detection
-	go g.monitorProcessExit(ctx, process, agentType, apiKey)
+	go g.monitorProcessExit(ctx, process, agentType, cred)
 
 	// Start forwarding agent stdout (NDJSON) to WebSocket
 	// Note: The ACP SDK's ClientSideConnection reads from stdout internally,
@@ -183,7 +184,7 @@ func (g *Gateway) monitorStderr(process *AgentProcess) {
 }
 
 // monitorProcessExit detects when the agent process crashes and attempts restart.
-func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess, agentType, apiKey string) {
+func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess, agentType string, cred *agentCredential) {
 	err := process.Wait()
 
 	g.mu.Lock()
@@ -197,13 +198,17 @@ func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess,
 		log.Printf("Agent process exited with error: %v", err)
 	}
 
-	// Detect rapid exit — likely an auth error (invalid/expired API key)
+	// Detect rapid exit — likely an auth error (invalid/expired credential)
 	uptime := time.Since(process.startTime)
 	if uptime < 5*time.Second && err != nil {
 		g.process = nil
 		g.acpConn = nil
 		g.mu.Unlock()
-		errMsg := fmt.Sprintf("API key for %s may be invalid or expired — update it in Settings", agentType)
+		credType := "API key"
+		if cred.credentialKind == "oauth-token" {
+			credType = "OAuth token"
+		}
+		errMsg := fmt.Sprintf("%s for %s may be invalid or expired — update it in Settings", credType, agentType)
 		g.sendAgentStatus(StatusError, agentType, errMsg)
 		return
 	}
@@ -229,7 +234,7 @@ func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess,
 	time.Sleep(time.Second)
 
 	g.mu.Lock()
-	if err := g.startAgent(ctx, agentType, apiKey); err != nil {
+	if err := g.startAgent(ctx, agentType, cred); err != nil {
 		g.mu.Unlock()
 		log.Printf("Agent restart failed: %v", err)
 		g.sendAgentStatus(StatusError, agentType, err.Error())
@@ -303,47 +308,62 @@ func (g *Gateway) cleanup() {
 	g.stopCurrentAgentLocked()
 }
 
-// fetchAgentKey retrieves the decrypted agent API key from the control plane.
-func (g *Gateway) fetchAgentKey(ctx context.Context, agentType string) (string, error) {
+// agentCredential holds the credential and its type returned from the control plane.
+type agentCredential struct {
+	credential     string
+	credentialKind string // "api-key" or "oauth-token"
+}
+
+// fetchAgentKey retrieves the decrypted agent credential from the control plane.
+func (g *Gateway) fetchAgentKey(ctx context.Context, agentType string) (*agentCredential, error) {
 	url := fmt.Sprintf("%s/api/workspaces/%s/agent-key", g.config.ControlPlaneURL, g.config.WorkspaceID)
 
 	body, err := json.Marshal(map[string]string{"agentType": agentType})
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, byteReader(body))
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+g.config.CallbackToken)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch agent key: %w", err)
+		return nil, fmt.Errorf("failed to fetch agent key: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return "", fmt.Errorf("no API key configured for %s", agentType)
+		return nil, fmt.Errorf("no credential configured for %s", agentType)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("control plane returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("control plane returned status %d", resp.StatusCode)
 	}
 
 	var result struct {
-		APIKey string `json:"apiKey"`
+		APIKey         string `json:"apiKey"`
+		CredentialKind string `json:"credentialKind"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	if result.APIKey == "" {
-		return "", fmt.Errorf("empty API key returned for %s", agentType)
+		return nil, fmt.Errorf("empty credential returned for %s", agentType)
 	}
 
-	return result.APIKey, nil
+	// Default to api-key for backward compatibility
+	if result.CredentialKind == "" {
+		result.CredentialKind = "api-key"
+	}
+
+	return &agentCredential{
+		credential:     result.APIKey,
+		credentialKind: result.CredentialKind,
+	}, nil
 }
 
 type byteReaderImpl struct {
@@ -442,11 +462,15 @@ func (c *gatewayClient) WaitForTerminalExit(_ context.Context, _ acpsdk.WaitForT
 	return acpsdk.WaitForTerminalExitResponse{}, fmt.Errorf("WaitForTerminalExit not supported by gateway")
 }
 
-// getAgentCommandInfo returns the ACP command, args, and env var name for a given agent type.
+// getAgentCommandInfo returns the ACP command, args, and env var name for a given agent type and credential kind.
 // These match the agent catalog defined in packages/shared/src/agents.ts.
-func getAgentCommandInfo(agentType string) (command string, args []string, envVarName string) {
+func getAgentCommandInfo(agentType string, credentialKind string) (command string, args []string, envVarName string) {
 	switch agentType {
 	case "claude-code":
+		if credentialKind == "oauth-token" {
+			// OAuth tokens use a different environment variable
+			return "claude-code-acp", nil, "CLAUDE_CODE_OAUTH_TOKEN"
+		}
 		return "claude-code-acp", nil, "ANTHROPIC_API_KEY"
 	case "openai-codex":
 		return "codex-acp", nil, "OPENAI_API_KEY"

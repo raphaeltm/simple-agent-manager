@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { AgentKeyCard } from './AgentKeyCard';
 import { listAgents, listAgentCredentials, saveAgentCredential, deleteAgentCredential } from '../lib/api';
 import { Alert, Spinner } from '@simple-agent-manager/ui';
-import type { AgentInfo, AgentCredentialInfo, AgentType } from '@simple-agent-manager/shared';
+import type { AgentInfo, AgentCredentialInfo, AgentType, SaveAgentCredentialRequest, CredentialKind } from '@simple-agent-manager/shared';
 
 /**
  * Section for managing all agent API keys.
@@ -33,23 +33,38 @@ export function AgentKeysSection() {
     loadData();
   }, [loadData]);
 
-  const handleSave = async (agentType: AgentType, apiKey: string) => {
-    const result = await saveAgentCredential({ agentType, apiKey });
+  const handleSave = async (request: SaveAgentCredentialRequest) => {
+    const result = await saveAgentCredential(request);
     setCredentials((prev) => {
-      const filtered = prev.filter((c) => c.agentType !== agentType);
+      // Remove old credential of the same type and kind
+      const filtered = prev.filter((c) =>
+        !(c.agentType === request.agentType && c.credentialKind === request.credentialKind)
+      );
       return [...filtered, result];
     });
     setAgents((prev) =>
-      prev.map((a) => a.id === agentType ? { ...a, configured: true } : a)
+      prev.map((a) => a.id === request.agentType ? { ...a, configured: true } : a)
     );
   };
 
-  const handleDelete = async (agentType: AgentType) => {
+  const handleDelete = async (agentType: AgentType, credentialKind: CredentialKind) => {
+    // For now, we'll delete all credentials for the agent
+    // In Phase 4, we'll implement credential-specific deletion
     await deleteAgentCredential(agentType);
-    setCredentials((prev) => prev.filter((c) => c.agentType !== agentType));
-    setAgents((prev) =>
-      prev.map((a) => a.id === agentType ? { ...a, configured: false } : a)
+    setCredentials((prev) => prev.filter((c) =>
+      !(c.agentType === agentType && c.credentialKind === credentialKind)
+    ));
+
+    // Check if any credentials remain for this agent
+    const hasRemainingCreds = credentials.some(c =>
+      c.agentType === agentType && c.credentialKind !== credentialKind
     );
+
+    if (!hasRemainingCreds) {
+      setAgents((prev) =>
+        prev.map((a) => a.id === agentType ? { ...a, configured: false } : a)
+      );
+    }
   };
 
   if (loading) {
@@ -84,15 +99,19 @@ export function AgentKeysSection() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-3)' }}>
-      {agents.map((agent) => (
-        <AgentKeyCard
-          key={agent.id}
-          agent={agent}
-          credential={credentials.find((c) => c.agentType === agent.id) ?? null}
-          onSave={handleSave}
-          onDelete={handleDelete}
-        />
-      ))}
+      {agents.map((agent) => {
+        // Filter credentials for this agent
+        const agentCredentials = credentials.filter((c) => c.agentType === agent.id);
+        return (
+          <AgentKeyCard
+            key={agent.id}
+            agent={agent}
+            credentials={agentCredentials.length > 0 ? agentCredentials : null}
+            onSave={handleSave}
+            onDelete={handleDelete}
+          />
+        );
+      })}
     </div>
   );
 }
