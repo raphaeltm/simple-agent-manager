@@ -63,6 +63,14 @@ function updateEnvironmentBindings(
       { pattern: `api.${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain },
       { pattern: `*.${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain }
     ],
+    // Enable Workers Observability for logging/debugging
+    observability: {
+      enabled: true,
+      logs: {
+        invocation_logs: true,
+        head_sampling_rate: 1,
+      },
+    },
     vars: {
       ...envConfig.vars,
       BASE_DOMAIN: outputs.stackSummary.baseDomain,

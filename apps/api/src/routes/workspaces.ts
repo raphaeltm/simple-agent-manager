@@ -970,18 +970,29 @@ async function provisionWorkspace(
   db: ReturnType<typeof drizzle>
 ): Promise<void> {
   const now = () => new Date().toISOString();
+  const log = (step: string, detail?: string) =>
+    console.log(JSON.stringify({ event: 'provision', workspaceId, step, detail, ts: now() }));
 
   try {
+    log('start', `repo=${config.repository} size=${config.vmSize} location=${config.vmLocation}`);
+
     // Get GitHub installation token for cloning
+    log('github_token', `installationId=${config.installationId}`);
     const { token: githubToken } = await getInstallationToken(config.installationId, env);
+    log('github_token_ok');
 
     // Encrypt the GitHub token for storage
+    log('encrypt_github');
     const { ciphertext: encGithub, iv: ivGithub } = await encrypt(githubToken, env.ENCRYPTION_KEY);
+    log('encrypt_github_ok');
 
     // Generate callback token for VM-to-API authentication
+    log('sign_callback');
     const callbackToken = await signCallbackToken(workspaceId, env);
+    log('sign_callback_ok');
 
     // Generate bootstrap token and store encrypted credentials
+    log('bootstrap_token');
     const bootstrapToken = generateBootstrapToken();
     const bootstrapData: BootstrapTokenData = {
       workspaceId,
@@ -994,9 +1005,11 @@ async function provisionWorkspace(
     };
 
     await storeBootstrapToken(env.KV, bootstrapToken, bootstrapData);
+    log('bootstrap_token_ok');
 
     // Generate cloud-init config (NO SECRETS - only bootstrap token)
     // Use workspace-specific timeout or 0 to disable
+    log('cloud_init');
     const cloudInit = generateCloudInit({
       workspaceId,
       hostname: `ws-${workspaceId}`,
@@ -1011,8 +1024,10 @@ async function provisionWorkspace(
     if (!validateCloudInitSize(cloudInit)) {
       throw new Error('Cloud-init config exceeds size limit');
     }
+    log('cloud_init_ok', `size=${cloudInit.length}`);
 
     // Create Hetzner server
+    log('create_server', `type=${SERVER_TYPES[config.vmSize] || 'cx33'}`);
     const server = await createServer(hetznerToken, {
       name: `ws-${workspaceId}`,
       serverType: SERVER_TYPES[config.vmSize] || 'cx33',
@@ -1024,19 +1039,24 @@ async function provisionWorkspace(
         managed: 'simple-agent-manager',
       },
     });
+    log('create_server_ok', `serverId=${server.id} ip=${server.publicNet.ipv4.ip}`);
 
     // Create a DNS-only (non-proxied) A record for the VM backend.
     // Cloudflare Workers cannot fetch IP addresses directly (Error 1003),
     // so the Worker proxy uses vm-{id}.{domain} to reach the VM.
     let dnsRecordId: string | null = null;
     try {
+      log('create_dns');
       dnsRecordId = await createBackendDNSRecord(workspaceId, server.publicNet.ipv4.ip, env);
+      log('create_dns_ok', `recordId=${dnsRecordId}`);
     } catch (dnsErr) {
+      log('create_dns_error', dnsErr instanceof Error ? dnsErr.message : String(dnsErr));
       console.error('Failed to create backend DNS record:', dnsErr);
       // Continue — the workspace can still be reached via /ready callback
     }
 
     // Update workspace with server info
+    log('db_update');
     await db
       .update(schema.workspaces)
       .set({
@@ -1046,18 +1066,28 @@ async function provisionWorkspace(
         updatedAt: now(),
       })
       .where(eq(schema.workspaces.id, workspaceId));
+    log('db_update_ok');
 
+    log('complete');
     // VM agent will redeem bootstrap token on startup, then call /ready endpoint
   } catch (err) {
+    const errMsg = err instanceof Error ? err.message : 'Provisioning failed';
+    log('error', errMsg);
     console.error('Provisioning failed:', err);
-    await db
-      .update(schema.workspaces)
-      .set({
-        status: 'error',
-        errorMessage: err instanceof Error ? err.message : 'Provisioning failed',
-        updatedAt: now(),
-      })
-      .where(eq(schema.workspaces.id, workspaceId));
+    try {
+      await db
+        .update(schema.workspaces)
+        .set({
+          status: 'error',
+          errorMessage: errMsg,
+          updatedAt: now(),
+        })
+        .where(eq(schema.workspaces.id, workspaceId));
+      log('error_saved');
+    } catch (dbErr) {
+      log('error_save_failed', dbErr instanceof Error ? dbErr.message : String(dbErr));
+      console.error('Failed to save error status:', dbErr);
+    }
   }
 }
 
