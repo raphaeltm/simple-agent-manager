@@ -21,6 +21,13 @@ const actionButtonStyle: React.CSSProperties = {
   transition: 'background-color 0.1s',
 };
 
+function formatIdleTimeout(seconds: number): string {
+  if (seconds === 0) return 'No timeout';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m idle`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h idle`;
+  return '24h idle';
+}
+
 /**
  * Card component for displaying a workspace.
  */
@@ -80,7 +87,7 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
             color: 'var(--sam-color-fg-muted)',
             opacity: 0.7,
           }}>
-            {workspace.branch} &middot; {workspace.vmSize} &middot; {workspace.vmLocation}
+            {workspace.branch} &middot; {workspace.vmSize} &middot; {workspace.vmLocation} &middot; {formatIdleTimeout(workspace.idleTimeoutSeconds)}
           </p>
         </div>
       </div>

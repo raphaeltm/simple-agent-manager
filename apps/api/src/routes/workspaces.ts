@@ -83,6 +83,7 @@ workspacesRoutes.get('/', async (c) => {
     lastActivityAt: ws.lastActivityAt,
     errorMessage: ws.errorMessage,
     shutdownDeadline: ws.shutdownDeadline,
+    idleTimeoutSeconds: ws.idleTimeoutSeconds,
     createdAt: ws.createdAt,
     updatedAt: ws.updatedAt,
     url: ws.vmIp ? getWorkspaceUrl(ws.id, c.env.BASE_DOMAIN) : undefined,
@@ -127,6 +128,7 @@ workspacesRoutes.get('/:id', async (c) => {
     lastActivityAt: ws.lastActivityAt,
     errorMessage: ws.errorMessage,
     shutdownDeadline: ws.shutdownDeadline,
+    idleTimeoutSeconds: ws.idleTimeoutSeconds,
     createdAt: ws.createdAt,
     updatedAt: ws.updatedAt,
     url: ws.vmIp ? getWorkspaceUrl(ws.id, c.env.BASE_DOMAIN) : undefined,
@@ -201,6 +203,12 @@ workspacesRoutes.post('/', async (c) => {
   const vmLocation = body.vmLocation || 'nbg1';
   const branch = body.branch || 'main';
 
+  // Validate idle timeout (5 minutes to 24 hours)
+  let idleTimeoutSeconds = body.idleTimeoutSeconds ?? getIdleTimeoutSeconds(c.env);
+  if (idleTimeoutSeconds !== 0 && (idleTimeoutSeconds < 300 || idleTimeoutSeconds > 86400)) {
+    throw errors.badRequest('Idle timeout must be between 5 minutes and 24 hours, or 0 to disable');
+  }
+
   await db.insert(schema.workspaces).values({
     id: workspaceId,
     userId,
@@ -211,6 +219,7 @@ workspacesRoutes.post('/', async (c) => {
     status: 'creating',
     vmSize,
     vmLocation,
+    idleTimeoutSeconds,
     createdAt: now,
     updatedAt: now,
   });
@@ -226,6 +235,7 @@ workspacesRoutes.post('/', async (c) => {
         vmSize,
         vmLocation,
         installationId: installation.installationId,
+        idleTimeoutSeconds,
       },
       hetznerToken,
       { encryptedToken: cred.encryptedToken, iv: cred.iv },
@@ -246,6 +256,7 @@ workspacesRoutes.post('/', async (c) => {
     lastActivityAt: null,
     errorMessage: null,
     shutdownDeadline: null,
+    idleTimeoutSeconds,
     createdAt: now,
     updatedAt: now,
   };
@@ -419,6 +430,7 @@ workspacesRoutes.post('/:id/restart', async (c) => {
         vmSize: workspaceRestart.vmSize,
         vmLocation: workspaceRestart.vmLocation,
         installationId: installRestart.installationId,
+        idleTimeoutSeconds: workspaceRestart.idleTimeoutSeconds,
       },
       hetznerToken,
       { encryptedToken: credRestart.encryptedToken, iv: credRestart.iv },
@@ -865,6 +877,7 @@ async function provisionWorkspace(
     vmSize: string;
     vmLocation: string;
     installationId: string;
+    idleTimeoutSeconds: number;
   },
   hetznerToken: string,
   hetznerCredential: { encryptedToken: string; iv: string },
@@ -898,7 +911,7 @@ async function provisionWorkspace(
     await storeBootstrapToken(env.KV, bootstrapToken, bootstrapData);
 
     // Generate cloud-init config (NO SECRETS - only bootstrap token)
-    const idleTimeoutSeconds = getIdleTimeoutSeconds(env);
+    // Use workspace-specific timeout or 0 to disable
     const cloudInit = generateCloudInit({
       workspaceId,
       hostname: `ws-${workspaceId}`,
@@ -907,7 +920,7 @@ async function provisionWorkspace(
       controlPlaneUrl: `https://api.${env.BASE_DOMAIN}`,
       jwksUrl: `https://api.${env.BASE_DOMAIN}/.well-known/jwks.json`,
       bootstrapToken,
-      idleTimeout: `${idleTimeoutSeconds}s`, // Format as duration string for Go's time.ParseDuration
+      idleTimeout: config.idleTimeoutSeconds === 0 ? '0' : `${config.idleTimeoutSeconds}s`, // Format as duration string for Go's time.ParseDuration
     });
 
     if (!validateCloudInitSize(cloudInit)) {

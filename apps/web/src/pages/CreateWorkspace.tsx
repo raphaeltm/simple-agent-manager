@@ -22,6 +22,20 @@ const VM_LOCATIONS = [
   { value: 'hel1', label: 'Helsinki, FI' },
 ];
 
+const IDLE_TIMEOUT_OPTIONS = [
+  { value: '300', label: '5 minutes' },
+  { value: '600', label: '10 minutes' },
+  { value: '900', label: '15 minutes' },
+  { value: '1800', label: '30 minutes (default)' },
+  { value: '3600', label: '1 hour' },
+  { value: '7200', label: '2 hours' },
+  { value: '14400', label: '4 hours' },
+  { value: '28800', label: '8 hours' },
+  { value: '43200', label: '12 hours' },
+  { value: '86400', label: '24 hours' },
+  { value: '0', label: 'Never (disabled)' },
+];
+
 export function CreateWorkspace() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -36,6 +50,7 @@ export function CreateWorkspace() {
   const [installationId, setInstallationId] = useState('');
   const [vmSize, setVmSize] = useState('medium');
   const [vmLocation, setVmLocation] = useState('nbg1');
+  const [idleTimeoutSeconds, setIdleTimeoutSeconds] = useState('1800');
 
   useEffect(() => {
     checkPrerequisites();
@@ -80,6 +95,7 @@ export function CreateWorkspace() {
         installationId,
         vmSize: vmSize as any,
         vmLocation: vmLocation as any,
+        idleTimeoutSeconds: parseInt(idleTimeoutSeconds, 10),
       });
 
       navigate(`/workspaces/${workspace.id}`);
@@ -267,6 +283,24 @@ export function CreateWorkspace() {
                 </option>
               ))}
             </Select>
+          </div>
+
+          <div>
+            <label htmlFor="idleTimeout" style={labelStyle}>Idle Timeout</label>
+            <Select
+              id="idleTimeout"
+              value={idleTimeoutSeconds}
+              onChange={(e) => setIdleTimeoutSeconds(e.target.value)}
+            >
+              {IDLE_TIMEOUT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+            <p style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginTop: '0.25rem' }}>
+              Workspace will automatically shut down after this period of inactivity
+            </p>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sam-space-3)', paddingTop: 'var(--sam-space-4)' }}>
