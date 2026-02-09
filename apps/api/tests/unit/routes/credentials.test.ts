@@ -25,6 +25,16 @@ describe('Credentials Routes - OAuth Support', () => {
 
   beforeEach(() => {
     app = new Hono<{ Bindings: Env }>();
+
+    // Add error handler to match production behavior
+    app.onError((err, c) => {
+      const appError = err as { statusCode?: number; error?: string; message?: string };
+      if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
+        return c.json({ error: appError.error, message: appError.message }, appError.statusCode);
+      }
+      return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
+    });
+
     app.route('/api/credentials', credentialsRoutes);
 
     // Mock database
@@ -51,7 +61,7 @@ describe('Credentials Routes - OAuth Support', () => {
       const request: SaveAgentCredentialRequest = {
         agentType: 'claude-code',
         credentialKind: 'oauth-token',
-        credential: 'oauth_token_from_claude_setup',
+        credential: 'oauth_token_from_claude_setup_1234567890abcdefghijklmnopqrstuvwxyz',
         autoActivate: true,
       };
 
@@ -69,20 +79,22 @@ describe('Credentials Routes - OAuth Support', () => {
       expect(body.credentialKind).toBe('oauth-token');
       expect(body.isActive).toBe(true);
       expect(body.label).toBe('Pro/Max Subscription');
-      expect(body.maskedKey).toBe('...etup');
+      expect(body.maskedKey).toBe('...wxyz');
     });
 
     it('should auto-activate new OAuth token and deactivate existing API key', async () => {
       // Mock existing API key credential
       mockDB.limit.mockResolvedValueOnce([]);
 
-      // Mock deactivating existing credentials
-      mockDB.where.mockResolvedValueOnce(undefined);
+      // Need to reset and re-mock for the update transaction
+      mockDB.where.mockReturnThis();
+      mockDB.update.mockReturnThis();
+      mockDB.set.mockReturnThis();
 
       const request: SaveAgentCredentialRequest = {
         agentType: 'claude-code',
         credentialKind: 'oauth-token',
-        credential: 'new_oauth_token',
+        credential: 'new_oauth_token_1234567890abcdefghijklmnopqrstuvwxyz_1234567890',
         autoActivate: true,
       };
 
@@ -107,7 +119,7 @@ describe('Credentials Routes - OAuth Support', () => {
 
       const request = {
         agentType: 'claude-code',
-        credential: 'sk-ant-api-key',
+        credential: 'sk-ant-api03-1234567890abcdef',
         // credentialKind not specified, should default to 'api-key'
       };
 
@@ -129,7 +141,7 @@ describe('Credentials Routes - OAuth Support', () => {
       const request: SaveAgentCredentialRequest = {
         agentType: 'openai-codex',
         credentialKind: 'oauth-token',
-        credential: 'oauth_token',
+        credential: 'oauth_token_that_is_long_enough_to_pass_validation_1234567890',
       };
 
       const res = await app.request('/api/credentials/agent', {
@@ -143,7 +155,7 @@ describe('Credentials Routes - OAuth Support', () => {
 
       expect(res.status).toBe(400);
       const body = await res.json();
-      expect(body.error).toContain('not supported');
+      expect(body.message).toContain('not supported');
     });
   });
 
@@ -200,7 +212,7 @@ describe('Credentials Routes - OAuth Support', () => {
       const request: SaveAgentCredentialRequest = {
         agentType: 'claude-code',
         credentialKind: 'oauth-token',
-        credential: 'oauth_token',
+        credential: 'oauth_token_that_is_long_enough_for_validation_1234567890',
         autoActivate: false,
       };
 
@@ -233,7 +245,7 @@ describe('Credentials Routes - OAuth Support', () => {
       const request: SaveAgentCredentialRequest = {
         agentType: 'claude-code',
         credentialKind: 'oauth-token',
-        credential: 'updated_oauth_token',
+        credential: 'updated_oauth_token_that_is_long_enough_for_validation_1234567890',
         autoActivate: true,
       };
 
