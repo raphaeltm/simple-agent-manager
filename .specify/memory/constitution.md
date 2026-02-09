@@ -138,8 +138,9 @@ AI coding agents (Claude Code, GitHub Copilot, Cursor) are first-class developme
 structure MUST help agents understand and contribute effectively.
 
 **Rules:**
-- CLAUDE.md at repository root provides agent-specific context (concise, universally applicable)
-- AGENTS.md provides detailed build/test/convention instructions
+- CLAUDE.md at repository root provides project reference context (concise, universally applicable)
+- `.claude/rules/*.md` provides auto-loaded behavioral rules for Claude Code
+- AGENTS.md provides detailed build/test/convention instructions for non-Claude AI agents
 - Each package MAY have its own AGENTS.md with package-specific context
 - File and directory names are descriptive and predictable
 - Code follows consistent patterns that agents can learn from existing code
@@ -244,8 +245,9 @@ simple-agent-manager/
 ├── .github/
 │   ├── workflows/           # CI/CD pipelines
 │   └── ISSUE_TEMPLATE/      # Issue templates
-├── CLAUDE.md                # AI agent context
-├── AGENTS.md                # Detailed agent instructions
+├── CLAUDE.md                # AI agent context (project reference)
+├── AGENTS.md                # Detailed agent instructions (non-Claude agents)
+├── .claude/rules/           # Auto-loaded behavioral rules (Claude Code)
 ├── CONTRIBUTING.md          # Contribution guide
 ├── ROADMAP.md               # Project roadmap
 └── README.md                # Project overview and quickstart
