@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+// DefaultAdditionalFeatures is the default JSON for --additional-features on devcontainer up.
+// Installs Node.js (required by ACP adapters) and the Claude Code ACP adapter.
+const DefaultAdditionalFeatures = `{"ghcr.io/devcontainers/features/node:1":{"version":"22"},"ghcr.io/devcontainers-community/npm-features/npm-package:1":{"package":"@zed-industries/claude-code-acp"}}`
+
 // Config holds all configuration values for the VM Agent.
 type Config struct {
 	// Server settings
@@ -62,6 +66,10 @@ type Config struct {
 	DefaultRows  int
 	DefaultCols  int
 
+	// PTY session persistence settings - configurable per constitution principle XI
+	PTYOrphanGracePeriod time.Duration // How long orphaned sessions survive before cleanup
+	PTYOutputBufferSize  int           // Ring buffer capacity per session in bytes
+
 	// ACP settings - configurable per constitution principle XI
 	ACPInitTimeoutMs      int
 	ACPReconnectDelayMs   int
@@ -75,6 +83,11 @@ type Config struct {
 	ContainerLabelKey   string
 	ContainerLabelValue string
 	ContainerCacheTTL   time.Duration
+
+	// Devcontainer features to inject via --additional-features on devcontainer up.
+	// JSON string matching the "features" section of devcontainer.json.
+	// Configurable per constitution principle XI.
+	AdditionalFeatures string
 }
 
 // Load reads configuration from environment variables.
@@ -146,6 +159,10 @@ func Load() (*Config, error) {
 		DefaultRows:  getEnvInt("DEFAULT_ROWS", 24),
 		DefaultCols:  getEnvInt("DEFAULT_COLS", 80),
 
+		// PTY session persistence - configurable per constitution principle XI
+		PTYOrphanGracePeriod: time.Duration(getEnvInt("PTY_ORPHAN_GRACE_PERIOD", 300)) * time.Second,
+		PTYOutputBufferSize:  getEnvInt("PTY_OUTPUT_BUFFER_SIZE", 262144), // 256 KB default
+
 		// ACP settings - configurable per constitution principle XI
 		ACPInitTimeoutMs:      getEnvInt("ACP_INIT_TIMEOUT_MS", 30000),
 		ACPReconnectDelayMs:   getEnvInt("ACP_RECONNECT_DELAY_MS", 2000),
@@ -160,6 +177,10 @@ func Load() (*Config, error) {
 		ContainerLabelKey:   getEnv("CONTAINER_LABEL_KEY", "devcontainer.local_folder"),
 		ContainerLabelValue: containerLabelValue,
 		ContainerCacheTTL:   getEnvDuration("CONTAINER_CACHE_TTL", 30*time.Second),
+
+		// Default installs Node.js (required by ACP adapters) and claude-code-acp.
+		// Override via ADDITIONAL_FEATURES env var. Set to empty string to disable.
+		AdditionalFeatures: getEnv("ADDITIONAL_FEATURES", DefaultAdditionalFeatures),
 	}
 
 	// Validate required fields

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 )
@@ -24,7 +25,9 @@ type Manager struct {
 	onActivity         func() // Called when any session has activity
 	containerResolver  ContainerResolver
 	containerUser      string
-	maxSessionsPerUser int     // Maximum sessions allowed per user (0 = unlimited)
+	maxSessionsPerUser int           // Maximum sessions allowed per user (0 = unlimited)
+	gracePeriod        time.Duration // How long orphaned sessions survive before cleanup
+	bufferSize         int           // Output ring buffer capacity per session in bytes
 }
 
 // ManagerConfig holds configuration for the session manager.
@@ -36,11 +39,21 @@ type ManagerConfig struct {
 	OnActivity         func()
 	ContainerResolver  ContainerResolver
 	ContainerUser      string
-	MaxSessionsPerUser int // Maximum sessions allowed per user (0 = unlimited)
+	MaxSessionsPerUser int           // Maximum sessions allowed per user (0 = unlimited)
+	GracePeriod        time.Duration // How long orphaned sessions survive before cleanup
+	BufferSize         int           // Output ring buffer capacity per session in bytes
 }
 
 // NewManager creates a new session manager.
 func NewManager(cfg ManagerConfig) *Manager {
+	gracePeriod := cfg.GracePeriod
+	if gracePeriod <= 0 {
+		gracePeriod = 5 * time.Minute
+	}
+	bufferSize := cfg.BufferSize
+	if bufferSize <= 0 {
+		bufferSize = 262144 // 256 KB
+	}
 	return &Manager{
 		sessions:           make(map[string]*Session),
 		defaultShell:       cfg.DefaultShell,
@@ -51,6 +64,8 @@ func NewManager(cfg ManagerConfig) *Manager {
 		containerResolver:  cfg.ContainerResolver,
 		containerUser:      cfg.ContainerUser,
 		maxSessionsPerUser: cfg.MaxSessionsPerUser,
+		gracePeriod:        gracePeriod,
+		bufferSize:         bufferSize,
 	}
 }
 
@@ -101,14 +116,15 @@ func (m *Manager) CreateSessionWithID(sessionID, userID string, rows, cols int) 
 	}
 
 	session, err := NewSession(SessionConfig{
-		ID:            sessionID,
-		UserID:        userID,
-		Shell:         m.defaultShell,
-		Rows:          rows,
-		Cols:          cols,
-		WorkDir:       m.workDir,
-		ContainerID:   containerID,
-		ContainerUser: m.containerUser,
+		ID:               sessionID,
+		UserID:           userID,
+		Shell:            m.defaultShell,
+		Rows:             rows,
+		Cols:             cols,
+		WorkDir:          m.workDir,
+		ContainerID:      containerID,
+		ContainerUser:    m.containerUser,
+		OutputBufferSize: m.bufferSize,
 		OnClose: func() {
 			m.removeSession(sessionID)
 		},
@@ -264,6 +280,135 @@ func (m *Manager) CleanupIdleSessions(maxIdle time.Duration) int {
 	}
 
 	return len(toClose)
+}
+
+// OrphanSession marks a session as orphaned and starts a cleanup timer.
+// Called when a WebSocket disconnects to keep the session alive temporarily.
+func (m *Manager) OrphanSession(sessionID string) {
+	m.mu.Lock()
+	session, ok := m.sessions[sessionID]
+	if !ok {
+		m.mu.Unlock()
+		return
+	}
+
+	session.mu.Lock()
+	session.IsOrphaned = true
+	session.OrphanedAt = time.Now()
+	session.attachedWriter = nil
+	session.mu.Unlock()
+
+	// Start orphan timer — cleanup after grace period
+	session.orphanTimer = time.AfterFunc(m.gracePeriod, func() {
+		m.cleanupOrphanedSession(sessionID)
+	})
+	m.mu.Unlock()
+
+	log.Printf("Session %s orphaned, will cleanup in %v", sessionID, m.gracePeriod)
+}
+
+// OrphanSessions marks multiple sessions as orphaned in batch.
+func (m *Manager) OrphanSessions(sessionIDs []string) {
+	for _, id := range sessionIDs {
+		m.OrphanSession(id)
+	}
+}
+
+// ReattachSession reattaches to an orphaned session, cancelling the cleanup timer.
+// Returns the session if successful, error if session not found or already exited.
+func (m *Manager) ReattachSession(sessionID string) (*Session, error) {
+	m.mu.Lock()
+	session, ok := m.sessions[sessionID]
+	if !ok {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	session.mu.Lock()
+
+	// Stop the orphan timer if it exists
+	if session.orphanTimer != nil {
+		session.orphanTimer.Stop()
+		session.orphanTimer = nil
+	}
+
+	// Clear orphan state
+	session.IsOrphaned = false
+	session.OrphanedAt = time.Time{}
+	session.mu.Unlock()
+	m.mu.Unlock()
+
+	log.Printf("Session %s reattached", sessionID)
+	return session, nil
+}
+
+// GetActiveSessions returns info about all non-closed sessions.
+func (m *Manager) GetActiveSessions() []SessionInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	infos := make([]SessionInfo, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		infos = append(infos, s.Info())
+	}
+	return infos
+}
+
+// SetSessionName updates the display name for a session.
+func (m *Manager) SetSessionName(sessionID, name string) error {
+	m.mu.RLock()
+	session, ok := m.sessions[sessionID]
+	m.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	session.mu.Lock()
+	session.Name = name
+	session.mu.Unlock()
+	return nil
+}
+
+// cleanupOrphanedSession is called by the orphan timer to remove a session.
+func (m *Manager) cleanupOrphanedSession(sessionID string) {
+	m.mu.Lock()
+	session, ok := m.sessions[sessionID]
+	if !ok {
+		m.mu.Unlock()
+		return
+	}
+
+	// Only cleanup if still orphaned (could have been reattached in the meantime)
+	session.mu.RLock()
+	stillOrphaned := session.IsOrphaned
+	session.mu.RUnlock()
+
+	if !stillOrphaned {
+		m.mu.Unlock()
+		return
+	}
+
+	delete(m.sessions, sessionID)
+	m.mu.Unlock()
+
+	log.Printf("Cleaning up orphaned session %s", sessionID)
+	_ = session.Close()
+}
+
+// GetOrphanedSessionCount returns the number of currently orphaned sessions.
+func (m *Manager) GetOrphanedSessionCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	count := 0
+	for _, s := range m.sessions {
+		s.mu.RLock()
+		if s.IsOrphaned {
+			count++
+		}
+		s.mu.RUnlock()
+	}
+	return count
 }
 
 // generateSessionID generates a random session ID.

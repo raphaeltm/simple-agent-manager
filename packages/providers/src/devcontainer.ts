@@ -171,7 +171,15 @@ export class DevcontainerProvider implements Provider {
     this.log('Starting devcontainer (this may take a few minutes on first run)...');
     let containerId: string;
     try {
-      const cmd = `devcontainer up --workspace-folder ${workspaceFolder} --id-label managed-by=${MANAGED_BY_LABEL} --id-label provider=${PROVIDER_LABEL} --id-label workspace-id=${config.workspaceId} --id-label repo-url=${encodeURIComponent(config.repoUrl).slice(0, 63)}`;
+      // Inject ACP agent adapters via --additional-features so they're available
+      // regardless of what the repo's devcontainer.json contains.
+      const additionalFeatures = JSON.stringify({
+        'ghcr.io/devcontainers/features/node:1': { version: '22' },
+        'ghcr.io/devcontainers-community/npm-features/npm-package:1': {
+          package: '@zed-industries/claude-code-acp',
+        },
+      });
+      const cmd = `devcontainer up --workspace-folder ${workspaceFolder} --id-label managed-by=${MANAGED_BY_LABEL} --id-label provider=${PROVIDER_LABEL} --id-label workspace-id=${config.workspaceId} --id-label repo-url=${encodeURIComponent(config.repoUrl).slice(0, 63)} --additional-features '${additionalFeatures}'`;
       this.log('Running command:', cmd);
 
       const { stdout, stderr } = await execAsync(cmd, { maxBuffer: 10 * 1024 * 1024 });

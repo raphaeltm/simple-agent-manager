@@ -10,11 +10,16 @@ import {
   encodeTerminalWsCreateSession,
   encodeTerminalWsCloseSession,
   encodeTerminalWsRenameSession,
+  encodeTerminalWsListSessions,
+  encodeTerminalWsReattachSession,
   parseTerminalWsServerMessage,
   isSessionCreatedMessage,
   isSessionClosedMessage,
   isOutputMessage,
   isErrorMessage,
+  isSessionReattachedMessage,
+  isScrollbackMessage,
+  isSessionListMessage,
 } from './protocol';
 import type { MultiTerminalProps, TerminalConfig } from './types/multi-terminal';
 
@@ -60,6 +65,7 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
     canCreateSession,
     updateSessionStatus,
     updateSessionWorkingDirectory,
+    updateServerSessionId,
     getPersistedSessions,
   } = useTerminalSessions(terminalConfig.maxSessions, persistenceKey);
 
@@ -67,6 +73,8 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
   const wsRef = useRef<WebSocket | null>(null);
   const terminalsRef = useRef<Map<string, TerminalInstance>>(new Map());
   const [wsConnected, setWsConnected] = useState(false);
+  // Guard against duplicate list_sessions requests during rapid reconnect cycles
+  const reconnectingRef = useRef(false);
 
   // ── Stable refs for latest callback/state versions ──
   // This prevents re-creating the WebSocket connection when callbacks change reference.
@@ -76,6 +84,7 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
     closeSession,
     updateSessionStatus,
     updateSessionWorkingDirectory,
+    updateServerSessionId,
     onActivity,
     sessions,
     getPersistedSessions,
@@ -85,6 +94,7 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
     closeSession,
     updateSessionStatus,
     updateSessionWorkingDirectory,
+    updateServerSessionId,
     onActivity,
     sessions,
     getPersistedSessions,
@@ -206,11 +216,36 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
             }
           }, PING_INTERVAL_MS);
 
-          // Create initial terminal sessions
-          if (latestRef.current.sessions.size === 0) {
-            // Check for persisted sessions (tab names survive page refresh)
-            const persisted = latestRef.current.getPersistedSessions();
+          // Session persistence reconnection flow:
+          // 1. Ask the server for active sessions
+          // 2. Match against persisted serverSessionIds
+          // 3. Reattach matches, create fresh for non-matches
+          // Guard: if a previous reconnect is still pending, skip duplicate list_sessions
+          if (reconnectingRef.current) return;
+
+          const persisted = latestRef.current.getPersistedSessions();
+          if (persisted && persisted.length > 0 && persisted.some(p => p.serverSessionId)) {
+            // We have persisted sessions with server IDs — attempt reconnection
+            // Set all existing tabs to "reconnecting" status
+            for (const p of persisted) {
+              if (latestRef.current.sessions.size === 0) {
+                // Tabs not yet created (page refresh) — create them in reconnecting state
+                const sessionId = latestRef.current.createSession(p.name);
+                createTerminalInstance(sessionId);
+                latestRef.current.updateSessionStatus(sessionId, 'reconnecting' as any);
+                // Store the serverSessionId mapping temporarily for the list_sessions callback
+                if (p.serverSessionId) {
+                  latestRef.current.updateServerSessionId(sessionId, p.serverSessionId);
+                }
+              }
+            }
+            // Ask server for active sessions — response handled in onmessage
+            reconnectingRef.current = true;
+            ws.send(encodeTerminalWsListSessions());
+          } else if (latestRef.current.sessions.size === 0) {
+            // No persisted state — first connection, create initial sessions
             if (persisted && persisted.length > 0) {
+              // Persisted tabs without serverSessionIds (legacy) — create fresh
               for (const p of persisted) {
                 const sessionId = latestRef.current.createSession(p.name);
                 createTerminalInstance(sessionId);
@@ -222,10 +257,9 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
               ws.send(encodeTerminalWsCreateSession(sessionId, 24, 80));
             }
           } else {
-            // Re-create server-side sessions for existing tabs after reconnect
-            for (const [sessionId] of terminalsRef.current) {
-              ws.send(encodeTerminalWsCreateSession(sessionId, 24, 80));
-            }
+            // Existing tabs (reconnect after brief disconnect) — ask server what's alive
+            reconnectingRef.current = true;
+            ws.send(encodeTerminalWsListSessions());
           }
         };
 
@@ -234,8 +268,61 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
           const msg = parseTerminalWsServerMessage(event.data);
           if (!msg) return;
 
-          if (isSessionCreatedMessage(msg) && msg.data) {
+          if (isSessionListMessage(msg) && msg.data) {
+            // Clear reconnecting guard — response received
+            reconnectingRef.current = false;
+
+            // Match server sessions against our persisted serverSessionIds
+            const serverSessions = msg.data.sessions;
+            const serverMap = new Map(serverSessions.map(s => [s.sessionId, s]));
+
+            // Build a map of serverSessionId -> local sessionId for matching
+            const currentSessions = Array.from(latestRef.current.sessions.entries());
+
+            for (const [localId, localSession] of currentSessions) {
+              const serverId = (localSession as any).serverSessionId as string | undefined;
+              const serverInfo = serverId ? serverMap.get(serverId) : undefined;
+
+              if (serverInfo && serverInfo.status !== 'exited') {
+                // Match found — reattach to existing server session
+                latestRef.current.updateSessionStatus(localId, 'reconnecting' as any);
+                const instance = terminalsRef.current.get(localId);
+                const rows = instance?.terminal?.rows ?? 24;
+                const cols = instance?.terminal?.cols ?? 80;
+                ws.send(encodeTerminalWsReattachSession(serverId!, rows, cols));
+                serverMap.delete(serverId!); // consumed
+              } else {
+                // No match or exited — create a fresh server session
+                ws.send(encodeTerminalWsCreateSession(localId, 24, 80, localSession.name));
+              }
+            }
+          } else if (isSessionReattachedMessage(msg) && msg.data) {
+            // Find the local session that maps to this server session ID
+            const serverId = msg.data.sessionId;
+            for (const [localId, localSession] of latestRef.current.sessions.entries()) {
+              if ((localSession as any).serverSessionId === serverId) {
+                latestRef.current.updateSessionStatus(localId, 'connected');
+                if (msg.data.workingDirectory) {
+                  latestRef.current.updateSessionWorkingDirectory(localId, msg.data.workingDirectory);
+                }
+                break;
+              }
+            }
+          } else if (isScrollbackMessage(msg) && msg.sessionId && msg.data) {
+            // Find the local session mapped to this server session ID and write scrollback
+            for (const [localId, localSession] of latestRef.current.sessions.entries()) {
+              if ((localSession as any).serverSessionId === msg.sessionId) {
+                const instance = terminalsRef.current.get(localId);
+                if (instance && msg.data.data) {
+                  instance.terminal.write(msg.data.data);
+                }
+                break;
+              }
+            }
+          } else if (isSessionCreatedMessage(msg) && msg.data) {
             latestRef.current.updateSessionStatus(msg.data.sessionId, 'connected');
+            // Store the server session ID for future reconnection matching
+            latestRef.current.updateServerSessionId(msg.data.sessionId, msg.data.sessionId);
             if (msg.data.workingDirectory) {
               latestRef.current.updateSessionWorkingDirectory(msg.data.sessionId, msg.data.workingDirectory);
             }
@@ -243,7 +330,19 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
             destroyTerminalInstance(msg.data.sessionId);
             latestRef.current.closeSession(msg.data.sessionId);
           } else if (isOutputMessage(msg) && msg.sessionId) {
-            const instance = terminalsRef.current.get(msg.sessionId);
+            // Output can come with server session ID — route to the right local terminal
+            let targetLocalId = msg.sessionId;
+            // Check if there's a local session with this ID first
+            if (!terminalsRef.current.has(targetLocalId)) {
+              // Try to find by serverSessionId mapping
+              for (const [localId, localSession] of latestRef.current.sessions.entries()) {
+                if ((localSession as any).serverSessionId === msg.sessionId) {
+                  targetLocalId = localId;
+                  break;
+                }
+              }
+            }
+            const instance = terminalsRef.current.get(targetLocalId);
             if (instance && msg.data?.data) {
               instance.terminal.write(msg.data.data);
             }
@@ -268,6 +367,7 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
         ws.onclose = () => {
           setWsConnected(false);
           wsRef.current = null;
+          reconnectingRef.current = false;
           clearInterval(pingInterval);
           if (!disposed) {
             reconnectTimeout = setTimeout(connect, RECONNECT_DELAY_MS);
@@ -373,26 +473,40 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
               inset: 0,
             }}
           >
-            {wsConnected && (session.status === 'connected' || session.status === 'connecting') ? (
-              <div
-                ref={(el) => attachTerminal(session.id, el)}
-                style={{ width: '100%', height: '100%' }}
-              />
-            ) : !wsConnected ? (
-              <div style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                height: '100%', color: '#a9b1d6', backgroundColor: '#1a1b26',
-              }}>
-                Connecting to terminal...
-              </div>
-            ) : session.status === 'error' ? (
+            {/* Terminal container — keep DOM alive across WS disconnects (T033) */}
+            {session.status === 'error' ? (
               <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 height: '100%', color: '#f7768e', backgroundColor: '#1a1b26',
               }}>
                 Terminal connection error. Please try again.
               </div>
-            ) : null}
+            ) : terminalsRef.current.has(session.id) || wsConnected ? (
+              <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                <div
+                  ref={(el) => attachTerminal(session.id, el)}
+                  style={{ width: '100%', height: '100%' }}
+                />
+                {/* Per-terminal reconnecting overlay (T028) */}
+                {(session.status === 'reconnecting' || (!wsConnected && session.status !== 'connecting')) && (
+                  <div style={{
+                    position: 'absolute', inset: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    backgroundColor: 'rgba(26, 27, 38, 0.7)',
+                    color: '#7aa2f7', fontSize: '14px', zIndex: 10,
+                  }}>
+                    Reconnecting...
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                height: '100%', color: '#a9b1d6', backgroundColor: '#1a1b26',
+              }}>
+                Connecting to terminal...
+              </div>
+            )}
           </div>
         ))}
 

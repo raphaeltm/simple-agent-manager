@@ -113,8 +113,9 @@ runcmd:
       DEVEOF
     fi
 
-  # Start devcontainer
-  - cd /workspace && devcontainer up --workspace-folder .
+  # Start devcontainer with ACP agent adapters injected as additional features.
+  # Node.js feature ensures npm is available; npm-package feature installs claude-code-acp globally.
+  - cd /workspace && devcontainer up --workspace-folder . --additional-features '{"ghcr.io/devcontainers/features/node:1":{"version":"22"},"ghcr.io/devcontainers-community/npm-features/npm-package:1":{"package":"@zed-industries/claude-code-acp"}}'
 
   # Setup idle check cron (every 5 minutes)
   - echo "*/5 * * * * root /usr/local/bin/idle-check.sh" > /etc/cron.d/idle-check

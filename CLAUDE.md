@@ -221,10 +221,14 @@ Claude Code now supports dual authentication methods:
 - Cloudflare R2 (Pulumi state), D1 (app data), KV (sessions) (005-automated-deployment)
 - TypeScript 5.x + React 18 + Vite 5 + shadcn-compatible open-code component workflow, Radix UI primitives, Tailwind-style design tokens/utilities, existing `lucide-react` icons (009-ui-system-standards)
 - Git-tracked specification artifacts and shared package source files (no new runtime database storage) (009-ui-system-standards)
+- Go 1.22+ (VM Agent), TypeScript 5.x (Browser terminal package) + `github.com/creack/pty`, `github.com/gorilla/websocket` (Go); React 18, xterm.js 5.3 (Browser) (012-pty-session-persistence)
+- In-memory only (Go maps, ring buffers) — no database or persistent storage (012-pty-session-persistence)
 - TypeScript 5.x (API, Web), Go 1.22 (VM Agent) + Hono (API), React 18 (Web UI), Drizzle ORM (database), creack/pty + gorilla/websocket (VM Agent) (013-agent-oauth-support)
 - Cloudflare D1 (credentials table with new schema), AES-256-GCM encryption (013-agent-oauth-support)
 
 ## Recent Changes
+- 013-agent-oauth-support: Dual credential support for Claude Code (API key + OAuth token), credential switching capability, auto-activation behavior
+- 012-pty-session-persistence: PTY sessions survive page refresh, network interruptions; ring buffer scrollback replay, orphan timer cleanup, session reattach protocol
 - 010-docs-review: Added Markdown (CommonMark) with GitHub Flavored Markdown extensions + None (documentation-only review)
 - 004-mvp-hardening: Secure bootstrap tokens, workspace ownership validation, provisioning timeouts, shared terminal package, WebSocket reconnection, idle deadline tracking
 - 003-browser-terminal-saas: Added multi-tenant SaaS with GitHub OAuth, VM Agent (Go), browser terminal

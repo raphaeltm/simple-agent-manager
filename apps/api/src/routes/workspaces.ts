@@ -539,6 +539,27 @@ workspacesRoutes.post('/:id/ready', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date().toISOString();
 
+  // Only transition to running if workspace is in 'creating' state.
+  // If the workspace is already 'stopping' or 'stopped' (e.g., after idle shutdown),
+  // the VM agent may have been restarted by systemd and is calling /ready again.
+  // We must NOT reset lastActivityAt or status in that case, as it would create
+  // an infinite shutdown/restart loop.
+  const workspaces = await db
+    .select()
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+
+  const ws = workspaces[0];
+  if (!ws) {
+    throw errors.notFound('Workspace');
+  }
+
+  if (ws.status === 'stopping' || ws.status === 'stopped') {
+    console.log(`Ignoring /ready callback for workspace ${workspaceId} in '${ws.status}' state (agent restart after idle shutdown)`);
+    return c.json({ success: false, reason: 'workspace_shutting_down' });
+  }
+
   await db
     .update(schema.workspaces)
     .set({
@@ -582,7 +603,7 @@ workspacesRoutes.post('/:id/heartbeat', async (c) => {
   const body = await c.req.json<HeartbeatRequest>();
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date().toISOString();
-  const idleTimeoutSeconds = getIdleTimeoutSeconds(c.env);
+  const globalIdleTimeoutSeconds = getIdleTimeoutSeconds(c.env);
 
   const workspaces = await db
     .select()
@@ -595,27 +616,29 @@ workspacesRoutes.post('/:id/heartbeat', async (c) => {
     throw errors.notFound('Workspace');
   }
 
-  // Update last activity if there's activity
-  if (body.hasActivity) {
+  // Use per-workspace idle timeout if set, otherwise fall back to global default
+  const idleTimeoutSeconds = wsHeartbeat.idleTimeoutSeconds ?? globalIdleTimeoutSeconds;
+
+  // Use the VM's reported lastActivityAt (authoritative) to update the control plane's view.
+  // The VM agent tracks actual user input activity locally and reports it here.
+  if (body.lastActivityAt) {
     await db
       .update(schema.workspaces)
-      .set({ lastActivityAt: now, updatedAt: now })
+      .set({
+        lastActivityAt: body.lastActivityAt,
+        shutdownDeadline: body.shutdownDeadline ?? null,
+        updatedAt: now,
+      })
       .where(eq(schema.workspaces.id, workspaceId));
   }
 
-  // Check if idle timeout reached
-  // NOTE: VMs self-terminate based on local idle detection. The 'shutdown' action
-  // here is informational/suggestive. VMs don't depend on the control plane being
-  // available to shut down when idle.
-  const lastActivity = wsHeartbeat.lastActivityAt
-    ? new Date(wsHeartbeat.lastActivityAt)
-    : new Date(wsHeartbeat.createdAt);
-  const idleSeconds = (Date.now() - lastActivity.getTime()) / 1000;
+  // Use VM-reported idle time (authoritative) for the response
+  const idleSeconds = body.idleSeconds ?? 0;
   const shouldShutdown = idleSeconds >= idleTimeoutSeconds;
 
-  // Calculate shutdown deadline (when idle timeout will be reached)
-  const remainingSeconds = Math.max(0, idleTimeoutSeconds - idleSeconds);
-  const shutdownDeadline = new Date(Date.now() + remainingSeconds * 1000).toISOString();
+  // Use VM-reported deadline, or compute a fallback
+  const shutdownDeadline = body.shutdownDeadline
+    ?? new Date(Date.now() + Math.max(0, idleTimeoutSeconds - idleSeconds) * 1000).toISOString();
 
   const response: HeartbeatResponse = {
     action: shouldShutdown ? 'shutdown' : 'continue',

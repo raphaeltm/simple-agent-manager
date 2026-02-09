@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
-	"github.com/workspace/vm-agent/internal/pty"
 )
 
 // createUpgrader creates a WebSocket upgrader with proper origin validation.
@@ -114,6 +113,35 @@ type wsRenameSessionData struct {
 	Name      string `json:"name"`
 }
 
+type wsReattachSessionData struct {
+	SessionID string `json:"sessionId"`
+	Rows      int    `json:"rows"`
+	Cols      int    `json:"cols"`
+}
+
+// wsWriter wraps a WebSocket connection and mutex to implement io.Writer.
+// Used as the attached writer for PTY sessions to forward output to WebSocket.
+type wsWriter struct {
+	conn      *websocket.Conn
+	writeMu   *sync.Mutex
+	sessionID string
+}
+
+func (w *wsWriter) Write(p []byte) (int, error) {
+	outputData, _ := json.Marshal(map[string]string{"data": string(p)})
+	w.writeMu.Lock()
+	err := w.conn.WriteJSON(wsMessage{
+		Type:      "output",
+		SessionID: w.sessionID,
+		Data:      outputData,
+	})
+	w.writeMu.Unlock()
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
 // handleTerminalWS handles WebSocket connections for terminal access.
 func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// Check authentication
@@ -195,7 +223,8 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if n > 0 {
-				s.idleDetector.RecordActivity()
+				// Don't record PTY output as activity - background processes
+				// and shell prompts would prevent idle shutdown
 				outputData, _ := json.Marshal(map[string]string{"data": string(buf[:n])})
 				writeMu.Lock()
 				err = conn.WriteJSON(wsMessage{Type: "output", Data: outputData})
@@ -246,7 +275,8 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "ping":
-			s.idleDetector.RecordActivity()
+			// Don't record activity for pings - they're automatic heartbeats
+			// sent every 30s regardless of user interaction
 			writeMu.Lock()
 			_ = conn.WriteJSON(wsMessage{Type: "pong"})
 			writeMu.Unlock()
@@ -261,7 +291,8 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleMultiTerminalWS handles WebSocket connections for multiple terminal sessions.
-// This is an enhanced version that supports the multi-terminal protocol.
+// This is an enhanced version that supports the multi-terminal protocol with session persistence.
+// Sessions survive WebSocket disconnects (page refresh, network interruption) and can be reattached.
 func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// Check authentication
 	session := s.sessionManager.GetSessionFromRequest(r)
@@ -297,70 +328,43 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Map to track PTY sessions for this WebSocket connection
-	ptySessions := make(map[string]*pty.Session)
-	var psMu sync.RWMutex
-
-	// Channel to signal shutdown
-	done := make(chan struct{})
-	defer close(done)
-
-	// Cleanup function
-	defer func() {
-		psMu.Lock()
-		for id := range ptySessions {
-			s.ptyManager.CloseSession(id)
-		}
-		psMu.Unlock()
-	}()
+	// Set of session IDs attached to THIS WebSocket connection (local tracking only).
+	// Sessions themselves live in the global PTY Manager.
+	attachedSessions := make(map[string]struct{})
+	var asMu sync.Mutex
 
 	// Create mutex for writing to websocket
 	var writeMu sync.Mutex
 
-	// Function to start PTY output reader for a session
-	startPTYReader := func(ptySession *pty.Session, sessionID string) {
-		go func() {
-			buf := make([]byte, 4096)
-			for {
-				select {
-				case <-done:
-					return
-				default:
-					n, err := ptySession.Read(buf)
-					if err != nil {
-						log.Printf("PTY read error for session %s: %v", sessionID, err)
-						// Send session closed message
-						closedData, _ := json.Marshal(map[string]interface{}{
-							"sessionId": sessionID,
-							"reason":    "process_exit",
-						})
-						writeMu.Lock()
-						_ = conn.WriteJSON(wsMessage{
-							Type:      "session_closed",
-							SessionID: sessionID,
-							Data:      closedData,
-						})
-						writeMu.Unlock()
-						return
-					}
-					if n > 0 {
-						s.idleDetector.RecordActivity()
-						outputData, _ := json.Marshal(map[string]string{"data": string(buf[:n])})
-						writeMu.Lock()
-						err = conn.WriteJSON(wsMessage{
-							Type:      "output",
-							SessionID: sessionID,
-							Data:      outputData,
-						})
-						writeMu.Unlock()
-						if err != nil {
-							log.Printf("WebSocket write error: %v", err)
-							return
-						}
-					}
+	// On disconnect: orphan all attached sessions instead of closing them
+	defer func() {
+		asMu.Lock()
+		ids := make([]string, 0, len(attachedSessions))
+		for id := range attachedSessions {
+			ids = append(ids, id)
+		}
+		asMu.Unlock()
+
+		if len(ids) > 0 {
+			log.Printf("WebSocket disconnected, orphaning %d sessions", len(ids))
+			// Clear attached writers before orphaning
+			for _, id := range ids {
+				if sess := s.ptyManager.GetSession(id); sess != nil {
+					sess.SetAttachedWriter(nil)
 				}
 			}
-		}()
+			s.ptyManager.OrphanSessions(ids)
+		}
+	}()
+
+	// Helper: attach a WebSocket writer to a session for live output forwarding
+	attachWriter := func(sessionID string) {
+		sess := s.ptyManager.GetSession(sessionID)
+		if sess == nil {
+			return
+		}
+		writer := &wsWriter{conn: conn, writeMu: &writeMu, sessionID: sessionID}
+		sess.SetAttachedWriter(writer)
 	}
 
 	// Handle WebSocket messages
@@ -378,6 +382,80 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}
 
 		switch msg.Type {
+		case "list_sessions":
+			// Return all active sessions from the global Manager
+			activeSessions := s.ptyManager.GetActiveSessions()
+			sessionInfos := make([]SessionInfo, len(activeSessions))
+			for i, si := range activeSessions {
+				sessionInfos[i] = SessionInfo{
+					SessionID:        si.ID,
+					Name:             si.Name,
+					Status:           si.Status,
+					WorkingDirectory: si.WorkingDirectory,
+					CreatedAt:        si.CreatedAt,
+					LastActivityAt:   si.LastActivityAt,
+				}
+			}
+			writeMu.Lock()
+			_ = conn.WriteMessage(websocket.TextMessage, NewSessionListMessage(sessionInfos))
+			writeMu.Unlock()
+
+		case "reattach_session":
+			var reattachData wsReattachSessionData
+			if err := json.Unmarshal(msg.Data, &reattachData); err != nil {
+				log.Printf("Invalid reattach session data: %v", err)
+				continue
+			}
+
+			// Reattach to the existing session
+			ptySession, err := s.ptyManager.ReattachSession(reattachData.SessionID)
+			if err != nil {
+				log.Printf("Failed to reattach session %s: %v", reattachData.SessionID, err)
+				errorData, _ := json.Marshal(map[string]string{
+					"error": err.Error(),
+				})
+				writeMu.Lock()
+				_ = conn.WriteJSON(wsMessage{
+					Type:      "error",
+					SessionID: reattachData.SessionID,
+					Data:      errorData,
+				})
+				writeMu.Unlock()
+				continue
+			}
+
+			// Resize PTY to match client dimensions
+			if reattachData.Rows > 0 && reattachData.Cols > 0 {
+				_ = ptySession.Resize(reattachData.Rows, reattachData.Cols)
+			}
+
+			// Track this session as attached to this connection
+			asMu.Lock()
+			attachedSessions[reattachData.SessionID] = struct{}{}
+			asMu.Unlock()
+
+			// Send session_reattached confirmation
+			dir := ""
+			if ptySession.Cmd != nil {
+				dir = ptySession.Cmd.Dir
+			}
+			writeMu.Lock()
+			_ = conn.WriteMessage(websocket.TextMessage,
+				NewSessionReattachedMessage(reattachData.SessionID, dir, ""))
+			writeMu.Unlock()
+
+			// Send buffered scrollback output
+			scrollback := ptySession.OutputBuffer.ReadAll()
+			if len(scrollback) > 0 {
+				writeMu.Lock()
+				_ = conn.WriteMessage(websocket.TextMessage,
+					NewScrollbackMessage(reattachData.SessionID, string(scrollback)))
+				writeMu.Unlock()
+			}
+
+			// Set the attached writer so live output flows to this WebSocket
+			attachWriter(reattachData.SessionID)
+
 		case "create_session":
 			var createData wsCreateSessionData
 			if err := json.Unmarshal(msg.Data, &createData); err != nil {
@@ -407,13 +485,64 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			// Store session reference
-			psMu.Lock()
-			ptySessions[createData.SessionID] = ptySession
-			psMu.Unlock()
+			// Set session name if provided (T023)
+			if createData.Name != "" {
+				_ = s.ptyManager.SetSessionName(createData.SessionID, createData.Name)
+			}
 
-			// Start output reader for this session
-			startPTYReader(ptySession, createData.SessionID)
+			// Track this session as attached to this connection
+			asMu.Lock()
+			attachedSessions[createData.SessionID] = struct{}{}
+			asMu.Unlock()
+
+			// Set attached writer for live output
+			attachWriter(createData.SessionID)
+
+			// Start persistent output reader goroutine (T024).
+			// This reader lives for the lifetime of the session, not the WebSocket connection.
+			// It always writes to the ring buffer; the attached writer forwards to WebSocket when set.
+			ptySession.StartOutputReader(
+				// onOutput: called on each chunk — record activity and forward to attached writer
+				func(sessionID string, data []byte) {
+					s.idleDetector.RecordActivity()
+					sess := s.ptyManager.GetSession(sessionID)
+					if sess == nil {
+						return
+					}
+					writer := sess.GetAttachedWriter()
+					if writer != nil {
+						if _, err := writer.Write(data); err != nil {
+							log.Printf("Attached writer error for session %s: %v", sessionID, err)
+							// Clear the writer on error (WebSocket likely disconnected)
+							sess.SetAttachedWriter(nil)
+						}
+					}
+				},
+				// onExit: called when process exits
+				func(sessionID string) {
+					closedData, _ := json.Marshal(map[string]interface{}{
+						"sessionId": sessionID,
+						"reason":    "process_exit",
+					})
+					sess := s.ptyManager.GetSession(sessionID)
+					if sess == nil {
+						return
+					}
+					writer := sess.GetAttachedWriter()
+					if writer != nil {
+						// Try to notify the attached WebSocket about process exit
+						if wsW, ok := writer.(*wsWriter); ok {
+							wsW.writeMu.Lock()
+							_ = wsW.conn.WriteJSON(wsMessage{
+								Type:      "session_closed",
+								SessionID: sessionID,
+								Data:      closedData,
+							})
+							wsW.writeMu.Unlock()
+						}
+					}
+				},
+			)
 
 			// Send session created confirmation
 			createdData, _ := json.Marshal(map[string]interface{}{
@@ -435,13 +564,12 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			// Remove and close session
-			psMu.Lock()
-			if _, exists := ptySessions[closeData.SessionID]; exists {
-				delete(ptySessions, closeData.SessionID)
-				s.ptyManager.CloseSession(closeData.SessionID)
-			}
-			psMu.Unlock()
+			// Remove from attached set and close the session permanently
+			asMu.Lock()
+			delete(attachedSessions, closeData.SessionID)
+			asMu.Unlock()
+
+			s.ptyManager.CloseSession(closeData.SessionID)
 
 			// Send confirmation
 			closedData, _ := json.Marshal(map[string]interface{}{
@@ -457,16 +585,16 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 			writeMu.Unlock()
 
 		case "input":
-			// Route input to specific session
+			// Route input to specific session via the global Manager
 			sessionID := msg.SessionID
 			if sessionID == "" {
-				// Fallback to first session for backward compatibility
-				psMu.RLock()
-				for id := range ptySessions {
+				// Fallback to first attached session for backward compatibility
+				asMu.Lock()
+				for id := range attachedSessions {
 					sessionID = id
 					break
 				}
-				psMu.RUnlock()
+				asMu.Unlock()
 			}
 
 			var input wsInputData
@@ -475,11 +603,8 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			psMu.RLock()
-			ptySession, exists := ptySessions[sessionID]
-			psMu.RUnlock()
-
-			if exists {
+			ptySession := s.ptyManager.GetSession(sessionID)
+			if ptySession != nil {
 				s.idleDetector.RecordActivity()
 				if _, err := ptySession.Write([]byte(input.Data)); err != nil {
 					log.Printf("PTY write error: %v", err)
@@ -487,15 +612,15 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "resize":
-			// Route resize to specific session
+			// Route resize to specific session via the global Manager
 			sessionID := msg.SessionID
 			if sessionID == "" {
-				psMu.RLock()
-				for id := range ptySessions {
+				asMu.Lock()
+				for id := range attachedSessions {
 					sessionID = id
 					break
 				}
-				psMu.RUnlock()
+				asMu.Unlock()
 			}
 
 			var resize wsResizeData
@@ -504,23 +629,22 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			psMu.RLock()
-			ptySession, exists := ptySessions[sessionID]
-			psMu.RUnlock()
-
-			if exists {
+			ptySession := s.ptyManager.GetSession(sessionID)
+			if ptySession != nil {
 				if err := ptySession.Resize(resize.Rows, resize.Cols); err != nil {
 					log.Printf("PTY resize error: %v", err)
 				}
 			}
 
 		case "rename_session":
-			// Handle session rename (store in memory for now)
 			var renameData wsRenameSessionData
 			if err := json.Unmarshal(msg.Data, &renameData); err != nil {
 				log.Printf("Invalid rename session data: %v", err)
 				continue
 			}
+
+			// Store name on the session in the global Manager
+			_ = s.ptyManager.SetSessionName(renameData.SessionID, renameData.Name)
 
 			// Send confirmation
 			renamedData, _ := json.Marshal(map[string]interface{}{
@@ -536,7 +660,8 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 			writeMu.Unlock()
 
 		case "ping":
-			s.idleDetector.RecordActivity()
+			// Don't record activity for pings - they're automatic heartbeats
+			// sent every 30s regardless of user interaction
 			writeMu.Lock()
 			_ = conn.WriteJSON(wsMessage{Type: "pong", SessionID: msg.SessionID})
 			writeMu.Unlock()

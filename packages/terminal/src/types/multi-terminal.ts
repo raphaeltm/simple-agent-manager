@@ -14,7 +14,7 @@ export interface TerminalSession {
   name: string;
 
   /** Current connection status */
-  status: 'connecting' | 'connected' | 'disconnected' | 'error';
+  status: 'connecting' | 'connected' | 'disconnected' | 'error' | 'reconnecting';
 
   /** Session creation timestamp */
   createdAt: Date;
@@ -36,6 +36,9 @@ export interface TerminalSession {
 
   /** Associated xterm.js instance reference */
   terminalInstance?: any; // Will be Terminal type from xterm
+
+  /** Server-assigned session ID for reconnection matching */
+  serverSessionId?: string;
 }
 
 /**
@@ -66,7 +69,7 @@ export interface ClientMessage {
   sessionId?: string;
 
   /** Message type */
-  type: 'input' | 'resize' | 'ping' | 'create_session' | 'close_session' | 'rename_session';
+  type: 'input' | 'resize' | 'ping' | 'create_session' | 'close_session' | 'rename_session' | 'list_sessions' | 'reattach_session';
 
   /** Message payload */
   data?: any;
@@ -77,7 +80,7 @@ export interface ServerMessage {
   sessionId?: string;
 
   /** Message type */
-  type: 'output' | 'session' | 'error' | 'pong' | 'session_created' | 'session_closed' | 'session_renamed' | 'session_list';
+  type: 'output' | 'session' | 'error' | 'pong' | 'session_created' | 'session_closed' | 'session_renamed' | 'session_list' | 'session_reattached' | 'scrollback';
 
   /** Message payload */
   data?: any;
@@ -118,10 +121,27 @@ export interface SessionListData {
   sessions: Array<{
     sessionId: string;
     name?: string;
+    status?: string; // "running" or "exited"
     workingDirectory?: string;
     createdAt: string;
     lastActivityAt?: string;
   }>;
+}
+
+export interface SessionReattachedData {
+  sessionId: string;
+  workingDirectory?: string;
+  shell?: string;
+}
+
+export interface ScrollbackData {
+  data: string;
+}
+
+export interface ReattachSessionData {
+  sessionId: string;
+  rows: number;
+  cols: number;
 }
 
 /**
@@ -183,6 +203,8 @@ export interface TabBarProps {
 export interface PersistedSession {
   name: string;
   order: number;
+  /** Server-assigned session ID for reconnection matching */
+  serverSessionId?: string;
 }
 
 export interface UseTerminalSessionsReturn {
@@ -197,6 +219,8 @@ export interface UseTerminalSessionsReturn {
   canCreateSession: boolean;
   updateSessionStatus: (sessionId: string, status: TerminalSession['status']) => void;
   updateSessionWorkingDirectory: (sessionId: string, workingDirectory: string) => void;
+  /** Update the server-assigned session ID for reconnection matching */
+  updateServerSessionId: (sessionId: string, serverSessionId: string) => void;
   /** Get persisted session metadata from sessionStorage */
   getPersistedSessions: () => PersistedSession[] | null;
   /** Clear persisted session state */

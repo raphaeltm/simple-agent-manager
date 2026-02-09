@@ -1,10 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useTerminalSessions } from './useTerminalSessions';
 
 describe('useTerminalSessions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    sessionStorage.clear();
   });
 
   describe('initialization', () => {
@@ -301,6 +306,180 @@ describe('useTerminalSessions', () => {
         result.current.createSession();
       });
       expect(result.current.canCreateSession).toBe(false);
+    });
+  });
+
+  describe('serverSessionId persistence', () => {
+    const PERSISTENCE_KEY = 'test-terminal-sessions';
+
+    it('should persist serverSessionId to sessionStorage', () => {
+      const { result } = renderHook(() => useTerminalSessions(10, PERSISTENCE_KEY));
+
+      let sessionId = '';
+      act(() => {
+        sessionId = result.current.createSession('Tab 1');
+      });
+
+      // Simulate receiving a server-assigned session ID
+      act(() => {
+        result.current.updateServerSessionId(sessionId, 'server-abc-123');
+      });
+
+      // Check sessionStorage contains the serverSessionId
+      const raw = sessionStorage.getItem(PERSISTENCE_KEY);
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw!);
+      expect(parsed.sessions).toHaveLength(1);
+      expect(parsed.sessions[0].serverSessionId).toBe('server-abc-123');
+      expect(parsed.sessions[0].name).toBe('Tab 1');
+    });
+
+    it('should load persisted serverSessionId via getPersistedSessions', () => {
+      // Pre-populate sessionStorage
+      const persisted = {
+        sessions: [
+          { name: 'Tab 1', order: 0, serverSessionId: 'server-111' },
+          { name: 'Tab 2', order: 1, serverSessionId: 'server-222' },
+        ],
+        counter: 3,
+      };
+      sessionStorage.setItem(PERSISTENCE_KEY, JSON.stringify(persisted));
+
+      const { result } = renderHook(() => useTerminalSessions(10, PERSISTENCE_KEY));
+
+      const loaded = result.current.getPersistedSessions();
+      expect(loaded).not.toBeNull();
+      expect(loaded).toHaveLength(2);
+      expect(loaded![0]!.serverSessionId).toBe('server-111');
+      expect(loaded![0]!.name).toBe('Tab 1');
+      expect(loaded![1]!.serverSessionId).toBe('server-222');
+      expect(loaded![1]!.name).toBe('Tab 2');
+    });
+
+    it('should restore counter from persisted state', () => {
+      // Pre-populate with counter=5
+      const persisted = {
+        sessions: [{ name: 'Tab 5', order: 0, serverSessionId: 'srv-1' }],
+        counter: 5,
+      };
+      sessionStorage.setItem(PERSISTENCE_KEY, JSON.stringify(persisted));
+
+      const { result } = renderHook(() => useTerminalSessions(10, PERSISTENCE_KEY));
+
+      // Creating a new session should use counter=5 (i.e., "Terminal 5")
+      let sessionId = '';
+      act(() => {
+        sessionId = result.current.createSession();
+      });
+
+      const session = result.current.sessions.get(sessionId);
+      expect(session?.name).toBe('Terminal 5');
+    });
+
+    it('should return null when no persisted sessions exist', () => {
+      const { result } = renderHook(() => useTerminalSessions(10, PERSISTENCE_KEY));
+      const loaded = result.current.getPersistedSessions();
+      expect(loaded).toBeNull();
+    });
+
+    it('should return null when persistenceKey is not provided', () => {
+      const { result } = renderHook(() => useTerminalSessions());
+      const loaded = result.current.getPersistedSessions();
+      expect(loaded).toBeNull();
+    });
+
+    it('should clear persisted sessions', () => {
+      const persisted = {
+        sessions: [{ name: 'Tab 1', order: 0, serverSessionId: 'srv-1' }],
+        counter: 2,
+      };
+      sessionStorage.setItem(PERSISTENCE_KEY, JSON.stringify(persisted));
+
+      const { result } = renderHook(() => useTerminalSessions(10, PERSISTENCE_KEY));
+
+      act(() => {
+        result.current.clearPersistedSessions();
+      });
+
+      expect(sessionStorage.getItem(PERSISTENCE_KEY)).toBeNull();
+    });
+
+    it('should persist multiple sessions with serverSessionIds', () => {
+      const { result } = renderHook(() => useTerminalSessions(10, PERSISTENCE_KEY));
+
+      let id1 = '';
+      let id2 = '';
+      act(() => {
+        id1 = result.current.createSession('First');
+        id2 = result.current.createSession('Second');
+      });
+
+      act(() => {
+        result.current.updateServerSessionId(id1, 'server-aaa');
+        result.current.updateServerSessionId(id2, 'server-bbb');
+      });
+
+      const raw = sessionStorage.getItem(PERSISTENCE_KEY);
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw!);
+      expect(parsed.sessions).toHaveLength(2);
+
+      // Sessions should be persisted in order
+      const sorted = [...parsed.sessions].sort(
+        (a: { order: number }, b: { order: number }) => a.order - b.order,
+      );
+      expect(sorted[0].name).toBe('First');
+      expect(sorted[0].serverSessionId).toBe('server-aaa');
+      expect(sorted[1].name).toBe('Second');
+      expect(sorted[1].serverSessionId).toBe('server-bbb');
+    });
+
+    it('should support VM restart scenario: create fresh sessions with persisted names and update serverSessionIds', () => {
+      // Simulate: user had 2 tabs persisted before VM restart
+      const persisted = {
+        sessions: [
+          { name: 'Dev Server', order: 0, serverSessionId: 'old-srv-1' },
+          { name: 'Build', order: 1, serverSessionId: 'old-srv-2' },
+        ],
+        counter: 3,
+      };
+      sessionStorage.setItem(PERSISTENCE_KEY, JSON.stringify(persisted));
+
+      const { result } = renderHook(() => useTerminalSessions(10, PERSISTENCE_KEY));
+
+      // Load persisted sessions (as MultiTerminal.tsx would on reconnect)
+      const loaded = result.current.getPersistedSessions();
+      expect(loaded).toHaveLength(2);
+      expect(loaded![0]!.name).toBe('Dev Server');
+      expect(loaded![1]!.name).toBe('Build');
+
+      // Simulate what MultiTerminal does when server returns empty session_list:
+      // create fresh sessions with the persisted names
+      let freshId1 = '';
+      let freshId2 = '';
+      act(() => {
+        freshId1 = result.current.createSession(loaded![0]!.name);
+        freshId2 = result.current.createSession(loaded![1]!.name);
+      });
+
+      // Verify sessions were created with the original names
+      expect(result.current.sessions.get(freshId1)?.name).toBe('Dev Server');
+      expect(result.current.sessions.get(freshId2)?.name).toBe('Build');
+
+      // Simulate receiving new server session IDs (from session_created messages)
+      act(() => {
+        result.current.updateServerSessionId(freshId1, 'new-srv-AAA');
+        result.current.updateServerSessionId(freshId2, 'new-srv-BBB');
+      });
+
+      // Verify the new serverSessionIds are persisted
+      const raw = sessionStorage.getItem(PERSISTENCE_KEY);
+      const parsed = JSON.parse(raw!);
+      const sorted = [...parsed.sessions].sort(
+        (a: { order: number }, b: { order: number }) => a.order - b.order,
+      );
+      expect(sorted[0].serverSessionId).toBe('new-srv-AAA');
+      expect(sorted[1].serverSessionId).toBe('new-srv-BBB');
     });
   });
 });

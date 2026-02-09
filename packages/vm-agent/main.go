@@ -110,9 +110,14 @@ func main() {
 			}
 		}
 
-		// Give the control plane time to process the deletion request
-		// This helps ensure logs are captured before the VM is deleted
-		time.Sleep(5 * time.Second)
+		// Block forever after requesting shutdown. If we exit, systemd's
+		// Restart=always will restart the agent, which calls /ready and
+		// resets lastActivityAt — creating an infinite shutdown loop.
+		// Neither `systemctl disable` nor `systemctl mask` reliably prevent
+		// runtime restarts without daemon-reload. Since the VM will be
+		// deleted by the control plane, there's no reason to exit.
+		log.Println("Shutdown requested — blocking until VM is deleted")
+		select {}
 	}
 
 	log.Println("VM Agent stopped")

@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"bytes"
 	"bufio"
 	"context"
 	"encoding/json"
@@ -52,48 +53,64 @@ type Gateway struct {
 	restartCount int
 }
 
-// NewGateway creates a new ACP gateway for a WebSocket connection.
-func NewGateway(conn *websocket.Conn, cfg GatewayConfig) *Gateway {
+// NewGateway creates a new ACP gateway for WebSocket-to-agent bridging.
+func NewGateway(config GatewayConfig, conn *websocket.Conn) *Gateway {
 	return &Gateway{
-		config: cfg,
+		config: config,
 		conn:   conn,
 	}
 }
 
-// Run starts the gateway's main loop, handling WebSocket messages.
-// It blocks until the WebSocket connection is closed or an unrecoverable error occurs.
-func (g *Gateway) Run(ctx context.Context) {
+// Run starts the gateway, bridging WebSocket messages to/from the agent subprocess.
+func (g *Gateway) Run(ctx context.Context) error {
 	defer g.cleanup()
 
+	// Start WebSocket reader
 	for {
-		_, message, err := g.conn.ReadMessage()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		msgType, data, err := g.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				log.Printf("ACP WebSocket error: %v", err)
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				return nil
 			}
-			return
+			return fmt.Errorf("failed to read WebSocket message: %w", err)
 		}
 
-		if g.config.OnActivity != nil {
-			g.config.OnActivity()
+		if msgType != websocket.TextMessage {
+			continue
 		}
 
-		isControl, controlType := ParseWebSocketMessage(message)
-		if isControl && controlType == MsgSelectAgent {
-			var selectMsg SelectAgentMessage
-			if err := json.Unmarshal(message, &selectMsg); err != nil {
-				log.Printf("Invalid select_agent message: %v", err)
-				continue
-			}
-			g.handleSelectAgent(ctx, selectMsg.AgentType)
-		} else {
-			// Forward ACP JSON-RPC message to agent stdin
-			g.forwardToAgent(message)
+		// Check for control messages
+		if err := g.handleControlMessage(ctx, data); err != nil {
+			log.Printf("Error handling control message: %v", err)
 		}
 	}
 }
 
-// handleSelectAgent stops the current agent (if any) and starts a new one.
+// handleControlMessage processes control plane messages (agent selection).
+func (g *Gateway) handleControlMessage(ctx context.Context, data []byte) error {
+	var msg json.RawMessage
+	if err := json.Unmarshal(data, &msg); err == nil {
+		var control ControlMessage
+		if err := json.Unmarshal(data, &control); err == nil {
+			if control.Type == MsgSelectAgent {
+				g.handleSelectAgent(ctx, control.AgentType)
+				return nil
+			}
+		}
+	}
+
+	// Forward to agent if not a control message
+	g.forwardToAgent(data)
+	return nil
+}
+
+// handleSelectAgent handles agent selection requests from the browser.
 func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -140,14 +157,14 @@ func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentC
 
 	// Look up agent command and args from well-known agent definitions
 	// Pass the credential kind to determine the correct environment variable
-	acpCommand, acpArgs, envVarName := getAgentCommandInfo(agentType, cred.credentialKind)
+	info := getAgentCommandInfo(agentType, cred.credentialKind)
 
 	process, err := StartProcess(ProcessConfig{
 		ContainerID:   containerID,
 		ContainerUser: g.config.ContainerUser,
-		AcpCommand:    acpCommand,
-		AcpArgs:       acpArgs,
-		EnvVars:       []string{fmt.Sprintf("%s=%s", envVarName, cred.credential)},
+		AcpCommand:    info.command,
+		AcpArgs:       info.args,
+		EnvVars:       []string{fmt.Sprintf("%s=%s", info.envVarName, cred.credential)},
 		WorkDir:       g.config.ContainerWorkDir,
 	})
 	if err != nil {
@@ -245,7 +262,7 @@ func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess,
 	g.sendAgentStatus(StatusReady, agentType, "")
 }
 
-// forwardToAgent sends a raw WebSocket message to the agent's stdin as NDJSON.
+// forwardToAgent sends a message to the agent's stdin.
 func (g *Gateway) forwardToAgent(message []byte) {
 	g.mu.Lock()
 	process := g.process
@@ -366,26 +383,9 @@ func (g *Gateway) fetchAgentKey(ctx context.Context, agentType string) (*agentCr
 	}, nil
 }
 
-type byteReaderImpl struct {
-	data []byte
-	pos  int
-}
 
-func byteReader(data []byte) *byteReaderImpl {
-	return &byteReaderImpl{data: data}
-}
-
-func (r *byteReaderImpl) Read(p []byte) (int, error) {
-	if r.pos >= len(r.data) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.data[r.pos:])
-	r.pos += n
-	return n, nil
-}
-
-func (r *byteReaderImpl) Close() error {
-	return nil
+func byteReader(data []byte) io.ReadCloser {
+	return io.NopCloser(bytes.NewReader(data))
 }
 
 // gatewayClient implements the acp.Client interface, forwarding agent
@@ -434,49 +434,69 @@ func (c *gatewayClient) RequestPermission(_ context.Context, params acpsdk.Reque
 }
 
 func (c *gatewayClient) ReadTextFile(_ context.Context, _ acpsdk.ReadTextFileRequest) (acpsdk.ReadTextFileResponse, error) {
-	// Not supported by the gateway — agents handle file operations themselves
 	return acpsdk.ReadTextFileResponse{}, fmt.Errorf("ReadTextFile not supported by gateway")
 }
 
-func (c *gatewayClient) WriteTextFile(_ context.Context, _ acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error) {
-	return acpsdk.WriteTextFileResponse{}, fmt.Errorf("WriteTextFile not supported by gateway")
+func (c *gatewayClient) ListTextFiles(_ context.Context, _ acpsdk.ListTextFilesRequest) (acpsdk.ListTextFilesResponse, error) {
+	return acpsdk.ListTextFilesResponse{}, fmt.Errorf("ListTextFiles not supported by gateway")
 }
 
-func (c *gatewayClient) CreateTerminal(_ context.Context, _ acpsdk.CreateTerminalRequest) (acpsdk.CreateTerminalResponse, error) {
-	return acpsdk.CreateTerminalResponse{}, fmt.Errorf("CreateTerminal not supported by gateway")
+func (c *gatewayClient) EditTextFile(_ context.Context, _ acpsdk.EditTextFileRequest) (acpsdk.EditTextFileResponse, error) {
+	return acpsdk.EditTextFileResponse{}, fmt.Errorf("EditTextFile not supported by gateway")
 }
 
-func (c *gatewayClient) KillTerminalCommand(_ context.Context, _ acpsdk.KillTerminalCommandRequest) (acpsdk.KillTerminalCommandResponse, error) {
-	return acpsdk.KillTerminalCommandResponse{}, fmt.Errorf("KillTerminalCommand not supported by gateway")
+func (c *gatewayClient) CreateDirectory(_ context.Context, _ acpsdk.CreateDirectoryRequest) (acpsdk.CreateDirectoryResponse, error) {
+	return acpsdk.CreateDirectoryResponse{}, fmt.Errorf("CreateDirectory not supported by gateway")
 }
 
-func (c *gatewayClient) TerminalOutput(_ context.Context, _ acpsdk.TerminalOutputRequest) (acpsdk.TerminalOutputResponse, error) {
-	return acpsdk.TerminalOutputResponse{}, fmt.Errorf("TerminalOutput not supported by gateway")
+func (c *gatewayClient) MoveResource(_ context.Context, _ acpsdk.MoveResourceRequest) (acpsdk.MoveResourceResponse, error) {
+	return acpsdk.MoveResourceResponse{}, fmt.Errorf("MoveResource not supported by gateway")
 }
 
-func (c *gatewayClient) ReleaseTerminal(_ context.Context, _ acpsdk.ReleaseTerminalRequest) (acpsdk.ReleaseTerminalResponse, error) {
-	return acpsdk.ReleaseTerminalResponse{}, fmt.Errorf("ReleaseTerminal not supported by gateway")
+func (c *gatewayClient) StartTerminal(_ context.Context, _ acpsdk.StartTerminalRequest) (acpsdk.StartTerminalResponse, error) {
+	return acpsdk.StartTerminalResponse{}, fmt.Errorf("StartTerminal not supported by gateway")
+}
+
+func (c *gatewayClient) SendTerminalInput(_ context.Context, _ acpsdk.SendTerminalInputRequest) (acpsdk.SendTerminalInputResponse, error) {
+	return acpsdk.SendTerminalInputResponse{}, fmt.Errorf("SendTerminalInput not supported by gateway")
+}
+
+func (c *gatewayClient) ResizeTerminal(_ context.Context, _ acpsdk.ResizeTerminalRequest) (acpsdk.ResizeTerminalResponse, error) {
+	return acpsdk.ResizeTerminalResponse{}, fmt.Errorf("ResizeTerminal not supported by gateway")
+}
+
+func (c *gatewayClient) CloseTerminal(_ context.Context, _ acpsdk.CloseTerminalRequest) (acpsdk.CloseTerminalResponse, error) {
+	return acpsdk.CloseTerminalResponse{}, fmt.Errorf("CloseTerminal not supported by gateway")
 }
 
 func (c *gatewayClient) WaitForTerminalExit(_ context.Context, _ acpsdk.WaitForTerminalExitRequest) (acpsdk.WaitForTerminalExitResponse, error) {
 	return acpsdk.WaitForTerminalExitResponse{}, fmt.Errorf("WaitForTerminalExit not supported by gateway")
 }
 
-// getAgentCommandInfo returns the ACP command, args, and env var name for a given agent type and credential kind.
+// agentCommandInfo holds the command, args, env var, and install command for an agent.
+type agentCommandInfo struct {
+	command    string
+	args       []string
+	envVarName string
+	installCmd string // npm install command to run if binary is missing
+}
+
+// getAgentCommandInfo returns the ACP command, args, env var name, and install command for a given agent type.
 // These match the agent catalog defined in packages/shared/src/agents.ts.
-func getAgentCommandInfo(agentType string, credentialKind string) (command string, args []string, envVarName string) {
+// The credentialKind parameter determines which environment variable to use for Claude Code.
+func getAgentCommandInfo(agentType string, credentialKind string) agentCommandInfo {
 	switch agentType {
 	case "claude-code":
 		if credentialKind == "oauth-token" {
 			// OAuth tokens use a different environment variable
-			return "claude-code-acp", nil, "CLAUDE_CODE_OAUTH_TOKEN"
+			return agentCommandInfo{"claude-code-acp", nil, "CLAUDE_CODE_OAUTH_TOKEN", "npm install -g @zed-industries/claude-code-acp"}
 		}
-		return "claude-code-acp", nil, "ANTHROPIC_API_KEY"
+		return agentCommandInfo{"claude-code-acp", nil, "ANTHROPIC_API_KEY", "npm install -g @zed-industries/claude-code-acp"}
 	case "openai-codex":
-		return "codex-acp", nil, "OPENAI_API_KEY"
+		return agentCommandInfo{"codex-acp", nil, "OPENAI_API_KEY", "npm install -g @zed-industries/codex-acp"}
 	case "google-gemini":
-		return "gemini", []string{"--experimental-acp"}, "GEMINI_API_KEY"
+		return agentCommandInfo{"gemini", []string{"--experimental-acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli"}
 	default:
-		return agentType, nil, "API_KEY"
+		return agentCommandInfo{agentType, nil, "API_KEY", ""}
 	}
 }

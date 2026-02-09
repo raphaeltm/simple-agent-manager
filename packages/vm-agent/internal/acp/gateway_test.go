@@ -4,6 +4,7 @@ import (
 	"testing"
 )
 
+// Tests for OAuth support
 func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -11,6 +12,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 		credentialKind string
 		wantCommand    string
 		wantEnvVar     string
+		wantInstallCmd string
 	}{
 		{
 			name:           "Claude Code with OAuth token",
@@ -18,6 +20,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "oauth-token",
 			wantCommand:    "claude-code-acp",
 			wantEnvVar:     "CLAUDE_CODE_OAUTH_TOKEN",
+			wantInstallCmd: "npm install -g @zed-industries/claude-code-acp",
 		},
 		{
 			name:           "Claude Code with API key",
@@ -25,6 +28,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "claude-code-acp",
 			wantEnvVar:     "ANTHROPIC_API_KEY",
+			wantInstallCmd: "npm install -g @zed-industries/claude-code-acp",
 		},
 		{
 			name:           "Claude Code with empty credential kind defaults to API key",
@@ -32,6 +36,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "",
 			wantCommand:    "claude-code-acp",
 			wantEnvVar:     "ANTHROPIC_API_KEY",
+			wantInstallCmd: "npm install -g @zed-industries/claude-code-acp",
 		},
 		{
 			name:           "OpenAI Codex always uses API key",
@@ -39,6 +44,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "oauth-token",
 			wantCommand:    "codex-acp",
 			wantEnvVar:     "OPENAI_API_KEY",
+			wantInstallCmd: "npm install -g @zed-industries/codex-acp",
 		},
 		{
 			name:           "Google Gemini always uses API key",
@@ -46,29 +52,99 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "oauth-token",
 			wantCommand:    "gemini",
 			wantEnvVar:     "GEMINI_API_KEY",
+			wantInstallCmd: "npm install -g @google/gemini-cli",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			command, args, envVarName := getAgentCommandInfo(tt.agentType, tt.credentialKind)
+			info := getAgentCommandInfo(tt.agentType, tt.credentialKind)
 
-			if command != tt.wantCommand {
-				t.Errorf("getAgentCommandInfo() command = %v, want %v", command, tt.wantCommand)
+			if info.command != tt.wantCommand {
+				t.Errorf("getAgentCommandInfo() command = %v, want %v", info.command, tt.wantCommand)
 			}
 
-			if envVarName != tt.wantEnvVar {
-				t.Errorf("getAgentCommandInfo() envVarName = %v, want %v", envVarName, tt.wantEnvVar)
+			if info.envVarName != tt.wantEnvVar {
+				t.Errorf("getAgentCommandInfo() envVarName = %v, want %v", info.envVarName, tt.wantEnvVar)
+			}
+
+			if info.installCmd != tt.wantInstallCmd {
+				t.Errorf("getAgentCommandInfo() installCmd = %v, want %v", info.installCmd, tt.wantInstallCmd)
 			}
 
 			// Verify args for Gemini
-			if tt.agentType == "google-gemini" && len(args) == 0 {
+			if tt.agentType == "google-gemini" && len(info.args) == 0 {
 				t.Errorf("getAgentCommandInfo() expected args for google-gemini")
 			}
 		})
 	}
 }
 
+// Tests from main branch for backward compatibility
+func TestGetAgentCommandInfoClaudeCode(t *testing.T) {
+	t.Parallel()
+
+	info := getAgentCommandInfo("claude-code", "api-key")
+	if info.command != "claude-code-acp" {
+		t.Fatalf("command=%q, want %q", info.command, "claude-code-acp")
+	}
+	if info.envVarName != "ANTHROPIC_API_KEY" {
+		t.Fatalf("envVarName=%q, want %q", info.envVarName, "ANTHROPIC_API_KEY")
+	}
+	if info.installCmd != "npm install -g @zed-industries/claude-code-acp" {
+		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
+	}
+	if info.args != nil {
+		t.Fatalf("args=%v, want nil", info.args)
+	}
+}
+
+func TestGetAgentCommandInfoOpenAICodex(t *testing.T) {
+	t.Parallel()
+
+	info := getAgentCommandInfo("openai-codex", "api-key")
+	if info.command != "codex-acp" {
+		t.Fatalf("command=%q, want %q", info.command, "codex-acp")
+	}
+	if info.envVarName != "OPENAI_API_KEY" {
+		t.Fatalf("envVarName=%q, want %q", info.envVarName, "OPENAI_API_KEY")
+	}
+	if info.installCmd != "npm install -g @zed-industries/codex-acp" {
+		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
+	}
+}
+
+func TestGetAgentCommandInfoGoogleGemini(t *testing.T) {
+	t.Parallel()
+
+	info := getAgentCommandInfo("google-gemini", "api-key")
+	if info.command != "gemini" {
+		t.Fatalf("command=%q, want %q", info.command, "gemini")
+	}
+	if info.envVarName != "GEMINI_API_KEY" {
+		t.Fatalf("envVarName=%q, want %q", info.envVarName, "GEMINI_API_KEY")
+	}
+	if len(info.args) != 1 || info.args[0] != "--experimental-acp" {
+		t.Fatalf("args=%v, want [--experimental-acp]", info.args)
+	}
+}
+
+func TestGetAgentCommandInfoUnknown(t *testing.T) {
+	t.Parallel()
+
+	info := getAgentCommandInfo("custom-agent", "api-key")
+	if info.command != "custom-agent" {
+		t.Fatalf("command=%q, want %q", info.command, "custom-agent")
+	}
+	if info.envVarName != "API_KEY" {
+		t.Fatalf("envVarName=%q, want %q", info.envVarName, "API_KEY")
+	}
+	if info.installCmd != "" {
+		t.Fatalf("installCmd=%q, want empty for unknown agent", info.installCmd)
+	}
+}
+
+// Additional OAuth-specific tests
 func TestAgentCredential_ErrorMessages(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -143,10 +219,10 @@ func TestProcessConfig_EnvVarInjection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Get the command info based on credential type
-			_, _, envVarName := getAgentCommandInfo(tt.agentType, tt.credential.credentialKind)
+			info := getAgentCommandInfo(tt.agentType, tt.credential.credentialKind)
 
 			// Build the environment variable string
-			envVar := envVarName + "=" + tt.credential.credential
+			envVar := info.envVarName + "=" + tt.credential.credential
 
 			if envVar != tt.wantEnvVar {
 				t.Errorf("Environment variable = %v, want %v", envVar, tt.wantEnvVar)
