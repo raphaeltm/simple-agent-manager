@@ -460,7 +460,7 @@ credentialsRoutes.delete('/agent/:agentType/:credentialKind', async (c) => {
       )
       .limit(1);
 
-    if (remaining.length > 0) {
+    if (remaining.length > 0 && remaining[0]) {
       await db
         .update(schema.credentials)
         .set({ isActive: true, updatedAt: new Date().toISOString() })
