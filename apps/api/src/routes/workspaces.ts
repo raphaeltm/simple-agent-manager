@@ -204,7 +204,7 @@ workspacesRoutes.post('/', async (c) => {
   const branch = body.branch || 'main';
 
   // Validate idle timeout (5 minutes to 24 hours)
-  let idleTimeoutSeconds = body.idleTimeoutSeconds ?? getIdleTimeoutSeconds(c.env);
+  const idleTimeoutSeconds = body.idleTimeoutSeconds ?? getIdleTimeoutSeconds(c.env);
   if (idleTimeoutSeconds !== 0 && (idleTimeoutSeconds < 300 || idleTimeoutSeconds > 86400)) {
     throw errors.badRequest('Idle timeout must be between 5 minutes and 24 hours, or 0 to disable');
   }
