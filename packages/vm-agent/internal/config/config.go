@@ -21,6 +21,16 @@ import (
 // ENV vars (e.g. NPM_CONFIG_PREFIX). See hasDevcontainerConfig() in bootstrap.go.
 const DefaultAdditionalFeatures = `{"ghcr.io/devcontainers/features/node:1":{"version":"22"}}`
 
+// DefaultDevcontainerImage is the default container image used when a repo has no devcontainer config.
+// Uses Microsoft's universal image which includes Python, Node, Go, Java, C++, Ruby, .NET, PHP.
+// This matches what GitHub Codespaces uses as its default.
+// Override via DEFAULT_DEVCONTAINER_IMAGE env var.
+const DefaultDevcontainerImage = "mcr.microsoft.com/devcontainers/universal:2"
+
+// DefaultDevcontainerConfigPath is where the VM agent writes the default devcontainer.json
+// when a repo has no devcontainer config. Override via DEFAULT_DEVCONTAINER_CONFIG_PATH env var.
+const DefaultDevcontainerConfigPath = "/etc/sam/default-devcontainer.json"
+
 // Config holds all configuration values for the VM Agent.
 type Config struct {
 	// Server settings
@@ -95,6 +105,11 @@ type Config struct {
 	// JSON string matching the "features" section of devcontainer.json.
 	// Configurable per constitution principle XI.
 	AdditionalFeatures string
+
+	// Default devcontainer settings for repos without a devcontainer config.
+	// Configurable per constitution principle XI.
+	DefaultDevcontainerImage      string // Container image for the default config
+	DefaultDevcontainerConfigPath string // Path to write the generated default config
 }
 
 // Load reads configuration from environment variables.
@@ -189,6 +204,10 @@ func Load() (*Config, error) {
 		// Default installs Node.js (required by ACP adapters) and claude-code-acp.
 		// Override via ADDITIONAL_FEATURES env var. Set to empty string to disable.
 		AdditionalFeatures: getEnv("ADDITIONAL_FEATURES", DefaultAdditionalFeatures),
+
+		// Default devcontainer settings for repos without their own config.
+		DefaultDevcontainerImage:      getEnv("DEFAULT_DEVCONTAINER_IMAGE", DefaultDevcontainerImage),
+		DefaultDevcontainerConfigPath: getEnv("DEFAULT_DEVCONTAINER_CONFIG_PATH", DefaultDevcontainerConfigPath),
 	}
 
 	// Validate required fields

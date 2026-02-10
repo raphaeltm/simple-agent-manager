@@ -328,3 +328,132 @@ func TestWaitForCommandTimesOut(t *testing.T) {
 		t.Fatal("expected error for timed out context")
 	}
 }
+
+func TestWriteDefaultDevcontainerConfig(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "sam", "default-devcontainer.json")
+
+	cfg := &config.Config{
+		DefaultDevcontainerImage:      "mcr.microsoft.com/devcontainers/universal:2",
+		DefaultDevcontainerConfigPath: configPath,
+	}
+
+	gotPath, err := writeDefaultDevcontainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("writeDefaultDevcontainerConfig returned error: %v", err)
+	}
+	if gotPath != configPath {
+		t.Fatalf("expected path %q, got %q", configPath, gotPath)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read written config: %v", err)
+	}
+
+	content := string(data)
+	required := []string{
+		`"mcr.microsoft.com/devcontainers/universal:2"`,
+		`"ghcr.io/devcontainers/features/git:1"`,
+		`"ghcr.io/devcontainers/features/github-cli:1"`,
+		`"remoteUser": "vscode"`,
+	}
+	for _, fragment := range required {
+		if !strings.Contains(content, fragment) {
+			t.Fatalf("expected config to contain %q, got:\n%s", fragment, content)
+		}
+	}
+}
+
+func TestWriteDefaultDevcontainerConfigCustomImage(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "custom-config.json")
+
+	cfg := &config.Config{
+		DefaultDevcontainerImage:      "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+		DefaultDevcontainerConfigPath: configPath,
+	}
+
+	_, err := writeDefaultDevcontainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("writeDefaultDevcontainerConfig returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read written config: %v", err)
+	}
+
+	if !strings.Contains(string(data), `"mcr.microsoft.com/devcontainers/base:ubuntu-24.04"`) {
+		t.Fatalf("expected custom image in config, got:\n%s", string(data))
+	}
+}
+
+func TestWriteDefaultDevcontainerConfigFallbackDefaults(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "fallback-config.json")
+
+	// Empty image/path fields should fall back to package-level defaults
+	cfg := &config.Config{
+		DefaultDevcontainerImage:      "",
+		DefaultDevcontainerConfigPath: configPath,
+	}
+
+	_, err := writeDefaultDevcontainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("writeDefaultDevcontainerConfig returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read written config: %v", err)
+	}
+
+	if !strings.Contains(string(data), config.DefaultDevcontainerImage) {
+		t.Fatalf("expected fallback to default image %q, got:\n%s", config.DefaultDevcontainerImage, string(data))
+	}
+}
+
+func TestHasDevcontainerConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no config", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		if hasDevcontainerConfig(tmpDir) {
+			t.Fatal("expected hasDevcontainerConfig to return false for empty dir")
+		}
+	})
+
+	t.Run("with .devcontainer/devcontainer.json", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		dcDir := filepath.Join(tmpDir, ".devcontainer")
+		if err := os.MkdirAll(dcDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dcDir, "devcontainer.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if !hasDevcontainerConfig(tmpDir) {
+			t.Fatal("expected hasDevcontainerConfig to return true")
+		}
+	})
+
+	t.Run("with .devcontainer.json", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(tmpDir, ".devcontainer.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if !hasDevcontainerConfig(tmpDir) {
+			t.Fatal("expected hasDevcontainerConfig to return true")
+		}
+	})
+}

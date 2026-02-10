@@ -374,14 +374,27 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) error {
 	log.Printf("Starting devcontainer for workspace at %s", cfg.WorkspaceDir)
 
 	args := []string{"up", "--workspace-folder", cfg.WorkspaceDir}
-	if cfg.AdditionalFeatures != "" && !hasDevcontainerConfig(cfg.WorkspaceDir) {
-		// Only inject additional features when the repo does NOT have its own
-		// .devcontainer config. Repos with their own config likely have Node.js
-		// and other dependencies set up already, and injecting features (e.g.
-		// nvm-based Node.js) can conflict with existing ENV vars like NPM_CONFIG_PREFIX.
+	hasConfig := hasDevcontainerConfig(cfg.WorkspaceDir)
+
+	if !hasConfig {
+		// Repo has no devcontainer config — provide a default via --override-config.
+		// The devcontainer CLI requires a config file; without one it fails with
+		// "Dev container config not found". We write a default config that uses the
+		// Microsoft universal image (configurable via DEFAULT_DEVCONTAINER_IMAGE).
+		configPath, err := writeDefaultDevcontainerConfig(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to write default devcontainer config: %w", err)
+		}
+		log.Printf("Repo has no devcontainer config — using default: %s (image: %s)", configPath, cfg.DefaultDevcontainerImage)
+		args = append(args, "--override-config", configPath)
+	}
+
+	if cfg.AdditionalFeatures != "" && !hasConfig {
+		// Inject additional features (e.g. Node.js for ACP adapters) on top of the
+		// default config. These compose with --override-config.
 		log.Printf("Injecting additional devcontainer features: %s", cfg.AdditionalFeatures)
 		args = append(args, "--additional-features", cfg.AdditionalFeatures)
-	} else if cfg.AdditionalFeatures != "" {
+	} else if cfg.AdditionalFeatures != "" && hasConfig {
 		log.Printf("Repo has its own devcontainer config — skipping additional-features injection")
 	}
 
@@ -392,6 +405,44 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) error {
 	}
 
 	return nil
+}
+
+// writeDefaultDevcontainerConfig writes a default devcontainer.json to the configured
+// path (DefaultDevcontainerConfigPath) and returns the path. The config uses the image
+// specified by DefaultDevcontainerImage. This is only used when a repo has no devcontainer
+// config of its own.
+func writeDefaultDevcontainerConfig(cfg *config.Config) (string, error) {
+	configPath := cfg.DefaultDevcontainerConfigPath
+	if configPath == "" {
+		configPath = config.DefaultDevcontainerConfigPath
+	}
+
+	// Create parent directory if needed
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		return "", fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	image := cfg.DefaultDevcontainerImage
+	if image == "" {
+		image = config.DefaultDevcontainerImage
+	}
+
+	configJSON := fmt.Sprintf(`{
+  "name": "Default Workspace",
+  "image": %q,
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "remoteUser": "vscode"
+}
+`, image)
+
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o644); err != nil {
+		return "", fmt.Errorf("failed to write default config: %w", err)
+	}
+
+	return configPath, nil
 }
 
 // hasDevcontainerConfig checks whether the workspace directory contains a devcontainer

@@ -35,7 +35,7 @@ const WORKSPACE_BASE_DIR = '/tmp/simple-agent-manager';
  */
 const DEFAULT_DEVCONTAINER_CONFIG = {
   name: 'Simple Agent Manager Workspace',
-  image: 'mcr.microsoft.com/devcontainers/base:ubuntu-22.04',
+  image: 'mcr.microsoft.com/devcontainers/universal:2',
   features: {
     'ghcr.io/devcontainers/features/git:1': {},
     'ghcr.io/devcontainers/features/node:1': { version: '22' },
