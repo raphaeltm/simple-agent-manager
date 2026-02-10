@@ -61,6 +61,7 @@ type Gateway struct {
 	process      *AgentProcess
 	acpConn      *acpsdk.ClientSideConnection
 	agentType    string
+	sessionID    acpsdk.SessionId
 	restartCount int
 
 	// stderrBuf collects recent stderr output from the agent process for error reporting.
@@ -107,21 +108,37 @@ func (g *Gateway) Run(ctx context.Context) error {
 	}
 }
 
-// handleControlMessage processes control plane messages (agent selection).
+// handleControlMessage processes control plane messages (agent selection)
+// and routes ACP JSON-RPC messages through the SDK.
 func (g *Gateway) handleControlMessage(ctx context.Context, data []byte) error {
-	var msg json.RawMessage
-	if err := json.Unmarshal(data, &msg); err == nil {
-		var control SelectAgentMessage
-		if err := json.Unmarshal(data, &control); err == nil {
-			if control.Type == MsgSelectAgent {
-				g.handleSelectAgent(ctx, control.AgentType)
-				return nil
-			}
+	// Check for our custom control messages first
+	var control SelectAgentMessage
+	if err := json.Unmarshal(data, &control); err == nil {
+		if control.Type == MsgSelectAgent {
+			g.handleSelectAgent(ctx, control.AgentType)
+			return nil
 		}
 	}
 
-	// Forward to agent if not a control message
-	g.forwardToAgent(data)
+	// Parse as JSON-RPC to route ACP methods through the SDK
+	var rpcMsg struct {
+		JSONRPC string          `json:"jsonrpc"`
+		Method  string          `json:"method"`
+		ID      json.RawMessage `json:"id,omitempty"`
+		Params  json.RawMessage `json:"params,omitempty"`
+	}
+	if err := json.Unmarshal(data, &rpcMsg); err != nil {
+		log.Printf("Failed to parse WebSocket message: %v", err)
+		return nil
+	}
+
+	switch rpcMsg.Method {
+	case "session/prompt":
+		go g.handlePromptRequest(ctx, rpcMsg.ID, rpcMsg.Params)
+	default:
+		// Forward unknown methods to agent stdin (fallback)
+		g.forwardToAgent(data)
+	}
 	return nil
 }
 
@@ -179,6 +196,97 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 	}
 
 	g.sendAgentStatus(StatusReady, agentType, "")
+}
+
+// handlePromptRequest routes a session/prompt request from the browser through
+// the ACP SDK instead of forwarding raw JSON to agent stdin. The SDK manages
+// the protocol lifecycle (request IDs, response matching) while streaming
+// session/update notifications flow back via gatewayClient.SessionUpdate().
+func (g *Gateway) handlePromptRequest(ctx context.Context, reqID json.RawMessage, params json.RawMessage) {
+	// Signal activity for idle detection
+	if g.config.OnActivity != nil {
+		g.config.OnActivity()
+	}
+
+	g.mu.Lock()
+	acpConn := g.acpConn
+	sessionID := g.sessionID
+	g.mu.Unlock()
+
+	if acpConn == nil || sessionID == acpsdk.SessionId("") {
+		log.Printf("Prompt request received but no ACP session active")
+		g.sendJSONRPCError(reqID, -32603, "No ACP session active")
+		return
+	}
+
+	// Parse the prompt content from the browser's request.
+	// Browser sends: { prompt: [{ type: "text", text: "..." }] }
+	var promptParams struct {
+		Prompt []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"prompt"`
+	}
+	if err := json.Unmarshal(params, &promptParams); err != nil {
+		log.Printf("Failed to parse prompt params: %v", err)
+		g.sendJSONRPCError(reqID, -32602, "Invalid prompt params")
+		return
+	}
+
+	// Build ACP ContentBlock array from browser prompt
+	var blocks []acpsdk.ContentBlock
+	for _, p := range promptParams.Prompt {
+		if p.Type == "text" && p.Text != "" {
+			blocks = append(blocks, acpsdk.TextBlock(p.Text))
+		}
+	}
+	if len(blocks) == 0 {
+		g.sendJSONRPCError(reqID, -32602, "Empty prompt")
+		return
+	}
+
+	log.Printf("ACP: sending Prompt (session=%s, blocks=%d)", sessionID, len(blocks))
+
+	// Prompt() is blocking — it waits for the agent to complete processing.
+	// While it runs, session/update notifications are dispatched to
+	// gatewayClient.SessionUpdate() which forwards them to the browser.
+	resp, err := acpConn.Prompt(ctx, acpsdk.PromptRequest{
+		SessionId: sessionID,
+		Prompt:    blocks,
+	})
+	if err != nil {
+		log.Printf("ACP Prompt failed: %v", err)
+		g.sendJSONRPCError(reqID, -32603, fmt.Sprintf("Prompt failed: %v", err))
+		return
+	}
+
+	log.Printf("ACP: Prompt completed (stopReason=%s)", resp.StopReason)
+
+	// Send the prompt response back to the browser as a JSON-RPC result
+	result, _ := json.Marshal(resp)
+	response := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      json.RawMessage(reqID),
+		"result":  json.RawMessage(result),
+	}
+	data, _ := json.Marshal(response)
+	g.writeRawJSON(data)
+}
+
+// sendJSONRPCError sends a JSON-RPC error response to the browser.
+func (g *Gateway) sendJSONRPCError(reqID json.RawMessage, code int, message string) {
+	resp := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"error": map[string]interface{}{
+			"code":    code,
+			"message": message,
+		},
+	}
+	if reqID != nil {
+		resp["id"] = json.RawMessage(reqID)
+	}
+	data, _ := json.Marshal(resp)
+	g.writeRawJSON(data)
 }
 
 // ensureAgentInstalled checks if the ACP adapter binary exists in the devcontainer
@@ -259,10 +367,33 @@ func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentC
 	// Monitor process exit for crash detection
 	go g.monitorProcessExit(ctx, process, agentType, cred)
 
-	// Start forwarding agent stdout (NDJSON) to WebSocket
-	// Note: The ACP SDK's ClientSideConnection reads from stdout internally,
-	// so we don't need a separate stdout reader. The SDK dispatches to our
-	// gatewayClient methods (SessionUpdate, RequestPermission, etc.)
+	// Initialize the ACP protocol handshake.
+	// The agent expects Initialize → NewSession before any Prompt calls.
+	initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer initCancel()
+
+	log.Printf("ACP: sending Initialize request")
+	_, err = g.acpConn.Initialize(initCtx, acpsdk.InitializeRequest{
+		ProtocolVersion: acpsdk.ProtocolVersionNumber,
+		ClientCapabilities: acpsdk.ClientCapabilities{
+			Fs: acpsdk.FileSystemCapability{ReadTextFile: true, WriteTextFile: true},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("ACP initialize failed: %w", err)
+	}
+	log.Printf("ACP: Initialize succeeded")
+
+	log.Printf("ACP: sending NewSession request")
+	sessResp, err := g.acpConn.NewSession(initCtx, acpsdk.NewSessionRequest{
+		Cwd:        g.config.ContainerWorkDir,
+		McpServers: []acpsdk.McpServer{},
+	})
+	if err != nil {
+		return fmt.Errorf("ACP new session failed: %w", err)
+	}
+	g.sessionID = sessResp.SessionId
+	log.Printf("ACP: NewSession succeeded, sessionID=%s", string(g.sessionID))
 
 	return nil
 }
@@ -337,6 +468,7 @@ func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess,
 	if isRapidExit {
 		g.process = nil
 		g.acpConn = nil
+		g.sessionID = ""
 		g.mu.Unlock()
 
 		// Build error message for WebSocket status (same as reported above)
@@ -353,6 +485,7 @@ func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess,
 		log.Printf("Agent exceeded max restart attempts (%d)", g.config.MaxRestartAttempts)
 		g.process = nil
 		g.acpConn = nil
+		g.sessionID = ""
 		g.mu.Unlock()
 		crashMsg := "Agent crashed and could not be restarted"
 		if stderrOutput != "" {
@@ -365,6 +498,7 @@ func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess,
 
 	g.process = nil
 	g.acpConn = nil
+	g.sessionID = ""
 	g.mu.Unlock()
 
 	log.Printf("Attempting agent restart (%d/%d)", g.restartCount, g.config.MaxRestartAttempts)
@@ -457,6 +591,7 @@ func (g *Gateway) stopCurrentAgentLocked() {
 		g.process = nil
 	}
 	g.acpConn = nil
+	g.sessionID = ""
 }
 
 // cleanup stops any running agent process.
