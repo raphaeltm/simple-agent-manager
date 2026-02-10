@@ -67,7 +67,7 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	s.idleDetector.RecordActivity()
 
 	// Create and run the ACP gateway
-	gateway := acp.NewGateway(conn, s.acpConfig)
+	gateway := acp.NewGateway(s.acpConfig, conn)
 	gateway.Run(context.Background())
 
 	log.Printf("ACP WebSocket disconnected: user=%s", session.UserID)
