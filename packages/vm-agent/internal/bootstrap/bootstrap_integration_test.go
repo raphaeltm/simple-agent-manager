@@ -467,10 +467,12 @@ echo '{"outcome":"success","containerId":"mock-container-id"}'
 
 		repo := mustCreateTestRepo(t, false, "")
 		cfg := &config.Config{
-			WorkspaceDir:       repo,
-			AdditionalFeatures: `{"ghcr.io/devcontainers/features/node:1":{"version":"22"}}`,
-			ContainerLabelKey:  "devcontainer.local_folder",
-			ContainerLabelValue: repo,
+			WorkspaceDir:                  repo,
+			AdditionalFeatures:            `{"ghcr.io/devcontainers/features/node:1":{"version":"22"}}`,
+			ContainerLabelKey:             "devcontainer.local_folder",
+			ContainerLabelValue:           repo,
+			DefaultDevcontainerImage:      config.DefaultDevcontainerImage,
+			DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -482,8 +484,12 @@ echo '{"outcome":"success","containerId":"mock-container-id"}'
 		if err != nil {
 			t.Fatalf("read args file: %v", err)
 		}
-		if !strings.Contains(string(args), "--additional-features") {
-			t.Fatalf("expected --additional-features in args, got: %s", string(args))
+		argsStr := string(args)
+		if !strings.Contains(argsStr, "--additional-features") {
+			t.Fatalf("expected --additional-features in args, got: %s", argsStr)
+		}
+		if !strings.Contains(argsStr, "--override-config") {
+			t.Fatalf("expected --override-config in args for repo without devcontainer config, got: %s", argsStr)
 		}
 	})
 
