@@ -545,7 +545,132 @@ func TestIntegration_InstallAgent_Devcontainer_SAMRepoConfig(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Category 4: Python devcontainer (no npm by default)
+// Category 4: Real agent binary (npm install + Claude CLI, network required)
+// ---------------------------------------------------------------------------
+
+// TestIntegration_InstallAgent_RealClaudeCodeACP installs the actual
+// @zed-industries/claude-code-acp package and Claude Code CLI inside a
+// SAM-style devcontainer, then verifies they work together.
+//
+// This test requires network access (npm registry + claude.ai) and takes
+// longer than mock-based tests. It exercises the real production install path.
+func TestIntegration_InstallAgent_RealClaudeCodeACP(t *testing.T) {
+	requireDockerAvailable(t)
+	requireDevcontainerCLI(t)
+
+	// Use our actual SAM-style devcontainer (typescript-node with features)
+	devcontainerJSON := `{
+		"image": "mcr.microsoft.com/devcontainers/typescript-node:22-bookworm",
+		"features": {
+			"ghcr.io/devcontainers/features/github-cli:1": {},
+			"ghcr.io/devcontainers/features/go:1": { "version": "1.22" }
+		}
+	}`
+	repo := mustCreateTestRepo(t, true, devcontainerJSON)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	// Build devcontainer
+	dcArgs := []string{"up", "--workspace-folder", repo}
+	dcCmd := exec.CommandContext(ctx, "devcontainer", dcArgs...)
+	output, err := dcCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("devcontainer up failed: %v\n%s", err, string(output))
+	}
+
+	// Find the container
+	labelFilter := fmt.Sprintf("label=devcontainer.local_folder=%s", repo)
+	out, err := exec.CommandContext(ctx, "docker", "ps", "-q", "--filter", labelFilter).CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker ps: %v\n%s", err, string(out))
+	}
+	containerID := strings.TrimSpace(string(out))
+	if containerID == "" {
+		t.Fatal("no devcontainer found after build")
+	}
+
+	t.Cleanup(func() {
+		_ = exec.Command("docker", "rm", "-f", containerID).Run()
+	})
+
+	// Step 1: Install claude-code-acp using the REAL production install path
+	realInfo := getAgentCommandInfo("claude-code", "")
+	t.Logf("Installing real agent: command=%s, installCmd=%s", realInfo.command, realInfo.installCmd)
+
+	if err := installAgentBinary(ctx, containerID, realInfo); err != nil {
+		t.Fatalf("installAgentBinary with real claude-code-acp: %v", err)
+	}
+
+	// Verify claude-code-acp is installed
+	out, err = exec.CommandContext(ctx, "docker", "exec", containerID, "which", "claude-code-acp").CombinedOutput()
+	if err != nil {
+		t.Fatalf("claude-code-acp not found after install: %v\n%s", err, string(out))
+	}
+	t.Logf("claude-code-acp location: %s", strings.TrimSpace(string(out)))
+
+	// Verify non-root user (node) can find and execute claude-code-acp
+	out, err = exec.CommandContext(ctx, "docker", "exec", "-u", "node", containerID, "which", "claude-code-acp").CombinedOutput()
+	if err != nil {
+		t.Fatalf("claude-code-acp not accessible by node user: %v\n%s", err, string(out))
+	}
+	t.Logf("claude-code-acp accessible by node user at: %s", strings.TrimSpace(string(out)))
+
+	// Step 2: Install Claude Code CLI (the underlying CLI that claude-code-acp wraps)
+	// Install as the node user so it lands in /home/node/.local/bin/ (matching production
+	// where the devcontainer's default user runs the install script).
+	// Then symlink to /usr/local/bin/ so it's on everyone's PATH.
+	installClaude := `curl -fsSL https://claude.ai/install.sh | bash`
+	installArgs := []string{"exec", "-u", "node", "-e", "HOME=/home/node", containerID, "bash", "-c", installClaude}
+	out, err = exec.CommandContext(ctx, "docker", installArgs...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("Claude Code CLI install failed: %v\n%s", err, string(out))
+	}
+	t.Logf("Claude CLI installed")
+
+	// Symlink to a PATH location so all users can find it
+	symlinkCmd := `ln -sf /home/node/.local/bin/claude /usr/local/bin/claude`
+	out, err = exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "sh", "-c", symlinkCmd).CombinedOutput()
+	if err != nil {
+		t.Fatalf("symlink claude to /usr/local/bin failed: %v\n%s", err, string(out))
+	}
+
+	// Verify claude CLI is installed and accessible
+	out, err = exec.CommandContext(ctx, "docker", "exec", containerID, "claude", "--version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("claude --version failed: %v\n%s", err, string(out))
+	}
+	t.Logf("claude version: %s", strings.TrimSpace(string(out)))
+
+	// Step 3: Verify claude-code-acp + claude CLI work together via ACP protocol.
+	// Send an ACP Initialize JSON-RPC message to stdin and verify we get a valid
+	// response with agent capabilities. This is the critical integration point:
+	// claude-code-acp must find claude CLI and successfully negotiate the protocol.
+	acpInitMsg := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}`
+	acpTestScript := fmt.Sprintf(`echo '%s' | timeout 15 claude-code-acp 2>/dev/null`, acpInitMsg)
+	out, err = exec.CommandContext(ctx, "docker", "exec", "-u", "node", containerID, "bash", "-c", acpTestScript).CombinedOutput()
+	if err != nil {
+		t.Fatalf("ACP Initialize handshake failed: %v\n%s", err, string(out))
+	}
+	acpResponse := strings.TrimSpace(string(out))
+	t.Logf("ACP Initialize response: %s", acpResponse)
+
+	// Verify response is valid JSON-RPC with agent info
+	if !strings.Contains(acpResponse, `"jsonrpc":"2.0"`) {
+		t.Fatalf("expected JSON-RPC response, got: %s", acpResponse)
+	}
+	if !strings.Contains(acpResponse, "claude-code-acp") {
+		t.Fatalf("expected agent name in response, got: %s", acpResponse)
+	}
+	if !strings.Contains(acpResponse, `"agentCapabilities"`) {
+		t.Fatalf("expected agentCapabilities in response, got: %s", acpResponse)
+	}
+
+	t.Logf("Real Claude Code ACP + CLI integration test: OK")
+}
+
+// ---------------------------------------------------------------------------
+// Category 5: Python devcontainer (no npm by default)
 // ---------------------------------------------------------------------------
 
 func TestIntegration_InstallAgent_Devcontainer_PythonImage(t *testing.T) {
