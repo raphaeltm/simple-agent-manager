@@ -1,6 +1,6 @@
 # VM Agent Makefile
 
-.PHONY: all build build-ui embed clean test lint
+.PHONY: all build build-ui embed clean test test-integration lint
 
 # Go build settings
 BINARY_NAME := vm-agent
@@ -48,6 +48,10 @@ build-linux-arm64: build-ui embed
 # Run tests
 test:
 	$(GO) test -v ./...
+
+# Run integration tests (requires Docker and optionally devcontainer CLI)
+test-integration:
+	$(GO) test -v -tags integration -timeout 10m ./internal/bootstrap/
 
 # Run linter
 lint:
