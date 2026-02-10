@@ -198,7 +198,7 @@ jobs:
   vm-agent-integration:
     name: VM Agent Integration
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -216,8 +216,9 @@ jobs:
           docker pull debian:bookworm-slim &
           docker pull node:22-bookworm &
           docker pull mcr.microsoft.com/devcontainers/base:debian &
+          docker pull mcr.microsoft.com/devcontainers/python:3.12 &
           wait
 
       - name: Run VM Agent integration tests
         working-directory: packages/vm-agent
-        run: go test -v -tags integration -timeout 10m ./internal/bootstrap/
+        run: go test -v -tags integration -timeout 15m ./internal/bootstrap/ ./internal/acp/

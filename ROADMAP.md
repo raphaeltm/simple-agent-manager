@@ -44,6 +44,8 @@ Web-based terminal access to running workspaces:
 Improvements to user experience and reliability:
 
 - [ ] Workspace logs and debugging
+- [ ] Better error UX for build failures — categorize errors (transient vs config vs provider), show actionable guidance, persist boot logs past `error` state, expandable build log detail with copy-to-clipboard. Context: third-party devcontainer features can fail with transient 503s (e.g., GHCR rate limiting) leaving users with a generic red error box and no next step.
+- [ ] Retry failed workspace builds — extend `POST /api/workspaces/:id/restart` to accept `error` status (currently only `stopped`), clean up partial resources (orphaned VMs, stale DNS) before retry, add "Retry" button to WorkspaceCard for error state. Optionally track retry count and cap at a configurable max.
 - [ ] Custom devcontainer support
 - [ ] Multiple repository sources (GitLab, Bitbucket)
 - [ ] Workspace templates

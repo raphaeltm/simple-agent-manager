@@ -302,16 +302,32 @@ func (g *Gateway) ensureAgentInstalled(ctx context.Context, info agentCommandInf
 		return fmt.Errorf("failed to discover devcontainer: %w", err)
 	}
 
-	// Check if the command exists in the container
+	// Quick check: if binary already exists, skip install
 	checkArgs := []string{"exec", containerID, "which", info.command}
 	checkCmd := exec.CommandContext(ctx, "docker", checkArgs...)
 	if err := checkCmd.Run(); err == nil {
 		log.Printf("Agent binary %s is already installed", info.command)
-		return nil // Binary exists
+		return nil
+	}
+
+	g.sendAgentStatus(StatusInstalling, info.command, "")
+	return installAgentBinary(ctx, containerID, info)
+}
+
+// installAgentBinary checks if the agent command exists in the given container
+// and installs it via the provided installCmd if missing. The install runs as
+// root to ensure permissions for system-level package installs. Returns nil if
+// the binary was already present or was installed successfully.
+func installAgentBinary(ctx context.Context, containerID string, info agentCommandInfo) error {
+	// Check if the command already exists
+	checkArgs := []string{"exec", containerID, "which", info.command}
+	checkCmd := exec.CommandContext(ctx, "docker", checkArgs...)
+	if err := checkCmd.Run(); err == nil {
+		log.Printf("Agent binary %s is already installed", info.command)
+		return nil
 	}
 
 	log.Printf("Agent binary %s not found in container, installing", info.command)
-	g.sendAgentStatus(StatusInstalling, info.command, "")
 
 	// Check if npm exists; if not, install Node.js first (most devcontainers
 	// are Debian/Ubuntu-based). Run as root for system-level package installs.
