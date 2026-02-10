@@ -572,10 +572,13 @@ func findDevcontainerID(ctx context.Context, cfg *config.Config) (string, error)
 }
 
 func configureGitCredentialHelper(ctx context.Context, containerID, helperPath string) error {
+	// Use -u root because the container's default user (e.g. "node") may not have
+	// write permissions to /etc/gitconfig (system-level git config).
 	cmd := exec.CommandContext(
 		ctx,
 		"docker",
 		"exec",
+		"-u", "root",
 		containerID,
 		"git",
 		"config",
