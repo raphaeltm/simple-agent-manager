@@ -202,20 +202,17 @@ func (g *Gateway) ensureAgentInstalled(ctx context.Context, info agentCommandInf
 		return nil // Binary exists
 	}
 
-	log.Printf("Agent binary %s not found in container, installing via: %s", info.command, info.installCmd)
+	log.Printf("Agent binary %s not found in container, installing", info.command)
 	g.sendAgentStatus(StatusInstalling, info.command, "")
 
-	// Run the install command inside the container
-	// Split installCmd into command + args for docker exec
-	installArgs := []string{"exec"}
-	if g.config.ContainerUser != "" {
-		installArgs = append(installArgs, "-u", g.config.ContainerUser)
-	}
-	if g.config.ContainerWorkDir != "" {
-		installArgs = append(installArgs, "-w", g.config.ContainerWorkDir)
-	}
-	installArgs = append(installArgs, containerID, "sh", "-c", info.installCmd)
+	// Check if npm exists; if not, install Node.js first (most devcontainers
+	// are Debian/Ubuntu-based). Run as root for system-level package installs.
+	installScript := fmt.Sprintf(
+		`which npm >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq nodejs npm; }; %s`,
+		info.installCmd,
+	)
 
+	installArgs := []string{"exec", "-u", "root", containerID, "sh", "-c", installScript}
 	installCmd := exec.CommandContext(ctx, "docker", installArgs...)
 	output, err := installCmd.CombinedOutput()
 	if err != nil {
