@@ -19,6 +19,7 @@ type AgentStatus string
 
 const (
 	StatusStarting   AgentStatus = "starting"
+	StatusInstalling AgentStatus = "installing"
 	StatusReady      AgentStatus = "ready"
 	StatusError      AgentStatus = "error"
 	StatusRestarting AgentStatus = "restarting"

@@ -3,7 +3,7 @@
 // =============================================================================
 
 /** Status values for agent lifecycle updates */
-export type AgentSessionStatus = 'starting' | 'ready' | 'error' | 'restarting';
+export type AgentSessionStatus = 'starting' | 'installing' | 'ready' | 'error' | 'restarting';
 
 /** Sent by VM Agent to browser: agent lifecycle status update */
 export interface AgentStatusMessage {

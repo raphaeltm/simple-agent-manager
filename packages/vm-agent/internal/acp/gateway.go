@@ -1,14 +1,15 @@
 package acp
 
 import (
-	"bytes"
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -157,6 +158,18 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 		return
 	}
 
+	// Ensure the ACP adapter binary is installed in the devcontainer.
+	// Repos with their own .devcontainer config skip --additional-features
+	// during bootstrap, so the binary may not be present.
+	info := getAgentCommandInfo(agentType, cred.credentialKind)
+	if err := g.ensureAgentInstalled(ctx, info); err != nil {
+		errMsg := fmt.Sprintf("Failed to install %s: %v", info.command, err)
+		log.Printf("Agent install failed: %v", err)
+		g.sendAgentStatus(StatusError, agentType, errMsg)
+		g.reportAgentError(agentType, "agent_install", errMsg, err.Error())
+		return
+	}
+
 	// Start the agent process
 	if err := g.startAgent(ctx, agentType, cred); err != nil {
 		log.Printf("Agent start failed: %v", err)
@@ -166,6 +179,51 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 	}
 
 	g.sendAgentStatus(StatusReady, agentType, "")
+}
+
+// ensureAgentInstalled checks if the ACP adapter binary exists in the devcontainer
+// and installs it on-demand if missing. This handles repos with their own
+// .devcontainer config where --additional-features is skipped during bootstrap.
+func (g *Gateway) ensureAgentInstalled(ctx context.Context, info agentCommandInfo) error {
+	if info.installCmd == "" {
+		return nil // Unknown agent, skip install check
+	}
+
+	containerID, err := g.config.ContainerResolver()
+	if err != nil {
+		return fmt.Errorf("failed to discover devcontainer: %w", err)
+	}
+
+	// Check if the command exists in the container
+	checkArgs := []string{"exec", containerID, "which", info.command}
+	checkCmd := exec.CommandContext(ctx, "docker", checkArgs...)
+	if err := checkCmd.Run(); err == nil {
+		log.Printf("Agent binary %s is already installed", info.command)
+		return nil // Binary exists
+	}
+
+	log.Printf("Agent binary %s not found in container, installing via: %s", info.command, info.installCmd)
+	g.sendAgentStatus(StatusInstalling, info.command, "")
+
+	// Run the install command inside the container
+	// Split installCmd into command + args for docker exec
+	installArgs := []string{"exec"}
+	if g.config.ContainerUser != "" {
+		installArgs = append(installArgs, "-u", g.config.ContainerUser)
+	}
+	if g.config.ContainerWorkDir != "" {
+		installArgs = append(installArgs, "-w", g.config.ContainerWorkDir)
+	}
+	installArgs = append(installArgs, containerID, "sh", "-c", info.installCmd)
+
+	installCmd := exec.CommandContext(ctx, "docker", installArgs...)
+	output, err := installCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("install command failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	log.Printf("Agent binary %s installed successfully", info.command)
+	return nil
 }
 
 // startAgent spawns the agent process and sets up the ACP connection.

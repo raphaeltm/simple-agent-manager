@@ -98,6 +98,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
   const handleAgentStatus = useCallback((msg: AgentStatusMessage) => {
     const statusMap: Record<AgentSessionStatus, AcpSessionState> = {
       starting: 'initializing',
+      installing: 'initializing',
       ready: 'ready',
       error: 'error',
       restarting: 'initializing',
