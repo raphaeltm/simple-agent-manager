@@ -722,6 +722,592 @@ func TestIntegration_DevcontainerBuildWithAdditionalFeatures(t *testing.T) {
 	t.Logf("Built devcontainer %s with injected Node.js %s", containerID, version)
 }
 
+// ---------------------------------------------------------------------------
+// Category 4b: Devcontainer Config Variety Tests
+// These tests exercise different devcontainer.json configuration patterns
+// that are common in real-world repositories.
+// ---------------------------------------------------------------------------
+
+func TestIntegration_DevcontainerWithRemoteUser(t *testing.T) {
+	requireDockerAvailable(t)
+	requireDevcontainerCLI(t)
+
+	// Uses mcr.microsoft.com/devcontainers/base:debian which has a "vscode" user
+	// at uid 1000. The remoteUser field tells the devcontainer CLI to set up the
+	// environment for that user (affects VS Code connection, not docker exec default).
+	devcontainerJSON := `{
+		"image": "mcr.microsoft.com/devcontainers/base:debian",
+		"remoteUser": "vscode"
+	}`
+	repo := mustCreateTestRepo(t, true, devcontainerJSON)
+
+	cfg := &config.Config{
+		WorkspaceDir:        repo,
+		ContainerLabelKey:   "devcontainer.local_folder",
+		ContainerLabelValue: repo,
+		AdditionalFeatures:  config.DefaultAdditionalFeatures,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	if err := ensureDevcontainerReady(ctx, cfg); err != nil {
+		t.Fatalf("ensureDevcontainerReady: %v", err)
+	}
+
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		t.Fatalf("findDevcontainerID: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("docker", "rm", "-f", containerID).Run()
+	})
+
+	// Verify the "vscode" user exists in the container
+	uid, gid, err := getContainerUserIDs(ctx, containerID, "vscode")
+	if err != nil {
+		t.Fatalf("getContainerUserIDs(vscode): %v", err)
+	}
+	if uid != 1000 {
+		t.Fatalf("expected vscode uid=1000, got %d", uid)
+	}
+	if gid != 1000 {
+		t.Fatalf("expected vscode gid=1000, got %d", gid)
+	}
+
+	// Verify git credential helper works in a container with remoteUser set.
+	// This exercises the -u root pattern needed for non-root containers.
+	testCfg := &config.Config{
+		Repository:          "https://github.com/test/repo",
+		CallbackToken:       "remote-user-cred-token",
+		Port:                8080,
+		ContainerMode:       true,
+		ContainerLabelKey:   cfg.ContainerLabelKey,
+		ContainerLabelValue: cfg.ContainerLabelValue,
+	}
+	if err := ensureGitCredentialHelper(ctx, testCfg); err != nil {
+		t.Fatalf("ensureGitCredentialHelper with remoteUser: %v", err)
+	}
+
+	// Verify credential helper is configured
+	out, err := exec.CommandContext(ctx, "docker", "exec", containerID,
+		"git", "config", "--system", "credential.helper").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git config read: %v\n%s", err, string(out))
+	}
+	if !strings.Contains(string(out), "git-credential-sam") {
+		t.Fatalf("credential helper not configured, got: %s", string(out))
+	}
+
+	// Verify workspace permissions work with ContainerUser="vscode"
+	permCfg := &config.Config{
+		WorkspaceDir:        repo,
+		ContainerMode:       true,
+		ContainerUser:       "vscode",
+		ContainerLabelKey:   cfg.ContainerLabelKey,
+		ContainerLabelValue: cfg.ContainerLabelValue,
+	}
+	if err := ensureWorkspaceWritable(ctx, permCfg); err != nil {
+		t.Fatalf("ensureWorkspaceWritable with vscode user: %v", err)
+	}
+
+	t.Logf("Built devcontainer %s with remoteUser=vscode, credential helper and permissions work", containerID)
+}
+
+func TestIntegration_DevcontainerWithDockerfile(t *testing.T) {
+	requireDockerAvailable(t)
+	requireDevcontainerCLI(t)
+
+	// Create a repo with a Dockerfile-based devcontainer config.
+	// This exercises the devcontainer CLI's build.dockerfile path rather
+	// than the simpler image-based path.
+	dir := t.TempDir()
+
+	// Initialize git repo
+	cmds := [][]string{
+		{"git", "init", dir},
+		{"git", "-C", dir, "config", "user.email", "test@example.com"},
+		{"git", "-C", dir, "config", "user.name", "Test User"},
+	}
+	for _, args := range cmds {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("%s failed: %v\n%s", strings.Join(args, " "), err, string(out))
+		}
+	}
+
+	// Write README
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Dockerfile Test\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+
+	// Write Dockerfile
+	dcDir := filepath.Join(dir, ".devcontainer")
+	if err := os.MkdirAll(dcDir, 0o755); err != nil {
+		t.Fatalf("mkdir .devcontainer: %v", err)
+	}
+
+	dockerfile := `FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a non-root user (common Dockerfile pattern)
+RUN useradd -m -s /bin/bash devuser
+
+# Create a marker file to verify Dockerfile was used
+RUN echo "dockerfile-build-marker" > /tmp/dockerfile-marker
+`
+	if err := os.WriteFile(filepath.Join(dcDir, "Dockerfile"), []byte(dockerfile), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+
+	devcontainerJSON := `{
+		"build": {
+			"dockerfile": "Dockerfile"
+		},
+		"remoteUser": "devuser"
+	}`
+	if err := os.WriteFile(filepath.Join(dcDir, "devcontainer.json"), []byte(devcontainerJSON), 0o644); err != nil {
+		t.Fatalf("write devcontainer.json: %v", err)
+	}
+
+	// Commit everything
+	addAndCommit := [][]string{
+		{"git", "-C", dir, "add", "."},
+		{"git", "-C", dir, "commit", "-m", "initial commit"},
+	}
+	for _, args := range addAndCommit {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("%s failed: %v\n%s", strings.Join(args, " "), err, string(out))
+		}
+	}
+
+	cfg := &config.Config{
+		WorkspaceDir:        dir,
+		ContainerLabelKey:   "devcontainer.local_folder",
+		ContainerLabelValue: dir,
+		AdditionalFeatures:  config.DefaultAdditionalFeatures,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// hasDevcontainerConfig should detect Dockerfile-based configs too (they still
+	// have devcontainer.json, just with build.dockerfile instead of image)
+	if !hasDevcontainerConfig(dir) {
+		t.Fatal("hasDevcontainerConfig() should return true for Dockerfile-based config")
+	}
+
+	if err := ensureDevcontainerReady(ctx, cfg); err != nil {
+		t.Fatalf("ensureDevcontainerReady with Dockerfile: %v", err)
+	}
+
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		t.Fatalf("findDevcontainerID: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("docker", "rm", "-f", containerID).Run()
+	})
+
+	// Verify the Dockerfile was actually used by checking the marker file
+	out, err := exec.CommandContext(ctx, "docker", "exec", containerID, "cat", "/tmp/dockerfile-marker").CombinedOutput()
+	if err != nil {
+		t.Fatalf("Dockerfile marker not found — Dockerfile may not have been used: %v\n%s", err, string(out))
+	}
+	if !strings.Contains(string(out), "dockerfile-build-marker") {
+		t.Fatalf("expected dockerfile-build-marker, got: %s", string(out))
+	}
+
+	// Verify the custom user exists
+	uid, _, err := getContainerUserIDs(ctx, containerID, "devuser")
+	if err != nil {
+		t.Fatalf("getContainerUserIDs(devuser): %v", err)
+	}
+	if uid == 0 {
+		t.Fatal("devuser should not be root")
+	}
+
+	// Verify git is available (installed by Dockerfile)
+	out, err = exec.CommandContext(ctx, "docker", "exec", containerID, "git", "--version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git not available in Dockerfile-built container: %v\n%s", err, string(out))
+	}
+
+	// Verify credential helper works in Dockerfile-built container
+	credCfg := &config.Config{
+		Repository:          "https://github.com/test/repo",
+		CallbackToken:       "dockerfile-cred-token",
+		Port:                8080,
+		ContainerMode:       true,
+		ContainerLabelKey:   cfg.ContainerLabelKey,
+		ContainerLabelValue: cfg.ContainerLabelValue,
+	}
+	if err := ensureGitCredentialHelper(ctx, credCfg); err != nil {
+		t.Fatalf("ensureGitCredentialHelper in Dockerfile container: %v", err)
+	}
+
+	t.Logf("Built devcontainer %s from Dockerfile with custom user", containerID)
+}
+
+func TestIntegration_DevcontainerWithFeatures(t *testing.T) {
+	requireDockerAvailable(t)
+	requireDevcontainerCLI(t)
+
+	// Config that declares its own features. This tests two things:
+	// 1. hasDevcontainerConfig() returns true → our code skips --additional-features
+	// 2. The declared features are actually installed by devcontainer CLI
+	devcontainerJSON := `{
+		"image": "mcr.microsoft.com/devcontainers/base:debian",
+		"features": {
+			"ghcr.io/devcontainers/features/git:1": {}
+		}
+	}`
+	repo := mustCreateTestRepo(t, true, devcontainerJSON)
+
+	cfg := &config.Config{
+		WorkspaceDir:        repo,
+		ContainerLabelKey:   "devcontainer.local_folder",
+		ContainerLabelValue: repo,
+		AdditionalFeatures:  config.DefaultAdditionalFeatures,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Verify our detection logic recognizes this config
+	if !hasDevcontainerConfig(repo) {
+		t.Fatal("hasDevcontainerConfig() should return true for config with features")
+	}
+
+	if err := ensureDevcontainerReady(ctx, cfg); err != nil {
+		t.Fatalf("ensureDevcontainerReady: %v", err)
+	}
+
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		t.Fatalf("findDevcontainerID: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("docker", "rm", "-f", containerID).Run()
+	})
+
+	// Verify git feature was installed (should be available as a recent version)
+	out, err := exec.CommandContext(ctx, "docker", "exec", containerID, "git", "--version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git --version failed: %v\n%s", err, string(out))
+	}
+	version := strings.TrimSpace(string(out))
+	if !strings.HasPrefix(version, "git version") {
+		t.Fatalf("unexpected git --version output: %s", version)
+	}
+
+	t.Logf("Built devcontainer %s with declared features, git: %s", containerID, version)
+}
+
+func TestIntegration_DevcontainerWithPostCreateCommand(t *testing.T) {
+	requireDockerAvailable(t)
+	requireDevcontainerCLI(t)
+
+	// Config with postCreateCommand lifecycle hook. This verifies that
+	// devcontainer up executes lifecycle hooks, which is important because
+	// many real repos depend on postCreateCommand for setup (npm install,
+	// database migrations, etc.)
+	devcontainerJSON := `{
+		"image": "mcr.microsoft.com/devcontainers/base:debian",
+		"postCreateCommand": "echo 'post-create-hook-executed' > /tmp/post-create-marker"
+	}`
+	repo := mustCreateTestRepo(t, true, devcontainerJSON)
+
+	cfg := &config.Config{
+		WorkspaceDir:        repo,
+		ContainerLabelKey:   "devcontainer.local_folder",
+		ContainerLabelValue: repo,
+		AdditionalFeatures:  config.DefaultAdditionalFeatures,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	if err := ensureDevcontainerReady(ctx, cfg); err != nil {
+		t.Fatalf("ensureDevcontainerReady: %v", err)
+	}
+
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		t.Fatalf("findDevcontainerID: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("docker", "rm", "-f", containerID).Run()
+	})
+
+	// Verify postCreateCommand ran by checking the marker file
+	out, err := exec.CommandContext(ctx, "docker", "exec", containerID, "cat", "/tmp/post-create-marker").CombinedOutput()
+	if err != nil {
+		t.Fatalf("postCreateCommand marker not found — hook may not have run: %v\n%s", err, string(out))
+	}
+	marker := strings.TrimSpace(string(out))
+	if marker != "post-create-hook-executed" {
+		t.Fatalf("expected marker 'post-create-hook-executed', got: %q", marker)
+	}
+
+	t.Logf("Built devcontainer %s, postCreateCommand executed successfully", containerID)
+}
+
+func TestIntegration_DevcontainerWithMultipleLifecycleHooks(t *testing.T) {
+	requireDockerAvailable(t)
+	requireDevcontainerCLI(t)
+
+	// Tests multiple lifecycle hooks running in sequence. This is common in
+	// production repos that need to install dependencies and run build steps.
+	devcontainerJSON := `{
+		"image": "mcr.microsoft.com/devcontainers/base:debian",
+		"onCreateCommand": "echo 'on-create' > /tmp/lifecycle-log",
+		"postCreateCommand": "echo 'post-create' >> /tmp/lifecycle-log",
+		"postStartCommand": "echo 'post-start' >> /tmp/lifecycle-log"
+	}`
+	repo := mustCreateTestRepo(t, true, devcontainerJSON)
+
+	cfg := &config.Config{
+		WorkspaceDir:        repo,
+		ContainerLabelKey:   "devcontainer.local_folder",
+		ContainerLabelValue: repo,
+		AdditionalFeatures:  config.DefaultAdditionalFeatures,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	if err := ensureDevcontainerReady(ctx, cfg); err != nil {
+		t.Fatalf("ensureDevcontainerReady: %v", err)
+	}
+
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		t.Fatalf("findDevcontainerID: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("docker", "rm", "-f", containerID).Run()
+	})
+
+	// Verify all lifecycle hooks ran in order
+	out, err := exec.CommandContext(ctx, "docker", "exec", containerID, "cat", "/tmp/lifecycle-log").CombinedOutput()
+	if err != nil {
+		t.Fatalf("lifecycle log not found: %v\n%s", err, string(out))
+	}
+	log := strings.TrimSpace(string(out))
+	lines := strings.Split(log, "\n")
+
+	expected := []string{"on-create", "post-create", "post-start"}
+	if len(lines) != len(expected) {
+		t.Fatalf("expected %d lifecycle entries, got %d: %q", len(expected), len(lines), log)
+	}
+	for i, want := range expected {
+		if strings.TrimSpace(lines[i]) != want {
+			t.Fatalf("lifecycle entry %d: expected %q, got %q (full log: %q)", i, want, lines[i], log)
+		}
+	}
+
+	t.Logf("Built devcontainer %s, all %d lifecycle hooks executed in order", containerID, len(expected))
+}
+
+func TestIntegration_DevcontainerWithRemoteEnv(t *testing.T) {
+	requireDockerAvailable(t)
+	requireDevcontainerCLI(t)
+
+	// Tests remoteEnv — environment variables that are set in the container.
+	// Common for configuring database URLs, API keys, etc. in dev environments.
+	devcontainerJSON := `{
+		"image": "mcr.microsoft.com/devcontainers/base:debian",
+		"remoteEnv": {
+			"MY_APP_ENV": "integration-test",
+			"MY_APP_DEBUG": "true"
+		}
+	}`
+	repo := mustCreateTestRepo(t, true, devcontainerJSON)
+
+	cfg := &config.Config{
+		WorkspaceDir:        repo,
+		ContainerLabelKey:   "devcontainer.local_folder",
+		ContainerLabelValue: repo,
+		AdditionalFeatures:  config.DefaultAdditionalFeatures,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	if err := ensureDevcontainerReady(ctx, cfg); err != nil {
+		t.Fatalf("ensureDevcontainerReady: %v", err)
+	}
+
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		t.Fatalf("findDevcontainerID: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("docker", "rm", "-f", containerID).Run()
+	})
+
+	// NOTE: remoteEnv variables are set for the remoteUser session, not for
+	// arbitrary docker exec commands. We verify the container built successfully
+	// which is the primary concern for our bootstrap path.
+	t.Logf("Built devcontainer %s with remoteEnv configuration", containerID)
+}
+
+func TestIntegration_DevcontainerRootDevcontainerJson(t *testing.T) {
+	requireDockerAvailable(t)
+	requireDevcontainerCLI(t)
+
+	// Tests the alternate config location: .devcontainer.json in repo root
+	// (instead of .devcontainer/devcontainer.json). Some repos use this format.
+	dir := t.TempDir()
+
+	cmds := [][]string{
+		{"git", "init", dir},
+		{"git", "-C", dir, "config", "user.email", "test@example.com"},
+		{"git", "-C", dir, "config", "user.name", "Test User"},
+	}
+	for _, args := range cmds {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("%s failed: %v\n%s", strings.Join(args, " "), err, string(out))
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Root Config Test\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+
+	// Write .devcontainer.json in repo root (NOT in .devcontainer/ directory)
+	devcontainerJSON := `{
+		"image": "mcr.microsoft.com/devcontainers/base:debian"
+	}`
+	if err := os.WriteFile(filepath.Join(dir, ".devcontainer.json"), []byte(devcontainerJSON), 0o644); err != nil {
+		t.Fatalf("write .devcontainer.json: %v", err)
+	}
+
+	addAndCommit := [][]string{
+		{"git", "-C", dir, "add", "."},
+		{"git", "-C", dir, "commit", "-m", "initial commit"},
+	}
+	for _, args := range addAndCommit {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("%s failed: %v\n%s", strings.Join(args, " "), err, string(out))
+		}
+	}
+
+	// Verify hasDevcontainerConfig detects root-level config
+	if !hasDevcontainerConfig(dir) {
+		t.Fatal("hasDevcontainerConfig() should detect .devcontainer.json in repo root")
+	}
+
+	cfg := &config.Config{
+		WorkspaceDir:        dir,
+		ContainerLabelKey:   "devcontainer.local_folder",
+		ContainerLabelValue: dir,
+		AdditionalFeatures:  config.DefaultAdditionalFeatures,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	if err := ensureDevcontainerReady(ctx, cfg); err != nil {
+		t.Fatalf("ensureDevcontainerReady with root .devcontainer.json: %v", err)
+	}
+
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		t.Fatalf("findDevcontainerID: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("docker", "rm", "-f", containerID).Run()
+	})
+
+	t.Logf("Built devcontainer %s from root .devcontainer.json", containerID)
+}
+
+func TestIntegration_FullBootstrapWithRemoteUser(t *testing.T) {
+	requireDockerAvailable(t)
+	requireDevcontainerCLI(t)
+
+	// Full end-to-end bootstrap with remoteUser set to "vscode".
+	// This tests the complete path that caused bugs in production:
+	// bootstrap → devcontainer up → workspace permissions → credential helper → ready
+	const (
+		workspaceID    = "ws-remote-user-test"
+		bootstrapToken = "test-bootstrap-remote-user"
+		callbackToken  = "test-callback-remote-user"
+	)
+
+	server, cpState := startMockControlPlane(t, workspaceID, bootstrapToken, callbackToken)
+
+	devcontainerJSON := `{
+		"image": "mcr.microsoft.com/devcontainers/base:debian",
+		"remoteUser": "vscode"
+	}`
+	repoDir := mustCreateTestRepo(t, true, devcontainerJSON)
+
+	cfg := &config.Config{
+		BootstrapToken:      bootstrapToken,
+		ControlPlaneURL:     server.URL,
+		WorkspaceID:         workspaceID,
+		Branch:              "main",
+		Repository:          "https://github.com/test/repo",
+		WorkspaceDir:        repoDir,
+		BootstrapStatePath:  filepath.Join(t.TempDir(), "bootstrap-state.json"),
+		BootstrapMaxWait:    30 * time.Second,
+		ContainerMode:       true,
+		ContainerLabelKey:   "devcontainer.local_folder",
+		ContainerLabelValue: repoDir,
+		ContainerUser:       "vscode",
+		Port:                8080,
+		AdditionalFeatures:  config.DefaultAdditionalFeatures,
+	}
+
+	reporter := bootlog.New(server.URL, workspaceID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	if err := Run(ctx, cfg, reporter); err != nil {
+		t.Fatalf("Run() with remoteUser failed: %v", err)
+	}
+
+	t.Cleanup(func() {
+		if containerID, err := findDevcontainerID(context.Background(), cfg); err == nil {
+			_ = exec.Command("docker", "rm", "-f", containerID).Run()
+		}
+	})
+
+	cpState.mu.Lock()
+	defer cpState.mu.Unlock()
+
+	if !cpState.bootstrapRedeemed {
+		t.Fatal("bootstrap token was not redeemed")
+	}
+	if !cpState.readyCalled {
+		t.Fatal("/ready was not called")
+	}
+
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		t.Fatalf("findDevcontainerID: %v", err)
+	}
+
+	// Verify credential helper works with remoteUser container
+	out, err := exec.CommandContext(ctx, "docker", "exec", containerID,
+		"git", "config", "--system", "credential.helper").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git config read: %v\n%s", err, string(out))
+	}
+	if !strings.Contains(string(out), "git-credential-sam") {
+		t.Fatalf("credential helper not configured, got: %s", string(out))
+	}
+
+	t.Logf("Full bootstrap with remoteUser=vscode completed: container %s", containerID)
+}
+
 func TestIntegration_FindDevcontainerID(t *testing.T) {
 	requireDockerAvailable(t)
 
