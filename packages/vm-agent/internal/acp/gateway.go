@@ -9,12 +9,19 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/gorilla/websocket"
 )
+
+// BootLogReporter sends structured log entries to the control plane.
+// It must be non-nil and have a valid token for logging to work.
+type BootLogReporter interface {
+	Log(step, status, message string, detail ...string)
+}
 
 // GatewayConfig holds configuration for the ACP gateway.
 type GatewayConfig struct {
@@ -36,6 +43,9 @@ type GatewayConfig struct {
 	ContainerWorkDir string
 	// OnActivity is called when there's ACP activity (for idle detection).
 	OnActivity func()
+	// BootLog is the reporter for sending structured logs to the control plane.
+	// Agent errors (stderr, crashes) are reported here for observability.
+	BootLog BootLogReporter
 }
 
 // Gateway bridges a gorilla/websocket connection to an ACP agent subprocess.
@@ -51,6 +61,10 @@ type Gateway struct {
 	acpConn      *acpsdk.ClientSideConnection
 	agentType    string
 	restartCount int
+
+	// stderrBuf collects recent stderr output from the agent process for error reporting.
+	stderrMu  sync.Mutex
+	stderrBuf strings.Builder
 }
 
 // NewGateway creates a new ACP gateway for WebSocket-to-agent bridging.
@@ -128,12 +142,18 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 	// Send starting status
 	g.sendAgentStatus(StatusStarting, agentType, "")
 
+	// Reset stderr buffer for the new agent
+	g.stderrMu.Lock()
+	g.stderrBuf.Reset()
+	g.stderrMu.Unlock()
+
 	// Fetch credential from control plane
 	cred, err := g.fetchAgentKey(ctx, agentType)
 	if err != nil {
 		errMsg := fmt.Sprintf("Failed to fetch credential for %s — check Settings", agentType)
 		log.Printf("Agent credential fetch failed: %v", err)
 		g.sendAgentStatus(StatusError, agentType, errMsg)
+		g.reportAgentError(agentType, "agent_key_fetch", errMsg, err.Error())
 		return
 	}
 
@@ -141,6 +161,7 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 	if err := g.startAgent(ctx, agentType, cred); err != nil {
 		log.Printf("Agent start failed: %v", err)
 		g.sendAgentStatus(StatusError, agentType, err.Error())
+		g.reportAgentError(agentType, "agent_start", err.Error(), "")
 		return
 	}
 
@@ -191,18 +212,39 @@ func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentC
 	return nil
 }
 
-// monitorStderr reads the agent's stderr for error messages.
+// monitorStderr reads the agent's stderr, logs it, and collects it for error reporting.
 func (g *Gateway) monitorStderr(process *AgentProcess) {
 	scanner := bufio.NewScanner(process.Stderr())
 	for scanner.Scan() {
 		line := scanner.Text()
 		log.Printf("Agent stderr: %s", line)
+		g.stderrMu.Lock()
+		if g.stderrBuf.Len() < 4096 { // Cap collected stderr at 4KB
+			if g.stderrBuf.Len() > 0 {
+				g.stderrBuf.WriteByte('\n')
+			}
+			g.stderrBuf.WriteString(line)
+		}
+		g.stderrMu.Unlock()
 	}
+}
+
+// getAndClearStderr returns the collected stderr output and resets the buffer.
+func (g *Gateway) getAndClearStderr() string {
+	g.stderrMu.Lock()
+	defer g.stderrMu.Unlock()
+	s := g.stderrBuf.String()
+	g.stderrBuf.Reset()
+	return s
 }
 
 // monitorProcessExit detects when the agent process crashes and attempts restart.
 func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess, agentType string, cred *agentCredential) {
 	err := process.Wait()
+
+	// Brief delay to let stderr goroutine finish collecting output
+	time.Sleep(100 * time.Millisecond)
+	stderrOutput := g.getAndClearStderr()
 
 	g.mu.Lock()
 	// Only handle if this is still the active process
@@ -215,18 +257,21 @@ func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess,
 		log.Printf("Agent process exited with error: %v", err)
 	}
 
-	// Detect rapid exit — likely an auth error (invalid/expired credential)
+	// Detect rapid exit — include stderr output in the error for debugging
 	uptime := time.Since(process.startTime)
 	if uptime < 5*time.Second && err != nil {
 		g.process = nil
 		g.acpConn = nil
 		g.mu.Unlock()
-		credType := "API key"
-		if cred.credentialKind == "oauth-token" {
-			credType = "OAuth token"
+
+		// Build informative error message with stderr context
+		errMsg := fmt.Sprintf("Agent %s crashed on startup (exited in %v)", agentType, uptime.Round(time.Millisecond))
+		if stderrOutput != "" {
+			errMsg = fmt.Sprintf("%s: %s", errMsg, truncate(stderrOutput, 500))
 		}
-		errMsg := fmt.Sprintf("%s for %s may be invalid or expired — update it in Settings", credType, agentType)
+		log.Printf("Agent rapid exit: %s", errMsg)
 		g.sendAgentStatus(StatusError, agentType, errMsg)
+		g.reportAgentError(agentType, "agent_crash", errMsg, stderrOutput)
 		return
 	}
 
@@ -236,7 +281,12 @@ func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess,
 		g.process = nil
 		g.acpConn = nil
 		g.mu.Unlock()
-		g.sendAgentStatus(StatusError, agentType, "Agent crashed and could not be restarted")
+		crashMsg := "Agent crashed and could not be restarted"
+		if stderrOutput != "" {
+			crashMsg = fmt.Sprintf("%s: %s", crashMsg, truncate(stderrOutput, 500))
+		}
+		g.sendAgentStatus(StatusError, agentType, crashMsg)
+		g.reportAgentError(agentType, "agent_max_restarts", crashMsg, stderrOutput)
 		return
 	}
 
@@ -255,11 +305,29 @@ func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess,
 		g.mu.Unlock()
 		log.Printf("Agent restart failed: %v", err)
 		g.sendAgentStatus(StatusError, agentType, err.Error())
+		g.reportAgentError(agentType, "agent_restart_failed", err.Error(), "")
 		return
 	}
 	g.mu.Unlock()
 
 	g.sendAgentStatus(StatusReady, agentType, "")
+}
+
+// reportAgentError sends an agent error to the control plane boot-log endpoint
+// for observability. It is fire-and-forget — failures are logged but don't block.
+func (g *Gateway) reportAgentError(agentType, step, message, detail string) {
+	if g.config.BootLog == nil {
+		return
+	}
+	g.config.BootLog.Log(step, "failed", fmt.Sprintf("[%s] %s", agentType, message), detail)
+}
+
+// truncate limits a string to maxLen characters, appending "..." if truncated.
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // forwardToAgent sends a message to the agent's stdin.

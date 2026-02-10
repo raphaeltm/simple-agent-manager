@@ -129,6 +129,12 @@ func New(cfg *config.Config) (*Server, error) {
 	return s, nil
 }
 
+// SetBootLog wires a boot-log reporter into the ACP gateway config so that
+// agent errors (crashes, stderr) are reported to the control plane.
+func (s *Server) SetBootLog(reporter acp.BootLogReporter) {
+	s.acpConfig.BootLog = reporter
+}
+
 // Start starts the HTTP server.
 func (s *Server) Start() error {
 	// Start idle detector

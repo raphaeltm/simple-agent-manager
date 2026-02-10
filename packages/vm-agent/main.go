@@ -99,6 +99,9 @@ func main() {
 		log.Fatalf("Failed to create server: %v", err)
 	}
 
+	// Wire boot-log reporter into ACP gateway for agent error reporting
+	srv.SetBootLog(reporter)
+
 	// Handle shutdown signals
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

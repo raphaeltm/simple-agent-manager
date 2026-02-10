@@ -997,6 +997,15 @@ workspacesRoutes.post('/:id/boot-log', async (c) => {
     timestamp: body.timestamp || new Date().toISOString(),
   };
 
+  // Log to Workers observability for debugging — especially important for failures
+  const logLevel = entry.status === 'failed' ? 'error' : 'info';
+  const logPayload = { event: 'boot_log', workspaceId, step: entry.step, status: entry.status, message: entry.message, detail: entry.detail || undefined };
+  if (logLevel === 'error') {
+    console.error(JSON.stringify(logPayload));
+  } else {
+    console.log(JSON.stringify(logPayload));
+  }
+
   await appendBootLog(c.env.KV, workspaceId, entry, c.env);
 
   return c.json({ success: true });
