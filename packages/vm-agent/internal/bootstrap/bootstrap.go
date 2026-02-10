@@ -486,7 +486,9 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("failed to copy credential helper into devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
-	cmd = exec.CommandContext(ctx, "docker", "exec", containerID, "chmod", "0755", installPath)
+	// Use -u root because the container's default user (e.g. "node") may not have
+	// write permissions to /usr/local/bin/.
+	cmd = exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "chmod", "0755", installPath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to chmod credential helper in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
 	}
