@@ -217,6 +217,7 @@ jobs:
           docker pull node:22-bookworm &
           docker pull mcr.microsoft.com/devcontainers/base:debian &
           docker pull mcr.microsoft.com/devcontainers/python:3.12 &
+          docker pull mcr.microsoft.com/devcontainers/typescript-node:22-bookworm &
           wait
 
       - name: Run VM Agent integration tests

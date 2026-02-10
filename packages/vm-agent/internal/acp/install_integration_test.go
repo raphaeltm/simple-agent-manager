@@ -442,7 +442,110 @@ func TestIntegration_InstallAgent_Devcontainer_WithNodeFeature(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Category 3: Python devcontainer (no npm by default)
+// Category 3: SAM repo devcontainer (typescript-node + features)
+// ---------------------------------------------------------------------------
+
+func TestIntegration_InstallAgent_TypescriptNodeImage(t *testing.T) {
+	requireDockerAvailable(t)
+
+	// Our SAM repo uses mcr.microsoft.com/devcontainers/typescript-node:22-bookworm.
+	// This is NOT the same as bare node:22. The devcontainer image has different
+	// PATH structure, tooling, and runs as the "node" user by default.
+	containerID := mustStartContainer(t, "mcr.microsoft.com/devcontainers/typescript-node:22-bookworm", "test.label", t.Name())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	info := mockAgentInfo("test-agent-tsnode")
+
+	if err := installAgentBinary(ctx, containerID, info); err != nil {
+		t.Fatalf("installAgentBinary on typescript-node image: %v", err)
+	}
+
+	verifyBinaryInstalled(t, ctx, containerID, "test-agent-tsnode")
+
+	// Verify node user can invoke the binary (default user for this image)
+	verifyBinaryAccessibleByUser(t, ctx, containerID, "test-agent-tsnode", "node")
+}
+
+func TestIntegration_InstallAgent_Devcontainer_SAMRepoConfig(t *testing.T) {
+	requireDockerAvailable(t)
+	requireDevcontainerCLI(t)
+
+	// Models the actual SAM repo devcontainer configuration:
+	// - typescript-node base image
+	// - Go feature (modifies PATH, adds tooling)
+	// - GitHub CLI feature
+	// - containerEnv settings
+	// Note: docker-in-docker is excluded because it requires --privileged and
+	// isn't relevant to agent binary installation.
+	devcontainerJSON := `{
+		"image": "mcr.microsoft.com/devcontainers/typescript-node:22-bookworm",
+		"containerEnv": {
+			"CLAUDE_CONFIG_DIR": "/workspaces/claude-home"
+		},
+		"features": {
+			"ghcr.io/devcontainers/features/github-cli:1": {},
+			"ghcr.io/devcontainers/features/go:1": { "version": "1.22" }
+		}
+	}`
+	repo := mustCreateTestRepo(t, true, devcontainerJSON)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Build devcontainer
+	dcArgs := []string{"up", "--workspace-folder", repo}
+	dcCmd := exec.CommandContext(ctx, "devcontainer", dcArgs...)
+	output, err := dcCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("devcontainer up failed: %v\n%s", err, string(output))
+	}
+
+	// Find the container
+	labelFilter := fmt.Sprintf("label=devcontainer.local_folder=%s", repo)
+	out, err := exec.CommandContext(ctx, "docker", "ps", "-q", "--filter", labelFilter).CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker ps: %v\n%s", err, string(out))
+	}
+	containerID := strings.TrimSpace(string(out))
+	if containerID == "" {
+		t.Fatal("no devcontainer found after build")
+	}
+
+	t.Cleanup(func() {
+		_ = exec.Command("docker", "rm", "-f", containerID).Run()
+	})
+
+	// Verify environment matches expectations
+	out, err = exec.CommandContext(ctx, "docker", "exec", containerID, "go", "version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("go not available in SAM-style devcontainer: %v\n%s", err, string(out))
+	}
+	t.Logf("Go version: %s", strings.TrimSpace(string(out)))
+
+	out, err = exec.CommandContext(ctx, "docker", "exec", containerID, "gh", "--version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("gh CLI not available in SAM-style devcontainer: %v\n%s", err, string(out))
+	}
+	t.Logf("GitHub CLI: %s", strings.TrimSpace(string(out)))
+
+	// Install agent binary
+	info := mockAgentInfo("test-agent-sam")
+
+	if err := installAgentBinary(ctx, containerID, info); err != nil {
+		t.Fatalf("installAgentBinary in SAM-style devcontainer: %v", err)
+	}
+
+	verifyBinaryInstalled(t, ctx, containerID, "test-agent-sam")
+
+	// Verify node user can invoke it (typescript-node default user)
+	verifyBinaryAccessibleByUser(t, ctx, containerID, "test-agent-sam", "node")
+
+	t.Logf("Agent install in SAM repo-style devcontainer: OK")
+}
+
+// ---------------------------------------------------------------------------
+// Category 4: Python devcontainer (no npm by default)
 // ---------------------------------------------------------------------------
 
 func TestIntegration_InstallAgent_Devcontainer_PythonImage(t *testing.T) {
