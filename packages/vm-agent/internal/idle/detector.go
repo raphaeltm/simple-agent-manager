@@ -86,7 +86,7 @@ func (d *Detector) Start() {
 			return
 		case <-heartbeatTicker.C:
 			// Send heartbeat to control plane (informational only)
-			d.sendHeartbeat()
+			d.SendHeartbeat()
 		case <-idleCheckTicker.C:
 			// Check if we've exceeded the idle timeout locally
 			if d.IsIdle() {
@@ -147,9 +147,9 @@ func (d *Detector) ShutdownChannel() <-chan struct{} {
 	return d.shutdownCh
 }
 
-// sendHeartbeat sends a heartbeat to the control plane.
+// SendHeartbeat sends a heartbeat to the control plane.
 // This is purely informational - the VM makes its own shutdown decisions.
-func (d *Detector) sendHeartbeat() {
+func (d *Detector) SendHeartbeat() {
 	idleTime := d.GetIdleTime()
 	deadline := d.GetDeadline()
 	isIdle := time.Now().After(deadline)

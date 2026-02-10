@@ -98,8 +98,7 @@ type SessionConfig struct {
 	OnClose          func()
 	ContainerID      string // If set, exec into this Docker container
 	ContainerUser    string // User to run as inside the container
-	OutputBufferSize int    // Ring buffer capacity in bytes (0 = default)
-	OnActivity       func() // Called when PTY output is detected
+	OutputBufferSize int // Ring buffer capacity in bytes (0 = default)
 }
 
 // NewSession creates a new PTY session.

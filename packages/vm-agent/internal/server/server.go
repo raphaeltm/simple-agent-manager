@@ -86,7 +86,6 @@ func New(cfg *config.Config) (*Server, error) {
 		DefaultRows:       cfg.DefaultRows,
 		DefaultCols:       cfg.DefaultCols,
 		WorkDir:           containerWorkDir,
-		OnActivity:        idleDetector.RecordActivity,
 		ContainerResolver: containerResolver,
 		ContainerUser:     containerUser,
 	})
