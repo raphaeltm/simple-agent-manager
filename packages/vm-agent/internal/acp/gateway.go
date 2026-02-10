@@ -246,32 +246,50 @@ func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess,
 	time.Sleep(100 * time.Millisecond)
 	stderrOutput := g.getAndClearStderr()
 
-	g.mu.Lock()
-	// Only handle if this is still the active process
-	if g.process != process {
-		g.mu.Unlock()
-		return
-	}
-
-	if err != nil {
-		log.Printf("Agent process exited with error: %v", err)
-	}
-
-	// Detect rapid exit — include stderr output in the error for debugging
 	uptime := time.Since(process.startTime)
-	if uptime < 5*time.Second && err != nil {
-		g.process = nil
-		g.acpConn = nil
-		g.mu.Unlock()
+	exitInfo := "exit=0"
+	if err != nil {
+		exitInfo = fmt.Sprintf("exit=%v", err)
+	}
+	log.Printf("Agent process exited: type=%s, uptime=%v, %s, stderr=%d bytes",
+		agentType, uptime.Round(time.Millisecond), exitInfo, len(stderrOutput))
 
-		// Build informative error message with stderr context
-		errMsg := fmt.Sprintf("Agent %s crashed on startup (exited in %v)", agentType, uptime.Round(time.Millisecond))
+	// Detect rapid exit (within 5s) regardless of exit code. Any exit this
+	// fast indicates a crash or misconfiguration — even exit code 0.
+	// Report the error BEFORE the ownership check so error data reaches the
+	// control plane even if cleanup() already ran (race with WebSocket close).
+	isRapidExit := uptime < 5*time.Second
+	if isRapidExit {
+		errMsg := fmt.Sprintf("Agent %s crashed on startup (exited in %v, %s)", agentType, uptime.Round(time.Millisecond), exitInfo)
 		if stderrOutput != "" {
 			errMsg = fmt.Sprintf("%s: %s", errMsg, truncate(stderrOutput, 500))
 		}
 		log.Printf("Agent rapid exit: %s", errMsg)
-		g.sendAgentStatus(StatusError, agentType, errMsg)
+		// Report to boot-log FIRST — this is fire-and-forget and must not be
+		// gated by the ownership check, which may fail if cleanup() already ran.
 		g.reportAgentError(agentType, "agent_crash", errMsg, stderrOutput)
+	}
+
+	g.mu.Lock()
+	// Only handle status updates and restarts if this is still the active process.
+	// Error reporting above already ran unconditionally.
+	if g.process != process {
+		g.mu.Unlock()
+		log.Printf("Agent process monitor: process replaced (cleanup() likely ran), skipping status/restart")
+		return
+	}
+
+	if isRapidExit {
+		g.process = nil
+		g.acpConn = nil
+		g.mu.Unlock()
+
+		// Build error message for WebSocket status (same as reported above)
+		errMsg := fmt.Sprintf("Agent %s crashed on startup (exited in %v, %s)", agentType, uptime.Round(time.Millisecond), exitInfo)
+		if stderrOutput != "" {
+			errMsg = fmt.Sprintf("%s: %s", errMsg, truncate(stderrOutput, 500))
+		}
+		g.sendAgentStatus(StatusError, agentType, errMsg)
 		return
 	}
 
