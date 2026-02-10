@@ -14,8 +14,11 @@ import (
 // DefaultAdditionalFeatures is the default JSON for --additional-features on devcontainer up.
 // Installs Node.js which is required by ACP adapters. The ACP adapter itself is installed
 // on-demand via docker exec when the user activates an agent (see acp/gateway.go ensureAgentInstalled).
-// Note: the community npm-package feature (ghcr.io/devcontainers-community/npm-features/npm-package:1)
-// was removed because it became unavailable, causing devcontainer builds to fail.
+//
+// IMPORTANT: These features are ONLY injected when the repo does NOT have its own
+// .devcontainer config. Repos with existing devcontainer configs likely have Node.js
+// and other deps set up, and injecting features like nvm can conflict with existing
+// ENV vars (e.g. NPM_CONFIG_PREFIX). See hasDevcontainerConfig() in bootstrap.go.
 const DefaultAdditionalFeatures = `{"ghcr.io/devcontainers/features/node:1":{"version":"22"}}`
 
 // Config holds all configuration values for the VM Agent.

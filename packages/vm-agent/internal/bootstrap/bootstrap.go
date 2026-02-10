@@ -374,9 +374,15 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) error {
 	log.Printf("Starting devcontainer for workspace at %s", cfg.WorkspaceDir)
 
 	args := []string{"up", "--workspace-folder", cfg.WorkspaceDir}
-	if cfg.AdditionalFeatures != "" {
+	if cfg.AdditionalFeatures != "" && !hasDevcontainerConfig(cfg.WorkspaceDir) {
+		// Only inject additional features when the repo does NOT have its own
+		// .devcontainer config. Repos with their own config likely have Node.js
+		// and other dependencies set up already, and injecting features (e.g.
+		// nvm-based Node.js) can conflict with existing ENV vars like NPM_CONFIG_PREFIX.
 		log.Printf("Injecting additional devcontainer features: %s", cfg.AdditionalFeatures)
 		args = append(args, "--additional-features", cfg.AdditionalFeatures)
+	} else if cfg.AdditionalFeatures != "" {
+		log.Printf("Repo has its own devcontainer config — skipping additional-features injection")
 	}
 
 	cmd := exec.CommandContext(ctx, "devcontainer", args...)
@@ -386,6 +392,23 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) error {
 	}
 
 	return nil
+}
+
+// hasDevcontainerConfig checks whether the workspace directory contains a devcontainer
+// configuration (either .devcontainer/devcontainer.json or .devcontainer.json).
+// When present, we skip --additional-features to avoid conflicts with the repo's own setup.
+func hasDevcontainerConfig(workspaceDir string) bool {
+	candidates := []string{
+		filepath.Join(workspaceDir, ".devcontainer", "devcontainer.json"),
+		filepath.Join(workspaceDir, ".devcontainer.json"),
+	}
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			log.Printf("Found devcontainer config: %s", path)
+			return true
+		}
+	}
+	return false
 }
 
 // waitForCommand polls until the given command is available in PATH or ctx is cancelled.
