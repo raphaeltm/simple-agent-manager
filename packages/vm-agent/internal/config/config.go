@@ -12,8 +12,14 @@ import (
 )
 
 // DefaultAdditionalFeatures is the default JSON for --additional-features on devcontainer up.
-// Installs Node.js (required by ACP adapters) and the Claude Code ACP adapter.
-const DefaultAdditionalFeatures = `{"ghcr.io/devcontainers/features/node:1":{"version":"22"},"ghcr.io/devcontainers-community/npm-features/npm-package:1":{"package":"@zed-industries/claude-code-acp"}}`
+// Installs Node.js which is required by ACP adapters. The ACP adapter itself is installed
+// on-demand via docker exec when the user activates an agent (see acp/gateway.go ensureAgentInstalled).
+//
+// IMPORTANT: These features are ONLY injected when the repo does NOT have its own
+// .devcontainer config. Repos with existing devcontainer configs likely have Node.js
+// and other deps set up, and injecting features like nvm can conflict with existing
+// ENV vars (e.g. NPM_CONFIG_PREFIX). See hasDevcontainerConfig() in bootstrap.go.
+const DefaultAdditionalFeatures = `{"ghcr.io/devcontainers/features/node:1":{"version":"22"}}`
 
 // Config holds all configuration values for the VM Agent.
 type Config struct {
@@ -39,6 +45,7 @@ type Config struct {
 	WorkspaceDir       string
 	BootstrapStatePath string
 	BootstrapMaxWait   time.Duration
+	BootstrapTimeout   time.Duration // Overall bootstrap timeout including devcontainer build
 
 	// Session settings
 	SessionTTL             time.Duration
@@ -135,6 +142,7 @@ func Load() (*Config, error) {
 		WorkspaceDir:       workspaceDir,
 		BootstrapStatePath: getEnv("BOOTSTRAP_STATE_PATH", "/var/lib/vm-agent/bootstrap-state.json"),
 		BootstrapMaxWait:   getEnvDuration("BOOTSTRAP_MAX_WAIT", 5*time.Minute),
+		BootstrapTimeout:   getEnvDuration("BOOTSTRAP_TIMEOUT", 15*time.Minute),
 
 		SessionTTL:             getEnvDuration("SESSION_TTL", 24*time.Hour),
 		SessionCleanupInterval: getEnvDuration("SESSION_CLEANUP_INTERVAL", 1*time.Minute),

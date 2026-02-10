@@ -667,6 +667,7 @@ You can also trigger deployment manually via GitHub Actions → Deploy → Run w
 
 ### VM Communication
 - `POST /api/workspaces/:id/heartbeat` - VM heartbeat with idle detection
+- `POST /api/workspaces/:id/boot-log` - VM sends boot progress log entry (callback JWT auth)
 - `POST /api/bootstrap/:token` - Redeem one-time bootstrap token (VM startup)
 - `POST /api/agent/ready` - VM agent ready callback
 - `POST /api/agent/activity` - VM agent activity report

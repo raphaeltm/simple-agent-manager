@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/bootlog"
 	"github.com/workspace/vm-agent/internal/config"
 )
 
@@ -39,7 +40,9 @@ type bootstrapState struct {
 }
 
 // Run redeems bootstrap credentials (if configured), prepares the workspace, and signals ready.
-func Run(ctx context.Context, cfg *config.Config) error {
+// The reporter is used to send structured boot log entries to the control plane for UI display.
+// It is safe to pass a nil reporter.
+func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) error {
 	if cfg.BootstrapToken == "" {
 		return nil
 	}
@@ -55,12 +58,16 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		}
 		log.Printf("Using cached bootstrap state from %s", cfg.BootstrapStatePath)
 		cfg.CallbackToken = state.CallbackToken
+		reporter.SetToken(state.CallbackToken)
 	} else {
+		reporter.Log("bootstrap_redeem", "started", "Redeeming bootstrap credentials")
 		state, err = redeemBootstrapTokenWithRetry(ctx, cfg)
 		if err != nil {
 			return err
 		}
 		cfg.CallbackToken = state.CallbackToken
+		reporter.SetToken(state.CallbackToken)
+		reporter.Log("bootstrap_redeem", "completed", "Bootstrap credentials redeemed")
 		if err := saveState(cfg.BootstrapStatePath, state); err != nil {
 			return fmt.Errorf("failed to persist bootstrap state: %w", err)
 		}
@@ -70,25 +77,41 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return errors.New("callback token is missing after bootstrap")
 	}
 
+	reporter.Log("git_clone", "started", "Cloning repository")
 	if err := ensureRepositoryReady(ctx, cfg, state); err != nil {
+		reporter.Log("git_clone", "failed", "Repository clone failed", err.Error())
 		return err
 	}
+	reporter.Log("git_clone", "completed", "Repository cloned")
 
+	reporter.Log("devcontainer_wait", "started", "Waiting for devcontainer CLI")
+	reporter.Log("devcontainer_up", "started", "Building devcontainer")
 	if err := ensureDevcontainerReady(ctx, cfg); err != nil {
+		reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", err.Error())
 		return err
 	}
+	reporter.Log("devcontainer_up", "completed", "Devcontainer ready")
 
+	reporter.Log("workspace_perms", "started", "Setting workspace permissions")
 	if err := ensureWorkspaceWritable(ctx, cfg); err != nil {
+		reporter.Log("workspace_perms", "failed", "Permission setup failed", err.Error())
 		return err
 	}
+	reporter.Log("workspace_perms", "completed", "Workspace permissions set")
 
+	reporter.Log("git_creds", "started", "Configuring git credentials")
 	if err := ensureGitCredentialHelper(ctx, cfg); err != nil {
+		reporter.Log("git_creds", "failed", "Git credential setup failed", err.Error())
 		return err
 	}
+	reporter.Log("git_creds", "completed", "Git credentials configured")
 
+	reporter.Log("workspace_ready", "started", "Marking workspace ready")
 	if err := markWorkspaceReady(ctx, cfg); err != nil {
+		reporter.Log("workspace_ready", "failed", "Failed to mark workspace ready", err.Error())
 		return err
 	}
+	reporter.Log("workspace_ready", "completed", "Workspace is ready")
 
 	return nil
 }
@@ -341,12 +364,25 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) error {
 		return nil
 	}
 
+	// Wait for devcontainer CLI to be available. Cloud-init installs Node.js and
+	// devcontainer CLI asynchronously AFTER the VM Agent starts — there is a race
+	// where the agent tries to run "devcontainer up" before the CLI exists.
+	if err := waitForCommand(ctx, "devcontainer"); err != nil {
+		return fmt.Errorf("devcontainer CLI never became available: %w", err)
+	}
+
 	log.Printf("Starting devcontainer for workspace at %s", cfg.WorkspaceDir)
 
 	args := []string{"up", "--workspace-folder", cfg.WorkspaceDir}
-	if cfg.AdditionalFeatures != "" {
+	if cfg.AdditionalFeatures != "" && !hasDevcontainerConfig(cfg.WorkspaceDir) {
+		// Only inject additional features when the repo does NOT have its own
+		// .devcontainer config. Repos with their own config likely have Node.js
+		// and other dependencies set up already, and injecting features (e.g.
+		// nvm-based Node.js) can conflict with existing ENV vars like NPM_CONFIG_PREFIX.
 		log.Printf("Injecting additional devcontainer features: %s", cfg.AdditionalFeatures)
 		args = append(args, "--additional-features", cfg.AdditionalFeatures)
+	} else if cfg.AdditionalFeatures != "" {
+		log.Printf("Repo has its own devcontainer config — skipping additional-features injection")
 	}
 
 	cmd := exec.CommandContext(ctx, "devcontainer", args...)
@@ -356,6 +392,51 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) error {
 	}
 
 	return nil
+}
+
+// hasDevcontainerConfig checks whether the workspace directory contains a devcontainer
+// configuration (either .devcontainer/devcontainer.json or .devcontainer.json).
+// When present, we skip --additional-features to avoid conflicts with the repo's own setup.
+func hasDevcontainerConfig(workspaceDir string) bool {
+	candidates := []string{
+		filepath.Join(workspaceDir, ".devcontainer", "devcontainer.json"),
+		filepath.Join(workspaceDir, ".devcontainer.json"),
+	}
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			log.Printf("Found devcontainer config: %s", path)
+			return true
+		}
+	}
+	return false
+}
+
+// waitForCommand polls until the given command is available in PATH or ctx is cancelled.
+func waitForCommand(ctx context.Context, name string) error {
+	if _, err := exec.LookPath(name); err == nil {
+		return nil // Already available
+	}
+
+	log.Printf("Waiting for %q to be installed (cloud-init may still be running)...", name)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	logged := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled while waiting for %q: %w", name, ctx.Err())
+		case <-ticker.C:
+			if _, err := exec.LookPath(name); err == nil {
+				log.Printf("Command %q is now available", name)
+				return nil
+			}
+			if time.Since(logged) >= 30*time.Second {
+				log.Printf("Still waiting for %q to be installed...", name)
+				logged = time.Now()
+			}
+		}
+	}
 }
 
 func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
@@ -405,7 +486,9 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("failed to copy credential helper into devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
-	cmd = exec.CommandContext(ctx, "docker", "exec", containerID, "chmod", "0755", installPath)
+	// Use -u root because the container's default user (e.g. "node") may not have
+	// write permissions to /usr/local/bin/.
+	cmd = exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "chmod", "0755", installPath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to chmod credential helper in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
 	}
@@ -489,10 +572,13 @@ func findDevcontainerID(ctx context.Context, cfg *config.Config) (string, error)
 }
 
 func configureGitCredentialHelper(ctx context.Context, containerID, helperPath string) error {
+	// Use -u root because the container's default user (e.g. "node") may not have
+	// write permissions to /etc/gitconfig (system-level git config).
 	cmd := exec.CommandContext(
 		ctx,
 		"docker",
 		"exec",
+		"-u", "root",
 		containerID,
 		"git",
 		"config",

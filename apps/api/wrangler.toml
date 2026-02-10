@@ -48,6 +48,13 @@ bucket_name = "workspaces-staging-assets"
 name = "sam-api-prod"
 vars = { BASE_DOMAIN = "workspaces.example.com", VERSION = "0.1.0" }
 
+[env.production.observability]
+enabled = true
+
+  [env.production.observability.logs]
+  invocation_logs = true
+  head_sampling_rate = 1
+
 [[env.production.d1_databases]]
 binding = "DATABASE"
 database_name = "workspaces"

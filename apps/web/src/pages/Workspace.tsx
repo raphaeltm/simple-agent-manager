@@ -8,7 +8,7 @@ import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { AgentSelector } from '../components/AgentSelector';
 import { getWorkspace, getTerminalToken, stopWorkspace, restartWorkspace } from '../lib/api';
-import type { WorkspaceResponse } from '@simple-agent-manager/shared';
+import type { WorkspaceResponse, BootLogEntry } from '@simple-agent-manager/shared';
 
 /** Map ACP session state to a human-readable label */
 function agentStatusLabel(state: AcpSessionState, agentType: string | null): string {
@@ -394,7 +394,7 @@ export function Workspace() {
             <CenteredStatus color="#f87171" title="Connection Failed" subtitle="Unable to connect to terminal" />
           )
         ) : workspace?.status === 'creating' ? (
-          <CenteredStatus color="#60a5fa" title="Creating Workspace" subtitle="This may take a few minutes..." loading />
+          <BootProgress logs={workspace.bootLogs} />
         ) : workspace?.status === 'stopping' ? (
           <CenteredStatus color="#fbbf24" title="Stopping Workspace" loading />
         ) : workspace?.status === 'stopped' ? (
@@ -457,6 +457,65 @@ function CenteredStatus({
       <h3 style={{ fontSize: '1rem', fontWeight: 600, color, margin: 0 }}>{title}</h3>
       {subtitle && <p style={{ fontSize: '0.875rem', color: '#787c99', margin: 0, maxWidth: '400px', textAlign: 'center' }}>{subtitle}</p>}
       {action && <div style={{ marginTop: '4px' }}>{action}</div>}
+    </div>
+  );
+}
+
+function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
+  if (!logs || logs.length === 0) {
+    return <CenteredStatus color="#60a5fa" title="Creating Workspace" subtitle="Initializing..." loading />;
+  }
+
+  // Deduplicate: show latest status per step
+  const stepMap = new Map<string, BootLogEntry>();
+  for (const log of logs) {
+    stepMap.set(log.step, log);
+  }
+  const steps = Array.from(stepMap.values());
+
+  const statusIcon = (status: BootLogEntry['status']) => {
+    switch (status) {
+      case 'completed':
+        return <span style={{ color: '#4ade80', marginRight: 8, fontSize: '0.875rem' }}>&#10003;</span>;
+      case 'failed':
+        return <span style={{ color: '#f87171', marginRight: 8, fontSize: '0.875rem' }}>&#10007;</span>;
+      case 'started':
+      default:
+        return <span style={{ marginRight: 8, display: 'inline-flex' }}><Spinner size="sm" /></span>;
+    }
+  };
+
+  const lastStep = steps[steps.length - 1];
+  const hasFailed = lastStep?.status === 'failed';
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      height: '100%', backgroundColor: '#1a1b26', color: '#a9b1d6', padding: '24px',
+    }}>
+      <h3 style={{ fontSize: '1rem', fontWeight: 600, color: hasFailed ? '#f87171' : '#60a5fa', margin: '0 0 16px 0' }}>
+        {hasFailed ? 'Provisioning Failed' : 'Creating Workspace'}
+      </h3>
+      <div style={{
+        display: 'flex', flexDirection: 'column', gap: '6px',
+        maxWidth: '400px', width: '100%',
+      }}>
+        {steps.map((entry, i) => (
+          <div key={i} style={{
+            display: 'flex', alignItems: 'center',
+            fontSize: '0.8125rem',
+            color: entry.status === 'failed' ? '#f87171' : entry.status === 'completed' ? '#787c99' : '#a9b1d6',
+          }}>
+            {statusIcon(entry.status)}
+            <span>{entry.message}</span>
+          </div>
+        ))}
+      </div>
+      {lastStep?.status === 'failed' && lastStep.detail && (
+        <p style={{ fontSize: '0.75rem', color: '#787c99', margin: '12px 0 0', maxWidth: '400px', textAlign: 'center', wordBreak: 'break-word' }}>
+          {lastStep.detail}
+        </p>
+      )}
     </div>
   );
 }

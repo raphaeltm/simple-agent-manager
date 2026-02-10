@@ -19,9 +19,11 @@ import type {
   HeartbeatRequest,
   HeartbeatResponse,
   BootstrapTokenData,
+  BootLogEntry,
 } from '@simple-agent-manager/shared';
 import { MAX_WORKSPACES_PER_USER, HETZNER_IMAGE, isValidAgentType } from '@simple-agent-manager/shared';
 import { getDecryptedAgentKey } from './credentials';
+import { getBootLogs, appendBootLog, writeBootLogs } from '../services/boot-log';
 
 /**
  * Get idle timeout in seconds from environment.
@@ -43,7 +45,8 @@ workspacesRoutes.use('/*', async (c, next) => {
     path.endsWith('/ready') ||
     path.endsWith('/heartbeat') ||
     path.endsWith('/agent-key') ||
-    path.endsWith('/git-token')
+    path.endsWith('/git-token') ||
+    path.endsWith('/boot-log')
   ) {
     return next();
   }
@@ -133,6 +136,11 @@ workspacesRoutes.get('/:id', async (c) => {
     updatedAt: ws.updatedAt,
     url: ws.vmIp ? getWorkspaceUrl(ws.id, c.env.BASE_DOMAIN) : undefined,
   };
+
+  // Include boot logs when workspace is being created (for progress UI)
+  if (ws.status === 'creating') {
+    response.bootLogs = await getBootLogs(c.env.KV, workspaceId);
+  }
 
   return c.json(response);
 });
@@ -640,6 +648,68 @@ workspacesRoutes.post('/:id/heartbeat', async (c) => {
   const shutdownDeadline = body.shutdownDeadline
     ?? new Date(Date.now() + Math.max(0, idleTimeoutSeconds - idleSeconds) * 1000).toISOString();
 
+  // Heartbeat-based shutdown fallback: if the VM reports it's idle past the
+  // deadline and the workspace is still "running", the control plane initiates
+  // deletion directly. This is a safety net for when the VM's own
+  // /request-shutdown call fails (network issues, auth errors, etc.).
+  if (shouldShutdown && wsHeartbeat.status === 'running') {
+    console.log(`Heartbeat fallback: workspace ${workspaceId} idle for ${idleSeconds}s (limit ${idleTimeoutSeconds}s), initiating deletion`);
+
+    await db
+      .update(schema.workspaces)
+      .set({ status: 'stopping', updatedAt: new Date().toISOString() })
+      .where(eq(schema.workspaces.id, workspaceId));
+
+    const creds = await db
+      .select()
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, wsHeartbeat.userId),
+          eq(schema.credentials.provider, 'hetzner')
+        )
+      )
+      .limit(1);
+
+    const cred = creds[0];
+    if (cred && wsHeartbeat.hetznerServerId) {
+      const hetznerToken = await decrypt(cred.encryptedToken, cred.iv, c.env.ENCRYPTION_KEY);
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            await deleteServer(hetznerToken, wsHeartbeat.hetznerServerId!);
+            if (wsHeartbeat.dnsRecordId) {
+              await deleteDNSRecord(wsHeartbeat.dnsRecordId, c.env);
+            }
+            await cleanupWorkspaceDNSRecords(workspaceId, c.env);
+            await db
+              .update(schema.workspaces)
+              .set({
+                status: 'stopped',
+                hetznerServerId: null,
+                vmIp: null,
+                dnsRecordId: null,
+                updatedAt: new Date().toISOString(),
+              })
+              .where(eq(schema.workspaces.id, workspaceId));
+            console.log(`Heartbeat fallback: successfully deleted idle VM ${workspaceId}`);
+          } catch (err) {
+            console.error(`Heartbeat fallback: failed to delete VM ${workspaceId}:`, err);
+            await db
+              .update(schema.workspaces)
+              .set({
+                status: 'error',
+                errorMessage: err instanceof Error ? err.message : 'Failed to delete VM via heartbeat fallback',
+                updatedAt: new Date().toISOString(),
+              })
+              .where(eq(schema.workspaces.id, workspaceId));
+          }
+        })()
+      );
+    }
+  }
+
   const response: HeartbeatResponse = {
     action: shouldShutdown ? 'shutdown' : 'continue',
     idleSeconds: Math.floor(idleSeconds),
@@ -891,6 +961,48 @@ workspacesRoutes.post('/:id/git-token', async (c) => {
 });
 
 /**
+ * POST /api/workspaces/:id/boot-log - VM Agent sends a boot log entry
+ * Internal endpoint called during bootstrap. Requires callback JWT auth.
+ */
+workspacesRoutes.post('/:id/boot-log', async (c) => {
+  const workspaceId = c.req.param('id');
+
+  // Validate callback token from Authorization header
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    throw errors.unauthorized('Missing or invalid Authorization header');
+  }
+
+  const token = authHeader.slice(7);
+  try {
+    const payload = await verifyCallbackToken(token, c.env);
+    if (payload.workspace !== workspaceId) {
+      throw errors.forbidden('Token workspace mismatch');
+    }
+  } catch (err) {
+    throw errors.unauthorized(err instanceof Error ? err.message : 'Invalid callback token');
+  }
+
+  const body = await c.req.json<BootLogEntry>();
+
+  if (!body.step || !body.status || !body.message) {
+    throw errors.badRequest('step, status, and message are required');
+  }
+
+  const entry: BootLogEntry = {
+    step: body.step,
+    status: body.status,
+    message: body.message,
+    detail: body.detail,
+    timestamp: body.timestamp || new Date().toISOString(),
+  };
+
+  await appendBootLog(c.env.KV, workspaceId, entry, c.env);
+
+  return c.json({ success: true });
+});
+
+/**
  * Provision a workspace (create VM, DNS, etc.)
  * Uses bootstrap tokens for secure credential delivery - no secrets in cloud-init.
  */
@@ -911,10 +1023,27 @@ async function provisionWorkspace(
   db: ReturnType<typeof drizzle>
 ): Promise<void> {
   const now = () => new Date().toISOString();
+  const bootLogs: BootLogEntry[] = [];
+  const log = (step: string, detail?: string) =>
+    console.log(JSON.stringify({ event: 'provision', workspaceId, step, detail, ts: now() }));
+
+  // Accumulate boot log entries in memory and log to console.
+  // We write to KV only once at the end of provisioning to minimize KV writes
+  // (free tier allows 1,000 writes/day). VM-side boot logs are written individually
+  // by the VM Agent via POST /boot-log — those are the slow steps users care about.
+  const bootLog = (step: string, status: BootLogEntry['status'], message: string, detail?: string) => {
+    const entry: BootLogEntry = { step, status, message, timestamp: now(), ...(detail ? { detail } : {}) };
+    bootLogs.push(entry);
+    log(step, detail);
+  };
 
   try {
+    bootLog('provision_start', 'started', 'Starting workspace provisioning', `repo=${config.repository} size=${config.vmSize} location=${config.vmLocation}`);
+
     // Get GitHub installation token for cloning
+    bootLog('github_token', 'started', 'Obtaining GitHub access token');
     const { token: githubToken } = await getInstallationToken(config.installationId, env);
+    bootLog('github_token', 'completed', 'GitHub access token obtained');
 
     // Encrypt the GitHub token for storage
     const { ciphertext: encGithub, iv: ivGithub } = await encrypt(githubToken, env.ENCRYPTION_KEY);
@@ -954,6 +1083,7 @@ async function provisionWorkspace(
     }
 
     // Create Hetzner server
+    bootLog('create_server', 'started', 'Creating virtual machine', `type=${SERVER_TYPES[config.vmSize] || 'cx33'}`);
     const server = await createServer(hetznerToken, {
       name: `ws-${workspaceId}`,
       serverType: SERVER_TYPES[config.vmSize] || 'cx33',
@@ -965,14 +1095,18 @@ async function provisionWorkspace(
         managed: 'simple-agent-manager',
       },
     });
+    bootLog('create_server', 'completed', 'Virtual machine created', `serverId=${server.id}`);
 
     // Create a DNS-only (non-proxied) A record for the VM backend.
     // Cloudflare Workers cannot fetch IP addresses directly (Error 1003),
     // so the Worker proxy uses vm-{id}.{domain} to reach the VM.
     let dnsRecordId: string | null = null;
     try {
+      bootLog('create_dns', 'started', 'Configuring DNS');
       dnsRecordId = await createBackendDNSRecord(workspaceId, server.publicNet.ipv4.ip, env);
+      bootLog('create_dns', 'completed', 'DNS configured');
     } catch (dnsErr) {
+      bootLog('create_dns', 'failed', 'DNS configuration failed', dnsErr instanceof Error ? dnsErr.message : String(dnsErr));
       console.error('Failed to create backend DNS record:', dnsErr);
       // Continue — the workspace can still be reached via /ready callback
     }
@@ -988,17 +1122,41 @@ async function provisionWorkspace(
       })
       .where(eq(schema.workspaces.id, workspaceId));
 
+    bootLog('provision_complete', 'completed', 'Server provisioning complete — waiting for VM bootstrap');
+
+    // Write all boot log entries to KV in a single write (saves KV quota).
+    // Server-side provisioning is fast (~5-10s) so batching doesn't hurt UX.
+    try {
+      await writeBootLogs(env.KV, workspaceId, bootLogs, env);
+    } catch (kvErr) {
+      console.error('Failed to write boot logs to KV:', kvErr);
+      // Non-critical — provisioning succeeded, logs are just for UI
+    }
     // VM agent will redeem bootstrap token on startup, then call /ready endpoint
   } catch (err) {
+    const errMsg = err instanceof Error ? err.message : 'Provisioning failed';
+    bootLog('provision_error', 'failed', 'Provisioning failed', errMsg);
     console.error('Provisioning failed:', err);
-    await db
-      .update(schema.workspaces)
-      .set({
-        status: 'error',
-        errorMessage: err instanceof Error ? err.message : 'Provisioning failed',
-        updatedAt: now(),
-      })
-      .where(eq(schema.workspaces.id, workspaceId));
+
+    // Best-effort write of boot logs including the error
+    try {
+      await writeBootLogs(env.KV, workspaceId, bootLogs, env);
+    } catch (kvErr) {
+      console.error('Failed to write boot logs to KV:', kvErr);
+    }
+
+    try {
+      await db
+        .update(schema.workspaces)
+        .set({
+          status: 'error',
+          errorMessage: errMsg,
+          updatedAt: now(),
+        })
+        .where(eq(schema.workspaces.id, workspaceId));
+    } catch (dbErr) {
+      console.error('Failed to save error status:', dbErr);
+    }
   }
 }
 
