@@ -1024,25 +1024,23 @@ async function provisionWorkspace(
   const log = (step: string, detail?: string) =>
     console.log(JSON.stringify({ event: 'provision', workspaceId, step, detail, ts: now() }));
 
-  // Write a boot log entry (visible to UI) and also log to console
-  const bootLog = async (step: string, status: BootLogEntry['status'], message: string, detail?: string) => {
+  // Accumulate boot log entries in memory and log to console.
+  // We write to KV only once at the end of provisioning to minimize KV writes
+  // (free tier allows 1,000 writes/day). VM-side boot logs are written individually
+  // by the VM Agent via POST /boot-log — those are the slow steps users care about.
+  const bootLog = (step: string, status: BootLogEntry['status'], message: string, detail?: string) => {
     const entry: BootLogEntry = { step, status, message, timestamp: now(), ...(detail ? { detail } : {}) };
     bootLogs.push(entry);
     log(step, detail);
-    try {
-      await writeBootLogs(env.KV, workspaceId, bootLogs, env);
-    } catch (kvErr) {
-      console.error('Failed to write boot log to KV:', kvErr);
-    }
   };
 
   try {
-    await bootLog('provision_start', 'started', 'Starting workspace provisioning', `repo=${config.repository} size=${config.vmSize} location=${config.vmLocation}`);
+    bootLog('provision_start', 'started', 'Starting workspace provisioning', `repo=${config.repository} size=${config.vmSize} location=${config.vmLocation}`);
 
     // Get GitHub installation token for cloning
-    await bootLog('github_token', 'started', 'Obtaining GitHub access token');
+    bootLog('github_token', 'started', 'Obtaining GitHub access token');
     const { token: githubToken } = await getInstallationToken(config.installationId, env);
-    await bootLog('github_token', 'completed', 'GitHub access token obtained');
+    bootLog('github_token', 'completed', 'GitHub access token obtained');
 
     // Encrypt the GitHub token for storage
     const { ciphertext: encGithub, iv: ivGithub } = await encrypt(githubToken, env.ENCRYPTION_KEY);
@@ -1082,7 +1080,7 @@ async function provisionWorkspace(
     }
 
     // Create Hetzner server
-    await bootLog('create_server', 'started', 'Creating virtual machine', `type=${SERVER_TYPES[config.vmSize] || 'cx33'}`);
+    bootLog('create_server', 'started', 'Creating virtual machine', `type=${SERVER_TYPES[config.vmSize] || 'cx33'}`);
     const server = await createServer(hetznerToken, {
       name: `ws-${workspaceId}`,
       serverType: SERVER_TYPES[config.vmSize] || 'cx33',
@@ -1094,18 +1092,18 @@ async function provisionWorkspace(
         managed: 'simple-agent-manager',
       },
     });
-    await bootLog('create_server', 'completed', 'Virtual machine created', `serverId=${server.id}`);
+    bootLog('create_server', 'completed', 'Virtual machine created', `serverId=${server.id}`);
 
     // Create a DNS-only (non-proxied) A record for the VM backend.
     // Cloudflare Workers cannot fetch IP addresses directly (Error 1003),
     // so the Worker proxy uses vm-{id}.{domain} to reach the VM.
     let dnsRecordId: string | null = null;
     try {
-      await bootLog('create_dns', 'started', 'Configuring DNS');
+      bootLog('create_dns', 'started', 'Configuring DNS');
       dnsRecordId = await createBackendDNSRecord(workspaceId, server.publicNet.ipv4.ip, env);
-      await bootLog('create_dns', 'completed', 'DNS configured');
+      bootLog('create_dns', 'completed', 'DNS configured');
     } catch (dnsErr) {
-      await bootLog('create_dns', 'failed', 'DNS configuration failed', dnsErr instanceof Error ? dnsErr.message : String(dnsErr));
+      bootLog('create_dns', 'failed', 'DNS configuration failed', dnsErr instanceof Error ? dnsErr.message : String(dnsErr));
       console.error('Failed to create backend DNS record:', dnsErr);
       // Continue — the workspace can still be reached via /ready callback
     }
@@ -1121,12 +1119,29 @@ async function provisionWorkspace(
       })
       .where(eq(schema.workspaces.id, workspaceId));
 
-    await bootLog('provision_complete', 'completed', 'Server provisioning complete — waiting for VM bootstrap');
+    bootLog('provision_complete', 'completed', 'Server provisioning complete — waiting for VM bootstrap');
+
+    // Write all boot log entries to KV in a single write (saves KV quota).
+    // Server-side provisioning is fast (~5-10s) so batching doesn't hurt UX.
+    try {
+      await writeBootLogs(env.KV, workspaceId, bootLogs, env);
+    } catch (kvErr) {
+      console.error('Failed to write boot logs to KV:', kvErr);
+      // Non-critical — provisioning succeeded, logs are just for UI
+    }
     // VM agent will redeem bootstrap token on startup, then call /ready endpoint
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : 'Provisioning failed';
-    await bootLog('provision_error', 'failed', 'Provisioning failed', errMsg);
+    bootLog('provision_error', 'failed', 'Provisioning failed', errMsg);
     console.error('Provisioning failed:', err);
+
+    // Best-effort write of boot logs including the error
+    try {
+      await writeBootLogs(env.KV, workspaceId, bootLogs, env);
+    } catch (kvErr) {
+      console.error('Failed to write boot logs to KV:', kvErr);
+    }
+
     try {
       await db
         .update(schema.workspaces)
