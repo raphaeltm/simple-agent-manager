@@ -210,6 +210,8 @@ export interface BootstrapTokenData {
   callbackToken: string;
   encryptedGithubToken: string | null;
   githubTokenIv: string | null;
+  gitUserName?: string | null;
+  gitUserEmail?: string | null;
   createdAt: string;
 }
 
@@ -219,6 +221,8 @@ export interface BootstrapResponse {
   hetznerToken: string;
   callbackToken: string;
   githubToken: string | null;
+  gitUserName?: string | null;
+  gitUserEmail?: string | null;
   controlPlaneUrl: string;
 }
 

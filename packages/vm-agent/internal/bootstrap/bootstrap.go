@@ -30,6 +30,8 @@ type bootstrapResponse struct {
 	WorkspaceID     string  `json:"workspaceId"`
 	CallbackToken   string  `json:"callbackToken"`
 	GitHubToken     *string `json:"githubToken"`
+	GitUserName     *string `json:"gitUserName"`
+	GitUserEmail    *string `json:"gitUserEmail"`
 	ControlPlaneURL string  `json:"controlPlaneUrl"`
 }
 
@@ -37,6 +39,8 @@ type bootstrapState struct {
 	WorkspaceID   string `json:"workspaceId"`
 	CallbackToken string `json:"callbackToken"`
 	GitHubToken   string `json:"githubToken,omitempty"`
+	GitUserName   string `json:"gitUserName,omitempty"`
+	GitUserEmail  string `json:"gitUserEmail,omitempty"`
 }
 
 // Run redeems bootstrap credentials (if configured), prepares the workspace, and signals ready.
@@ -105,6 +109,13 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 		return err
 	}
 	reporter.Log("git_creds", "completed", "Git credentials configured")
+
+	reporter.Log("git_identity", "started", "Configuring git identity")
+	if err := ensureGitIdentity(ctx, cfg, state); err != nil {
+		reporter.Log("git_identity", "failed", "Git identity setup failed", err.Error())
+		return err
+	}
+	reporter.Log("git_identity", "completed", "Git identity configured")
 
 	reporter.Log("workspace_ready", "started", "Marking workspace ready")
 	if err := markWorkspaceReady(ctx, cfg); err != nil {
@@ -297,11 +308,21 @@ func redeemBootstrapToken(ctx context.Context, cfg *config.Config) (*bootstrapSt
 	if payload.GitHubToken != nil {
 		githubToken = *payload.GitHubToken
 	}
+	gitUserName := ""
+	if payload.GitUserName != nil {
+		gitUserName = *payload.GitUserName
+	}
+	gitUserEmail := ""
+	if payload.GitUserEmail != nil {
+		gitUserEmail = *payload.GitUserEmail
+	}
 
 	return &bootstrapState{
 		WorkspaceID:   payload.WorkspaceID,
 		CallbackToken: payload.CallbackToken,
 		GitHubToken:   githubToken,
+		GitUserName:   strings.TrimSpace(gitUserName),
+		GitUserEmail:  strings.TrimSpace(gitUserEmail),
 	}, false, nil
 }
 
@@ -640,6 +661,74 @@ func configureGitCredentialHelper(ctx context.Context, containerID, helperPath s
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to configure git credential helper in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
 	}
+	return nil
+}
+
+func resolveGitIdentity(state *bootstrapState) (name string, email string, ok bool) {
+	if state == nil {
+		return "", "", false
+	}
+
+	email = strings.TrimSpace(state.GitUserEmail)
+	if email == "" {
+		return "", "", false
+	}
+
+	name = strings.TrimSpace(state.GitUserName)
+	if name != "" {
+		return name, email, true
+	}
+
+	if at := strings.Index(email, "@"); at > 0 {
+		return email[:at], email, true
+	}
+	return "workspace-user", email, true
+}
+
+func ensureGitIdentity(ctx context.Context, cfg *config.Config, state *bootstrapState) error {
+	gitUserName, gitUserEmail, ok := resolveGitIdentity(state)
+	if !ok {
+		return nil
+	}
+
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to locate devcontainer for git identity setup: %w", err)
+	}
+
+	setEmailCmd := exec.CommandContext(
+		ctx,
+		"docker",
+		"exec",
+		"-u", "root",
+		containerID,
+		"git",
+		"config",
+		"--system",
+		"user.email",
+		gitUserEmail,
+	)
+	if output, err := setEmailCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to configure git user.email in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	setNameCmd := exec.CommandContext(
+		ctx,
+		"docker",
+		"exec",
+		"-u", "root",
+		containerID,
+		"git",
+		"config",
+		"--system",
+		"user.name",
+		gitUserName,
+	)
+	if output, err := setNameCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to configure git user.name in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	log.Printf("Configured git identity in devcontainer %s", containerID)
 	return nil
 }
 

@@ -4,6 +4,68 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from './db/schema';
 import type { Env } from './index';
 
+interface GitHubUserResponse {
+  id: number | string;
+  login?: string | null;
+  name?: string | null;
+  email?: string | null;
+  avatar_url?: string | null;
+}
+
+interface GitHubEmailResponse {
+  email: string;
+  primary: boolean;
+  verified: boolean;
+}
+
+function normalizeEmail(email: string | null | undefined): string | null {
+  if (!email) {
+    return null;
+  }
+  const trimmed = email.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export function isGitHubNoReplyEmail(email: string): boolean {
+  return email.trim().toLowerCase().endsWith('@users.noreply.github.com');
+}
+
+export function selectPreferredGitHubEmail(
+  userEmail: string | null | undefined,
+  emails: GitHubEmailResponse[] | null | undefined
+): string | null {
+  const normalizedUserEmail = normalizeEmail(userEmail);
+  const verifiedEmails = (emails || [])
+    .map((entry) => ({
+      email: normalizeEmail(entry.email),
+      primary: Boolean(entry.primary),
+      verified: Boolean(entry.verified),
+    }))
+    .filter((entry): entry is { email: string; primary: boolean; verified: true } => Boolean(entry.email) && entry.verified);
+
+  const primaryVerifiedNonNoReply = verifiedEmails.find((entry) => entry.primary && !isGitHubNoReplyEmail(entry.email));
+  if (primaryVerifiedNonNoReply) {
+    return primaryVerifiedNonNoReply.email;
+  }
+
+  const verifiedNonNoReply = verifiedEmails.find((entry) => !isGitHubNoReplyEmail(entry.email));
+  if (verifiedNonNoReply) {
+    return verifiedNonNoReply.email;
+  }
+
+  const primaryVerified = verifiedEmails.find((entry) => entry.primary);
+  if (primaryVerified) {
+    return primaryVerified.email;
+  }
+
+  const firstVerified = verifiedEmails.find(() => true);
+  if (firstVerified) {
+    return firstVerified.email;
+  }
+
+  return normalizedUserEmail;
+}
+
 /**
  * Create BetterAuth instance with Cloudflare D1 + KV configuration.
  * Uses GitHub OAuth as the social provider.
@@ -37,17 +99,23 @@ export function createAuth(env: Env) {
         clientId: env.GITHUB_CLIENT_ID,
         clientSecret: env.GITHUB_CLIENT_SECRET,
         scope: ['read:user', 'user:email'],
-        // Custom getUserInfo to handle GitHub private emails.
-        // GitHub Apps need "Email Addresses: Read-Only" permission,
-        // AND we fetch from /user/emails as fallback for private emails.
+        // Custom getUserInfo to handle GitHub private emails and avoid persisting
+        // noreply addresses when a verified real email exists.
         getUserInfo: async (token) => {
           const userRes = await fetch('https://api.github.com/user', {
             headers: { Authorization: `Bearer ${token.accessToken}`, 'User-Agent': 'SAM-Auth' },
           });
-          const user = await userRes.json() as Record<string, unknown>;
+          if (!userRes.ok) {
+            console.error('[Auth] Failed to fetch /user:', userRes.status);
+            return null;
+          }
 
-          let email = user.email as string | null;
-          if (!email) {
+          const user = await userRes.json() as GitHubUserResponse;
+
+          let email = normalizeEmail(user.email);
+          const shouldResolveEmailViaList = !email || isGitHubNoReplyEmail(email);
+
+          if (shouldResolveEmailViaList) {
             // Fetch emails endpoint for private email addresses.
             // Note: GitHub App needs "Email Addresses: Read-Only" permission,
             // otherwise this returns {"message":"Not Found"} instead of an array.
@@ -55,13 +123,15 @@ export function createAuth(env: Env) {
               const emailsRes = await fetch('https://api.github.com/user/emails', {
                 headers: { Authorization: `Bearer ${token.accessToken}`, 'User-Agent': 'SAM-Auth' },
               });
-              const emailsData = await emailsRes.json();
-              if (Array.isArray(emailsData)) {
-                const emails = emailsData as Array<{ email: string; primary: boolean; verified: boolean }>;
-                const primary = emails.find((e) => e.primary && e.verified);
-                email = primary?.email || emails.find((e) => e.verified)?.email || null;
+              if (emailsRes.ok) {
+                const emailsData = await emailsRes.json();
+                if (Array.isArray(emailsData)) {
+                  email = selectPreferredGitHubEmail(email, emailsData as GitHubEmailResponse[]);
+                } else {
+                  console.error('[Auth] /user/emails returned non-array:', JSON.stringify(emailsData));
+                }
               } else {
-                console.error('[Auth] /user/emails returned non-array:', JSON.stringify(emailsData));
+                console.error('[Auth] Failed to fetch /user/emails:', emailsRes.status);
               }
             } catch (err) {
               console.error('[Auth] Failed to fetch /user/emails:', err);
@@ -69,7 +139,7 @@ export function createAuth(env: Env) {
           }
 
           // Last resort: use GitHub noreply email
-          if (!email && user.login) {
+          if (!email && user.login && user.id) {
             email = `${user.id}+${user.login}@users.noreply.github.com`;
           }
 
@@ -81,13 +151,13 @@ export function createAuth(env: Env) {
             user: {
               id: String(user.id),
               email,
-              name: (user.name as string) || (user.login as string) || '',
-              image: user.avatar_url as string,
+              name: (user.name || user.login || '').trim(),
+              image: user.avatar_url || undefined,
               emailVerified: true,
             },
             data: {
               githubId: String(user.id),
-              avatarUrl: user.avatar_url as string,
+              avatarUrl: user.avatar_url || undefined,
             },
           };
         },

@@ -171,7 +171,7 @@ func TestRedeemBootstrapTokenSuccess(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"workspaceId":"ws-123","callbackToken":"cb-123","githubToken":"gh-123","controlPlaneUrl":"http://api.example.com"}`))
+		_, _ = w.Write([]byte(`{"workspaceId":"ws-123","callbackToken":"cb-123","githubToken":"gh-123","gitUserName":"Octo Cat","gitUserEmail":"octo@example.com","controlPlaneUrl":"http://api.example.com"}`))
 	}))
 	defer server.Close()
 
@@ -190,6 +190,9 @@ func TestRedeemBootstrapTokenSuccess(t *testing.T) {
 	}
 	if state.WorkspaceID != "ws-123" || state.CallbackToken != "cb-123" || state.GitHubToken != "gh-123" {
 		t.Fatalf("unexpected state: %+v", state)
+	}
+	if state.GitUserName != "Octo Cat" || state.GitUserEmail != "octo@example.com" {
+		t.Fatalf("unexpected git identity: name=%q email=%q", state.GitUserName, state.GitUserEmail)
 	}
 }
 
@@ -275,6 +278,31 @@ func TestSaveStatePermissions(t *testing.T) {
 
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("expected mode 0600, got %o", info.Mode().Perm())
+	}
+}
+
+func TestResolveGitIdentity(t *testing.T) {
+	t.Parallel()
+
+	name, email, ok := resolveGitIdentity(nil)
+	if ok {
+		t.Fatalf("expected no identity for nil state, got %q <%s>", name, email)
+	}
+
+	name, email, ok = resolveGitIdentity(&bootstrapState{GitUserName: "Octo Cat", GitUserEmail: "octo@example.com"})
+	if !ok {
+		t.Fatal("expected git identity to resolve")
+	}
+	if name != "Octo Cat" || email != "octo@example.com" {
+		t.Fatalf("unexpected identity: %q <%s>", name, email)
+	}
+
+	name, email, ok = resolveGitIdentity(&bootstrapState{GitUserEmail: "octo@example.com"})
+	if !ok {
+		t.Fatal("expected git identity to resolve with email fallback")
+	}
+	if name != "octo" || email != "octo@example.com" {
+		t.Fatalf("unexpected derived identity: %q <%s>", name, email)
 	}
 }
 

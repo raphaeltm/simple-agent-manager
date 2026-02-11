@@ -92,6 +92,8 @@ bootstrapRoutes.post('/:token', async (c) => {
     hetznerToken,
     callbackToken: tokenData.callbackToken,
     githubToken,
+    gitUserName: tokenData.gitUserName ?? null,
+    gitUserEmail: tokenData.gitUserEmail ?? null,
     controlPlaneUrl: `https://api.${c.env.BASE_DOMAIN}`,
   };
 

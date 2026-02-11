@@ -288,7 +288,7 @@ docs/                 # Documentation
 
 | Endpoint                | Method | Description                                     |
 | ----------------------- | ------ | ----------------------------------------------- |
-| `/api/bootstrap/:token` | `POST` | Redeem one-time bootstrap token for credentials |
+| `/api/bootstrap/:token` | `POST` | Redeem one-time bootstrap token for credentials + git identity |
 
 Authentication is session-based via cookies (BetterAuth + GitHub OAuth).
 
@@ -300,7 +300,7 @@ VMs receive credentials securely using one-time bootstrap tokens:
 
 1. **Workspace creation**: API generates a one-time bootstrap token stored in KV with 5-minute TTL
 2. **Cloud-init**: VM receives only the bootstrap URL (no embedded secrets)
-3. **VM startup**: VM agent calls `POST /api/bootstrap/:token` to redeem credentials
+3. **VM startup**: VM agent calls `POST /api/bootstrap/:token` to redeem credentials and git identity
 4. **Token invalidation**: Token is deleted immediately after first use
 
 This ensures:
@@ -308,6 +308,7 @@ This ensures:
 - No sensitive tokens in cloud-init user data (visible in Hetzner console)
 - Single-use tokens prevent replay attacks
 - Short TTL limits exposure window
+- Devcontainer git author identity is set from authenticated user profile data
 
 ### Workspace Access Control
 

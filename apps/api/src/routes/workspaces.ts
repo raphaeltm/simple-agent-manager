@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { eq, and, desc } from 'drizzle-orm';
 import { ulid } from '../lib/ulid';
 import type { Env } from '../index';
-import { requireAuth, getUserId } from '../middleware/auth';
+import { requireAuth, getAuth, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { encrypt, decrypt } from '../services/encryption';
 import { createServer, deleteServer, SERVER_TYPES } from '../services/hetzner';
@@ -33,6 +33,24 @@ import { getBootLogs, appendBootLog, writeBootLogs } from '../services/boot-log'
 function getIdleTimeoutSeconds(env: Env): number {
   const envValue = env.IDLE_TIMEOUT_SECONDS;
   return envValue ? parseInt(envValue, 10) : 30 * 60;
+}
+
+function normalizeGitUserEmail(email: string | null | undefined): string | null {
+  const trimmed = email?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function deriveGitUserName(name: string | null | undefined, email: string | null | undefined): string | null {
+  const trimmedName = name?.trim();
+  if (trimmedName) {
+    return trimmedName;
+  }
+  const trimmedEmail = normalizeGitUserEmail(email);
+  if (!trimmedEmail) {
+    return null;
+  }
+  const localPart = trimmedEmail.split('@')[0]?.trim();
+  return localPart || null;
 }
 
 const workspacesRoutes = new Hono<{ Bindings: Env }>();
@@ -149,7 +167,8 @@ workspacesRoutes.get('/:id', async (c) => {
  * POST /api/workspaces - Create a new workspace
  */
 workspacesRoutes.post('/', async (c) => {
-  const userId = getUserId(c);
+  const auth = getAuth(c);
+  const userId = auth.user.id;
   const body = await c.req.json<CreateWorkspaceRequest>();
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date().toISOString();
@@ -244,6 +263,8 @@ workspacesRoutes.post('/', async (c) => {
         vmLocation,
         installationId: installation.installationId,
         idleTimeoutSeconds,
+        userName: auth.user.name,
+        userEmail: auth.user.email,
       },
       hetznerToken,
       { encryptedToken: cred.encryptedToken, iv: cred.iv },
@@ -366,7 +387,8 @@ workspacesRoutes.post('/:id/stop', async (c) => {
  * POST /api/workspaces/:id/restart - Restart a stopped workspace
  */
 workspacesRoutes.post('/:id/restart', async (c) => {
-  const userId = getUserId(c);
+  const auth = getAuth(c);
+  const userId = auth.user.id;
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
 
@@ -439,6 +461,8 @@ workspacesRoutes.post('/:id/restart', async (c) => {
         vmLocation: workspaceRestart.vmLocation,
         installationId: installRestart.installationId,
         idleTimeoutSeconds: workspaceRestart.idleTimeoutSeconds,
+        userName: auth.user.name,
+        userEmail: auth.user.email,
       },
       hetznerToken,
       { encryptedToken: credRestart.encryptedToken, iv: credRestart.iv },
@@ -1025,6 +1049,8 @@ async function provisionWorkspace(
     vmLocation: string;
     installationId: string;
     idleTimeoutSeconds: number;
+    userName: string | null;
+    userEmail: string;
   },
   hetznerToken: string,
   hetznerCredential: { encryptedToken: string; iv: string },
@@ -1062,6 +1088,8 @@ async function provisionWorkspace(
 
     // Generate bootstrap token and store encrypted credentials
     const bootstrapToken = generateBootstrapToken();
+    const gitUserEmail = normalizeGitUserEmail(config.userEmail);
+    const gitUserName = deriveGitUserName(config.userName, gitUserEmail);
     const bootstrapData: BootstrapTokenData = {
       workspaceId,
       encryptedHetznerToken: hetznerCredential.encryptedToken,
@@ -1069,6 +1097,8 @@ async function provisionWorkspace(
       callbackToken,
       encryptedGithubToken: encGithub,
       githubTokenIv: ivGithub,
+      gitUserName,
+      gitUserEmail,
       createdAt: now(),
     };
 

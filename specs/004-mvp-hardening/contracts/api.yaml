@@ -216,10 +216,15 @@ components:
     BootstrapResponse:
       type: object
       required:
+        - workspaceId
         - hetznerToken
         - callbackToken
         - githubToken
+        - controlPlaneUrl
       properties:
+        workspaceId:
+          type: string
+          description: Workspace identifier
         hetznerToken:
           type: string
           description: Decrypted Hetzner API token for VM self-destruct
@@ -228,7 +233,19 @@ components:
           description: JWT for authenticating API callbacks
         githubToken:
           type: string
+          nullable: true
           description: Decrypted GitHub token for git operations
+        gitUserName:
+          type: string
+          nullable: true
+          description: Git commit author name derived from authenticated user profile
+        gitUserEmail:
+          type: string
+          nullable: true
+          description: Git commit author email derived from authenticated user profile
+        controlPlaneUrl:
+          type: string
+          description: API control plane base URL used by VM agent callbacks
 
     WorkspaceResponse:
       type: object

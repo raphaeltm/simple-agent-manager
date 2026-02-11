@@ -128,7 +128,7 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 ### VM Communication
 - `POST /api/workspaces/:id/heartbeat` — VM heartbeat with idle detection
 - `POST /api/workspaces/:id/boot-log` — VM sends boot progress log entry (callback JWT auth)
-- `POST /api/bootstrap/:token` — Redeem one-time bootstrap token
+- `POST /api/bootstrap/:token` — Redeem one-time bootstrap token (credentials + git identity)
 - `POST /api/agent/ready` — VM agent ready callback
 - `POST /api/agent/activity` — VM agent activity report
 
@@ -228,6 +228,7 @@ Claude Code now supports dual authentication methods:
 - Cloudflare D1 (credentials table with new schema), AES-256-GCM encryption (013-agent-oauth-support)
 
 ## Recent Changes
+- 014-auth-profile-sync: Prefer verified non-noreply GitHub email at login and propagate git user name/email into workspace bootstrap so VM agent configures commit identity
 - 013-agent-oauth-support: Dual credential support for Claude Code (API key + OAuth token), credential switching capability, auto-activation behavior
 - 012-pty-session-persistence: PTY sessions survive page refresh/network interruptions with ring buffer replay and session reattach; orphan cleanup is configurable and disabled by default (`PTY_ORPHAN_GRACE_PERIOD=0`)
 - 010-docs-review: Added Markdown (CommonMark) with GitHub Flavored Markdown extensions + None (documentation-only review)

@@ -67,6 +67,8 @@ describe('Bootstrap Routes', () => {
         callbackToken: 'jwt-callback-token',
         encryptedGithubToken: encGithub,
         githubTokenIv: ivGithub,
+        gitUserName: 'Octo Cat',
+        gitUserEmail: 'octo@example.com',
         createdAt: new Date().toISOString(),
       };
 
@@ -85,6 +87,8 @@ describe('Bootstrap Routes', () => {
       expect(body.hetznerToken).toBe('hetzner-api-token-123');
       expect(body.callbackToken).toBe('jwt-callback-token');
       expect(body.githubToken).toBe('github-token-456');
+      expect(body.gitUserName).toBe('Octo Cat');
+      expect(body.gitUserEmail).toBe('octo@example.com');
       expect(body.controlPlaneUrl).toContain(mockEnv.BASE_DOMAIN);
 
       // Verify token was deleted (single-use enforcement)
@@ -110,6 +114,8 @@ describe('Bootstrap Routes', () => {
         callbackToken: 'jwt-token',
         encryptedGithubToken: null,
         githubTokenIv: null,
+        gitUserName: null,
+        gitUserEmail: null,
         createdAt: new Date().toISOString(),
       };
 
@@ -156,6 +162,8 @@ describe('Bootstrap Routes', () => {
         callbackToken: 'jwt-token',
         encryptedGithubToken: null,
         githubTokenIv: null,
+        gitUserName: null,
+        gitUserEmail: null,
         createdAt: new Date().toISOString(),
       };
 
@@ -170,6 +178,8 @@ describe('Bootstrap Routes', () => {
       expect(res.status).toBe(200);
       const body: BootstrapResponse = await res.json();
       expect(body.githubToken).toBeNull();
+      expect(body.gitUserName).toBeNull();
+      expect(body.gitUserEmail).toBeNull();
     });
   });
 });

@@ -668,7 +668,7 @@ You can also trigger deployment manually via GitHub Actions → Deploy → Run w
 ### VM Communication
 - `POST /api/workspaces/:id/heartbeat` - VM heartbeat with idle detection
 - `POST /api/workspaces/:id/boot-log` - VM sends boot progress log entry (callback JWT auth)
-- `POST /api/bootstrap/:token` - Redeem one-time bootstrap token (VM startup)
+- `POST /api/bootstrap/:token` - Redeem one-time bootstrap token (credentials + git identity)
 - `POST /api/agent/ready` - VM agent ready callback
 - `POST /api/agent/activity` - VM agent activity report
 
@@ -739,6 +739,7 @@ See `apps/api/.env.example`:
 - Git-tracked specification artifacts and shared package source files (no new runtime database storage) (009-ui-system-standards)
 
 ## Recent Changes
+- 014-auth-profile-sync: Prefer verified non-noreply GitHub email at login and propagate git user name/email into workspace bootstrap so VM agent configures commit identity
 - 004-mvp-hardening: Secure bootstrap tokens, workspace ownership validation, provisioning timeouts, shared terminal package, WebSocket reconnection, idle deadline tracking
 - 003-browser-terminal-saas: Added multi-tenant SaaS with GitHub OAuth, VM Agent (Go), browser terminal
 - 002-local-mock-mode: Added local mock mode with devcontainers CLI

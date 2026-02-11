@@ -62,7 +62,7 @@ git push
 
 3. **VM Agent: Bootstrap redemption** — implement the missing Go code to:
    - Redeem `BOOTSTRAP_TOKEN` via `POST /api/bootstrap/:token` on startup
-   - Receive `githubToken`, `callbackToken`, `hetznerToken`
+   - Receive `githubToken`, `callbackToken`, `hetznerToken`, and optional `gitUserName`/`gitUserEmail`
    - Store `callbackToken` for subsequent API calls
    - Use `githubToken` for initial `git clone`
 

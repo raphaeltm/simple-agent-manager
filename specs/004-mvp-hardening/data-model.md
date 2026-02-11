@@ -17,27 +17,31 @@ Bootstrap tokens enable secure credential delivery to VMs without embedding secr
 
 **Storage**: Cloudflare KV (not D1)
 **Key Pattern**: `bootstrap:{token}`
-**TTL**: 300 seconds (5 minutes)
+**TTL**: 900 seconds (15 minutes) by default, configurable via `BOOTSTRAP_TOKEN_TTL_SECONDS`
 
 ```typescript
 interface BootstrapTokenData {
   workspaceId: string;
-  hetznerToken: string;      // Encrypted
-  callbackToken: string;     // JWT for API callbacks
-  githubToken: string;       // Encrypted
-  createdAt: string;         // ISO 8601
+  encryptedHetznerToken: string;  // Encrypted
+  hetznerTokenIv: string;
+  callbackToken: string;          // JWT for API callbacks
+  encryptedGithubToken: string | null;
+  githubTokenIv: string | null;
+  gitUserName?: string | null;    // Optional git identity propagated to VM
+  gitUserEmail?: string | null;   // Optional git identity propagated to VM
+  createdAt: string;              // ISO 8601
 }
 ```
 
 **Lifecycle**:
 1. **Created**: When workspace provisioning begins
 2. **Redeemed**: When VM calls `/api/bootstrap/:token` (deleted immediately)
-3. **Expired**: Automatically deleted after 5 minutes via KV TTL
+3. **Expired**: Automatically deleted after TTL via KV expiration
 
 **Validation Rules**:
 - Token format: UUID v4
 - Single use: Deleted on first successful redemption
-- Expiry: 5 minutes from creation
+- Expiry: Controlled by `BOOTSTRAP_TOKEN_TTL_SECONDS` (default 15 minutes)
 
 ---
 
@@ -139,9 +143,13 @@ interface HeartbeatResponse {
 
 ```typescript
 interface BootstrapResponse {
+  workspaceId: string;
   hetznerToken: string;   // Decrypted, for VM self-destruct
   callbackToken: string;  // JWT for API callbacks
-  githubToken: string;    // Decrypted, for git operations
+  githubToken: string | null;    // Decrypted, for git operations
+  gitUserName?: string | null;   // Optional commit author name
+  gitUserEmail?: string | null;  // Optional commit author email
+  controlPlaneUrl: string;
 }
 ```
 
