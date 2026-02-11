@@ -18,6 +18,14 @@
   padding: 0;
 }
 
+button {
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
 html, body, #root {
   min-height: var(--sam-app-height);
 }
