@@ -64,6 +64,9 @@ type Gateway struct {
 	sessionID    acpsdk.SessionId
 	restartCount int
 
+	// closed is set when Close() is called to signal a takeover
+	closed bool
+
 	// stderrBuf collects recent stderr output from the agent process for error reporting.
 	stderrMu  sync.Mutex
 	stderrBuf strings.Builder
@@ -77,9 +80,61 @@ func NewGateway(config GatewayConfig, conn *websocket.Conn) *Gateway {
 	}
 }
 
+// Close terminates the gateway by closing the underlying WebSocket connection.
+// This causes Run() to return, cleaning up the agent process. It is safe to
+// call from any goroutine and is used by the takeover pattern when a new
+// ACP connection replaces an existing one.
+func (g *Gateway) Close() {
+	g.mu.Lock()
+	g.closed = true
+	g.mu.Unlock()
+
+	// Send a close frame and close the connection. This unblocks ReadMessage()
+	// in Run(), causing the gateway to shut down cleanly.
+	g.conn.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseGoingAway, "session takeover"),
+		time.Now().Add(5*time.Second),
+	)
+	g.conn.Close()
+}
+
+// pingInterval is the interval between WebSocket pings to detect stale connections.
+const pingInterval = 30 * time.Second
+
+// pongTimeout is the deadline for receiving a pong after sending a ping.
+const pongTimeout = 10 * time.Second
+
 // Run starts the gateway, bridging WebSocket messages to/from the agent subprocess.
 func (g *Gateway) Run(ctx context.Context) error {
 	defer g.cleanup()
+
+	// Configure pong handler to extend the read deadline when pong is received.
+	g.conn.SetReadDeadline(time.Now().Add(pingInterval + pongTimeout))
+	g.conn.SetPongHandler(func(string) error {
+		g.conn.SetReadDeadline(time.Now().Add(pingInterval + pongTimeout))
+		return nil
+	})
+
+	// Start ping ticker to detect stale connections
+	pingTicker := time.NewTicker(pingInterval)
+	defer pingTicker.Stop()
+
+	// Run ping sender in background
+	go func() {
+		for range pingTicker.C {
+			g.writeMu.Lock()
+			err := g.conn.WriteControl(
+				websocket.PingMessage,
+				nil,
+				time.Now().Add(5*time.Second),
+			)
+			g.writeMu.Unlock()
+			if err != nil {
+				return // Connection is dead, Run() will detect via ReadMessage error
+			}
+		}
+	}()
 
 	// Start WebSocket reader
 	for {
@@ -91,11 +146,17 @@ func (g *Gateway) Run(ctx context.Context) error {
 
 		msgType, data, err := g.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+			g.mu.Lock()
+			wasClosed := g.closed
+			g.mu.Unlock()
+			if wasClosed || websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				return nil
 			}
 			return fmt.Errorf("failed to read WebSocket message: %w", err)
 		}
+
+		// Reset read deadline on any message
+		g.conn.SetReadDeadline(time.Now().Add(pingInterval + pongTimeout))
 
 		if msgType != websocket.TextMessage {
 			continue

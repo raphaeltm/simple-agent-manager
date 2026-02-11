@@ -68,6 +68,10 @@ export function AgentSelector({ activeAgentType, sessionState, onSelectAgent }: 
       {agents.map((agent) => {
         const isActive = agent.id === activeAgentType;
         const isInitializing = isActive && (sessionState === 'initializing' || sessionState === 'connecting');
+        // Disable buttons until the ACP WebSocket is connected (state reaches at least 'no_session').
+        // Without this, clicks silently do nothing because switchAgent() checks transport.connected.
+        const wsConnected = sessionState !== 'disconnected' && sessionState !== 'connecting' && sessionState !== 'reconnecting';
+        const canClick = agent.configured && wsConnected;
 
         const buttonStyle: React.CSSProperties = {
           display: 'inline-flex',
@@ -77,7 +81,7 @@ export function AgentSelector({ activeAgentType, sessionState, onSelectAgent }: 
           fontSize: '0.875rem',
           fontWeight: 500,
           transition: 'all 0.15s ease',
-          cursor: agent.configured ? 'pointer' : 'not-allowed',
+          cursor: canClick ? 'pointer' : 'not-allowed',
           border: 'none',
           ...(isActive
             ? {
@@ -85,7 +89,7 @@ export function AgentSelector({ activeAgentType, sessionState, onSelectAgent }: 
                 color: '#ffffff',
                 boxShadow: '0 1px 2px rgba(0, 0, 0, 0.2)',
               }
-            : agent.configured
+            : canClick
               ? {
                   backgroundColor: 'var(--sam-color-bg-surface)',
                   color: 'var(--sam-color-fg-primary)',
@@ -102,9 +106,13 @@ export function AgentSelector({ activeAgentType, sessionState, onSelectAgent }: 
         return (
           <button
             key={agent.id}
-            onClick={() => agent.configured ? onSelectAgent(agent.id) : undefined}
-            disabled={!agent.configured}
-            title={agent.configured ? agent.description : 'API key not configured — add it in Settings'}
+            onClick={() => canClick ? onSelectAgent(agent.id) : undefined}
+            disabled={!canClick}
+            title={!agent.configured
+              ? 'API key not configured — add it in Settings'
+              : !wsConnected
+                ? 'Connecting to workspace...'
+                : agent.description}
             style={buttonStyle}
           >
             {isInitializing && (

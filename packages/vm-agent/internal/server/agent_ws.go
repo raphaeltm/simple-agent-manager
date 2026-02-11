@@ -10,7 +10,8 @@ import (
 
 // handleAgentWS handles WebSocket connections for ACP agent communication.
 // Authentication uses the same JWT mechanism as the terminal WebSocket.
-// Only one ACP session is allowed per workspace (T051).
+// Only one ACP session is allowed per workspace — new connections take over
+// from existing ones (closing the old WebSocket) instead of being rejected.
 func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	// Check authentication — same as terminal WebSocket
 	session := s.sessionManager.GetSessionFromRequest(r)
@@ -36,21 +37,17 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Enforce single ACP session per workspace
+	// Takeover pattern: if an existing ACP session is active, close it
+	// gracefully to allow the new connection. This handles page refreshes,
+	// tab closes, and network interruptions where the old goroutine is
+	// still blocking in gateway.Run().
 	s.acpMu.Lock()
-	if s.acpActive {
-		s.acpMu.Unlock()
-		http.Error(w, "Another ACP session is already active", http.StatusConflict)
-		return
+	if s.acpGateway != nil {
+		log.Printf("ACP: closing existing session for takeover by new connection")
+		s.acpGateway.Close()
+		s.acpGateway = nil
 	}
-	s.acpActive = true
 	s.acpMu.Unlock()
-
-	defer func() {
-		s.acpMu.Lock()
-		s.acpActive = false
-		s.acpMu.Unlock()
-	}()
 
 	// Upgrade to WebSocket with origin validation
 	upgrader := s.createUpgrader()
@@ -59,16 +56,29 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ACP WebSocket upgrade failed: %v", err)
 		return
 	}
-	defer conn.Close()
 
 	log.Printf("ACP WebSocket connected: user=%s, workspace=%s", session.UserID, s.config.WorkspaceID)
 
 	// Record activity for idle detection
 	s.idleDetector.RecordActivity()
 
-	// Create and run the ACP gateway
+	// Create and register the ACP gateway
 	gateway := acp.NewGateway(s.acpConfig, conn)
+
+	s.acpMu.Lock()
+	s.acpGateway = gateway
+	s.acpMu.Unlock()
+
+	// Run blocks until the WebSocket closes or the gateway is closed
 	gateway.Run(context.Background())
+
+	// Deregister the gateway (only if it's still ours — another takeover may
+	// have already replaced it)
+	s.acpMu.Lock()
+	if s.acpGateway == gateway {
+		s.acpGateway = nil
+	}
+	s.acpMu.Unlock()
 
 	log.Printf("ACP WebSocket disconnected: user=%s", session.UserID)
 }

@@ -31,7 +31,7 @@ type Server struct {
 	idleDetector   *idle.Detector
 	acpConfig      acp.GatewayConfig
 	acpMu          sync.Mutex
-	acpActive      bool
+	acpGateway     *acp.Gateway
 }
 
 // New creates a new server instance.
@@ -117,13 +117,16 @@ func New(cfg *config.Config) (*Server, error) {
 	mux := http.NewServeMux()
 	s.setupRoutes(mux)
 
-	// Create HTTP server with configurable timeouts
+	// Create HTTP server with configurable timeouts.
+	// WriteTimeout is intentionally set to 0 because WebSocket connections
+	// are long-lived. Go's http.Server.WriteTimeout sets a deadline on the
+	// underlying net.Conn BEFORE the handler runs, which kills hijacked
+	// WebSocket connections after the timeout period.
 	s.httpServer = &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
-		Handler:      corsMiddleware(mux, cfg.AllowedOrigins),
-		ReadTimeout:  cfg.HTTPReadTimeout,
-		WriteTimeout: cfg.HTTPWriteTimeout,
-		IdleTimeout:  cfg.HTTPIdleTimeout,
+		Addr:        fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		Handler:     corsMiddleware(mux, cfg.AllowedOrigins),
+		ReadTimeout: cfg.HTTPReadTimeout,
+		IdleTimeout: cfg.HTTPIdleTimeout,
 	}
 
 	return s, nil
