@@ -14,7 +14,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   if (isLoading) {
     return (
       <div style={{
-        minHeight: '100vh',
+        minHeight: 'var(--sam-app-height)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',

@@ -109,7 +109,7 @@ export function CreateWorkspace() {
   if (checkingPrereqs) {
     return (
       <div style={{
-        minHeight: '100vh',
+        minHeight: 'var(--sam-app-height)',
         backgroundColor: 'var(--sam-color-bg-canvas)',
         display: 'flex',
         alignItems: 'center',

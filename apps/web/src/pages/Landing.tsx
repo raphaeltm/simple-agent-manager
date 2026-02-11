@@ -27,7 +27,7 @@ export function Landing() {
 
   return (
     <div style={{
-      minHeight: '100vh',
+      minHeight: 'var(--sam-app-height)',
       backgroundColor: 'var(--sam-color-bg-canvas)',
       display: 'flex',
       flexDirection: 'column',

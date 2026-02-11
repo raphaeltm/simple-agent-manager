@@ -4,8 +4,17 @@
 
 ### 1. Viewport Meta Tag (REQUIRED)
 ```html
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta
+  name="viewport"
+  content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+/>
 ```
+
+### 1.1 Dynamic Viewport Sizing (REQUIRED)
+- Do not use bare `100vh` for full-screen layouts on mobile.
+- Use dynamic viewport sizing (`100dvh` when available) with a fallback CSS variable (for example `--sam-app-height`) updated from `window.visualViewport`.
+- Keep top bars, bottom bars, and input composers inside a flex column where only the center pane scrolls.
+- Include safe-area insets (`env(safe-area-inset-bottom)`) for bottom navigation and sticky input controls.
 
 ### 2. Touch Target Sizes
 - **Minimum touch target**: 44x44px (iOS) / 48x48px (Android)
@@ -62,6 +71,7 @@ Before deploying any UI changes:
 - [ ] Ensure login/primary CTA is immediately visible
 - [ ] Test landscape orientation
 - [ ] Verify forms are usable with mobile keyboard
+- [ ] Verify chat/composer input remains visible with browser UI expanded and with keyboard open
 - [ ] Check loading states work on slow connections
 
 ## Enforcement Examples

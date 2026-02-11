@@ -49,10 +49,12 @@ Think **GitHub Codespaces, but built for AI-assisted development** and with auto
 - **Instant Workspaces** — Create a cloud VM from any Git repository in minutes
 - **Multi-Terminal Support** — Open multiple terminal sessions in tabs without new browser windows
 - **Web Terminal** — Access via browser-based xterm.js terminal with WebSocket connection
+- **Installable PWA** — Add SAM to your home screen for app-like mobile access
 - **DevContainer Support** — Automatically detects and uses your `.devcontainer/devcontainer.json`
 - **Multiple VM Sizes** — Small (2 vCPU/4GB), Medium (4 vCPU/8GB), Large (8 vCPU/16GB)
 - **Automatic Cleanup** — Idle workspaces shut down after configurable inactivity (default 30 minutes)
 - **GitHub Integration** — Works with both public and private repositories
+- **Keyboard-Safe Mobile Layout** — Viewport-aware sizing keeps core controls visible as browser UI and mobile keyboard appear/disappear
 
 ## Quick Start
 

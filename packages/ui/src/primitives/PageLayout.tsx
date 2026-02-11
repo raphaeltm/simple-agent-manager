@@ -76,7 +76,7 @@ export function PageLayout({
   };
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: 'var(--sam-color-bg-canvas)' }}>
+    <div style={{ minHeight: 'var(--sam-app-height, 100vh)', backgroundColor: 'var(--sam-color-bg-canvas)' }}>
       <header style={headerStyle}>
         <div style={headerInnerStyle}>
           <div style={titleGroupStyle}>

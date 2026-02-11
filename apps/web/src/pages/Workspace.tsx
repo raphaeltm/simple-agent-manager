@@ -206,7 +206,7 @@ export function Workspace() {
   // ── Loading state ──
   if (loading) {
     return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1b26' }}>
+      <div style={{ height: 'var(--sam-app-height)', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1b26' }}>
         <Spinner size="lg" />
       </div>
     );
@@ -215,7 +215,7 @@ export function Workspace() {
   // ── Fatal error (no workspace loaded) ──
   if (error && !workspace) {
     return (
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#1a1b26' }}>
+      <div style={{ height: 'var(--sam-app-height)', display: 'flex', flexDirection: 'column', backgroundColor: '#1a1b26' }}>
         <Toolbar onBack={() => navigate('/dashboard')} />
         <CenteredStatus
           color="#f87171"
@@ -292,7 +292,7 @@ export function Workspace() {
   // ══════════════════════════════════════════════════════════════
   if (isMobile) {
     return (
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#1a1b26', overflow: 'hidden' }}>
+      <div style={{ height: 'var(--sam-app-height)', display: 'flex', flexDirection: 'column', backgroundColor: '#1a1b26', overflow: 'hidden' }}>
         {/* ── Mobile Header (compact) ── */}
         <header style={{
           display: 'flex',
@@ -392,7 +392,7 @@ export function Workspace() {
   });
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#1a1b26', overflow: 'hidden' }}>
+    <div style={{ height: 'var(--sam-app-height)', display: 'flex', flexDirection: 'column', backgroundColor: '#1a1b26', overflow: 'hidden' }}>
       {/* ── Compact Toolbar ── */}
       <header style={{
         display: 'flex',

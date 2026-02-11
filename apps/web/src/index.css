@@ -1,10 +1,25 @@
 @import '@simple-agent-manager/ui/tokens/theme.css';
 
+:root {
+  --sam-app-height: 100vh;
+  --sam-keyboard-offset: 0px;
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --sam-app-height: 100dvh;
+  }
+}
+
 /* Reset */
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+
+html, body, #root {
+  min-height: var(--sam-app-height);
 }
 
 body {
@@ -64,7 +79,7 @@ body {
 .list-inside { list-style-position: inside; }
 
 /* ── Layout ── */
-.min-h-screen { min-height: 100vh; }
+.min-h-screen { min-height: var(--sam-app-height); }
 .flex { display: flex; }
 .inline-flex { display: inline-flex; }
 .grid { display: grid; }

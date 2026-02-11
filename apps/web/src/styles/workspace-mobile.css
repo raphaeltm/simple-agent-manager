@@ -11,6 +11,10 @@
   padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
+html.sam-keyboard-open .sam-mobile-bottom-bar {
+  display: none;
+}
+
 .sam-mobile-tab {
   flex: 1;
   display: flex;
@@ -64,7 +68,7 @@
   padding: 16px;
   padding-bottom: calc(16px + env(safe-area-inset-bottom, 0));
   animation: sam-slide-up 0.2s ease;
-  max-height: 60vh;
+  max-height: min(60vh, calc(var(--sam-app-height) - 12px));
   overflow-y: auto;
 }
 
