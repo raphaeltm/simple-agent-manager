@@ -39,6 +39,14 @@ vi.mock('../../../src/components/AgentSelector', () => ({
   AgentSelector: () => <div data-testid="agent-selector">agent-selector</div>,
 }));
 
+vi.mock('../../../src/components/MobileBottomBar', () => ({
+  MobileBottomBar: () => null,
+}));
+
+vi.mock('../../../src/components/MobileOverflowMenu', () => ({
+  MobileOverflowMenu: () => null,
+}));
+
 import { Workspace } from '../../../src/pages/Workspace';
 
 function renderWorkspace(initialEntry = '/workspaces/ws-123') {
@@ -54,6 +62,20 @@ function renderWorkspace(initialEntry = '/workspaces/ws-123') {
 describe('Workspace page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Mock matchMedia for useIsMobile hook (default to desktop)
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false, // desktop by default
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
     mocks.getWorkspace.mockResolvedValue({
       id: 'ws-123',
       name: 'Test Workspace',

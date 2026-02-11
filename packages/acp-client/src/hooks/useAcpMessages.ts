@@ -224,9 +224,11 @@ export function useAcpMessages(): AcpMessagesHandle {
           break;
         }
 
-        case 'usage_update': {
-          // usage_update is about context window, not direct token usage
-          // We acknowledge the variant but don't process it into conversation items
+        case 'usage_update':
+        case 'available_commands_update': {
+          // Acknowledged ACP notification types that don't need conversation rendering.
+          // usage_update: context window stats
+          // available_commands_update: agent slash commands (not rendered in chat)
           break;
         }
 

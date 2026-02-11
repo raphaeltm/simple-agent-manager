@@ -7,8 +7,12 @@ import type { AcpSessionState } from '@simple-agent-manager/acp-client';
 import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { AgentSelector } from '../components/AgentSelector';
+import { MobileBottomBar } from '../components/MobileBottomBar';
+import { MobileOverflowMenu } from '../components/MobileOverflowMenu';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { getWorkspace, getTerminalToken, stopWorkspace, restartWorkspace } from '../lib/api';
 import type { WorkspaceResponse, BootLogEntry } from '@simple-agent-manager/shared';
+import '../styles/workspace-mobile.css';
 
 /** Map ACP session state to a human-readable label */
 function agentStatusLabel(state: AcpSessionState, agentType: string | null): string {
@@ -57,6 +61,7 @@ export function Workspace() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const featureFlags = useFeatureFlags();
+  const isMobile = useIsMobile();
   const viewParam = searchParams.get('view');
   const viewOverride: ViewMode | null = viewParam === 'terminal' || viewParam === 'conversation' ? viewParam : null;
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
@@ -66,6 +71,7 @@ export function Workspace() {
   const [wsUrl, setWsUrl] = useState<string | null>(null);
   const [terminalLoading, setTerminalLoading] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>(viewOverride ?? 'terminal');
+  const [agentSheetOpen, setAgentSheetOpen] = useState(false);
 
   // ACP
   const [acpWsUrl, setAcpWsUrl] = useState<string | null>(null);
@@ -227,6 +233,151 @@ export function Workspace() {
   const isRunning = workspace?.status === 'running';
   const hasAgent = isRunning && acpSession.agentType;
 
+  // ── Shared content area ──
+  const contentArea = (
+    <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+      {isRunning ? (
+        viewMode === 'conversation' ? (
+          <div style={{ height: '100%', overflow: 'hidden' }}>
+            <AgentPanel session={acpSession} messages={acpMessages} />
+          </div>
+        ) : wsUrl ? (
+          <div style={{ height: '100%' }}>
+            {featureFlags.multiTerminal ? (
+              <MultiTerminal
+                wsUrl={wsUrl}
+                shutdownDeadline={workspace?.shutdownDeadline}
+                onActivity={handleTerminalActivity}
+                className="h-full"
+                persistenceKey={id ? `sam-terminal-sessions-${id}` : undefined}
+              />
+            ) : (
+              <Terminal
+                wsUrl={wsUrl}
+                shutdownDeadline={workspace?.shutdownDeadline}
+                onActivity={handleTerminalActivity}
+                className="h-full"
+              />
+            )}
+          </div>
+        ) : terminalLoading ? (
+          <CenteredStatus color="#60a5fa" title="Connecting to Terminal..." subtitle="Establishing secure connection" loading />
+        ) : (
+          <CenteredStatus color="#f87171" title="Connection Failed" subtitle="Unable to connect to terminal" />
+        )
+      ) : workspace?.status === 'creating' ? (
+        <BootProgress logs={workspace.bootLogs} />
+      ) : workspace?.status === 'stopping' ? (
+        <CenteredStatus color="#fbbf24" title="Stopping Workspace" loading />
+      ) : workspace?.status === 'stopped' ? (
+        <CenteredStatus
+          color="var(--sam-color-fg-muted)"
+          title="Workspace Stopped"
+          subtitle="Restart to access the terminal."
+          action={
+            <Button variant="primary" size="sm" onClick={handleRestart} disabled={actionLoading} loading={actionLoading}>
+              Restart Workspace
+            </Button>
+          }
+        />
+      ) : workspace?.status === 'error' ? (
+        <CenteredStatus color="#f87171" title="Workspace Error" subtitle={workspace?.errorMessage || 'An unexpected error occurred.'} />
+      ) : null}
+    </div>
+  );
+
+  // ══════════════════════════════════════════════════════════════
+  // MOBILE LAYOUT
+  // ══════════════════════════════════════════════════════════════
+  if (isMobile) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#1a1b26', overflow: 'hidden' }}>
+        {/* ── Mobile Header (compact) ── */}
+        <header style={{
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 4px 0 8px',
+          height: '44px',
+          backgroundColor: 'var(--sam-color-bg-surface)',
+          borderBottom: '1px solid var(--sam-color-border-default)',
+          gap: '6px',
+          flexShrink: 0,
+        }}>
+          {/* Back */}
+          <button
+            onClick={() => navigate('/dashboard')}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--sam-color-fg-muted)', padding: '8px', display: 'flex', minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
+            aria-label="Back to dashboard"
+          >
+            <svg style={{ height: 18, width: 18 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+
+          {/* Workspace name + status */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+            <span style={{
+              fontWeight: 600,
+              fontSize: '0.875rem',
+              color: 'var(--sam-color-fg-primary)',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}>
+              {workspace?.name}
+            </span>
+            {workspace && <StatusBadge status={workspace.status} />}
+          </div>
+
+          {/* Overflow menu */}
+          <MobileOverflowMenu
+            repository={workspace?.repository}
+            branch={workspace?.branch}
+            isRunning={!!isRunning}
+            isStopped={workspace?.status === 'stopped'}
+            agentType={acpSession.agentType}
+            sessionState={acpSession.state}
+            error={error}
+            actionLoading={actionLoading}
+            onStop={handleStop}
+            onRestart={handleRestart}
+            onClearError={() => setError(null)}
+          />
+
+          {/* User menu */}
+          <UserMenu />
+        </header>
+
+        {/* ── Content area ── */}
+        {contentArea}
+
+        {/* ── Bottom bar ── */}
+        <MobileBottomBar
+          viewMode={viewMode}
+          onChangeView={setViewMode}
+          onOpenAgentSheet={() => setAgentSheetOpen(true)}
+          agentType={acpSession.agentType}
+          sessionState={acpSession.state}
+          isRunning={!!isRunning}
+        />
+
+        {/* ── Agent sheet overlay ── */}
+        {agentSheetOpen && (
+          <AgentSelector
+            activeAgentType={acpSession.agentType}
+            sessionState={acpSession.state}
+            onSelectAgent={acpSession.switchAgent}
+            mobile
+            onClose={() => setAgentSheetOpen(false)}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // DESKTOP LAYOUT (original)
+  // ══════════════════════════════════════════════════════════════
   const toggleBtnStyle = (active: boolean): React.CSSProperties => ({
     padding: '2px 10px',
     fontSize: '0.75rem',
@@ -351,7 +502,7 @@ export function Workspace() {
         <UserMenu />
       </header>
 
-      {/* ── Agent selector bar (thin, only when running) ── */}
+      {/* ── Agent selector bar (thin, only when running — desktop only) ── */}
       {isRunning && (
         <div style={{ flexShrink: 0 }}>
           <AgentSelector
@@ -362,56 +513,8 @@ export function Workspace() {
         </div>
       )}
 
-      {/* ── Content area (fills remaining viewport) ── */}
-      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-        {isRunning ? (
-          viewMode === 'conversation' ? (
-            <div style={{ height: '100%', overflow: 'hidden' }}>
-              <AgentPanel session={acpSession} messages={acpMessages} />
-            </div>
-          ) : wsUrl ? (
-            <div style={{ height: '100%' }}>
-              {featureFlags.multiTerminal ? (
-                <MultiTerminal
-                  wsUrl={wsUrl}
-                  shutdownDeadline={workspace?.shutdownDeadline}
-                  onActivity={handleTerminalActivity}
-                  className="h-full"
-                  persistenceKey={id ? `sam-terminal-sessions-${id}` : undefined}
-                />
-              ) : (
-                <Terminal
-                  wsUrl={wsUrl}
-                  shutdownDeadline={workspace?.shutdownDeadline}
-                  onActivity={handleTerminalActivity}
-                  className="h-full"
-                />
-              )}
-            </div>
-          ) : terminalLoading ? (
-            <CenteredStatus color="#60a5fa" title="Connecting to Terminal..." subtitle="Establishing secure connection" loading />
-          ) : (
-            <CenteredStatus color="#f87171" title="Connection Failed" subtitle="Unable to connect to terminal" />
-          )
-        ) : workspace?.status === 'creating' ? (
-          <BootProgress logs={workspace.bootLogs} />
-        ) : workspace?.status === 'stopping' ? (
-          <CenteredStatus color="#fbbf24" title="Stopping Workspace" loading />
-        ) : workspace?.status === 'stopped' ? (
-          <CenteredStatus
-            color="var(--sam-color-fg-muted)"
-            title="Workspace Stopped"
-            subtitle="Restart to access the terminal."
-            action={
-              <Button variant="primary" size="sm" onClick={handleRestart} disabled={actionLoading} loading={actionLoading}>
-                Restart Workspace
-              </Button>
-            }
-          />
-        ) : workspace?.status === 'error' ? (
-          <CenteredStatus color="#f87171" title="Workspace Error" subtitle={workspace?.errorMessage || 'An unexpected error occurred.'} />
-        ) : null}
-      </div>
+      {/* ── Content area ── */}
+      {contentArea}
     </div>
   );
 }
