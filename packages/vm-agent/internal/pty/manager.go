@@ -22,7 +22,6 @@ type Manager struct {
 	defaultRows        int
 	defaultCols        int
 	workDir            string
-	onActivity         func() // Called when any session has activity
 	containerResolver  ContainerResolver
 	containerUser      string
 	maxSessionsPerUser int           // Maximum sessions allowed per user (0 = unlimited)
@@ -36,7 +35,6 @@ type ManagerConfig struct {
 	DefaultRows        int
 	DefaultCols        int
 	WorkDir            string
-	OnActivity         func()
 	ContainerResolver  ContainerResolver
 	ContainerUser      string
 	MaxSessionsPerUser int           // Maximum sessions allowed per user (0 = unlimited)
@@ -60,7 +58,6 @@ func NewManager(cfg ManagerConfig) *Manager {
 		defaultRows:        cfg.DefaultRows,
 		defaultCols:        cfg.DefaultCols,
 		workDir:            cfg.WorkDir,
-		onActivity:         cfg.OnActivity,
 		containerResolver:  cfg.ContainerResolver,
 		containerUser:      cfg.ContainerUser,
 		maxSessionsPerUser: cfg.MaxSessionsPerUser,
@@ -257,12 +254,6 @@ func (m *Manager) GetLastActivity() time.Time {
 	return lastActive
 }
 
-// NotifyActivity notifies the manager of activity (called by sessions).
-func (m *Manager) NotifyActivity() {
-	if m.onActivity != nil {
-		m.onActivity()
-	}
-}
 
 // CleanupIdleSessions closes sessions that have been idle for longer than the given duration.
 func (m *Manager) CleanupIdleSessions(maxIdle time.Duration) int {

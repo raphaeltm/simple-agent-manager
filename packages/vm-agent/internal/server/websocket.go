@@ -502,9 +502,10 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 			// This reader lives for the lifetime of the session, not the WebSocket connection.
 			// It always writes to the ring buffer; the attached writer forwards to WebSocket when set.
 			ptySession.StartOutputReader(
-				// onOutput: called on each chunk — record activity and forward to attached writer
+				// onOutput: called on each chunk — forward to attached writer.
+				// Don't record PTY output as activity - background processes
+				// and shell prompts would prevent idle shutdown.
 				func(sessionID string, data []byte) {
-					s.idleDetector.RecordActivity()
 					sess := s.ptyManager.GetSession(sessionID)
 					if sess == nil {
 						return
