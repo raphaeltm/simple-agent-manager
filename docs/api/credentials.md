@@ -113,6 +113,7 @@ Removes all credentials for an agent.
 - Supports both API keys (`ANTHROPIC_API_KEY`) and OAuth tokens (`CLAUDE_CODE_OAUTH_TOKEN`)
 - OAuth tokens from Claude Max/Pro subscriptions via `claude setup-token`
 - Automatic environment variable selection based on credential type
+- OAuth tokens are treated as opaque values; API-side checks only reject obvious type mismatches
 
 ### Other Agents
 - OpenAI Codex and Google Gemini currently only support API keys

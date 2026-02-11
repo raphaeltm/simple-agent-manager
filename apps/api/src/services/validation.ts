@@ -1,5 +1,8 @@
 import type { CredentialKind } from '@simple-agent-manager/shared';
 
+const ANTHROPIC_API_KEY_PREFIX = 'sk-ant-api';
+const CLAUDE_OAUTH_TOKEN_PREFIX = 'sk-ant-oat';
+
 /**
  * Validate and detect credential format
  */
@@ -10,18 +13,15 @@ export class CredentialValidator {
    * @returns The detected credential kind or null if uncertain
    */
   static detectCredentialKind(credential: string): CredentialKind | null {
-    // Anthropic API keys follow a specific pattern
-    if (credential.startsWith('sk-ant-')) {
+    if (credential.startsWith(ANTHROPIC_API_KEY_PREFIX)) {
       return 'api-key';
     }
 
-    // OAuth tokens are typically longer base64-like strings
-    // They don't follow the API key format
-    if (credential.length > 100 && !credential.startsWith('sk-')) {
+    if (credential.startsWith(CLAUDE_OAUTH_TOKEN_PREFIX)) {
       return 'oauth-token';
     }
 
-    // Can't reliably detect - let user specify
+    // Other credential formats are intentionally treated as opaque.
     return null;
   }
 
@@ -41,10 +41,17 @@ export class CredentialValidator {
 
     if (kind === 'api-key') {
       // Validate API key format
-      if (!credential.startsWith('sk-ant-')) {
+      if (credential.startsWith(CLAUDE_OAUTH_TOKEN_PREFIX)) {
         return {
           valid: false,
-          error: 'API key should start with "sk-ant-"',
+          error: 'This looks like a Claude OAuth token. Please use the "OAuth Token (Pro/Max)" option instead.',
+        };
+      }
+
+      if (!credential.startsWith(ANTHROPIC_API_KEY_PREFIX)) {
+        return {
+          valid: false,
+          error: 'API key should start with "sk-ant-api"',
         };
       }
       if (credential.length < 20) {
@@ -54,15 +61,9 @@ export class CredentialValidator {
         };
       }
     } else if (kind === 'oauth-token') {
-      // OAuth tokens are more flexible, but should have minimum length
-      if (credential.length < 50) {
-        return {
-          valid: false,
-          error: 'OAuth token appears too short',
-        };
-      }
-      // Warn if it looks like an API key
-      if (credential.startsWith('sk-')) {
+      // OAuth tokens are treated as opaque values.
+      // We only reject obvious API keys to reduce user mistakes.
+      if (credential.startsWith(ANTHROPIC_API_KEY_PREFIX)) {
         return {
           valid: false,
           error: 'This looks like an API key, not an OAuth token. Please use the "API Key" option instead.',

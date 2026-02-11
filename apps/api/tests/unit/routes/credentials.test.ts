@@ -55,6 +55,31 @@ describe('Credentials Routes - OAuth Support', () => {
   });
 
   describe('PUT /api/credentials/agent - OAuth credential save flow', () => {
+    it('should accept a Claude OAuth token with sk-ant-oat prefix', async () => {
+      mockDB.limit.mockResolvedValueOnce([]); // No existing credential
+
+      const request: SaveAgentCredentialRequest = {
+        agentType: 'claude-code',
+        credentialKind: 'oauth-token',
+        credential: 'sk-ant-oat01-1234567890abcdefghijklmnopqrstuvwxyz',
+        autoActivate: true,
+      };
+
+      const res = await app.request('/api/credentials/agent', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      }, {
+        DATABASE: {} as any,
+        ENCRYPTION_KEY: 'test-key',
+      } as Env);
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.credentialKind).toBe('oauth-token');
+      expect(body.isActive).toBe(true);
+    });
+
     it('should save an OAuth token with correct credentialKind', async () => {
       mockDB.limit.mockResolvedValueOnce([]); // No existing credential
 
@@ -135,6 +160,27 @@ describe('Credentials Routes - OAuth Support', () => {
       expect(res.status).toBe(201);
       const body = await res.json();
       expect(body.credentialKind).toBe('api-key');
+    });
+
+    it('should reject Claude OAuth token when saved as API key', async () => {
+      const request = {
+        agentType: 'claude-code',
+        credentialKind: 'api-key',
+        credential: 'sk-ant-oat01-1234567890abcdefghijklmnopqrstuvwxyz',
+      };
+
+      const res = await app.request('/api/credentials/agent', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      }, {
+        DATABASE: {} as any,
+        ENCRYPTION_KEY: 'test-key',
+      } as Env);
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.message).toContain('OAuth token');
     });
 
     it('should reject OAuth token for unsupported agents', async () => {

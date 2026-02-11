@@ -84,8 +84,8 @@ Then update it in SAM Settings.
 ### "Invalid token format" Warning
 
 You may have pasted an API key in the OAuth field (or vice versa). Check that:
-- API keys start with `sk-ant-`
-- OAuth tokens are longer and don't follow the API key format
+- Anthropic API keys use `sk-ant-api...` style prefixes
+- Claude OAuth tokens from `claude setup-token` are accepted as opaque values (including `sk-ant-oat...` prefixes)
 
 ### Token Not Working
 

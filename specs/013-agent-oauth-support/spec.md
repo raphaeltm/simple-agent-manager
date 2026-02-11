@@ -64,7 +64,7 @@ A user who has configured both an API key and an OAuth token for the same agent 
 ### Edge Cases
 
 - **OAuth token expires mid-session**: The agent process crashes, the VM Agent detects the rapid exit, and the user sees a clear error: "Your subscription token has expired — re-authenticate in Settings." The workspace remains usable via terminal fallback.
-- **User pastes an API key in the OAuth field (or vice versa)**: The system should detect the credential format where possible (e.g., `sk-ant-` prefix = API key) and warn the user or auto-classify. If format detection isn't possible, the error surfaces at agent startup with a helpful message.
+- **User pastes an API key in the OAuth field (or vice versa)**: The system should detect obvious mismatches where possible (e.g., Anthropic API key prefixes like `sk-ant-api...` in OAuth mode, or Claude OAuth prefixes like `sk-ant-oat...` in API-key mode) and warn the user. If format detection isn't conclusive, the error surfaces at agent startup with a helpful message.
 - **Subscription plan downgraded**: The token may become invalid. Same handling as token expiry — clear error message with re-authentication guidance.
 - **Multiple credential types saved, none marked active**: The system must always have exactly one active credential per agent. The most recently saved credential automatically becomes active. When saving a new credential type, it auto-activates (e.g., adding OAuth when API key exists makes OAuth active immediately).
 - **Token contains sensitive scopes beyond what's needed**: The platform stores only the token string — it does not inspect or validate OAuth scopes. Scope validation happens at the agent/provider level.
