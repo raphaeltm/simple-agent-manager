@@ -36,7 +36,7 @@ function StatusIcon({ status }: { status: ToolCallItem['status'] }) {
  */
 export function ToolCallCard({ toolCall }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const hasContent = toolCall.content.length > 0;
+  const hasContent = toolCall.content.some(hasRenderableContent);
 
   return (
     <div className="my-2 border border-gray-200 rounded-lg overflow-hidden">
@@ -84,17 +84,79 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
 }
 
 function ToolCallContentView({ content }: { content: ToolCallContentItem }) {
+  const fallbackJson = getRenderableFallback(content.data);
+
   switch (content.type) {
     case 'diff':
-      return <FileDiffView diff={content.text ?? ''} />;
+      return content.text?.trim()
+        ? <FileDiffView diff={content.text} />
+        : fallbackJson;
     case 'terminal':
-      return <TerminalBlock output={content.text ?? ''} />;
+      return content.text?.trim()
+        ? <TerminalBlock output={content.text} />
+        : fallbackJson;
     case 'content':
     default:
-      return content.text ? (
+      return content.text?.trim() ? (
         <div className="p-3 text-sm text-gray-700 whitespace-pre-wrap font-mono text-xs">
           {content.text}
         </div>
-      ) : null;
+      ) : fallbackJson;
+  }
+}
+
+function hasRenderableContent(content: ToolCallContentItem): boolean {
+  if (content.text?.trim()) {
+    return true;
+  }
+
+  if (content.data === null || content.data === undefined) {
+    return false;
+  }
+
+  if (typeof content.data === 'string') {
+    return content.data.trim().length > 0;
+  }
+
+  if (typeof content.data === 'number' || typeof content.data === 'boolean') {
+    return true;
+  }
+
+  if (Array.isArray(content.data)) {
+    return content.data.length > 0;
+  }
+
+  if (typeof content.data === 'object') {
+    return Object.keys(content.data as Record<string, unknown>).length > 0;
+  }
+
+  return false;
+}
+
+function getRenderableFallback(data: unknown): JSX.Element | null {
+  if (data === null || data === undefined) {
+    return null;
+  }
+
+  const json = safeStringify(data);
+  if (!json) {
+    return null;
+  }
+
+  return (
+    <pre className="p-3 text-xs text-gray-600 font-mono whitespace-pre-wrap overflow-auto max-h-40">
+      {json}
+    </pre>
+  );
+}
+
+function safeStringify(value: unknown): string {
+  try {
+    if (typeof value === 'string') {
+      return value;
+    }
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return '';
   }
 }

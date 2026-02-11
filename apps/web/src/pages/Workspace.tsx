@@ -13,6 +13,7 @@ import { useIsMobile } from '../hooks/useIsMobile';
 import { getWorkspace, getTerminalToken, stopWorkspace, restartWorkspace } from '../lib/api';
 import type { WorkspaceResponse, BootLogEntry } from '@simple-agent-manager/shared';
 import '../styles/workspace-mobile.css';
+import '../styles/acp-chat.css';
 
 /** Map ACP session state to a human-readable label */
 function agentStatusLabel(state: AcpSessionState, agentType: string | null): string {

@@ -70,6 +70,7 @@ A user opens a running workspace and interacts with the agent through a rich, st
 6. **Given** the agent is processing internally before responding, **When** thinking/reasoning chunks arrive, **Then** the user sees a collapsible "Thinking..." section that can be expanded to view the agent's reasoning
 7. **Given** the agent runs a shell command, **When** the command executes, **Then** the output appears in an embedded output block within the conversation flow
 8. **Given** the user is in the conversation view, **When** they scroll up through message history, **Then** all previous messages, tool calls, and responses remain visible and properly formatted
+9. **Given** a tool call emits metadata without renderable output text, **When** the card is shown, **Then** it must not present an expandable affordance unless there is actual detail content to display
 
 ---
 

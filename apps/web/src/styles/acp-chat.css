@@ -1,0 +1,413 @@
+/* ACP conversation components (from @simple-agent-manager/acp-client)
+   rely on Tailwind-like utility class names. This file provides the
+   utility subset we use in Workspace chat, mapped to SAM theme tokens. */
+
+/* Layout and spacing utilities missing from the app's global utility set */
+.my-2 {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.my-3 {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.mr-1 {
+  margin-right: 0.25rem;
+}
+
+.space-y-1 > * + * {
+  margin-top: 0.25rem;
+}
+
+.space-x-1 > * + * {
+  margin-left: 0.25rem;
+}
+
+.justify-start {
+  justify-content: flex-start;
+}
+
+.overflow-auto {
+  overflow: auto;
+}
+
+.overflow-x-auto {
+  overflow-x: auto;
+}
+
+.whitespace-pre {
+  white-space: pre;
+}
+
+.whitespace-pre-wrap {
+  white-space: pre-wrap;
+}
+
+.resize-none {
+  resize: none;
+}
+
+.line-through {
+  text-decoration: line-through;
+}
+
+.opacity-60 {
+  opacity: 0.6;
+}
+
+.max-h-40 {
+  max-height: 10rem;
+}
+
+.max-w-none {
+  max-width: none;
+}
+
+.max-w-\[80\%\] {
+  max-width: 80%;
+}
+
+.rounded {
+  border-radius: 0.25rem;
+}
+
+.border-l-2 {
+  border-left-width: 2px;
+  border-left-style: solid;
+}
+
+.px-1 {
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+}
+
+.px-1\.5 {
+  padding-left: 0.375rem;
+  padding-right: 0.375rem;
+}
+
+.py-1\.5 {
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
+}
+
+.border-t-transparent {
+  border-top-color: transparent;
+}
+
+.cursor-default {
+  cursor: default;
+}
+
+/* Focus + disabled utility variants */
+.focus\:outline-none:focus {
+  outline: none;
+}
+
+.focus\:ring-1:focus {
+  box-shadow: 0 0 0 1px var(--sam-color-focus-ring);
+}
+
+.focus\:ring-blue-500:focus {
+  box-shadow: 0 0 0 1px var(--sam-color-focus-ring);
+}
+
+.focus\:border-blue-500:focus {
+  border-color: var(--sam-color-focus-ring);
+}
+
+.disabled\:bg-gray-100:disabled {
+  background-color: var(--sam-color-bg-surface-hover);
+}
+
+.disabled\:text-gray-500:disabled {
+  color: var(--sam-color-fg-muted);
+}
+
+.disabled\:opacity-50:disabled {
+  opacity: 0.5;
+}
+
+.disabled\:cursor-not-allowed:disabled {
+  cursor: not-allowed;
+}
+
+/* Theme-aligned color utilities used by ACP components */
+.bg-white {
+  background-color: var(--sam-color-bg-surface);
+}
+
+.bg-gray-50 {
+  background-color: var(--sam-color-bg-inset);
+}
+
+.bg-gray-100 {
+  background-color: var(--sam-color-bg-surface-hover);
+}
+
+.bg-gray-200 {
+  background-color: var(--sam-color-border-default);
+}
+
+.bg-gray-300 {
+  background-color: #466359;
+}
+
+.bg-gray-800 {
+  background-color: #101917;
+}
+
+.bg-gray-900 {
+  background-color: #090f0e;
+}
+
+.bg-blue-50 {
+  background-color: rgba(52, 211, 153, 0.12);
+}
+
+.bg-blue-400 {
+  background-color: #22c55e;
+}
+
+.bg-blue-500 {
+  background-color: #16a34a;
+}
+
+.bg-blue-600 {
+  background-color: var(--sam-color-accent-primary);
+}
+
+.bg-green-50 {
+  background-color: rgba(34, 197, 94, 0.14);
+}
+
+.bg-green-400 {
+  background-color: var(--sam-color-success);
+}
+
+.bg-green-600 {
+  background-color: #16a34a;
+}
+
+.bg-red-50 {
+  background-color: rgba(239, 68, 68, 0.14);
+}
+
+.bg-red-100 {
+  background-color: rgba(239, 68, 68, 0.22);
+}
+
+.bg-red-200 {
+  background-color: rgba(239, 68, 68, 0.32);
+}
+
+.bg-yellow-50 {
+  background-color: rgba(245, 158, 11, 0.16);
+}
+
+.bg-orange-50 {
+  background-color: rgba(249, 115, 22, 0.16);
+}
+
+.text-white {
+  color: #f3faf7;
+}
+
+.text-gray-100 {
+  color: #e8f4ef;
+}
+
+.text-gray-200 {
+  color: #d3e4dd;
+}
+
+.text-gray-300 {
+  color: #bfd1c9;
+}
+
+.text-gray-400 {
+  color: #adc4bc;
+}
+
+.text-gray-500 {
+  color: var(--sam-color-fg-muted);
+}
+
+.text-gray-600 {
+  color: #c7d8d2;
+}
+
+.text-gray-700 {
+  color: #deebe6;
+}
+
+.text-gray-800 {
+  color: #edf7f4;
+}
+
+.text-gray-900 {
+  color: var(--sam-color-fg-primary);
+}
+
+.text-blue-50 {
+  color: #f0fdf7;
+}
+
+.text-blue-400 {
+  color: #6ee7b7;
+}
+
+.text-blue-600 {
+  color: #34d399;
+}
+
+.text-green-400 {
+  color: #4ade80;
+}
+
+.text-green-500 {
+  color: #22c55e;
+}
+
+.text-green-800 {
+  color: #86efac;
+}
+
+.text-red-500 {
+  color: #f87171;
+}
+
+.text-red-600 {
+  color: #f87171;
+}
+
+.text-red-700 {
+  color: #fca5a5;
+}
+
+.text-red-800 {
+  color: #fca5a5;
+}
+
+.text-yellow-600 {
+  color: #fbbf24;
+}
+
+.text-yellow-700 {
+  color: #fcd34d;
+}
+
+.text-yellow-800 {
+  color: #fde68a;
+}
+
+.text-orange-600 {
+  color: #fb923c;
+}
+
+.border-gray-200 {
+  border-color: var(--sam-color-border-default);
+}
+
+.border-gray-300 {
+  border-color: #3f5b53;
+}
+
+.border-gray-700 {
+  border-color: #355047;
+}
+
+.border-blue-500 {
+  border-color: var(--sam-color-focus-ring);
+}
+
+.border-green-600 {
+  border-color: #16a34a;
+}
+
+.border-red-300 {
+  border-color: rgba(239, 68, 68, 0.45);
+}
+
+.border-yellow-200 {
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.border-yellow-300 {
+  border-color: rgba(245, 158, 11, 0.6);
+}
+
+.border-orange-200 {
+  border-color: rgba(249, 115, 22, 0.45);
+}
+
+/* Hover utility variants */
+.hover\:bg-gray-100:hover {
+  background-color: var(--sam-color-bg-surface-hover);
+}
+
+.hover\:bg-gray-50:hover {
+  background-color: var(--sam-color-bg-inset);
+}
+
+.hover\:bg-blue-700:hover {
+  background-color: var(--sam-color-accent-primary-hover);
+}
+
+.hover\:bg-green-700:hover {
+  background-color: #15803d;
+}
+
+.hover\:bg-red-50:hover {
+  background-color: rgba(239, 68, 68, 0.14);
+}
+
+.hover\:bg-red-200:hover {
+  background-color: rgba(239, 68, 68, 0.32);
+}
+
+.hover\:text-gray-700:hover {
+  color: #deebe6;
+}
+
+/* Lightweight markdown prose styles for agent message rendering */
+.prose {
+  color: inherit;
+}
+
+.prose-sm {
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.prose p {
+  margin: 0 0 0.5rem;
+}
+
+.prose p:last-child {
+  margin-bottom: 0;
+}
+
+.prose ul,
+.prose ol {
+  margin: 0.375rem 0 0.5rem;
+  padding-left: 1.25rem;
+}
+
+.prose li + li {
+  margin-top: 0.125rem;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4 {
+  margin: 0 0 0.5rem;
+  line-height: 1.25;
+}
+
+.prose code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

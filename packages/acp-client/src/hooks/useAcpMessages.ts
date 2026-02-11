@@ -153,7 +153,7 @@ export function useAcpMessages(): AcpMessagesHandle {
             title?: string;
             kind?: string;
             status?: string;
-            content?: Array<{ type: string }>;
+            content?: Array<{ type: string } & Record<string, unknown>>;
             locations?: Array<{ path: string; line?: number | null }>;
           };
           // Finalize any streaming agent message or thinking block
@@ -183,7 +183,7 @@ export function useAcpMessages(): AcpMessagesHandle {
           const tcu = update as {
             toolCallId?: string;
             status?: string;
-            content?: Array<{ type: string }> | null;
+            content?: Array<{ type: string } & Record<string, unknown>> | null;
             title?: string | null;
           };
           setItems((prev) =>
@@ -290,13 +290,52 @@ export function useAcpMessages(): AcpMessagesHandle {
 // =============================================================================
 
 function mapToolCallContent(c: { type: string } & Record<string, unknown>): ToolCallContentItem {
+  const text = extractToolCallText(c);
+
   switch (c.type) {
     case 'diff':
-      return { type: 'diff', text: String(c.diff ?? c.text ?? '') };
+      return { type: 'diff', text, data: c };
     case 'terminal':
-      return { type: 'terminal', text: String(c.output ?? c.text ?? '') };
+      return { type: 'terminal', text, data: c };
     case 'content':
     default:
-      return { type: 'content', text: String(c.text ?? ''), data: c };
+      return { type: 'content', text, data: c };
   }
+}
+
+function extractToolCallText(value: unknown, depth = 0): string {
+  if (depth > 5 || value === null || value === undefined) {
+    return '';
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => extractToolCallText(entry, depth + 1))
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  if (typeof value !== 'object') {
+    return '';
+  }
+
+  const record = value as Record<string, unknown>;
+  const preferredKeys = ['text', 'output', 'diff', 'content', 'stdout', 'stderr', 'message', 'result'];
+  for (const key of preferredKeys) {
+    const parsed = extractToolCallText(record[key], depth + 1).trim();
+    if (parsed.length > 0) {
+      return parsed;
+    }
+  }
+
+  return '';
 }
