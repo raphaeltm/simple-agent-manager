@@ -739,7 +739,7 @@ See `apps/api/.env.example`:
 - Git-tracked specification artifacts and shared package source files (no new runtime database storage) (009-ui-system-standards)
 
 ## Recent Changes
-- 014-auth-profile-sync: Prefer verified non-noreply GitHub email at login and propagate git user name/email into workspace bootstrap so VM agent configures commit identity
+- 014-auth-profile-sync: Resolve and persist the GitHub account primary email at login (via `/user/emails`) and propagate git user name/email into workspace bootstrap so VM agent configures commit identity
 - 004-mvp-hardening: Secure bootstrap tokens, workspace ownership validation, provisioning timeouts, shared terminal package, WebSocket reconnection, idle deadline tracking
 - 003-browser-terminal-saas: Added multi-tenant SaaS with GitHub OAuth, VM Agent (Go), browser terminal
 - 002-local-mock-mode: Added local mock mode with devcontainers CLI

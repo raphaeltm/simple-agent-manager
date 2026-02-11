@@ -296,6 +296,8 @@ SAM uses a single **GitHub App** for both user login (OAuth) and repository acce
 
 > **Important**: "Request user authorization (OAuth) during installation" MUST be unchecked. When checked, it disables the Setup URL and causes the post-installation redirect to hit the OAuth callback, which fails because BetterAuth didn't initiate the flow. Users log in separately via the app's login button.
 
+> **Important**: GitHub App user access tokens use app/user permissions (not OAuth scopes). SAM reads the user's primary email from `GET /user/emails`, so the **Email addresses** user permission must be granted.
+
 **Post installation:**
 | Field | Value |
 |-------|-------|
@@ -326,7 +328,7 @@ SAM uses a single **GitHub App** for both user login (OAuth) and repository acce
 |------------|--------|
 | **Email addresses** | Read-only |
 
-> **Note**: Email addresses permission is required for login. GitHub users with private emails would otherwise get an `email_not_found` error during OAuth.
+> **Note**: SAM uses this permission to read the account's **primary** email from `GET /user/emails`. Without it, SAM falls back to the public profile email from `GET /user`, or a GitHub noreply fallback when no email is available.
 
 **Where can this GitHub App be installed?**: Select based on your needs:
 - **Only on this account**: For personal use

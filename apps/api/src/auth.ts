@@ -18,6 +18,17 @@ interface GitHubEmailResponse {
   verified: boolean;
 }
 
+const GITHUB_API_VERSION = '2022-11-28';
+
+function githubApiHeaders(accessToken: string): HeadersInit {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'SAM-Auth',
+    'X-GitHub-Api-Version': GITHUB_API_VERSION,
+  };
+}
+
 function normalizeEmail(email: string | null | undefined): string | null {
   if (!email) {
     return null;
@@ -26,41 +37,27 @@ function normalizeEmail(email: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-export function isGitHubNoReplyEmail(email: string): boolean {
-  return email.trim().toLowerCase().endsWith('@users.noreply.github.com');
-}
-
-export function selectPreferredGitHubEmail(
+export function selectPrimaryGitHubEmail(
   userEmail: string | null | undefined,
   emails: GitHubEmailResponse[] | null | undefined
 ): string | null {
   const normalizedUserEmail = normalizeEmail(userEmail);
-  const verifiedEmails = (emails || [])
+  const normalizedEmails = (emails || [])
     .map((entry) => ({
       email: normalizeEmail(entry.email),
       primary: Boolean(entry.primary),
       verified: Boolean(entry.verified),
     }))
-    .filter((entry): entry is { email: string; primary: boolean; verified: true } => Boolean(entry.email) && entry.verified);
+    .filter((entry): entry is { email: string; primary: boolean; verified: boolean } => Boolean(entry.email));
 
-  const primaryVerifiedNonNoReply = verifiedEmails.find((entry) => entry.primary && !isGitHubNoReplyEmail(entry.email));
-  if (primaryVerifiedNonNoReply) {
-    return primaryVerifiedNonNoReply.email;
+  const verifiedPrimary = normalizedEmails.find((entry) => entry.primary && entry.verified);
+  if (verifiedPrimary) {
+    return verifiedPrimary.email;
   }
 
-  const verifiedNonNoReply = verifiedEmails.find((entry) => !isGitHubNoReplyEmail(entry.email));
-  if (verifiedNonNoReply) {
-    return verifiedNonNoReply.email;
-  }
-
-  const primaryVerified = verifiedEmails.find((entry) => entry.primary);
-  if (primaryVerified) {
-    return primaryVerified.email;
-  }
-
-  const firstVerified = verifiedEmails.find(() => true);
-  if (firstVerified) {
-    return firstVerified.email;
+  const primary = normalizedEmails.find((entry) => entry.primary);
+  if (primary) {
+    return primary.email;
   }
 
   return normalizedUserEmail;
@@ -101,11 +98,16 @@ export function createAuth(env: Env) {
         scope: ['read:user', 'user:email'],
         // Ensure existing linked users are refreshed with latest provider profile data on sign-in.
         overrideUserInfoOnSignIn: true,
-        // Custom getUserInfo to handle GitHub private emails and avoid persisting
-        // noreply addresses when a verified real email exists.
+        // Custom getUserInfo to ensure we persist the account's primary email when available.
         getUserInfo: async (token) => {
+          const accessToken = token.accessToken;
+          if (!accessToken) {
+            console.error('[Auth] Missing GitHub access token in getUserInfo callback');
+            return null;
+          }
+
           const userRes = await fetch('https://api.github.com/user', {
-            headers: { Authorization: `Bearer ${token.accessToken}`, 'User-Agent': 'SAM-Auth' },
+            headers: githubApiHeaders(accessToken),
           });
           if (!userRes.ok) {
             console.error('[Auth] Failed to fetch /user:', userRes.status);
@@ -113,31 +115,35 @@ export function createAuth(env: Env) {
           }
 
           const user = await userRes.json() as GitHubUserResponse;
-
           let email = normalizeEmail(user.email);
-          const shouldResolveEmailViaList = !email || isGitHubNoReplyEmail(email);
 
-          if (shouldResolveEmailViaList) {
-            // Fetch emails endpoint for private email addresses.
-            // Note: GitHub App needs "Email Addresses: Read-Only" permission,
-            // otherwise this returns {"message":"Not Found"} instead of an array.
-            try {
-              const emailsRes = await fetch('https://api.github.com/user/emails', {
-                headers: { Authorization: `Bearer ${token.accessToken}`, 'User-Agent': 'SAM-Auth' },
-              });
-              if (emailsRes.ok) {
-                const emailsData = await emailsRes.json();
-                if (Array.isArray(emailsData)) {
-                  email = selectPreferredGitHubEmail(email, emailsData as GitHubEmailResponse[]);
-                } else {
-                  console.error('[Auth] /user/emails returned non-array:', JSON.stringify(emailsData));
-                }
+          // Resolve the user's primary email from /user/emails.
+          // OAuth apps need user:email scope. GitHub Apps need "Email addresses" user permission.
+          try {
+            const emailsRes = await fetch('https://api.github.com/user/emails', {
+              headers: githubApiHeaders(accessToken),
+            });
+            if (emailsRes.ok) {
+              const emailsData = await emailsRes.json();
+              if (Array.isArray(emailsData)) {
+                email = selectPrimaryGitHubEmail(email, emailsData as GitHubEmailResponse[]);
               } else {
-                console.error('[Auth] Failed to fetch /user/emails:', emailsRes.status);
+                console.error('[Auth] /user/emails returned non-array:', JSON.stringify(emailsData));
               }
-            } catch (err) {
-              console.error('[Auth] Failed to fetch /user/emails:', err);
+            } else {
+              const errorBody = await emailsRes.text();
+              if (emailsRes.status === 403 || emailsRes.status === 404) {
+                console.error(
+                  '[Auth] /user/emails unavailable (status %d). Ensure GitHub App user permission "Email addresses" is read-only or OAuth app has user:email scope. Response: %s',
+                  emailsRes.status,
+                  errorBody
+                );
+              } else {
+                console.error('[Auth] Failed to fetch /user/emails (status %d): %s', emailsRes.status, errorBody);
+              }
             }
+          } catch (err) {
+            console.error('[Auth] Failed to fetch /user/emails:', err);
           }
 
           // Last resort: use GitHub noreply email

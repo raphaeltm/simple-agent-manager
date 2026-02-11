@@ -1,17 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { isGitHubNoReplyEmail, selectPreferredGitHubEmail } from '../../src/auth';
+import { selectPrimaryGitHubEmail } from '../../src/auth';
 
 describe('GitHub auth email selection', () => {
-  it('detects GitHub noreply addresses', () => {
-    expect(isGitHubNoReplyEmail('12345+octocat@users.noreply.github.com')).toBe(true);
-    expect(isGitHubNoReplyEmail('person@example.com')).toBe(false);
-  });
-
-  it('prefers verified primary non-noreply email from email list', () => {
-    const selected = selectPreferredGitHubEmail(
+  it('prefers verified primary email from email list', () => {
+    const selected = selectPrimaryGitHubEmail(
       '12345+octocat@users.noreply.github.com',
       [
-        { email: '12345+octocat@users.noreply.github.com', primary: true, verified: true },
+        { email: 'secondary@real-company.com', primary: false, verified: true },
         { email: 'octocat@real-company.com', primary: false, verified: true },
         { email: 'primary@real-company.com', primary: true, verified: true },
       ]
@@ -20,8 +15,8 @@ describe('GitHub auth email selection', () => {
     expect(selected).toBe('primary@real-company.com');
   });
 
-  it('prefers verified non-noreply email over noreply when primary is noreply', () => {
-    const selected = selectPreferredGitHubEmail(
+  it('returns primary email even when non-primary verified email exists', () => {
+    const selected = selectPrimaryGitHubEmail(
       '12345+octocat@users.noreply.github.com',
       [
         { email: '12345+octocat@users.noreply.github.com', primary: true, verified: true },
@@ -29,17 +24,28 @@ describe('GitHub auth email selection', () => {
       ]
     );
 
-    expect(selected).toBe('octocat@real-company.com');
+    expect(selected).toBe('12345+octocat@users.noreply.github.com');
   });
 
-  it('falls back to user email when no verified email list entries exist', () => {
-    const selected = selectPreferredGitHubEmail(
+  it('falls back to primary email when it is not verified', () => {
+    const selected = selectPrimaryGitHubEmail(
       '12345+octocat@users.noreply.github.com',
       [
         { email: 'octocat@real-company.com', primary: true, verified: false },
       ]
     );
 
-    expect(selected).toBe('12345+octocat@users.noreply.github.com');
+    expect(selected).toBe('octocat@real-company.com');
+  });
+
+  it('falls back to user email when email list has no primary entry', () => {
+    const selected = selectPrimaryGitHubEmail(
+      'public@profile.com',
+      [
+        { email: 'octocat@real-company.com', primary: false, verified: true },
+      ]
+    );
+
+    expect(selected).toBe('public@profile.com');
   });
 });

@@ -228,7 +228,7 @@ Claude Code now supports dual authentication methods:
 - Cloudflare D1 (credentials table with new schema), AES-256-GCM encryption (013-agent-oauth-support)
 
 ## Recent Changes
-- 014-auth-profile-sync: Prefer verified non-noreply GitHub email at login and propagate git user name/email into workspace bootstrap so VM agent configures commit identity
+- 014-auth-profile-sync: Resolve and persist the GitHub account primary email at login (via `/user/emails`) and propagate git user name/email into workspace bootstrap so VM agent configures commit identity
 - 013-agent-oauth-support: Dual credential support for Claude Code (API key + OAuth token), credential switching capability, auto-activation behavior
 - 012-pty-session-persistence: PTY sessions survive page refresh/network interruptions with ring buffer replay and session reattach; orphan cleanup is configurable and disabled by default (`PTY_ORPHAN_GRACE_PERIOD=0`)
 - 010-docs-review: Added Markdown (CommonMark) with GitHub Flavored Markdown extensions + None (documentation-only review)
