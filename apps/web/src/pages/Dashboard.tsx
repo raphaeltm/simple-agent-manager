@@ -106,7 +106,7 @@ export function Dashboard() {
 
       <style>{`
         .sam-quick-actions { grid-template-columns: 1fr; }
-        @media (min-width: 768px) { .sam-quick-actions { grid-template-columns: repeat(4, 1fr); } }
+        @media (min-width: 768px) { .sam-quick-actions { grid-template-columns: repeat(3, 1fr); } }
         .sam-workspace-grid { grid-template-columns: 1fr; }
         @media (min-width: 768px) { .sam-workspace-grid { grid-template-columns: repeat(2, 1fr); } }
         @media (min-width: 1024px) { .sam-workspace-grid { grid-template-columns: repeat(3, 1fr); } }
@@ -134,17 +134,6 @@ export function Dashboard() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
           <span>Settings</span>
-        </Button>
-        <Button
-          onClick={() => navigate('/ui-standards')}
-          variant="secondary"
-          size="lg"
-          style={{ width: '100%', justifyContent: 'center', gap: '0.5rem' }}
-        >
-          <svg style={{ height: 20, width: 20 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
-          </svg>
-          <span>UI Standards</span>
         </Button>
         <div style={{
           padding: 'var(--sam-space-4)',
