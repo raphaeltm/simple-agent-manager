@@ -19,7 +19,7 @@
 
 **Purpose**: Add new environment variables and foundational data structures that all user stories depend on.
 
-- [x] T001 Add `PTY_ORPHAN_GRACE_PERIOD` and `PTY_OUTPUT_BUFFER_SIZE` env var parsing to `packages/vm-agent/internal/config/config.go` with defaults (300s, 262144 bytes)
+- [x] T001 Add `PTY_ORPHAN_GRACE_PERIOD` and `PTY_OUTPUT_BUFFER_SIZE` env var parsing to `packages/vm-agent/internal/config/config.go` with defaults (0s disabled cleanup, 262144 bytes)
 - [x] T002 Add `gracePeriod` and `bufferSize` fields to `ManagerConfig` and wire them into `NewManager()` in `packages/vm-agent/internal/pty/manager.go`
 - [x] T003 [P] Implement `RingBuffer` struct in new file `packages/vm-agent/internal/pty/ring_buffer.go` with `NewRingBuffer()`, `Write()`, `ReadAll()`, `Len()`, `Reset()` per data-model.md
 - [x] T004 [P] Write Go unit tests for `RingBuffer` in `packages/vm-agent/internal/pty/ring_buffer_test.go` — test: write under capacity, write at capacity, wrap-around overwrite, `ReadAll()` linearization order, concurrent write/read, `Reset()`, zero-length write
@@ -113,11 +113,11 @@
 
 ---
 
-## Phase 5: User Story 3 — Orphan Cleanup After Abandonment (Priority: P3)
+## Phase 5: User Story 3 — Optional Orphan Cleanup After Abandonment (Priority: P3)
 
-**Goal**: Orphaned sessions (no reconnect within grace period) are automatically cleaned up, freeing resources.
+**Goal**: When configured, orphaned sessions (no reconnect within grace period) are automatically cleaned up, freeing resources.
 
-**Independent Test**: Create sessions, close browser tab, wait beyond grace period, check `/health` endpoint shows 0 sessions.
+**Independent Test**: Set `PTY_ORPHAN_GRACE_PERIOD` to a short value, create sessions, close browser tab, wait beyond grace period, check `/health` endpoint shows 0 sessions.
 
 ### Implementation
 
@@ -129,7 +129,7 @@
 
 - [x] T038 [US3] Write Go test for orphan cleanup timing in `packages/vm-agent/internal/pty/manager_test.go` — test: orphan session with short grace period (e.g., 100ms), verify session cleaned up after grace period, verify `ReattachSession` before grace period cancels cleanup, verify race between reattach and timer is safe
 
-**Checkpoint**: Orphaned sessions are cleaned up on schedule. No zombie processes accumulate.
+**Checkpoint**: With cleanup enabled, orphaned sessions are cleaned up on schedule. No zombie processes accumulate.
 
 ---
 

@@ -25,7 +25,7 @@ type Manager struct {
 	containerResolver  ContainerResolver
 	containerUser      string
 	maxSessionsPerUser int           // Maximum sessions allowed per user (0 = unlimited)
-	gracePeriod        time.Duration // How long orphaned sessions survive before cleanup
+	gracePeriod        time.Duration // How long orphaned sessions survive before cleanup (0 = disabled)
 	bufferSize         int           // Output ring buffer capacity per session in bytes
 }
 
@@ -38,15 +38,15 @@ type ManagerConfig struct {
 	ContainerResolver  ContainerResolver
 	ContainerUser      string
 	MaxSessionsPerUser int           // Maximum sessions allowed per user (0 = unlimited)
-	GracePeriod        time.Duration // How long orphaned sessions survive before cleanup
+	GracePeriod        time.Duration // How long orphaned sessions survive before cleanup (0 = disabled)
 	BufferSize         int           // Output ring buffer capacity per session in bytes
 }
 
 // NewManager creates a new session manager.
 func NewManager(cfg ManagerConfig) *Manager {
 	gracePeriod := cfg.GracePeriod
-	if gracePeriod <= 0 {
-		gracePeriod = 5 * time.Minute
+	if gracePeriod < 0 {
+		gracePeriod = 0
 	}
 	bufferSize := cfg.BufferSize
 	if bufferSize <= 0 {
@@ -254,7 +254,6 @@ func (m *Manager) GetLastActivity() time.Time {
 	return lastActive
 }
 
-
 // CleanupIdleSessions closes sessions that have been idle for longer than the given duration.
 func (m *Manager) CleanupIdleSessions(maxIdle time.Duration) int {
 	m.mu.RLock()
@@ -287,15 +286,24 @@ func (m *Manager) OrphanSession(sessionID string) {
 	session.IsOrphaned = true
 	session.OrphanedAt = time.Now()
 	session.attachedWriter = nil
+
+	// Stop any prior orphan timer before creating a new one.
+	if session.orphanTimer != nil {
+		session.orphanTimer.Stop()
+		session.orphanTimer = nil
+	}
 	session.mu.Unlock()
 
-	// Start orphan timer — cleanup after grace period
-	session.orphanTimer = time.AfterFunc(m.gracePeriod, func() {
-		m.cleanupOrphanedSession(sessionID)
-	})
+	if m.gracePeriod > 0 {
+		// Start orphan timer — cleanup after grace period.
+		session.orphanTimer = time.AfterFunc(m.gracePeriod, func() {
+			m.cleanupOrphanedSession(sessionID)
+		})
+		log.Printf("Session %s orphaned, will cleanup in %v", sessionID, m.gracePeriod)
+	} else {
+		log.Printf("Session %s orphaned, automatic cleanup disabled", sessionID)
+	}
 	m.mu.Unlock()
-
-	log.Printf("Session %s orphaned, will cleanup in %v", sessionID, m.gracePeriod)
 }
 
 // OrphanSessions marks multiple sessions as orphaned in batch.
@@ -341,6 +349,20 @@ func (m *Manager) GetActiveSessions() []SessionInfo {
 	infos := make([]SessionInfo, 0, len(m.sessions))
 	for _, s := range m.sessions {
 		infos = append(infos, s.Info())
+	}
+	return infos
+}
+
+// GetActiveSessionsForUser returns info about all non-closed sessions for a user.
+func (m *Manager) GetActiveSessionsForUser(userID string) []SessionInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	infos := make([]SessionInfo, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		if s.UserID == userID {
+			infos = append(infos, s.Info())
+		}
 	}
 	return infos
 }

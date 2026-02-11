@@ -66,6 +66,14 @@ class MockWebSocket {
   static CLOSED = 3;
   static CONNECTING = 0;
   static CLOSING = 2;
+  static sessionListResponse: Array<{
+    sessionId: string;
+    name?: string;
+    status?: string;
+    workingDirectory?: string;
+    createdAt: string;
+    lastActivityAt?: string;
+  }> = [];
 
   url: string;
   readyState: number = MockWebSocket.OPEN;
@@ -99,12 +107,24 @@ class MockWebSocket {
         }));
       }, 10);
     } else if (msg.type === 'list_sessions' && this.onmessage) {
-      // Respond with empty session list (no server-side sessions to reconnect to)
       setTimeout(() => {
         this.onmessage!(new MessageEvent('message', {
           data: JSON.stringify({
             type: 'session_list',
-            data: { sessions: [] },
+            data: { sessions: MockWebSocket.sessionListResponse },
+          }),
+        }));
+      }, 10);
+    } else if (msg.type === 'reattach_session' && this.onmessage) {
+      setTimeout(() => {
+        this.onmessage!(new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'session_reattached',
+            sessionId: msg.data.sessionId,
+            data: {
+              sessionId: msg.data.sessionId,
+              workingDirectory: '/workspace',
+            },
           }),
         }));
       }, 10);
@@ -129,6 +149,8 @@ describe('MultiTerminal', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
+    MockWebSocket.sessionListResponse = [];
   });
 
   afterEach(() => {
@@ -147,6 +169,32 @@ describe('MultiTerminal', () => {
       rerender(<MultiTerminal {...defaultProps} />);
       const tabBar = screen.queryByTestId('tab-bar');
       expect(tabBar).toBeDefined();
+    });
+  });
+
+  it('should hydrate tabs from server session list when local state is empty', async () => {
+    MockWebSocket.sessionListResponse = [
+      {
+        sessionId: 'srv-1',
+        name: 'Build',
+        status: 'running',
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+
+    render(<MultiTerminal {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Build')).toBeDefined();
+    });
+
+    await waitFor(() => {
+      const hasReattach = sendSpy.mock.calls.some((call) => {
+        const payload = JSON.parse(call[0] as string);
+        return payload.type === 'reattach_session' && payload.data?.sessionId === 'srv-1';
+      });
+      expect(hasReattach).toBe(true);
     });
   });
 
@@ -183,21 +231,57 @@ describe('MultiTerminal', () => {
     const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
     render(<MultiTerminal {...defaultProps} />);
 
+    const newTabButton = await screen.findByTestId('new-tab');
+    fireEvent.click(newTabButton);
+
     await waitFor(() => {
       const closeButton = screen.queryByTestId(/close-/);
-      if (closeButton) {
-        fireEvent.click(closeButton);
-      }
+      expect(closeButton).toBeDefined();
+    });
+    const closeButton = screen.getByTestId(/close-/);
+    fireEvent.click(closeButton);
+
+    await waitFor(() => {
+      const hasCloseSession = sendSpy.mock.calls.some((call) => {
+        const payload = JSON.parse(call[0] as string);
+        return payload.type === 'close_session';
+      });
+      expect(hasCloseSession).toBe(true);
+    });
+  });
+
+  it('should close reattached sessions using server session id', async () => {
+    const persistenceKey = 'multi-terminal-persist-test';
+    sessionStorage.setItem(persistenceKey, JSON.stringify({
+      sessions: [{ name: 'Persisted Tab', order: 0, serverSessionId: 'srv-persisted' }],
+      counter: 2,
+    }));
+    MockWebSocket.sessionListResponse = [
+      {
+        sessionId: 'srv-persisted',
+        name: 'Persisted Tab',
+        status: 'running',
+        createdAt: new Date().toISOString(),
+      },
+    ];
+
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    render(<MultiTerminal {...defaultProps} persistenceKey={persistenceKey} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Persisted Tab')).toBeDefined();
     });
 
-    const calls = sendSpy.mock.calls;
-    const hasCloseSession = calls.some((call) =>
-      call[0].includes('close_session')
-    );
-    const hasCreateSession = calls.some((call) =>
-      call[0].includes('create_session')
-    );
-    expect(hasCloseSession || hasCreateSession || calls.length === 0).toBe(true);
+    const closeButton = await screen.findByTestId(/close-/);
+    fireEvent.click(closeButton);
+
+    await waitFor(() => {
+      const closePayload = sendSpy.mock.calls
+        .map((call) => JSON.parse(call[0] as string))
+        .find((payload) => payload.type === 'close_session');
+      expect(closePayload).toBeDefined();
+      expect(closePayload.data.sessionId).toBe('srv-persisted');
+    });
   });
 
   it('should respect maximum session limit', () => {

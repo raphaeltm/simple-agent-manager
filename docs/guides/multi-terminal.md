@@ -83,6 +83,17 @@ VITE_TAB_SWITCH_ANIMATION_MS=200
 VITE_TERMINAL_SCROLLBACK_LINES=1000
 ```
 
+VM Agent session lifecycle is controlled separately:
+
+```bash
+# Orphan session cleanup delay in seconds.
+# 0 disables automatic cleanup (default), so sessions persist until explicitly closed.
+PTY_ORPHAN_GRACE_PERIOD=0
+
+# Output buffer size per session in bytes (default: 256 KB)
+PTY_OUTPUT_BUFFER_SIZE=262144
+```
+
 ## Mobile Support
 
 The multi-terminal interface is fully responsive:
@@ -118,7 +129,8 @@ Switching between tabs doesn't affect running commands - they continue executing
 - Check browser console for WebSocket errors
 
 ### Tab Not Responding
-- The terminal session may have timed out
+- The terminal session may have been explicitly closed from another tab/window
+- The workspace may have restarted (fresh PTY sessions are created after restart)
 - Try closing and creating a new tab
 - Check the connection status indicator
 
@@ -134,7 +146,7 @@ The single-terminal mode is still available when the feature flag is disabled. Y
 ## Known Limitations
 
 - Maximum 10 concurrent terminals (browser WebSocket limit)
-- Sessions are not persisted across page refreshes
+- Session persistence is in-memory on the VM Agent only (lost on VM Agent restart)
 - No terminal splitting/panes (use separate tabs instead)
 - Cannot detach terminals into separate windows
 
@@ -151,8 +163,6 @@ The single-terminal mode is still available when the feature flag is disabled. Y
 For developers integrating with the multi-terminal system:
 
 - `POST /api/terminal/token` - Get authentication token for terminal access
-- `GET /api/terminal/config` - Get terminal configuration
-- `GET /api/terminal/sessions?workspaceId={id}` - List active sessions
 
 ## WebSocket Protocol
 
@@ -173,7 +183,6 @@ The multi-terminal system uses an extended WebSocket protocol:
 
 Planned features for future releases:
 - Terminal splitting/panes within tabs
-- Session persistence across refreshes
 - Terminal sharing between users
 - Command history search across all terminals
 - Terminal recording and playback

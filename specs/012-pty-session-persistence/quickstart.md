@@ -8,7 +8,7 @@ Terminal sessions survive page refreshes and brief network interruptions. When y
 
 ## How It Works
 
-1. **VM Agent** keeps PTY processes alive for 5 minutes after your browser disconnects
+1. **VM Agent** keeps PTY processes alive after your browser disconnects (default: until explicitly closed)
 2. **Output buffer** captures terminal output while you're disconnected (last 256 KB)
 3. **Browser** remembers your tab arrangement and session IDs in sessionStorage
 4. **On reconnect**, the browser asks the server for active sessions, matches them against saved IDs, and reattaches
@@ -19,7 +19,7 @@ Two environment variables control persistence behavior on the VM Agent:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PTY_ORPHAN_GRACE_PERIOD` | `300` (5 minutes) | Seconds to keep orphaned sessions alive |
+| `PTY_ORPHAN_GRACE_PERIOD` | `0` (disabled) | Seconds to keep orphaned sessions alive before auto-cleanup (`0` disables timer) |
 | `PTY_OUTPUT_BUFFER_SIZE` | `262144` (256 KB) | Output buffer size per session in bytes |
 
 Set these in `/etc/workspace/agent.env` on the VM or pass as environment variables to the VM Agent binary.
@@ -40,9 +40,9 @@ Set these in `/etc/workspace/agent.env` on the VM or pass as environment variabl
 
 ### Browser Tab Close
 1. User closes the browser tab entirely
-2. Sessions remain alive for 5 minutes on the VM
-3. If user returns within 5 minutes: sessions reattach
-4. If user doesn't return: sessions are cleaned up automatically
+2. Sessions remain alive on the VM by default until explicitly closed
+3. If user returns later: sessions reattach
+4. If `PTY_ORPHAN_GRACE_PERIOD` is set to a positive value, auto-cleanup runs after that delay
 
 ### VM Restart
 1. VM Agent restarts (crash, update, etc.)
@@ -69,10 +69,10 @@ Set these in `/etc/workspace/agent.env` on the VM or pass as environment variabl
 ### Grace Period Test
 1. Note the current time
 2. Close the browser tab entirely
-3. Wait 4 minutes, reopen the workspace URL
-4. Verify: Sessions reattach (within grace period)
-5. Repeat but wait 6 minutes
-6. Verify: Fresh sessions created (grace period expired)
+3. Reopen the workspace URL after a few minutes
+4. Verify: Sessions still reattach (default behavior)
+5. Set `PTY_ORPHAN_GRACE_PERIOD=60`, restart VM Agent, and repeat
+6. Verify: Fresh sessions created after the 60-second grace period expires
 
 ## Architecture Summary
 

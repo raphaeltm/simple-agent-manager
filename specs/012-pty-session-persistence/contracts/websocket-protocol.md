@@ -24,7 +24,7 @@ All messages are JSON-encoded text frames:
 
 ### `list_sessions`
 
-Request the server to send a list of all active (non-closed) PTY sessions.
+Request the server to send a list of all active (non-closed) PTY sessions for the authenticated user.
 
 **When sent**: Immediately after WebSocket connection is established on reconnect.
 
@@ -218,7 +218,8 @@ Browser                                    VM Agent
 
 | Scenario | Server Response |
 |----------|----------------|
-| `reattach_session` with unknown session ID | `error: { error: "SESSION_NOT_FOUND", details: "Session {id} does not exist" }` |
+| `reattach_session` with unknown session ID | `error: { error: "session not found" }` |
 | `reattach_session` for exited session | `error: { error: "SESSION_EXITED", details: "Session {id} has exited (code: N)" }` |
 | `list_sessions` when no sessions exist | `session_list: { sessions: [] }` |
 | `reattach_session` for already-attached session | Success (last-attach-wins; previous attachment detached) |
+| Any session operation for another user's session | `error: { error: "not authorized" }` |

@@ -48,6 +48,7 @@ Think **GitHub Codespaces, but built for AI-assisted development** and with auto
 
 - **Instant Workspaces** — Create a cloud VM from any Git repository in minutes
 - **Multi-Terminal Support** — Open multiple terminal sessions in tabs without new browser windows
+- **Session Reattach & Recovery** — On reconnect, tabs hydrate from VM session state; orphaned sessions persist until explicitly closed by default
 - **Web Terminal** — Access via browser-based xterm.js terminal with WebSocket connection
 - **Installable PWA** — Add SAM to your home screen for app-like mobile access
 - **DevContainer Support** — Automatically detects and uses your `.devcontainer/devcontainer.json`

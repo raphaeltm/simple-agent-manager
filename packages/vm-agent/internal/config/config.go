@@ -84,7 +84,7 @@ type Config struct {
 	DefaultCols  int
 
 	// PTY session persistence settings - configurable per constitution principle XI
-	PTYOrphanGracePeriod time.Duration // How long orphaned sessions survive before cleanup
+	PTYOrphanGracePeriod time.Duration // How long orphaned sessions survive before cleanup (0 = disabled)
 	PTYOutputBufferSize  int           // Ring buffer capacity per session in bytes
 
 	// ACP settings - configurable per constitution principle XI
@@ -182,8 +182,9 @@ func Load() (*Config, error) {
 		DefaultRows:  getEnvInt("DEFAULT_ROWS", 24),
 		DefaultCols:  getEnvInt("DEFAULT_COLS", 80),
 
-		// PTY session persistence - configurable per constitution principle XI
-		PTYOrphanGracePeriod: time.Duration(getEnvInt("PTY_ORPHAN_GRACE_PERIOD", 300)) * time.Second,
+		// PTY session persistence - configurable per constitution principle XI.
+		// Default keeps orphaned sessions until explicitly closed by the user.
+		PTYOrphanGracePeriod: time.Duration(getEnvInt("PTY_ORPHAN_GRACE_PERIOD", 0)) * time.Second,
 		PTYOutputBufferSize:  getEnvInt("PTY_OUTPUT_BUFFER_SIZE", 262144), // 256 KB default
 
 		// ACP settings - configurable per constitution principle XI

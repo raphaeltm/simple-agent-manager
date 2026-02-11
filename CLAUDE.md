@@ -229,7 +229,7 @@ Claude Code now supports dual authentication methods:
 
 ## Recent Changes
 - 013-agent-oauth-support: Dual credential support for Claude Code (API key + OAuth token), credential switching capability, auto-activation behavior
-- 012-pty-session-persistence: PTY sessions survive page refresh, network interruptions; ring buffer scrollback replay, orphan timer cleanup, session reattach protocol
+- 012-pty-session-persistence: PTY sessions survive page refresh/network interruptions with ring buffer replay and session reattach; orphan cleanup is configurable and disabled by default (`PTY_ORPHAN_GRACE_PERIOD=0`)
 - 010-docs-review: Added Markdown (CommonMark) with GitHub Flavored Markdown extensions + None (documentation-only review)
 - 004-mvp-hardening: Secure bootstrap tokens, workspace ownership validation, provisioning timeouts, shared terminal package, WebSocket reconnection, idle deadline tracking
 - 003-browser-terminal-saas: Added multi-tenant SaaS with GitHub OAuth, VM Agent (Go), browser terminal

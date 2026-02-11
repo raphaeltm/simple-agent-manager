@@ -151,3 +151,30 @@ func TestBootstrapTimeoutOverride(t *testing.T) {
 		t.Fatalf("BootstrapTimeout=%v, want %v", cfg.BootstrapTimeout, 20*time.Minute)
 	}
 }
+
+func TestPTYOrphanGracePeriodDefaultDisabled(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.PTYOrphanGracePeriod != 0 {
+		t.Fatalf("PTYOrphanGracePeriod=%v, want 0", cfg.PTYOrphanGracePeriod)
+	}
+}
+
+func TestPTYOrphanGracePeriodOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("PTY_ORPHAN_GRACE_PERIOD", "300")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.PTYOrphanGracePeriod != 5*time.Minute {
+		t.Fatalf("PTYOrphanGracePeriod=%v, want %v", cfg.PTYOrphanGracePeriod, 5*time.Minute)
+	}
+}

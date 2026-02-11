@@ -100,6 +100,22 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
     getPersistedSessions,
   };
 
+  const resolveLocalSessionId = useCallback((sessionId?: string): string | null => {
+    if (!sessionId) return null;
+    if (latestRef.current.sessions.has(sessionId)) return sessionId;
+    for (const [localId, localSession] of latestRef.current.sessions.entries()) {
+      if (localSession.serverSessionId === sessionId) {
+        return localId;
+      }
+    }
+    return null;
+  }, []);
+
+  const getOutboundSessionId = useCallback((localSessionId: string): string => {
+    const localSession = latestRef.current.sessions.get(localSessionId);
+    return localSession?.serverSessionId ?? localSessionId;
+  }, []);
+
   // Create xterm.js instance for a session (stable — only depends on scrollback config)
   const createTerminalInstance = useCallback((sessionId: string): TerminalInstance => {
     const terminal = new XTerm({
@@ -140,14 +156,14 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
       latestRef.current.onActivity?.();
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(encodeTerminalWsInput(data, sessionId));
+        ws.send(encodeTerminalWsInput(data, getOutboundSessionId(sessionId)));
       }
     });
 
     const instance: TerminalInstance = { terminal, fitAddon, containerEl: null };
     terminalsRef.current.set(sessionId, instance);
     return instance;
-  }, [terminalConfig.scrollbackLines]);
+  }, [getOutboundSessionId, terminalConfig.scrollbackLines]);
 
   // Destroy xterm.js instance (completely stable)
   const destroyTerminalInstance = useCallback((sessionId: string) => {
@@ -173,20 +189,20 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
   const handleCloseTab = useCallback((sessionId: string) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(encodeTerminalWsCloseSession(sessionId));
+      ws.send(encodeTerminalWsCloseSession(getOutboundSessionId(sessionId)));
     }
     destroyTerminalInstance(sessionId);
     latestRef.current.closeSession(sessionId);
-  }, [destroyTerminalInstance]);
+  }, [destroyTerminalInstance, getOutboundSessionId]);
 
   // Handle tab rename
   const handleRenameTab = useCallback((sessionId: string, name: string) => {
     renameSession(sessionId, name);
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(encodeTerminalWsRenameSession(sessionId, name));
+      ws.send(encodeTerminalWsRenameSession(getOutboundSessionId(sessionId), name));
     }
-  }, [renameSession]);
+  }, [getOutboundSessionId, renameSession]);
 
   // ── WebSocket connection lifecycle ──
   // This single effect manages the ENTIRE WebSocket: connect, message routing,
@@ -216,51 +232,11 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
             }
           }, PING_INTERVAL_MS);
 
-          // Session persistence reconnection flow:
-          // 1. Ask the server for active sessions
-          // 2. Match against persisted serverSessionIds
-          // 3. Reattach matches, create fresh for non-matches
-          // Guard: if a previous reconnect is still pending, skip duplicate list_sessions
+          // Always ask for the authoritative server-side session list on connect.
+          // Guard: if a previous reconnect is still pending, skip duplicate list_sessions.
           if (reconnectingRef.current) return;
-
-          const persisted = latestRef.current.getPersistedSessions();
-          if (persisted && persisted.length > 0 && persisted.some(p => p.serverSessionId)) {
-            // We have persisted sessions with server IDs — attempt reconnection
-            // Set all existing tabs to "reconnecting" status
-            for (const p of persisted) {
-              if (latestRef.current.sessions.size === 0) {
-                // Tabs not yet created (page refresh) — create them in reconnecting state
-                const sessionId = latestRef.current.createSession(p.name);
-                createTerminalInstance(sessionId);
-                latestRef.current.updateSessionStatus(sessionId, 'reconnecting' as any);
-                // Store the serverSessionId mapping temporarily for the list_sessions callback
-                if (p.serverSessionId) {
-                  latestRef.current.updateServerSessionId(sessionId, p.serverSessionId);
-                }
-              }
-            }
-            // Ask server for active sessions — response handled in onmessage
-            reconnectingRef.current = true;
-            ws.send(encodeTerminalWsListSessions());
-          } else if (latestRef.current.sessions.size === 0) {
-            // No persisted state — first connection, create initial sessions
-            if (persisted && persisted.length > 0) {
-              // Persisted tabs without serverSessionIds (legacy) — create fresh
-              for (const p of persisted) {
-                const sessionId = latestRef.current.createSession(p.name);
-                createTerminalInstance(sessionId);
-                ws.send(encodeTerminalWsCreateSession(sessionId, 24, 80, p.name));
-              }
-            } else {
-              const sessionId = latestRef.current.createSession();
-              createTerminalInstance(sessionId);
-              ws.send(encodeTerminalWsCreateSession(sessionId, 24, 80));
-            }
-          } else {
-            // Existing tabs (reconnect after brief disconnect) — ask server what's alive
-            reconnectingRef.current = true;
-            ws.send(encodeTerminalWsListSessions());
-          }
+          reconnectingRef.current = true;
+          ws.send(encodeTerminalWsListSessions());
         };
 
         ws.onmessage = (event) => {
@@ -272,84 +248,126 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
             // Clear reconnecting guard — response received
             reconnectingRef.current = false;
 
-            // Match server sessions against our persisted serverSessionIds
-            const serverSessions = msg.data.sessions;
-            const serverMap = new Map(serverSessions.map(s => [s.sessionId, s]));
+            const serverSessions = msg.data.sessions
+              .filter((s) => s.status !== 'exited')
+              .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+            const serverMap = new Map(serverSessions.map((s) => [s.sessionId, s]));
 
-            // Build a map of serverSessionId -> local sessionId for matching
             const currentSessions = Array.from(latestRef.current.sessions.entries());
+            const pendingLocalSessions: Array<{
+              localId: string;
+              name: string;
+              serverSessionId?: string;
+            }> = currentSessions.map(([localId, localSession]) => ({
+              localId,
+              name: localSession.name,
+              serverSessionId: localSession.serverSessionId,
+            }));
 
-            for (const [localId, localSession] of currentSessions) {
-              const serverId = (localSession as any).serverSessionId as string | undefined;
-              const serverInfo = serverId ? serverMap.get(serverId) : undefined;
+            if (pendingLocalSessions.length === 0) {
+              const persisted = latestRef.current.getPersistedSessions();
+              const sortedPersisted = persisted ? [...persisted].sort((a, b) => a.order - b.order) : [];
+              const hasPersistedServerIds = sortedPersisted.some((entry) => Boolean(entry.serverSessionId));
 
-              if (serverInfo && serverInfo.status !== 'exited') {
-                // Match found — reattach to existing server session
-                latestRef.current.updateSessionStatus(localId, 'reconnecting' as any);
+              if (sortedPersisted.length > 0 && (hasPersistedServerIds || serverSessions.length === 0)) {
+                for (const entry of sortedPersisted) {
+                  const localId = latestRef.current.createSession(entry.name);
+                  createTerminalInstance(localId);
+                  latestRef.current.updateSessionStatus(localId, 'reconnecting');
+                  if (entry.serverSessionId) {
+                    latestRef.current.updateServerSessionId(localId, entry.serverSessionId);
+                  }
+                  pendingLocalSessions.push({
+                    localId,
+                    name: entry.name,
+                    serverSessionId: entry.serverSessionId,
+                  });
+                }
+              }
+            }
+
+            if (pendingLocalSessions.length === 0 && serverSessions.length === 0) {
+              const sessionId = latestRef.current.createSession();
+              createTerminalInstance(sessionId);
+              ws.send(encodeTerminalWsCreateSession(sessionId, 24, 80));
+            } else {
+              for (const localSession of pendingLocalSessions) {
+                const serverId = localSession.serverSessionId;
+                const serverInfo = serverId ? serverMap.get(serverId) : undefined;
+
+                if (serverId && serverInfo) {
+                  latestRef.current.updateSessionStatus(localSession.localId, 'reconnecting');
+                  if (serverInfo.workingDirectory) {
+                    latestRef.current.updateSessionWorkingDirectory(localSession.localId, serverInfo.workingDirectory);
+                  }
+                  const instance = terminalsRef.current.get(localSession.localId);
+                  const rows = instance?.terminal?.rows ?? 24;
+                  const cols = instance?.terminal?.cols ?? 80;
+                  ws.send(encodeTerminalWsReattachSession(serverId, rows, cols));
+                  serverMap.delete(serverId);
+                } else {
+                  ws.send(encodeTerminalWsCreateSession(localSession.localId, 24, 80, localSession.name));
+                }
+              }
+
+              // Server has sessions not represented locally (e.g. no local cache after reload).
+              for (const serverInfo of serverMap.values()) {
+                const localId = latestRef.current.createSession(serverInfo.name);
+                createTerminalInstance(localId);
+                latestRef.current.updateSessionStatus(localId, 'reconnecting');
+                latestRef.current.updateServerSessionId(localId, serverInfo.sessionId);
+                if (serverInfo.workingDirectory) {
+                  latestRef.current.updateSessionWorkingDirectory(localId, serverInfo.workingDirectory);
+                }
                 const instance = terminalsRef.current.get(localId);
                 const rows = instance?.terminal?.rows ?? 24;
                 const cols = instance?.terminal?.cols ?? 80;
-                ws.send(encodeTerminalWsReattachSession(serverId!, rows, cols));
-                serverMap.delete(serverId!); // consumed
-              } else {
-                // No match or exited — create a fresh server session
-                ws.send(encodeTerminalWsCreateSession(localId, 24, 80, localSession.name));
+                ws.send(encodeTerminalWsReattachSession(serverInfo.sessionId, rows, cols));
               }
             }
           } else if (isSessionReattachedMessage(msg) && msg.data) {
             // Find the local session that maps to this server session ID
             const serverId = msg.data.sessionId;
-            for (const [localId, localSession] of latestRef.current.sessions.entries()) {
-              if ((localSession as any).serverSessionId === serverId) {
-                latestRef.current.updateSessionStatus(localId, 'connected');
-                if (msg.data.workingDirectory) {
-                  latestRef.current.updateSessionWorkingDirectory(localId, msg.data.workingDirectory);
-                }
-                break;
+            const localId = resolveLocalSessionId(serverId);
+            if (localId) {
+              latestRef.current.updateSessionStatus(localId, 'connected');
+              if (msg.data.workingDirectory) {
+                latestRef.current.updateSessionWorkingDirectory(localId, msg.data.workingDirectory);
               }
             }
           } else if (isScrollbackMessage(msg) && msg.sessionId && msg.data) {
             // Find the local session mapped to this server session ID and write scrollback
-            for (const [localId, localSession] of latestRef.current.sessions.entries()) {
-              if ((localSession as any).serverSessionId === msg.sessionId) {
-                const instance = terminalsRef.current.get(localId);
-                if (instance && msg.data.data) {
-                  instance.terminal.write(msg.data.data);
-                }
-                break;
+            const localId = resolveLocalSessionId(msg.sessionId);
+            if (localId) {
+              const instance = terminalsRef.current.get(localId);
+              if (instance && msg.data.data) {
+                instance.terminal.write(msg.data.data);
               }
             }
           } else if (isSessionCreatedMessage(msg) && msg.data) {
-            latestRef.current.updateSessionStatus(msg.data.sessionId, 'connected');
+            const localId = resolveLocalSessionId(msg.data.sessionId) ?? msg.data.sessionId;
+            latestRef.current.updateSessionStatus(localId, 'connected');
             // Store the server session ID for future reconnection matching
-            latestRef.current.updateServerSessionId(msg.data.sessionId, msg.data.sessionId);
+            latestRef.current.updateServerSessionId(localId, msg.data.sessionId);
             if (msg.data.workingDirectory) {
-              latestRef.current.updateSessionWorkingDirectory(msg.data.sessionId, msg.data.workingDirectory);
+              latestRef.current.updateSessionWorkingDirectory(localId, msg.data.workingDirectory);
             }
           } else if (isSessionClosedMessage(msg) && msg.data) {
-            destroyTerminalInstance(msg.data.sessionId);
-            latestRef.current.closeSession(msg.data.sessionId);
+            const localId = resolveLocalSessionId(msg.data.sessionId) ?? msg.data.sessionId;
+            destroyTerminalInstance(localId);
+            latestRef.current.closeSession(localId);
           } else if (isOutputMessage(msg) && msg.sessionId) {
             // Output can come with server session ID — route to the right local terminal
-            let targetLocalId = msg.sessionId;
-            // Check if there's a local session with this ID first
-            if (!terminalsRef.current.has(targetLocalId)) {
-              // Try to find by serverSessionId mapping
-              for (const [localId, localSession] of latestRef.current.sessions.entries()) {
-                if ((localSession as any).serverSessionId === msg.sessionId) {
-                  targetLocalId = localId;
-                  break;
-                }
-              }
-            }
+            const targetLocalId = resolveLocalSessionId(msg.sessionId) ?? msg.sessionId;
             const instance = terminalsRef.current.get(targetLocalId);
             if (instance && msg.data?.data) {
               instance.terminal.write(msg.data.data);
             }
           } else if (isErrorMessage(msg)) {
             if (msg.sessionId) {
-              latestRef.current.updateSessionStatus(msg.sessionId, 'error');
-              const instance = terminalsRef.current.get(msg.sessionId);
+              const localId = resolveLocalSessionId(msg.sessionId) ?? msg.sessionId;
+              latestRef.current.updateSessionStatus(localId, 'error');
+              const instance = terminalsRef.current.get(localId);
               const errorText = typeof msg.data === 'string' ? msg.data : JSON.stringify(msg.data);
               if (instance) {
                 instance.terminal.writeln(`\r\n\x1b[31mError: ${errorText}\x1b[0m\r\n`);
@@ -395,7 +413,7 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
       }
       terminalsRef.current.clear();
     };
-  }, [wsUrl, createTerminalInstance, destroyTerminalInstance]);
+  }, [wsUrl, createTerminalInstance, destroyTerminalInstance, resolveLocalSessionId]);
 
   // Attach/fit xterm.js to DOM container via ref callback
   const attachTerminal = useCallback((sessionId: string, containerEl: HTMLDivElement | null) => {
@@ -411,10 +429,16 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
 
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(encodeTerminalWsResize(instance.terminal.rows, instance.terminal.cols, sessionId));
+        ws.send(
+          encodeTerminalWsResize(
+            instance.terminal.rows,
+            instance.terminal.cols,
+            getOutboundSessionId(sessionId),
+          ),
+        );
       }
     }
-  }, []);
+  }, [getOutboundSessionId]);
 
   // Fit active terminal on window resize
   useEffect(() => {
@@ -425,13 +449,19 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
         instance.fitAddon.fit();
         const ws = wsRef.current;
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(encodeTerminalWsResize(instance.terminal.rows, instance.terminal.cols, activeSessionId));
+          ws.send(
+            encodeTerminalWsResize(
+              instance.terminal.rows,
+              instance.terminal.cols,
+              getOutboundSessionId(activeSessionId),
+            ),
+          );
         }
       }
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [activeSessionId]);
+  }, [activeSessionId, getOutboundSessionId]);
 
   // When active tab changes, fit the terminal
   useEffect(() => {
@@ -443,11 +473,17 @@ export const MultiTerminal: React.FC<MultiTerminalProps> = (props) => {
         instance.terminal.focus();
         const ws = wsRef.current;
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(encodeTerminalWsResize(instance.terminal.rows, instance.terminal.cols, activeSessionId));
+          ws.send(
+            encodeTerminalWsResize(
+              instance.terminal.rows,
+              instance.terminal.cols,
+              getOutboundSessionId(activeSessionId),
+            ),
+          );
         }
       });
     }
-  }, [activeSessionId]);
+  }, [activeSessionId, getOutboundSessionId]);
 
   const sessionsArray = Array.from(sessions.values());
 

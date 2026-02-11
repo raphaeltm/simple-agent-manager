@@ -88,6 +88,8 @@ func New(cfg *config.Config) (*Server, error) {
 		WorkDir:           containerWorkDir,
 		ContainerResolver: containerResolver,
 		ContainerUser:     containerUser,
+		GracePeriod:       cfg.PTYOrphanGracePeriod,
+		BufferSize:        cfg.PTYOutputBufferSize,
 	})
 
 	// Build ACP gateway configuration

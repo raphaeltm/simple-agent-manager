@@ -98,7 +98,7 @@
 **Design Details**:
 
 New client → server messages:
-- `list_sessions`: No payload. Server responds with `session_list` containing all active (non-closed) sessions.
+- `list_sessions`: No payload. Server responds with `session_list` containing all active (non-closed) sessions for the authenticated user.
 - `reattach_session`: `{ sessionId: string, rows: number, cols: number }`. Server reattaches and responds with `session_reattached` + `scrollback` data.
 
 New server → client messages:
@@ -130,7 +130,7 @@ Updated `session_list` payload:
    - If matching session ID found in server list with status `"running"`: Send `reattach_session`
    - If matching session ID found but status `"exited"`: Create fresh session (new ID), update sessionStorage
    - If no matching session ID in server list: Create fresh session (new ID), update sessionStorage
-6. For server sessions not in browser tabs: Ignore (may be from another browser tab per FR-010)
+6. For server sessions not represented in browser tabs: Hydrate local tabs from server metadata and reattach so sessions remain discoverable after reload.
 7. Display "Reconnecting..." overlay per terminal until `session_reattached` or `session_created` received
 8. On `scrollback` message: Write replay data to xterm.js instance
 9. On first `output` message after reattach: Live streaming resumes
@@ -175,7 +175,7 @@ interface PersistedSession {
 
 **Decision**: Each browser tab maintains its own WebSocket connection and its own set of attached sessions. Sessions are shared in the global PTY Manager but a session can only be attached to one WebSocket writer at a time.
 
-**Rationale**: FR-010 requires supporting multiple browser tabs. The simplest model is that each tab sees the full session list and can interact with any session. However, only one tab's WebSocket can receive live output from a given session at a time (last-attach-wins). This prevents duplicate output delivery.
+**Rationale**: FR-010 requires supporting multiple browser tabs. The simplest model is that each tab sees the authenticated user's full session list and can interact with those sessions. However, only one tab's WebSocket can receive live output from a given session at a time (last-attach-wins). This prevents duplicate output delivery.
 
 **Design Details**:
 - `session.GetAttachedWriter()` returns the most recently attached WebSocket writer
@@ -187,13 +187,13 @@ interface PersistedSession {
 
 ### 10. Grace Period and Cleanup Timing
 
-**Decision**: Each session has an independent orphan timer. The grace period starts per-session when that session's last attached WebSocket disconnects.
+**Decision**: Each session can have an independent orphan timer when cleanup is enabled. By default (`PTY_ORPHAN_GRACE_PERIOD=0`), orphaned sessions are retained until explicitly closed.
 
-**Rationale**: Different sessions may become orphaned at different times (e.g., user closes one browser tab but keeps another open). Per-session timers ensure accurate cleanup.
+**Rationale**: Explicit-close defaults improve long-running mobile workflows and avoid surprising session loss. For deployments that want automatic reclamation, per-session timers still provide precise cleanup.
 
 **Design Details**:
-- Grace period: Configurable via `PTY_ORPHAN_GRACE_PERIOD` env var (default: `300` seconds)
-- Timer created with `time.AfterFunc(gracePeriod, cleanupFunc)`
+- Grace period: Configurable via `PTY_ORPHAN_GRACE_PERIOD` env var (default: `0`, disabled)
+- When grace period is `> 0`, timer created with `time.AfterFunc(gracePeriod, cleanupFunc)`
 - `cleanupFunc` acquires Manager lock, checks session still orphaned, closes PTY, removes from registry
 - On reattach: `timer.Stop()` cancels the pending cleanup
 - On PTY process exit while orphaned: Session kept in registry (marked as exited) until timer fires, so client can discover the exit on reconnect

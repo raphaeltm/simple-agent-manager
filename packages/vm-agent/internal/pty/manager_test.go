@@ -167,6 +167,37 @@ func TestOrphanTimer_CleansUpAfterGracePeriod(t *testing.T) {
 	}
 }
 
+func TestOrphanSession_NoAutoCleanupWhenGraceDisabled(t *testing.T) {
+	m := NewManager(ManagerConfig{
+		DefaultShell: "/bin/sh",
+		DefaultRows:  24,
+		DefaultCols:  80,
+		GracePeriod:  0,
+		BufferSize:   1024,
+	})
+
+	session, err := m.CreateSession("user1", 24, 80)
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+	defer m.CloseAllSessions()
+
+	m.OrphanSession(session.ID)
+	time.Sleep(150 * time.Millisecond)
+
+	remaining := m.GetSession(session.ID)
+	if remaining == nil {
+		t.Fatal("expected orphaned session to remain when grace period is disabled")
+	}
+
+	remaining.mu.RLock()
+	orphaned := remaining.IsOrphaned
+	remaining.mu.RUnlock()
+	if !orphaned {
+		t.Fatal("expected session to stay orphaned until explicitly closed")
+	}
+}
+
 func TestSetSessionName(t *testing.T) {
 	m := NewManager(ManagerConfig{
 		DefaultShell: "/bin/sh",
@@ -309,5 +340,38 @@ func TestGetOrphanedSessionCount(t *testing.T) {
 	}
 	if m.GetOrphanedSessionCount() != 1 {
 		t.Fatalf("expected 1 orphaned after reattach, got %d", m.GetOrphanedSessionCount())
+	}
+}
+
+func TestGetActiveSessionsForUser(t *testing.T) {
+	m := NewManager(ManagerConfig{
+		DefaultShell: "/bin/sh",
+		DefaultRows:  24,
+		DefaultCols:  80,
+		GracePeriod:  1 * time.Minute,
+		BufferSize:   1024,
+	})
+
+	user1Session, err := m.CreateSession("user1", 24, 80)
+	if err != nil {
+		t.Fatalf("failed to create user1 session: %v", err)
+	}
+	_, err = m.CreateSession("user2", 24, 80)
+	if err != nil {
+		t.Fatalf("failed to create user2 session: %v", err)
+	}
+	defer m.CloseAllSessions()
+
+	user1Sessions := m.GetActiveSessionsForUser("user1")
+	if len(user1Sessions) != 1 {
+		t.Fatalf("expected 1 session for user1, got %d", len(user1Sessions))
+	}
+	if user1Sessions[0].ID != user1Session.ID {
+		t.Fatalf("expected session %s for user1, got %s", user1Session.ID, user1Sessions[0].ID)
+	}
+
+	user2Sessions := m.GetActiveSessionsForUser("user2")
+	if len(user2Sessions) != 1 {
+		t.Fatalf("expected 1 session for user2, got %d", len(user2Sessions))
 	}
 }

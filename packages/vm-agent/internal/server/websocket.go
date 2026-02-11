@@ -367,6 +367,19 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 		sess.SetAttachedWriter(writer)
 	}
 
+	sendSessionError := func(sessionID, errMsg string) {
+		errorData, _ := json.Marshal(map[string]string{
+			"error": errMsg,
+		})
+		writeMu.Lock()
+		_ = conn.WriteJSON(wsMessage{
+			Type:      "error",
+			SessionID: sessionID,
+			Data:      errorData,
+		})
+		writeMu.Unlock()
+	}
+
 	// Handle WebSocket messages
 	for {
 		_, message, err := conn.ReadMessage()
@@ -383,8 +396,8 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 		switch msg.Type {
 		case "list_sessions":
-			// Return all active sessions from the global Manager
-			activeSessions := s.ptyManager.GetActiveSessions()
+			// Return all active sessions for the authenticated user.
+			activeSessions := s.ptyManager.GetActiveSessionsForUser(session.UserID)
 			sessionInfos := make([]SessionInfo, len(activeSessions))
 			for i, si := range activeSessions {
 				sessionInfos[i] = SessionInfo{
@@ -407,20 +420,21 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
+			existingSession := s.ptyManager.GetSession(reattachData.SessionID)
+			if existingSession == nil {
+				sendSessionError(reattachData.SessionID, "session not found")
+				continue
+			}
+			if existingSession.UserID != session.UserID {
+				sendSessionError(reattachData.SessionID, "not authorized")
+				continue
+			}
+
 			// Reattach to the existing session
 			ptySession, err := s.ptyManager.ReattachSession(reattachData.SessionID)
 			if err != nil {
 				log.Printf("Failed to reattach session %s: %v", reattachData.SessionID, err)
-				errorData, _ := json.Marshal(map[string]string{
-					"error": err.Error(),
-				})
-				writeMu.Lock()
-				_ = conn.WriteJSON(wsMessage{
-					Type:      "error",
-					SessionID: reattachData.SessionID,
-					Data:      errorData,
-				})
-				writeMu.Unlock()
+				sendSessionError(reattachData.SessionID, err.Error())
 				continue
 			}
 
@@ -565,12 +579,25 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
+			ptySession := s.ptyManager.GetSession(closeData.SessionID)
+			if ptySession == nil {
+				sendSessionError(closeData.SessionID, "session not found")
+				continue
+			}
+			if ptySession.UserID != session.UserID {
+				sendSessionError(closeData.SessionID, "not authorized")
+				continue
+			}
+
 			// Remove from attached set and close the session permanently
 			asMu.Lock()
 			delete(attachedSessions, closeData.SessionID)
 			asMu.Unlock()
 
-			s.ptyManager.CloseSession(closeData.SessionID)
+			if err := s.ptyManager.CloseSession(closeData.SessionID); err != nil {
+				sendSessionError(closeData.SessionID, err.Error())
+				continue
+			}
 
 			// Send confirmation
 			closedData, _ := json.Marshal(map[string]interface{}{
@@ -606,6 +633,10 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 			ptySession := s.ptyManager.GetSession(sessionID)
 			if ptySession != nil {
+				if ptySession.UserID != session.UserID {
+					sendSessionError(sessionID, "not authorized")
+					continue
+				}
 				s.idleDetector.RecordActivity()
 				if _, err := ptySession.Write([]byte(input.Data)); err != nil {
 					log.Printf("PTY write error: %v", err)
@@ -632,6 +663,10 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 			ptySession := s.ptyManager.GetSession(sessionID)
 			if ptySession != nil {
+				if ptySession.UserID != session.UserID {
+					sendSessionError(sessionID, "not authorized")
+					continue
+				}
 				if err := ptySession.Resize(resize.Rows, resize.Cols); err != nil {
 					log.Printf("PTY resize error: %v", err)
 				}
@@ -644,8 +679,21 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
+			ptySession := s.ptyManager.GetSession(renameData.SessionID)
+			if ptySession == nil {
+				sendSessionError(renameData.SessionID, "session not found")
+				continue
+			}
+			if ptySession.UserID != session.UserID {
+				sendSessionError(renameData.SessionID, "not authorized")
+				continue
+			}
+
 			// Store name on the session in the global Manager
-			_ = s.ptyManager.SetSessionName(renameData.SessionID, renameData.Name)
+			if err := s.ptyManager.SetSessionName(renameData.SessionID, renameData.Name); err != nil {
+				sendSessionError(renameData.SessionID, err.Error())
+				continue
+			}
 
 			// Send confirmation
 			renamedData, _ := json.Marshal(map[string]interface{}{

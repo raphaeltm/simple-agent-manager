@@ -25,7 +25,7 @@ The core entity representing a running pseudo-terminal process on the VM.
 | `ProcessExited` | `bool` | Whether the PTY process has exited naturally | New |
 | `ExitCode` | `int` | Exit code if process exited | New |
 | `OutputBuffer` | `*RingBuffer` | Circular buffer for recent output | New |
-| `orphanTimer` | `*time.Timer` | Cleanup timer (unexported) | New |
+| `orphanTimer` | `*time.Timer` | Cleanup timer when enabled (unexported) | New |
 | `attachedWriter` | `io.Writer` | Active WebSocket writer (nil when orphaned) | New |
 
 **Lifecycle States:**
@@ -36,7 +36,7 @@ The core entity representing a running pseudo-terminal process on the VM.
                          ▼
                     ┌──────────┐
                     │  Active  │◄──────── reattach_session
-                    │(attached)│          (cancel orphan timer)
+                    │(attached)│          (cancel orphan timer if set)
                     └────┬─────┘
                          │
               WebSocket disconnect
@@ -47,6 +47,7 @@ The core entity representing a running pseudo-terminal process on the VM.
               │     │(buffering)│
               │     └────┬─────┘
               │          │
+              │  cleanup enabled +
               │   grace period expires
               │          │
               │          ▼
@@ -60,7 +61,7 @@ The core entity representing a running pseudo-terminal process on the VM.
               ▼
         ┌───────────┐
         │  Orphaned  │
-        │  (exited)  │──── grace period expires ──► Closed
+        │  (exited)  │──── cleanup enabled + grace period expires ──► Closed
         └───────────┘
 ```
 
@@ -68,7 +69,7 @@ The core entity representing a running pseudo-terminal process on the VM.
 - `ID` must be a valid UUID string
 - `Name` max length: 50 characters
 - `OutputBuffer` capacity: configurable, default 256 KB (262,144 bytes)
-- Orphan timer duration: configurable, default 300 seconds
+- Orphan timer duration: configurable, default disabled (`0`)
 - A session cannot be reattached if `ProcessExited == true`
 
 ---
@@ -117,10 +118,11 @@ Extended fields on the existing PTY Manager.
 
 | Method | Description |
 |--------|-------------|
-| `OrphanSession(sessionID string)` | Mark session as orphaned, start cleanup timer |
+| `OrphanSession(sessionID string)` | Mark session as orphaned, start cleanup timer when enabled |
 | `OrphanSessions(sessionIDs []string)` | Batch orphan multiple sessions |
 | `ReattachSession(sessionID string) (*Session, error)` | Cancel orphan timer, return session for reattach |
 | `GetActiveSessions() []SessionInfo` | Return list of non-closed sessions with status |
+| `GetActiveSessionsForUser(userID string) []SessionInfo` | Return list of non-closed sessions scoped to a user |
 | `SetSessionName(sessionID, name string)` | Store tab name on session |
 
 ---
@@ -191,5 +193,5 @@ interface PersistedState {
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `PTY_ORPHAN_GRACE_PERIOD` | `int` (seconds) | `300` | How long orphaned sessions survive before cleanup |
+| `PTY_ORPHAN_GRACE_PERIOD` | `int` (seconds) | `0` | How long orphaned sessions survive before cleanup (`0` = disabled) |
 | `PTY_OUTPUT_BUFFER_SIZE` | `int` (bytes) | `262144` | Ring buffer capacity per session (256 KB) |

@@ -5,7 +5,7 @@
 
 ## Summary
 
-Keep PTY processes alive on the VM when users refresh their browser or experience brief network interruptions, enabling seamless reconnection to existing terminal sessions. The VM Agent (Go) gains an output ring buffer per session, orphan timers with a 5-minute grace period, and a reattach protocol. The browser (TypeScript/React) persists server-assigned session IDs in sessionStorage and uses them to match and reattach on reconnect, displaying a per-terminal "Reconnecting..." overlay during the transition.
+Keep PTY processes alive on the VM when users refresh their browser or experience brief network interruptions, enabling seamless reconnection to existing terminal sessions. The VM Agent (Go) gains an output ring buffer per session, optional orphan timers (default disabled), and a reattach protocol. The browser (TypeScript/React) persists server-assigned session IDs in sessionStorage and uses them to match and reattach on reconnect, displaying a per-terminal "Reconnecting..." overlay during the transition.
 
 ## Technical Context
 
@@ -16,7 +16,7 @@ Keep PTY processes alive on the VM when users refresh their browser or experienc
 **Target Platform**: Linux VM (Go binary), Browser (React SPA)
 **Project Type**: Monorepo — changes span `packages/vm-agent/` (Go) and `packages/terminal/` (TypeScript)
 **Performance Goals**: Reconnection < 2 seconds, scrollback replay of 256 KB in < 500ms
-**Constraints**: Memory < 256 KB per orphaned session buffer, grace period configurable (default 300s), no persistence across VM Agent restarts
+**Constraints**: Memory < 256 KB per orphaned session buffer, orphan cleanup delay configurable (default disabled, `PTY_ORPHAN_GRACE_PERIOD=0`), no persistence across VM Agent restarts
 **Scale/Scope**: Typically 1-10 concurrent terminal sessions per workspace
 
 ## Constitution Check

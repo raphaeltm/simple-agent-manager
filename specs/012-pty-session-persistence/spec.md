@@ -25,7 +25,7 @@ A user is working in a multi-terminal workspace with several active terminal ses
 
 ### User Story 2 - Brief Network Interruption Recovery (Priority: P2)
 
-A user experiences a brief network disruption (Wi-Fi drop, VPN reconnect, mobile network switch). The WebSocket disconnects and reconnects within the grace period. The user's terminal sessions seamlessly resume without losing any running processes or visible output.
+A user experiences a brief network disruption (Wi-Fi drop, VPN reconnect, mobile network switch). The WebSocket disconnects and reconnects while sessions are still available (always when orphan cleanup is disabled; otherwise within the configured grace period). The user's terminal sessions seamlessly resume without losing any running processes or visible output.
 
 **Why this priority**: Network interruptions are common, especially for mobile users and those on unreliable connections. Losing all terminal sessions for a 2-second network blip is a poor experience.
 
@@ -34,24 +34,24 @@ A user experiences a brief network disruption (Wi-Fi drop, VPN reconnect, mobile
 **Acceptance Scenarios**:
 
 1. **Given** a user has active terminal sessions, **When** the network drops for 10 seconds and recovers, **Then** all PTY sessions are still alive and the user reconnects to them automatically.
-2. **Given** a WebSocket disconnects, **When** the client reconnects within the grace period, **Then** no new PTY processes are spawned — existing ones are reattached.
+2. **Given** a WebSocket disconnects, **When** the client reconnects while sessions are still retained, **Then** no new PTY processes are spawned — existing ones are reattached.
 3. **Given** output was produced while the WebSocket was disconnected, **When** the client reconnects, **Then** the missed output is replayed so the terminal display is up-to-date.
 
 ---
 
 ### User Story 3 - Orphan Cleanup After Abandonment (Priority: P3)
 
-A user closes their browser tab entirely (not a refresh — a full close). The PTY sessions on the VM continue running during the grace period, waiting for a potential reconnect. When no reconnect occurs within the grace period, all orphaned PTY sessions are automatically cleaned up to free system resources.
+A user closes their browser tab entirely (not a refresh — a full close). By default, PTY sessions remain alive until explicitly closed by the user. If orphan cleanup is enabled, sessions continue running for the configured grace period and are then cleaned up automatically when no reconnect occurs.
 
-**Why this priority**: Resource management is essential to prevent memory leaks and zombie processes from accumulating on VMs. Without cleanup, long-lived VMs could exhaust resources.
+**Why this priority**: Explicit-close semantics protect long-running workflows. Optional cleanup remains important for operators who prefer automatic reclamation.
 
-**Independent Test**: Can be tested by connecting, creating sessions, fully closing the browser, waiting beyond the grace period, and verifying via the VM Agent health endpoint that sessions were cleaned up.
+**Independent Test**: Can be tested by connecting, creating sessions, fully closing the browser, and verifying either persistence (default behavior) or cleanup (when `PTY_ORPHAN_GRACE_PERIOD` is set to a positive value).
 
 **Acceptance Scenarios**:
 
-1. **Given** a user closes their browser tab with 3 active PTY sessions, **When** the grace period expires without reconnection, **Then** all 3 orphaned PTY processes are terminated and their resources freed.
+1. **Given** `PTY_ORPHAN_GRACE_PERIOD=0`, **When** a user closes their browser tab with 3 active PTY sessions, **Then** all 3 sessions remain available for later reattachment until explicitly closed.
 2. **Given** orphaned sessions exist, **When** a different user (or the same user in a new browser tab) connects, **Then** they do not see or have access to the orphaned sessions.
-3. **Given** a user closes their browser tab, **When** they open a new tab and navigate to the workspace before the grace period expires, **Then** they reconnect to their existing sessions.
+3. **Given** a user closes their browser tab, **When** they open a new tab and navigate to the workspace later, **Then** they reconnect to existing sessions if still retained by configuration.
 
 ---
 
@@ -73,28 +73,28 @@ When the VM restarts (e.g., after a crash or system update), all PTY sessions ar
 
 ### Edge Cases
 
-- What happens when the grace period expires while output is being buffered? Cleanup must safely stop the output buffer reader before freeing resources.
+- If orphan cleanup is enabled and the grace period expires while output is being buffered, cleanup must safely stop the output buffer reader before freeing resources.
 - What happens when two browser tabs connect to the same workspace simultaneously? Each tab should get its own WebSocket connection but both should be able to interact with the shared pool of PTY sessions.
 - What happens if a PTY process exits naturally (e.g., `exit` command) while the WebSocket is disconnected? The session should be marked as closed and not available for reattach; the browser should handle this on reconnect.
 - What happens if the scrollback buffer fills up? The buffer operates as a ring buffer — oldest output is overwritten by newest output, maintaining a fixed memory footprint.
-- What happens when a user creates new sessions from a second browser tab while existing sessions from the first tab are orphaned? New sessions are created normally; orphaned sessions remain available for reattach until their grace period expires.
+- What happens when a user creates new sessions from a second browser tab while existing sessions from the first tab are orphaned? New sessions are created normally; orphaned sessions remain available for reattach while retained by configuration.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-- **FR-001**: The system MUST keep PTY processes alive after a WebSocket disconnection for a configurable grace period (default: 300 seconds / 5 minutes).
+- **FR-001**: The system MUST keep PTY processes alive after a WebSocket disconnection. By default sessions persist until explicitly closed (`PTY_ORPHAN_GRACE_PERIOD=0`), with optional timed cleanup when configured.
 - **FR-002**: The system MUST provide a mechanism for reconnecting clients to request a list of active PTY sessions associated with their connection.
 - **FR-003**: The system MUST allow a reconnecting client to reattach to an existing PTY session by session ID instead of creating a new one.
 - **FR-004**: The system MUST replay buffered recent output when a client reattaches to a PTY session, so the terminal display shows recent history.
-- **FR-005**: The system MUST automatically clean up orphaned PTY sessions (no active WebSocket attachment) after the grace period expires.
+- **FR-005**: When `PTY_ORPHAN_GRACE_PERIOD` is greater than 0, the system MUST automatically clean up orphaned PTY sessions (no active WebSocket attachment) after the configured grace period expires.
 - **FR-006**: The system MUST limit memory usage per orphaned session's output buffer to a configurable maximum (default: 256 KB).
 - **FR-007**: The system MUST continue capturing PTY output into the buffer while no WebSocket is connected, so output produced during disconnection is not lost.
 - **FR-008**: The system MUST handle the case where a PTY process exits while orphaned — the session should be marked as closed and not offered for reattach.
 - **FR-009**: The browser MUST request the server's active session list on reconnect and match it against browser-persisted session metadata to determine which sessions to reattach vs. create fresh. Matching is performed by session ID: the browser persists each server-assigned session ID alongside tab metadata in sessionStorage, enabling unambiguous 1:1 matching on reconnect.
 - **FR-014**: During reconnection, the browser MUST display existing tabs immediately (from browser-persisted metadata) with a per-terminal "Reconnecting..." overlay, replacing it with terminal content once the session is reattached and scrollback is replayed.
 - **FR-010**: The system MUST support multiple browser tabs connected to the same workspace, with each tab able to interact with the shared PTY session pool.
-- **FR-011**: The grace period duration MUST be configurable via environment variable with a sensible default.
+- **FR-011**: The orphan cleanup grace period duration MUST be configurable via environment variable with default `0` (disabled).
 - **FR-012**: The output buffer size per session MUST be configurable via environment variable with a sensible default.
 - **FR-013**: The system MUST NOT break existing single-terminal (non-multi) WebSocket mode, which does not use session persistence.
 
@@ -103,12 +103,12 @@ When the VM restarts (e.g., after a crash or system update), all PTY sessions ar
 - **PTY Session**: A running pseudo-terminal process on the VM. Key attributes: session ID, creation time, last activity time, process state (running/exited), attached/orphaned status, output ring buffer.
 - **Session Registry**: An in-memory store mapping session IDs to PTY sessions. Persists across WebSocket connections (within the same VM Agent process lifetime). Already partially exists as the PTY Manager's `sessions` map.
 - **Output Ring Buffer**: A fixed-size circular buffer capturing recent PTY output per session. Used to replay scrollback on reconnect. Bounded to prevent memory exhaustion.
-- **Orphan Timer**: A per-session timer that starts when a session becomes detached (WebSocket disconnects). When it fires, the session is cleaned up. Cancelled if a client reattaches before expiry.
+- **Orphan Timer**: A per-session timer used only when cleanup is enabled (`PTY_ORPHAN_GRACE_PERIOD > 0`). It starts when a session becomes detached and is cancelled if a client reattaches before expiry.
 
 ## Assumptions
 
 - The VM Agent process runs continuously for the lifetime of a workspace. PTY persistence is in-memory only — if the VM Agent process restarts, all sessions are lost (graceful degradation per User Story 4).
-- Session ownership is not tracked per-user for multi-terminal mode (current architecture). Any WebSocket connection to the workspace can interact with any session. Access control is handled at the WebSocket authentication layer (JWT token validation).
+- Session ownership is tracked per-user in multi-terminal mode. Session listing and control operations are scoped to the authenticated user ID.
 - The existing browser-side sessionStorage persistence (tab names, order, counter) from spec 011 continues to work alongside server-side PTY persistence. They complement each other: browser remembers UI arrangement, server keeps processes alive.
 - The scrollback replay sends output as a single batch message before resuming real-time output streaming. The client is responsible for writing the replayed data to the terminal emulator.
 
@@ -116,7 +116,7 @@ When the VM restarts (e.g., after a crash or system update), all PTY sessions ar
 
 ### Session 2026-02-09
 
-- Q: What should the default grace period duration be? → A: 5 minutes (300 seconds) — covers page refreshes, network blips, laptop lid close, and brief breaks without holding resources excessively.
+- Q: What should the default grace period duration be? → A: Disabled (`0`) so sessions persist until explicitly closed; operators can set a positive value when automatic cleanup is desired.
 - Q: What should the default output buffer size per session be? → A: 256 KB (~4,000 lines) — sufficient for most build/test output while keeping memory bounded (~2.5 MB for 10 orphaned sessions).
 - Q: What should the user see during reconnection? → A: Existing tabs appear immediately (from browser-persisted metadata) with a subtle per-terminal "Reconnecting..." overlay; content replaces overlay once reattached.
 - Q: How should the browser match server sessions to browser tabs on reconnect? → A: By session ID — browser persists each server-assigned session ID in sessionStorage alongside tab metadata for unambiguous 1:1 matching.
@@ -125,9 +125,9 @@ When the VM restarts (e.g., after a crash or system update), all PTY sessions ar
 
 ### Measurable Outcomes
 
-- **SC-001**: Users retain running processes across a page refresh 100% of the time (when reconnecting within the grace period).
+- **SC-001**: Users retain running processes across a page refresh 100% of the time while sessions are retained by configuration.
 - **SC-002**: Terminal scrollback displays at least the last 256 KB of output upon reconnection, with no visible gap to the user.
 - **SC-003**: Reconnection to existing sessions completes within 2 seconds of the WebSocket connection being established.
-- **SC-004**: Orphaned sessions are cleaned up within 5 seconds of the grace period expiring, freeing all associated memory and process resources.
+- **SC-004**: When cleanup is enabled (`PTY_ORPHAN_GRACE_PERIOD > 0`), orphaned sessions are cleaned up within 5 seconds of the grace period expiring, freeing all associated memory and process resources.
 - **SC-005**: Memory usage per orphaned session stays below the configured buffer size limit plus a reasonable overhead (process metadata).
 - **SC-006**: The feature works transparently — users do not need to take any special action to benefit from session persistence; it happens automatically on every page refresh or network recovery.

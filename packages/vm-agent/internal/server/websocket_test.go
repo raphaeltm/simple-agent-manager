@@ -354,6 +354,72 @@ func TestMultiTerminalWS_DisconnectOrphansSessionsNotClose(t *testing.T) {
 	}
 }
 
+func TestMultiTerminalWS_ListSessionsIsUserScoped(t *testing.T) {
+	s, ts, authSessionID := newTestServer(t)
+
+	// Create a session for another user directly in the manager.
+	_, err := s.ptyManager.CreateSessionWithID("sess-other-user", "other-user", 24, 80)
+	if err != nil {
+		t.Fatalf("failed to create other-user session: %v", err)
+	}
+
+	conn := dialWS(t, ts, authSessionID)
+	defer conn.Close()
+
+	// Create an authenticated user's own session.
+	sendJSON(t, conn, wsMessage{
+		Type: "create_session",
+		Data: mustMarshal(wsCreateSessionData{
+			SessionID: "sess-owned",
+			Rows:      24,
+			Cols:      80,
+		}),
+	})
+	readMsgOfType(t, conn, MessageTypeSessionCreated)
+
+	sendJSON(t, conn, wsMessage{Type: "list_sessions"})
+	listed := readMsgOfType(t, conn, MessageTypeSessionList)
+
+	var listData SessionListMessage
+	if err := json.Unmarshal(listed.Data, &listData); err != nil {
+		t.Fatalf("parse session list: %v", err)
+	}
+	if len(listData.Sessions) != 1 {
+		t.Fatalf("expected 1 scoped session, got %d", len(listData.Sessions))
+	}
+	if listData.Sessions[0].SessionID != "sess-owned" {
+		t.Fatalf("expected only sess-owned, got %s", listData.Sessions[0].SessionID)
+	}
+}
+
+func TestMultiTerminalWS_CloseSessionRejectsOtherUserSession(t *testing.T) {
+	s, ts, authSessionID := newTestServer(t)
+
+	// Create a session for another user directly in the manager.
+	_, err := s.ptyManager.CreateSessionWithID("sess-other-user", "other-user", 24, 80)
+	if err != nil {
+		t.Fatalf("failed to create other-user session: %v", err)
+	}
+
+	conn := dialWS(t, ts, authSessionID)
+	defer conn.Close()
+
+	sendJSON(t, conn, wsMessage{
+		Type: "close_session",
+		Data: mustMarshal(wsCloseSessionData{SessionID: "sess-other-user"}),
+	})
+
+	errMsg := readMsgOfType(t, conn, MessageTypeError)
+	if errMsg.SessionID != "sess-other-user" {
+		t.Fatalf("expected error for sess-other-user, got %s", errMsg.SessionID)
+	}
+
+	// Session should still exist because close was rejected.
+	if s.ptyManager.GetSession("sess-other-user") == nil {
+		t.Fatal("expected other-user session to remain after unauthorized close attempt")
+	}
+}
+
 // mustMarshal marshals v to json.RawMessage, panicking on error.
 func mustMarshal(v interface{}) json.RawMessage {
 	data, err := json.Marshal(v)
