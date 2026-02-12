@@ -211,9 +211,24 @@ func (s *Server) adoptLegacyWorkspaceLayout(runtime *WorkspaceRuntime) bool {
 		return false
 	}
 
+	baseDir := strings.TrimSpace(s.config.WorkspaceDir)
+	if baseDir == "" {
+		baseDir = "/workspace"
+	}
+	cleanBaseDir := filepath.Clean(baseDir)
+	cleanLegacyDir := filepath.Clean(legacyDir)
+
 	currentDir := strings.TrimSpace(runtime.WorkspaceDir)
+	cleanCurrentDir := ""
 	if currentDir != "" {
-		if _, err := os.Stat(currentDir); err == nil {
+		cleanCurrentDir = filepath.Clean(currentDir)
+	}
+
+	// Preserve explicitly configured existing workspace directories. Only adopt
+	// legacy repo layouts when the current runtime path is missing or still on
+	// the generic base directory.
+	if cleanCurrentDir != "" && cleanCurrentDir != cleanLegacyDir {
+		if _, err := os.Stat(cleanCurrentDir); err == nil && cleanCurrentDir != cleanBaseDir {
 			return false
 		}
 	}
@@ -223,7 +238,7 @@ func (s *Server) adoptLegacyWorkspaceLayout(runtime *WorkspaceRuntime) bool {
 	}
 
 	nextContainerWorkDir := deriveContainerWorkDir(legacyDir)
-	if currentDir == legacyDir &&
+	if cleanCurrentDir == cleanLegacyDir &&
 		strings.TrimSpace(runtime.ContainerLabelValue) == legacyDir &&
 		strings.TrimSpace(runtime.ContainerWorkDir) == nextContainerWorkDir {
 		return false
