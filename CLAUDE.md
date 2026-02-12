@@ -262,7 +262,7 @@ Claude Code now supports dual authentication methods:
 
 ## Recent Changes
 - 014-multi-workspace-nodes: Workspace desktop session tabs now use an integrated terminal-style strip above the content area (instead of crowded header chips) with a `+` dropdown that creates terminal sessions or agent-specific chat sessions (`terminal` + `claude/codex/...` when multiple agent keys are configured)
-- 014-multi-workspace-nodes: Fresh-node readiness probing now enforces per-request probe timeouts (AbortController) so workspace creation fails fast with explicit timeout errors instead of hanging in `creating` when `/health` calls stall
+- 014-multi-workspace-nodes: Fresh-node readiness probing now enforces hard per-request timeouts (`Promise.race` + `AbortController`) so workspace creation fails fast with explicit timeout errors even when runtime fetch abort signals are ignored
 - 014-multi-workspace-nodes: Workspace creation now waits for fresh node-agent backend readiness (`/health`) before dispatching first node workspace create, avoiding immediate fresh-node routing failures (for example Cloudflare 1014/404 races)
 - 014-multi-workspace-nodes: VM Agent legacy-layout recovery now adopts repo-specific workspace paths even when the current runtime path is the existing generic base workspace dir (for example `/workspace`), preventing stale terminal container-label routing on recovered sessions
 - 014-multi-workspace-nodes: VM Agent now avoids reusing legacy single-workspace PTY manager wiring when runtime recovery updates workspace/container paths, so terminal attach uses the recovered workspace-specific devcontainer label instead of stale `/workspace` routing

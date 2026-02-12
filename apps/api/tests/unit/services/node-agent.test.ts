@@ -96,4 +96,22 @@ describe('node-agent readiness helpers', () => {
     await rejection;
     expect(fetchMock).toHaveBeenCalled();
   });
+
+  it('times out health probes even when fetch never rejects on abort', async () => {
+    vi.useFakeTimers();
+
+    const fetchMock = vi.fn(() => new Promise<Response>(() => {}));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const waitPromise = waitForNodeAgentReady('NODE_STUCK', {
+      BASE_DOMAIN: 'example.com',
+      NODE_AGENT_READY_TIMEOUT_MS: '35',
+      NODE_AGENT_READY_POLL_INTERVAL_MS: '10',
+    } as never);
+
+    const rejection = expect(waitPromise).rejects.toThrow(/request timeout after/i);
+    await vi.advanceTimersByTimeAsync(40);
+    await rejection;
+    expect(fetchMock).toHaveBeenCalled();
+  });
 });
