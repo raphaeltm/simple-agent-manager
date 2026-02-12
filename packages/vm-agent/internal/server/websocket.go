@@ -201,6 +201,14 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ptySession, err := runtime.PTY.CreateSession(userID, rows, cols)
+	if err != nil && isContainerUnavailableError(err) {
+		log.Printf("Workspace %s: terminal session create failed due to unavailable container, attempting recovery: %v", workspaceID, err)
+		if recoverErr := s.recoverWorkspaceRuntime(r.Context(), runtime); recoverErr != nil {
+			log.Printf("Workspace %s: terminal recovery failed: %v", workspaceID, recoverErr)
+		} else {
+			ptySession, err = runtime.PTY.CreateSession(userID, rows, cols)
+		}
+	}
 	if err != nil {
 		_ = conn.WriteJSON(wsMessage{Type: "error", Data: json.RawMessage(`"Failed to create terminal session"`)})
 		return
@@ -427,6 +435,14 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			ptySession, err := runtime.PTY.CreateSessionWithID(data.SessionID, userID, data.Rows, data.Cols)
+			if err != nil && isContainerUnavailableError(err) {
+				log.Printf("Workspace %s: multi-terminal session create failed due to unavailable container, attempting recovery: %v", workspaceID, err)
+				if recoverErr := s.recoverWorkspaceRuntime(r.Context(), runtime); recoverErr != nil {
+					log.Printf("Workspace %s: multi-terminal recovery failed: %v", workspaceID, recoverErr)
+				} else {
+					ptySession, err = runtime.PTY.CreateSessionWithID(data.SessionID, userID, data.Rows, data.Cols)
+				}
+			}
 			if err != nil {
 				sendSessionError(data.SessionID, err.Error())
 				continue

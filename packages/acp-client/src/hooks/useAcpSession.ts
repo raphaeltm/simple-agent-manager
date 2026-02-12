@@ -31,6 +31,20 @@ export interface AcpMessage {
   error?: unknown;
 }
 
+interface GatewayErrorMessage {
+  error: string;
+  message?: string;
+}
+
+function isGatewayErrorMessage(data: unknown): data is GatewayErrorMessage {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+  const record = data as Record<string, unknown>;
+  return typeof record.error === 'string' &&
+    (typeof record.message === 'string' || record.message === undefined);
+}
+
 /** Options for the useAcpSession hook */
 export interface UseAcpSessionOptions {
   /** WebSocket URL for the ACP gateway (e.g., wss://host/agent/ws?token=JWT) */
@@ -117,6 +131,11 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
 
   // Handle incoming ACP messages
   const handleAcpMessage = useCallback((data: unknown) => {
+    if (isGatewayErrorMessage(data)) {
+      setState('error');
+      setError(data.message || data.error);
+      return;
+    }
     onAcpMessageRef.current?.(data as AcpMessage);
   }, []);
 

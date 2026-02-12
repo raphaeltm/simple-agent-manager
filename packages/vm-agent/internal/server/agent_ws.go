@@ -54,20 +54,21 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 
 	session, exists := s.agentSessions.Get(workspaceID, requestedSessionID)
 	if !exists {
-		if !autoCreateSession {
-			writeSessionError(w, http.StatusNotFound, "session_not_found", "Requested session does not exist in this workspace")
-			return
-		}
-
 		created, _, err := s.agentSessions.Create(workspaceID, requestedSessionID, "", idempotencyKey)
 		if err != nil {
 			writeSessionError(w, http.StatusConflict, "session_create_failed", err.Error())
 			return
 		}
 		session = created
-		s.appendNodeEvent(workspaceID, "info", "agent.session_created", "Agent session created for websocket attach", map[string]interface{}{
-			"sessionId": requestedSessionID,
-		})
+		if autoCreateSession {
+			s.appendNodeEvent(workspaceID, "info", "agent.session_created", "Agent session created for websocket attach", map[string]interface{}{
+				"sessionId": requestedSessionID,
+			})
+		} else {
+			s.appendNodeEvent(workspaceID, "warn", "agent.session_recovered", "Agent session was missing on node and has been recreated", map[string]interface{}{
+				"sessionId": requestedSessionID,
+			})
+		}
 	}
 
 	if session.Status != agentsessions.StatusRunning {
@@ -119,6 +120,15 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		gatewayCfg.CallbackToken = callbackToken
 	}
 	if runtime != nil {
+		if resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue); resolver != nil {
+			if _, resolveErr := resolver(); isContainerUnavailableError(resolveErr) {
+				log.Printf("Workspace %s: ACP attach detected unavailable container, attempting recovery: %v", workspaceID, resolveErr)
+				if recoverErr := s.recoverWorkspaceRuntime(r.Context(), runtime); recoverErr != nil {
+					log.Printf("Workspace %s: ACP recovery failed: %v", workspaceID, recoverErr)
+				}
+			}
+		}
+
 		if workDir := strings.TrimSpace(runtime.ContainerWorkDir); workDir != "" {
 			gatewayCfg.ContainerWorkDir = workDir
 		}

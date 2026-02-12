@@ -9,6 +9,8 @@ import (
 	"github.com/workspace/vm-agent/internal/bootstrap"
 )
 
+var prepareWorkspaceForRuntime = bootstrap.PrepareWorkspace
+
 func (s *Server) callbackTokenForWorkspace(workspaceID string) string {
 	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
 		if token := strings.TrimSpace(runtime.CallbackToken); token != "" {
@@ -53,4 +55,45 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 	return bootstrap.PrepareWorkspace(provisionCtx, &cfg, bootstrap.ProvisionState{
 		GitHubToken: gitToken,
 	})
+}
+
+func isContainerUnavailableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(errMsg, "devcontainer not available") ||
+		strings.Contains(errMsg, "no running devcontainer found")
+}
+
+func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *WorkspaceRuntime) error {
+	if runtime == nil {
+		return fmt.Errorf("workspace runtime is required")
+	}
+	if !s.config.ContainerMode {
+		return nil
+	}
+
+	callbackToken := s.callbackTokenForWorkspace(runtime.ID)
+
+	cfg := *s.config
+	cfg.WorkspaceID = runtime.ID
+	cfg.Repository = strings.TrimSpace(runtime.Repository)
+	cfg.Branch = strings.TrimSpace(runtime.Branch)
+	cfg.WorkspaceDir = strings.TrimSpace(runtime.WorkspaceDir)
+	cfg.ContainerLabelValue = strings.TrimSpace(runtime.ContainerLabelValue)
+	cfg.ContainerWorkDir = strings.TrimSpace(runtime.ContainerWorkDir)
+	cfg.CallbackToken = callbackToken
+
+	state := bootstrap.ProvisionState{}
+	if cfg.Repository != "" && callbackToken != "" {
+		gitToken, err := s.fetchGitTokenForWorkspace(ctx, runtime.ID, callbackToken)
+		if err != nil {
+			log.Printf("Workspace %s: recovery proceeding without git token: %v", runtime.ID, err)
+		} else {
+			state.GitHubToken = gitToken
+		}
+	}
+
+	return prepareWorkspaceForRuntime(ctx, &cfg, state)
 }
