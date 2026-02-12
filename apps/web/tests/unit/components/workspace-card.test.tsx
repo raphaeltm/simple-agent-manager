@@ -3,7 +3,12 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import { WorkspaceCard } from '../../../src/components/WorkspaceCard';
+import { useIsMobile } from '../../../src/hooks/useIsMobile';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
+
+vi.mock('../../../src/hooks/useIsMobile', () => ({
+  useIsMobile: vi.fn(),
+}));
 
 const workspace: WorkspaceResponse = {
   id: '01KTESTWORKSPACEID0000000000000',
@@ -22,9 +27,12 @@ const workspace: WorkspaceResponse = {
   url: 'https://ws-01ktestworkspaceid0000000000000.simple-agent-manager.org',
 };
 
+const mockUseIsMobile = vi.mocked(useIsMobile);
+
 describe('WorkspaceCard', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockUseIsMobile.mockReturnValue(false);
   });
 
   it('opens the control plane workspace page (not the ws-* URL)', async () => {
@@ -60,5 +68,24 @@ describe('WorkspaceCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
 
     expect(screen.getByText('Workspace page')).toBeInTheDocument();
+  });
+
+  it('uses 56px touch targets for mobile actions', () => {
+    mockUseIsMobile.mockReturnValue(true);
+
+    render(
+      <MemoryRouter>
+        <WorkspaceCard workspace={workspace} onStop={() => undefined} />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByRole('button', { name: 'Open' })).toHaveStyle({
+      minHeight: '56px',
+      minWidth: '120px',
+    });
+    expect(screen.getByRole('button', { name: 'Stop' })).toHaveStyle({
+      minHeight: '56px',
+      minWidth: '120px',
+    });
   });
 });
