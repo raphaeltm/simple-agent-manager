@@ -15,6 +15,17 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/lib/api', () => ({
+  ApiClientError: class ApiClientError extends Error {
+    code: string;
+    status: number;
+
+    constructor(code: string, message: string, status: number) {
+      super(message);
+      this.code = code;
+      this.status = status;
+      this.name = 'ApiClientError';
+    }
+  },
   getWorkspace: mocks.getWorkspace,
   getTerminalToken: mocks.getTerminalToken,
   stopWorkspace: mocks.stopWorkspace,
@@ -203,6 +214,31 @@ describe('Workspace page', () => {
       expect(probe.textContent).toContain('/workspaces/ws-123?');
       expect(probe.textContent).toContain('view=conversation');
       expect(probe.textContent).toContain('sessionId=sess-1');
+    });
+  });
+
+  it('shows retry action with friendly terminal connection error messaging', async () => {
+    mocks.getTerminalToken.mockRejectedValueOnce(new Error('Workspace not found or has no VM IP'));
+    mocks.getTerminalToken.mockResolvedValueOnce({
+      token: 'tok_retry',
+      expiresAt: '2026-02-08T01:00:00.000Z',
+      workspaceUrl: 'https://ws-ws-123.example.com',
+    });
+
+    renderWorkspace('/workspaces/ws-123');
+
+    expect(await screen.findByText('Connection Failed')).toBeInTheDocument();
+    expect(screen.getByText('Unable to establish terminal connection right now. Please retry.')).toBeInTheDocument();
+    expect(screen.queryByText('Workspace not found or has no VM IP')).not.toBeInTheDocument();
+
+    const callsBeforeRetry = mocks.getTerminalToken.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Connection' }));
+
+    await waitFor(() => {
+      expect(mocks.getTerminalToken.mock.calls.length).toBeGreaterThan(callsBeforeRetry);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal')).toBeInTheDocument();
     });
   });
 
