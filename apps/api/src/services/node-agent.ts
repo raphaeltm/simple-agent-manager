@@ -48,25 +48,37 @@ export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<v
     const remainingMs = deadline - Date.now();
     const requestTimeoutMs = Math.max(1, Math.min(pollIntervalMs, remainingMs));
     const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => controller.abort(), requestTimeoutMs);
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
     try {
-      const response = await fetch(healthUrl, { method: 'GET', signal: controller.signal });
+      const requestTimeoutError = `request timeout after ${requestTimeoutMs}ms`;
+      const response = await Promise.race([
+        fetch(healthUrl, { method: 'GET', signal: controller.signal }),
+        new Promise<Response>((_resolve, reject) => {
+          timeoutHandle = setTimeout(() => {
+            controller.abort();
+            reject(new Error(requestTimeoutError));
+          }, requestTimeoutMs);
+        }),
+      ]);
       if (response.ok) {
-        clearTimeout(timeoutHandle);
         return;
       }
 
       const responseBody = await response.text().catch(() => '');
       lastError = `HTTP ${response.status}${responseBody ? ` ${responseBody}` : ''}`.trim();
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
+      if (err instanceof Error && err.message.startsWith('request timeout after ')) {
+        lastError = err.message;
+      } else if (err instanceof Error && err.name === 'AbortError') {
         lastError = `request timeout after ${requestTimeoutMs}ms`;
       } else {
         lastError = err instanceof Error ? err.message : String(err);
       }
     } finally {
-      clearTimeout(timeoutHandle);
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
     }
 
     const nextRemainingMs = deadline - Date.now();
