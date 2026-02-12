@@ -12,6 +12,7 @@ import { MobileBottomBar } from '../components/MobileBottomBar';
 import { MobileOverflowMenu } from '../components/MobileOverflowMenu';
 import { useIsMobile } from '../hooks/useIsMobile';
 import {
+  ApiClientError,
   createAgentSession,
   getTerminalToken,
   getWorkspace,
@@ -62,6 +63,22 @@ function agentStatusDotStyle(state: AcpSessionState): React.CSSProperties {
   }
 }
 
+function terminalConnectionErrorMessage(err: unknown): string {
+  if (err instanceof ApiClientError) {
+    if (err.status === 401 || err.status === 403) {
+      return 'Your session expired. Sign in again, then retry the terminal connection.';
+    }
+    if (err.status === 404) {
+      return 'Workspace connection endpoint is not ready yet. Retry in a few seconds.';
+    }
+    if (err.status >= 500) {
+      return 'Terminal service is temporarily unavailable. Please retry.';
+    }
+  }
+
+  return 'Unable to establish terminal connection right now. Please retry.';
+}
+
 /** View modes */
 type ViewMode = 'terminal' | 'conversation';
 
@@ -83,6 +100,7 @@ export function Workspace() {
   const [actionLoading, setActionLoading] = useState(false);
   const [wsUrl, setWsUrl] = useState<string | null>(null);
   const [terminalLoading, setTerminalLoading] = useState(false);
+  const [terminalError, setTerminalError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(viewOverride ?? 'terminal');
   const [agentSheetOpen, setAgentSheetOpen] = useState(false);
   const [workspaceEvents, setWorkspaceEvents] = useState<Event[]>([]);
@@ -148,31 +166,38 @@ export function Workspace() {
     return () => clearInterval(interval);
   }, [id, workspace?.status, loadWorkspaceState]);
 
+  const connectTerminal = useCallback(async () => {
+    if (!id || !workspace?.url || workspace.status !== 'running') {
+      return;
+    }
+
+    try {
+      setTerminalLoading(true);
+      setTerminalError(null);
+
+      const { token } = await getTerminalToken(id);
+      const url = new URL(workspace.url);
+      const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsPath = featureFlags.multiTerminal ? '/terminal/ws/multi' : '/terminal/ws';
+      setWsUrl(`${wsProtocol}//${url.host}${wsPath}?token=${encodeURIComponent(token)}`);
+    } catch (err) {
+      setWsUrl(null);
+      setTerminalError(terminalConnectionErrorMessage(err));
+    } finally {
+      setTerminalLoading(false);
+    }
+  }, [id, workspace?.status, workspace?.url, featureFlags.multiTerminal]);
+
   // Fetch terminal token and build WebSocket URL
   useEffect(() => {
     if (!id || !workspace || workspace.status !== 'running' || !workspace.url) {
       setWsUrl(null);
+      setTerminalError(null);
       return;
     }
 
-    const fetchTerminalToken = async () => {
-      if (!workspace.url) return;
-      try {
-        setTerminalLoading(true);
-        const { token } = await getTerminalToken(id);
-        const url = new URL(workspace.url);
-        const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsPath = featureFlags.multiTerminal ? '/terminal/ws/multi' : '/terminal/ws';
-        setWsUrl(`${wsProtocol}//${url.host}${wsPath}?token=${encodeURIComponent(token)}`);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to get terminal token');
-      } finally {
-        setTerminalLoading(false);
-      }
-    };
-
-    fetchTerminalToken();
-  }, [id, workspace?.status, workspace?.url, featureFlags.multiTerminal]);
+    void connectTerminal();
+  }, [id, workspace?.status, workspace?.url, connectTerminal]);
 
   // Build ACP WebSocket URL
   useEffect(() => {
@@ -352,7 +377,21 @@ export function Workspace() {
         ) : terminalLoading ? (
           <CenteredStatus color="#60a5fa" title="Connecting to Terminal..." subtitle="Establishing secure connection" loading />
         ) : (
-          <CenteredStatus color="#f87171" title="Connection Failed" subtitle="Unable to connect to terminal" />
+          <CenteredStatus
+            color="#f87171"
+            title="Connection Failed"
+            subtitle={terminalError || 'Unable to connect to terminal'}
+            action={(
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => { void connectTerminal(); }}
+                disabled={terminalLoading}
+              >
+                Retry Connection
+              </Button>
+            )}
+          />
         )
       ) : workspace?.status === 'creating' ? (
         <BootProgress logs={workspace.bootLogs} />
