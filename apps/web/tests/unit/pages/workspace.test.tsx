@@ -247,6 +247,32 @@ describe('Workspace page', () => {
     });
   });
 
+  it('renders unified session tabs and switches to chat tab selection', async () => {
+    mocks.listAgentSessions.mockResolvedValue([
+      {
+        id: 'sess-tab',
+        workspaceId: 'ws-123',
+        status: 'running',
+        label: 'Claude Code Chat',
+        createdAt: '2026-02-08T00:10:00.000Z',
+        updatedAt: '2026-02-08T00:10:00.000Z',
+      },
+    ]);
+
+    renderWorkspace('/workspaces/ws-123', true);
+
+    expect(await screen.findByRole('tablist', { name: 'Workspace sessions' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Chat tab: Claude Code Chat' }));
+
+    await waitFor(() => {
+      const probe = screen.getByTestId('location-probe');
+      expect(probe.textContent).toContain('/workspaces/ws-123?');
+      expect(probe.textContent).toContain('view=conversation');
+      expect(probe.textContent).toContain('sessionId=sess-tab');
+    });
+  });
+
   it('adds takeover flag to ACP websocket URL when a sessionId is selected', async () => {
     renderWorkspace('/workspaces/ws-123?view=conversation&sessionId=sess-1');
 
