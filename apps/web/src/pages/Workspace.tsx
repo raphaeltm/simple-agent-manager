@@ -615,7 +615,11 @@ export function Workspace() {
       return;
     }
 
-    const preferredAgent = preferredAgentsBySession[activeChatSessionId];
+    // Use explicit preference if set, otherwise fall back to first configured agent
+    // (handles page reload where preferredAgentsBySession state is lost)
+    const preferredAgent =
+      preferredAgentsBySession[activeChatSessionId] ||
+      (configuredAgents.length > 0 ? configuredAgents[0]!.id : null);
     if (!preferredAgent) {
       return;
     }
@@ -637,6 +641,7 @@ export function Workspace() {
     acpState,
     acpSession.switchAgent,
     activeChatSessionId,
+    configuredAgents,
     preferredAgentsBySession,
     viewMode,
   ]);
