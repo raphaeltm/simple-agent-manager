@@ -784,6 +784,9 @@ See `apps/api/.env.example`:
 - Cloudflare D1 (SQLite) for app state; Cloudflare KV for bootstrap tokens and boot logs; Cloudflare R2 for Node Agent binaries (014-multi-workspace-nodes)
 
 ## Recent Changes
+- 014-multi-workspace-nodes: Node-mode `PrepareWorkspace` now calls `POST /api/workspaces/:id/ready` after successful provisioning (same as bootstrap `Run`), preventing workspaces from getting stuck in `creating` after successful devcontainer setup
+- 014-multi-workspace-nodes: VM Agent now normalizes workspace bind-mount permissions (`chmod -R a+rwX`) before `devcontainer up` so repo `postCreateCommand` steps can write files (for example `npm install` updating lockfiles) when container lifecycle commands run as non-root users
+- 014-multi-workspace-nodes: Unified workspace session tabs were refined to match the existing integrated terminal tab style and now support tab-close actions (`terminal` close for extra terminals, `chat` close to stop session) while keeping the `+` dropdown for terminal or agent-specific chat creation
 - 014-multi-workspace-nodes: Default fallback devcontainer image for repos without a `.devcontainer` config is now `mcr.microsoft.com/devcontainers/base:ubuntu` (instead of `.../universal:2`) to reduce bootstrap resource pressure and avoid frequent `devcontainer up ... signal: killed` failures on modest nodes
 - 014-multi-workspace-nodes: Node `ready` callbacks now dispatch queued `creating` workspaces on that node, so auto-created-node workspace requests are not stranded when long node bootstrap work outlives the original create-request background window
 - 014-multi-workspace-nodes: VM Agent workspace create/restart now runs provisioning asynchronously and final state is callback-driven (`/ready` or `/provisioning-failed`) instead of blocking control-plane dispatch requests on full devcontainer setup duration
