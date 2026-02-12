@@ -52,8 +52,9 @@ terminalRoutes.post('/token', async (c) => {
   // Generate the terminal token
   const { token, expiresAt } = await signTerminalToken(userId, body.workspaceId, c.env);
 
-  // Construct workspace URL from vmIp
-  const workspaceUrl = ws.vmIp ? `https://ws-${ws.id}.${c.env.BASE_DOMAIN}` : undefined;
+  // Canonical workspace URL is derived from workspace ID and base domain.
+  // In multi-workspace-per-node mode, routing no longer depends on vmIp in this record.
+  const workspaceUrl = `https://ws-${ws.id}.${c.env.BASE_DOMAIN}`;
 
   const response: TerminalTokenResponse = {
     token,

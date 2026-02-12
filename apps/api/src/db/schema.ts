@@ -124,12 +124,38 @@ export const githubInstallations = sqliteTable('github_installations', {
 });
 
 // =============================================================================
+// Nodes
+// =============================================================================
+export const nodes = sqliteTable('nodes', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  status: text('status').notNull().default('pending'),
+  vmSize: text('vm_size').notNull().default('medium'),
+  vmLocation: text('vm_location').notNull().default('nbg1'),
+  providerInstanceId: text('provider_instance_id'),
+  ipAddress: text('ip_address'),
+  backendDnsRecordId: text('backend_dns_record_id'),
+  lastHeartbeatAt: text('last_heartbeat_at'),
+  healthStatus: text('health_status').notNull().default('unhealthy'),
+  heartbeatStaleAfterSeconds: integer('heartbeat_stale_after_seconds').notNull().default(180),
+  errorMessage: text('error_message'),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  userIdIdx: index('idx_nodes_user_id').on(table.userId),
+}));
+
+// =============================================================================
 // Workspaces
 // =============================================================================
 export const workspaces = sqliteTable('workspaces', {
   id: text('id').primaryKey(),
+  nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   installationId: text('installation_id').references(() => githubInstallations.id),
+  displayName: text('display_name'),
+  normalizedDisplayName: text('normalized_display_name'),
   name: text('name').notNull(),
   repository: text('repository').notNull(),
   branch: text('branch').notNull().default('main'),
@@ -145,7 +171,31 @@ export const workspaces = sqliteTable('workspaces', {
   idleTimeoutSeconds: integer('idle_timeout_seconds').notNull().default(1800), // Default 30 minutes
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+}, (table) => ({
+  userIdIdx: index('idx_workspaces_user_id').on(table.userId),
+  nodeIdIdx: index('idx_workspaces_node_id').on(table.nodeId),
+  nodeDisplayNameUnique: uniqueIndex('idx_workspaces_node_display_name_unique')
+    .on(table.nodeId, table.normalizedDisplayName)
+    .where(sql`node_id is not null and normalized_display_name is not null`),
+}));
+
+// =============================================================================
+// Agent Sessions
+// =============================================================================
+export const agentSessions = sqliteTable('agent_sessions', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('running'),
+  label: text('label'),
+  stoppedAt: text('stopped_at'),
+  errorMessage: text('error_message'),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  workspaceIdIdx: index('idx_agent_sessions_workspace_id').on(table.workspaceId),
+  userIdIdx: index('idx_agent_sessions_user_id').on(table.userId),
+}));
 
 // =============================================================================
 // UI Governance
@@ -277,8 +327,12 @@ export type Credential = typeof credentials.$inferSelect;
 export type NewCredential = typeof credentials.$inferInsert;
 export type GitHubInstallation = typeof githubInstallations.$inferSelect;
 export type NewGitHubInstallation = typeof githubInstallations.$inferInsert;
+export type Node = typeof nodes.$inferSelect;
+export type NewNode = typeof nodes.$inferInsert;
 export type Workspace = typeof workspaces.$inferSelect;
 export type NewWorkspace = typeof workspaces.$inferInsert;
+export type AgentSession = typeof agentSessions.$inferSelect;
+export type NewAgentSession = typeof agentSessions.$inferInsert;
 export type UIStandard = typeof uiStandards.$inferSelect;
 export type NewUIStandard = typeof uiStandards.$inferInsert;
 export type ThemeToken = typeof themeTokens.$inferSelect;

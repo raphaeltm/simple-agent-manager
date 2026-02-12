@@ -1,64 +1,47 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
+import { and, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and, desc } from 'drizzle-orm';
 import { ulid } from '../lib/ulid';
 import type { Env } from '../index';
-import { requireAuth, getAuth, getUserId } from '../middleware/auth';
+import { getAuth, getUserId, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { encrypt, decrypt } from '../services/encryption';
-import { createServer, deleteServer, SERVER_TYPES } from '../services/hetzner';
-import { deleteDNSRecord, cleanupWorkspaceDNSRecords, createBackendDNSRecord, getWorkspaceUrl } from '../services/dns';
-import { getInstallationToken } from '../services/github-app';
-import { generateBootstrapToken, storeBootstrapToken } from '../services/bootstrap';
-import { signCallbackToken, verifyCallbackToken } from '../services/jwt';
-import { generateCloudInit, validateCloudInitSize } from '@workspace/cloud-init';
 import * as schema from '../db/schema';
 import type {
-  WorkspaceResponse,
+  AgentSession,
+  BootLogEntry,
+  BootstrapTokenData,
+  CreateAgentSessionRequest,
   CreateWorkspaceRequest,
+  Event,
   HeartbeatRequest,
   HeartbeatResponse,
-  BootstrapTokenData,
-  BootLogEntry,
+  UpdateWorkspaceRequest,
+  WorkspaceResponse,
 } from '@simple-agent-manager/shared';
-import { MAX_WORKSPACES_PER_USER, HETZNER_IMAGE, isValidAgentType } from '@simple-agent-manager/shared';
+import { getWorkspaceUrl } from '../services/dns';
+import { getRuntimeLimits } from '../services/limits';
+import { resolveUniqueWorkspaceDisplayName } from '../services/workspace-names';
+import { createNodeRecord, provisionNode } from '../services/nodes';
+import {
+  createAgentSessionOnNode,
+  createWorkspaceOnNode,
+  deleteWorkspaceOnNode,
+  listWorkspaceEvents as fetchWorkspaceEvents,
+  restartWorkspaceOnNode,
+  stopAgentSessionOnNode,
+  stopWorkspaceOnNode,
+} from '../services/node-agent';
+import { verifyCallbackToken } from '../services/jwt';
+import { recordNodeRoutingMetric } from '../services/telemetry';
 import { getDecryptedAgentKey } from './credentials';
-import { getBootLogs, appendBootLog, writeBootLogs } from '../services/boot-log';
-
-/**
- * Get idle timeout in seconds from environment.
- * Default: 30 minutes (1800 seconds)
- * Configurable via IDLE_TIMEOUT_SECONDS env var per constitution principle XI.
- */
-function getIdleTimeoutSeconds(env: Env): number {
-  const envValue = env.IDLE_TIMEOUT_SECONDS;
-  return envValue ? parseInt(envValue, 10) : 30 * 60;
-}
-
-function normalizeGitUserEmail(email: string | null | undefined): string | null {
-  const trimmed = email?.trim();
-  return trimmed ? trimmed : null;
-}
-
-function deriveGitUserName(name: string | null | undefined, email: string | null | undefined): string | null {
-  const trimmedName = name?.trim();
-  if (trimmedName) {
-    return trimmedName;
-  }
-  const trimmedEmail = normalizeGitUserEmail(email);
-  if (!trimmedEmail) {
-    return null;
-  }
-  const localPart = trimmedEmail.split('@')[0]?.trim();
-  return localPart || null;
-}
+import { getInstallationToken } from '../services/github-app';
+import { appendBootLog, getBootLogs } from '../services/boot-log';
 
 const workspacesRoutes = new Hono<{ Bindings: Env }>();
 
-// Apply auth middleware to all routes except VM Agent callbacks
 workspacesRoutes.use('/*', async (c, next) => {
   const path = c.req.path;
-  // Skip session auth for VM Agent callback endpoints (they use JWT Bearer auth)
   if (
     path.endsWith('/ready') ||
     path.endsWith('/heartbeat') ||
@@ -68,38 +51,21 @@ workspacesRoutes.use('/*', async (c, next) => {
   ) {
     return next();
   }
+
   return requireAuth()(c, next);
 });
 
-/**
- * GET /api/workspaces - List user's workspaces
- */
-workspacesRoutes.get('/', async (c) => {
-  const userId = getUserId(c);
-  const status = c.req.query('status');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  const query = db
-    .select()
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.userId, userId))
-    .orderBy(desc(schema.workspaces.createdAt));
-
-  const workspaces = await query;
-
-  // Filter by status if provided
-  const filtered = status
-    ? workspaces.filter((w) => w.status === status)
-    : workspaces;
-
-  const response: WorkspaceResponse[] = filtered.map((ws) => ({
+function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): WorkspaceResponse {
+  return {
     id: ws.id,
+    nodeId: ws.nodeId ?? undefined,
+    displayName: ws.displayName ?? ws.name,
     name: ws.name,
     repository: ws.repository,
     branch: ws.branch,
-    status: ws.status as any,
-    vmSize: ws.vmSize as any,
-    vmLocation: ws.vmLocation as any,
+    status: ws.status as WorkspaceResponse['status'],
+    vmSize: ws.vmSize as WorkspaceResponse['vmSize'],
+    vmLocation: ws.vmLocation as WorkspaceResponse['vmLocation'],
     vmIp: ws.vmIp,
     lastActivityAt: ws.lastActivityAt,
     errorMessage: ws.errorMessage,
@@ -107,21 +73,38 @@ workspacesRoutes.get('/', async (c) => {
     idleTimeoutSeconds: ws.idleTimeoutSeconds,
     createdAt: ws.createdAt,
     updatedAt: ws.updatedAt,
-    url: ws.vmIp ? getWorkspaceUrl(ws.id, c.env.BASE_DOMAIN) : undefined,
-  }));
+    url: getWorkspaceUrl(ws.id, baseDomain),
+  };
+}
 
-  return c.json(response);
-});
+function toAgentSessionResponse(session: schema.AgentSession): AgentSession {
+  return {
+    id: session.id,
+    workspaceId: session.workspaceId,
+    status: session.status as AgentSession['status'],
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    stoppedAt: session.stoppedAt,
+    errorMessage: session.errorMessage,
+    label: session.label,
+  };
+}
 
-/**
- * GET /api/workspaces/:id - Get single workspace
- */
-workspacesRoutes.get('/:id', async (c) => {
-  const userId = getUserId(c);
-  const workspaceId = c.req.param('id');
-  const db = drizzle(c.env.DATABASE, { schema });
+function getIdleTimeoutSeconds(env: Env): number {
+  const value = env.IDLE_TIMEOUT_SECONDS;
+  const parsed = value ? Number.parseInt(value, 10) : 30 * 60;
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 30 * 60;
+  }
+  return parsed;
+}
 
-  const workspaces = await db
+async function getOwnedWorkspace(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspaceId: string,
+  userId: string
+): Promise<schema.Workspace> {
+  const rows = await db
     .select()
     .from(schema.workspaces)
     .where(
@@ -132,84 +115,234 @@ workspacesRoutes.get('/:id', async (c) => {
     )
     .limit(1);
 
-  const ws = workspaces[0];
-  if (!ws) {
+  const workspace = rows[0];
+  if (!workspace) {
     throw errors.notFound('Workspace');
   }
 
-  const response: WorkspaceResponse = {
-    id: ws.id,
-    name: ws.name,
-    repository: ws.repository,
-    branch: ws.branch,
-    status: ws.status as any,
-    vmSize: ws.vmSize as any,
-    vmLocation: ws.vmLocation as any,
-    vmIp: ws.vmIp,
-    lastActivityAt: ws.lastActivityAt,
-    errorMessage: ws.errorMessage,
-    shutdownDeadline: ws.shutdownDeadline,
-    idleTimeoutSeconds: ws.idleTimeoutSeconds,
-    createdAt: ws.createdAt,
-    updatedAt: ws.updatedAt,
-    url: ws.vmIp ? getWorkspaceUrl(ws.id, c.env.BASE_DOMAIN) : undefined,
-  };
+  return workspace;
+}
 
-  // Include boot logs when workspace is being created (for progress UI)
-  if (ws.status === 'creating') {
-    response.bootLogs = await getBootLogs(c.env.KV, workspaceId);
+async function getOwnedNode(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  nodeId: string,
+  userId: string
+): Promise<schema.Node> {
+  const rows = await db
+    .select()
+    .from(schema.nodes)
+    .where(
+      and(
+        eq(schema.nodes.id, nodeId),
+        eq(schema.nodes.userId, userId)
+      )
+    )
+    .limit(1);
+
+  const node = rows[0];
+  if (!node) {
+    throw errors.notFound('Node');
+  }
+
+  return node;
+}
+
+function assertNodeOperational(node: schema.Node, action: string): void {
+  if (node.status !== 'running') {
+    throw errors.badRequest(`Cannot ${action}: node is ${node.status}`);
+  }
+  if (node.healthStatus === 'unhealthy') {
+    throw errors.badRequest(`Cannot ${action}: node is unhealthy`);
+  }
+}
+
+async function verifyWorkspaceCallbackAuth(
+  c: Context<{ Bindings: Env }>,
+  workspaceId: string
+): Promise<void> {
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    throw errors.unauthorized('Missing or invalid Authorization header');
+  }
+
+  const token = authHeader.slice(7);
+  const payload = await verifyCallbackToken(token, c.env);
+  if (payload.workspace !== workspaceId) {
+    throw errors.forbidden('Token workspace mismatch');
+  }
+}
+
+async function scheduleWorkspaceCreateOnNode(
+  env: Env,
+  workspaceId: string,
+  nodeId: string,
+  userId: string,
+  repository: string,
+  branch: string
+): Promise<void> {
+  const db = drizzle(env.DATABASE, { schema });
+  const now = new Date().toISOString();
+
+  await db
+    .update(schema.workspaces)
+    .set({ status: 'creating', errorMessage: null, updatedAt: now })
+    .where(eq(schema.workspaces.id, workspaceId));
+
+  try {
+    await createWorkspaceOnNode(nodeId, env, userId, {
+      workspaceId,
+      repository,
+      branch,
+    });
+
+    await db
+      .update(schema.workspaces)
+      .set({
+        status: 'running',
+        lastActivityAt: new Date().toISOString(),
+        errorMessage: null,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.workspaces.id, workspaceId));
+  } catch (err) {
+    await db
+      .update(schema.workspaces)
+      .set({
+        status: 'error',
+        errorMessage: err instanceof Error ? err.message : 'Failed to create workspace on node',
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.workspaces.id, workspaceId));
+  }
+}
+
+workspacesRoutes.get('/', async (c) => {
+  const userId = getUserId(c);
+  const status = c.req.query('status');
+  const nodeId = c.req.query('nodeId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  const rows = await db
+    .select()
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.userId, userId))
+    .orderBy(desc(schema.workspaces.createdAt));
+
+  const filtered = rows.filter((workspace) => {
+    if (status && workspace.status !== status) {
+      return false;
+    }
+    if (nodeId && workspace.nodeId !== nodeId) {
+      return false;
+    }
+    return true;
+  });
+
+  return c.json(filtered.map((workspace) => toWorkspaceResponse(workspace, c.env.BASE_DOMAIN)));
+});
+
+workspacesRoutes.get('/:id/events', async (c) => {
+  const userId = getUserId(c);
+  const workspaceId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
+  const limit = Number.parseInt(c.req.query('limit') ?? '100', 10);
+  const cursor = c.req.query('cursor');
+
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  if (!workspace.nodeId) {
+    return c.json({ events: [] as Event[], nextCursor: null });
+  }
+
+  try {
+    const result = await fetchWorkspaceEvents(
+      workspace.nodeId,
+      workspace.id,
+      c.env,
+      userId,
+      limit,
+      cursor
+    ) as { events?: Event[]; nextCursor?: string | null };
+
+    return c.json({
+      events: result.events ?? [],
+      nextCursor: result.nextCursor ?? null,
+    });
+  } catch {
+    return c.json({ events: [] as Event[], nextCursor: null });
+  }
+});
+
+workspacesRoutes.get('/:id', async (c) => {
+  const userId = getUserId(c);
+  const workspaceId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  const response = toWorkspaceResponse(workspace, c.env.BASE_DOMAIN);
+
+  if (workspace.status === 'creating') {
+    response.bootLogs = await getBootLogs(c.env.KV, workspace.id);
   }
 
   return c.json(response);
 });
 
-/**
- * POST /api/workspaces - Create a new workspace
- */
+workspacesRoutes.patch('/:id', async (c) => {
+  const userId = getUserId(c);
+  const workspaceId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
+  const body = await c.req.json<UpdateWorkspaceRequest>();
+
+  if (!body.displayName?.trim()) {
+    throw errors.badRequest('displayName is required');
+  }
+
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  const nodeScopeId = workspace.nodeId ?? workspace.id;
+  const uniqueName = await resolveUniqueWorkspaceDisplayName(
+    db,
+    nodeScopeId,
+    body.displayName,
+    workspace.id
+  );
+
+  await db
+    .update(schema.workspaces)
+    .set({
+      nodeId: nodeScopeId,
+      displayName: uniqueName.displayName,
+      normalizedDisplayName: uniqueName.normalizedDisplayName,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.workspaces.id, workspace.id));
+
+  const updated = await getOwnedWorkspace(db, workspace.id, userId);
+  return c.json(toWorkspaceResponse(updated, c.env.BASE_DOMAIN));
+});
+
 workspacesRoutes.post('/', async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
-  const body = await c.req.json<CreateWorkspaceRequest>();
   const db = drizzle(c.env.DATABASE, { schema });
+  const body = await c.req.json<CreateWorkspaceRequest>();
   const now = new Date().toISOString();
+  const limits = getRuntimeLimits(c.env);
+  const normalizedRepository = body.repository?.trim().toLowerCase() || null;
 
-  // Validate request
-  if (!body.name || !body.repository || !body.installationId) {
-    throw errors.badRequest('Name, repository, and installationId are required');
+  if (!body.name?.trim() || !body.repository?.trim() || !body.installationId) {
+    throw errors.badRequest('name, repository, and installationId are required');
   }
 
-  // Check workspace limit
-  const existingWorkspaces = await db
-    .select()
+  const userWorkspaceRows = await db
+    .select({ id: schema.workspaces.id })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.userId, userId));
-
-  if (existingWorkspaces.length >= MAX_WORKSPACES_PER_USER) {
-    throw errors.badRequest(`Maximum ${MAX_WORKSPACES_PER_USER} workspaces allowed`);
+  if (userWorkspaceRows.length >= limits.maxWorkspacesPerUser) {
+    throw errors.badRequest(`Maximum ${limits.maxWorkspacesPerUser} workspaces allowed`);
   }
 
-  // Get Hetzner credential
-  const creds = await db
-    .select()
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.provider, 'hetzner')
-      )
-    )
-    .limit(1);
-
-  const cred = creds[0];
-  if (!cred) {
-    throw errors.badRequest('Hetzner account not connected');
-  }
-
-  const hetznerToken = await decrypt(cred.encryptedToken, cred.iv, c.env.ENCRYPTION_KEY);
-
-  // Get GitHub installation
-  const installations = await db
-    .select()
+  const installationRows = await db
+    .select({ id: schema.githubInstallations.id })
     .from(schema.githubInstallations)
     .where(
       and(
@@ -218,29 +351,77 @@ workspacesRoutes.post('/', async (c) => {
       )
     )
     .limit(1);
-
-  const installation = installations[0];
-  if (!installation) {
+  if (!installationRows[0]) {
     throw errors.badRequest('GitHub installation not found');
   }
 
-  // Create workspace record
-  const workspaceId = ulid();
-  const vmSize = body.vmSize || 'medium';
-  const vmLocation = body.vmLocation || 'nbg1';
-  const branch = body.branch || 'main';
+  const vmSize = body.vmSize ?? 'medium';
+  const vmLocation = body.vmLocation ?? 'nbg1';
+  const branch = body.branch?.trim() || 'main';
 
-  // Validate idle timeout (5 minutes to 24 hours)
-  const idleTimeoutSeconds = body.idleTimeoutSeconds ?? getIdleTimeoutSeconds(c.env);
-  if (idleTimeoutSeconds !== 0 && (idleTimeoutSeconds < 300 || idleTimeoutSeconds > 86400)) {
-    throw errors.badRequest('Idle timeout must be between 5 minutes and 24 hours, or 0 to disable');
+  let nodeId = body.nodeId;
+  let mustProvisionNode = false;
+  const userNodeRows = await db
+    .select({ id: schema.nodes.id })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.userId, userId));
+
+  if (nodeId) {
+    const node = await getOwnedNode(db, nodeId, userId);
+    if (node.status === 'stopped' || node.healthStatus === 'unhealthy') {
+      throw errors.badRequest('Selected node is not ready for workspace creation');
+    }
+  } else {
+    if (userNodeRows.length >= limits.maxNodesPerUser) {
+      throw errors.badRequest(`Maximum ${limits.maxNodesPerUser} nodes allowed`);
+    }
+
+    const createdNode = await createNodeRecord(c.env, {
+      userId,
+      name: `${body.name.trim()} Node`,
+      vmSize,
+      vmLocation,
+      heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
+    });
+
+    nodeId = createdNode.id;
+    mustProvisionNode = true;
   }
+  const targetNodeId = nodeId;
+  if (!targetNodeId) {
+    throw errors.internal('Failed to determine target node');
+  }
+
+  const nodeWorkspaceRows = await db
+    .select({ id: schema.workspaces.id })
+    .from(schema.workspaces)
+    .where(
+      and(
+        eq(schema.workspaces.userId, userId),
+        eq(schema.workspaces.nodeId, targetNodeId)
+      )
+    );
+
+  if (nodeWorkspaceRows.length >= limits.maxWorkspacesPerNode) {
+    throw errors.badRequest(`Maximum ${limits.maxWorkspacesPerNode} workspaces allowed per node`);
+  }
+
+  const uniqueName = await resolveUniqueWorkspaceDisplayName(db, targetNodeId, body.name);
+  const idleTimeoutSeconds = body.idleTimeoutSeconds ?? getIdleTimeoutSeconds(c.env);
+  if (idleTimeoutSeconds < 0 || idleTimeoutSeconds > 86400) {
+    throw errors.badRequest('idleTimeoutSeconds must be between 0 and 86400');
+  }
+
+  const workspaceId = ulid();
 
   await db.insert(schema.workspaces).values({
     id: workspaceId,
+    nodeId: targetNodeId,
     userId,
     installationId: body.installationId,
     name: body.name,
+    displayName: uniqueName.displayName,
+    normalizedDisplayName: uniqueName.normalizedDisplayName,
     repository: body.repository,
     branch,
     status: 'creating',
@@ -251,669 +432,458 @@ workspacesRoutes.post('/', async (c) => {
     updatedAt: now,
   });
 
-  // Start provisioning in background
+  const nodeCountForUser = userNodeRows.length + (mustProvisionNode ? 1 : 0);
+  const workspaceCountForUser = userWorkspaceRows.length + 1;
+  const reusedExistingNode = !mustProvisionNode;
+  const workspaceCountOnNodeBefore = nodeWorkspaceRows.length;
+
+  recordNodeRoutingMetric({
+    metric: 'sc_002_workspace_creation_flow',
+    nodeId: targetNodeId,
+    workspaceId,
+    userId,
+    repository: normalizedRepository,
+    reusedExistingNode,
+    workspaceCountOnNodeBefore,
+    nodeCountForUser,
+    workspaceCountForUser,
+  }, c.env);
+
+  recordNodeRoutingMetric({
+    metric: 'sc_006_node_efficiency',
+    nodeId: targetNodeId,
+    workspaceId,
+    userId,
+    repository: normalizedRepository,
+    reusedExistingNode,
+    nodeCountForUser,
+    workspaceCountForUser,
+  }, c.env);
+
   c.executionCtx.waitUntil(
-    provisionWorkspace(
-      workspaceId,
-      {
-        name: body.name,
-        repository: body.repository,
-        branch,
-        vmSize,
-        vmLocation,
-        installationId: installation.installationId,
-        idleTimeoutSeconds,
-        userName: auth.user.name,
-        userEmail: auth.user.email,
-      },
-      hetznerToken,
-      { encryptedToken: cred.encryptedToken, iv: cred.iv },
-      c.env,
-      db
-    )
+    (async () => {
+      if (mustProvisionNode) {
+        await provisionNode(targetNodeId, c.env);
+      }
+
+      await scheduleWorkspaceCreateOnNode(
+        c.env,
+        workspaceId,
+        targetNodeId,
+        userId,
+        body.repository,
+        branch
+      );
+    })()
   );
 
-  const response: WorkspaceResponse = {
-    id: workspaceId,
-    name: body.name,
-    repository: body.repository,
-    branch,
-    status: 'creating',
-    vmSize: vmSize as any,
-    vmLocation: vmLocation as any,
-    vmIp: null,
-    lastActivityAt: null,
-    errorMessage: null,
-    shutdownDeadline: null,
-    idleTimeoutSeconds,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  return c.json(response, 201);
+  const created = await getOwnedWorkspace(db, workspaceId, userId);
+  return c.json(toWorkspaceResponse(created, c.env.BASE_DOMAIN), 201);
 });
 
-/**
- * POST /api/workspaces/:id/stop - Stop a workspace
- */
 workspacesRoutes.post('/:id/stop', async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
-  const now = new Date().toISOString();
 
-  const workspaces = await db
-    .select()
-    .from(schema.workspaces)
-    .where(
-      and(
-        eq(schema.workspaces.id, workspaceId),
-        eq(schema.workspaces.userId, userId)
-      )
-    )
-    .limit(1);
-
-  const workspace = workspaces[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  if (!workspace.nodeId) {
+    throw errors.badRequest('Workspace is not attached to a node');
   }
-
   if (workspace.status !== 'running') {
-    throw errors.badRequest('Workspace is not running');
+    throw errors.badRequest(`Workspace is ${workspace.status}`);
   }
 
-  // Update status
+  const node = await getOwnedNode(db, workspace.nodeId, userId);
+  assertNodeOperational(node, 'stop workspace');
+
   await db
     .update(schema.workspaces)
-    .set({ status: 'stopping', updatedAt: now })
-    .where(eq(schema.workspaces.id, workspaceId));
+    .set({ status: 'stopping', updatedAt: new Date().toISOString() })
+    .where(eq(schema.workspaces.id, workspace.id));
 
-  // Get Hetzner token and stop server
-  const creds = await db
-    .select()
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.provider, 'hetzner')
-      )
-    )
-    .limit(1);
-
-  const credStop = creds[0];
-  if (credStop && workspace.hetznerServerId) {
-    const hetznerToken = await decrypt(credStop.encryptedToken, credStop.iv, c.env.ENCRYPTION_KEY);
-
-    c.executionCtx.waitUntil(
-      (async () => {
-        try {
-          await deleteServer(hetznerToken, workspace.hetznerServerId!);
-          if (workspace.dnsRecordId) {
-            await deleteDNSRecord(workspace.dnsRecordId, c.env);
-          }
-          // Always clean up any stale DNS records by name as a fallback.
-          // This handles cases where dnsRecordId was lost or a record was
-          // created by old code that didn't store the ID properly.
-          await cleanupWorkspaceDNSRecords(workspaceId, c.env);
-          await db
-            .update(schema.workspaces)
-            .set({
-              status: 'stopped',
-              hetznerServerId: null,
-              vmIp: null,
-              dnsRecordId: null,
-              updatedAt: new Date().toISOString(),
-            })
-            .where(eq(schema.workspaces.id, workspaceId));
-        } catch (err) {
-          console.error('Failed to stop workspace:', err);
-          await db
-            .update(schema.workspaces)
-            .set({
-              status: 'error',
-              errorMessage: err instanceof Error ? err.message : 'Failed to stop workspace',
-              updatedAt: new Date().toISOString(),
-            })
-            .where(eq(schema.workspaces.id, workspaceId));
-        }
-      })()
-    );
-  }
+  c.executionCtx.waitUntil(
+    (async () => {
+      const innerDb = drizzle(c.env.DATABASE, { schema });
+      try {
+        await stopWorkspaceOnNode(workspace.nodeId!, workspace.id, c.env, userId);
+        await innerDb
+          .update(schema.workspaces)
+          .set({
+            status: 'stopped',
+            errorMessage: null,
+            shutdownDeadline: null,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(schema.workspaces.id, workspace.id));
+      } catch (err) {
+        await innerDb
+          .update(schema.workspaces)
+          .set({
+            status: 'error',
+            errorMessage: err instanceof Error ? err.message : 'Failed to stop workspace',
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(schema.workspaces.id, workspace.id));
+      }
+    })()
+  );
 
   return c.json({ status: 'stopping' });
 });
 
-/**
- * POST /api/workspaces/:id/restart - Restart a stopped workspace
- */
 workspacesRoutes.post('/:id/restart', async (c) => {
-  const auth = getAuth(c);
-  const userId = auth.user.id;
+  const userId = getUserId(c);
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const workspaces = await db
-    .select()
-    .from(schema.workspaces)
-    .where(
-      and(
-        eq(schema.workspaces.id, workspaceId),
-        eq(schema.workspaces.userId, userId)
-      )
-    )
-    .limit(1);
-
-  const workspaceRestart = workspaces[0];
-  if (!workspaceRestart) {
-    throw errors.notFound('Workspace');
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  if (!workspace.nodeId) {
+    throw errors.badRequest('Workspace is not attached to a node');
+  }
+  if (workspace.status !== 'stopped' && workspace.status !== 'error') {
+    throw errors.badRequest(`Workspace is ${workspace.status}`);
   }
 
-  if (workspaceRestart.status !== 'stopped') {
-    throw errors.badRequest('Workspace is not stopped');
-  }
+  const node = await getOwnedNode(db, workspace.nodeId, userId);
+  assertNodeOperational(node, 'restart workspace');
 
-  // Get Hetzner credential
-  const credsRestart = await db
-    .select()
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.provider, 'hetzner')
-      )
-    )
-    .limit(1);
-
-  const credRestart = credsRestart[0];
-  if (!credRestart) {
-    throw errors.badRequest('Hetzner account not connected');
-  }
-
-  const hetznerToken = await decrypt(credRestart.encryptedToken, credRestart.iv, c.env.ENCRYPTION_KEY);
-
-  // Get GitHub installation
-  const installationsRestart = await db
-    .select()
-    .from(schema.githubInstallations)
-    .where(eq(schema.githubInstallations.id, workspaceRestart.installationId!))
-    .limit(1);
-
-  const installRestart = installationsRestart[0];
-  if (!installRestart) {
-    throw errors.badRequest('GitHub installation not found');
-  }
-
-  // Update status
   await db
     .update(schema.workspaces)
-    .set({ status: 'creating', updatedAt: new Date().toISOString() })
-    .where(eq(schema.workspaces.id, workspaceId));
+    .set({ status: 'creating', errorMessage: null, updatedAt: new Date().toISOString() })
+    .where(eq(schema.workspaces.id, workspace.id));
 
-  // Start provisioning
   c.executionCtx.waitUntil(
-    provisionWorkspace(
-      workspaceId,
-      {
-        name: workspaceRestart.name,
-        repository: workspaceRestart.repository,
-        branch: workspaceRestart.branch,
-        vmSize: workspaceRestart.vmSize,
-        vmLocation: workspaceRestart.vmLocation,
-        installationId: installRestart.installationId,
-        idleTimeoutSeconds: workspaceRestart.idleTimeoutSeconds,
-        userName: auth.user.name,
-        userEmail: auth.user.email,
-      },
-      hetznerToken,
-      { encryptedToken: credRestart.encryptedToken, iv: credRestart.iv },
-      c.env,
-      db
-    )
+    (async () => {
+      const innerDb = drizzle(c.env.DATABASE, { schema });
+      try {
+        await restartWorkspaceOnNode(workspace.nodeId!, workspace.id, c.env, userId);
+        await innerDb
+          .update(schema.workspaces)
+          .set({
+            status: 'running',
+            errorMessage: null,
+            lastActivityAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(schema.workspaces.id, workspace.id));
+      } catch (err) {
+        await innerDb
+          .update(schema.workspaces)
+          .set({
+            status: 'error',
+            errorMessage: err instanceof Error ? err.message : 'Failed to restart workspace',
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(schema.workspaces.id, workspace.id));
+      }
+    })()
   );
 
   return c.json({ status: 'creating' });
 });
 
-/**
- * DELETE /api/workspaces/:id - Delete a workspace
- */
 workspacesRoutes.delete('/:id', async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const workspaces = await db
-    .select()
-    .from(schema.workspaces)
-    .where(
-      and(
-        eq(schema.workspaces.id, workspaceId),
-        eq(schema.workspaces.userId, userId)
-      )
-    )
-    .limit(1);
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
 
-  const workspaceDelete = workspaces[0];
-  if (!workspaceDelete) {
-    throw errors.notFound('Workspace');
-  }
-
-  // Cleanup resources if they exist
-  if (workspaceDelete.hetznerServerId) {
-    const credsDelete = await db
-      .select()
-      .from(schema.credentials)
-      .where(
-        and(
-          eq(schema.credentials.userId, userId),
-          eq(schema.credentials.provider, 'hetzner')
-        )
-      )
-      .limit(1);
-
-    const credDelete = credsDelete[0];
-    if (credDelete) {
-      const hetznerToken = await decrypt(credDelete.encryptedToken, credDelete.iv, c.env.ENCRYPTION_KEY);
+  if (workspace.nodeId) {
+    const node = await getOwnedNode(db, workspace.nodeId, userId);
+    if (node.status === 'running' && node.healthStatus !== 'unhealthy') {
       try {
-        await deleteServer(hetznerToken, workspaceDelete.hetznerServerId);
-      } catch (err) {
-        console.error('Failed to delete server:', err);
+        await deleteWorkspaceOnNode(workspace.nodeId, workspace.id, c.env, userId);
+      } catch {
+        // Best-effort delete on node agent; DB delete still proceeds.
       }
     }
   }
 
-  if (workspaceDelete.dnsRecordId) {
-    try {
-      await deleteDNSRecord(workspaceDelete.dnsRecordId, c.env);
-    } catch (err) {
-      console.error('Failed to delete DNS record:', err);
-    }
-  }
-  // Always clean up any stale DNS records by name as a fallback
-  try {
-    await cleanupWorkspaceDNSRecords(workspaceId, c.env);
-  } catch (err) {
-    console.error('Failed to cleanup DNS records by name:', err);
-  }
+  await db
+    .delete(schema.agentSessions)
+    .where(eq(schema.agentSessions.workspaceId, workspace.id));
 
-  // Delete workspace record
   await db
     .delete(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId));
+    .where(
+      and(
+        eq(schema.workspaces.id, workspace.id),
+        eq(schema.workspaces.userId, userId)
+      )
+    );
 
   return c.json({ success: true });
 });
 
-/**
- * POST /api/workspaces/:id/ready - VM callback when workspace is ready
- * Requires valid callback token in Authorization header.
- */
-workspacesRoutes.post('/:id/ready', async (c) => {
+workspacesRoutes.get('/:id/agent-sessions', async (c) => {
+  const userId = getUserId(c);
   const workspaceId = c.req.param('id');
-
-  // Validate callback token from Authorization header
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    throw errors.unauthorized('Missing or invalid Authorization header');
-  }
-
-  const token = authHeader.slice(7);
-  try {
-    const payload = await verifyCallbackToken(token, c.env);
-    // Verify the token is for this specific workspace
-    if (payload.workspace !== workspaceId) {
-      throw errors.forbidden('Token workspace mismatch');
-    }
-  } catch (err) {
-    throw errors.unauthorized(err instanceof Error ? err.message : 'Invalid callback token');
-  }
-
   const db = drizzle(c.env.DATABASE, { schema });
+
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  if (!workspace.nodeId) {
+    return c.json([] as AgentSession[]);
+  }
+
+  const sessions = await db
+    .select()
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.workspaceId, workspace.id),
+        eq(schema.agentSessions.userId, userId)
+      )
+    )
+    .orderBy(desc(schema.agentSessions.createdAt));
+
+  return c.json(sessions.map(toAgentSessionResponse));
+});
+
+workspacesRoutes.post('/:id/agent-sessions', async (c) => {
+  const userId = getUserId(c);
+  const workspaceId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
+  const body = await c.req.json<CreateAgentSessionRequest>();
+  const limits = getRuntimeLimits(c.env);
+  const idempotencyKey = c.req.header('Idempotency-Key')?.trim();
+
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  if (!workspace.nodeId) {
+    throw errors.badRequest('Workspace is not attached to a node');
+  }
+
+  const node = await getOwnedNode(db, workspace.nodeId, userId);
+  assertNodeOperational(node, 'create agent session');
+
+  if (idempotencyKey) {
+    const existingSessionId = await c.env.KV.get(`agent-session-idempotency:${workspace.id}:${userId}:${idempotencyKey}`);
+    if (existingSessionId) {
+      const existingRows = await db
+        .select()
+        .from(schema.agentSessions)
+        .where(
+          and(
+            eq(schema.agentSessions.id, existingSessionId),
+            eq(schema.agentSessions.workspaceId, workspace.id),
+            eq(schema.agentSessions.userId, userId)
+          )
+        )
+        .limit(1);
+      const existing = existingRows[0];
+      if (existing) {
+        return c.json(toAgentSessionResponse(existing));
+      }
+    }
+  }
+
+  const existingRunning = await db
+    .select({ id: schema.agentSessions.id })
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.workspaceId, workspace.id),
+        eq(schema.agentSessions.userId, userId),
+        eq(schema.agentSessions.status, 'running')
+      )
+    );
+
+  if (existingRunning.length >= limits.maxAgentSessionsPerWorkspace) {
+    throw errors.badRequest(`Maximum ${limits.maxAgentSessionsPerWorkspace} agent sessions per workspace`);
+  }
+
+  const sessionId = ulid();
   const now = new Date().toISOString();
 
-  // Only transition to running if workspace is in 'creating' state.
-  // If the workspace is already 'stopping' or 'stopped' (e.g., after idle shutdown),
-  // the VM agent may have been restarted by systemd and is calling /ready again.
-  // We must NOT reset lastActivityAt or status in that case, as it would create
-  // an infinite shutdown/restart loop.
-  const workspaces = await db
+  await db.insert(schema.agentSessions).values({
+    id: sessionId,
+    workspaceId: workspace.id,
+    userId,
+    status: 'running',
+    label: body.label?.trim() || null,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  try {
+    await createAgentSessionOnNode(
+      workspace.nodeId,
+      workspace.id,
+      sessionId,
+      body.label?.trim() || null,
+      idempotencyKey,
+      c.env,
+      userId
+    );
+  } catch (err) {
+    await db
+      .update(schema.agentSessions)
+      .set({
+        status: 'error',
+        errorMessage: err instanceof Error ? err.message : 'Failed to create agent session',
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.agentSessions.id, sessionId));
+
+    throw errors.internal('Failed to create agent session on node');
+  }
+
+  if (idempotencyKey) {
+    await c.env.KV.put(
+      `agent-session-idempotency:${workspace.id}:${userId}:${idempotencyKey}`,
+      sessionId,
+      { expirationTtl: 60 * 60 }
+    );
+  }
+
+  const rows = await db
     .select()
+    .from(schema.agentSessions)
+    .where(eq(schema.agentSessions.id, sessionId))
+    .limit(1);
+
+  return c.json(toAgentSessionResponse(rows[0]!), 201);
+});
+
+workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop', async (c) => {
+  const userId = getUserId(c);
+  const workspaceId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  if (!workspace.nodeId) {
+    throw errors.badRequest('Workspace is not attached to a node');
+  }
+
+  const rows = await db
+    .select()
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.id, sessionId),
+        eq(schema.agentSessions.workspaceId, workspace.id),
+        eq(schema.agentSessions.userId, userId)
+      )
+    )
+    .limit(1);
+
+  const session = rows[0];
+  if (!session) {
+    throw errors.notFound('Agent session');
+  }
+
+  if (session.status !== 'running') {
+    return c.json({ status: session.status });
+  }
+
+  try {
+    await stopAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
+  } catch {
+    // Best effort remote stop; local state still transitions.
+  }
+
+  await db
+    .update(schema.agentSessions)
+    .set({
+      status: 'stopped',
+      stoppedAt: new Date().toISOString(),
+      errorMessage: null,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.agentSessions.id, session.id));
+
+  return c.json({ status: 'stopped' });
+});
+
+workspacesRoutes.post('/:id/ready', async (c) => {
+  const workspaceId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await verifyWorkspaceCallbackAuth(c, workspaceId);
+
+  const rows = await db
+    .select({ id: schema.workspaces.id, status: schema.workspaces.status })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
-  const ws = workspaces[0];
-  if (!ws) {
+  const workspace = rows[0];
+  if (!workspace) {
     throw errors.notFound('Workspace');
   }
 
-  if (ws.status === 'stopping' || ws.status === 'stopped') {
-    console.log(`Ignoring /ready callback for workspace ${workspaceId} in '${ws.status}' state (agent restart after idle shutdown)`);
-    return c.json({ success: false, reason: 'workspace_shutting_down' });
+  if (workspace.status === 'stopping' || workspace.status === 'stopped') {
+    return c.json({ success: false, reason: 'workspace_not_running' });
   }
 
   await db
     .update(schema.workspaces)
     .set({
       status: 'running',
-      lastActivityAt: now,
-      updatedAt: now,
+      lastActivityAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     })
     .where(eq(schema.workspaces.id, workspaceId));
 
   return c.json({ success: true });
 });
 
-/**
- * POST /api/workspaces/:id/heartbeat - VM heartbeat for idle detection
- * Requires valid callback token in Authorization header.
- *
- * NOTE: The VM Agent manages its own idle timeout locally and will self-terminate.
- * This endpoint provides visibility and allows the control plane to track workspace status,
- * but does NOT extend the VM's lifetime. The Go agent uses IDLE_TIMEOUT env var (default 30min).
- */
 workspacesRoutes.post('/:id/heartbeat', async (c) => {
   const workspaceId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
 
-  // Validate callback token from Authorization header
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    throw errors.unauthorized('Missing or invalid Authorization header');
-  }
-
-  const token = authHeader.slice(7);
-  try {
-    const payload = await verifyCallbackToken(token, c.env);
-    // Verify the token is for this specific workspace
-    if (payload.workspace !== workspaceId) {
-      throw errors.forbidden('Token workspace mismatch');
-    }
-  } catch (err) {
-    throw errors.unauthorized(err instanceof Error ? err.message : 'Invalid callback token');
-  }
+  await verifyWorkspaceCallbackAuth(c, workspaceId);
 
   const body = await c.req.json<HeartbeatRequest>();
-  const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date().toISOString();
-  const globalIdleTimeoutSeconds = getIdleTimeoutSeconds(c.env);
+  const idleTimeoutSeconds = getIdleTimeoutSeconds(c.env);
 
-  const workspaces = await db
-    .select()
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const wsHeartbeat = workspaces[0];
-  if (!wsHeartbeat) {
-    throw errors.notFound('Workspace');
-  }
-
-  // Use per-workspace idle timeout if set, otherwise fall back to global default
-  const idleTimeoutSeconds = wsHeartbeat.idleTimeoutSeconds ?? globalIdleTimeoutSeconds;
-
-  // Use the VM's reported lastActivityAt (authoritative) to update the control plane's view.
-  // The VM agent tracks actual user input activity locally and reports it here.
-  if (body.lastActivityAt) {
-    await db
-      .update(schema.workspaces)
-      .set({
-        lastActivityAt: body.lastActivityAt,
-        shutdownDeadline: body.shutdownDeadline ?? null,
-        updatedAt: now,
-      })
-      .where(eq(schema.workspaces.id, workspaceId));
-  }
-
-  // Use VM-reported idle time (authoritative) for the response
-  const idleSeconds = body.idleSeconds ?? 0;
-  const shouldShutdown = idleSeconds >= idleTimeoutSeconds;
-
-  // Use VM-reported deadline, or compute a fallback
-  const shutdownDeadline = body.shutdownDeadline
-    ?? new Date(Date.now() + Math.max(0, idleTimeoutSeconds - idleSeconds) * 1000).toISOString();
-
-  // Heartbeat-based shutdown fallback: if the VM reports it's idle past the
-  // deadline and the workspace is still "running", the control plane initiates
-  // deletion directly. This is a safety net for when the VM's own
-  // /request-shutdown call fails (network issues, auth errors, etc.).
-  if (shouldShutdown && wsHeartbeat.status === 'running') {
-    console.log(`Heartbeat fallback: workspace ${workspaceId} idle for ${idleSeconds}s (limit ${idleTimeoutSeconds}s), initiating deletion`);
-
-    await db
-      .update(schema.workspaces)
-      .set({ status: 'stopping', updatedAt: new Date().toISOString() })
-      .where(eq(schema.workspaces.id, workspaceId));
-
-    const creds = await db
-      .select()
-      .from(schema.credentials)
-      .where(
-        and(
-          eq(schema.credentials.userId, wsHeartbeat.userId),
-          eq(schema.credentials.provider, 'hetzner')
-        )
-      )
-      .limit(1);
-
-    const cred = creds[0];
-    if (cred && wsHeartbeat.hetznerServerId) {
-      const hetznerToken = await decrypt(cred.encryptedToken, cred.iv, c.env.ENCRYPTION_KEY);
-
-      c.executionCtx.waitUntil(
-        (async () => {
-          try {
-            await deleteServer(hetznerToken, wsHeartbeat.hetznerServerId!);
-            if (wsHeartbeat.dnsRecordId) {
-              await deleteDNSRecord(wsHeartbeat.dnsRecordId, c.env);
-            }
-            await cleanupWorkspaceDNSRecords(workspaceId, c.env);
-            await db
-              .update(schema.workspaces)
-              .set({
-                status: 'stopped',
-                hetznerServerId: null,
-                vmIp: null,
-                dnsRecordId: null,
-                updatedAt: new Date().toISOString(),
-              })
-              .where(eq(schema.workspaces.id, workspaceId));
-            console.log(`Heartbeat fallback: successfully deleted idle VM ${workspaceId}`);
-          } catch (err) {
-            console.error(`Heartbeat fallback: failed to delete VM ${workspaceId}:`, err);
-            await db
-              .update(schema.workspaces)
-              .set({
-                status: 'error',
-                errorMessage: err instanceof Error ? err.message : 'Failed to delete VM via heartbeat fallback',
-                updatedAt: new Date().toISOString(),
-              })
-              .where(eq(schema.workspaces.id, workspaceId));
-          }
-        })()
-      );
-    }
-  }
+  await db
+    .update(schema.workspaces)
+    .set({
+      lastActivityAt: body.lastActivityAt || now,
+      shutdownDeadline: null,
+      updatedAt: now,
+    })
+    .where(eq(schema.workspaces.id, workspaceId));
 
   const response: HeartbeatResponse = {
-    action: shouldShutdown ? 'shutdown' : 'continue',
-    idleSeconds: Math.floor(idleSeconds),
+    action: 'continue',
+    idleSeconds: Math.max(0, Math.floor(body.idleSeconds ?? 0)),
     maxIdleSeconds: idleTimeoutSeconds,
-    shutdownDeadline,
+    shutdownDeadline: null,
   };
 
   return c.json(response);
 });
 
-/**
- * POST /api/workspaces/:id/request-shutdown - VM requests its own deletion
- * Internal endpoint called by VM Agent when idle timeout is reached.
- * Requires callback JWT auth. This allows VMs to clean themselves up
- * without having direct access to Hetzner credentials.
- */
-workspacesRoutes.post('/:id/request-shutdown', async (c) => {
-  const workspaceId = c.req.param('id');
-
-  // Validate callback token from Authorization header
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    throw errors.unauthorized('Missing or invalid Authorization header');
-  }
-
-  const token = authHeader.slice(7);
-  try {
-    const payload = await verifyCallbackToken(token, c.env);
-    if (payload.workspace !== workspaceId) {
-      throw errors.forbidden('Token workspace mismatch');
-    }
-  } catch (err) {
-    throw errors.unauthorized(err instanceof Error ? err.message : 'Invalid callback token');
-  }
-
-  const body = await c.req.json<{ reason: string }>();
-  const reason = body.reason || 'idle_timeout';
-
-  const db = drizzle(c.env.DATABASE, { schema });
-  const now = new Date().toISOString();
-
-  // Get workspace
-  const workspaces = await db
-    .select()
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = workspaces[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
-
-  if (workspace.status !== 'running') {
-    // Already stopping or stopped
-    return c.json({ status: workspace.status });
-  }
-
-  // Update status to stopping
-  await db
-    .update(schema.workspaces)
-    .set({
-      status: 'stopping',
-      updatedAt: now,
-      // Record the reason for shutdown in lastActivityAt for now
-      // (Could add a separate field in the future)
-    })
-    .where(eq(schema.workspaces.id, workspaceId));
-
-  // Get user's Hetzner credentials
-  const creds = await db
-    .select()
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, workspace.userId),
-        eq(schema.credentials.provider, 'hetzner')
-      )
-    )
-    .limit(1);
-
-  const cred = creds[0];
-  if (cred && workspace.hetznerServerId) {
-    const hetznerToken = await decrypt(cred.encryptedToken, cred.iv, c.env.ENCRYPTION_KEY);
-
-    // Delete server and clean up DNS asynchronously
-    c.executionCtx.waitUntil(
-      (async () => {
-        try {
-          console.log(`VM ${workspaceId} requested self-deletion due to: ${reason}`);
-
-          // Delete Hetzner server
-          await deleteServer(hetznerToken, workspace.hetznerServerId!);
-
-          // Clean up DNS records
-          if (workspace.dnsRecordId) {
-            await deleteDNSRecord(workspace.dnsRecordId, c.env);
-          }
-          await cleanupWorkspaceDNSRecords(workspaceId, c.env);
-
-          // Update status to stopped
-          await db
-            .update(schema.workspaces)
-            .set({
-              status: 'stopped',
-              hetznerServerId: null,
-              vmIp: null,
-              dnsRecordId: null,
-              updatedAt: new Date().toISOString(),
-            })
-            .where(eq(schema.workspaces.id, workspaceId));
-
-          console.log(`Successfully deleted idle VM ${workspaceId}`);
-        } catch (err) {
-          console.error('Failed to delete VM on idle shutdown:', err);
-          await db
-            .update(schema.workspaces)
-            .set({
-              status: 'error',
-              errorMessage: err instanceof Error ? err.message : 'Failed to delete VM',
-              updatedAt: new Date().toISOString(),
-            })
-            .where(eq(schema.workspaces.id, workspaceId));
-        }
-      })()
-    );
-  }
-
-  return c.json({ status: 'stopping', reason });
-});
-
-/**
- * POST /api/workspaces/:id/agent-key - Fetch a decrypted agent API key
- * Internal endpoint called by VM Agent. Requires callback JWT auth.
- * The control plane decrypts the key (it holds ENCRYPTION_KEY) and returns it
- * over HTTPS. The decrypted key MUST NOT be logged (SC-006).
- */
 workspacesRoutes.post('/:id/agent-key', async (c) => {
   const workspaceId = c.req.param('id');
-
-  // Validate callback token from Authorization header
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    throw errors.unauthorized('Missing or invalid Authorization header');
-  }
-
-  const token = authHeader.slice(7);
-  try {
-    const payload = await verifyCallbackToken(token, c.env);
-    if (payload.workspace !== workspaceId) {
-      throw errors.forbidden('Token workspace mismatch');
-    }
-  } catch (err) {
-    throw errors.unauthorized(err instanceof Error ? err.message : 'Invalid callback token');
-  }
-
+  await verifyWorkspaceCallbackAuth(c, workspaceId);
   const body = await c.req.json<{ agentType: string }>();
 
-  if (!body.agentType || !isValidAgentType(body.agentType)) {
-    throw errors.badRequest('Valid agentType is required');
+  if (!body.agentType) {
+    throw errors.badRequest('agentType is required');
   }
 
   const db = drizzle(c.env.DATABASE, { schema });
 
-  // Find the workspace owner
-  const workspaces = await db
+  const workspaceRows = await db
     .select({ userId: schema.workspaces.userId })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
-  const ws = workspaces[0];
-  if (!ws) {
+  const workspace = workspaceRows[0];
+  if (!workspace) {
     throw errors.notFound('Workspace');
   }
 
-  // Decrypt the agent credential for the workspace owner
   const credentialData = await getDecryptedAgentKey(
     db,
-    ws.userId,
+    workspace.userId,
     body.agentType,
     c.env.ENCRYPTION_KEY
   );
@@ -924,48 +894,25 @@ workspacesRoutes.post('/:id/agent-key', async (c) => {
 
   return c.json({
     apiKey: credentialData.credential,
-    credentialKind: credentialData.credentialKind
+    credentialKind: credentialData.credentialKind,
   });
 });
 
-/**
- * POST /api/workspaces/:id/git-token - Fetch a fresh GitHub installation token
- * Internal endpoint called by VM Agent credential helper flow.
- * Requires callback JWT auth.
- */
 workspacesRoutes.post('/:id/git-token', async (c) => {
   const workspaceId = c.req.param('id');
-
-  // Validate callback token from Authorization header
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    throw errors.unauthorized('Missing or invalid Authorization header');
-  }
-
-  const token = authHeader.slice(7);
-  try {
-    const payload = await verifyCallbackToken(token, c.env);
-    if (payload.workspace !== workspaceId) {
-      throw errors.forbidden('Token workspace mismatch');
-    }
-  } catch (err) {
-    throw errors.unauthorized(err instanceof Error ? err.message : 'Invalid callback token');
-  }
+  await verifyWorkspaceCallbackAuth(c, workspaceId);
 
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const workspaces = await db
+  const workspaceRows = await db
     .select({ installationId: schema.workspaces.installationId })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
-  const workspace = workspaces[0];
-  if (!workspace) {
+  const workspace = workspaceRows[0];
+  if (!workspace || !workspace.installationId) {
     throw errors.notFound('Workspace');
-  }
-  if (!workspace.installationId) {
-    throw errors.badRequest('Workspace is not linked to a GitHub installation');
   }
 
   const installations = await db
@@ -979,36 +926,15 @@ workspacesRoutes.post('/:id/git-token', async (c) => {
     throw errors.notFound('GitHub installation');
   }
 
-  const { token: gitToken, expiresAt } = await getInstallationToken(installation.installationId, c.env);
-
-  return c.json({ token: gitToken, expiresAt });
+  const token = await getInstallationToken(installation.installationId, c.env);
+  return c.json({ token: token.token, expiresAt: token.expiresAt });
 });
 
-/**
- * POST /api/workspaces/:id/boot-log - VM Agent sends a boot log entry
- * Internal endpoint called during bootstrap. Requires callback JWT auth.
- */
 workspacesRoutes.post('/:id/boot-log', async (c) => {
   const workspaceId = c.req.param('id');
-
-  // Validate callback token from Authorization header
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    throw errors.unauthorized('Missing or invalid Authorization header');
-  }
-
-  const token = authHeader.slice(7);
-  try {
-    const payload = await verifyCallbackToken(token, c.env);
-    if (payload.workspace !== workspaceId) {
-      throw errors.forbidden('Token workspace mismatch');
-    }
-  } catch (err) {
-    throw errors.unauthorized(err instanceof Error ? err.message : 'Invalid callback token');
-  }
+  await verifyWorkspaceCallbackAuth(c, workspaceId);
 
   const body = await c.req.json<BootLogEntry>();
-
   if (!body.step || !body.status || !body.message) {
     throw errors.badRequest('step, status, and message are required');
   }
@@ -1021,182 +947,34 @@ workspacesRoutes.post('/:id/boot-log', async (c) => {
     timestamp: body.timestamp || new Date().toISOString(),
   };
 
-  // Log to Workers observability for debugging — especially important for failures
-  const logLevel = entry.status === 'failed' ? 'error' : 'info';
-  const logPayload = { event: 'boot_log', workspaceId, step: entry.step, status: entry.status, message: entry.message, detail: entry.detail || undefined };
-  if (logLevel === 'error') {
-    console.error(JSON.stringify(logPayload));
-  } else {
-    console.log(JSON.stringify(logPayload));
-  }
-
   await appendBootLog(c.env.KV, workspaceId, entry, c.env);
-
   return c.json({ success: true });
 });
 
-/**
- * Provision a workspace (create VM, DNS, etc.)
- * Uses bootstrap tokens for secure credential delivery - no secrets in cloud-init.
- */
-async function provisionWorkspace(
-  workspaceId: string,
-  config: {
-    name: string;
-    repository: string;
-    branch: string;
-    vmSize: string;
-    vmLocation: string;
-    installationId: string;
-    idleTimeoutSeconds: number;
-    userName: string | null;
-    userEmail: string;
-  },
-  hetznerToken: string,
-  hetznerCredential: { encryptedToken: string; iv: string },
-  env: Env,
-  db: ReturnType<typeof drizzle>
-): Promise<void> {
-  const now = () => new Date().toISOString();
-  const bootLogs: BootLogEntry[] = [];
-  const log = (step: string, detail?: string) =>
-    console.log(JSON.stringify({ event: 'provision', workspaceId, step, detail, ts: now() }));
+// Legacy compatibility endpoint for node-side bootstrap exchange.
+workspacesRoutes.post('/:id/bootstrap-token', async (c) => {
+  const workspaceId = c.req.param('id');
+  await verifyWorkspaceCallbackAuth(c, workspaceId);
 
-  // Accumulate boot log entries in memory and log to console.
-  // We write to KV only once at the end of provisioning to minimize KV writes
-  // (free tier allows 1,000 writes/day). VM-side boot logs are written individually
-  // by the VM Agent via POST /boot-log — those are the slow steps users care about.
-  const bootLog = (step: string, status: BootLogEntry['status'], message: string, detail?: string) => {
-    const entry: BootLogEntry = { step, status, message, timestamp: now(), ...(detail ? { detail } : {}) };
-    bootLogs.push(entry);
-    log(step, detail);
+  const bootstrapToken = ulid();
+  const now = new Date().toISOString();
+  const data: BootstrapTokenData = {
+    workspaceId,
+    encryptedHetznerToken: '',
+    hetznerTokenIv: '',
+    callbackToken: '',
+    encryptedGithubToken: null,
+    githubTokenIv: null,
+    gitUserName: null,
+    gitUserEmail: null,
+    createdAt: now,
   };
 
-  try {
-    bootLog('provision_start', 'started', 'Starting workspace provisioning', `repo=${config.repository} size=${config.vmSize} location=${config.vmLocation}`);
+  await c.env.KV.put(`bootstrap:${bootstrapToken}`, JSON.stringify(data), {
+    expirationTtl: 60,
+  });
 
-    // Get GitHub installation token for cloning
-    bootLog('github_token', 'started', 'Obtaining GitHub access token');
-    const { token: githubToken } = await getInstallationToken(config.installationId, env);
-    bootLog('github_token', 'completed', 'GitHub access token obtained');
-
-    // Encrypt the GitHub token for storage
-    const { ciphertext: encGithub, iv: ivGithub } = await encrypt(githubToken, env.ENCRYPTION_KEY);
-
-    // Generate callback token for VM-to-API authentication
-    const callbackToken = await signCallbackToken(workspaceId, env);
-
-    // Generate bootstrap token and store encrypted credentials
-    const bootstrapToken = generateBootstrapToken();
-    const gitUserEmail = normalizeGitUserEmail(config.userEmail);
-    const gitUserName = deriveGitUserName(config.userName, gitUserEmail);
-    const bootstrapData: BootstrapTokenData = {
-      workspaceId,
-      encryptedHetznerToken: hetznerCredential.encryptedToken,
-      hetznerTokenIv: hetznerCredential.iv,
-      callbackToken,
-      encryptedGithubToken: encGithub,
-      githubTokenIv: ivGithub,
-      gitUserName,
-      gitUserEmail,
-      createdAt: now(),
-    };
-
-    await storeBootstrapToken(env.KV, bootstrapToken, bootstrapData);
-
-    // Generate cloud-init config (NO SECRETS - only bootstrap token)
-    // Use workspace-specific timeout or 0 to disable
-    const cloudInit = generateCloudInit({
-      workspaceId,
-      hostname: `ws-${workspaceId}`,
-      repository: config.repository,
-      branch: config.branch,
-      controlPlaneUrl: `https://api.${env.BASE_DOMAIN}`,
-      jwksUrl: `https://api.${env.BASE_DOMAIN}/.well-known/jwks.json`,
-      bootstrapToken,
-      idleTimeout: config.idleTimeoutSeconds === 0 ? '0' : `${config.idleTimeoutSeconds}s`, // Format as duration string for Go's time.ParseDuration
-    });
-
-    if (!validateCloudInitSize(cloudInit)) {
-      throw new Error('Cloud-init config exceeds size limit');
-    }
-
-    // Create Hetzner server
-    bootLog('create_server', 'started', 'Creating virtual machine', `type=${SERVER_TYPES[config.vmSize] || 'cx33'}`);
-    const server = await createServer(hetznerToken, {
-      name: `ws-${workspaceId}`,
-      serverType: SERVER_TYPES[config.vmSize] || 'cx33',
-      location: config.vmLocation,
-      image: HETZNER_IMAGE,
-      userData: cloudInit,
-      labels: {
-        workspace: workspaceId,
-        managed: 'simple-agent-manager',
-      },
-    });
-    bootLog('create_server', 'completed', 'Virtual machine created', `serverId=${server.id}`);
-
-    // Create a DNS-only (non-proxied) A record for the VM backend.
-    // Cloudflare Workers cannot fetch IP addresses directly (Error 1003),
-    // so the Worker proxy uses vm-{id}.{domain} to reach the VM.
-    let dnsRecordId: string | null = null;
-    try {
-      bootLog('create_dns', 'started', 'Configuring DNS');
-      dnsRecordId = await createBackendDNSRecord(workspaceId, server.publicNet.ipv4.ip, env);
-      bootLog('create_dns', 'completed', 'DNS configured');
-    } catch (dnsErr) {
-      bootLog('create_dns', 'failed', 'DNS configuration failed', dnsErr instanceof Error ? dnsErr.message : String(dnsErr));
-      console.error('Failed to create backend DNS record:', dnsErr);
-      // Continue — the workspace can still be reached via /ready callback
-    }
-
-    // Update workspace with server info
-    await db
-      .update(schema.workspaces)
-      .set({
-        hetznerServerId: String(server.id),
-        vmIp: server.publicNet.ipv4.ip,
-        dnsRecordId,
-        updatedAt: now(),
-      })
-      .where(eq(schema.workspaces.id, workspaceId));
-
-    bootLog('provision_complete', 'completed', 'Server provisioning complete — waiting for VM bootstrap');
-
-    // Write all boot log entries to KV in a single write (saves KV quota).
-    // Server-side provisioning is fast (~5-10s) so batching doesn't hurt UX.
-    try {
-      await writeBootLogs(env.KV, workspaceId, bootLogs, env);
-    } catch (kvErr) {
-      console.error('Failed to write boot logs to KV:', kvErr);
-      // Non-critical — provisioning succeeded, logs are just for UI
-    }
-    // VM agent will redeem bootstrap token on startup, then call /ready endpoint
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : 'Provisioning failed';
-    bootLog('provision_error', 'failed', 'Provisioning failed', errMsg);
-    console.error('Provisioning failed:', err);
-
-    // Best-effort write of boot logs including the error
-    try {
-      await writeBootLogs(env.KV, workspaceId, bootLogs, env);
-    } catch (kvErr) {
-      console.error('Failed to write boot logs to KV:', kvErr);
-    }
-
-    try {
-      await db
-        .update(schema.workspaces)
-        .set({
-          status: 'error',
-          errorMessage: errMsg,
-          updatedAt: now(),
-        })
-        .where(eq(schema.workspaces.id, workspaceId));
-    } catch (dbErr) {
-      console.error('Failed to save error status:', dbErr);
-    }
-  }
-}
+  return c.json({ token: bootstrapToken });
+});
 
 export { workspacesRoutes };

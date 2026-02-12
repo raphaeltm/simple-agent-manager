@@ -77,9 +77,9 @@ func TestRingBuffer_ReadAllLinearizesCorrectly(t *testing.T) {
 	rb := NewRingBuffer(10)
 
 	// Write in three chunks to force wrap-around
-	rb.Write([]byte("AAAA"))  // pos now at 4
-	rb.Write([]byte("BBBB"))  // pos now at 8
-	rb.Write([]byte("CCCC"))  // wraps: pos now at 2
+	rb.Write([]byte("AAAA")) // pos now at 4
+	rb.Write([]byte("BBBB")) // pos now at 8
+	rb.Write([]byte("CCCC")) // wraps: pos now at 2
 
 	got := rb.ReadAll()
 	// Should be last 10 bytes of "AAAABBBBCCCC" (12 bytes) = "AABBBBCCCC"

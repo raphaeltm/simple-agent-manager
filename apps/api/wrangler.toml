@@ -7,6 +7,11 @@ port = 8787
 [vars]
 BASE_DOMAIN = "workspaces.example.com"
 VERSION = "0.1.0"
+MAX_NODES_PER_USER = "10"
+MAX_WORKSPACES_PER_USER = "10"
+MAX_WORKSPACES_PER_NODE = "10"
+MAX_AGENT_SESSIONS_PER_WORKSPACE = "10"
+NODE_HEARTBEAT_STALE_SECONDS = "180"
 
 # D1 Database
 [[d1_databases]]
@@ -28,7 +33,7 @@ bucket_name = "workspaces-dev-assets"
 # Environment-specific configuration
 [env.staging]
 name = "sam-api-staging"
-vars = { BASE_DOMAIN = "staging.workspaces.example.com", VERSION = "0.1.0" }
+vars = { BASE_DOMAIN = "staging.workspaces.example.com", VERSION = "0.1.0", MAX_NODES_PER_USER = "10", MAX_WORKSPACES_PER_USER = "10", MAX_WORKSPACES_PER_NODE = "10", MAX_AGENT_SESSIONS_PER_WORKSPACE = "10", NODE_HEARTBEAT_STALE_SECONDS = "180" }
 
 [[env.staging.d1_databases]]
 binding = "DATABASE"
@@ -46,7 +51,7 @@ bucket_name = "workspaces-staging-assets"
 
 [env.production]
 name = "sam-api-prod"
-vars = { BASE_DOMAIN = "workspaces.example.com", VERSION = "0.1.0" }
+vars = { BASE_DOMAIN = "workspaces.example.com", VERSION = "0.1.0", MAX_NODES_PER_USER = "10", MAX_WORKSPACES_PER_USER = "10", MAX_WORKSPACES_PER_NODE = "10", MAX_AGENT_SESSIONS_PER_WORKSPACE = "10", NODE_HEARTBEAT_STALE_SECONDS = "180" }
 
 [env.production.observability]
 enabled = true

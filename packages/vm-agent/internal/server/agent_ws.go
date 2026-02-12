@@ -4,81 +4,144 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/workspace/vm-agent/internal/acp"
+	"github.com/workspace/vm-agent/internal/agentsessions"
 )
 
+func parseTakeoverParam(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func writeSessionError(w http.ResponseWriter, statusCode int, code, message string) {
+	writeJSON(w, statusCode, map[string]string{
+		"error":   code,
+		"message": message,
+	})
+}
+
 // handleAgentWS handles WebSocket connections for ACP agent communication.
-// Authentication uses the same JWT mechanism as the terminal WebSocket.
-// Only one ACP session is allowed per workspace — new connections take over
-// from existing ones (closing the old WebSocket) instead of being rejected.
+// Supports optional sessionId query for deterministic attach/takeover semantics.
 func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
-	// Check authentication — same as terminal WebSocket
-	session := s.sessionManager.GetSessionFromRequest(r)
-	if session == nil {
-		// Try token from query param (for initial connection)
-		token := r.URL.Query().Get("token")
-		if token != "" {
-			claims, err := s.jwtValidator.Validate(token)
-			if err != nil {
-				log.Printf("ACP WebSocket auth failed: %v", err)
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-			session, err = s.sessionManager.CreateSession(claims)
-			if err != nil {
-				log.Printf("Failed to create session for ACP: %v", err)
-				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-				return
-			}
-		} else {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
+	workspaceID, ok := s.requireWorkspaceRoute(w, r)
+	if !ok {
+		return
 	}
 
-	// Takeover pattern: if an existing ACP session is active, close it
-	// gracefully to allow the new connection. This handles page refreshes,
-	// tab closes, and network interruptions where the old goroutine is
-	// still blocking in gateway.Run().
+	_, ok = s.authenticateWorkspaceWebsocket(w, r, workspaceID)
+	if !ok {
+		return
+	}
+
+	requestedSessionID := strings.TrimSpace(r.URL.Query().Get("sessionId"))
+	idempotencyKey := strings.TrimSpace(r.URL.Query().Get("idempotencyKey"))
+	takeover := parseTakeoverParam(r.URL.Query().Get("takeover"))
+	autoCreateSession := requestedSessionID == ""
+
+	if autoCreateSession {
+		requestedSessionID = "session-" + randomEventID()
+	}
+
+	session, exists := s.agentSessions.Get(workspaceID, requestedSessionID)
+	if !exists {
+		if !autoCreateSession {
+			writeSessionError(w, http.StatusNotFound, "session_not_found", "Requested session does not exist in this workspace")
+			return
+		}
+
+		created, _, err := s.agentSessions.Create(workspaceID, requestedSessionID, "", idempotencyKey)
+		if err != nil {
+			writeSessionError(w, http.StatusConflict, "session_create_failed", err.Error())
+			return
+		}
+		session = created
+		s.appendNodeEvent(workspaceID, "info", "agent.session_created", "Agent session created for websocket attach", map[string]interface{}{
+			"sessionId": requestedSessionID,
+		})
+	}
+
+	if session.Status != agentsessions.StatusRunning {
+		writeSessionError(w, http.StatusConflict, "session_not_running", "Requested session is not running")
+		return
+	}
+
+	upgrader := s.createUpgrader()
+	gatewayKey := workspaceID + ":" + requestedSessionID
+
 	s.acpMu.Lock()
-	if s.acpGateway != nil {
-		log.Printf("ACP: closing existing session for takeover by new connection")
-		s.acpGateway.Close()
-		s.acpGateway = nil
+	if existing := s.acpGateways[gatewayKey]; existing != nil {
+		if !takeover {
+			s.acpMu.Unlock()
+			writeSessionError(w, http.StatusConflict, "session_already_attached", "Session already has an active interactive attachment")
+			return
+		}
+		existing.Close()
+		delete(s.acpGateways, gatewayKey)
 	}
 	s.acpMu.Unlock()
 
-	// Upgrade to WebSocket with origin validation
-	upgrader := s.createUpgrader()
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("ACP WebSocket upgrade failed: %v", err)
 		return
 	}
 
-	log.Printf("ACP WebSocket connected: user=%s, workspace=%s", session.UserID, s.config.WorkspaceID)
+	// Deterministic attach/stop race handling:
+	// If stop wins before websocket attach completes, close with session_not_running.
+	postUpgradeSession, postUpgradeExists := s.agentSessions.Get(workspaceID, requestedSessionID)
+	if !postUpgradeExists || postUpgradeSession.Status != agentsessions.StatusRunning {
+		_ = conn.WriteJSON(map[string]string{
+			"error":   "session_not_running",
+			"message": "Requested session is not running",
+		})
+		_ = conn.WriteControl(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "session_not_running"),
+			time.Now().Add(5*time.Second),
+		)
+		_ = conn.Close()
+		return
+	}
 
-	// Record activity for idle detection
-	s.idleDetector.RecordActivity()
-
-	// Create and register the ACP gateway
-	gateway := acp.NewGateway(s.acpConfig, conn)
+	gatewayCfg := s.acpConfig
+	gatewayCfg.WorkspaceID = workspaceID
+	gateway := acp.NewGateway(gatewayCfg, conn)
 
 	s.acpMu.Lock()
-	s.acpGateway = gateway
+	if existing := s.acpGateways[gatewayKey]; existing != nil {
+		if !takeover {
+			s.acpMu.Unlock()
+			_ = conn.WriteJSON(map[string]string{
+				"error":   "session_already_attached",
+				"message": "Session already has an active interactive attachment",
+			})
+			_ = conn.Close()
+			return
+		}
+		existing.Close()
+		delete(s.acpGateways, gatewayKey)
+	}
+	s.acpGateways[gatewayKey] = gateway
 	s.acpMu.Unlock()
 
-	// Run blocks until the WebSocket closes or the gateway is closed
+	s.appendNodeEvent(workspaceID, "info", "agent.attach", "Agent session attached", map[string]interface{}{
+		"sessionId": requestedSessionID,
+		"takeover":  takeover,
+	})
+
 	gateway.Run(context.Background())
 
-	// Deregister the gateway (only if it's still ours — another takeover may
-	// have already replaced it)
 	s.acpMu.Lock()
-	if s.acpGateway == gateway {
-		s.acpGateway = nil
+	if s.acpGateways[gatewayKey] == gateway {
+		delete(s.acpGateways, gatewayKey)
 	}
 	s.acpMu.Unlock()
-
-	log.Printf("ACP WebSocket disconnected: user=%s", session.UserID)
 }

@@ -106,7 +106,7 @@ export function Dashboard() {
 
       <style>{`
         .sam-quick-actions { grid-template-columns: 1fr; }
-        @media (min-width: 768px) { .sam-quick-actions { grid-template-columns: repeat(3, 1fr); } }
+        @media (min-width: 768px) { .sam-quick-actions { grid-template-columns: repeat(4, 1fr); } }
         .sam-workspace-grid { grid-template-columns: 1fr; }
         @media (min-width: 768px) { .sam-workspace-grid { grid-template-columns: repeat(2, 1fr); } }
         @media (min-width: 1024px) { .sam-workspace-grid { grid-template-columns: repeat(3, 1fr); } }
@@ -122,6 +122,17 @@ export function Dashboard() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
           <span>New Workspace</span>
+        </Button>
+        <Button
+          onClick={() => navigate('/nodes')}
+          variant="secondary"
+          size="lg"
+          style={{ width: '100%', justifyContent: 'center', gap: '0.5rem' }}
+        >
+          <svg style={{ height: 20, width: 20 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 6h14M5 12h14M5 18h14" />
+          </svg>
+          <span>Nodes</span>
         </Button>
         <Button
           onClick={() => navigate('/settings')}

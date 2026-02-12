@@ -10,9 +10,8 @@ interface AuthState {
 
 interface HealthResponse {
   status: string;
-  workspaceId: string;
-  sessions: number;
-  idle: string;
+  nodeId: string;
+  activeWorkspaces: number;
 }
 
 interface AgentInstructionResponse {
@@ -28,41 +27,12 @@ function App() {
     error: null,
   });
   const [connected, setConnected] = useState(false);
-  const [workspaceId, setWorkspaceId] = useState<string | undefined>();
-  const [idleWarning, setIdleWarning] = useState<number>(0);
+  const [nodeId, setNodeId] = useState<string | undefined>();
   const [complianceContext, setComplianceContext] = useState<AgentInstructionResponse | null>(null);
 
-  // Get token from URL params
   const urlParams = new URLSearchParams(window.location.search);
   const tokenFromUrl = urlParams.get('token');
 
-  // Check session status
-  const checkSession = useCallback(async () => {
-    try {
-      const response = await fetch('/auth/session', {
-        credentials: 'include',
-      });
-      const data = await response.json();
-
-      if (data.authenticated) {
-        setAuth({ authenticated: true, loading: false, error: null });
-      } else if (tokenFromUrl) {
-        // Authenticate with token from URL
-        await authenticateWithToken(tokenFromUrl);
-      } else {
-        setAuth({ authenticated: false, loading: false, error: 'Not authenticated' });
-      }
-    } catch (error) {
-      console.error('Session check failed:', error);
-      if (tokenFromUrl) {
-        await authenticateWithToken(tokenFromUrl);
-      } else {
-        setAuth({ authenticated: false, loading: false, error: 'Session check failed' });
-      }
-    }
-  }, [tokenFromUrl]);
-
-  // Authenticate with JWT token
   const authenticateWithToken = async (token: string) => {
     try {
       const response = await fetch('/auth/token', {
@@ -79,34 +49,40 @@ function App() {
       }
 
       setAuth({ authenticated: true, loading: false, error: null });
-      // Remove token from URL for security
       window.history.replaceState({}, '', window.location.pathname);
-    } catch (error) {
-      console.error('Token auth failed:', error);
+    } catch {
       setAuth({ authenticated: false, loading: false, error: 'Authentication failed' });
     }
   };
 
-  // Fetch health info for workspace ID
+  const checkSession = useCallback(async () => {
+    try {
+      const response = await fetch('/auth/session', { credentials: 'include' });
+      const data = await response.json();
+
+      if (data.authenticated) {
+        setAuth({ authenticated: true, loading: false, error: null });
+      } else if (tokenFromUrl) {
+        await authenticateWithToken(tokenFromUrl);
+      } else {
+        setAuth({ authenticated: false, loading: false, error: 'Not authenticated' });
+      }
+    } catch {
+      if (tokenFromUrl) {
+        await authenticateWithToken(tokenFromUrl);
+      } else {
+        setAuth({ authenticated: false, loading: false, error: 'Session check failed' });
+      }
+    }
+  }, [tokenFromUrl]);
+
   const fetchHealth = useCallback(async () => {
     try {
       const response = await fetch('/health');
       const data: HealthResponse = await response.json();
-      setWorkspaceId(data.workspaceId);
-
-      // Parse idle time and calculate warning
-      const idleMatch = data.idle.match(/(\d+)m/);
-      if (idleMatch) {
-        const idleMinutes = parseInt(idleMatch[1], 10);
-        // Show warning if idle for more than 25 minutes (5 min before 30 min timeout)
-        if (idleMinutes >= 25) {
-          setIdleWarning((30 - idleMinutes) * 60);
-        } else {
-          setIdleWarning(0);
-        }
-      }
-    } catch (error) {
-      console.error('Health check failed:', error);
+      setNodeId(data.nodeId);
+    } catch {
+      // Ignore transient health failures.
     }
   }, []);
 
@@ -119,29 +95,31 @@ function App() {
         setComplianceContext(null);
         return;
       }
-      const data = await response.json() as AgentInstructionResponse;
+      const data = (await response.json()) as AgentInstructionResponse;
       setComplianceContext(data);
-    } catch (error) {
-      console.error('Compliance context fetch failed:', error);
+    } catch {
       setComplianceContext(null);
     }
   }, []);
 
   useEffect(() => {
-    checkSession();
-    fetchHealth();
-    fetchComplianceContext();
+    void checkSession();
+    void fetchHealth();
+    void fetchComplianceContext();
 
-    // Poll health every 30 seconds
-    const healthInterval = setInterval(fetchHealth, 30000);
-    const complianceInterval = setInterval(fetchComplianceContext, 60000);
+    const healthInterval = setInterval(() => {
+      void fetchHealth();
+    }, 30000);
+    const complianceInterval = setInterval(() => {
+      void fetchComplianceContext();
+    }, 60000);
+
     return () => {
       clearInterval(healthInterval);
       clearInterval(complianceInterval);
     };
   }, [checkSession, fetchHealth, fetchComplianceContext]);
 
-  // Loading state
   if (auth.loading) {
     return (
       <div
@@ -169,16 +147,11 @@ function App() {
           />
           <p>Connecting to workspace...</p>
         </div>
-        <style>{`
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
-  // Error state
   if (auth.error && !auth.authenticated) {
     return (
       <div
@@ -193,22 +166,6 @@ function App() {
         }}
       >
         <div style={{ textAlign: 'center', maxWidth: '400px', padding: '20px' }}>
-          <div
-            style={{
-              width: '60px',
-              height: '60px',
-              backgroundColor: '#f44336',
-              borderRadius: '50%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto 16px',
-            }}
-          >
-            <svg width="30" height="30" viewBox="0 0 24 24" fill="white">
-              <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-            </svg>
-          </div>
           <h2 style={{ margin: '0 0 8px', fontSize: '20px' }}>Authentication Failed</h2>
           <p style={{ margin: '0 0 16px', opacity: 0.7 }}>{auth.error}</p>
           <p style={{ margin: 0, fontSize: '14px', opacity: 0.5 }}>
@@ -219,7 +176,6 @@ function App() {
     );
   }
 
-  // Main terminal view
   return (
     <div
       style={{
@@ -242,16 +198,9 @@ function App() {
           UI Compliance: instruction set {complianceContext.version} · checklist {complianceContext.requiredChecklistVersion}
         </div>
       )}
-      <StatusBar
-        connected={connected}
-        workspaceId={workspaceId}
-        idleWarning={idleWarning}
-      />
+      <StatusBar connected={connected} nodeId={nodeId} />
       <div style={{ flex: 1, overflow: 'hidden' }}>
-        <Terminal
-          onReady={() => setConnected(true)}
-          onDisconnect={() => setConnected(false)}
-        />
+        <Terminal onReady={() => setConnected(true)} onDisconnect={() => setConnected(false)} />
       </div>
     </div>
   );

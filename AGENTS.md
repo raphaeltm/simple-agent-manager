@@ -27,6 +27,14 @@ This includes but is not limited to:
 3. **Include doc changes in the same commit**: Do NOT create separate "docs update" commits after the fact
 4. **If unsure whether a doc is affected**: Read it. It takes seconds. The cost of stale docs is much higher.
 
+### CRITICAL: Spec Documentation Edit Scope (NON-NEGOTIABLE)
+
+Spec files are historical records tied to a specific feature context. Apply these scope rules on every task:
+
+1. **Working within a specific spec**: You MAY update docs under that active spec directory (for example, `specs/014-multi-workspace-nodes/*`) when needed.
+2. **Working within a specific spec**: You MUST NOT edit docs under any other spec directory.
+3. **Working outside spec context**: You MUST NOT edit `specs/` documentation at all.
+
 ### Why This Matters
 
 Stale documentation causes real user-facing failures. Users follow setup guides that reference incorrect permissions, wrong URLs, or outdated configuration — and then things break in ways that are hard to debug. Every code change without a corresponding doc update is technical debt that compounds.
@@ -486,7 +494,7 @@ When documenting environment variables:
 ### Business Logic Principles (Quick Reference)
 
 1. **Workspace Lifecycle**: pending → creating → running → stopping → stopped (see data-model.md for state machine)
-2. **Idle Detection**: Configurable timeout (default 30 minutes via `IDLE_TIMEOUT_SECONDS`), managed by VM Agent with PTY activity detection
+2. **Idle Detection Telemetry**: Idle/activity heartbeats are still recorded (`IDLE_TIMEOUT_SECONDS` remains configurable), but lifecycle transitions are explicit (no automatic idle-triggered stop/delete)
 3. **Ownership Validation**: All workspace operations MUST verify `user_id` matches authenticated user
 4. **Bootstrap Tokens**: One-time use, 5-minute expiry, cryptographically random
 
@@ -529,7 +537,7 @@ CI validates this evidence on pull requests.
 
 ## Project Overview
 
-This is a monorepo containing a Cloudflare-based platform for managing ephemeral Claude Code workspaces. Users can create cloud VMs with Claude Code pre-installed from any git repository, access them via a web-based interface, and have them automatically terminate when idle.
+This is a monorepo containing a Cloudflare-based platform for managing Claude Code workspaces. Users can create cloud VMs with Claude Code pre-installed from any git repository, access them via a web-based interface, and explicitly stop/restart/delete workspaces and nodes from the control plane.
 
 ## Tech Stack
 
@@ -553,7 +561,7 @@ packages/
 ├── providers/    # Cloud provider abstraction (Hetzner)
 ├── terminal/     # Shared terminal component (@simple-agent-manager/terminal)
 ├── cloud-init/   # Cloud-init template generator
-└── vm-agent/     # Go VM agent (PTY, WebSocket, idle detection)
+└── vm-agent/     # Go VM agent (PTY, WebSocket, node/workspace/session routing)
 
 scripts/
 └── vm/           # VM-side scripts (cloud-init, idle detection)
@@ -653,24 +661,42 @@ You can also trigger deployment manually via GitHub Actions → Deploy → Run w
 ## Key Concepts
 
 - **Workspace**: An AI coding environment (VM + devcontainer + Claude Code)
+- **Node**: A VM host that can run multiple workspaces
 - **Provider**: Cloud infrastructure abstraction (currently Hetzner only)
 - **CloudCLI**: Web-based Claude Code interface (file explorer + terminal)
-- **Idle Detection**: VMs self-terminate after inactivity (default 30 minutes, configurable via `IDLE_TIMEOUT_SECONDS`)
+- **Lifecycle Control**: Workspaces/nodes are stopped, restarted, or deleted explicitly via API/UI actions
 
 ## API Endpoints
+
+### Node Management
+- `POST /api/nodes` - Create node
+- `GET /api/nodes` - List user's nodes
+- `GET /api/nodes/:id` - Get node details
+- `POST /api/nodes/:id/stop` - Stop a node (and child workloads)
+- `DELETE /api/nodes/:id` - Delete node and cleanup resources
+- `GET /api/nodes/:id/events` - List node events
 
 ### Workspace Management
 - `POST /api/workspaces` - Create workspace
 - `GET /api/workspaces` - List user's workspaces
 - `GET /api/workspaces/:id` - Get workspace details
+- `PATCH /api/workspaces/:id` - Rename workspace display name
 - `POST /api/workspaces/:id/stop` - Stop a running workspace
 - `POST /api/workspaces/:id/restart` - Restart a workspace
 - `DELETE /api/workspaces/:id` - Delete a workspace (permanently removes it)
-- `GET /api/workspaces/:id/ready` - Check workspace readiness
+- `GET /api/workspaces/:id/events` - List workspace events
+
+### Agent Sessions
+- `GET /api/workspaces/:id/agent-sessions` - List workspace agent sessions
+- `POST /api/workspaces/:id/agent-sessions` - Create agent session
+- `POST /api/workspaces/:id/agent-sessions/:sessionId/stop` - Stop agent session
 
 ### VM Communication
-- `POST /api/workspaces/:id/heartbeat` - VM heartbeat with idle detection
-- `POST /api/workspaces/:id/boot-log` - VM sends boot progress log entry (callback JWT auth)
+- `POST /api/nodes/:id/ready` - Node Agent ready callback
+- `POST /api/nodes/:id/heartbeat` - Node Agent heartbeat callback
+- `POST /api/workspaces/:id/ready` - Workspace ready callback
+- `POST /api/workspaces/:id/heartbeat` - Workspace activity heartbeat callback
+- `POST /api/workspaces/:id/boot-log` - Workspace boot progress log callback
 - `POST /api/bootstrap/:token` - Redeem one-time bootstrap token (credentials + git identity)
 - `POST /api/agent/ready` - VM agent ready callback
 - `POST /api/agent/activity` - VM agent activity report
@@ -685,11 +711,12 @@ You can also trigger deployment manually via GitHub Actions → Deploy → Run w
 
 ### Credentials
 - `GET /api/credentials` - Get user's cloud provider credentials (encrypted)
-- `PUT /api/credentials` - Save cloud provider credentials
+- `POST /api/credentials` - Save cloud provider credentials
+- `DELETE /api/credentials/:provider` - Delete stored cloud provider credential
 
 ### GitHub Integration
 - `GET /api/github/installations` - List user's GitHub App installations
-- `GET /api/github/repos` - List accessible repositories
+- `GET /api/github/repositories` - List accessible repositories
 
 ## Environment Variables
 
@@ -723,6 +750,11 @@ See `docs/architecture/credential-security.md` for details.
 See `apps/api/.env.example`:
 - `WRANGLER_PORT` - Local dev port (default: 8787)
 - `BASE_DOMAIN` - Set automatically by sync scripts
+- `MAX_NODES_PER_USER` - Optional runtime node cap
+- `MAX_WORKSPACES_PER_USER` - Optional runtime workspace cap
+- `MAX_WORKSPACES_PER_NODE` - Optional runtime per-node workspace cap
+- `MAX_AGENT_SESSIONS_PER_WORKSPACE` - Optional runtime session cap
+- `NODE_HEARTBEAT_STALE_SECONDS` - Optional staleness threshold for node health
 
 ## Active Technologies
 - TypeScript 5.x + Hono (API), React + Vite (UI), Cloudflare Workers (001-mvp)
@@ -740,8 +772,11 @@ See `apps/api/.env.example`:
 - Cloudflare R2 (Pulumi state), D1 (app data), KV (sessions) (005-automated-deployment)
 - TypeScript 5.x + React 18 + Vite 5 + shadcn-compatible open-code component workflow, Radix UI primitives, Tailwind-style design tokens/utilities, existing `lucide-react` icons (009-ui-system-standards)
 - Git-tracked specification artifacts and shared package source files (no new runtime database storage) (009-ui-system-standards)
+- TypeScript 5.x (Node.js >= 20) and Go 1.22 (Node Agent) + Cloudflare Workers (Hono), React 18 + Vite (UI), Drizzle ORM (D1), BetterAuth, Cloudflare KV/R2; Go `net/http` + WebSockets (014-multi-workspace-nodes)
+- Cloudflare D1 (SQLite) for app state; Cloudflare KV for bootstrap tokens and boot logs; Cloudflare R2 for Node Agent binaries (014-multi-workspace-nodes)
 
 ## Recent Changes
+- 014-multi-workspace-nodes: Added first-class Nodes with multi-workspace hosting, node/workspace event streams, agent sessions, node-scoped routing/auth, and explicit lifecycle control (no idle-triggered shutdown)
 - 014-auth-profile-sync: Resolve and persist the GitHub account primary email at login (via `/user/emails`) and propagate git user name/email into workspace bootstrap so VM agent configures commit identity
 - 004-mvp-hardening: Secure bootstrap tokens, workspace ownership validation, provisioning timeouts, shared terminal package, WebSocket reconnection, idle deadline tracking
 - 003-browser-terminal-saas: Added multi-tenant SaaS with GitHub OAuth, VM Agent (Go), browser terminal

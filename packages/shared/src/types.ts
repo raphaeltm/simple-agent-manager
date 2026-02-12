@@ -95,6 +95,16 @@ export interface GitHubConnection {
 // =============================================================================
 // Workspace
 // =============================================================================
+export type NodeStatus =
+  | 'pending'
+  | 'creating'
+  | 'running'
+  | 'stopping'
+  | 'stopped'
+  | 'error';
+
+export type NodeHealthStatus = 'healthy' | 'stale' | 'unhealthy';
+
 export type WorkspaceStatus =
   | 'pending'
   | 'creating'
@@ -107,11 +117,51 @@ export type VMSize = 'small' | 'medium' | 'large';
 
 export type VMLocation = 'nbg1' | 'fsn1' | 'hel1';
 
+export interface Node {
+  id: string;
+  userId: string;
+  name: string;
+  status: NodeStatus;
+  healthStatus?: NodeHealthStatus;
+  vmSize: VMSize;
+  vmLocation: VMLocation;
+  providerInstanceId: string | null;
+  ipAddress: string | null;
+  lastHeartbeatAt: string | null;
+  heartbeatStaleAfterSeconds?: number;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NodeResponse {
+  id: string;
+  name: string;
+  status: NodeStatus;
+  healthStatus?: NodeHealthStatus;
+  vmSize: VMSize;
+  vmLocation: VMLocation;
+  ipAddress: string | null;
+  lastHeartbeatAt: string | null;
+  heartbeatStaleAfterSeconds?: number;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateNodeRequest {
+  name: string;
+  vmSize?: VMSize;
+  vmLocation?: VMLocation;
+}
+
 export interface Workspace {
   id: string;
+  nodeId?: string;
   userId: string;
   installationId: string | null;
   name: string;
+  displayName?: string;
   repository: string;
   branch: string;
   status: WorkspaceStatus;
@@ -140,7 +190,9 @@ export interface BootLogEntry {
 /** API response (includes computed URL) */
 export interface WorkspaceResponse {
   id: string;
+  nodeId?: string;
   name: string;
+  displayName?: string;
   repository: string;
   branch: string;
   status: WorkspaceStatus;
@@ -159,12 +211,47 @@ export interface WorkspaceResponse {
 
 export interface CreateWorkspaceRequest {
   name: string;
+  nodeId?: string;
   repository: string;
   branch?: string;
   vmSize?: VMSize;
   vmLocation?: VMLocation;
   installationId: string;
   idleTimeoutSeconds?: number;
+}
+
+export interface UpdateWorkspaceRequest {
+  displayName: string;
+}
+
+export type EventLevel = 'info' | 'warn' | 'error';
+
+export interface Event {
+  id: string;
+  nodeId?: string | null;
+  workspaceId?: string | null;
+  level: EventLevel;
+  type: string;
+  message: string;
+  detail?: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export type AgentSessionStatus = 'running' | 'stopped' | 'error';
+
+export interface AgentSession {
+  id: string;
+  workspaceId: string;
+  status: AgentSessionStatus;
+  createdAt: string;
+  updatedAt: string;
+  stoppedAt?: string | null;
+  errorMessage?: string | null;
+  label?: string | null;
+}
+
+export interface CreateAgentSessionRequest {
+  label?: string;
 }
 
 // =============================================================================

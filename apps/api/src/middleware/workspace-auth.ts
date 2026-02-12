@@ -1,6 +1,6 @@
 import type { Context } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { workspaces, type Workspace } from '../db/schema';
 import { getUserId } from './auth';
 import type { Env } from '../index';
@@ -36,4 +36,31 @@ export async function requireWorkspaceOwnership(
   }
 
   return workspace;
+}
+
+/**
+ * Like requireWorkspaceOwnership, but enforces that the workspace is attached
+ * to a specific node when nodeId is provided.
+ */
+export async function requireWorkspaceOwnershipOnNode(
+  c: Context<{ Bindings: Env }>,
+  workspaceId: string,
+  nodeId: string
+): Promise<Workspace | null> {
+  const userId = getUserId(c);
+  const db = drizzle(c.env.DATABASE);
+
+  const result = await db
+    .select()
+    .from(workspaces)
+    .where(
+      and(
+        eq(workspaces.id, workspaceId),
+        eq(workspaces.userId, userId),
+        eq(workspaces.nodeId, nodeId)
+      )
+    )
+    .limit(1);
+
+  return result[0] ?? null;
 }

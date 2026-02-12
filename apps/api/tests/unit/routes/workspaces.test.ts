@@ -1,57 +1,48 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
-/**
- * Workspace Routes Access Control Tests
- *
- * These tests verify that workspace routes properly enforce ownership.
- * All tests check that non-owners receive 404 (not 403) to prevent
- * information disclosure about workspace existence.
- */
+describe('workspaces routes source contract', () => {
+  const file = readFileSync(resolve(process.cwd(), 'src/routes/workspaces.ts'), 'utf8');
+  const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
+  const migrationFile = readFileSync(resolve(process.cwd(), 'src/db/migrations/0007_multi_workspace_nodes.sql'), 'utf8');
 
-// These are integration-level tests that would require mocking the full
-// Hono app with D1 database. For unit tests, we test the middleware
-// separately in workspace-auth.test.ts.
-
-describe('Workspace Routes Access Control', () => {
-  describe('GET /api/workspaces/:id', () => {
-    it('should return 404 for non-owned workspace', () => {
-      // This behavior is enforced by using requireWorkspaceOwnership
-      // which returns null for both non-existent AND non-owned workspaces.
-      // The route handler then returns 404 for null result.
-      //
-      // Verified by:
-      // 1. Unit test of requireWorkspaceOwnership (workspace-auth.test.ts)
-      // 2. Integration test would mock auth to verify 404 response
-      expect(true).toBe(true);
-    });
+  it('defines node-scoped workspace list/filter and rename endpoints', () => {
+    expect(file).toContain("const nodeId = c.req.query('nodeId')");
+    expect(file).toContain("workspacesRoutes.patch('/:id'");
+    expect(file).toContain('resolveUniqueWorkspaceDisplayName');
+    expect(file).toContain('UpdateWorkspaceRequest');
+    expect(file).toContain('body.displayName?.trim()');
+    expect(file).toContain('normalizedDisplayName');
   });
 
-  describe('DELETE /api/workspaces/:id', () => {
-    it('should return 404 for non-owned workspace', () => {
-      // Same behavior as GET - verified through middleware unit tests
-      expect(true).toBe(true);
-    });
+  it('defines workspace events and agent sessions endpoints', () => {
+    expect(file).toContain("workspacesRoutes.get('/:id/events'");
+    expect(file).toContain("workspacesRoutes.get('/:id/agent-sessions'");
+    expect(file).toContain("workspacesRoutes.post('/:id/agent-sessions'");
+    expect(file).toContain("workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop'");
   });
 
-  describe('GET /api/workspaces', () => {
-    it('should only return workspaces owned by authenticated user', () => {
-      // The list endpoint filters by userId from auth context.
-      // This is enforced by the WHERE clause in the query.
-      // Integration test would verify:
-      // - User A sees only their workspaces
-      // - User B sees only their workspaces
-      // - No cross-user data leakage
-      expect(true).toBe(true);
-    });
+  it('implements idempotent session creation support', () => {
+    expect(file).toContain("c.req.header('Idempotency-Key')");
+    expect(file).toContain('agent-session-idempotency');
+  });
+
+  it('uses DB-backed node-scoped unique display names for create and rename', () => {
+    expect(file).toContain('const uniqueName = await resolveUniqueWorkspaceDisplayName(db, targetNodeId, body.name)');
+    expect(file).toContain('resolveUniqueWorkspaceDisplayName(');
+    expect(file).toContain('nodeScopeId');
+    expect(schemaFile).toContain('idx_workspaces_node_display_name_unique');
+    expect(migrationFile).toContain('CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_node_display_name_unique');
+  });
+
+  it('keeps rename and create duplicate protection tied to node scope', () => {
+    expect(file).toContain('workspace.id');
+    expect(file).toContain('nodeId: nodeScopeId');
+    expect(file).toContain('Maximum ${limits.maxWorkspacesPerNode} workspaces allowed per node');
+  });
+
+  it('removes idle-triggered request-shutdown route', () => {
+    expect(file).not.toContain('/request-shutdown');
   });
 });
-
-/**
- * Note: For complete coverage, integration tests with actual D1
- * database mocking would be needed. These placeholder tests document
- * the expected behavior that is enforced by:
- *
- * 1. requireWorkspaceOwnership middleware (tested in workspace-auth.test.ts)
- * 2. Existing WHERE clauses filtering by userId
- * 3. Consistent 404 response for both non-existent and non-owned
- */

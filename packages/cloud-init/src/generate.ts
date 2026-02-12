@@ -2,39 +2,27 @@ import { CLOUD_INIT_TEMPLATE } from './template';
 
 /**
  * Variables for cloud-init generation.
- * SECURITY: No sensitive tokens are included - credentials are delivered via bootstrap.
  */
 export interface CloudInitVariables {
-  workspaceId: string;
+  nodeId: string;
   hostname: string;
-  repository: string;
-  branch: string;
   controlPlaneUrl: string;
   jwksUrl: string;
-  /** One-time bootstrap token for credential retrieval (not a secret, just an opaque key) */
-  bootstrapToken: string;
-  /** Idle timeout in seconds (e.g., "1800" for 30 minutes) */
-  idleTimeout: string;
+  callbackToken: string;
 }
 
 /**
  * Generate cloud-init configuration from template with variables.
- * No sensitive tokens are embedded - the VM agent retrieves credentials via bootstrap.
  */
 export function generateCloudInit(variables: CloudInitVariables): string {
   let config = CLOUD_INIT_TEMPLATE;
 
-  // Replace all template variables
-  // NOTE: No sensitive tokens (github_token, callback_token) are embedded
   const replacements: Record<string, string> = {
-    '{{ workspace_id }}': variables.workspaceId,
+    '{{ node_id }}': variables.nodeId,
     '{{ hostname }}': variables.hostname,
-    '{{ repository }}': variables.repository,
-    '{{ branch }}': variables.branch,
     '{{ control_plane_url }}': variables.controlPlaneUrl,
     '{{ jwks_url }}': variables.jwksUrl,
-    '{{ bootstrap_token }}': variables.bootstrapToken,
-    '{{ idle_timeout }}': variables.idleTimeout,
+    '{{ callback_token }}': variables.callbackToken,
   };
 
   for (const [placeholder, value] of Object.entries(replacements)) {
@@ -44,19 +32,15 @@ export function generateCloudInit(variables: CloudInitVariables): string {
   return config;
 }
 
-/**
- * Escape special regex characters in a string.
- */
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
- * Validate cloud-init config doesn't exceed size limit.
- * Hetzner limit is 32KB.
+ * Validate cloud-init config doesn't exceed Hetzner 32KB user-data limit.
  */
 export function validateCloudInitSize(config: string): boolean {
   const sizeBytes = new TextEncoder().encode(config).length;
-  const maxBytes = 32 * 1024; // 32KB
+  const maxBytes = 32 * 1024;
   return sizeBytes <= maxBytes;
 }

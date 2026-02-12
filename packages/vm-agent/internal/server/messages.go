@@ -10,14 +10,14 @@ type MessageType string
 
 const (
 	// Client -> Server message types
-	MessageTypeInput            MessageType = "input"
-	MessageTypeResize           MessageType = "resize"
-	MessageTypePing             MessageType = "ping"
-	MessageTypeCreateSession    MessageType = "create_session"
-	MessageTypeCloseSession     MessageType = "close_session"
-	MessageTypeRenameSession    MessageType = "rename_session"
-	MessageTypeListSessions     MessageType = "list_sessions"
-	MessageTypeReattachSession  MessageType = "reattach_session"
+	MessageTypeInput           MessageType = "input"
+	MessageTypeResize          MessageType = "resize"
+	MessageTypePing            MessageType = "ping"
+	MessageTypeCreateSession   MessageType = "create_session"
+	MessageTypeCloseSession    MessageType = "close_session"
+	MessageTypeRenameSession   MessageType = "rename_session"
+	MessageTypeListSessions    MessageType = "list_sessions"
+	MessageTypeReattachSession MessageType = "reattach_session"
 
 	// Server -> Client message types
 	MessageTypeOutput            MessageType = "output"
@@ -92,9 +92,9 @@ type SessionCreatedMessage struct {
 
 // SessionClosedMessage confirms session closure
 type SessionClosedMessage struct {
-	SessionID string                 `json:"sessionId"`
-	Reason    SessionClosureReason   `json:"reason"`
-	ExitCode  int                    `json:"exitCode,omitempty"`
+	SessionID string               `json:"sessionId"`
+	Reason    SessionClosureReason `json:"reason"`
+	ExitCode  int                  `json:"exitCode,omitempty"`
 }
 
 // SessionClosureReason represents why a session was closed

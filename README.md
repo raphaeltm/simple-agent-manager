@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Simple Agent Manager (SAM) - Spin up AI coding environments on-demand. Zero cost when idle.</strong>
+  <strong>Simple Agent Manager (SAM) - Spin up AI coding environments on-demand.</strong>
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@
 
 Simple Agent Manager (SAM) is a serverless platform for creating ephemeral cloud development environments optimized for [Claude Code](https://www.anthropic.com/claude-code). Point it at any GitHub repository and get a fully configured workspace with Claude Code pre-installed—accessible from your browser in minutes.
 
-Think **GitHub Codespaces, but built for AI-assisted development** and with automatic shutdown to eliminate surprise bills.
+Think **GitHub Codespaces, but built for AI-assisted development** with explicit lifecycle controls and node-level consolidation.
 
 ## **WARNING** this thing is fully vibe coded, with some code review, but not a lot yet. It has not yet beeen tested, so you should not use it at the moment.
 
@@ -31,7 +31,7 @@ Think **GitHub Codespaces, but built for AI-assisted development** and with auto
 |                   | GitHub Codespaces       | Simple Agent Manager                 |
 | ----------------- | ----------------------- | ------------------------------------ |
 | **Cost**          | $0.18–$0.36/hour        | ~$0.07–$0.15/hour                    |
-| **Idle shutdown** | Manual or 30min timeout | Automatic with PTY activity tracking |
+| **Lifecycle control** | Manual or 30min timeout | Explicit workspace/node stop, restart, and delete |
 | **Claude Code**   | Manual setup required   | Pre-installed and optimized          |
 | **Private repos** | Native GitHub support   | GitHub App integration               |
 | **Control plane** | Managed                 | Self-hosted (free tier)              |
@@ -39,8 +39,8 @@ Think **GitHub Codespaces, but built for AI-assisted development** and with auto
 ### Key Differentiators
 
 - **2-3x cheaper** than hosted alternatives using Hetzner Cloud VMs
-- **Smart idle detection** — tracks terminal activity to prevent premature shutdown
-- **Zero ongoing cost** — VMs self-terminate, control plane runs on Cloudflare's free tier
+- **Node consolidation** — run multiple workspaces on a single node VM
+- **Operator-controlled lifecycle** — explicit stop/restart/delete actions for nodes and workspaces
 - **Claude Code first** — pre-installed, session persistence, MCP server support
 - **Private repository support** — secure GitHub App integration for your org
 
@@ -53,7 +53,7 @@ Think **GitHub Codespaces, but built for AI-assisted development** and with auto
 - **Installable PWA** — Add SAM to your home screen for app-like mobile access
 - **DevContainer Support** — Automatically detects and uses your `.devcontainer/devcontainer.json`
 - **Multiple VM Sizes** — Small (2 vCPU/4GB), Medium (4 vCPU/8GB), Large (8 vCPU/16GB)
-- **Automatic Cleanup** — Idle workspaces shut down after configurable inactivity (default 30 minutes)
+- **Explicit Lifecycle Controls** — Stop, restart, and delete workspaces/nodes on demand
 - **GitHub Integration** — Works with both public and private repositories
 - **Keyboard-Safe Mobile Layout** — Viewport-aware sizing keeps core controls visible as browser UI and mobile keyboard appear/disappear
 
@@ -189,7 +189,8 @@ Then push to main or manually trigger the Deploy workflow.
     │  │  VM Agent (Go)                       │    │
     │  │  • WebSocket terminal (xterm.js)    │    │
     │  │  • JWT authentication               │    │
-    │  │  • Idle detection + auto-shutdown   │    │
+    │  │  • Workspace/session routing         │    │
+    │  │  • Node/workspace health heartbeats  │    │
     │  └─────────────────────────────────────┘    │
     └─────────────────────────────────────────────┘
 ```
@@ -214,7 +215,7 @@ packages/
 ├── providers/        # Cloud provider abstraction
 ├── cloud-init/       # VM cloud-init template generation
 ├── terminal/         # Shared terminal component (xterm.js + WebSocket)
-└── vm-agent/         # Go agent for WebSocket terminal + idle detection
+└── vm-agent/         # Go agent for terminal routing, sessions, and node health
 
 scripts/
 ├── vm/               # VM-side config templates (cloud-init.yaml, default-devcontainer.json)
@@ -256,18 +257,34 @@ docs/                 # Documentation
 | `/api/github/webhook`       | `POST` | GitHub webhook handler        |
 | `/api/github/callback`      | `GET`  | GitHub App OAuth callback     |
 
+### Nodes
+
+| Endpoint               | Method   | Description                     |
+| ---------------------- | -------- | ------------------------------- |
+| `/api/nodes`           | `GET`    | List user's nodes               |
+| `/api/nodes`           | `POST`   | Create a node                   |
+| `/api/nodes/:id`       | `GET`    | Get node details                |
+| `/api/nodes/:id/stop`  | `POST`   | Stop a node and child workloads |
+| `/api/nodes/:id`       | `DELETE` | Delete node                     |
+| `/api/nodes/:id/events` | `GET`    | List node events                |
+
 ### Workspaces
 
-| Endpoint                        | Method   | Description            |
-| ------------------------------- | -------- | ---------------------- |
-| `/api/workspaces`               | `GET`    | List user's workspaces |
-| `/api/workspaces`               | `POST`   | Create a new workspace |
-| `/api/workspaces/:id`           | `GET`    | Get workspace details  |
-| `/api/workspaces/:id`           | `DELETE` | Delete workspace       |
-| `/api/workspaces/:id/stop`      | `POST`   | Stop workspace         |
-| `/api/workspaces/:id/restart`   | `POST`   | Restart workspace      |
-| `/api/workspaces/:id/ready`     | `POST`   | VM ready callback      |
-| `/api/workspaces/:id/heartbeat` | `POST`   | VM heartbeat           |
+| Endpoint                                         | Method   | Description                      |
+| ------------------------------------------------ | -------- | -------------------------------- |
+| `/api/workspaces`                                | `GET`    | List user's workspaces           |
+| `/api/workspaces`                                | `POST`   | Create a new workspace           |
+| `/api/workspaces/:id`                            | `GET`    | Get workspace details            |
+| `/api/workspaces/:id`                            | `PATCH`  | Rename workspace display name    |
+| `/api/workspaces/:id`                            | `DELETE` | Delete workspace                 |
+| `/api/workspaces/:id/stop`                       | `POST`   | Stop workspace                   |
+| `/api/workspaces/:id/restart`                    | `POST`   | Restart workspace                |
+| `/api/workspaces/:id/events`                     | `GET`    | List workspace events            |
+| `/api/workspaces/:id/agent-sessions`             | `GET`    | List agent sessions              |
+| `/api/workspaces/:id/agent-sessions`             | `POST`   | Create agent session             |
+| `/api/workspaces/:id/agent-sessions/:sessionId/stop` | `POST` | Stop agent session               |
+| `/api/workspaces/:id/ready`                      | `POST`   | Workspace ready callback         |
+| `/api/workspaces/:id/heartbeat`                  | `POST`   | Workspace heartbeat callback     |
 
 ### Terminal
 
@@ -345,8 +362,8 @@ New team members can spin up fully configured development environments in minute
 
 | Phase                   | Target   | Features                                               |
 | ----------------------- | -------- | ------------------------------------------------------ |
-| **1. MVP**              | Complete | Core workspace management, GitHub OAuth, auto-shutdown |
-| **2. Browser Terminal** | Current  | Web terminal, VM agent, idle detection                 |
+| **1. MVP**              | Complete | Core workspace management and GitHub OAuth             |
+| **2. Browser Terminal** | Current  | Web terminal, VM agent, multi-workspace nodes/sessions |
 | **3. Enhanced UX**      | Q1 2026  | Logs, SSH access, templates, persistent storage        |
 | **4. Multi-Tenancy**    | Q2 2026  | Teams, usage quotas, billing                           |
 | **5. Enterprise**       | Q3 2026  | VPC, SSO, compliance, multi-region                     |

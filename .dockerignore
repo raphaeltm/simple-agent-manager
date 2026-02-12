@@ -1,0 +1,15 @@
+node_modules/
+.git/
+.turbo/
+dist/
+build/
+coverage/
+.wrangler/
+.cache/
+*.log
+*.log.*
+.env
+.env.*
+.dev.vars
+Dockerfile*
+.dockerignore

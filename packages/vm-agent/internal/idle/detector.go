@@ -14,7 +14,7 @@ import (
 type Detector struct {
 	timeout           time.Duration
 	heartbeatInterval time.Duration
-	idleCheckInterval time.Duration // How often to check for idle timeout
+	idleCheckInterval time.Duration // Deprecated: no automatic shutdown
 	controlPlaneURL   string
 	workspaceID       string
 	callbackToken     string
@@ -76,10 +76,6 @@ func (d *Detector) Start() {
 	heartbeatTicker := time.NewTicker(d.heartbeatInterval)
 	defer heartbeatTicker.Stop()
 
-	// Check for idle timeout periodically
-	idleCheckTicker := time.NewTicker(d.idleCheckInterval)
-	defer idleCheckTicker.Stop()
-
 	for {
 		select {
 		case <-d.done:
@@ -87,26 +83,18 @@ func (d *Detector) Start() {
 		case <-heartbeatTicker.C:
 			// Send heartbeat to control plane (informational only)
 			d.SendHeartbeat()
-		case <-idleCheckTicker.C:
-			// Check if we've exceeded the idle timeout locally
-			if d.IsIdle() {
-				log.Printf("Idle timeout reached (idle for %v, timeout is %v), initiating shutdown",
-					d.GetIdleTime(), d.timeout)
-				select {
-				case <-d.shutdownCh:
-					// Already closed
-				default:
-					close(d.shutdownCh)
-				}
-				return // Stop the detector after triggering shutdown
-			}
 		}
 	}
 }
 
 // Stop stops the idle detector.
 func (d *Detector) Stop() {
-	close(d.done)
+	select {
+	case <-d.done:
+		// Already stopped.
+	default:
+		close(d.done)
+	}
 }
 
 // RecordActivity records user activity and extends the shutdown deadline.
@@ -150,6 +138,10 @@ func (d *Detector) ShutdownChannel() <-chan struct{} {
 // SendHeartbeat sends a heartbeat to the control plane.
 // This is purely informational - the VM makes its own shutdown decisions.
 func (d *Detector) SendHeartbeat() {
+	if d.controlPlaneURL == "" || d.workspaceID == "" {
+		return
+	}
+
 	idleTime := d.GetIdleTime()
 	deadline := d.GetDeadline()
 	isIdle := time.Now().After(deadline)
@@ -194,23 +186,8 @@ func (d *Detector) SendHeartbeat() {
 		return
 	}
 
-	// The control plane may suggest actions, but the VM decides autonomously
-	// We can still respect immediate shutdown requests from the control plane
-	var response struct {
-		Action string `json:"action"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&response); err == nil {
-		if response.Action == "shutdown" {
-			// Control plane can request immediate shutdown (e.g., user clicked "stop")
-			log.Println("Immediate shutdown requested by control plane")
-			select {
-			case <-d.shutdownCh:
-				// Already closed
-			default:
-				close(d.shutdownCh)
-			}
-		}
-	}
+	// Read and discard heartbeat response body for connection reuse.
+	_ = json.NewDecoder(resp.Body).Decode(&struct{}{})
 }
 
 // GetWarningTime returns how much warning time is left before shutdown.
@@ -220,10 +197,15 @@ func (d *Detector) GetWarningTime() time.Duration {
 	warningThreshold := 5 * time.Minute
 
 	timeUntilShutdown := time.Until(deadline)
-	
+
 	if timeUntilShutdown > 0 && timeUntilShutdown <= warningThreshold {
 		return timeUntilShutdown
 	}
-	
+
 	return 0
+}
+
+// Done returns a channel that's closed when the detector is stopped.
+func (d *Detector) Done() <-chan struct{} {
+	return d.done
 }

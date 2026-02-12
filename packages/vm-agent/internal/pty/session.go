@@ -14,25 +14,25 @@ import (
 
 // Session represents a PTY session.
 type Session struct {
-	ID          string
-	UserID      string
-	Name        string
-	Cmd         *exec.Cmd
-	Pty         *os.File
-	Rows        int
-	Cols        int
-	CreatedAt   time.Time
-	LastActive  time.Time
-	mu          sync.RWMutex
-	onClose     func()
+	ID         string
+	UserID     string
+	Name       string
+	Cmd        *exec.Cmd
+	Pty        *os.File
+	Rows       int
+	Cols       int
+	CreatedAt  time.Time
+	LastActive time.Time
+	mu         sync.RWMutex
+	onClose    func()
 
 	// Persistence fields
-	IsOrphaned    bool
-	OrphanedAt    time.Time
-	ProcessExited bool
-	ExitCode      int
-	OutputBuffer  *RingBuffer
-	orphanTimer   *time.Timer
+	IsOrphaned     bool
+	OrphanedAt     time.Time
+	ProcessExited  bool
+	ExitCode       int
+	OutputBuffer   *RingBuffer
+	orphanTimer    *time.Timer
 	attachedWriter io.Writer
 }
 
@@ -98,7 +98,7 @@ type SessionConfig struct {
 	OnClose          func()
 	ContainerID      string // If set, exec into this Docker container
 	ContainerUser    string // User to run as inside the container
-	OutputBufferSize int // Ring buffer capacity in bytes (0 = default)
+	OutputBufferSize int    // Ring buffer capacity in bytes (0 = default)
 }
 
 // NewSession creates a new PTY session.

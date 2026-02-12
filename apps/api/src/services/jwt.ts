@@ -7,6 +7,7 @@ const KEY_ID = `key-${new Date().getFullYear()}-${String(new Date().getMonth() +
 // Audiences for different token types
 const TERMINAL_AUDIENCE = 'workspace-terminal';
 const CALLBACK_AUDIENCE = 'workspace-callback';
+const NODE_MANAGEMENT_AUDIENCE = 'node-management';
 
 /**
  * Get the JWT issuer URL from environment.
@@ -91,6 +92,39 @@ export async function signCallbackToken(
     .sign(privateKey);
 
   return token;
+}
+
+/**
+ * Sign a management token for Control Plane -> Node Agent API calls.
+ */
+export async function signNodeManagementToken(
+  userId: string,
+  nodeId: string,
+  workspaceId: string | null,
+  env: Env
+): Promise<{ token: string; expiresAt: string }> {
+  const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
+  const expiry = getTerminalTokenExpiry(env);
+  const expiresAt = new Date(Date.now() + expiry);
+  const issuer = getIssuer(env);
+
+  const token = await new SignJWT({
+    type: 'node-management',
+    node: nodeId,
+    ...(workspaceId ? { workspace: workspaceId } : {}),
+  })
+    .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+    .setIssuer(issuer)
+    .setSubject(userId)
+    .setAudience(NODE_MANAGEMENT_AUDIENCE)
+    .setExpirationTime(expiresAt)
+    .setIssuedAt()
+    .sign(privateKey);
+
+  return {
+    token,
+    expiresAt: expiresAt.toISOString(),
+  };
 }
 
 /**
