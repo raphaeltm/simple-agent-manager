@@ -443,8 +443,8 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) error {
 	if !hasConfig {
 		// Repo has no devcontainer config — provide a default via --override-config.
 		// The devcontainer CLI requires a config file; without one it fails with
-		// "Dev container config not found". We write a default config that uses the
-		// Microsoft universal image (configurable via DEFAULT_DEVCONTAINER_IMAGE).
+		// "Dev container config not found". We write a default config that uses
+		// DEFAULT_DEVCONTAINER_IMAGE (configurable at runtime).
 		configPath, err := writeDefaultDevcontainerConfig(cfg)
 		if err != nil {
 			return fmt.Errorf("failed to write default devcontainer config: %w", err)
