@@ -130,20 +130,19 @@ app.use('*', async (c, next) => {
     return c.json({ error: 'INVALID_WORKSPACE', message: 'Invalid workspace subdomain' }, 400);
   }
 
-  // Look up the VM IP from D1
+  // Look up workspace routing metadata from D1.
   const db = drizzle(c.env.DATABASE, { schema });
   const workspace = await db
     .select({
       nodeId: schema.workspaces.nodeId,
-      vmIp: schema.workspaces.vmIp,
       status: schema.workspaces.status,
     })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .get();
 
-  if (!workspace || !workspace.vmIp) {
-    return c.json({ error: 'NOT_FOUND', message: 'Workspace not found or has no VM IP' }, 404);
+  if (!workspace) {
+    return c.json({ error: 'NOT_FOUND', message: 'Workspace not found' }, 404);
   }
 
   if (workspace.status !== 'running') {
