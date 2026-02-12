@@ -76,7 +76,7 @@ export function Landing() {
             {[
               { label: 'Cloud VMs', sub: 'Powered by Hetzner', color: '#60a5fa' },
               { label: 'Claude Code', sub: 'Pre-installed', color: 'var(--sam-color-success)' },
-              { label: 'Zero Cost', sub: 'When idle', color: '#c084fc' },
+              { label: 'Pay as you go', sub: 'Stop when done', color: '#c084fc' },
             ].map((item) => (
               <div key={item.label} style={{
                 textAlign: 'center',
