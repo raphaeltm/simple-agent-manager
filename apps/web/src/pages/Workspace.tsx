@@ -131,6 +131,8 @@ type WorkspaceTab =
       status: AgentSession['status'];
     };
 
+const DEFAULT_TERMINAL_TAB_ID = '__default-terminal__';
+
 /**
  * Workspace detail page — compact toolbar with terminal filling the viewport.
  */
@@ -490,7 +492,9 @@ export function Workspace() {
   const handleSelectWorkspaceTab = (tab: WorkspaceTab) => {
     if (tab.kind === 'terminal') {
       setViewMode('terminal');
-      multiTerminalRef.current?.activateSession(tab.sessionId);
+      if (tab.sessionId !== DEFAULT_TERMINAL_TAB_ID) {
+        multiTerminalRef.current?.activateSession(tab.sessionId);
+      }
       return;
     }
 
@@ -499,8 +503,31 @@ export function Workspace() {
 
   const defaultAgentId = configuredAgents.length === 1 ? configuredAgents[0]!.id : null;
 
+  const visibleTerminalTabs = useMemo<MultiTerminalSessionSnapshot[]>(() => {
+    if (terminalTabs.length > 0) {
+      return terminalTabs;
+    }
+    if (!isRunning || !featureFlags.multiTerminal) {
+      return [];
+    }
+    return [
+      {
+        id: DEFAULT_TERMINAL_TAB_ID,
+        name: 'Terminal 1',
+        status: terminalError ? 'error' : terminalLoading ? 'connecting' : wsUrl ? 'connected' : 'disconnected',
+      },
+    ];
+  }, [
+    featureFlags.multiTerminal,
+    isRunning,
+    terminalError,
+    terminalLoading,
+    terminalTabs,
+    wsUrl,
+  ]);
+
   const workspaceTabs = useMemo<WorkspaceTab[]>(() => {
-    const terminalSessionTabs: WorkspaceTab[] = terminalTabs.map((session) => ({
+    const terminalSessionTabs: WorkspaceTab[] = visibleTerminalTabs.map((session) => ({
       id: `terminal:${session.id}`,
       kind: 'terminal',
       sessionId: session.id,
@@ -525,14 +552,20 @@ export function Workspace() {
     });
 
     return [...terminalSessionTabs, ...chatSessionTabs];
-  }, [agentNameById, agentSessions, preferredAgentsBySession, terminalTabs]);
+  }, [agentNameById, agentSessions, preferredAgentsBySession, visibleTerminalTabs]);
 
   const activeTabId = useMemo(() => {
     if (viewMode === 'terminal') {
-      return activeTerminalSessionId ? `terminal:${activeTerminalSessionId}` : null;
+      if (activeTerminalSessionId) {
+        return `terminal:${activeTerminalSessionId}`;
+      }
+      if (visibleTerminalTabs.length > 0) {
+        return `terminal:${visibleTerminalTabs[0]!.id}`;
+      }
+      return null;
     }
     return activeChatSessionId ? `chat:${activeChatSessionId}` : null;
-  }, [activeChatSessionId, activeTerminalSessionId, viewMode]);
+  }, [activeChatSessionId, activeTerminalSessionId, viewMode, visibleTerminalTabs]);
 
   const acpConnected = acpSession.connected;
   const acpAgentType = acpSession.agentType;

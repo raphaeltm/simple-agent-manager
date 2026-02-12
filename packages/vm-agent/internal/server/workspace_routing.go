@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -265,21 +266,54 @@ func (s *Server) ptyManagerContainerResolverForLabel(labelValue string) pty.Cont
 		return nil
 	}
 
-	resolvedLabel := strings.TrimSpace(labelValue)
-	if resolvedLabel == "" {
-		resolvedLabel = strings.TrimSpace(s.config.ContainerLabelValue)
-	}
-	if resolvedLabel == "" {
-		resolvedLabel = strings.TrimSpace(s.config.WorkspaceDir)
-	}
-	if resolvedLabel == "" {
-		resolvedLabel = "/workspace"
+	labelCandidates := containerLabelCandidates(
+		labelValue,
+		s.config.ContainerLabelValue,
+		s.config.WorkspaceDir,
+		"/workspace",
+	)
+	if len(labelCandidates) == 0 {
+		return nil
 	}
 
-	discovery := container.NewDiscovery(container.Config{
-		LabelKey:   s.config.ContainerLabelKey,
-		LabelValue: resolvedLabel,
-		CacheTTL:   s.config.ContainerCacheTTL,
-	})
-	return discovery.GetContainerID
+	discoveries := make([]*container.Discovery, 0, len(labelCandidates))
+	for _, candidate := range labelCandidates {
+		discoveries = append(discoveries, container.NewDiscovery(container.Config{
+			LabelKey:   s.config.ContainerLabelKey,
+			LabelValue: candidate,
+			CacheTTL:   s.config.ContainerCacheTTL,
+		}))
+	}
+
+	return func() (string, error) {
+		var lastErr error
+		for _, discovery := range discoveries {
+			containerID, err := discovery.GetContainerID()
+			if err == nil {
+				return containerID, nil
+			}
+			lastErr = err
+		}
+		if lastErr != nil {
+			return "", lastErr
+		}
+		return "", fmt.Errorf("no container label candidates configured")
+	}
+}
+
+func containerLabelCandidates(values ...string) []string {
+	candidates := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		candidates = append(candidates, trimmed)
+	}
+	return candidates
 }
