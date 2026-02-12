@@ -211,6 +211,112 @@ func TestRecoverWorkspaceRuntimeHydratesMetadataAndAdoptsLegacyLayout(t *testing
 	}
 }
 
+func TestRecoverWorkspaceRuntimeAdoptsLegacyLayoutFromBaseWorkspaceDir(t *testing.T) {
+	originalPrepare := prepareWorkspaceForRuntime
+	defer func() { prepareWorkspaceForRuntime = originalPrepare }()
+
+	var capturedCfg *config.Config
+	prepareWorkspaceForRuntime = func(_ context.Context, cfg *config.Config, _ bootstrap.ProvisionState) error {
+		copyCfg := *cfg
+		capturedCfg = &copyCfg
+		return nil
+	}
+
+	const workspaceID = "WS_BASE"
+	const callbackToken = "node-callback-token"
+	baseDir := t.TempDir()
+	legacyDir := filepath.Join(baseDir, "repo-one")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatalf("failed to create legacy workspace dir: %v", err)
+	}
+
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+callbackToken {
+			t.Fatalf("unexpected Authorization header: %q", r.Header.Get("Authorization"))
+		}
+		switch r.URL.Path {
+		case "/api/workspaces/WS_BASE/runtime":
+			_, _ = w.Write([]byte(`{"workspaceId":"WS_BASE","repository":"octo/repo-one","branch":"main"}`))
+		case "/api/workspaces/WS_BASE/git-token":
+			_, _ = w.Write([]byte(`{"token":"ghs_recovery_token","expiresAt":"2026-02-12T00:00:00Z"}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer controlPlane.Close()
+
+	runtime := &WorkspaceRuntime{
+		ID:                  workspaceID,
+		WorkspaceDir:        baseDir,
+		ContainerLabelValue: baseDir,
+		ContainerWorkDir:    deriveContainerWorkDir(baseDir),
+	}
+
+	s := &Server{
+		config: &config.Config{
+			ContainerMode:       true,
+			WorkspaceDir:        baseDir,
+			CallbackToken:       callbackToken,
+			ControlPlaneURL:     controlPlane.URL,
+			DefaultShell:        "/bin/bash",
+			DefaultRows:         24,
+			DefaultCols:         80,
+			ContainerLabelKey:   "devcontainer.local_folder",
+			PTYOutputBufferSize: 1024,
+		},
+		workspaces: map[string]*WorkspaceRuntime{runtime.ID: runtime},
+	}
+
+	if err := s.recoverWorkspaceRuntime(context.Background(), runtime); err != nil {
+		t.Fatalf("recoverWorkspaceRuntime() error = %v", err)
+	}
+	if capturedCfg == nil {
+		t.Fatal("expected prepareWorkspaceForRuntime to be called")
+	}
+	if capturedCfg.WorkspaceDir != legacyDir {
+		t.Fatalf("WorkspaceDir = %q, want %q", capturedCfg.WorkspaceDir, legacyDir)
+	}
+	if capturedCfg.ContainerLabelValue != legacyDir {
+		t.Fatalf("ContainerLabelValue = %q, want %q", capturedCfg.ContainerLabelValue, legacyDir)
+	}
+}
+
+func TestAdoptLegacyWorkspaceLayoutKeepsExistingNonBaseDir(t *testing.T) {
+	baseDir := t.TempDir()
+	existingDir := filepath.Join(baseDir, "custom-path")
+	legacyDir := filepath.Join(baseDir, "repo-one")
+	if err := os.MkdirAll(existingDir, 0o755); err != nil {
+		t.Fatalf("failed to create existing workspace dir: %v", err)
+	}
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatalf("failed to create legacy workspace dir: %v", err)
+	}
+
+	runtime := &WorkspaceRuntime{
+		ID:                  "WS_KEEP",
+		Repository:          "octo/repo-one",
+		WorkspaceDir:        existingDir,
+		ContainerLabelValue: existingDir,
+		ContainerWorkDir:    deriveContainerWorkDir(existingDir),
+	}
+
+	s := &Server{
+		config: &config.Config{
+			WorkspaceDir: baseDir,
+		},
+	}
+
+	if adopted := s.adoptLegacyWorkspaceLayout(runtime); adopted {
+		t.Fatal("expected existing non-base workspace dir to be preserved")
+	}
+	if runtime.WorkspaceDir != existingDir {
+		t.Fatalf("WorkspaceDir mutated = %q, want %q", runtime.WorkspaceDir, existingDir)
+	}
+	if runtime.ContainerLabelValue != existingDir {
+		t.Fatalf("ContainerLabelValue mutated = %q, want %q", runtime.ContainerLabelValue, existingDir)
+	}
+}
+
 func TestRepositoryDirName(t *testing.T) {
 	tests := []struct {
 		name       string

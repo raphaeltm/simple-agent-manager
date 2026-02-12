@@ -117,6 +117,8 @@ Build order matters: shared → providers → api/web
 4. If the feature cannot be tested via Playwright (e.g., requires external service interaction), document why and what was verified manually.
 5. Report results to the user — do not assume deployment success just because CI passed.
 6. During development Playwright runs, store screenshots in `.codex/tmp/playwright-screenshots/` (gitignored). Do not write screenshots to tracked directories.
+7. For Playwright verification that needs live resources, create fresh test workspaces/nodes and clean them up when testing is complete (delete test workspaces, then delete test nodes if empty).
+8. Do not repurpose or modify old/long-lived workspaces or nodes for validation; only use newly created test resources for the current run.
 
 ### Documentation & File Naming
 
@@ -276,6 +278,8 @@ export const WorkspaceCard: FC<Props> = ({ workspace }) => {
 **Test credentials** for the live app (`app.simple-agent-manager.org`) are stored at `/workspaces/.tmp/secure/demo-credentials.md` (outside this git repository). This path is intentionally outside the repo so credentials cannot be committed. If the file is missing or outdated, ask the human for the latest credentials, update that file, and then continue Playwright testing.
 
 **Playwright screenshots (development):** Save all screenshots to `.codex/tmp/playwright-screenshots/` only. This path is gitignored via `.codex/tmp/`.
+
+**Live test cleanup (required):** When automated/manual verification creates test nodes or workspaces, delete those test resources before marking the task complete. Do not alter pre-existing legacy resources during validation.
 
 ## Troubleshooting
 
@@ -777,6 +781,7 @@ See `apps/api/.env.example`:
 - Cloudflare D1 (SQLite) for app state; Cloudflare KV for bootstrap tokens and boot logs; Cloudflare R2 for Node Agent binaries (014-multi-workspace-nodes)
 
 ## Recent Changes
+- 014-multi-workspace-nodes: VM Agent legacy-layout recovery now adopts repo-specific workspace paths even when the current runtime path is the existing generic base workspace dir (for example `/workspace`), preventing stale terminal container-label routing on recovered sessions
 - 014-multi-workspace-nodes: VM Agent now avoids reusing legacy single-workspace PTY manager wiring when runtime recovery updates workspace/container paths, so terminal attach uses the recovered workspace-specific devcontainer label instead of stale `/workspace` routing
 - 014-multi-workspace-nodes: Added VM Agent workspace recovery on terminal/ACP attach (rebuilds missing devcontainers and recreates missing in-memory agent sessions by explicit `sessionId`), and ACP client now surfaces gateway error payloads instead of stalling in a waiting state
 - 014-multi-workspace-nodes: Added callback-auth runtime metadata endpoint (`GET /api/workspaces/:id/runtime`) and legacy workspace layout recovery so node restarts can rehydrate terminal/ACP context before attach
