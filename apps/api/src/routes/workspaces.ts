@@ -46,6 +46,7 @@ workspacesRoutes.use('/*', async (c, next) => {
     path.endsWith('/ready') ||
     path.endsWith('/heartbeat') ||
     path.endsWith('/agent-key') ||
+    path.endsWith('/runtime') ||
     path.endsWith('/git-token') ||
     path.endsWith('/boot-log')
   ) {
@@ -903,6 +904,38 @@ workspacesRoutes.post('/:id/agent-key', async (c) => {
   return c.json({
     apiKey: credentialData.credential,
     credentialKind: credentialData.credentialKind,
+  });
+});
+
+workspacesRoutes.get('/:id/runtime', async (c) => {
+  const workspaceId = c.req.param('id');
+  await verifyWorkspaceCallbackAuth(c, workspaceId);
+
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  const workspaceRows = await db
+    .select({
+      id: schema.workspaces.id,
+      repository: schema.workspaces.repository,
+      branch: schema.workspaces.branch,
+      status: schema.workspaces.status,
+      nodeId: schema.workspaces.nodeId,
+    })
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+
+  const workspace = workspaceRows[0];
+  if (!workspace) {
+    throw errors.notFound('Workspace');
+  }
+
+  return c.json({
+    workspaceId: workspace.id,
+    repository: workspace.repository,
+    branch: workspace.branch,
+    status: workspace.status,
+    nodeId: workspace.nodeId,
   });
 });
 

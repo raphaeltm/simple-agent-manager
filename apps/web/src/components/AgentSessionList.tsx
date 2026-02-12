@@ -4,7 +4,7 @@ import { Button } from '@simple-agent-manager/ui';
 interface AgentSessionListProps {
   sessions: AgentSession[];
   loading?: boolean;
-  onCreate: () => void;
+  onCreate?: () => void;
   onAttach: (sessionId: string) => void;
   onStop: (sessionId: string) => void;
 }
@@ -35,9 +35,11 @@ export function AgentSessionList({
         }}
       >
         <strong style={{ fontSize: '0.875rem' }}>Agent Sessions</strong>
-        <Button size="sm" onClick={onCreate} disabled={loading}>
-          New Session
-        </Button>
+        {onCreate && (
+          <Button size="sm" onClick={onCreate} disabled={loading}>
+            New Session
+          </Button>
+        )}
       </div>
 
       {sessions.length === 0 ? (

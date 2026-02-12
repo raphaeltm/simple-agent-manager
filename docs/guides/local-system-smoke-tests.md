@@ -14,7 +14,7 @@ That full path is best validated in staging. This harness validates the core run
 
 - Terminal WebSocket auth and PTY execution
 - ACP WebSocket agent selection and subprocess wiring
-- VM Agent -> control plane callback (`/api/workspaces/:id/agent-key`)
+- VM Agent -> control plane callbacks (`/api/workspaces/:id/agent-key`, `/api/workspaces/:id/runtime`)
 - VM Agent container discovery + `docker exec` into a workspace container
 
 ## Test topology
