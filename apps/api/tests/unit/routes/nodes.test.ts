@@ -18,6 +18,9 @@ describe('nodes routes source contract', () => {
     expect(file).toContain("nodesRoutes.get('/:id/events',");
     expect(file).toContain("nodesRoutes.post('/:id/ready',");
     expect(file).toContain("nodesRoutes.post('/:id/heartbeat',");
+    expect(file).toContain('createWorkspaceOnNode');
+    expect(file).toContain('signCallbackToken');
+    expect(file).toContain("eq(schema.workspaces.status, 'creating')");
   });
 
   it('implements stop/delete semantics for child workspaces and sessions', () => {

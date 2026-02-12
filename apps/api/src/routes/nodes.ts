@@ -11,9 +11,13 @@ import { requireNodeOwnership } from '../middleware/node-auth';
 import * as schema from '../db/schema';
 import { getRuntimeLimits } from '../services/limits';
 import { createNodeRecord, deleteNodeResources, provisionNode, stopNodeResources } from '../services/nodes';
-import { verifyCallbackToken } from '../services/jwt';
+import { signCallbackToken, verifyCallbackToken } from '../services/jwt';
 import { recordNodeRoutingMetric } from '../services/telemetry';
-import { listNodeEvents as fetchNodeEvents, stopWorkspaceOnNode } from '../services/node-agent';
+import {
+  createWorkspaceOnNode,
+  listNodeEvents as fetchNodeEvents,
+  stopWorkspaceOnNode,
+} from '../services/node-agent';
 
 const nodesRoutes = new Hono<{ Bindings: Env }>();
 
@@ -310,6 +314,48 @@ nodesRoutes.post('/:id/ready', async (c) => {
       updatedAt: now,
     })
     .where(eq(schema.nodes.id, nodeId));
+
+  c.executionCtx.waitUntil(
+    (async () => {
+      const innerDb = drizzle(c.env.DATABASE, { schema });
+      const pendingWorkspaces = await innerDb
+        .select({
+          id: schema.workspaces.id,
+          userId: schema.workspaces.userId,
+          repository: schema.workspaces.repository,
+          branch: schema.workspaces.branch,
+        })
+        .from(schema.workspaces)
+        .where(
+          and(
+            eq(schema.workspaces.nodeId, nodeId),
+            eq(schema.workspaces.status, 'creating')
+          )
+        );
+
+      for (const workspace of pendingWorkspaces) {
+        try {
+          const callbackToken = await signCallbackToken(workspace.id, c.env);
+          await createWorkspaceOnNode(nodeId, c.env, workspace.userId, {
+            workspaceId: workspace.id,
+            repository: workspace.repository,
+            branch: workspace.branch,
+            callbackToken,
+          });
+        } catch (err) {
+          await innerDb
+            .update(schema.workspaces)
+            .set({
+              status: 'error',
+              errorMessage:
+                err instanceof Error ? err.message : 'Failed to dispatch workspace provisioning',
+              updatedAt: new Date().toISOString(),
+            })
+            .where(eq(schema.workspaces.id, workspace.id));
+        }
+      }
+    })()
+  );
 
   return c.json({ status: 'running', readyAt: now });
 });
