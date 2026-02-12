@@ -1107,10 +1107,10 @@ export function Workspace() {
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 6,
+                    gap: 7,
                     padding: '0 12px',
-                    minWidth: 110,
-                    maxWidth: 220,
+                    minWidth: 100,
+                    maxWidth: 180,
                     cursor: 'pointer',
                     fontSize: 13,
                     border: 'none',
@@ -1138,8 +1138,8 @@ export function Workspace() {
                   <span
                     style={{
                       display: 'inline-block',
-                      width: 8,
-                      height: 8,
+                      width: 7,
+                      height: 7,
                       borderRadius: '50%',
                       backgroundColor: statusColor,
                       flexShrink: 0,
@@ -1147,19 +1147,8 @@ export function Workspace() {
                   />
                   <span
                     style={{
-                      fontSize: 10,
-                      border: '1px solid #2a2d3a',
-                      borderRadius: 999,
-                      padding: '0 5px',
-                      lineHeight: '14px',
-                      color: '#9aa0ba',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {tab.kind === 'terminal' ? 'TER' : 'CHAT'}
-                  </span>
-                  <span
-                    style={{
+                      flex: 1,
+                      minWidth: 0,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',

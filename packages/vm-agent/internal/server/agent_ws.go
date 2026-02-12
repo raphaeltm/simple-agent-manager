@@ -31,12 +31,13 @@ func writeSessionError(w http.ResponseWriter, statusCode int, code, message stri
 // handleAgentWS handles WebSocket connections for ACP agent communication.
 // Supports optional sessionId query for deterministic attach/takeover semantics.
 func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
-	workspaceID, ok := s.requireWorkspaceRoute(w, r)
-	if !ok {
+	workspaceID := s.resolveWorkspaceIDForWebsocket(r)
+	if workspaceID == "" {
+		writeSessionError(w, http.StatusBadRequest, "workspace_required", "Missing workspace route")
 		return
 	}
 
-	_, ok = s.authenticateWorkspaceWebsocket(w, r, workspaceID)
+	_, ok := s.authenticateWorkspaceWebsocket(w, r, workspaceID)
 	if !ok {
 		return
 	}

@@ -56,6 +56,9 @@ describe('workspaces routes source contract', () => {
   it('accepts node-scoped callback tokens for workspace callbacks', () => {
     expect(file).toContain('payload.workspace === workspace.nodeId');
     expect(file).toContain("throw errors.forbidden('Token workspace mismatch')");
+    expect(file).toContain("path.endsWith('/provisioning-failed')");
+    expect(file).toContain("workspacesRoutes.post('/:id/provisioning-failed'");
+    expect(file).toContain("reason: 'workspace_not_creating'");
   });
 
   it('exposes callback-auth runtime metadata for node recovery', () => {
