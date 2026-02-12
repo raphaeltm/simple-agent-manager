@@ -45,23 +45,37 @@ export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<v
   let lastError = '';
 
   while (Date.now() < deadline) {
+    const remainingMs = deadline - Date.now();
+    const requestTimeoutMs = Math.max(1, Math.min(pollIntervalMs, remainingMs));
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), requestTimeoutMs);
+
     try {
-      const response = await fetch(healthUrl, { method: 'GET' });
+      const response = await fetch(healthUrl, { method: 'GET', signal: controller.signal });
       if (response.ok) {
+        clearTimeout(timeoutHandle);
         return;
       }
 
       const responseBody = await response.text().catch(() => '');
       lastError = `HTTP ${response.status}${responseBody ? ` ${responseBody}` : ''}`.trim();
     } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
+      if (err instanceof Error && err.name === 'AbortError') {
+        lastError = `request timeout after ${requestTimeoutMs}ms`;
+      } else {
+        lastError = err instanceof Error ? err.message : String(err);
+      }
+    } finally {
+      clearTimeout(timeoutHandle);
     }
 
-    const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) {
+    const nextRemainingMs = deadline - Date.now();
+    if (nextRemainingMs <= 0) {
       break;
     }
-    await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remainingMs)));
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(pollIntervalMs, nextRemainingMs))
+    );
   }
 
   const details = lastError ? ` Last error: ${lastError}` : '';
