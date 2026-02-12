@@ -22,9 +22,9 @@ func TestAgentWebSocketSourceContract(t *testing.T) {
 		"parseTakeoverParam",
 		"agentSessions",
 		"idempotencyKey",
-		"session_not_found",
 		"session_not_running",
 		"session_already_attached",
+		"agent.session_recovered",
 		"ClosePolicyViolation",
 	} {
 		if !strings.Contains(content, needle) {
