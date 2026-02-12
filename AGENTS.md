@@ -777,6 +777,7 @@ See `apps/api/.env.example`:
 - Cloudflare D1 (SQLite) for app state; Cloudflare KV for bootstrap tokens and boot logs; Cloudflare R2 for Node Agent binaries (014-multi-workspace-nodes)
 
 ## Recent Changes
+- 014-multi-workspace-nodes: VM Agent now avoids reusing legacy single-workspace PTY manager wiring when runtime recovery updates workspace/container paths, so terminal attach uses the recovered workspace-specific devcontainer label instead of stale `/workspace` routing
 - 014-multi-workspace-nodes: Added VM Agent workspace recovery on terminal/ACP attach (rebuilds missing devcontainers and recreates missing in-memory agent sessions by explicit `sessionId`), and ACP client now surfaces gateway error payloads instead of stalling in a waiting state
 - 014-multi-workspace-nodes: Added callback-auth runtime metadata endpoint (`GET /api/workspaces/:id/runtime`) and legacy workspace layout recovery so node restarts can rehydrate terminal/ACP context before attach
 - 014-multi-workspace-nodes: Workspace ACP WebSocket now includes `takeover=1` so selecting an existing chat session can reclaim stale attachments instead of failing with WebSocket 409
