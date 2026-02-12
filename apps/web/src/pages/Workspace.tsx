@@ -1341,7 +1341,7 @@ export function Workspace() {
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           {workspaceTabStrip}
-          <div style={{ flex: 1, minHeight: 0 }}>{contentArea}</div>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{contentArea}</div>
         </div>
 
         <aside
