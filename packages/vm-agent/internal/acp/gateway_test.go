@@ -191,10 +191,10 @@ func TestAgentCredential_ErrorMessages(t *testing.T) {
 // variable is set when starting an agent process with OAuth credentials
 func TestProcessConfig_EnvVarInjection(t *testing.T) {
 	tests := []struct {
-		name         string
-		agentType    string
-		credential   *agentCredential
-		wantEnvVar   string
+		name       string
+		agentType  string
+		credential *agentCredential
+		wantEnvVar string
 	}{
 		{
 			name:      "OAuth token uses CLAUDE_CODE_OAUTH_TOKEN",

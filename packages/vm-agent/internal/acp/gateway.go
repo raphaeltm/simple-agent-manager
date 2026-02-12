@@ -736,7 +736,6 @@ func (g *Gateway) fetchAgentKey(ctx context.Context, agentType string) (*agentCr
 	}, nil
 }
 
-
 func byteReader(data []byte) io.ReadCloser {
 	return io.NopCloser(bytes.NewReader(data))
 }

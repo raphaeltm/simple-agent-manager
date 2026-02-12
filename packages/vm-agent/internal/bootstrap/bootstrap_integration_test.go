@@ -498,9 +498,9 @@ echo '{"outcome":"success","containerId":"mock-container-id"}'
 
 		repo := mustCreateTestRepo(t, true, `{"image":"debian:bookworm-slim"}`)
 		cfg := &config.Config{
-			WorkspaceDir:       repo,
-			AdditionalFeatures: `{"ghcr.io/devcontainers/features/node:1":{"version":"22"}}`,
-			ContainerLabelKey:  "devcontainer.local_folder",
+			WorkspaceDir:        repo,
+			AdditionalFeatures:  `{"ghcr.io/devcontainers/features/node:1":{"version":"22"}}`,
+			ContainerLabelKey:   "devcontainer.local_folder",
 			ContainerLabelValue: repo,
 		}
 

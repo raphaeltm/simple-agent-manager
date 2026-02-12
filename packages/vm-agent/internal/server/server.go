@@ -9,8 +9,10 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/workspace/vm-agent/internal/acp"
+	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/auth"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/container"
@@ -23,21 +25,56 @@ var staticFiles embed.FS
 
 // Server is the HTTP server for the VM Agent.
 type Server struct {
-	config         *config.Config
-	httpServer     *http.Server
-	jwtValidator   *auth.JWTValidator
-	sessionManager *auth.SessionManager
-	ptyManager     *pty.Manager
-	idleDetector   *idle.Detector
-	acpConfig      acp.GatewayConfig
-	acpMu          sync.Mutex
-	acpGateway     *acp.Gateway
+	config          *config.Config
+	httpServer      *http.Server
+	jwtValidator    *auth.JWTValidator
+	sessionManager  *auth.SessionManager
+	ptyManager      *pty.Manager
+	idleDetector    *idle.Detector
+	workspaceMu     sync.RWMutex
+	workspaces      map[string]*WorkspaceRuntime
+	eventMu         sync.RWMutex
+	nodeEvents      []EventRecord
+	workspaceEvents map[string][]EventRecord
+	agentSessions   *agentsessions.Manager
+	acpConfig       acp.GatewayConfig
+	acpMu           sync.Mutex
+	acpGateway      *acp.Gateway
+	acpGateways     map[string]*acp.Gateway
+}
+
+type WorkspaceRuntime struct {
+	ID         string
+	Repository string
+	Branch     string
+	Status     string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	PTY        *pty.Manager
+}
+
+type EventRecord struct {
+	ID          string                 `json:"id"`
+	NodeID      string                 `json:"nodeId,omitempty"`
+	WorkspaceID string                 `json:"workspaceId,omitempty"`
+	Level       string                 `json:"level"`
+	Type        string                 `json:"type"`
+	Message     string                 `json:"message"`
+	Detail      map[string]interface{} `json:"detail,omitempty"`
+	CreatedAt   string                 `json:"createdAt"`
+}
+
+func defaultWorkspaceScope(workspaceID, nodeID string) string {
+	if workspaceID != "" {
+		return workspaceID
+	}
+	return nodeID
 }
 
 // New creates a new server instance.
 func New(cfg *config.Config) (*Server, error) {
 	// Create JWT validator with configurable issuer and audience
-	jwtValidator, err := auth.NewJWTValidator(cfg.JWKSEndpoint, cfg.WorkspaceID, cfg.JWTIssuer, cfg.JWTAudience)
+	jwtValidator, err := auth.NewJWTValidator(cfg.JWKSEndpoint, cfg.NodeID, cfg.JWTIssuer, cfg.JWTAudience)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create JWT validator: %w", err)
 	}
@@ -97,7 +134,7 @@ func New(cfg *config.Config) (*Server, error) {
 		InitTimeoutMs:      cfg.ACPInitTimeoutMs,
 		MaxRestartAttempts: cfg.ACPMaxRestartAttempts,
 		ControlPlaneURL:    cfg.ControlPlaneURL,
-		WorkspaceID:        cfg.WorkspaceID,
+		WorkspaceID:        defaultWorkspaceScope(cfg.WorkspaceID, cfg.NodeID),
 		CallbackToken:      cfg.CallbackToken,
 		ContainerResolver:  containerResolver,
 		ContainerUser:      containerUser,
@@ -106,12 +143,27 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	s := &Server{
-		config:         cfg,
-		jwtValidator:   jwtValidator,
-		sessionManager: sessionManager,
-		ptyManager:     ptyManager,
-		idleDetector:   idleDetector,
-		acpConfig:      acpGatewayConfig,
+		config:          cfg,
+		jwtValidator:    jwtValidator,
+		sessionManager:  sessionManager,
+		ptyManager:      ptyManager,
+		idleDetector:    idleDetector,
+		workspaces:      make(map[string]*WorkspaceRuntime),
+		nodeEvents:      make([]EventRecord, 0, 512),
+		workspaceEvents: make(map[string][]EventRecord),
+		agentSessions:   agentsessions.NewManager(),
+		acpConfig:       acpGatewayConfig,
+		acpGateways:     make(map[string]*acp.Gateway),
+	}
+
+	if cfg.WorkspaceID != "" {
+		s.workspaces[cfg.WorkspaceID] = &WorkspaceRuntime{
+			ID:        cfg.WorkspaceID,
+			Status:    "running",
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+			PTY:       ptyManager,
+		}
 	}
 
 	// Setup routes
@@ -143,6 +195,7 @@ func (s *Server) SetBootLog(reporter acp.BootLogReporter) {
 func (s *Server) Start() error {
 	// Start idle detector
 	go s.idleDetector.Start()
+	s.startNodeHealthReporter()
 
 	log.Printf("Starting VM Agent on %s", s.httpServer.Addr)
 	return s.httpServer.ListenAndServe()
@@ -153,6 +206,35 @@ func (s *Server) GetIdleShutdownChannel() <-chan struct{} {
 	return s.idleDetector.ShutdownChannel()
 }
 
+// StopAllWorkspacesAndSessions transitions all local workloads to stopped state.
+// This is invoked during node shutdown to ensure no child workloads are left active.
+func (s *Server) StopAllWorkspacesAndSessions() {
+	s.workspaceMu.Lock()
+	workspaceIDs := make([]string, 0, len(s.workspaces))
+	for id, runtime := range s.workspaces {
+		runtime.PTY.CloseAllSessions()
+		runtime.Status = "stopped"
+		runtime.UpdatedAt = nowUTC()
+		workspaceIDs = append(workspaceIDs, id)
+	}
+	s.workspaceMu.Unlock()
+
+	for _, workspaceID := range workspaceIDs {
+		if s.agentSessions != nil {
+			sessions := s.agentSessions.List(workspaceID)
+			for _, session := range sessions {
+				_, _ = s.agentSessions.Stop(workspaceID, session.ID)
+				s.closeAgentGateway(workspaceID, session.ID)
+			}
+		}
+
+		s.closeAgentGatewaysForWorkspace(workspaceID)
+		s.appendNodeEvent(workspaceID, "info", "workspace.stopped", "Workspace stopped due to node shutdown", map[string]interface{}{
+			"reason": "node_shutdown",
+		})
+	}
+}
+
 // Stop gracefully stops the server.
 func (s *Server) Stop(ctx context.Context) error {
 	// Stop idle detector
@@ -161,8 +243,25 @@ func (s *Server) Stop(ctx context.Context) error {
 	// Close JWT validator
 	s.jwtValidator.Close()
 
-	// Close all PTY sessions
-	s.ptyManager.CloseAllSessions()
+	s.acpMu.Lock()
+	for key, gateway := range s.acpGateways {
+		if gateway != nil {
+			gateway.Close()
+		}
+		delete(s.acpGateways, key)
+	}
+	if s.acpGateway != nil {
+		s.acpGateway.Close()
+		s.acpGateway = nil
+	}
+	s.acpMu.Unlock()
+
+	// Close all workspace PTY sessions.
+	s.workspaceMu.Lock()
+	for _, runtime := range s.workspaces {
+		runtime.PTY.CloseAllSessions()
+	}
+	s.workspaceMu.Unlock()
 
 	// Shutdown HTTP server
 	return s.httpServer.Shutdown(ctx)
@@ -182,6 +281,19 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /terminal/ws", s.handleTerminalWS)
 	mux.HandleFunc("GET /terminal/ws/multi", s.handleMultiTerminalWS)
 	mux.HandleFunc("POST /terminal/resize", s.handleTerminalResize)
+
+	// Node/workspace management routes (control-plane authenticated).
+	mux.HandleFunc("GET /workspaces", s.handleListWorkspaces)
+	mux.HandleFunc("POST /workspaces", s.handleCreateWorkspace)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/events", s.handleListWorkspaceEvents)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/stop", s.handleStopWorkspace)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/restart", s.handleRestartWorkspace)
+	mux.HandleFunc("DELETE /workspaces/{workspaceId}", s.handleDeleteWorkspace)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions", s.handleListAgentSessions)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions", s.handleCreateAgentSession)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/stop", s.handleStopAgentSession)
+	mux.HandleFunc("GET /events", s.handleListNodeEvents)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/ports/{port}", s.handleWorkspacePortProxy)
 
 	// ACP Agent WebSocket
 	mux.HandleFunc("GET /agent/ws", s.handleAgentWS)

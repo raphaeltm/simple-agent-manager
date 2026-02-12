@@ -12,7 +12,6 @@ import (
 	"github.com/workspace/vm-agent/internal/bootlog"
 	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/config"
-	"github.com/workspace/vm-agent/internal/idle"
 	"github.com/workspace/vm-agent/internal/server"
 )
 
@@ -26,7 +25,7 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	reporter := bootlog.New(cfg.ControlPlaneURL, cfg.WorkspaceID)
+	reporter := bootlog.New(cfg.ControlPlaneURL, cfg.NodeID)
 
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), cfg.BootstrapTimeout)
 	defer bootstrapCancel()
@@ -35,7 +34,7 @@ func main() {
 		log.Fatalf("Bootstrap failed: %v", err)
 	}
 
-	log.Printf("Configuration loaded: workspace=%s, port=%d", cfg.WorkspaceID, cfg.Port)
+	log.Printf("Configuration loaded: node=%s, port=%d", cfg.NodeID, cfg.Port)
 
 	// Create server
 	srv, err := server.New(cfg)
@@ -58,30 +57,13 @@ func main() {
 		}
 	}()
 
-	// Wait for shutdown signal, idle timeout, or error
-	var idleShutdown bool
+	// Wait for shutdown signal or fatal server error.
 	select {
 	case err := <-errCh:
 		log.Fatalf("Server error: %v", err)
 	case sig := <-sigCh:
 		log.Printf("Received signal %v, shutting down...", sig)
-	case <-srv.GetIdleShutdownChannel():
-		log.Println("Idle timeout reached, requesting VM deletion...")
-		idleShutdown = true
-	}
-
-	// If this was an idle shutdown, request deletion from control plane BEFORE
-	// stopping the local server. The HTTP call needs networking to be functional,
-	// and srv.Stop() may close connections or time out.
-	if idleShutdown && cfg.ControlPlaneURL != "" && cfg.WorkspaceID != "" && cfg.CallbackToken != "" {
-		log.Println("Requesting VM deletion from control plane due to idle timeout...")
-		if err := idle.RequestShutdown(idle.ShutdownConfig{
-			ControlPlaneURL: cfg.ControlPlaneURL,
-			WorkspaceID:     cfg.WorkspaceID,
-			CallbackToken:   cfg.CallbackToken,
-		}); err != nil {
-			log.Printf("WARNING: Failed to request shutdown: %v (control plane heartbeat fallback will clean up)", err)
-		}
+		srv.StopAllWorkspacesAndSessions()
 	}
 
 	// Graceful shutdown of local server
@@ -90,15 +72,6 @@ func main() {
 
 	if err := srv.Stop(ctx); err != nil {
 		log.Printf("Error during shutdown: %v", err)
-	}
-
-	if idleShutdown {
-		// Block forever after requesting shutdown. If we exit, systemd's
-		// Restart=always will restart the agent, which calls /ready and
-		// resets lastActivityAt — creating an infinite shutdown loop.
-		// The VM will be deleted by the control plane.
-		log.Println("Shutdown requested — blocking until VM is deleted")
-		select {}
 	}
 
 	log.Println("VM Agent stopped")

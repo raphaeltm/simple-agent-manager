@@ -3,21 +3,36 @@ package server
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
+	"sort"
 )
 
 // handleHealth handles the health check endpoint.
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	deadline := s.idleDetector.GetDeadline()
-	
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	s.workspaceMu.RLock()
+	workspaceSummaries := make([]map[string]interface{}, 0, len(s.workspaces))
+	for _, runtime := range s.workspaces {
+		workspaceSummaries = append(workspaceSummaries, map[string]interface{}{
+			"id":       runtime.ID,
+			"status":   runtime.Status,
+			"sessions": runtime.PTY.SessionCount(),
+		})
+	}
+	s.workspaceMu.RUnlock()
+
+	sort.Slice(workspaceSummaries, func(i, j int) bool {
+		left, _ := workspaceSummaries[i]["id"].(string)
+		right, _ := workspaceSummaries[j]["id"].(string)
+		return left < right
+	})
+
 	response := map[string]interface{}{
-		"status":            "healthy",
-		"workspaceId":       s.config.WorkspaceID,
-		"sessions":          s.ptyManager.SessionCount(),
-		"orphanedSessions":  s.ptyManager.GetOrphanedSessionCount(),
-		"idle":              s.idleDetector.GetIdleTime().String(),
-		"shutdownDeadline":  deadline.Format(http.TimeFormat),
+		"status":           "healthy",
+		"nodeId":           s.config.NodeID,
+		"activeWorkspaces": s.activeWorkspaceCount(),
+		"workspaces":       workspaceSummaries,
+		"sessions":         s.ptyManager.SessionCount(),
+		"lastActivityAt":   s.idleDetector.GetLastActivity().Format(timeRFC3339),
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -38,40 +53,50 @@ func (s *Server) handleTokenAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate JWT
 	claims, err := s.jwtValidator.Validate(body.Token)
 	if err != nil {
-		log.Printf("Token validation failed: %v", err)
 		writeError(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
+	workspaceID := claims.Workspace
+	if workspaceID == "" {
+		writeError(w, http.StatusUnauthorized, "workspace claim missing")
+		return
+	}
+	if routedWorkspace := s.routedWorkspaceID(r); routedWorkspace != "" && routedWorkspace != workspaceID {
+		writeError(w, http.StatusForbidden, "workspace route mismatch")
+		return
+	}
 
-	// Create session
 	session, err := s.sessionManager.CreateSession(claims)
 	if err != nil {
-		log.Printf("Failed to create session: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to create session")
 		return
 	}
 
-	// Set session cookie
 	s.sessionManager.SetCookie(w, session)
-
-	// Record activity
 	s.idleDetector.RecordActivity()
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":   true,
 		"sessionId": session.ID,
 		"userId":    session.UserID,
-		"expiresAt": session.ExpiresAt.Format(http.TimeFormat),
+		"expiresAt": session.ExpiresAt.Format(timeRFC3339),
 	})
 }
 
 // handleSessionCheck handles session validation.
 func (s *Server) handleSessionCheck(w http.ResponseWriter, r *http.Request) {
+	workspaceID := s.routedWorkspaceID(r)
 	session := s.sessionManager.GetSessionFromRequest(r)
 	if session == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"authenticated": false,
+		})
+		return
+	}
+
+	if workspaceID != "" && (session.Claims == nil || session.Claims.Workspace != workspaceID) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"authenticated": false,
 		})
@@ -82,7 +107,8 @@ func (s *Server) handleSessionCheck(w http.ResponseWriter, r *http.Request) {
 		"authenticated": true,
 		"userId":        session.UserID,
 		"sessionId":     session.ID,
-		"expiresAt":     session.ExpiresAt.Format(http.TimeFormat),
+		"workspaceId":   session.Claims.Workspace,
+		"expiresAt":     session.ExpiresAt.Format(timeRFC3339),
 	})
 }
 
@@ -90,14 +116,9 @@ func (s *Server) handleSessionCheck(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	session := s.sessionManager.GetSessionFromRequest(r)
 	if session != nil {
-		// Close any PTY sessions for this user
-		_ = s.ptyManager.CloseUserSessions(session.UserID)
-
-		// Delete session
 		s.sessionManager.DeleteSession(session.ID)
 	}
 
-	// Clear cookie
 	s.sessionManager.ClearCookie(w)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -110,6 +131,13 @@ func (s *Server) handleTerminalResize(w http.ResponseWriter, r *http.Request) {
 	session := s.sessionManager.GetSessionFromRequest(r)
 	if session == nil {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	workspaceID := session.Claims.Workspace
+	runtime, ok := s.getWorkspaceRuntime(workspaceID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
 
@@ -129,27 +157,23 @@ func (s *Server) handleTerminalResize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ptySession := s.ptyManager.GetSession(body.SessionID)
+	ptySession := runtime.PTY.GetSession(body.SessionID)
 	if ptySession == nil {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
-	// Verify ownership
 	if ptySession.UserID != session.UserID {
 		writeError(w, http.StatusForbidden, "not authorized")
 		return
 	}
 
 	if err := ptySession.Resize(body.Rows, body.Cols); err != nil {
-		log.Printf("Failed to resize terminal: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to resize terminal")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-	})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 }
 
 // writeJSON writes a JSON response.

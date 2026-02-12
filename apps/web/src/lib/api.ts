@@ -1,12 +1,18 @@
 import type {
   User,
+  NodeResponse,
+  CreateNodeRequest,
   WorkspaceResponse,
   CreateWorkspaceRequest,
+  UpdateWorkspaceRequest,
   CredentialResponse,
   CreateCredentialRequest,
   GitHubInstallation,
   Repository,
   TerminalTokenResponse,
+  AgentSession,
+  CreateAgentSessionRequest,
+  Event,
   ApiError,
   AgentInfo,
   AgentCredentialInfo,
@@ -111,10 +117,50 @@ export async function listRepositories(installationId?: string): Promise<Reposit
 }
 
 // =============================================================================
+// Nodes
+// =============================================================================
+export async function listNodes(): Promise<NodeResponse[]> {
+  return request<NodeResponse[]>('/api/nodes');
+}
+
+export async function getNode(id: string): Promise<NodeResponse> {
+  return request<NodeResponse>(`/api/nodes/${id}`);
+}
+
+export async function createNode(data: CreateNodeRequest): Promise<NodeResponse> {
+  return request<NodeResponse>('/api/nodes', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function stopNode(id: string): Promise<{ status: string }> {
+  return request<{ status: string }>(`/api/nodes/${id}/stop`, {
+    method: 'POST',
+  });
+}
+
+export async function deleteNode(id: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/api/nodes/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function listNodeEvents(nodeId: string, limit = 100, cursor?: string): Promise<{ events: Event[]; nextCursor?: string | null }> {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  if (cursor) params.set('cursor', cursor);
+  return request<{ events: Event[]; nextCursor?: string | null }>(`/api/nodes/${nodeId}/events?${params.toString()}`);
+}
+
+// =============================================================================
 // Workspaces
 // =============================================================================
-export async function listWorkspaces(status?: string): Promise<WorkspaceResponse[]> {
-  const url = status ? `/api/workspaces?status=${status}` : '/api/workspaces';
+export async function listWorkspaces(status?: string, nodeId?: string): Promise<WorkspaceResponse[]> {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (nodeId) params.set('nodeId', nodeId);
+  const url = params.toString() ? `/api/workspaces?${params.toString()}` : '/api/workspaces';
   return request<WorkspaceResponse[]>(url);
 }
 
@@ -129,14 +175,21 @@ export async function createWorkspace(data: CreateWorkspaceRequest): Promise<Wor
   });
 }
 
-export async function stopWorkspace(id: string): Promise<WorkspaceResponse> {
-  return request<WorkspaceResponse>(`/api/workspaces/${id}/stop`, {
+export async function updateWorkspace(id: string, data: UpdateWorkspaceRequest): Promise<WorkspaceResponse> {
+  return request<WorkspaceResponse>(`/api/workspaces/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function stopWorkspace(id: string): Promise<{ status: string }> {
+  return request<{ status: string }>(`/api/workspaces/${id}/stop`, {
     method: 'POST',
   });
 }
 
-export async function restartWorkspace(id: string): Promise<WorkspaceResponse> {
-  return request<WorkspaceResponse>(`/api/workspaces/${id}/restart`, {
+export async function restartWorkspace(id: string): Promise<{ status: string }> {
+  return request<{ status: string }>(`/api/workspaces/${id}/restart`, {
     method: 'POST',
   });
 }
@@ -144,6 +197,42 @@ export async function restartWorkspace(id: string): Promise<WorkspaceResponse> {
 export async function deleteWorkspace(id: string): Promise<void> {
   return request<void>(`/api/workspaces/${id}`, {
     method: 'DELETE',
+  });
+}
+
+export async function listWorkspaceEvents(workspaceId: string, limit = 100, cursor?: string): Promise<{ events: Event[]; nextCursor?: string | null }> {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  if (cursor) params.set('cursor', cursor);
+  return request<{ events: Event[]; nextCursor?: string | null }>(`/api/workspaces/${workspaceId}/events?${params.toString()}`);
+}
+
+// =============================================================================
+// Agent Sessions
+// =============================================================================
+export async function listAgentSessions(workspaceId: string): Promise<AgentSession[]> {
+  return request<AgentSession[]>(`/api/workspaces/${workspaceId}/agent-sessions`);
+}
+
+export async function createAgentSession(
+  workspaceId: string,
+  data: CreateAgentSessionRequest = {},
+  idempotencyKey?: string
+): Promise<AgentSession> {
+  const headers: Record<string, string> = {};
+  if (idempotencyKey) {
+    headers['Idempotency-Key'] = idempotencyKey;
+  }
+  return request<AgentSession>(`/api/workspaces/${workspaceId}/agent-sessions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(data),
+  });
+}
+
+export async function stopAgentSession(workspaceId: string, sessionId: string): Promise<{ status: string }> {
+  return request<{ status: string }>(`/api/workspaces/${workspaceId}/agent-sessions/${sessionId}/stop`, {
+    method: 'POST',
   });
 }
 

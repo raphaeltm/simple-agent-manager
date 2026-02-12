@@ -106,6 +106,7 @@ export function UserMenu() {
 
           {[
             { label: 'Dashboard', path: '/dashboard' },
+            { label: 'Nodes', path: '/nodes' },
             { label: 'Settings', path: '/settings' },
           ].map((item) => (
             <button

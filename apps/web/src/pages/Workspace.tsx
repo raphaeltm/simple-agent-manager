@@ -7,11 +7,22 @@ import type { AcpSessionState } from '@simple-agent-manager/acp-client';
 import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { AgentSelector } from '../components/AgentSelector';
+import { AgentSessionList } from '../components/AgentSessionList';
 import { MobileBottomBar } from '../components/MobileBottomBar';
 import { MobileOverflowMenu } from '../components/MobileOverflowMenu';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { getWorkspace, getTerminalToken, stopWorkspace, restartWorkspace } from '../lib/api';
-import type { WorkspaceResponse, BootLogEntry } from '@simple-agent-manager/shared';
+import {
+  createAgentSession,
+  getTerminalToken,
+  getWorkspace,
+  listAgentSessions,
+  listWorkspaceEvents,
+  restartWorkspace,
+  stopAgentSession,
+  stopWorkspace,
+  updateWorkspace,
+} from '../lib/api';
+import type { AgentSession, Event, WorkspaceResponse, BootLogEntry } from '@simple-agent-manager/shared';
 import '../styles/workspace-mobile.css';
 import '../styles/acp-chat.css';
 
@@ -64,6 +75,7 @@ export function Workspace() {
   const featureFlags = useFeatureFlags();
   const isMobile = useIsMobile();
   const viewParam = searchParams.get('view');
+  const sessionIdParam = searchParams.get('sessionId');
   const viewOverride: ViewMode | null = viewParam === 'terminal' || viewParam === 'conversation' ? viewParam : null;
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -73,6 +85,11 @@ export function Workspace() {
   const [terminalLoading, setTerminalLoading] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>(viewOverride ?? 'terminal');
   const [agentSheetOpen, setAgentSheetOpen] = useState(false);
+  const [workspaceEvents, setWorkspaceEvents] = useState<Event[]>([]);
+  const [agentSessions, setAgentSessions] = useState<AgentSession[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [displayNameInput, setDisplayNameInput] = useState('');
 
   // ACP
   const [acpWsUrl, setAcpWsUrl] = useState<string | null>(null);
@@ -93,37 +110,43 @@ export function Workspace() {
     }
   }, [acpSession.state, acpSession.agentType, viewMode, viewOverride]);
 
+  const loadWorkspaceState = useCallback(async () => {
+    if (!id) {
+      return;
+    }
+
+    try {
+      setError(null);
+      const [workspaceData, eventsData, sessionsData] = await Promise.all([
+        getWorkspace(id),
+        listWorkspaceEvents(id, 50),
+        listAgentSessions(id),
+      ]);
+      setWorkspace(workspaceData);
+      setDisplayNameInput(workspaceData.displayName || workspaceData.name);
+      setWorkspaceEvents(eventsData.events || []);
+      setAgentSessions(sessionsData || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load workspace');
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
   // Load workspace
   useEffect(() => {
     if (!id) return;
 
-    const loadWorkspace = async () => {
-      try {
-        setError(null);
-        const data = await getWorkspace(id);
-        setWorkspace(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load workspace');
-      } finally {
-        setLoading(false);
-      }
-    };
+    void loadWorkspaceState();
 
-    loadWorkspace();
-
-    const interval = setInterval(async () => {
-      if (workspace?.status === 'creating' || workspace?.status === 'stopping') {
-        try {
-          const data = await getWorkspace(id);
-          setWorkspace(data);
-        } catch {
-          // Ignore polling errors
-        }
+    const interval = setInterval(() => {
+      if (workspace?.status === 'creating' || workspace?.status === 'stopping' || workspace?.status === 'running') {
+        void loadWorkspaceState();
       }
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [id, workspace?.status]);
+  }, [id, workspace?.status, loadWorkspaceState]);
 
   // Fetch terminal token and build WebSocket URL
   useEffect(() => {
@@ -163,19 +186,20 @@ export function Workspace() {
         const { token } = await getTerminalToken(id);
         const url = new URL(workspace.url!);
         const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-        setAcpWsUrl(`${wsProtocol}//${url.host}/agent/ws?token=${encodeURIComponent(token)}`);
+        const sessionQuery = sessionIdParam ? `&sessionId=${encodeURIComponent(sessionIdParam)}` : '';
+        setAcpWsUrl(`${wsProtocol}//${url.host}/agent/ws?token=${encodeURIComponent(token)}${sessionQuery}`);
       } catch {
         // ACP is optional
       }
     };
 
     fetchAcpToken();
-  }, [id, workspace?.status, workspace?.url]);
+  }, [id, workspace?.status, workspace?.url, sessionIdParam]);
 
   const handleTerminalActivity = useCallback(() => {
     if (!id) return;
-    getWorkspace(id).then(setWorkspace).catch(() => {});
-  }, [id]);
+    void loadWorkspaceState();
+  }, [id, loadWorkspaceState]);
 
   const handleStop = async () => {
     if (!id) return;
@@ -201,6 +225,70 @@ export function Workspace() {
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const handleRename = async () => {
+    if (!id || !displayNameInput.trim()) {
+      return;
+    }
+    try {
+      setRenaming(true);
+      const updated = await updateWorkspace(id, { displayName: displayNameInput.trim() });
+      setWorkspace(updated);
+      setDisplayNameInput(updated.displayName || updated.name);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to rename workspace');
+    } finally {
+      setRenaming(false);
+    }
+  };
+
+  const handleCreateSession = async () => {
+    if (!id) {
+      return;
+    }
+
+    try {
+      setSessionsLoading(true);
+      const key = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()}`;
+      await createAgentSession(id, {}, key);
+      const sessions = await listAgentSessions(id);
+      setAgentSessions(sessions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create session');
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
+
+  const handleStopSession = async (sessionId: string) => {
+    if (!id) {
+      return;
+    }
+
+    try {
+      setSessionsLoading(true);
+      await stopAgentSession(id, sessionId);
+      const sessions = await listAgentSessions(id);
+      setAgentSessions(sessions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to stop session');
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
+
+  const handleAttachSession = (sessionId: string) => {
+    if (!id) {
+      return;
+    }
+    const params = new URLSearchParams(searchParams);
+    params.set('view', 'conversation');
+    params.set('sessionId', sessionId);
+    navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
+    setViewMode('conversation');
   };
 
   // ── Loading state ──
@@ -325,7 +413,7 @@ export function Workspace() {
               overflow: 'hidden',
               textOverflow: 'ellipsis',
             }}>
-              {workspace?.name}
+              {workspace?.displayName || workspace?.name}
             </span>
             {workspace && <StatusBadge status={workspace.status} />}
           </div>
@@ -425,7 +513,7 @@ export function Workspace() {
             overflow: 'hidden',
             textOverflow: 'ellipsis',
           }}>
-            {workspace?.name}
+            {workspace?.displayName || workspace?.name}
           </span>
           {workspace && <StatusBadge status={workspace.status} />}
         </div>
@@ -515,7 +603,93 @@ export function Workspace() {
       )}
 
       {/* ── Content area ── */}
-      {contentArea}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>{contentArea}</div>
+
+        <aside
+          style={{
+            width: 320,
+            minWidth: 320,
+            borderLeft: '1px solid var(--sam-color-border-default)',
+            background: 'var(--sam-color-bg-surface)',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <div
+            style={{
+              padding: 'var(--sam-space-3)',
+              borderBottom: '1px solid var(--sam-color-border-default)',
+              display: 'grid',
+              gap: 'var(--sam-space-2)',
+            }}
+          >
+            <label style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>Workspace name</label>
+            <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
+              <input
+                value={displayNameInput}
+                onChange={(event) => setDisplayNameInput(event.target.value)}
+                style={{
+                  flex: 1,
+                  borderRadius: 'var(--sam-radius-sm)',
+                  border: '1px solid var(--sam-color-border-default)',
+                  background: 'var(--sam-color-bg-canvas)',
+                  color: 'var(--sam-color-fg-primary)',
+                  padding: '6px 8px',
+                  minWidth: 0,
+                }}
+              />
+              <Button size="sm" onClick={handleRename} disabled={renaming || !displayNameInput.trim()}>
+                {renaming ? 'Saving...' : 'Rename'}
+              </Button>
+            </div>
+          </div>
+
+          <AgentSessionList
+            sessions={agentSessions}
+            loading={sessionsLoading}
+            onCreate={handleCreateSession}
+            onAttach={handleAttachSession}
+            onStop={handleStopSession}
+          />
+
+          <section
+            style={{
+              borderTop: '1px solid var(--sam-color-border-default)',
+              overflow: 'auto',
+              flex: 1,
+            }}
+          >
+            <div style={{ padding: 'var(--sam-space-3)', borderBottom: '1px solid var(--sam-color-border-default)' }}>
+              <strong style={{ fontSize: '0.875rem' }}>Workspace Events</strong>
+            </div>
+            {workspaceEvents.length === 0 ? (
+              <div style={{ padding: 'var(--sam-space-3)', fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
+                No events yet.
+              </div>
+            ) : (
+              workspaceEvents.map((event) => (
+                <div
+                  key={event.id}
+                  style={{
+                    borderBottom: '1px solid var(--sam-color-border-default)',
+                    padding: 'var(--sam-space-3)',
+                    fontSize: '0.8125rem',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--sam-space-2)' }}>
+                    <strong>{event.type}</strong>
+                    <span style={{ color: 'var(--sam-color-fg-muted)' }}>
+                      {new Date(event.createdAt).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <div style={{ color: 'var(--sam-color-fg-muted)' }}>{event.message}</div>
+                </div>
+              ))
+            )}
+          </section>
+        </aside>
+      </div>
     </div>
   );
 }

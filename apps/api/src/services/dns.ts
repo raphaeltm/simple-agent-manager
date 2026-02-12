@@ -224,6 +224,18 @@ export async function createBackendDNSRecord(
   ip: string,
   env: Env
 ): Promise<string> {
+  return createNodeBackendDNSRecord(workspaceId, ip, env);
+}
+
+/**
+ * Create a DNS-only (non-proxied) A record for a node VM backend.
+ * Uses vm-{nodeId}.{BASE_DOMAIN}.
+ */
+export async function createNodeBackendDNSRecord(
+  nodeId: string,
+  ip: string,
+  env: Env
+): Promise<string> {
   const response = await fetch(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records`,
     {
@@ -234,7 +246,7 @@ export async function createBackendDNSRecord(
       },
       body: JSON.stringify({
         type: 'A',
-        name: `vm-${workspaceId.toLowerCase()}`,
+        name: `vm-${nodeId.toLowerCase()}`,
         content: ip,
         ttl: getDnsTTL(env),
         proxied: false, // DNS-only — Worker subrequests go directly to VM IP
@@ -257,7 +269,15 @@ export async function createBackendDNSRecord(
  * Used by the Worker proxy to route subrequests via DNS instead of raw IP.
  */
 export function getBackendHostname(workspaceId: string, baseDomain: string): string {
-  return `vm-${workspaceId.toLowerCase()}.${baseDomain}`;
+  return getNodeBackendHostname(workspaceId, baseDomain);
+}
+
+/**
+ * Get the backend hostname for a node VM.
+ * Uses vm-{nodeId}.{BASE_DOMAIN}.
+ */
+export function getNodeBackendHostname(nodeId: string, baseDomain: string): string {
+  return `vm-${nodeId.toLowerCase()}.${baseDomain}`;
 }
 
 /**

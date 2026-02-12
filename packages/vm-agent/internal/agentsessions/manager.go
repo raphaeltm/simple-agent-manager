@@ -1,0 +1,155 @@
+package agentsessions
+
+import (
+	"fmt"
+	"sort"
+	"sync"
+	"time"
+)
+
+type Status string
+
+const (
+	StatusRunning Status = "running"
+	StatusStopped Status = "stopped"
+	StatusError   Status = "error"
+)
+
+type Session struct {
+	ID          string     `json:"id"`
+	WorkspaceID string     `json:"workspaceId"`
+	Status      Status     `json:"status"`
+	Label       string     `json:"label,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+	StoppedAt   *time.Time `json:"stoppedAt,omitempty"`
+	Error       string     `json:"errorMessage,omitempty"`
+}
+
+type Manager struct {
+	mu                sync.RWMutex
+	workspaceSessions map[string]map[string]Session
+	idempotency       map[string]string
+}
+
+func NewManager() *Manager {
+	return &Manager{
+		workspaceSessions: make(map[string]map[string]Session),
+		idempotency:       make(map[string]string),
+	}
+}
+
+func (m *Manager) Create(workspaceID, sessionID, label, idempotencyKey string) (Session, bool, error) {
+	if workspaceID == "" {
+		return Session{}, false, fmt.Errorf("workspace ID is required")
+	}
+	if sessionID == "" {
+		return Session{}, false, fmt.Errorf("session ID is required")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if idempotencyKey != "" {
+		if existingID, ok := m.idempotency[m.idempotencyKey(workspaceID, idempotencyKey)]; ok {
+			if ws, ok := m.workspaceSessions[workspaceID]; ok {
+				if session, ok := ws[existingID]; ok {
+					return session, true, nil
+				}
+			}
+		}
+	}
+
+	if _, ok := m.workspaceSessions[workspaceID]; !ok {
+		m.workspaceSessions[workspaceID] = make(map[string]Session)
+	}
+
+	if _, exists := m.workspaceSessions[workspaceID][sessionID]; exists {
+		return Session{}, false, fmt.Errorf("session already exists: %s", sessionID)
+	}
+
+	now := time.Now().UTC()
+	session := Session{
+		ID:          sessionID,
+		WorkspaceID: workspaceID,
+		Status:      StatusRunning,
+		Label:       label,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	m.workspaceSessions[workspaceID][sessionID] = session
+	if idempotencyKey != "" {
+		m.idempotency[m.idempotencyKey(workspaceID, idempotencyKey)] = sessionID
+	}
+	return session, false, nil
+}
+
+func (m *Manager) Stop(workspaceID, sessionID string) (Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	workspaceMap, ok := m.workspaceSessions[workspaceID]
+	if !ok {
+		return Session{}, fmt.Errorf("workspace not found: %s", workspaceID)
+	}
+
+	session, ok := workspaceMap[sessionID]
+	if !ok {
+		return Session{}, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	if session.Status == StatusStopped {
+		return session, nil
+	}
+
+	now := time.Now().UTC()
+	session.Status = StatusStopped
+	session.UpdatedAt = now
+	session.StoppedAt = &now
+	workspaceMap[sessionID] = session
+	return session, nil
+}
+
+func (m *Manager) List(workspaceID string) []Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	workspaceMap, ok := m.workspaceSessions[workspaceID]
+	if !ok {
+		return []Session{}
+	}
+
+	result := make([]Session, 0, len(workspaceMap))
+	for _, session := range workspaceMap {
+		result = append(result, session)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].CreatedAt.After(result[j].CreatedAt)
+	})
+
+	return result
+}
+
+func (m *Manager) Get(workspaceID, sessionID string) (Session, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	workspaceMap, ok := m.workspaceSessions[workspaceID]
+	if !ok {
+		return Session{}, false
+	}
+
+	session, ok := workspaceMap[sessionID]
+	return session, ok
+}
+
+func (m *Manager) RemoveWorkspace(workspaceID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.workspaceSessions, workspaceID)
+}
+
+func (m *Manager) idempotencyKey(workspaceID, key string) string {
+	return workspaceID + ":" + key
+}

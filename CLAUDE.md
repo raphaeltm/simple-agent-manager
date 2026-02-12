@@ -109,25 +109,43 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 ## Key Concepts
 
 - **Workspace**: An AI coding environment (VM + devcontainer + Claude Code)
+- **Node**: A VM host that can run multiple workspaces
 - **Provider**: Cloud infrastructure abstraction (currently Hetzner only)
 - **CloudCLI**: Web-based Claude Code interface (file explorer + terminal)
-- **Idle Detection**: VMs self-terminate after inactivity (default 30 minutes, configurable via `IDLE_TIMEOUT_SECONDS`)
+- **Lifecycle Control**: Workspaces/nodes are stopped, restarted, or deleted explicitly via API/UI actions
 - **OAuth Authentication**: Claude Code supports both API keys and OAuth tokens from Claude Max/Pro subscriptions
 
 ## API Endpoints
+
+### Node Management
+- `POST /api/nodes` — Create node
+- `GET /api/nodes` — List user's nodes
+- `GET /api/nodes/:id` — Get node details
+- `POST /api/nodes/:id/stop` — Stop node
+- `DELETE /api/nodes/:id` — Delete node
+- `GET /api/nodes/:id/events` — List node events
 
 ### Workspace Management
 - `POST /api/workspaces` — Create workspace
 - `GET /api/workspaces` — List user's workspaces
 - `GET /api/workspaces/:id` — Get workspace details
+- `PATCH /api/workspaces/:id` — Rename workspace display name
 - `POST /api/workspaces/:id/stop` — Stop a running workspace
 - `POST /api/workspaces/:id/restart` — Restart a workspace
 - `DELETE /api/workspaces/:id` — Delete a workspace
-- `GET /api/workspaces/:id/ready` — Check workspace readiness
+- `GET /api/workspaces/:id/events` — List workspace events
+
+### Agent Sessions
+- `GET /api/workspaces/:id/agent-sessions` — List workspace agent sessions
+- `POST /api/workspaces/:id/agent-sessions` — Create agent session
+- `POST /api/workspaces/:id/agent-sessions/:sessionId/stop` — Stop agent session
 
 ### VM Communication
-- `POST /api/workspaces/:id/heartbeat` — VM heartbeat with idle detection
-- `POST /api/workspaces/:id/boot-log` — VM sends boot progress log entry (callback JWT auth)
+- `POST /api/nodes/:id/ready` — Node Agent ready callback
+- `POST /api/nodes/:id/heartbeat` — Node Agent heartbeat callback
+- `POST /api/workspaces/:id/ready` — Workspace ready callback
+- `POST /api/workspaces/:id/heartbeat` — Workspace activity heartbeat callback
+- `POST /api/workspaces/:id/boot-log` — Workspace boot progress log callback
 - `POST /api/bootstrap/:token` — Redeem one-time bootstrap token (credentials + git identity)
 - `POST /api/agent/ready` — VM agent ready callback
 - `POST /api/agent/activity` — VM agent activity report
@@ -142,11 +160,12 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 
 ### Credentials
 - `GET /api/credentials` — Get user's cloud provider credentials
-- `PUT /api/credentials` — Save cloud provider credentials
+- `POST /api/credentials` — Save cloud provider credentials
+- `DELETE /api/credentials/:provider` — Delete stored cloud provider credential
 
 ### GitHub Integration
 - `GET /api/github/installations` — List user's GitHub App installations
-- `GET /api/github/repos` — List accessible repositories
+- `GET /api/github/repositories` — List accessible repositories
 
 ## Platform Secrets (Cloudflare Worker)
 
@@ -226,8 +245,11 @@ Claude Code now supports dual authentication methods:
 - In-memory only (Go maps, ring buffers) — no database or persistent storage (012-pty-session-persistence)
 - TypeScript 5.x (API, Web), Go 1.22 (VM Agent) + Hono (API), React 18 (Web UI), Drizzle ORM (database), creack/pty + gorilla/websocket (VM Agent) (013-agent-oauth-support)
 - Cloudflare D1 (credentials table with new schema), AES-256-GCM encryption (013-agent-oauth-support)
+- TypeScript 5.x (Node.js >= 20) and Go 1.22 (Node Agent) + Cloudflare Workers (Hono), React 18 + Vite (UI), Drizzle ORM (D1), BetterAuth, Cloudflare KV/R2; Go `net/http` + WebSockets (014-multi-workspace-nodes)
+- Cloudflare D1 (SQLite) for app state; Cloudflare KV for bootstrap tokens and boot logs; Cloudflare R2 for Node Agent binaries (014-multi-workspace-nodes)
 
 ## Recent Changes
+- 014-multi-workspace-nodes: Added first-class Nodes with multi-workspace hosting, node/workspace event streams, agent sessions, node-scoped routing/auth, and explicit lifecycle control (no idle-triggered shutdown)
 - 014-auth-profile-sync: Resolve and persist the GitHub account primary email at login (via `/user/emails`) and propagate git user name/email into workspace bootstrap so VM agent configures commit identity
 - 013-agent-oauth-support: Dual credential support for Claude Code (API key + OAuth token), credential switching capability, auto-activation behavior
 - 012-pty-session-persistence: PTY sessions survive page refresh/network interruptions with ring buffer replay and session reattach; orphan cleanup is configurable and disabled by default (`PTY_ORPHAN_GRACE_PERIOD=0`)

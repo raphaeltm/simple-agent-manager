@@ -6,6 +6,8 @@ import { Dashboard } from './pages/Dashboard';
 import { Settings } from './pages/Settings';
 import { CreateWorkspace } from './pages/CreateWorkspace';
 import { Workspace } from './pages/Workspace';
+import { Nodes } from './pages/Nodes';
+import { Node } from './pages/Node';
 import { UiStandards } from './pages/UiStandards';
 
 export default function App() {
@@ -46,6 +48,22 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <Workspace />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/nodes"
+            element={
+              <ProtectedRoute>
+                <Nodes />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/nodes/:id"
+            element={
+              <ProtectedRoute>
+                <Node />
               </ProtectedRoute>
             }
           />

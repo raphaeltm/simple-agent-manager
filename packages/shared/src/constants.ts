@@ -57,6 +57,18 @@ export const DEFAULT_MAX_WORKSPACES_PER_USER = 10;
 /** Backwards compatibility alias - use DEFAULT_MAX_WORKSPACES_PER_USER */
 export const MAX_WORKSPACES_PER_USER = DEFAULT_MAX_WORKSPACES_PER_USER;
 
+/** Default max nodes per user. Override via MAX_NODES_PER_USER env var. */
+export const DEFAULT_MAX_NODES_PER_USER = 10;
+
+/** Default max workspaces per node. Override via MAX_WORKSPACES_PER_NODE env var. */
+export const DEFAULT_MAX_WORKSPACES_PER_NODE = 10;
+
+/** Default max agent sessions per workspace. Override via MAX_AGENT_SESSIONS_PER_WORKSPACE env var. */
+export const DEFAULT_MAX_AGENT_SESSIONS_PER_WORKSPACE = 10;
+
+/** Default node heartbeat staleness threshold in seconds. Override via NODE_HEARTBEAT_STALE_SECONDS env var. */
+export const DEFAULT_NODE_HEARTBEAT_STALE_SECONDS = 180;
+
 /** Default idle timeout in seconds (30 minutes). Override via IDLE_TIMEOUT_SECONDS env var. */
 export const DEFAULT_IDLE_TIMEOUT_SECONDS = 30 * 60;
 

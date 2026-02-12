@@ -1,0 +1,756 @@
+openapi: 3.0.3
+info:
+  title: Simple Agent Manager Control Plane API
+  version: 0.1.0
+  description: |
+    Contract additions and changes required for the Multi-Workspace Nodes feature.
+
+servers:
+  - url: https://api.{baseDomain}
+    variables:
+      baseDomain:
+        default: example.com
+
+tags:
+  - name: Nodes
+  - name: Workspaces
+  - name: Agent Sessions
+  - name: Terminal
+  - name: Observability
+
+paths:
+  /api/nodes:
+    get:
+      tags: [Nodes]
+      summary: List nodes for the authenticated user
+      security: [{ cookieAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Node"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Nodes]
+      summary: Create a node for the authenticated user
+      security: [{ cookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateNodeRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Node"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/nodes/{nodeId}:
+    get:
+      tags: [Nodes]
+      summary: Get a node
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/NodeId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Node"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Nodes]
+      summary: Delete a node
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/NodeId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  success: { type: boolean }
+                required: [success]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/nodes/{nodeId}/stop:
+    post:
+      tags: [Nodes]
+      summary: Stop a running node (stops all workspaces and agent sessions)
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/NodeId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  status: { type: string }
+                required: [status]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/nodes/{nodeId}/ready:
+    post:
+      tags: [Nodes]
+      summary: Node Agent ready callback
+      description: Marks a Node as ready after Node Agent bootstrap completes.
+      security: [{ callbackTokenAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/NodeId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NodeReadyRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  status: { type: string }
+                  readyAt: { type: string }
+                required: [status]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/nodes/{nodeId}/heartbeat:
+    post:
+      tags: [Nodes]
+      summary: Node Agent heartbeat callback
+      description: Updates Node heartbeat freshness and health derivation inputs.
+      security: [{ callbackTokenAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/NodeId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NodeHeartbeatRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  status: { type: string }
+                  lastHeartbeatAt: { type: string }
+                  healthStatus: { $ref: "#/components/schemas/NodeHealthStatus" }
+                required: [status]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/nodes/{nodeId}/events:
+    get:
+      tags: [Observability]
+      summary: List recent node events/log entries
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/NodeId"
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Event"
+                  nextCursor:
+                    type: string
+                    nullable: true
+                required: [events]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/workspaces:
+    get:
+      tags: [Workspaces]
+      summary: List workspaces for the authenticated user
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/WorkspaceStatus"
+        - name: nodeId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Optional filter to only include workspaces for a specific node.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Workspace"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Workspaces]
+      summary: Create a workspace (optionally on an existing node)
+      security: [{ cookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkspaceRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/workspaces/{workspaceId}:
+    get:
+      tags: [Workspaces]
+      summary: Get a workspace
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Workspaces]
+      summary: Update a workspace (currently supports rename)
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkspaceRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Workspaces]
+      summary: Delete a workspace
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  success: { type: boolean }
+                required: [success]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/workspaces/{workspaceId}/stop:
+    post:
+      tags: [Workspaces]
+      summary: Stop a running workspace (preserves files, terminates sessions)
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  status: { type: string }
+                required: [status]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/workspaces/{workspaceId}/restart:
+    post:
+      tags: [Workspaces]
+      summary: Restart a stopped workspace (preserves files)
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  status: { type: string }
+                required: [status]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/workspaces/{workspaceId}/events:
+    get:
+      tags: [Observability]
+      summary: List recent workspace events/log entries
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Event"
+                  nextCursor:
+                    type: string
+                    nullable: true
+                required: [events]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/workspaces/{workspaceId}/agent-sessions:
+    get:
+      tags: [Agent Sessions]
+      summary: List agent sessions for a workspace
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AgentSession"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [Agent Sessions]
+      summary: Create an agent session in a workspace
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string }
+          description: Optional idempotency key to deduplicate retried session creation requests.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgentSessionRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/workspaces/{workspaceId}/agent-sessions/{sessionId}/stop:
+    post:
+      tags: [Agent Sessions]
+      summary: Stop an agent session
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  status: { type: string }
+                required: [status]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/terminal/token:
+    post:
+      tags: [Terminal]
+      summary: Create a terminal access token for a workspace
+      security: [{ cookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                workspaceId: { type: string }
+              required: [workspaceId]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalTokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: session
+    callbackTokenAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    NodeId:
+      name: nodeId
+      in: path
+      required: true
+      schema: { type: string }
+    WorkspaceId:
+      name: workspaceId
+      in: path
+      required: true
+      schema: { type: string }
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Bad Request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    NotFound:
+      description: Not Found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+
+  schemas:
+    ApiError:
+      type: object
+      additionalProperties: false
+      properties:
+        error: { type: string }
+        message: { type: string }
+        details:
+          type: object
+          additionalProperties: true
+      required: [error, message]
+
+    NodeStatus:
+      type: string
+      enum: [pending, creating, running, stopping, stopped, error]
+
+    NodeHealthStatus:
+      type: string
+      enum: [healthy, stale, unhealthy]
+
+    Node:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        name: { type: string }
+        status: { $ref: "#/components/schemas/NodeStatus" }
+        healthStatus: { $ref: "#/components/schemas/NodeHealthStatus" }
+        vmSize: { type: string }
+        vmLocation: { type: string }
+        ipAddress: { type: string, nullable: true }
+        lastHeartbeatAt: { type: string, nullable: true }
+        heartbeatStaleAfterSeconds: { type: integer, minimum: 1 }
+        errorMessage: { type: string, nullable: true }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+      required: [id, name, status, vmSize, vmLocation, createdAt, updatedAt]
+
+    CreateNodeRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        vmSize: { type: string }
+        vmLocation: { type: string }
+      required: [name]
+
+    NodeReadyRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        agentVersion: { type: string, nullable: true }
+        detail:
+          type: object
+          additionalProperties: true
+          nullable: true
+
+    NodeHeartbeatRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        activeWorkspaceCount: { type: integer, minimum: 0 }
+        activeSessionCount: { type: integer, minimum: 0 }
+        detail:
+          type: object
+          additionalProperties: true
+          nullable: true
+
+    WorkspaceStatus:
+      type: string
+      enum: [pending, creating, running, stopping, stopped, error]
+
+    Workspace:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        nodeId: { type: string }
+        displayName: { type: string }
+        repository: { type: string }
+        branch: { type: string }
+        status: { $ref: "#/components/schemas/WorkspaceStatus" }
+        lastActivityAt: { type: string, nullable: true }
+        errorMessage: { type: string, nullable: true }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+        url:
+          type: string
+          nullable: true
+          description: Canonical Workspace URL (ws-{id} subdomain).
+      required: [id, nodeId, displayName, repository, branch, status, createdAt, updatedAt]
+
+    CreateWorkspaceRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        nodeId:
+          type: string
+          nullable: true
+          description: Optional. If omitted, the system may create a new node or choose a default node.
+        name: { type: string }
+        repository: { type: string }
+        branch: { type: string }
+        installationId: { type: string }
+      required: [name, repository, installationId]
+
+    UpdateWorkspaceRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        displayName:
+          type: string
+          nullable: false
+          description: New user-visible Workspace name. Uniqueness is Node-scoped.
+      required: [displayName]
+
+    AgentSessionStatus:
+      type: string
+      enum: [running, stopped, error]
+
+    AgentSession:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        workspaceId: { type: string }
+        status: { $ref: "#/components/schemas/AgentSessionStatus" }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+        stoppedAt: { type: string, nullable: true }
+        errorMessage: { type: string, nullable: true }
+        label: { type: string, nullable: true }
+      required: [id, workspaceId, status, createdAt, updatedAt]
+
+    CreateAgentSessionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        label:
+          type: string
+          nullable: true
+          description: Optional user-visible label for the session.
+
+    Event:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        nodeId: { type: string, nullable: true }
+        workspaceId: { type: string, nullable: true }
+        level: { type: string, enum: [info, warn, error] }
+        type: { type: string }
+        message: { type: string }
+        detail:
+          type: object
+          additionalProperties: true
+          nullable: true
+        createdAt: { type: string }
+      required: [id, level, type, message, createdAt]
+
+    TerminalTokenResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        token: { type: string }
+        expiresAt: { type: string }
+        workspaceUrl: { type: string, nullable: true }
+      required: [token, expiresAt]

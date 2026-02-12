@@ -21,13 +21,6 @@ const actionButtonStyle: React.CSSProperties = {
   transition: 'background-color 0.1s',
 };
 
-function formatIdleTimeout(seconds: number): string {
-  if (seconds === 0) return 'No timeout';
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m idle`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h idle`;
-  return '24h idle';
-}
-
 /**
  * Card component for displaying a workspace.
  */
@@ -67,7 +60,7 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}>
-              {workspace.name}
+              {workspace.displayName || workspace.name}
             </h3>
             <StatusBadge status={workspace.status} />
           </div>
@@ -87,7 +80,12 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
             color: 'var(--sam-color-fg-muted)',
             opacity: 0.7,
           }}>
-            {workspace.branch} &middot; {workspace.vmSize} &middot; {workspace.vmLocation} &middot; {formatIdleTimeout(workspace.idleTimeoutSeconds)}
+            {workspace.branch}
+            {' \u00b7 '}
+            {workspace.vmSize}
+            {' \u00b7 '}
+            {workspace.vmLocation}
+            {workspace.nodeId ? ` \u00b7 Node ${workspace.nodeId}` : ''}
           </p>
         </div>
       </div>
@@ -102,26 +100,6 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
           color: '#f87171',
         }}>
           {workspace.errorMessage}
-        </div>
-      )}
-
-      {workspace.shutdownDeadline && (
-        <div style={{
-          marginTop: 'var(--sam-space-3)',
-          padding: 'var(--sam-space-2)',
-          backgroundColor: 'rgba(245, 158, 11, 0.1)',
-          borderRadius: 'var(--sam-radius-sm)',
-          fontSize: '0.75rem',
-          color: '#fbbf24',
-          display: 'flex',
-          alignItems: 'center',
-        }}>
-          <svg style={{ height: 14, width: 14, marginRight: 6, flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span>
-            Auto-shutdown at {new Date(workspace.shutdownDeadline).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </span>
         </div>
       )}
 

@@ -9,12 +9,15 @@ import { authRoutes } from './routes/auth';
 import { credentialsRoutes } from './routes/credentials';
 import { githubRoutes } from './routes/github';
 import { workspacesRoutes } from './routes/workspaces';
+import { nodesRoutes } from './routes/nodes';
 import { terminalRoutes } from './routes/terminal';
 import { agentRoutes } from './routes/agent';
 import { agentsCatalogRoutes } from './routes/agents-catalog';
 import { bootstrapRoutes } from './routes/bootstrap';
 import { uiGovernanceRoutes } from './routes/ui-governance';
 import { checkProvisioningTimeouts } from './services/timeout';
+import { getRuntimeLimits } from './services/limits';
+import { recordNodeRoutingMetric } from './services/telemetry';
 
 // Cloudflare bindings type
 export interface Env {
@@ -52,6 +55,12 @@ export interface Env {
   RATE_LIMIT_TERMINAL_TOKEN?: string;
   RATE_LIMIT_CREDENTIAL_UPDATE?: string;
   RATE_LIMIT_ANONYMOUS?: string;
+  // Hierarchy limits
+  MAX_NODES_PER_USER?: string;
+  MAX_WORKSPACES_PER_USER?: string;
+  MAX_WORKSPACES_PER_NODE?: string;
+  MAX_AGENT_SESSIONS_PER_WORKSPACE?: string;
+  NODE_HEARTBEAT_STALE_SECONDS?: string;
   // ACP configuration (passed to VMs via environment)
   ACP_INIT_TIMEOUT_MS?: string;
   ACP_RECONNECT_DELAY_MS?: string;
@@ -124,7 +133,11 @@ app.use('*', async (c, next) => {
   // Look up the VM IP from D1
   const db = drizzle(c.env.DATABASE, { schema });
   const workspace = await db
-    .select({ vmIp: schema.workspaces.vmIp, status: schema.workspaces.status })
+    .select({
+      nodeId: schema.workspaces.nodeId,
+      vmIp: schema.workspaces.vmIp,
+      status: schema.workspaces.status,
+    })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .get();
@@ -140,15 +153,36 @@ app.use('*', async (c, next) => {
   // Proxy to the VM agent via its DNS-only backend hostname.
   // Cloudflare Workers cannot fetch IP addresses directly (Error 1003),
   // so we use the vm-{id}.{domain} hostname which resolves directly to the VM IP.
-  const backendHostname = `vm-${workspaceId.toLowerCase()}.${baseDomain}`;
+  const routedNodeId = (workspace.nodeId || workspaceId).toLowerCase();
+  const backendHostname = `vm-${routedNodeId}.${baseDomain}`;
+  console.log(JSON.stringify({
+    event: 'ws_proxy_route',
+    workspaceId,
+    nodeId: workspace.nodeId || workspaceId,
+    backendHostname,
+    method: c.req.raw.method,
+    path: url.pathname,
+  }));
+  recordNodeRoutingMetric({
+    metric: 'ws_proxy_route',
+    nodeId: workspace.nodeId || workspaceId,
+    workspaceId,
+  }, c.env);
   const vmUrl = new URL(c.req.url);
   vmUrl.protocol = 'http:';
   vmUrl.hostname = backendHostname;
   vmUrl.port = '8080';
 
+  // Strip client-supplied routing headers and inject trusted routing context.
+  const headers = new Headers(c.req.raw.headers);
+  headers.delete('x-sam-node-id');
+  headers.delete('x-sam-workspace-id');
+  headers.set('X-SAM-Node-Id', (workspace.nodeId || workspaceId));
+  headers.set('X-SAM-Workspace-Id', workspaceId);
+
   return fetch(vmUrl.toString(), {
     method: c.req.raw.method,
-    headers: c.req.raw.headers,
+    headers,
     body: c.req.raw.body,
     // @ts-expect-error — Cloudflare Workers support duplex for streaming request bodies
     duplex: c.req.raw.body ? 'half' : undefined,
@@ -168,15 +202,17 @@ app.use('*', cors({
   },
   credentials: true,
   allowHeaders: ['Content-Type', 'Authorization'],
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
 
 // Health check
 app.get('/health', (c) => {
+  const limits = getRuntimeLimits(c.env);
   return c.json({
     status: 'healthy',
     version: c.env.VERSION,
     timestamp: new Date().toISOString(),
+    limits,
   });
 });
 
@@ -194,6 +230,7 @@ app.get('/.well-known/jwks.json', async (c) => {
 app.route('/api/auth', authRoutes);
 app.route('/api/credentials', credentialsRoutes);
 app.route('/api/github', githubRoutes);
+app.route('/api/nodes', nodesRoutes);
 app.route('/api/workspaces', workspacesRoutes);
 app.route('/api/terminal', terminalRoutes);
 app.route('/api/agent', agentRoutes);

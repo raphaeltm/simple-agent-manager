@@ -47,6 +47,7 @@ type Config struct {
 	JWTIssuer   string
 
 	// Workspace settings
+	NodeID             string
 	WorkspaceID        string
 	CallbackToken      string
 	BootstrapToken     string
@@ -149,6 +150,7 @@ func Load() (*Config, error) {
 		JWTAudience: getEnv("JWT_AUDIENCE", "workspace-terminal"),
 		JWTIssuer:   getEnv("JWT_ISSUER", ""), // Will be derived from ControlPlaneURL if not set
 
+		NodeID:             getEnv("NODE_ID", getEnv("WORKSPACE_ID", "")),
 		WorkspaceID:        getEnv("WORKSPACE_ID", ""),
 		CallbackToken:      getEnv("CALLBACK_TOKEN", ""),
 		BootstrapToken:     getEnv("BOOTSTRAP_TOKEN", ""),
@@ -193,7 +195,7 @@ func Load() (*Config, error) {
 		ACPReconnectTimeoutMs: getEnvInt("ACP_RECONNECT_TIMEOUT_MS", 30000),
 		ACPMaxRestartAttempts: getEnvInt("ACP_MAX_RESTART_ATTEMPTS", 3),
 
-		ContainerMode:       getEnvBool("CONTAINER_MODE", true),
+		ContainerMode: getEnvBool("CONTAINER_MODE", true),
 		// Default to the container's configured user. If you need to force a specific user, set CONTAINER_USER.
 		// Many devcontainer images use "vscode", but not all do (and forcing it can break docker exec).
 		ContainerUser:       getEnv("CONTAINER_USER", ""),
@@ -233,8 +235,8 @@ func Load() (*Config, error) {
 		cfg.AllowedOrigins = deriveAllowedOrigins(cfg.ControlPlaneURL)
 	}
 
-	if cfg.WorkspaceID == "" {
-		return nil, fmt.Errorf("WORKSPACE_ID is required")
+	if cfg.NodeID == "" {
+		return nil, fmt.Errorf("NODE_ID is required")
 	}
 
 	return cfg, nil
