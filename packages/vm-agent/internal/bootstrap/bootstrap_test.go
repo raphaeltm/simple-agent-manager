@@ -485,3 +485,162 @@ func TestHasDevcontainerConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestEnsureWorkspaceWritablePreDevcontainerNoopWhenContainerModeDisabled(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	targetFile := filepath.Join(workspaceDir, "package-lock.json")
+	if err := os.WriteFile(targetFile, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("failed to write target file: %v", err)
+	}
+
+	cfg := &config.Config{
+		WorkspaceDir:  workspaceDir,
+		ContainerMode: false,
+	}
+	if err := ensureWorkspaceWritablePreDevcontainer(context.Background(), cfg); err != nil {
+		t.Fatalf("ensureWorkspaceWritablePreDevcontainer returned error: %v", err)
+	}
+
+	info, err := os.Stat(targetFile)
+	if err != nil {
+		t.Fatalf("stat target file failed: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("expected mode 0600 when container mode is disabled, got %o", info.Mode().Perm())
+	}
+}
+
+func TestEnsureWorkspaceWritablePreDevcontainerMakesWorkspaceWritable(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	subDir := filepath.Join(workspaceDir, "subdir")
+	if err := os.MkdirAll(subDir, 0o700); err != nil {
+		t.Fatalf("failed to create subdir: %v", err)
+	}
+	targetFile := filepath.Join(workspaceDir, "package-lock.json")
+	if err := os.WriteFile(targetFile, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("failed to write target file: %v", err)
+	}
+
+	cfg := &config.Config{
+		WorkspaceDir:  workspaceDir,
+		ContainerMode: true,
+	}
+	if err := ensureWorkspaceWritablePreDevcontainer(context.Background(), cfg); err != nil {
+		t.Fatalf("ensureWorkspaceWritablePreDevcontainer returned error: %v", err)
+	}
+
+	fileInfo, err := os.Stat(targetFile)
+	if err != nil {
+		t.Fatalf("stat target file failed: %v", err)
+	}
+	if fileInfo.Mode().Perm()&0o666 != 0o666 {
+		t.Fatalf("expected file mode to include 0666 bits, got %o", fileInfo.Mode().Perm())
+	}
+
+	dirInfo, err := os.Stat(subDir)
+	if err != nil {
+		t.Fatalf("stat subdir failed: %v", err)
+	}
+	if dirInfo.Mode().Perm()&0o777 != 0o777 {
+		t.Fatalf("expected directory mode to include 0777 bits, got %o", dirInfo.Mode().Perm())
+	}
+}
+
+func TestPrepareWorkspaceMarksReady(t *testing.T) {
+	mockBinDir := t.TempDir()
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	mockScript := "#!/bin/sh\nexit 0\n"
+	if err := os.WriteFile(mockDevcontainer, []byte(mockScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+
+	workspaceID := "ws-prepare-ready"
+	callbackToken := "cb-prepare-ready"
+	readyCalled := false
+	readyAuth := ""
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/workspaces/"+workspaceID+"/ready" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+
+		readyCalled = true
+		readyAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"running"}`))
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		WorkspaceID:                   workspaceID,
+		ControlPlaneURL:               server.URL,
+		CallbackToken:                 callbackToken,
+		WorkspaceDir:                  t.TempDir(),
+		ContainerMode:                 false,
+		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := PrepareWorkspace(ctx, cfg, ProvisionState{}); err != nil {
+		t.Fatalf("PrepareWorkspace returned error: %v", err)
+	}
+
+	if !readyCalled {
+		t.Fatal("expected PrepareWorkspace to call the /ready callback")
+	}
+	if readyAuth != "Bearer "+callbackToken {
+		t.Fatalf("unexpected ready callback auth header: got %q", readyAuth)
+	}
+}
+
+func TestPrepareWorkspaceReturnsReadyEndpointError(t *testing.T) {
+	mockBinDir := t.TempDir()
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	mockScript := "#!/bin/sh\nexit 0\n"
+	if err := os.WriteFile(mockDevcontainer, []byte(mockScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+
+	workspaceID := "ws-prepare-ready-failure"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/workspaces/"+workspaceID+"/ready" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"INTERNAL_ERROR"}`))
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		WorkspaceID:                   workspaceID,
+		ControlPlaneURL:               server.URL,
+		CallbackToken:                 "cb-failure",
+		WorkspaceDir:                  t.TempDir(),
+		ContainerMode:                 false,
+		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := PrepareWorkspace(ctx, cfg, ProvisionState{})
+	if err == nil {
+		t.Fatal("expected PrepareWorkspace to fail when /ready returns non-2xx")
+	}
+	if !strings.Contains(err.Error(), "ready endpoint returned HTTP 500") {
+		t.Fatalf("expected ready endpoint error, got: %v", err)
+	}
+}

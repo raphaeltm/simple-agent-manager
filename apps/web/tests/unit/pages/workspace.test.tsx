@@ -217,15 +217,16 @@ describe('Workspace page', () => {
     await waitFor(() => {
       expect(screen.getByTestId('terminal')).toBeInTheDocument();
     });
-    expect(screen.getByTestId('agent-session-list')).toBeInTheDocument();
+    expect(screen.getByText('Workspace Events')).toBeInTheDocument();
   });
 
-  it('supports session list + attach flow and updates workspace query string', async () => {
+  it('supports chat tab attach flow and updates workspace query string', async () => {
     mocks.listAgentSessions.mockResolvedValue([
       {
         id: 'sess-1',
         workspaceId: 'ws-123',
         status: 'running',
+        label: 'Claude Chat',
         createdAt: '2026-02-08T00:10:00.000Z',
         updatedAt: '2026-02-08T00:10:00.000Z',
       },
@@ -237,7 +238,7 @@ describe('Workspace page', () => {
       expect(mocks.listAgentSessions).toHaveBeenCalledWith('ws-123');
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'attach-sess-1' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Chat tab: Claude Chat' }));
 
     await waitFor(() => {
       const probe = screen.getByTestId('location-probe');
@@ -247,8 +248,9 @@ describe('Workspace page', () => {
     });
   });
 
-  it('renders unified session tabs and switches to chat tab selection', async () => {
-    mocks.listAgentSessions.mockResolvedValue([
+  it('stops active chat session when closing the chat tab', async () => {
+    mocks.stopAgentSession.mockResolvedValue(undefined);
+    mocks.listAgentSessions.mockResolvedValueOnce([
       {
         id: 'sess-tab',
         workspaceId: 'ws-123',
@@ -258,18 +260,33 @@ describe('Workspace page', () => {
         updatedAt: '2026-02-08T00:10:00.000Z',
       },
     ]);
+    mocks.listAgentSessions.mockResolvedValueOnce([
+      {
+        id: 'sess-tab',
+        workspaceId: 'ws-123',
+        status: 'running',
+        label: 'Claude Code Chat',
+        createdAt: '2026-02-08T00:10:00.000Z',
+        updatedAt: '2026-02-08T00:10:00.000Z',
+      },
+    ]);
+    mocks.listAgentSessions.mockResolvedValueOnce([]);
 
-    renderWorkspace('/workspaces/ws-123', true);
+    renderWorkspace('/workspaces/ws-123?view=conversation&sessionId=sess-tab', true);
 
     expect(await screen.findByRole('tablist', { name: 'Workspace sessions' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Chat tab: Claude Code Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop Claude Code Chat' }));
+
+    await waitFor(() => {
+      expect(mocks.stopAgentSession).toHaveBeenCalledWith('ws-123', 'sess-tab');
+    });
 
     await waitFor(() => {
       const probe = screen.getByTestId('location-probe');
       expect(probe.textContent).toContain('/workspaces/ws-123?');
-      expect(probe.textContent).toContain('view=conversation');
-      expect(probe.textContent).toContain('sessionId=sess-tab');
+      expect(probe.textContent).toContain('view=terminal');
+      expect(probe.textContent).not.toContain('sessionId=');
     });
   });
 
@@ -372,7 +389,7 @@ describe('Workspace page', () => {
     await screen.findByText('Workspace A');
 
     fireEvent.click(screen.getByRole('button', { name: 'Create terminal or chat session' }));
-    fireEvent.click(screen.getByRole('button', { name: 'New Claude Code Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Claude Code' }));
 
     await waitFor(() => {
       expect(mocks.createAgentSession).toHaveBeenCalledWith(
@@ -420,9 +437,9 @@ describe('Workspace page', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Create terminal or chat session' }));
 
-    expect(screen.getByRole('button', { name: 'New Terminal Session' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'New Claude Code' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'New Codex' }));
+    expect(screen.getByRole('button', { name: 'Terminal' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Claude Code' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Codex' }));
 
     await waitFor(() => {
       expect(mocks.createAgentSession).toHaveBeenCalledWith(

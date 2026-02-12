@@ -11,7 +11,6 @@ import type { AcpSessionState } from '@simple-agent-manager/acp-client';
 import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { AgentSelector } from '../components/AgentSelector';
-import { AgentSessionList } from '../components/AgentSessionList';
 import { MobileBottomBar } from '../components/MobileBottomBar';
 import { MobileOverflowMenu } from '../components/MobileOverflowMenu';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -191,6 +190,7 @@ export function Workspace() {
   const [preferredAgentsBySession, setPreferredAgentsBySession] = useState<
     Record<string, AgentInfo['id']>
   >({});
+  const [hoveredWorkspaceTabId, setHoveredWorkspaceTabId] = useState<string | null>(null);
   const multiTerminalRef = useRef<MultiTerminalHandle | null>(null);
   const createMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -526,6 +526,17 @@ export function Workspace() {
     handleAttachSession(tab.sessionId);
   };
 
+  const handleCloseWorkspaceTab = (tab: WorkspaceTab) => {
+    if (tab.kind === 'terminal') {
+      if (tab.sessionId !== DEFAULT_TERMINAL_TAB_ID) {
+        multiTerminalRef.current?.closeSession(tab.sessionId);
+      }
+      return;
+    }
+
+    void handleStopSession(tab.sessionId);
+  };
+
   const defaultAgentId = configuredAgents.length === 1 ? configuredAgents[0]!.id : null;
   const defaultAgentName = defaultAgentId ? agentNameById.get(defaultAgentId) ?? null : null;
 
@@ -561,7 +572,9 @@ export function Workspace() {
       status: session.status,
     }));
 
-    const chatSessionTabs: WorkspaceTab[] = agentSessions.map((session) => {
+    const chatSessionTabs: WorkspaceTab[] = agentSessions
+      .filter((session) => session.status === 'running')
+      .map((session) => {
       const preferredAgent = preferredAgentsBySession[session.id];
       const preferredName = preferredAgent ? agentNameById.get(preferredAgent) : undefined;
       const title =
@@ -575,7 +588,7 @@ export function Workspace() {
         title,
         status: session.status,
       };
-    });
+      });
 
     return [...terminalSessionTabs, ...chatSessionTabs];
   }, [agentNameById, agentSessions, preferredAgentsBySession, visibleTerminalTabs]);
@@ -787,30 +800,42 @@ export function Workspace() {
         {workspaceTabs.map((tab) => {
           const active = activeTabId === tab.id;
           const statusColor = workspaceTabStatusColor(tab);
+          const hovered = hoveredWorkspaceTabId === tab.id;
+          const canClose = tab.kind === 'chat' || tab.sessionId !== DEFAULT_TERMINAL_TAB_ID;
 
           return (
-            <button
+            <div
               key={tab.id}
               onClick={() => handleSelectWorkspaceTab(tab)}
+              onMouseEnter={() => setHoveredWorkspaceTabId(tab.id)}
+              onMouseLeave={() => setHoveredWorkspaceTabId((prev) => (prev === tab.id ? null : prev))}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  handleSelectWorkspaceTab(tab);
+                }
+              }}
               role="tab"
               aria-selected={active}
               aria-label={`${tab.kind === 'terminal' ? 'Terminal' : 'Chat'} tab: ${tab.title}`}
+              tabIndex={0}
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 7,
+                gap: 6,
                 padding: '0 12px',
                 minWidth: 100,
                 maxWidth: 180,
                 cursor: 'pointer',
                 fontSize: 13,
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                 border: 'none',
                 borderRight: '1px solid #2a2d3a',
                 position: 'relative',
                 flexShrink: 0,
                 whiteSpace: 'nowrap',
-                backgroundColor: active ? '#1a1b26' : 'transparent',
-                color: active ? '#a9b1d6' : '#787c99',
+                backgroundColor: active ? '#1a1b26' : hovered ? '#1e2030' : 'transparent',
+                color: active || hovered ? '#a9b1d6' : '#787c99',
               }}
               title={tab.title}
             >
@@ -829,13 +854,14 @@ export function Workspace() {
               <span
                 style={{
                   display: 'inline-block',
-                  width: 7,
-                  height: 7,
-                  borderRadius: '50%',
-                  backgroundColor: statusColor,
+                  fontSize: 10,
+                  lineHeight: 1,
+                  color: statusColor,
                   flexShrink: 0,
                 }}
-              />
+              >
+                ●
+              </span>
               <span
                 style={{
                   flex: 1,
@@ -847,7 +873,44 @@ export function Workspace() {
               >
                 {tab.title}
               </span>
-            </button>
+              {canClose && (
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleCloseWorkspaceTab(tab);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 20,
+                    height: 20,
+                    borderRadius: 4,
+                    border: 'none',
+                    background: 'none',
+                    color: '#787c99',
+                    cursor: 'pointer',
+                    fontSize: 14,
+                    lineHeight: 1,
+                    padding: 0,
+                    flexShrink: 0,
+                    opacity: active || hovered ? 1 : 0,
+                    transition: 'background-color 0.15s, color 0.15s',
+                  }}
+                  aria-label={tab.kind === 'terminal' ? `Close ${tab.title}` : `Stop ${tab.title}`}
+                  onMouseEnter={(event) => {
+                    event.currentTarget.style.backgroundColor = '#33467c';
+                    event.currentTarget.style.color = '#a9b1d6';
+                  }}
+                  onMouseLeave={(event) => {
+                    event.currentTarget.style.backgroundColor = 'transparent';
+                    event.currentTarget.style.color = '#787c99';
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
           );
         })}
       </div>
@@ -855,6 +918,7 @@ export function Workspace() {
       <div ref={createMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
         <button
           onClick={() => setCreateMenuOpen((prev) => !prev)}
+          disabled={sessionsLoading}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -865,10 +929,11 @@ export function Workspace() {
             border: 'none',
             borderLeft: '1px solid #2a2d3a',
             color: '#787c99',
-            cursor: 'pointer',
+            cursor: sessionsLoading ? 'not-allowed' : 'pointer',
             fontSize: 18,
             fontWeight: 300,
             padding: 0,
+            opacity: sessionsLoading ? 0.6 : 1,
           }}
           aria-label="Create terminal or chat session"
           aria-expanded={createMenuOpen}
@@ -893,6 +958,7 @@ export function Workspace() {
           >
             <button
               onClick={handleCreateTerminalTab}
+              disabled={sessionsLoading}
               style={{
                 width: '100%',
                 textAlign: 'left',
@@ -901,10 +967,11 @@ export function Workspace() {
                 color: 'var(--sam-color-fg-primary)',
                 padding: '10px 12px',
                 fontSize: '0.8125rem',
-                cursor: 'pointer',
+                cursor: sessionsLoading ? 'not-allowed' : 'pointer',
+                opacity: sessionsLoading ? 0.65 : 1,
               }}
             >
-              New Terminal Session
+              Terminal
             </button>
 
             {configuredAgents.length <= 1 ? (
@@ -912,23 +979,24 @@ export function Workspace() {
                 onClick={() => {
                   void handleCreateSession(defaultAgentId ?? undefined);
                 }}
-                disabled={configuredAgents.length === 0}
+                disabled={configuredAgents.length === 0 || sessionsLoading}
                 style={{
                   width: '100%',
                   textAlign: 'left',
                   border: 'none',
                   background: 'transparent',
                   color:
-                    configuredAgents.length === 0
+                    configuredAgents.length === 0 || sessionsLoading
                       ? 'var(--sam-color-fg-muted)'
                       : 'var(--sam-color-fg-primary)',
                   padding: '10px 12px',
                   fontSize: '0.8125rem',
-                  cursor: configuredAgents.length === 0 ? 'not-allowed' : 'pointer',
-                  opacity: configuredAgents.length === 0 ? 0.65 : 1,
+                  cursor:
+                    configuredAgents.length === 0 || sessionsLoading ? 'not-allowed' : 'pointer',
+                  opacity: configuredAgents.length === 0 || sessionsLoading ? 0.65 : 1,
                 }}
               >
-                {defaultAgentName ? `New ${defaultAgentName} Chat` : 'New Chat Session'}
+                {defaultAgentName ?? 'Chat'}
               </button>
             ) : (
               configuredAgents.map((agent) => (
@@ -937,6 +1005,7 @@ export function Workspace() {
                   onClick={() => {
                     void handleCreateSession(agent.id);
                   }}
+                  disabled={sessionsLoading}
                   style={{
                     width: '100%',
                     textAlign: 'left',
@@ -945,10 +1014,11 @@ export function Workspace() {
                     color: 'var(--sam-color-fg-primary)',
                     padding: '10px 12px',
                     fontSize: '0.8125rem',
-                    cursor: 'pointer',
+                    cursor: sessionsLoading ? 'not-allowed' : 'pointer',
+                    opacity: sessionsLoading ? 0.65 : 1,
                   }}
                 >
-                  New {agent.name}
+                  {agent.name}
                 </button>
               ))
             )}
@@ -1318,13 +1388,6 @@ export function Workspace() {
               </Button>
             </div>
           </div>
-
-          <AgentSessionList
-            sessions={agentSessions}
-            loading={sessionsLoading}
-            onAttach={handleAttachSession}
-            onStop={handleStopSession}
-          />
 
           <section
             style={{

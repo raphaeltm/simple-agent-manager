@@ -96,6 +96,13 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	}
 	reporter.Log("git_clone", "completed", "Repository cloned")
 
+	reporter.Log("workspace_perms_pre", "started", "Preparing workspace permissions")
+	if err := ensureWorkspaceWritablePreDevcontainer(ctx, cfg); err != nil {
+		reporter.Log("workspace_perms_pre", "failed", "Pre-devcontainer permission setup failed", err.Error())
+		return err
+	}
+	reporter.Log("workspace_perms_pre", "completed", "Workspace permissions prepared")
+
 	reporter.Log("devcontainer_wait", "started", "Waiting for devcontainer CLI")
 	reporter.Log("devcontainer_up", "started", "Building devcontainer")
 	if err := ensureDevcontainerReady(ctx, cfg); err != nil {
@@ -154,6 +161,9 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	if err := ensureRepositoryReady(ctx, cfg, bootstrap); err != nil {
 		return err
 	}
+	if err := ensureWorkspaceWritablePreDevcontainer(ctx, cfg); err != nil {
+		return err
+	}
 	if err := ensureDevcontainerReady(ctx, cfg); err != nil {
 		return err
 	}
@@ -165,6 +175,33 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	}
 	if err := ensureGitIdentity(ctx, cfg, bootstrap); err != nil {
 		return err
+	}
+	if err := markWorkspaceReady(ctx, cfg); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ensureWorkspaceWritablePreDevcontainer(ctx context.Context, cfg *config.Config) error {
+	if cfg.WorkspaceDir == "" {
+		return nil
+	}
+	if !cfg.ContainerMode {
+		return nil
+	}
+
+	if _, err := os.Stat(cfg.WorkspaceDir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("failed to stat workspace dir: %w", err)
+	}
+
+	// Ensure lifecycle hooks that run as non-root users can mutate the bind mount.
+	cmd := exec.CommandContext(ctx, "chmod", "-R", "a+rwX", cfg.WorkspaceDir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to normalize workspace permissions before devcontainer up: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
 	return nil
