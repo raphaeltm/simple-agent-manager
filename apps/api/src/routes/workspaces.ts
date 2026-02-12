@@ -49,7 +49,8 @@ workspacesRoutes.use('/*', async (c, next) => {
     path.endsWith('/agent-key') ||
     path.endsWith('/runtime') ||
     path.endsWith('/git-token') ||
-    path.endsWith('/boot-log')
+    path.endsWith('/boot-log') ||
+    path.endsWith('/provisioning-failed')
   ) {
     return next();
   }
@@ -871,6 +872,44 @@ workspacesRoutes.post('/:id/ready', async (c) => {
     .set({
       status: 'running',
       lastActivityAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.workspaces.id, workspaceId));
+
+  return c.json({ success: true });
+});
+
+workspacesRoutes.post('/:id/provisioning-failed', async (c) => {
+  const workspaceId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
+  await verifyWorkspaceCallbackAuth(c, workspaceId);
+
+  const body = await c.req.json<{ errorMessage?: string }>().catch(() => null);
+  const providedMessage =
+    typeof body?.errorMessage === 'string' ? body.errorMessage.trim() : '';
+  const errorMessage = providedMessage || 'Workspace provisioning failed';
+
+  const rows = await db
+    .select({ status: schema.workspaces.status })
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+
+  const workspace = rows[0];
+  if (!workspace) {
+    throw errors.notFound('Workspace');
+  }
+
+  if (workspace.status !== 'creating') {
+    return c.json({ success: false, reason: 'workspace_not_creating' });
+  }
+
+  await db
+    .update(schema.workspaces)
+    .set({
+      status: 'error',
+      errorMessage,
+      shutdownDeadline: null,
       updatedAt: new Date().toISOString(),
     })
     .where(eq(schema.workspaces.id, workspaceId));

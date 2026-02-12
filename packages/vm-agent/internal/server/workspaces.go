@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -144,6 +145,12 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if err := s.provisionWorkspaceRuntime(r.Context(), runtime); err != nil {
 		runtime.Status = "error"
 		runtime.UpdatedAt = nowUTC()
+		callbackToken := s.callbackTokenForWorkspace(body.WorkspaceID)
+		if callbackToken != "" {
+			if callbackErr := s.notifyWorkspaceProvisioningFailed(r.Context(), body.WorkspaceID, callbackToken, err.Error()); callbackErr != nil {
+				log.Printf("Workspace %s: provisioning-failed callback error: %v", body.WorkspaceID, callbackErr)
+			}
+		}
 		s.appendNodeEvent(body.WorkspaceID, "error", "workspace.provisioning_failed", "Workspace provisioning failed", map[string]interface{}{
 			"workspaceId": body.WorkspaceID,
 			"repository":  body.Repository,
@@ -223,6 +230,12 @@ func (s *Server) handleRestartWorkspace(w http.ResponseWriter, r *http.Request) 
 	if err := s.provisionWorkspaceRuntime(r.Context(), runtime); err != nil {
 		runtime.Status = "error"
 		runtime.UpdatedAt = nowUTC()
+		callbackToken := s.callbackTokenForWorkspace(workspaceID)
+		if callbackToken != "" {
+			if callbackErr := s.notifyWorkspaceProvisioningFailed(r.Context(), workspaceID, callbackToken, err.Error()); callbackErr != nil {
+				log.Printf("Workspace %s: restart provisioning-failed callback error: %v", workspaceID, callbackErr)
+			}
+		}
 		s.appendNodeEvent(workspaceID, "error", "workspace.restart_failed", "Workspace restart failed", map[string]interface{}{
 			"error": err.Error(),
 		})

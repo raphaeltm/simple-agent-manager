@@ -699,6 +699,7 @@ You can also trigger deployment manually via GitHub Actions → Deploy → Run w
 - `POST /api/nodes/:id/ready` - Node Agent ready callback
 - `POST /api/nodes/:id/heartbeat` - Node Agent heartbeat callback
 - `POST /api/workspaces/:id/ready` - Workspace ready callback
+- `POST /api/workspaces/:id/provisioning-failed` - Workspace provisioning failure callback (sets workspace to `error` when provisioning fails)
 - `POST /api/workspaces/:id/heartbeat` - Workspace activity heartbeat callback
 - `GET /api/workspaces/:id/runtime` - Workspace runtime metadata callback (repository/branch for recovery)
 - `POST /api/workspaces/:id/boot-log` - Workspace boot progress log callback
@@ -783,6 +784,8 @@ See `apps/api/.env.example`:
 - Cloudflare D1 (SQLite) for app state; Cloudflare KV for bootstrap tokens and boot logs; Cloudflare R2 for Node Agent binaries (014-multi-workspace-nodes)
 
 ## Recent Changes
+- 014-multi-workspace-nodes: Workspace provisioning failures now callback via `POST /api/workspaces/:id/provisioning-failed`, so control-plane status transitions to `error` even when long background create tasks outlive Worker `waitUntil` execution windows
+- 014-multi-workspace-nodes: VM Agent ACP WebSocket workspace routing now resolves workspace scope from token/session context for browser clients (instead of requiring `X-SAM-Workspace-Id`), restoring chat attach for Claude/Codex sessions
 - 014-multi-workspace-nodes: Workspace desktop session tabs now use an integrated terminal-style strip above the content area (instead of crowded header chips) with a `+` dropdown that creates terminal sessions or agent-specific chat sessions (`terminal` + `claude/codex/...` when multiple agent keys are configured)
 - 014-multi-workspace-nodes: Fresh-node readiness probing now enforces hard per-request timeouts (`Promise.race` + `AbortController`) so workspace creation fails fast with explicit timeout errors even when runtime fetch abort signals are ignored
 - 014-multi-workspace-nodes: Workspace creation now waits for fresh node-agent backend readiness (`/health`) before dispatching first node workspace create, avoiding immediate fresh-node routing failures (for example Cloudflare 1014/404 races)

@@ -42,7 +42,7 @@ func TestAgentWebSocketRoutingAndAuthContract(t *testing.T) {
 	content := string(contentBytes)
 
 	for _, needle := range []string{
-		"requireWorkspaceRoute",
+		"resolveWorkspaceIDForWebsocket",
 		"authenticateWorkspaceWebsocket",
 		"attach/stop race handling",
 	} {

@@ -147,17 +147,17 @@ func (s *Server) authenticateWorkspaceWebsocket(w http.ResponseWriter, r *http.R
 	return createdSession.UserID, true
 }
 
-func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
+func (s *Server) resolveWorkspaceIDForWebsocket(r *http.Request) string {
 	workspaceID := strings.TrimSpace(s.routedWorkspaceID(r))
 	if workspaceID == "" {
 		if session := s.sessionManager.GetSessionFromRequest(r); session != nil && session.Claims != nil {
-			workspaceID = session.Claims.Workspace
+			workspaceID = strings.TrimSpace(session.Claims.Workspace)
 		}
 	}
 	if workspaceID == "" {
 		if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" {
 			if claims, err := s.jwtValidator.Validate(token); err == nil {
-				workspaceID = claims.Workspace
+				workspaceID = strings.TrimSpace(claims.Workspace)
 			}
 		}
 	}
@@ -167,6 +167,11 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	if workspaceID == "" {
 		workspaceID = "default"
 	}
+	return workspaceID
+}
+
+func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
+	workspaceID := s.resolveWorkspaceIDForWebsocket(r)
 	if workspaceID == "" {
 		http.Error(w, "Missing workspace route", http.StatusBadRequest)
 		return
@@ -279,25 +284,7 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
-	workspaceID := strings.TrimSpace(s.routedWorkspaceID(r))
-	if workspaceID == "" {
-		if session := s.sessionManager.GetSessionFromRequest(r); session != nil && session.Claims != nil {
-			workspaceID = session.Claims.Workspace
-		}
-	}
-	if workspaceID == "" {
-		if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" {
-			if claims, err := s.jwtValidator.Validate(token); err == nil {
-				workspaceID = claims.Workspace
-			}
-		}
-	}
-	if workspaceID == "" {
-		workspaceID = strings.TrimSpace(s.config.WorkspaceID)
-	}
-	if workspaceID == "" {
-		workspaceID = "default"
-	}
+	workspaceID := s.resolveWorkspaceIDForWebsocket(r)
 	if workspaceID == "" {
 		http.Error(w, "Missing workspace route", http.StatusBadRequest)
 		return
