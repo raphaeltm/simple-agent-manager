@@ -207,16 +207,6 @@ async function scheduleWorkspaceCreateOnNode(
       branch,
       callbackToken,
     });
-
-    await db
-      .update(schema.workspaces)
-      .set({
-        status: 'running',
-        lastActivityAt: new Date().toISOString(),
-        errorMessage: null,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.workspaces.id, workspaceId));
   } catch (err) {
     await db
       .update(schema.workspaces)
@@ -610,15 +600,6 @@ workspacesRoutes.post('/:id/restart', async (c) => {
       const innerDb = drizzle(c.env.DATABASE, { schema });
       try {
         await restartWorkspaceOnNode(workspace.nodeId!, workspace.id, c.env, userId);
-        await innerDb
-          .update(schema.workspaces)
-          .set({
-            status: 'running',
-            errorMessage: null,
-            lastActivityAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(schema.workspaces.id, workspace.id));
       } catch (err) {
         await innerDb
           .update(schema.workspaces)

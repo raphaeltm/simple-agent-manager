@@ -262,6 +262,8 @@ Claude Code now supports dual authentication methods:
 - Cloudflare D1 (SQLite) for app state; Cloudflare KV for bootstrap tokens and boot logs; Cloudflare R2 for Node Agent binaries (014-multi-workspace-nodes)
 
 ## Recent Changes
+- 014-multi-workspace-nodes: Node `ready` callbacks now dispatch queued `creating` workspaces on that node, so auto-created-node workspace requests are not stranded when long node bootstrap work outlives the original create-request background window
+- 014-multi-workspace-nodes: VM Agent workspace create/restart now runs provisioning asynchronously and final state is callback-driven (`/ready` or `/provisioning-failed`) instead of blocking control-plane dispatch requests on full devcontainer setup duration
 - 014-multi-workspace-nodes: Workspace provisioning failures now callback via `POST /api/workspaces/:id/provisioning-failed`, so control-plane status transitions to `error` even when long background create tasks outlive Worker `waitUntil` execution windows
 - 014-multi-workspace-nodes: VM Agent ACP WebSocket workspace routing now resolves workspace scope from token/session context for browser clients (instead of requiring `X-SAM-Workspace-Id`), restoring chat attach for Claude/Codex sessions
 - 014-multi-workspace-nodes: Workspace desktop session tabs now use an integrated terminal-style strip above the content area (instead of crowded header chips) with a `+` dropdown that creates terminal sessions or agent-specific chat sessions (`terminal` + `claude/codex/...` when multiple agent keys are configured)

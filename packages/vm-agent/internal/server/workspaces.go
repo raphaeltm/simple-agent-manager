@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -108,6 +109,42 @@ func (s *Server) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
 
+func (s *Server) startWorkspaceProvision(
+	runtime *WorkspaceRuntime,
+	failureType string,
+	failureMessage string,
+	successType string,
+	successMessage string,
+	detail map[string]interface{},
+) {
+	go func() {
+		if err := s.provisionWorkspaceRuntime(context.Background(), runtime); err != nil {
+			runtime.Status = "error"
+			runtime.UpdatedAt = nowUTC()
+
+			callbackToken := s.callbackTokenForWorkspace(runtime.ID)
+			if callbackToken != "" {
+				if callbackErr := s.notifyWorkspaceProvisioningFailed(context.Background(), runtime.ID, callbackToken, err.Error()); callbackErr != nil {
+					log.Printf("Workspace %s: provisioning-failed callback error: %v", runtime.ID, callbackErr)
+				}
+			}
+
+			failureDetail := make(map[string]interface{}, len(detail)+1)
+			for key, value := range detail {
+				failureDetail[key] = value
+			}
+			failureDetail["error"] = err.Error()
+
+			s.appendNodeEvent(runtime.ID, "error", failureType, failureMessage, failureDetail)
+			return
+		}
+
+		runtime.Status = "running"
+		runtime.UpdatedAt = nowUTC()
+		s.appendNodeEvent(runtime.ID, "info", successType, successMessage, detail)
+	}()
+}
+
 func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		WorkspaceID   string `json:"workspaceId"`
@@ -142,36 +179,23 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		"branch":      branch,
 	})
 
-	if err := s.provisionWorkspaceRuntime(r.Context(), runtime); err != nil {
-		runtime.Status = "error"
-		runtime.UpdatedAt = nowUTC()
-		callbackToken := s.callbackTokenForWorkspace(body.WorkspaceID)
-		if callbackToken != "" {
-			if callbackErr := s.notifyWorkspaceProvisioningFailed(r.Context(), body.WorkspaceID, callbackToken, err.Error()); callbackErr != nil {
-				log.Printf("Workspace %s: provisioning-failed callback error: %v", body.WorkspaceID, callbackErr)
-			}
-		}
-		s.appendNodeEvent(body.WorkspaceID, "error", "workspace.provisioning_failed", "Workspace provisioning failed", map[string]interface{}{
-			"workspaceId": body.WorkspaceID,
-			"repository":  body.Repository,
-			"branch":      branch,
-			"error":       err.Error(),
-		})
-		writeError(w, http.StatusInternalServerError, "workspace provisioning failed")
-		return
-	}
-
-	runtime.Status = "running"
-	runtime.UpdatedAt = nowUTC()
-	s.appendNodeEvent(body.WorkspaceID, "info", "workspace.created", "Workspace runtime created", map[string]interface{}{
+	detail := map[string]interface{}{
 		"workspaceId": body.WorkspaceID,
 		"repository":  body.Repository,
 		"branch":      branch,
-	})
+	}
+	s.startWorkspaceProvision(
+		runtime,
+		"workspace.provisioning_failed",
+		"Workspace provisioning failed",
+		"workspace.created",
+		"Workspace runtime created",
+		detail,
+	)
 
-	writeJSON(w, http.StatusCreated, map[string]interface{}{
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{
 		"workspaceId": runtime.ID,
-		"status":      runtime.Status,
+		"status":      "creating",
 	})
 }
 
@@ -227,26 +251,15 @@ func (s *Server) handleRestartWorkspace(w http.ResponseWriter, r *http.Request) 
 	runtime.UpdatedAt = nowUTC()
 	s.appendNodeEvent(workspaceID, "info", "workspace.restarting", "Workspace restart started", nil)
 
-	if err := s.provisionWorkspaceRuntime(r.Context(), runtime); err != nil {
-		runtime.Status = "error"
-		runtime.UpdatedAt = nowUTC()
-		callbackToken := s.callbackTokenForWorkspace(workspaceID)
-		if callbackToken != "" {
-			if callbackErr := s.notifyWorkspaceProvisioningFailed(r.Context(), workspaceID, callbackToken, err.Error()); callbackErr != nil {
-				log.Printf("Workspace %s: restart provisioning-failed callback error: %v", workspaceID, callbackErr)
-			}
-		}
-		s.appendNodeEvent(workspaceID, "error", "workspace.restart_failed", "Workspace restart failed", map[string]interface{}{
-			"error": err.Error(),
-		})
-		writeError(w, http.StatusInternalServerError, "workspace restart failed")
-		return
-	}
-
-	runtime.Status = "running"
-	runtime.UpdatedAt = nowUTC()
-	s.appendNodeEvent(workspaceID, "info", "workspace.restarted", "Workspace restarted", nil)
-	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "running"})
+	s.startWorkspaceProvision(
+		runtime,
+		"workspace.restart_failed",
+		"Workspace restart failed",
+		"workspace.restarted",
+		"Workspace restarted",
+		map[string]interface{}{},
+	)
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{"status": "creating"})
 }
 
 func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
