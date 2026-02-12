@@ -109,9 +109,10 @@ const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
 
 func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		WorkspaceID string `json:"workspaceId"`
-		Repository  string `json:"repository"`
-		Branch      string `json:"branch"`
+		WorkspaceID   string `json:"workspaceId"`
+		Repository    string `json:"repository"`
+		Branch        string `json:"branch"`
+		CallbackToken string `json:"callbackToken,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -133,7 +134,28 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		branch = "main"
 	}
 
-	runtime := s.upsertWorkspaceRuntime(body.WorkspaceID, strings.TrimSpace(body.Repository), branch, "running")
+	runtime := s.upsertWorkspaceRuntime(body.WorkspaceID, strings.TrimSpace(body.Repository), branch, "creating", strings.TrimSpace(body.CallbackToken))
+	s.appendNodeEvent(body.WorkspaceID, "info", "workspace.provisioning", "Workspace provisioning started", map[string]interface{}{
+		"workspaceId": body.WorkspaceID,
+		"repository":  body.Repository,
+		"branch":      branch,
+	})
+
+	if err := s.provisionWorkspaceRuntime(r.Context(), runtime); err != nil {
+		runtime.Status = "error"
+		runtime.UpdatedAt = nowUTC()
+		s.appendNodeEvent(body.WorkspaceID, "error", "workspace.provisioning_failed", "Workspace provisioning failed", map[string]interface{}{
+			"workspaceId": body.WorkspaceID,
+			"repository":  body.Repository,
+			"branch":      branch,
+			"error":       err.Error(),
+		})
+		writeError(w, http.StatusInternalServerError, "workspace provisioning failed")
+		return
+	}
+
+	runtime.Status = "running"
+	runtime.UpdatedAt = nowUTC()
 	s.appendNodeEvent(body.WorkspaceID, "info", "workspace.created", "Workspace runtime created", map[string]interface{}{
 		"workspaceId": body.WorkspaceID,
 		"repository":  body.Repository,
@@ -191,6 +213,20 @@ func (s *Server) handleRestartWorkspace(w http.ResponseWriter, r *http.Request) 
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
 	if !ok {
 		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+
+	runtime.Status = "creating"
+	runtime.UpdatedAt = nowUTC()
+	s.appendNodeEvent(workspaceID, "info", "workspace.restarting", "Workspace restart started", nil)
+
+	if err := s.provisionWorkspaceRuntime(r.Context(), runtime); err != nil {
+		runtime.Status = "error"
+		runtime.UpdatedAt = nowUTC()
+		s.appendNodeEvent(workspaceID, "error", "workspace.restart_failed", "Workspace restart failed", map[string]interface{}{
+			"error": err.Error(),
+		})
+		writeError(w, http.StatusInternalServerError, "workspace restart failed")
 		return
 	}
 

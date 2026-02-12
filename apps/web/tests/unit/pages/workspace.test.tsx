@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   createAgentSession: vi.fn(),
   stopAgentSession: vi.fn(),
   updateWorkspace: vi.fn(),
+  listAgents: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
@@ -35,6 +36,7 @@ vi.mock('../../../src/lib/api', () => ({
   createAgentSession: mocks.createAgentSession,
   stopAgentSession: mocks.stopAgentSession,
   updateWorkspace: mocks.updateWorkspace,
+  listAgents: mocks.listAgents,
 }));
 
 vi.mock('@simple-agent-manager/terminal', () => ({
@@ -52,8 +54,12 @@ vi.mock('@simple-agent-manager/acp-client', () => ({
   AgentPanel: () => <div data-testid="agent-panel">agent-panel</div>,
 }));
 
-vi.mock('../../../src/components/UserMenu', () => ({ UserMenu: () => <div data-testid="user-menu" /> }));
-vi.mock('../../../src/components/AgentSelector', () => ({ AgentSelector: () => <div data-testid="agent-selector" /> }));
+vi.mock('../../../src/components/UserMenu', () => ({
+  UserMenu: () => <div data-testid="user-menu" />,
+}));
+vi.mock('../../../src/components/AgentSelector', () => ({
+  AgentSelector: () => <div data-testid="agent-selector" />,
+}));
 vi.mock('../../../src/components/AgentSessionList', () => ({
   AgentSessionList: ({
     sessions,
@@ -69,7 +75,9 @@ vi.mock('../../../src/components/AgentSessionList', () => ({
     onStop: (sessionId: string) => void;
   }) => (
     <div data-testid="agent-session-list">
-      <button onClick={onCreate} disabled={loading}>new-session</button>
+      <button onClick={onCreate} disabled={loading}>
+        new-session
+      </button>
       {sessions.map((session) => (
         <div key={session.id}>
           <span>{session.label || session.id}</span>
@@ -96,14 +104,16 @@ function renderWorkspace(initialEntry = '/workspaces/ws-123', includeProbe = fal
       <Routes>
         <Route
           path="/workspaces/:id"
-          element={includeProbe ? (
-            <>
+          element={
+            includeProbe ? (
+              <>
+                <Workspace />
+                <LocationProbe />
+              </>
+            ) : (
               <Workspace />
-              <LocationProbe />
-            </>
-          ) : (
-            <Workspace />
-          )}
+            )
+          }
         />
       </Routes>
     </MemoryRouter>
@@ -173,6 +183,18 @@ describe('Workspace page', () => {
       updatedAt: '2026-02-08T00:00:00.000Z',
       url: 'https://ws-ws-123.example.com',
     });
+    mocks.listAgents.mockResolvedValue({
+      agents: [
+        {
+          id: 'claude-code',
+          name: 'Claude Code',
+          description: 'Anthropic agent',
+          supportsAcp: true,
+          configured: true,
+          credentialHelpUrl: 'https://example.com',
+        },
+      ],
+    });
   });
 
   it('renders workspace detail with terminal and session sidebar', async () => {
@@ -228,7 +250,9 @@ describe('Workspace page', () => {
     renderWorkspace('/workspaces/ws-123');
 
     expect(await screen.findByText('Connection Failed')).toBeInTheDocument();
-    expect(screen.getByText('Unable to establish terminal connection right now. Please retry.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Unable to establish terminal connection right now. Please retry.')
+    ).toBeInTheDocument();
     expect(screen.queryByText('Workspace not found or has no VM IP')).not.toBeInTheDocument();
 
     const callsBeforeRetry = mocks.getTerminalToken.mock.calls.length;
@@ -274,7 +298,9 @@ describe('Workspace page', () => {
     fireEvent.click(screen.getByRole('button', { name: /rename/i }));
 
     await waitFor(() => {
-      expect(mocks.updateWorkspace).toHaveBeenCalledWith('ws-123', { displayName: 'Renamed Workspace' });
+      expect(mocks.updateWorkspace).toHaveBeenCalledWith('ws-123', {
+        displayName: 'Renamed Workspace',
+      });
     });
     expect(await screen.findByDisplayValue('Renamed Workspace')).toBeInTheDocument();
   });

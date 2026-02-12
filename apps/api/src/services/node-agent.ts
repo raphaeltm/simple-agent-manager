@@ -42,24 +42,30 @@ async function nodeAgentRequest<T>(
   }
 
   const startedAt = Date.now();
-  recordNodeRoutingMetric({
-    metric: 'node_agent_request',
-    nodeId,
-    workspaceId: options.workspaceId ?? null,
-  }, env);
+  recordNodeRoutingMetric(
+    {
+      metric: 'node_agent_request',
+      nodeId,
+      workspaceId: options.workspaceId ?? null,
+    },
+    env
+  );
 
   const response = await fetch(url, {
     ...options,
     headers,
   });
 
-  recordNodeRoutingMetric({
-    metric: 'node_agent_response',
-    nodeId,
-    workspaceId: options.workspaceId ?? null,
-    statusCode: response.status,
-    durationMs: Date.now() - startedAt,
-  }, env);
+  recordNodeRoutingMetric(
+    {
+      metric: 'node_agent_response',
+      nodeId,
+      workspaceId: options.workspaceId ?? null,
+      statusCode: response.status,
+      durationMs: Date.now() - startedAt,
+    },
+    env
+  );
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
@@ -81,6 +87,7 @@ export async function createWorkspaceOnNode(
     workspaceId: string;
     repository: string;
     branch: string;
+    callbackToken: string;
   }
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, '/workspaces', {

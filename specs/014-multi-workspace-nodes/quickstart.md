@@ -14,17 +14,20 @@ This quickstart describes the expected user flow once the Multi-Workspace Nodes 
 ## Create a Node
 
 UI flow:
+
 1. Go to Nodes.
 2. Click Create Node.
 3. Choose a name (and optionally size/location).
 4. Wait for the Node to become Ready.
 
 API flow (conceptual):
+
 - `POST https://api.${BASE_DOMAIN}/api/nodes`
 
 ## Create Multiple Workspaces on the Same Node
 
 UI flow:
+
 1. Open a Node.
 2. Click Create Workspace.
 3. Select the repository and branch.
@@ -32,22 +35,33 @@ UI flow:
 5. Repeat to create Workspace B on the same Node.
 
 Behavior:
+
 - If you try to create two Workspaces with the same name on a Node, the system auto-adjusts the second name to a unique display name and shows you the final name.
 - Workspaces are isolated: stopping or deleting Workspace A does not interrupt Workspace B.
 - You can rename a Workspace later; if the target name already exists on the same Node, the system auto-adjusts to a unique final name.
 
 API flow (conceptual):
+
 - `POST https://api.${BASE_DOMAIN}/api/workspaces` with `nodeId`
 
 ## Open a Workspace and Start an Agent Session
 
 UI flow:
+
 1. From the Control Plane, open a Workspace details page.
 2. Click Open Workspace (loads the Workspace UI via its `ws-{workspaceId}` address).
-3. Click New Agent Session.
-4. Attach to the running session (including after a browser refresh while the Workspace remains running).
+3. Use the top tab bar `+` menu:
+   - Select **New Terminal Session** for a terminal tab.
+   - Select **New Chat Session** (or a specific agent option when multiple agent keys are configured) for a chat tab.
+4. Attach to or switch between chat tabs (including after a browser refresh while the Workspace remains running).
+
+Agent selection behavior:
+
+- If exactly one configured agent key is available, creating a chat tab auto-selects that agent.
+- If multiple configured agent keys are available, the `+` menu shows agent-specific chat options so the user can choose before session start.
 
 Behavior:
+
 - Agent Sessions do not survive Workspace stop/restart.
 - Stopping/restarting a Workspace terminates all its Agent Sessions and they become non-attachable.
 - By default, only one interactive attachment is active per Agent Session; a second attach shows a clear "already attached" conflict unless the user explicitly chooses takeover.
@@ -56,6 +70,7 @@ Behavior:
 ## Run Services Without Port Conflicts
 
 Expected behavior:
+
 - Two Workspaces on the same Node can run the same service ports concurrently (for example, both can run a web server on the same internal port) without conflicts.
 - The system provides per-Workspace access so you can reach the correct Workspace's running services independently.
 
@@ -71,12 +86,14 @@ Expected behavior:
 ## Inspect Events and Logs
 
 Expected behavior:
+
 - You can view Node-level events/logs (for example, provisioning and Node Agent health events).
 - You can view Workspace-level events/logs (for example, creation, restart, and failure events).
 - Node health includes freshness/check-in information and a derived `healthy`/`stale`/`unhealthy` state so stale Nodes are visible in the Control Plane.
 - Staleness uses a configurable threshold (for example `NODE_HEARTBEAT_STALE_SECONDS`), not a hardcoded timeout.
 
 API flow (conceptual):
+
 - `GET https://api.${BASE_DOMAIN}/api/nodes/{nodeId}/events`
 - `GET https://api.${BASE_DOMAIN}/api/workspaces/{workspaceId}/events`
 

@@ -43,6 +43,14 @@ type bootstrapState struct {
 	GitUserEmail  string `json:"gitUserEmail,omitempty"`
 }
 
+// ProvisionState carries optional credential and git identity data used when
+// preparing a workspace environment outside the bootstrap-token flow.
+type ProvisionState struct {
+	GitHubToken  string
+	GitUserName  string
+	GitUserEmail string
+}
+
 // Run redeems bootstrap credentials (if configured), prepares the workspace, and signals ready.
 // The reporter is used to send structured boot log entries to the control plane for UI display.
 // It is safe to pass a nil reporter.
@@ -123,6 +131,41 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 		return err
 	}
 	reporter.Log("workspace_ready", "completed", "Workspace is ready")
+
+	return nil
+}
+
+// PrepareWorkspace provisions a workspace repository/devcontainer and configures
+// git credentials/identity using the provided state. This is used by node-mode
+// workspace creation where workspaces are prepared on demand rather than at VM boot.
+func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionState) error {
+	if cfg == nil {
+		return errors.New("config is required")
+	}
+
+	bootstrap := &bootstrapState{
+		WorkspaceID:   cfg.WorkspaceID,
+		CallbackToken: cfg.CallbackToken,
+		GitHubToken:   strings.TrimSpace(state.GitHubToken),
+		GitUserName:   strings.TrimSpace(state.GitUserName),
+		GitUserEmail:  strings.TrimSpace(state.GitUserEmail),
+	}
+
+	if err := ensureRepositoryReady(ctx, cfg, bootstrap); err != nil {
+		return err
+	}
+	if err := ensureDevcontainerReady(ctx, cfg); err != nil {
+		return err
+	}
+	if err := ensureWorkspaceWritable(ctx, cfg); err != nil {
+		return err
+	}
+	if err := ensureGitCredentialHelper(ctx, cfg); err != nil {
+		return err
+	}
+	if err := ensureGitIdentity(ctx, cfg, bootstrap); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -584,6 +627,11 @@ func renderGitCredentialHelperScript(cfg *config.Config) (string, error) {
 		return "", fmt.Errorf("invalid VM agent port: %d", cfg.Port)
 	}
 
+	query := ""
+	if workspaceID := strings.TrimSpace(cfg.WorkspaceID); workspaceID != "" {
+		query = "?workspaceId=" + url.QueryEscape(workspaceID)
+	}
+
 	return fmt.Sprintf(`#!/bin/sh
 set -eu
 
@@ -612,7 +660,7 @@ request_credentials() {
   target="$1"
   curl -fsS --max-time 5 \
     -H "Authorization: Bearer %s" \
-    "http://${target}:%d/git-credential"
+    "http://${target}:%d/git-credential%s"
 }
 
 gateway="$(resolve_gateway || true)"
@@ -624,7 +672,7 @@ for target in host.docker.internal "$gateway" 172.17.0.1; do
 done
 
 exit 0
-`, cfg.CallbackToken, cfg.Port), nil
+`, cfg.CallbackToken, cfg.Port, query), nil
 }
 
 func findDevcontainerID(ctx context.Context, cfg *config.Config) (string, error) {

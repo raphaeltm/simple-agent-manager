@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,13 +45,17 @@ type Server struct {
 }
 
 type WorkspaceRuntime struct {
-	ID         string
-	Repository string
-	Branch     string
-	Status     string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	PTY        *pty.Manager
+	ID                  string
+	Repository          string
+	Branch              string
+	Status              string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	WorkspaceDir        string
+	ContainerLabelValue string
+	ContainerWorkDir    string
+	CallbackToken       string
+	PTY                 *pty.Manager
 }
 
 type EventRecord struct {
@@ -158,11 +163,17 @@ func New(cfg *config.Config) (*Server, error) {
 
 	if cfg.WorkspaceID != "" {
 		s.workspaces[cfg.WorkspaceID] = &WorkspaceRuntime{
-			ID:        cfg.WorkspaceID,
-			Status:    "running",
-			CreatedAt: time.Now().UTC(),
-			UpdatedAt: time.Now().UTC(),
-			PTY:       ptyManager,
+			ID:                  cfg.WorkspaceID,
+			Repository:          strings.TrimSpace(cfg.Repository),
+			Branch:              strings.TrimSpace(cfg.Branch),
+			Status:              "running",
+			CreatedAt:           time.Now().UTC(),
+			UpdatedAt:           time.Now().UTC(),
+			WorkspaceDir:        strings.TrimSpace(cfg.WorkspaceDir),
+			ContainerLabelValue: strings.TrimSpace(cfg.ContainerLabelValue),
+			ContainerWorkDir:    strings.TrimSpace(cfg.ContainerWorkDir),
+			CallbackToken:       strings.TrimSpace(cfg.CallbackToken),
+			PTY:                 ptyManager,
 		}
 	}
 

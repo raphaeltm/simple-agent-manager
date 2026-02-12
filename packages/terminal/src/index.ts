@@ -39,6 +39,8 @@ export type {
   UseTabShortcutsReturn,
   TabShortcutActions,
   MultiTerminalError,
+  MultiTerminalHandle,
+  MultiTerminalSessionSnapshot,
   PersistedSession,
 } from './types/multi-terminal';
 

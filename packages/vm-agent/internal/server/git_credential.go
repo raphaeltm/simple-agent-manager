@@ -18,12 +18,18 @@ type gitTokenResponse struct {
 }
 
 func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
-	if !s.isValidCallbackAuth(r) {
+	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspaceId"))
+	if workspaceID == "" {
+		workspaceID = strings.TrimSpace(s.routedWorkspaceID(r))
+	}
+
+	if !s.isValidCallbackAuth(r, workspaceID) {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
-	gitToken, err := s.fetchGitToken(r.Context())
+	bearerToken := bearerTokenFromHeader(r.Header.Get("Authorization"))
+	gitToken, err := s.fetchGitTokenForWorkspace(r.Context(), workspaceID, bearerToken)
 	if err != nil {
 		log.Printf("Failed to fetch git token: %v", err)
 		writeError(w, http.StatusBadGateway, "failed to fetch git token")
@@ -36,17 +42,37 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) fetchGitToken(ctx context.Context) (string, error) {
+	return s.fetchGitTokenForWorkspace(ctx, s.config.WorkspaceID, s.config.CallbackToken)
+}
+
+func (s *Server) fetchGitTokenForWorkspace(ctx context.Context, workspaceID, callbackToken string) (string, error) {
+	targetWorkspaceID := strings.TrimSpace(workspaceID)
+	if targetWorkspaceID == "" {
+		targetWorkspaceID = strings.TrimSpace(s.config.WorkspaceID)
+	}
+	if targetWorkspaceID == "" {
+		return "", fmt.Errorf("workspace id is required for git-token request")
+	}
+
+	effectiveToken := strings.TrimSpace(callbackToken)
+	if effectiveToken == "" {
+		effectiveToken = s.callbackTokenForWorkspace(targetWorkspaceID)
+	}
+	if effectiveToken == "" {
+		return "", fmt.Errorf("callback token is required for git-token request")
+	}
+
 	endpoint := fmt.Sprintf(
 		"%s/api/workspaces/%s/git-token",
 		strings.TrimRight(s.config.ControlPlaneURL, "/"),
-		s.config.WorkspaceID,
+		targetWorkspaceID,
 	)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader([]byte("{}")))
 	if err != nil {
 		return "", fmt.Errorf("failed to build git-token request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+s.config.CallbackToken)
+	req.Header.Set("Authorization", "Bearer "+effectiveToken)
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -70,18 +96,37 @@ func (s *Server) fetchGitToken(ctx context.Context) (string, error) {
 	return payload.Token, nil
 }
 
-func (s *Server) isValidCallbackAuth(r *http.Request) bool {
-	authHeader := r.Header.Get("Authorization")
+func bearerTokenFromHeader(authHeader string) string {
 	if !strings.HasPrefix(authHeader, "Bearer ") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+}
+
+func (s *Server) isValidCallbackAuth(r *http.Request, workspaceID string) bool {
+	given := bearerTokenFromHeader(r.Header.Get("Authorization"))
+	if given == "" {
 		return false
 	}
-	given := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
-	expected := s.config.CallbackToken
-	if given == "" || expected == "" {
-		return false
+
+	candidates := []string{strings.TrimSpace(s.config.CallbackToken)}
+	if workspaceID != "" {
+		if workspaceToken := strings.TrimSpace(s.callbackTokenForWorkspace(workspaceID)); workspaceToken != "" {
+			candidates = append(candidates, workspaceToken)
+		}
 	}
-	if len(given) != len(expected) {
-		return false
+
+	for _, expected := range candidates {
+		if expected == "" {
+			continue
+		}
+		if len(given) != len(expected) {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(given), []byte(expected)) == 1 {
+			return true
+		}
 	}
-	return subtle.ConstantTimeCompare([]byte(given), []byte(expected)) == 1
+
+	return false
 }
