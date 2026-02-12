@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { StatusBadge } from './StatusBadge';
 import { Card } from '@simple-agent-manager/ui';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 interface WorkspaceCardProps {
   workspace: WorkspaceResponse;
@@ -26,6 +27,7 @@ const actionButtonStyle: React.CSSProperties = {
  */
 export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: WorkspaceCardProps) {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
 
   const handleOpen = () => {
     // Open the control plane workspace page (not the ws-* subdomain directly).
@@ -46,6 +48,15 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
     // Pop-up blocker fallback
     navigate(path);
   };
+
+  const buttonStyle = {
+    ...actionButtonStyle,
+    minHeight: isMobile ? '56px' : 'auto',
+    minWidth: isMobile ? '120px' : 'auto',
+    fontSize: isMobile ? '0.875rem' : actionButtonStyle.fontSize,
+    padding: isMobile ? '0 16px' : actionButtonStyle.padding,
+    flex: isMobile ? '1 1 0%' : '0 0 auto',
+  } satisfies React.CSSProperties;
 
   return (
     <Card style={{ padding: 'var(--sam-space-4)', transition: 'border-color 0.15s' }}>
@@ -106,8 +117,10 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
       <div style={{
         marginTop: 'var(--sam-space-4)',
         display: 'flex',
-        alignItems: 'center',
+        flexDirection: isMobile ? 'column' : 'row',
+        alignItems: isMobile ? 'stretch' : 'center',
         justifyContent: 'space-between',
+        gap: isMobile ? 'var(--sam-space-3)' : 'var(--sam-space-2)',
       }}>
         <div style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', opacity: 0.7 }}>
           {workspace.lastActivityAt
@@ -115,12 +128,12 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
             : `Created: ${new Date(workspace.createdAt).toLocaleString()}`}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', width: isMobile ? '100%' : 'auto' }}>
           {workspace.status === 'running' && (
             <>
               <button
                 onClick={handleOpen}
-                style={{ ...actionButtonStyle, color: 'var(--sam-color-accent-primary)' }}
+                style={{ ...buttonStyle, color: 'var(--sam-color-accent-primary)' }}
                 onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(22, 163, 74, 0.1)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
               >
@@ -129,7 +142,7 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
               {onStop && (
                 <button
                   onClick={() => onStop(workspace.id)}
-                  style={{ ...actionButtonStyle, color: 'var(--sam-color-warning)' }}
+                  style={{ ...buttonStyle, color: 'var(--sam-color-warning)' }}
                   onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(245, 158, 11, 0.1)'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
                 >
@@ -143,7 +156,7 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
               {onRestart && (
                 <button
                   onClick={() => onRestart(workspace.id)}
-                  style={{ ...actionButtonStyle, color: 'var(--sam-color-success)' }}
+                  style={{ ...buttonStyle, color: 'var(--sam-color-success)' }}
                   onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.1)'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
                 >
@@ -153,7 +166,7 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
               {onDelete && (
                 <button
                   onClick={() => onDelete(workspace.id)}
-                  style={{ ...actionButtonStyle, color: 'var(--sam-color-danger)' }}
+                  style={{ ...buttonStyle, color: 'var(--sam-color-danger)' }}
                   onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.1)'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
                 >
@@ -165,7 +178,7 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
           {workspace.status === 'error' && onDelete && (
             <button
               onClick={() => onDelete(workspace.id)}
-              style={{ ...actionButtonStyle, color: 'var(--sam-color-danger)' }}
+              style={{ ...buttonStyle, color: 'var(--sam-color-danger)' }}
               onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.1)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
             >
