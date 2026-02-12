@@ -108,6 +108,7 @@ Build order matters: shared → providers → api/web
 3. Use the test credentials stored at `/workspaces/.tmp/secure/demo-credentials.md` to authenticate. If the file is missing, ask the human for credentials and write them to that path before testing.
 4. If the feature cannot be tested via Playwright (e.g., requires external service interaction), document why and what was verified manually.
 5. Report results to the user — do not assume deployment success just because CI passed.
+6. During development Playwright runs, store screenshots in `.codex/tmp/playwright-screenshots/` (gitignored). Do not write screenshots to tracked directories.
 
 ### Documentation & File Naming
 
@@ -265,6 +266,8 @@ export const WorkspaceCard: FC<Props> = ({ workspace }) => {
 ## Testing
 
 **Test credentials** for the live app (`app.simple-agent-manager.org`) are stored at `/workspaces/.tmp/secure/demo-credentials.md` (outside this git repository). This path is intentionally outside the repo so credentials cannot be committed. If the file is missing or outdated, ask the human for the latest credentials, update that file, and then continue Playwright testing.
+
+**Playwright screenshots (development):** Save all screenshots to `.codex/tmp/playwright-screenshots/` only. This path is gitignored via `.codex/tmp/`.
 
 ## Troubleshooting
 

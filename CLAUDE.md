@@ -60,6 +60,10 @@ Running `pnpm dev` starts local emulators but has significant limitations:
 
 **For any meaningful testing, deploy to staging.** See `docs/guides/local-development.md`.
 
+### Playwright Artifacts (Development)
+
+Store all Playwright screenshots from development and verification runs in `.codex/tmp/playwright-screenshots/` (gitignored). Do not save screenshots in tracked directories.
+
 ## Common Commands
 
 ```bash
