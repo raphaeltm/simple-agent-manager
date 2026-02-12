@@ -161,12 +161,57 @@ func (s *Server) newPTYManagerForWorkspace(workspaceID, workspaceDir, containerW
 	}
 
 	manager := pty.NewManager(config)
-	// Preserve compatibility with single-workspace mode.
-	if s.ptyManager != nil && ((s.config.WorkspaceID != "" && workspaceID == s.config.WorkspaceID) || (!s.config.ContainerMode && len(s.workspaces) == 0)) {
-		manager = s.ptyManager
+	if s.shouldReusePrimaryPTYManager(workspaceID, workspaceDir, containerWorkDir, containerLabelValue) {
+		return s.ptyManager
 	}
 
 	return manager
+}
+
+func (s *Server) shouldReusePrimaryPTYManager(workspaceID, workspaceDir, containerWorkDir, containerLabelValue string) bool {
+	if s == nil || s.ptyManager == nil {
+		return false
+	}
+
+	// Preserve compatibility with legacy single-workspace host mode.
+	if !s.config.ContainerMode && len(s.workspaces) == 0 {
+		return true
+	}
+
+	configuredWorkspaceID := strings.TrimSpace(s.config.WorkspaceID)
+	if configuredWorkspaceID == "" || strings.TrimSpace(workspaceID) != configuredWorkspaceID {
+		return false
+	}
+
+	expectedWorkspaceDir := strings.TrimSpace(s.workspaceDirForRuntime(configuredWorkspaceID))
+	if expectedWorkspaceDir == "" {
+		expectedWorkspaceDir = "/workspace"
+	}
+	if strings.TrimSpace(workspaceDir) != expectedWorkspaceDir {
+		return false
+	}
+
+	if !s.config.ContainerMode {
+		return true
+	}
+
+	expectedContainerLabel := strings.TrimSpace(s.config.ContainerLabelValue)
+	if expectedContainerLabel == "" {
+		expectedContainerLabel = expectedWorkspaceDir
+	}
+	if strings.TrimSpace(containerLabelValue) != expectedContainerLabel {
+		return false
+	}
+
+	expectedContainerWorkDir := strings.TrimSpace(s.config.ContainerWorkDir)
+	if expectedContainerWorkDir == "" {
+		expectedContainerWorkDir = deriveContainerWorkDir(expectedWorkspaceDir)
+	}
+	if strings.TrimSpace(containerWorkDir) != expectedContainerWorkDir {
+		return false
+	}
+
+	return true
 }
 
 func (s *Server) rebuildWorkspacePTYManager(runtime *WorkspaceRuntime) {

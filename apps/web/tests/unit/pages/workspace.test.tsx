@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   stopAgentSession: vi.fn(),
   updateWorkspace: vi.fn(),
   listAgents: vi.fn(),
+  useAcpSession: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
@@ -46,11 +47,7 @@ vi.mock('@simple-agent-manager/terminal', () => ({
 
 vi.mock('@simple-agent-manager/acp-client', () => ({
   useAcpMessages: () => ({ processMessage: vi.fn() }),
-  useAcpSession: () => ({
-    state: 'no_session',
-    agentType: null,
-    switchAgent: vi.fn(),
-  }),
+  useAcpSession: mocks.useAcpSession,
   AgentPanel: () => <div data-testid="agent-panel">agent-panel</div>,
 }));
 
@@ -125,6 +122,15 @@ function renderWorkspace(initialEntry = '/workspaces/ws-123', includeProbe = fal
 describe('Workspace page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+
+    mocks.useAcpSession.mockReturnValue({
+      state: 'no_session',
+      agentType: null,
+      switchAgent: vi.fn(),
+      connected: true,
+      error: null,
+      sendMessage: vi.fn(),
+    });
 
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
@@ -238,6 +244,23 @@ describe('Workspace page', () => {
       expect(probe.textContent).toContain('/workspaces/ws-123?');
       expect(probe.textContent).toContain('view=conversation');
       expect(probe.textContent).toContain('sessionId=sess-1');
+    });
+  });
+
+  it('adds takeover flag to ACP websocket URL when a sessionId is selected', async () => {
+    renderWorkspace('/workspaces/ws-123?view=conversation&sessionId=sess-1');
+
+    await waitFor(() => {
+      expect(mocks.useAcpSession).toHaveBeenCalled();
+    });
+
+    await waitFor(() => {
+      const wsUrls = mocks.useAcpSession.mock.calls
+        .map(([options]) => options?.wsUrl)
+        .filter((value): value is string => typeof value === 'string');
+      expect(
+        wsUrls.some((url) => url.includes('sessionId=sess-1') && url.includes('takeover=1'))
+      ).toBe(true);
     });
   });
 
