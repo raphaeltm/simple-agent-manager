@@ -22,10 +22,9 @@ import (
 const DefaultAdditionalFeatures = `{"ghcr.io/devcontainers/features/node:1":{"version":"22"}}`
 
 // DefaultDevcontainerImage is the default container image used when a repo has no devcontainer config.
-// Uses Microsoft's universal image which includes Python, Node, Go, Java, C++, Ruby, .NET, PHP.
-// This matches what GitHub Codespaces uses as its default.
+// Uses a lighter base image so fallback workspaces bootstrap quickly on modest nodes.
 // Override via DEFAULT_DEVCONTAINER_IMAGE env var.
-const DefaultDevcontainerImage = "mcr.microsoft.com/devcontainers/universal:2"
+const DefaultDevcontainerImage = "mcr.microsoft.com/devcontainers/base:ubuntu"
 
 // DefaultDevcontainerConfigPath is where the VM agent writes the default devcontainer.json
 // when a repo has no devcontainer config. Override via DEFAULT_DEVCONTAINER_CONFIG_PATH env var.

@@ -364,7 +364,7 @@ func TestWriteDefaultDevcontainerConfig(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "sam", "default-devcontainer.json")
 
 	cfg := &config.Config{
-		DefaultDevcontainerImage:      "mcr.microsoft.com/devcontainers/universal:2",
+		DefaultDevcontainerImage:      "mcr.microsoft.com/devcontainers/base:ubuntu",
 		DefaultDevcontainerConfigPath: configPath,
 	}
 
@@ -383,7 +383,7 @@ func TestWriteDefaultDevcontainerConfig(t *testing.T) {
 
 	content := string(data)
 	required := []string{
-		`"mcr.microsoft.com/devcontainers/universal:2"`,
+		`"mcr.microsoft.com/devcontainers/base:ubuntu"`,
 		`"ghcr.io/devcontainers/features/git:1"`,
 		`"ghcr.io/devcontainers/features/github-cli:1"`,
 		`"remoteUser": "vscode"`,

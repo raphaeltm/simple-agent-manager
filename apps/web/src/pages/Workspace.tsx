@@ -761,6 +761,203 @@ export function Workspace() {
     </div>
   );
 
+  const workspaceTabStrip = isRunning ? (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'stretch',
+        backgroundColor: '#16171e',
+        borderBottom: '1px solid #2a2d3a',
+        height: 38,
+        flexShrink: 0,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'stretch',
+          overflowX: 'auto',
+          flex: 1,
+          scrollbarWidth: 'none',
+          msOverflowStyle: 'none',
+        }}
+        role="tablist"
+        aria-label="Workspace sessions"
+      >
+        {workspaceTabs.map((tab) => {
+          const active = activeTabId === tab.id;
+          const statusColor = workspaceTabStatusColor(tab);
+
+          return (
+            <button
+              key={tab.id}
+              onClick={() => handleSelectWorkspaceTab(tab)}
+              role="tab"
+              aria-selected={active}
+              aria-label={`${tab.kind === 'terminal' ? 'Terminal' : 'Chat'} tab: ${tab.title}`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 7,
+                padding: '0 12px',
+                minWidth: 100,
+                maxWidth: 180,
+                cursor: 'pointer',
+                fontSize: 13,
+                border: 'none',
+                borderRight: '1px solid #2a2d3a',
+                position: 'relative',
+                flexShrink: 0,
+                whiteSpace: 'nowrap',
+                backgroundColor: active ? '#1a1b26' : 'transparent',
+                color: active ? '#a9b1d6' : '#787c99',
+              }}
+              title={tab.title}
+            >
+              {active && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: 2,
+                    backgroundColor: '#7aa2f7',
+                  }}
+                />
+              )}
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: 7,
+                  height: 7,
+                  borderRadius: '50%',
+                  backgroundColor: statusColor,
+                  flexShrink: 0,
+                }}
+              />
+              <span
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {tab.title}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div ref={createMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
+        <button
+          onClick={() => setCreateMenuOpen((prev) => !prev)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 36,
+            height: '100%',
+            background: 'none',
+            border: 'none',
+            borderLeft: '1px solid #2a2d3a',
+            color: '#787c99',
+            cursor: 'pointer',
+            fontSize: 18,
+            fontWeight: 300,
+            padding: 0,
+          }}
+          aria-label="Create terminal or chat session"
+          aria-expanded={createMenuOpen}
+        >
+          +
+        </button>
+
+        {createMenuOpen && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 'calc(100% + 6px)',
+              right: 0,
+              minWidth: 220,
+              borderRadius: 'var(--sam-radius-md)',
+              border: '1px solid var(--sam-color-border-default)',
+              background: 'var(--sam-color-bg-surface)',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.35)',
+              zIndex: 30,
+              overflow: 'hidden',
+            }}
+          >
+            <button
+              onClick={handleCreateTerminalTab}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--sam-color-fg-primary)',
+                padding: '10px 12px',
+                fontSize: '0.8125rem',
+                cursor: 'pointer',
+              }}
+            >
+              New Terminal Session
+            </button>
+
+            {configuredAgents.length <= 1 ? (
+              <button
+                onClick={() => {
+                  void handleCreateSession(defaultAgentId ?? undefined);
+                }}
+                disabled={configuredAgents.length === 0}
+                style={{
+                  width: '100%',
+                  textAlign: 'left',
+                  border: 'none',
+                  background: 'transparent',
+                  color:
+                    configuredAgents.length === 0
+                      ? 'var(--sam-color-fg-muted)'
+                      : 'var(--sam-color-fg-primary)',
+                  padding: '10px 12px',
+                  fontSize: '0.8125rem',
+                  cursor: configuredAgents.length === 0 ? 'not-allowed' : 'pointer',
+                  opacity: configuredAgents.length === 0 ? 0.65 : 1,
+                }}
+              >
+                {defaultAgentName ? `New ${defaultAgentName} Chat` : 'New Chat Session'}
+              </button>
+            ) : (
+              configuredAgents.map((agent) => (
+                <button
+                  key={agent.id}
+                  onClick={() => {
+                    void handleCreateSession(agent.id);
+                  }}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--sam-color-fg-primary)',
+                    padding: '10px 12px',
+                    fontSize: '0.8125rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  New {agent.name}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  ) : null;
+
   // ══════════════════════════════════════════════════════════════
   // MOBILE LAYOUT
   // ══════════════════════════════════════════════════════════════
@@ -1070,206 +1267,12 @@ export function Workspace() {
         </div>
       )}
 
-      {isRunning && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'stretch',
-            backgroundColor: '#16171e',
-            borderBottom: '1px solid #2a2d3a',
-            height: 38,
-            flexShrink: 0,
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'stretch',
-              overflowX: 'auto',
-              flex: 1,
-              scrollbarWidth: 'none',
-              msOverflowStyle: 'none',
-            }}
-            role="tablist"
-            aria-label="Workspace sessions"
-          >
-            {workspaceTabs.map((tab) => {
-              const active = activeTabId === tab.id;
-              const statusColor = workspaceTabStatusColor(tab);
-
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => handleSelectWorkspaceTab(tab)}
-                  role="tab"
-                  aria-selected={active}
-                  aria-label={`${tab.kind === 'terminal' ? 'Terminal' : 'Chat'} tab: ${tab.title}`}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 7,
-                    padding: '0 12px',
-                    minWidth: 100,
-                    maxWidth: 180,
-                    cursor: 'pointer',
-                    fontSize: 13,
-                    border: 'none',
-                    borderRight: '1px solid #2a2d3a',
-                    position: 'relative',
-                    flexShrink: 0,
-                    whiteSpace: 'nowrap',
-                    backgroundColor: active ? '#1a1b26' : 'transparent',
-                    color: active ? '#a9b1d6' : '#787c99',
-                  }}
-                  title={tab.title}
-                >
-                  {active && (
-                    <span
-                      style={{
-                        position: 'absolute',
-                        bottom: 0,
-                        left: 0,
-                        right: 0,
-                        height: 2,
-                        backgroundColor: '#7aa2f7',
-                      }}
-                    />
-                  )}
-                  <span
-                    style={{
-                      display: 'inline-block',
-                      width: 7,
-                      height: 7,
-                      borderRadius: '50%',
-                      backgroundColor: statusColor,
-                      flexShrink: 0,
-                    }}
-                  />
-                  <span
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {tab.title}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div ref={createMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
-            <button
-              onClick={() => setCreateMenuOpen((prev) => !prev)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 36,
-                height: '100%',
-                background: 'none',
-                border: 'none',
-                borderLeft: '1px solid #2a2d3a',
-                color: '#787c99',
-                cursor: 'pointer',
-                fontSize: 18,
-                fontWeight: 300,
-                padding: 0,
-              }}
-              aria-label="Create terminal or chat session"
-              aria-expanded={createMenuOpen}
-            >
-              +
-            </button>
-
-            {createMenuOpen && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 'calc(100% + 6px)',
-                  right: 0,
-                  minWidth: 220,
-                  borderRadius: 'var(--sam-radius-md)',
-                  border: '1px solid var(--sam-color-border-default)',
-                  background: 'var(--sam-color-bg-surface)',
-                  boxShadow: '0 10px 30px rgba(0, 0, 0, 0.35)',
-                  zIndex: 30,
-                  overflow: 'hidden',
-                }}
-              >
-                <button
-                  onClick={handleCreateTerminalTab}
-                  style={{
-                    width: '100%',
-                    textAlign: 'left',
-                    border: 'none',
-                    background: 'transparent',
-                    color: 'var(--sam-color-fg-primary)',
-                    padding: '10px 12px',
-                    fontSize: '0.8125rem',
-                    cursor: 'pointer',
-                  }}
-                >
-                  New Terminal Session
-                </button>
-
-                {configuredAgents.length <= 1 ? (
-                  <button
-                    onClick={() => {
-                      void handleCreateSession(defaultAgentId ?? undefined);
-                    }}
-                    disabled={configuredAgents.length === 0}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      border: 'none',
-                      background: 'transparent',
-                      color:
-                        configuredAgents.length === 0
-                          ? 'var(--sam-color-fg-muted)'
-                          : 'var(--sam-color-fg-primary)',
-                      padding: '10px 12px',
-                      fontSize: '0.8125rem',
-                      cursor: configuredAgents.length === 0 ? 'not-allowed' : 'pointer',
-                      opacity: configuredAgents.length === 0 ? 0.65 : 1,
-                    }}
-                  >
-                    {defaultAgentName ? `New ${defaultAgentName} Chat` : 'New Chat Session'}
-                  </button>
-                ) : (
-                  configuredAgents.map((agent) => (
-                    <button
-                      key={agent.id}
-                      onClick={() => {
-                        void handleCreateSession(agent.id);
-                      }}
-                      style={{
-                        width: '100%',
-                        textAlign: 'left',
-                        border: 'none',
-                        background: 'transparent',
-                        color: 'var(--sam-color-fg-primary)',
-                        padding: '10px 12px',
-                        fontSize: '0.8125rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      New {agent.name}
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* ── Content area ── */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        <div style={{ flex: 1, minWidth: 0 }}>{contentArea}</div>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          {workspaceTabStrip}
+          <div style={{ flex: 1, minHeight: 0 }}>{contentArea}</div>
+        </div>
 
         <aside
           style={{
