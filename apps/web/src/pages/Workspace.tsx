@@ -273,8 +273,9 @@ export function Workspace() {
         const sessionQuery = sessionIdParam
           ? `&sessionId=${encodeURIComponent(sessionIdParam)}`
           : '';
+        const takeoverQuery = '&takeover=1';
         setAcpWsUrl(
-          `${wsProtocol}//${url.host}/agent/ws?token=${encodeURIComponent(token)}${sessionQuery}`
+          `${wsProtocol}//${url.host}/agent/ws?token=${encodeURIComponent(token)}${sessionQuery}${takeoverQuery}`
         );
       } catch {
         // ACP is optional
