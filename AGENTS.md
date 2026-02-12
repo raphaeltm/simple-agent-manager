@@ -696,6 +696,7 @@ You can also trigger deployment manually via GitHub Actions → Deploy → Run w
 - `POST /api/nodes/:id/heartbeat` - Node Agent heartbeat callback
 - `POST /api/workspaces/:id/ready` - Workspace ready callback
 - `POST /api/workspaces/:id/heartbeat` - Workspace activity heartbeat callback
+- `GET /api/workspaces/:id/runtime` - Workspace runtime metadata callback (repository/branch for recovery)
 - `POST /api/workspaces/:id/boot-log` - Workspace boot progress log callback
 - `POST /api/bootstrap/:token` - Redeem one-time bootstrap token (credentials + git identity)
 - `POST /api/agent/ready` - VM agent ready callback
@@ -777,6 +778,7 @@ See `apps/api/.env.example`:
 
 ## Recent Changes
 - 014-multi-workspace-nodes: Added VM Agent workspace recovery on terminal/ACP attach (rebuilds missing devcontainers and recreates missing in-memory agent sessions by explicit `sessionId`), and ACP client now surfaces gateway error payloads instead of stalling in a waiting state
+- 014-multi-workspace-nodes: Added callback-auth runtime metadata endpoint (`GET /api/workspaces/:id/runtime`) and legacy workspace layout recovery so node restarts can rehydrate terminal/ACP context before attach
 - 014-multi-workspace-nodes: Added first-class Nodes with multi-workspace hosting, node/workspace event streams, agent sessions, node-scoped routing/auth, and explicit lifecycle control (no idle-triggered shutdown)
 - 014-auth-profile-sync: Resolve and persist the GitHub account primary email at login (via `/user/emails`) and propagate git user name/email into workspace bootstrap so VM agent configures commit identity
 - 004-mvp-hardening: Secure bootstrap tokens, workspace ownership validation, provisioning timeouts, shared terminal package, WebSocket reconnection, idle deadline tracking

@@ -70,14 +70,16 @@ vi.mock('../../../src/components/AgentSessionList', () => ({
   }: {
     sessions: Array<{ id: string; label?: string | null }>;
     loading?: boolean;
-    onCreate: () => void;
+    onCreate?: () => void;
     onAttach: (sessionId: string) => void;
     onStop: (sessionId: string) => void;
   }) => (
     <div data-testid="agent-session-list">
-      <button onClick={onCreate} disabled={loading}>
-        new-session
-      </button>
+      {onCreate && (
+        <button onClick={onCreate} disabled={loading}>
+          new-session
+        </button>
+      )}
       {sessions.map((session) => (
         <div key={session.id}>
           <span>{session.label || session.id}</span>
@@ -303,5 +305,82 @@ describe('Workspace page', () => {
       });
     });
     expect(await screen.findByDisplayValue('Renamed Workspace')).toBeInTheDocument();
+  });
+
+  it('uses the only configured agent when creating a chat session from the + menu', async () => {
+    mocks.createAgentSession.mockResolvedValue({
+      id: 'sess-new',
+      workspaceId: 'ws-123',
+      status: 'running',
+      label: 'Claude Code Chat',
+      createdAt: '2026-02-08T00:12:00.000Z',
+      updatedAt: '2026-02-08T00:12:00.000Z',
+      stoppedAt: null,
+      errorMessage: null,
+    });
+
+    renderWorkspace('/workspaces/ws-123');
+    await screen.findByText('Workspace A');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create terminal or chat session' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Claude Code Chat' }));
+
+    await waitFor(() => {
+      expect(mocks.createAgentSession).toHaveBeenCalledWith(
+        'ws-123',
+        { label: 'Claude Code Chat' },
+        expect.any(String)
+      );
+    });
+  });
+
+  it('shows agent-specific chat options when multiple configured agents are available', async () => {
+    mocks.listAgents.mockResolvedValue({
+      agents: [
+        {
+          id: 'claude-code',
+          name: 'Claude Code',
+          description: 'Anthropic agent',
+          supportsAcp: true,
+          configured: true,
+          credentialHelpUrl: 'https://example.com',
+        },
+        {
+          id: 'openai-codex',
+          name: 'Codex',
+          description: 'OpenAI agent',
+          supportsAcp: true,
+          configured: true,
+          credentialHelpUrl: 'https://example.com',
+        },
+      ],
+    });
+    mocks.createAgentSession.mockResolvedValue({
+      id: 'sess-codex',
+      workspaceId: 'ws-123',
+      status: 'running',
+      label: 'Codex Chat',
+      createdAt: '2026-02-08T00:12:00.000Z',
+      updatedAt: '2026-02-08T00:12:00.000Z',
+      stoppedAt: null,
+      errorMessage: null,
+    });
+
+    renderWorkspace('/workspaces/ws-123');
+    await screen.findByText('Workspace A');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create terminal or chat session' }));
+
+    expect(screen.getByRole('button', { name: 'New Terminal Session' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New Claude Code' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'New Codex' }));
+
+    await waitFor(() => {
+      expect(mocks.createAgentSession).toHaveBeenCalledWith(
+        'ws-123',
+        { label: 'Codex Chat' },
+        expect.any(String)
+      );
+    });
   });
 });

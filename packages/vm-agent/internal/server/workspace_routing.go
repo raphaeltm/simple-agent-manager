@@ -124,6 +124,26 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 	containerLabelValue := workspaceDir
 	containerWorkDir := deriveContainerWorkDir(workspaceDir)
 
+	manager := s.newPTYManagerForWorkspace(workspaceID, workspaceDir, containerWorkDir, containerLabelValue)
+
+	runtime = &WorkspaceRuntime{
+		ID:                  workspaceID,
+		Repository:          repository,
+		Branch:              branch,
+		Status:              status,
+		CreatedAt:           time.Now().UTC(),
+		UpdatedAt:           time.Now().UTC(),
+		WorkspaceDir:        workspaceDir,
+		ContainerLabelValue: containerLabelValue,
+		ContainerWorkDir:    containerWorkDir,
+		CallbackToken:       strings.TrimSpace(callbackToken),
+		PTY:                 manager,
+	}
+	s.workspaces[workspaceID] = runtime
+	return runtime
+}
+
+func (s *Server) newPTYManagerForWorkspace(workspaceID, workspaceDir, containerWorkDir, containerLabelValue string) *pty.Manager {
 	workDir := workspaceDir
 	if s.config.ContainerMode {
 		workDir = containerWorkDir
@@ -146,21 +166,22 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		manager = s.ptyManager
 	}
 
-	runtime = &WorkspaceRuntime{
-		ID:                  workspaceID,
-		Repository:          repository,
-		Branch:              branch,
-		Status:              status,
-		CreatedAt:           time.Now().UTC(),
-		UpdatedAt:           time.Now().UTC(),
-		WorkspaceDir:        workspaceDir,
-		ContainerLabelValue: containerLabelValue,
-		ContainerWorkDir:    containerWorkDir,
-		CallbackToken:       strings.TrimSpace(callbackToken),
-		PTY:                 manager,
+	return manager
+}
+
+func (s *Server) rebuildWorkspacePTYManager(runtime *WorkspaceRuntime) {
+	if runtime == nil {
+		return
 	}
-	s.workspaces[workspaceID] = runtime
-	return runtime
+	if runtime.PTY != nil && runtime.PTY.SessionCount() > 0 {
+		return
+	}
+	runtime.PTY = s.newPTYManagerForWorkspace(
+		runtime.ID,
+		strings.TrimSpace(runtime.WorkspaceDir),
+		strings.TrimSpace(runtime.ContainerWorkDir),
+		strings.TrimSpace(runtime.ContainerLabelValue),
+	)
 }
 
 func (s *Server) removeWorkspaceRuntime(workspaceID string) {

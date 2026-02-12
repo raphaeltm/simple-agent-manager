@@ -502,6 +502,7 @@ export function Workspace() {
   };
 
   const defaultAgentId = configuredAgents.length === 1 ? configuredAgents[0]!.id : null;
+  const defaultAgentName = defaultAgentId ? agentNameById.get(defaultAgentId) ?? null : null;
 
   const visibleTerminalTabs = useMemo<MultiTerminalSessionSnapshot[]>(() => {
     if (terminalTabs.length > 0) {
@@ -1080,7 +1081,7 @@ export function Workspace() {
                         opacity: configuredAgents.length === 0 ? 0.65 : 1,
                       }}
                     >
-                      New Chat Session
+                      {defaultAgentName ? `New ${defaultAgentName} Chat` : 'New Chat Session'}
                     </button>
                   ) : (
                     configuredAgents.map((agent) => (
@@ -1100,7 +1101,7 @@ export function Workspace() {
                           cursor: 'pointer',
                         }}
                       >
-                        New {agent.name} Chat
+                        New {agent.name}
                       </button>
                     ))
                   )}
@@ -1253,13 +1254,6 @@ export function Workspace() {
           <AgentSessionList
             sessions={agentSessions}
             loading={sessionsLoading}
-            onCreate={() => {
-              if (configuredAgents.length > 1) {
-                setCreateMenuOpen(true);
-                return;
-              }
-              void handleCreateSession(defaultAgentId ?? undefined);
-            }}
             onAttach={handleAttachSession}
             onStop={handleStopSession}
           />

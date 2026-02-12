@@ -2,14 +2,26 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	neturl "net/url"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/workspace/vm-agent/internal/bootstrap"
 )
 
 var prepareWorkspaceForRuntime = bootstrap.PrepareWorkspace
+
+type workspaceRuntimeMetadataResponse struct {
+	WorkspaceID string `json:"workspaceId"`
+	Repository  string `json:"repository"`
+	Branch      string `json:"branch"`
+}
 
 func (s *Server) callbackTokenForWorkspace(workspaceID string) string {
 	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
@@ -75,6 +87,14 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 	}
 
 	callbackToken := s.callbackTokenForWorkspace(runtime.ID)
+	recoveryCtx := ctx
+	cancel := func() {}
+	if s.config.BootstrapTimeout > 0 {
+		recoveryCtx, cancel = context.WithTimeout(ctx, s.config.BootstrapTimeout)
+	}
+	defer cancel()
+
+	s.hydrateWorkspaceRuntimeForRecovery(recoveryCtx, runtime, callbackToken)
 
 	cfg := *s.config
 	cfg.WorkspaceID = runtime.ID
@@ -87,7 +107,7 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 
 	state := bootstrap.ProvisionState{}
 	if cfg.Repository != "" && callbackToken != "" {
-		gitToken, err := s.fetchGitTokenForWorkspace(ctx, runtime.ID, callbackToken)
+		gitToken, err := s.fetchGitTokenForWorkspace(recoveryCtx, runtime.ID, callbackToken)
 		if err != nil {
 			log.Printf("Workspace %s: recovery proceeding without git token: %v", runtime.ID, err)
 		} else {
@@ -95,5 +115,180 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 		}
 	}
 
-	return prepareWorkspaceForRuntime(ctx, &cfg, state)
+	return prepareWorkspaceForRuntime(recoveryCtx, &cfg, state)
+}
+
+func (s *Server) hydrateWorkspaceRuntimeForRecovery(
+	ctx context.Context,
+	runtime *WorkspaceRuntime,
+	callbackToken string,
+) {
+	if runtime == nil {
+		return
+	}
+
+	updated := false
+	if strings.TrimSpace(runtime.Repository) == "" || strings.TrimSpace(runtime.Branch) == "" {
+		metadata, err := s.fetchWorkspaceRuntimeMetadata(ctx, runtime.ID, callbackToken)
+		if err != nil {
+			log.Printf("Workspace %s: unable to hydrate runtime metadata from control plane: %v", runtime.ID, err)
+		} else if metadata != nil {
+			if strings.TrimSpace(runtime.Repository) == "" && strings.TrimSpace(metadata.Repository) != "" {
+				runtime.Repository = strings.TrimSpace(metadata.Repository)
+				updated = true
+			}
+			if strings.TrimSpace(runtime.Branch) == "" && strings.TrimSpace(metadata.Branch) != "" {
+				runtime.Branch = strings.TrimSpace(metadata.Branch)
+				updated = true
+			}
+		}
+	}
+
+	if s.adoptLegacyWorkspaceLayout(runtime) {
+		updated = true
+	}
+
+	if updated {
+		s.rebuildWorkspacePTYManager(runtime)
+	}
+}
+
+func (s *Server) fetchWorkspaceRuntimeMetadata(
+	ctx context.Context,
+	workspaceID string,
+	callbackToken string,
+) (*workspaceRuntimeMetadataResponse, error) {
+	targetWorkspaceID := strings.TrimSpace(workspaceID)
+	if targetWorkspaceID == "" {
+		return nil, fmt.Errorf("workspace id is required for runtime metadata request")
+	}
+
+	effectiveToken := strings.TrimSpace(callbackToken)
+	if effectiveToken == "" {
+		effectiveToken = s.callbackTokenForWorkspace(targetWorkspaceID)
+	}
+	if effectiveToken == "" {
+		return nil, fmt.Errorf("callback token is required for runtime metadata request")
+	}
+
+	endpoint := fmt.Sprintf(
+		"%s/api/workspaces/%s/runtime",
+		strings.TrimRight(s.config.ControlPlaneURL, "/"),
+		neturl.PathEscape(targetWorkspaceID),
+	)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build runtime metadata request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+effectiveToken)
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("runtime metadata request failed: %w", err)
+	}
+	defer res.Body.Close()
+
+	body, _ := io.ReadAll(io.LimitReader(res.Body, 8*1024))
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return nil, fmt.Errorf("runtime metadata endpoint returned HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var payload workspaceRuntimeMetadataResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("failed to decode runtime metadata response: %w", err)
+	}
+	return &payload, nil
+}
+
+func (s *Server) adoptLegacyWorkspaceLayout(runtime *WorkspaceRuntime) bool {
+	if runtime == nil {
+		return false
+	}
+
+	legacyDir := legacyWorkspaceDir(s.config.WorkspaceDir, runtime.Repository)
+	if legacyDir == "" {
+		return false
+	}
+
+	currentDir := strings.TrimSpace(runtime.WorkspaceDir)
+	if currentDir != "" {
+		if _, err := os.Stat(currentDir); err == nil {
+			return false
+		}
+	}
+
+	if _, err := os.Stat(legacyDir); err != nil {
+		return false
+	}
+
+	nextContainerWorkDir := deriveContainerWorkDir(legacyDir)
+	if currentDir == legacyDir &&
+		strings.TrimSpace(runtime.ContainerLabelValue) == legacyDir &&
+		strings.TrimSpace(runtime.ContainerWorkDir) == nextContainerWorkDir {
+		return false
+	}
+
+	log.Printf("Workspace %s: adopting legacy workspace layout at %s", runtime.ID, legacyDir)
+	runtime.WorkspaceDir = legacyDir
+	runtime.ContainerLabelValue = legacyDir
+	runtime.ContainerWorkDir = nextContainerWorkDir
+	return true
+}
+
+func legacyWorkspaceDir(baseDir, repository string) string {
+	trimmedBase := strings.TrimSpace(baseDir)
+	if trimmedBase == "" {
+		trimmedBase = "/workspace"
+	}
+
+	repoDir := repositoryDirName(repository)
+	if repoDir == "" {
+		return ""
+	}
+
+	return filepath.Join(trimmedBase, repoDir)
+}
+
+func repositoryDirName(repository string) string {
+	repo := strings.TrimSpace(repository)
+	if repo == "" {
+		return ""
+	}
+
+	if strings.Contains(repo, "://") {
+		if parsed, err := neturl.Parse(repo); err == nil {
+			repo = parsed.Path
+		}
+	}
+
+	repo = strings.Trim(repo, "/")
+	if repo == "" {
+		return ""
+	}
+
+	parts := strings.Split(repo, "/")
+	name := strings.TrimSpace(strings.TrimSuffix(parts[len(parts)-1], ".git"))
+	if name == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_' || r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+
+	return strings.Trim(b.String(), "-")
 }

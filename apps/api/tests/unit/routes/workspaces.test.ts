@@ -57,4 +57,11 @@ describe('workspaces routes source contract', () => {
     expect(file).toContain('payload.workspace === workspace.nodeId');
     expect(file).toContain("throw errors.forbidden('Token workspace mismatch')");
   });
+
+  it('exposes callback-auth runtime metadata for node recovery', () => {
+    expect(file).toContain("path.endsWith('/runtime')");
+    expect(file).toContain("workspacesRoutes.get('/:id/runtime'");
+    expect(file).toContain('repository: schema.workspaces.repository');
+    expect(file).toContain('branch: schema.workspaces.branch');
+  });
 });

@@ -285,6 +285,8 @@ docs/                 # Documentation
 | `/api/workspaces/:id/agent-sessions/:sessionId/stop` | `POST` | Stop agent session               |
 | `/api/workspaces/:id/ready`                      | `POST`   | Workspace ready callback         |
 | `/api/workspaces/:id/heartbeat`                  | `POST`   | Workspace heartbeat callback     |
+| `/api/workspaces/:id/runtime`                    | `GET`    | Workspace runtime metadata callback |
+| `/api/workspaces/:id/boot-log`                   | `POST`   | Workspace boot-log callback      |
 
 ### Terminal
 
