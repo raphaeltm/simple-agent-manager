@@ -760,6 +760,8 @@ See `apps/api/.env.example`:
 - `MAX_WORKSPACES_PER_NODE` - Optional runtime per-node workspace cap
 - `MAX_AGENT_SESSIONS_PER_WORKSPACE` - Optional runtime session cap
 - `NODE_HEARTBEAT_STALE_SECONDS` - Optional staleness threshold for node health
+- `NODE_AGENT_READY_TIMEOUT_MS` - Optional max wait for freshly provisioned node-agent health before first workspace create
+- `NODE_AGENT_READY_POLL_INTERVAL_MS` - Optional polling interval for fresh-node readiness checks
 
 ## Active Technologies
 - TypeScript 5.x + Hono (API), React + Vite (UI), Cloudflare Workers (001-mvp)
@@ -781,6 +783,7 @@ See `apps/api/.env.example`:
 - Cloudflare D1 (SQLite) for app state; Cloudflare KV for bootstrap tokens and boot logs; Cloudflare R2 for Node Agent binaries (014-multi-workspace-nodes)
 
 ## Recent Changes
+- 014-multi-workspace-nodes: Workspace creation now waits for fresh node-agent backend readiness (`/health`) before dispatching first node workspace create, avoiding immediate fresh-node routing failures (for example Cloudflare 1014/404 races)
 - 014-multi-workspace-nodes: VM Agent legacy-layout recovery now adopts repo-specific workspace paths even when the current runtime path is the existing generic base workspace dir (for example `/workspace`), preventing stale terminal container-label routing on recovered sessions
 - 014-multi-workspace-nodes: VM Agent now avoids reusing legacy single-workspace PTY manager wiring when runtime recovery updates workspace/container paths, so terminal attach uses the recovered workspace-specific devcontainer label instead of stale `/workspace` routing
 - 014-multi-workspace-nodes: Added VM Agent workspace recovery on terminal/ACP attach (rebuilds missing devcontainers and recreates missing in-memory agent sessions by explicit `sessionId`), and ACP client now surfaces gateway error payloads instead of stalling in a waiting state

@@ -2,6 +2,9 @@ import type { Env } from '../index';
 import { signNodeManagementToken } from './jwt';
 import { recordNodeRoutingMetric } from './telemetry';
 
+const DEFAULT_NODE_AGENT_READY_TIMEOUT_MS = 120000;
+const DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS = 5000;
+
 function getNodeBackendBaseUrl(nodeId: string, env: Env): string {
   return `http://vm-${nodeId.toLowerCase()}.${env.BASE_DOMAIN}:8080`;
 }
@@ -10,6 +13,59 @@ interface NodeAgentRequestOptions extends RequestInit {
   userId: string;
   workspaceId?: string | null;
   idempotencyKey?: string;
+}
+
+export function getNodeAgentReadyTimeoutMs(env: { NODE_AGENT_READY_TIMEOUT_MS?: string }): number {
+  const parsed = env.NODE_AGENT_READY_TIMEOUT_MS
+    ? Number.parseInt(env.NODE_AGENT_READY_TIMEOUT_MS, 10)
+    : DEFAULT_NODE_AGENT_READY_TIMEOUT_MS;
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_NODE_AGENT_READY_TIMEOUT_MS;
+  }
+  return parsed;
+}
+
+export function getNodeAgentReadyPollIntervalMs(env: { NODE_AGENT_READY_POLL_INTERVAL_MS?: string }): number {
+  const parsed = env.NODE_AGENT_READY_POLL_INTERVAL_MS
+    ? Number.parseInt(env.NODE_AGENT_READY_POLL_INTERVAL_MS, 10)
+    : DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS;
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS;
+  }
+  return parsed;
+}
+
+export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<void> {
+  const timeoutMs = getNodeAgentReadyTimeoutMs(env);
+  const pollIntervalMs = getNodeAgentReadyPollIntervalMs(env);
+  const baseUrl = getNodeBackendBaseUrl(nodeId, env);
+  const healthUrl = `${baseUrl}/health`;
+  const deadline = Date.now() + timeoutMs;
+
+  let lastError = '';
+
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(healthUrl, { method: 'GET' });
+      if (response.ok) {
+        return;
+      }
+
+      const responseBody = await response.text().catch(() => '');
+      lastError = `HTTP ${response.status}${responseBody ? ` ${responseBody}` : ''}`.trim();
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remainingMs)));
+  }
+
+  const details = lastError ? ` Last error: ${lastError}` : '';
+  throw new Error(`Node Agent not reachable at ${healthUrl} within ${timeoutMs}ms.${details}`);
 }
 
 async function nodeAgentRequest<T>(

@@ -64,4 +64,10 @@ describe('workspaces routes source contract', () => {
     expect(file).toContain('repository: schema.workspaces.repository');
     expect(file).toContain('branch: schema.workspaces.branch');
   });
+
+  it('waits for newly provisioned node readiness before workspace create dispatch', () => {
+    expect(file).toContain('waitForNodeAgentReady');
+    expect(file).toContain("provisionedNode.status !== 'running'");
+    expect(file).toContain('Node agent not reachable after provisioning');
+  });
 });
