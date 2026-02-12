@@ -31,6 +31,7 @@ import {
   restartWorkspaceOnNode,
   stopAgentSessionOnNode,
   stopWorkspaceOnNode,
+  waitForNodeAgentReady,
 } from '../services/node-agent';
 import { signCallbackToken, verifyCallbackToken } from '../services/jwt';
 import { recordNodeRoutingMetric } from '../services/telemetry';
@@ -474,8 +475,46 @@ workspacesRoutes.post('/', async (c) => {
 
   c.executionCtx.waitUntil(
     (async () => {
+      const innerDb = drizzle(c.env.DATABASE, { schema });
       if (mustProvisionNode) {
         await provisionNode(targetNodeId, c.env);
+
+        const nodeRows = await innerDb
+          .select({
+            status: schema.nodes.status,
+            errorMessage: schema.nodes.errorMessage,
+          })
+          .from(schema.nodes)
+          .where(eq(schema.nodes.id, targetNodeId))
+          .limit(1);
+
+        const provisionedNode = nodeRows[0];
+        if (!provisionedNode || provisionedNode.status !== 'running') {
+          await innerDb
+            .update(schema.workspaces)
+            .set({
+              status: 'error',
+              errorMessage: provisionedNode?.errorMessage || 'Node provisioning failed',
+              updatedAt: new Date().toISOString(),
+            })
+            .where(eq(schema.workspaces.id, workspaceId));
+          return;
+        }
+
+        try {
+          await waitForNodeAgentReady(targetNodeId, c.env);
+        } catch (err) {
+          await innerDb
+            .update(schema.workspaces)
+            .set({
+              status: 'error',
+              errorMessage:
+                err instanceof Error ? err.message : 'Node agent not reachable after provisioning',
+              updatedAt: new Date().toISOString(),
+            })
+            .where(eq(schema.workspaces.id, workspaceId));
+          return;
+        }
       }
 
       await scheduleWorkspaceCreateOnNode(

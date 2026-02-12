@@ -61,6 +61,8 @@ export interface Env {
   MAX_WORKSPACES_PER_NODE?: string;
   MAX_AGENT_SESSIONS_PER_WORKSPACE?: string;
   NODE_HEARTBEAT_STALE_SECONDS?: string;
+  NODE_AGENT_READY_TIMEOUT_MS?: string;
+  NODE_AGENT_READY_POLL_INTERVAL_MS?: string;
   // ACP configuration (passed to VMs via environment)
   ACP_INIT_TIMEOUT_MS?: string;
   ACP_RECONNECT_DELAY_MS?: string;
