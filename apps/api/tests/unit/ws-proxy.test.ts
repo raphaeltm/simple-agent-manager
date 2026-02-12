@@ -10,6 +10,11 @@ describe('ws proxy source contract', () => {
     expect(file).toContain('workspace.nodeId || workspaceId');
   });
 
+  it('does not block proxying when workspace vmIp is null', () => {
+    expect(file).not.toContain('!workspace || !workspace.vmIp');
+    expect(file).toContain("return c.json({ error: 'NOT_FOUND', message: 'Workspace not found' }, 404);");
+  });
+
   it('strips spoofed routing headers and injects trusted values', () => {
     expect(file).toContain("headers.delete('x-sam-node-id')");
     expect(file).toContain("headers.delete('x-sam-workspace-id')");
