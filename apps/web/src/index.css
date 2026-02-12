@@ -98,6 +98,7 @@ body {
 .flex-1 { flex: 1 1 0%; }
 .flex-shrink-0 { flex-shrink: 0; }
 .min-w-0 { min-width: 0; }
+.min-h-0 { min-height: 0; }
 .items-center { align-items: center; }
 .items-start { align-items: start; }
 .items-end { align-items: flex-end; }
