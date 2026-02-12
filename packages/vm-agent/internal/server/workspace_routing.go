@@ -4,10 +4,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/workspace/vm-agent/internal/agentsessions"
+	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/pty"
 )
 
@@ -76,7 +78,7 @@ func (s *Server) getWorkspaceRuntime(workspaceID string) (*WorkspaceRuntime, boo
 	return runtime, ok
 }
 
-func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status string) *WorkspaceRuntime {
+func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status, callbackToken string) *WorkspaceRuntime {
 	s.workspaceMu.Lock()
 	defer s.workspaceMu.Unlock()
 
@@ -101,35 +103,60 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status 
 		if status != "" {
 			runtime.Status = status
 		}
+		if callbackToken != "" {
+			runtime.CallbackToken = strings.TrimSpace(callbackToken)
+		}
+		if runtime.WorkspaceDir == "" {
+			runtime.WorkspaceDir = s.workspaceDirForRuntime(workspaceID)
+		}
+		if runtime.ContainerLabelValue == "" {
+			runtime.ContainerLabelValue = runtime.WorkspaceDir
+		}
+		if runtime.ContainerWorkDir == "" {
+			runtime.ContainerWorkDir = deriveContainerWorkDir(runtime.WorkspaceDir)
+		}
 		runtime.UpdatedAt = time.Now().UTC()
 		return runtime
+	}
+
+	workspaceDir := s.workspaceDirForRuntime(workspaceID)
+	containerLabelValue := workspaceDir
+	containerWorkDir := deriveContainerWorkDir(workspaceDir)
+
+	workDir := workspaceDir
+	if s.config.ContainerMode {
+		workDir = containerWorkDir
 	}
 
 	config := pty.ManagerConfig{
 		DefaultShell:      s.config.DefaultShell,
 		DefaultRows:       s.config.DefaultRows,
 		DefaultCols:       s.config.DefaultCols,
-		WorkDir:           s.config.ContainerWorkDir,
-		ContainerResolver: s.ptyManagerContainerResolver(),
+		WorkDir:           workDir,
+		ContainerResolver: s.ptyManagerContainerResolverForLabel(containerLabelValue),
 		ContainerUser:     s.config.ContainerUser,
 		GracePeriod:       s.config.PTYOrphanGracePeriod,
 		BufferSize:        s.config.PTYOutputBufferSize,
 	}
 
 	manager := pty.NewManager(config)
-	// Preserve compatibility with legacy tests and single-workspace mode.
-	if s.ptyManager != nil && (workspaceID == "default" || len(s.workspaces) == 0) {
+	// Preserve compatibility with single-workspace mode.
+	if s.ptyManager != nil && ((s.config.WorkspaceID != "" && workspaceID == s.config.WorkspaceID) || (!s.config.ContainerMode && len(s.workspaces) == 0)) {
 		manager = s.ptyManager
 	}
 
 	runtime = &WorkspaceRuntime{
-		ID:         workspaceID,
-		Repository: repository,
-		Branch:     branch,
-		Status:     status,
-		CreatedAt:  time.Now().UTC(),
-		UpdatedAt:  time.Now().UTC(),
-		PTY:        manager,
+		ID:                  workspaceID,
+		Repository:          repository,
+		Branch:              branch,
+		Status:              status,
+		CreatedAt:           time.Now().UTC(),
+		UpdatedAt:           time.Now().UTC(),
+		WorkspaceDir:        workspaceDir,
+		ContainerLabelValue: containerLabelValue,
+		ContainerWorkDir:    containerWorkDir,
+		CallbackToken:       strings.TrimSpace(callbackToken),
+		PTY:                 manager,
 	}
 	s.workspaces[workspaceID] = runtime
 	return runtime
@@ -153,6 +180,37 @@ func (s *Server) workspaceSessionCount(workspaceID string) int {
 		return 0
 	}
 	return runtime.PTY.SessionCount()
+}
+
+func (s *Server) workspaceDirForRuntime(workspaceID string) string {
+	baseDir := strings.TrimSpace(s.config.WorkspaceDir)
+	if baseDir == "" {
+		baseDir = "/workspace"
+	}
+	// In single-workspace mode, WorkspaceDir may already include the repo path.
+	// Keep using that when the IDs match to preserve compatibility.
+	if strings.TrimSpace(s.config.WorkspaceID) != "" && workspaceID == strings.TrimSpace(s.config.WorkspaceID) {
+		return baseDir
+	}
+
+	safeWorkspaceID := strings.TrimSpace(workspaceID)
+	if safeWorkspaceID == "" {
+		return baseDir
+	}
+	safeWorkspaceID = strings.ReplaceAll(safeWorkspaceID, string(filepath.Separator), "-")
+	return filepath.Join(baseDir, safeWorkspaceID)
+}
+
+func deriveContainerWorkDir(workspaceDir string) string {
+	trimmed := strings.TrimSpace(workspaceDir)
+	if trimmed == "" {
+		return "/workspaces"
+	}
+	base := filepath.Base(trimmed)
+	if base == "" || base == "." || base == "/" {
+		return "/workspaces"
+	}
+	return filepath.Join("/workspaces", base)
 }
 
 func (s *Server) appendNodeEvent(workspaceID, level, eventType, message string, detail map[string]interface{}) {
@@ -199,5 +257,29 @@ func (s *Server) ptyManagerContainerResolver() pty.ContainerResolver {
 }
 
 func (s *Server) ptyManagerContainerResolverFromConfig() pty.ContainerResolver {
-	return nil
+	return s.ptyManagerContainerResolverForLabel(s.config.ContainerLabelValue)
+}
+
+func (s *Server) ptyManagerContainerResolverForLabel(labelValue string) pty.ContainerResolver {
+	if !s.config.ContainerMode {
+		return nil
+	}
+
+	resolvedLabel := strings.TrimSpace(labelValue)
+	if resolvedLabel == "" {
+		resolvedLabel = strings.TrimSpace(s.config.ContainerLabelValue)
+	}
+	if resolvedLabel == "" {
+		resolvedLabel = strings.TrimSpace(s.config.WorkspaceDir)
+	}
+	if resolvedLabel == "" {
+		resolvedLabel = "/workspace"
+	}
+
+	discovery := container.NewDiscovery(container.Config{
+		LabelKey:   s.config.ContainerLabelKey,
+		LabelValue: resolvedLabel,
+		CacheTTL:   s.config.ContainerCacheTTL,
+	})
+	return discovery.GetContainerID
 }

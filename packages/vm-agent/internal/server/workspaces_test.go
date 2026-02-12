@@ -28,6 +28,8 @@ func TestWorkspaceManagementSourceContract(t *testing.T) {
 		"handleDeleteWorkspace",
 		"closeAgentGateway",
 		"closeAgentGatewaysForWorkspace",
+		"callbackToken",
+		"provisionWorkspaceRuntime",
 	} {
 		if !strings.Contains(content, needle) {
 			t.Fatalf("expected %q in %s", needle, path)

@@ -1,6 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Terminal, MultiTerminal } from '@simple-agent-manager/terminal';
+import type {
+  MultiTerminalHandle,
+  MultiTerminalSessionSnapshot,
+} from '@simple-agent-manager/terminal';
 import { useFeatureFlags } from '../config/features';
 import { useAcpSession, useAcpMessages, AgentPanel } from '@simple-agent-manager/acp-client';
 import type { AcpSessionState } from '@simple-agent-manager/acp-client';
@@ -16,6 +20,7 @@ import {
   createAgentSession,
   getTerminalToken,
   getWorkspace,
+  listAgents,
   listAgentSessions,
   listWorkspaceEvents,
   restartWorkspace,
@@ -23,7 +28,13 @@ import {
   stopWorkspace,
   updateWorkspace,
 } from '../lib/api';
-import type { AgentSession, Event, WorkspaceResponse, BootLogEntry } from '@simple-agent-manager/shared';
+import type {
+  AgentInfo,
+  AgentSession,
+  Event,
+  WorkspaceResponse,
+  BootLogEntry,
+} from '@simple-agent-manager/shared';
 import '../styles/workspace-mobile.css';
 import '../styles/acp-chat.css';
 
@@ -31,15 +42,24 @@ import '../styles/acp-chat.css';
 function agentStatusLabel(state: AcpSessionState, agentType: string | null): string {
   if (!agentType) return '';
   switch (state) {
-    case 'initializing': return `${agentType}: Init`;
-    case 'ready': return `${agentType}: Ready`;
-    case 'prompting': return `${agentType}: Prompting`;
-    case 'error': return `${agentType}: Error`;
-    case 'connecting': return `${agentType}: Connecting`;
-    case 'reconnecting': return `${agentType}: Reconnecting`;
-    case 'no_session': return '';
-    case 'disconnected': return 'Disconnected';
-    default: return '';
+    case 'initializing':
+      return `${agentType}: Init`;
+    case 'ready':
+      return `${agentType}: Ready`;
+    case 'prompting':
+      return `${agentType}: Prompting`;
+    case 'error':
+      return `${agentType}: Error`;
+    case 'connecting':
+      return `${agentType}: Connecting`;
+    case 'reconnecting':
+      return `${agentType}: Reconnecting`;
+    case 'no_session':
+      return '';
+    case 'disconnected':
+      return 'Disconnected';
+    default:
+      return '';
   }
 }
 
@@ -53,13 +73,26 @@ function agentStatusDotStyle(state: AcpSessionState): React.CSSProperties {
     flexShrink: 0,
   };
   switch (state) {
-    case 'ready': return { ...base, backgroundColor: '#4ade80' };
+    case 'ready':
+      return { ...base, backgroundColor: '#4ade80' };
     case 'initializing':
     case 'connecting':
-    case 'reconnecting': return { ...base, backgroundColor: '#fbbf24', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' };
-    case 'prompting': return { ...base, backgroundColor: '#60a5fa', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' };
-    case 'error': return { ...base, backgroundColor: '#f87171' };
-    default: return { ...base, backgroundColor: '#6b7280' };
+    case 'reconnecting':
+      return {
+        ...base,
+        backgroundColor: '#fbbf24',
+        animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+      };
+    case 'prompting':
+      return {
+        ...base,
+        backgroundColor: '#60a5fa',
+        animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+      };
+    case 'error':
+      return { ...base, backgroundColor: '#f87171' };
+    default:
+      return { ...base, backgroundColor: '#6b7280' };
   }
 }
 
@@ -82,6 +115,22 @@ function terminalConnectionErrorMessage(err: unknown): string {
 /** View modes */
 type ViewMode = 'terminal' | 'conversation';
 
+type WorkspaceTab =
+  | {
+      id: string;
+      kind: 'terminal';
+      sessionId: string;
+      title: string;
+      status: MultiTerminalSessionSnapshot['status'];
+    }
+  | {
+      id: string;
+      kind: 'chat';
+      sessionId: string;
+      title: string;
+      status: AgentSession['status'];
+    };
+
 /**
  * Workspace detail page — compact toolbar with terminal filling the viewport.
  */
@@ -93,7 +142,8 @@ export function Workspace() {
   const isMobile = useIsMobile();
   const viewParam = searchParams.get('view');
   const sessionIdParam = searchParams.get('sessionId');
-  const viewOverride: ViewMode | null = viewParam === 'terminal' || viewParam === 'conversation' ? viewParam : null;
+  const viewOverride: ViewMode | null =
+    viewParam === 'terminal' || viewParam === 'conversation' ? viewParam : null;
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -108,11 +158,21 @@ export function Workspace() {
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [displayNameInput, setDisplayNameInput] = useState('');
+  const [agentOptions, setAgentOptions] = useState<AgentInfo[]>([]);
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const [terminalTabs, setTerminalTabs] = useState<MultiTerminalSessionSnapshot[]>([]);
+  const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<string | null>(null);
+  const [preferredAgentsBySession, setPreferredAgentsBySession] = useState<
+    Record<string, AgentInfo['id']>
+  >({});
+  const multiTerminalRef = useRef<MultiTerminalHandle | null>(null);
+  const createMenuRef = useRef<HTMLDivElement | null>(null);
 
   // ACP
   const [acpWsUrl, setAcpWsUrl] = useState<string | null>(null);
   const acpMessages = useAcpMessages();
   const acpSession = useAcpSession({ wsUrl: acpWsUrl, onAcpMessage: acpMessages.processMessage });
+  const isRunning = workspace?.status === 'running';
 
   // Auto-fallback: switch to terminal when ACP errors
   useEffect(() => {
@@ -120,13 +180,6 @@ export function Workspace() {
       setViewMode('terminal');
     }
   }, [acpSession.state, viewMode]);
-
-  // Auto-switch to conversation when agent ready
-  useEffect(() => {
-    if (!viewOverride && acpSession.state === 'ready' && acpSession.agentType && viewMode === 'terminal') {
-      setViewMode('conversation');
-    }
-  }, [acpSession.state, acpSession.agentType, viewMode, viewOverride]);
 
   const loadWorkspaceState = useCallback(async () => {
     if (!id) {
@@ -158,7 +211,11 @@ export function Workspace() {
     void loadWorkspaceState();
 
     const interval = setInterval(() => {
-      if (workspace?.status === 'creating' || workspace?.status === 'stopping' || workspace?.status === 'running') {
+      if (
+        workspace?.status === 'creating' ||
+        workspace?.status === 'stopping' ||
+        workspace?.status === 'running'
+      ) {
         void loadWorkspaceState();
       }
     }, 5000);
@@ -211,8 +268,12 @@ export function Workspace() {
         const { token } = await getTerminalToken(id);
         const url = new URL(workspace.url!);
         const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-        const sessionQuery = sessionIdParam ? `&sessionId=${encodeURIComponent(sessionIdParam)}` : '';
-        setAcpWsUrl(`${wsProtocol}//${url.host}/agent/ws?token=${encodeURIComponent(token)}${sessionQuery}`);
+        const sessionQuery = sessionIdParam
+          ? `&sessionId=${encodeURIComponent(sessionIdParam)}`
+          : '';
+        setAcpWsUrl(
+          `${wsProtocol}//${url.host}/agent/ws?token=${encodeURIComponent(token)}${sessionQuery}`
+        );
       } catch {
         // ACP is optional
       }
@@ -220,6 +281,52 @@ export function Workspace() {
 
     fetchAcpToken();
   }, [id, workspace?.status, workspace?.url, sessionIdParam]);
+
+  useEffect(() => {
+    if (!isRunning) {
+      setAgentOptions([]);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await listAgents();
+        if (!cancelled) {
+          setAgentOptions(data.agents || []);
+        }
+      } catch {
+        if (!cancelled) {
+          setAgentOptions([]);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isRunning]);
+
+  useEffect(() => {
+    if (!createMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!createMenuRef.current) {
+        return;
+      }
+      const target = event.target as Node | null;
+      if (target && !createMenuRef.current.contains(target)) {
+        setCreateMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+    };
+  }, [createMenuOpen]);
 
   const handleTerminalActivity = useCallback(() => {
     if (!id) return;
@@ -231,7 +338,7 @@ export function Workspace() {
     try {
       setActionLoading(true);
       await stopWorkspace(id);
-      setWorkspace((prev) => prev ? { ...prev, status: 'stopping' } : null);
+      setWorkspace((prev) => (prev ? { ...prev, status: 'stopping' } : null));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to stop workspace');
     } finally {
@@ -244,7 +351,7 @@ export function Workspace() {
     try {
       setActionLoading(true);
       await restartWorkspace(id);
-      setWorkspace((prev) => prev ? { ...prev, status: 'creating' } : null);
+      setWorkspace((prev) => (prev ? { ...prev, status: 'creating' } : null));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to restart workspace');
     } finally {
@@ -268,19 +375,57 @@ export function Workspace() {
     }
   };
 
-  const handleCreateSession = async () => {
+  const configuredAgents = useMemo(
+    () => agentOptions.filter((agent) => agent.configured && agent.supportsAcp),
+    [agentOptions]
+  );
+
+  const agentNameById = useMemo(
+    () => new Map(configuredAgents.map((agent) => [agent.id, agent.name])),
+    [configuredAgents]
+  );
+
+  const activeChatSessionId =
+    viewMode === 'conversation'
+      ? sessionIdParam || agentSessions.find((session) => session.status === 'running')?.id || null
+      : null;
+
+  const handleCreateSession = async (preferredAgentId?: AgentInfo['id']) => {
     if (!id) {
       return;
     }
 
     try {
       setSessionsLoading(true);
-      const key = typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random()}`;
-      await createAgentSession(id, {}, key);
-      const sessions = await listAgentSessions(id);
-      setAgentSessions(sessions);
+      const key =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random()}`;
+      const preferredAgent = preferredAgentId
+        ? configuredAgents.find((agent) => agent.id === preferredAgentId)
+        : undefined;
+
+      const created = await createAgentSession(
+        id,
+        preferredAgent ? { label: `${preferredAgent.name} Chat` } : {},
+        key
+      );
+
+      setAgentSessions((prev) => {
+        const remaining = prev.filter((session) => session.id !== created.id);
+        return [created, ...remaining];
+      });
+
+      if (preferredAgentId) {
+        setPreferredAgentsBySession((prev) => ({ ...prev, [created.id]: preferredAgentId }));
+      }
+
+      const params = new URLSearchParams(searchParams);
+      params.set('view', 'conversation');
+      params.set('sessionId', created.id);
+      navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
+      setViewMode('conversation');
+      setCreateMenuOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create session');
     } finally {
@@ -298,6 +443,22 @@ export function Workspace() {
       await stopAgentSession(id, sessionId);
       const sessions = await listAgentSessions(id);
       setAgentSessions(sessions);
+      setPreferredAgentsBySession((prev) => {
+        if (!prev[sessionId]) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[sessionId];
+        return next;
+      });
+
+      if (sessionIdParam === sessionId) {
+        const params = new URLSearchParams(searchParams);
+        params.set('view', 'terminal');
+        params.delete('sessionId');
+        navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
+        setViewMode('terminal');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to stop session');
     } finally {
@@ -316,10 +477,110 @@ export function Workspace() {
     setViewMode('conversation');
   };
 
+  const handleCreateTerminalTab = () => {
+    setViewMode('terminal');
+    const sessionId = multiTerminalRef.current?.createSession();
+    if (sessionId) {
+      setActiveTerminalSessionId(sessionId);
+      multiTerminalRef.current?.activateSession(sessionId);
+    }
+    setCreateMenuOpen(false);
+  };
+
+  const handleSelectWorkspaceTab = (tab: WorkspaceTab) => {
+    if (tab.kind === 'terminal') {
+      setViewMode('terminal');
+      multiTerminalRef.current?.activateSession(tab.sessionId);
+      return;
+    }
+
+    handleAttachSession(tab.sessionId);
+  };
+
+  const defaultAgentId = configuredAgents.length === 1 ? configuredAgents[0]!.id : null;
+
+  const workspaceTabs = useMemo<WorkspaceTab[]>(() => {
+    const terminalSessionTabs: WorkspaceTab[] = terminalTabs.map((session) => ({
+      id: `terminal:${session.id}`,
+      kind: 'terminal',
+      sessionId: session.id,
+      title: session.name,
+      status: session.status,
+    }));
+
+    const chatSessionTabs: WorkspaceTab[] = agentSessions.map((session) => {
+      const preferredAgent = preferredAgentsBySession[session.id];
+      const preferredName = preferredAgent ? agentNameById.get(preferredAgent) : undefined;
+      const title =
+        session.label?.trim() ||
+        (preferredName ? `${preferredName} Chat` : `Chat ${session.id.slice(-4)}`);
+
+      return {
+        id: `chat:${session.id}`,
+        kind: 'chat',
+        sessionId: session.id,
+        title,
+        status: session.status,
+      };
+    });
+
+    return [...terminalSessionTabs, ...chatSessionTabs];
+  }, [agentNameById, agentSessions, preferredAgentsBySession, terminalTabs]);
+
+  const activeTabId = useMemo(() => {
+    if (viewMode === 'terminal') {
+      return activeTerminalSessionId ? `terminal:${activeTerminalSessionId}` : null;
+    }
+    return activeChatSessionId ? `chat:${activeChatSessionId}` : null;
+  }, [activeChatSessionId, activeTerminalSessionId, viewMode]);
+
+  const acpConnected = acpSession.connected;
+  const acpAgentType = acpSession.agentType;
+  const acpState = acpSession.state;
+
+  useEffect(() => {
+    if (viewMode !== 'conversation' || !activeChatSessionId) {
+      return;
+    }
+
+    const preferredAgent = preferredAgentsBySession[activeChatSessionId];
+    if (!preferredAgent) {
+      return;
+    }
+
+    if (!acpConnected) {
+      return;
+    }
+    if (acpAgentType === preferredAgent) {
+      return;
+    }
+    if (acpState === 'connecting' || acpState === 'reconnecting' || acpState === 'initializing') {
+      return;
+    }
+
+    acpSession.switchAgent(preferredAgent);
+  }, [
+    acpAgentType,
+    acpConnected,
+    acpState,
+    acpSession.switchAgent,
+    activeChatSessionId,
+    preferredAgentsBySession,
+    viewMode,
+  ]);
+
   // ── Loading state ──
   if (loading) {
     return (
-      <div style={{ height: 'var(--sam-app-height)', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1b26' }}>
+      <div
+        style={{
+          height: 'var(--sam-app-height)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: '#1a1b26',
+        }}
+      >
         <Spinner size="lg" />
       </div>
     );
@@ -328,7 +589,14 @@ export function Workspace() {
   // ── Fatal error (no workspace loaded) ──
   if (error && !workspace) {
     return (
-      <div style={{ height: 'var(--sam-app-height)', display: 'flex', flexDirection: 'column', backgroundColor: '#1a1b26' }}>
+      <div
+        style={{
+          height: 'var(--sam-app-height)',
+          display: 'flex',
+          flexDirection: 'column',
+          backgroundColor: '#1a1b26',
+        }}
+      >
         <Toolbar onBack={() => navigate('/dashboard')} />
         <CenteredStatus
           color="#f87171"
@@ -344,9 +612,6 @@ export function Workspace() {
     );
   }
 
-  const isRunning = workspace?.status === 'running';
-  const hasAgent = isRunning && acpSession.agentType;
-
   // ── Shared content area ──
   const contentArea = (
     <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
@@ -359,11 +624,17 @@ export function Workspace() {
           <div style={{ height: '100%' }}>
             {featureFlags.multiTerminal ? (
               <MultiTerminal
+                ref={multiTerminalRef}
                 wsUrl={wsUrl}
                 shutdownDeadline={workspace?.shutdownDeadline}
                 onActivity={handleTerminalActivity}
                 className="h-full"
                 persistenceKey={id ? `sam-terminal-sessions-${id}` : undefined}
+                hideTabBar
+                onSessionsChange={(sessions, activeSessionId) => {
+                  setTerminalTabs(sessions);
+                  setActiveTerminalSessionId(activeSessionId);
+                }}
               />
             ) : (
               <Terminal
@@ -375,22 +646,29 @@ export function Workspace() {
             )}
           </div>
         ) : terminalLoading ? (
-          <CenteredStatus color="#60a5fa" title="Connecting to Terminal..." subtitle="Establishing secure connection" loading />
+          <CenteredStatus
+            color="#60a5fa"
+            title="Connecting to Terminal..."
+            subtitle="Establishing secure connection"
+            loading
+          />
         ) : (
           <CenteredStatus
             color="#f87171"
             title="Connection Failed"
             subtitle={terminalError || 'Unable to connect to terminal'}
-            action={(
+            action={
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={() => { void connectTerminal(); }}
+                onClick={() => {
+                  void connectTerminal();
+                }}
                 disabled={terminalLoading}
               >
                 Retry Connection
               </Button>
-            )}
+            }
           />
         )
       ) : workspace?.status === 'creating' ? (
@@ -403,13 +681,23 @@ export function Workspace() {
           title="Workspace Stopped"
           subtitle="Restart to access the terminal."
           action={
-            <Button variant="primary" size="sm" onClick={handleRestart} disabled={actionLoading} loading={actionLoading}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleRestart}
+              disabled={actionLoading}
+              loading={actionLoading}
+            >
               Restart Workspace
             </Button>
           }
         />
       ) : workspace?.status === 'error' ? (
-        <CenteredStatus color="#f87171" title="Workspace Error" subtitle={workspace?.errorMessage || 'An unexpected error occurred.'} />
+        <CenteredStatus
+          color="#f87171"
+          title="Workspace Error"
+          subtitle={workspace?.errorMessage || 'An unexpected error occurred.'}
+        />
       ) : null}
     </div>
   );
@@ -419,39 +707,72 @@ export function Workspace() {
   // ══════════════════════════════════════════════════════════════
   if (isMobile) {
     return (
-      <div style={{ height: 'var(--sam-app-height)', display: 'flex', flexDirection: 'column', backgroundColor: '#1a1b26', overflow: 'hidden' }}>
-        {/* ── Mobile Header (compact) ── */}
-        <header style={{
+      <div
+        style={{
+          height: 'var(--sam-app-height)',
           display: 'flex',
-          alignItems: 'center',
-          padding: '0 4px 0 8px',
-          height: '44px',
-          backgroundColor: 'var(--sam-color-bg-surface)',
-          borderBottom: '1px solid var(--sam-color-border-default)',
-          gap: '6px',
-          flexShrink: 0,
-        }}>
+          flexDirection: 'column',
+          backgroundColor: '#1a1b26',
+          overflow: 'hidden',
+        }}
+      >
+        {/* ── Mobile Header (compact) ── */}
+        <header
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            padding: '0 4px 0 8px',
+            height: '44px',
+            backgroundColor: 'var(--sam-color-bg-surface)',
+            borderBottom: '1px solid var(--sam-color-border-default)',
+            gap: '6px',
+            flexShrink: 0,
+          }}
+        >
           {/* Back */}
           <button
             onClick={() => navigate('/dashboard')}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--sam-color-fg-muted)', padding: '8px', display: 'flex', minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--sam-color-fg-muted)',
+              padding: '8px',
+              display: 'flex',
+              minWidth: 44,
+              minHeight: 44,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
             aria-label="Back to dashboard"
           >
-            <svg style={{ height: 18, width: 18 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            <svg
+              style={{ height: 18, width: 18 }}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 19l-7-7 7-7"
+              />
             </svg>
           </button>
 
           {/* Workspace name + status */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
-            <span style={{
-              fontWeight: 600,
-              fontSize: '0.875rem',
-              color: 'var(--sam-color-fg-primary)',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}>
+            <span
+              style={{
+                fontWeight: 600,
+                fontSize: '0.875rem',
+                color: 'var(--sam-color-fg-primary)',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
               {workspace?.displayName || workspace?.name}
             </span>
             {workspace && <StatusBadge status={workspace.status} />}
@@ -506,71 +827,255 @@ export function Workspace() {
   // ══════════════════════════════════════════════════════════════
   // DESKTOP LAYOUT (original)
   // ══════════════════════════════════════════════════════════════
-  const toggleBtnStyle = (active: boolean): React.CSSProperties => ({
-    padding: '2px 10px',
-    fontSize: '0.75rem',
-    fontWeight: 500,
-    border: 'none',
-    borderRadius: 0,
-    cursor: 'pointer',
-    backgroundColor: active ? 'var(--sam-color-accent-primary)' : 'transparent',
-    color: active ? '#ffffff' : 'var(--sam-color-fg-muted)',
-    transition: 'all 0.15s ease',
-  });
-
   return (
-    <div style={{ height: 'var(--sam-app-height)', display: 'flex', flexDirection: 'column', backgroundColor: '#1a1b26', overflow: 'hidden' }}>
-      {/* ── Compact Toolbar ── */}
-      <header style={{
+    <div
+      style={{
+        height: 'var(--sam-app-height)',
         display: 'flex',
-        alignItems: 'center',
-        padding: '0 12px',
-        height: '40px',
-        backgroundColor: 'var(--sam-color-bg-surface)',
-        borderBottom: '1px solid var(--sam-color-border-default)',
-        gap: '10px',
-        flexShrink: 0,
-      }}>
+        flexDirection: 'column',
+        backgroundColor: '#1a1b26',
+        overflow: 'hidden',
+      }}
+    >
+      {/* ── Compact Toolbar ── */}
+      <header
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 12px',
+          height: '40px',
+          backgroundColor: 'var(--sam-color-bg-surface)',
+          borderBottom: '1px solid var(--sam-color-border-default)',
+          gap: '10px',
+          flexShrink: 0,
+        }}
+      >
         {/* Back */}
         <button
           onClick={() => navigate('/dashboard')}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--sam-color-fg-muted)', padding: '4px', display: 'flex' }}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            color: 'var(--sam-color-fg-muted)',
+            padding: '4px',
+            display: 'flex',
+          }}
           aria-label="Back to dashboard"
         >
-          <svg style={{ height: 16, width: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          <svg
+            style={{ height: 16, width: 16 }}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 19l-7-7 7-7"
+            />
           </svg>
         </button>
 
         {/* Workspace name + status */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-          <span style={{
-            fontWeight: 600,
-            fontSize: '0.875rem',
-            color: 'var(--sam-color-fg-primary)',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}>
+          <span
+            style={{
+              fontWeight: 600,
+              fontSize: '0.875rem',
+              color: 'var(--sam-color-fg-primary)',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
             {workspace?.displayName || workspace?.name}
           </span>
           {workspace && <StatusBadge status={workspace.status} />}
         </div>
 
         {/* Separator */}
-        <div style={{ width: '1px', height: '16px', backgroundColor: 'var(--sam-color-border-default)', flexShrink: 0 }} />
+        <div
+          style={{
+            width: '1px',
+            height: '16px',
+            backgroundColor: 'var(--sam-color-border-default)',
+            flexShrink: 0,
+          }}
+        />
 
         {/* Repo@branch */}
-        <span style={{
-          fontSize: '0.75rem',
-          color: 'var(--sam-color-fg-muted)',
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          minWidth: 0,
-        }}>
-          {workspace?.repository}{workspace?.branch ? `@${workspace.branch}` : ''}
+        <span
+          style={{
+            fontSize: '0.75rem',
+            color: 'var(--sam-color-fg-muted)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            minWidth: 0,
+          }}
+        >
+          {workspace?.repository}
+          {workspace?.branch ? `@${workspace.branch}` : ''}
         </span>
+
+        {isRunning && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              minWidth: 0,
+              maxWidth: '42%',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'stretch',
+                gap: '4px',
+                minWidth: 0,
+                overflowX: 'auto',
+                padding: '2px',
+                borderRadius: 'var(--sam-radius-md)',
+                border: '1px solid var(--sam-color-border-default)',
+                background: 'var(--sam-color-bg-inset)',
+              }}
+            >
+              {workspaceTabs.map((tab) => {
+                const active = activeTabId === tab.id;
+                const isErrored = tab.status === 'error';
+
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => handleSelectWorkspaceTab(tab)}
+                    style={{
+                      border: 'none',
+                      borderRadius: 'var(--sam-radius-sm)',
+                      padding: '4px 10px',
+                      minHeight: '30px',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      color: active
+                        ? '#ffffff'
+                        : isErrored
+                          ? '#f87171'
+                          : 'var(--sam-color-fg-muted)',
+                      background: active ? 'var(--sam-color-accent-primary)' : 'transparent',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={tab.title}
+                  >
+                    {tab.kind === 'terminal' ? 'Terminal' : 'Chat'}: {tab.title}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div ref={createMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
+              <button
+                onClick={() => setCreateMenuOpen((prev) => !prev)}
+                style={{
+                  minWidth: '30px',
+                  minHeight: '30px',
+                  borderRadius: 'var(--sam-radius-md)',
+                  border: '1px solid var(--sam-color-border-default)',
+                  background: 'var(--sam-color-bg-inset)',
+                  color: 'var(--sam-color-fg-primary)',
+                  fontSize: '1rem',
+                  lineHeight: 1,
+                  cursor: 'pointer',
+                }}
+                aria-label="Create terminal or chat session"
+                aria-expanded={createMenuOpen}
+              >
+                +
+              </button>
+
+              {createMenuOpen && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 6px)',
+                    right: 0,
+                    minWidth: 220,
+                    borderRadius: 'var(--sam-radius-md)',
+                    border: '1px solid var(--sam-color-border-default)',
+                    background: 'var(--sam-color-bg-surface)',
+                    boxShadow: '0 10px 30px rgba(0, 0, 0, 0.35)',
+                    zIndex: 30,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <button
+                    onClick={handleCreateTerminalTab}
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--sam-color-fg-primary)',
+                      padding: '10px 12px',
+                      fontSize: '0.8125rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    New Terminal Session
+                  </button>
+
+                  {configuredAgents.length <= 1 ? (
+                    <button
+                      onClick={() => {
+                        void handleCreateSession(defaultAgentId ?? undefined);
+                      }}
+                      disabled={configuredAgents.length === 0}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        border: 'none',
+                        background: 'transparent',
+                        color:
+                          configuredAgents.length === 0
+                            ? 'var(--sam-color-fg-muted)'
+                            : 'var(--sam-color-fg-primary)',
+                        padding: '10px 12px',
+                        fontSize: '0.8125rem',
+                        cursor: configuredAgents.length === 0 ? 'not-allowed' : 'pointer',
+                        opacity: configuredAgents.length === 0 ? 0.65 : 1,
+                      }}
+                    >
+                      New Chat Session
+                    </button>
+                  ) : (
+                    configuredAgents.map((agent) => (
+                      <button
+                        key={agent.id}
+                        onClick={() => {
+                          void handleCreateSession(agent.id);
+                        }}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'var(--sam-color-fg-primary)',
+                          padding: '10px 12px',
+                          fontSize: '0.8125rem',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        New {agent.name} Chat
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Spacer */}
         <div style={{ flex: 1 }} />
@@ -581,7 +1086,14 @@ export function Workspace() {
             {error}
             <button
               onClick={() => setError(null)}
-              style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', marginLeft: '4px', fontSize: '0.75rem' }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#f87171',
+                cursor: 'pointer',
+                marginLeft: '4px',
+                fontSize: '0.75rem',
+              }}
             >
               x
             </button>
@@ -591,37 +1103,52 @@ export function Workspace() {
         {/* Agent status */}
         {isRunning && acpSession.agentType && (
           <>
-            <div style={{ width: '1px', height: '16px', backgroundColor: 'var(--sam-color-border-default)', flexShrink: 0 }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', whiteSpace: 'nowrap' }}>
+            <div
+              style={{
+                width: '1px',
+                height: '16px',
+                backgroundColor: 'var(--sam-color-border-default)',
+                flexShrink: 0,
+              }}
+            />
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                fontSize: '0.75rem',
+                color: 'var(--sam-color-fg-muted)',
+                whiteSpace: 'nowrap',
+              }}
+            >
               <span style={agentStatusDotStyle(acpSession.state)} />
               <span>{agentStatusLabel(acpSession.state, acpSession.agentType)}</span>
             </div>
           </>
         )}
 
-        {/* View mode toggle */}
-        {hasAgent && (
-          <div style={{
-            display: 'flex',
-            borderRadius: 'var(--sam-radius-md)',
-            border: '1px solid var(--sam-color-border-default)',
-            overflow: 'hidden',
-          }}>
-            <button onClick={() => setViewMode('terminal')} style={toggleBtnStyle(viewMode === 'terminal')}>Terminal</button>
-            <button onClick={() => setViewMode('conversation')} style={toggleBtnStyle(viewMode === 'conversation')}>Chat</button>
-          </div>
-        )}
-
         {/* Stop/Restart */}
         {isRunning && (
-          <Button variant="danger" size="sm" onClick={handleStop} disabled={actionLoading} loading={actionLoading}
-            style={{ minHeight: '28px', padding: '0 10px', fontSize: '0.75rem' }}>
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={handleStop}
+            disabled={actionLoading}
+            loading={actionLoading}
+            style={{ minHeight: '28px', padding: '0 10px', fontSize: '0.75rem' }}
+          >
             Stop
           </Button>
         )}
         {workspace?.status === 'stopped' && (
-          <Button variant="primary" size="sm" onClick={handleRestart} disabled={actionLoading} loading={actionLoading}
-            style={{ minHeight: '28px', padding: '0 10px', fontSize: '0.75rem' }}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleRestart}
+            disabled={actionLoading}
+            loading={actionLoading}
+            style={{ minHeight: '28px', padding: '0 10px', fontSize: '0.75rem' }}
+          >
             Restart
           </Button>
         )}
@@ -663,7 +1190,9 @@ export function Workspace() {
               gap: 'var(--sam-space-2)',
             }}
           >
-            <label style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>Workspace name</label>
+            <label style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+              Workspace name
+            </label>
             <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
               <input
                 value={displayNameInput}
@@ -678,7 +1207,11 @@ export function Workspace() {
                   minWidth: 0,
                 }}
               />
-              <Button size="sm" onClick={handleRename} disabled={renaming || !displayNameInput.trim()}>
+              <Button
+                size="sm"
+                onClick={handleRename}
+                disabled={renaming || !displayNameInput.trim()}
+              >
                 {renaming ? 'Saving...' : 'Rename'}
               </Button>
             </div>
@@ -687,7 +1220,13 @@ export function Workspace() {
           <AgentSessionList
             sessions={agentSessions}
             loading={sessionsLoading}
-            onCreate={handleCreateSession}
+            onCreate={() => {
+              if (configuredAgents.length > 1) {
+                setCreateMenuOpen(true);
+                return;
+              }
+              void handleCreateSession(defaultAgentId ?? undefined);
+            }}
             onAttach={handleAttachSession}
             onStop={handleStopSession}
           />
@@ -699,11 +1238,22 @@ export function Workspace() {
               flex: 1,
             }}
           >
-            <div style={{ padding: 'var(--sam-space-3)', borderBottom: '1px solid var(--sam-color-border-default)' }}>
+            <div
+              style={{
+                padding: 'var(--sam-space-3)',
+                borderBottom: '1px solid var(--sam-color-border-default)',
+              }}
+            >
               <strong style={{ fontSize: '0.875rem' }}>Workspace Events</strong>
             </div>
             {workspaceEvents.length === 0 ? (
-              <div style={{ padding: 'var(--sam-space-3)', fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
+              <div
+                style={{
+                  padding: 'var(--sam-space-3)',
+                  fontSize: '0.875rem',
+                  color: 'var(--sam-color-fg-muted)',
+                }}
+              >
                 No events yet.
               </div>
             ) : (
@@ -716,7 +1266,13 @@ export function Workspace() {
                     fontSize: '0.8125rem',
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--sam-space-2)' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      gap: 'var(--sam-space-2)',
+                    }}
+                  >
                     <strong>{event.type}</strong>
                     <span style={{ color: 'var(--sam-color-fg-muted)' }}>
                       {new Date(event.createdAt).toLocaleTimeString()}
@@ -737,42 +1293,86 @@ export function Workspace() {
 
 function Toolbar({ onBack }: { onBack: () => void }) {
   return (
-    <header style={{
-      display: 'flex',
-      alignItems: 'center',
-      padding: '0 12px',
-      height: '40px',
-      backgroundColor: 'var(--sam-color-bg-surface)',
-      borderBottom: '1px solid var(--sam-color-border-default)',
-      gap: '10px',
-      flexShrink: 0,
-    }}>
+    <header
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        padding: '0 12px',
+        height: '40px',
+        backgroundColor: 'var(--sam-color-bg-surface)',
+        borderBottom: '1px solid var(--sam-color-border-default)',
+        gap: '10px',
+        flexShrink: 0,
+      }}
+    >
       <button
         onClick={onBack}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--sam-color-fg-muted)', padding: '4px', display: 'flex' }}
+        style={{
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          color: 'var(--sam-color-fg-muted)',
+          padding: '4px',
+          display: 'flex',
+        }}
       >
-        <svg style={{ height: 16, width: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg
+          style={{ height: 16, width: 16 }}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
         </svg>
       </button>
-      <span style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--sam-color-fg-primary)' }}>Workspace</span>
+      <span style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--sam-color-fg-primary)' }}>
+        Workspace
+      </span>
     </header>
   );
 }
 
 function CenteredStatus({
-  color, title, subtitle, action, loading: isLoading,
+  color,
+  title,
+  subtitle,
+  action,
+  loading: isLoading,
 }: {
-  color: string; title: string; subtitle?: string | null; action?: React.ReactNode; loading?: boolean;
+  color: string;
+  title: string;
+  subtitle?: string | null;
+  action?: React.ReactNode;
+  loading?: boolean;
 }) {
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      height: '100%', gap: '12px', backgroundColor: '#1a1b26', color: '#a9b1d6',
-    }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100%',
+        gap: '12px',
+        backgroundColor: '#1a1b26',
+        color: '#a9b1d6',
+      }}
+    >
       {isLoading && <Spinner size="lg" />}
       <h3 style={{ fontSize: '1rem', fontWeight: 600, color, margin: 0 }}>{title}</h3>
-      {subtitle && <p style={{ fontSize: '0.875rem', color: '#787c99', margin: 0, maxWidth: '400px', textAlign: 'center' }}>{subtitle}</p>}
+      {subtitle && (
+        <p
+          style={{
+            fontSize: '0.875rem',
+            color: '#787c99',
+            margin: 0,
+            maxWidth: '400px',
+            textAlign: 'center',
+          }}
+        >
+          {subtitle}
+        </p>
+      )}
       {action && <div style={{ marginTop: '4px' }}>{action}</div>}
     </div>
   );
@@ -780,7 +1380,14 @@ function CenteredStatus({
 
 function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
   if (!logs || logs.length === 0) {
-    return <CenteredStatus color="#60a5fa" title="Creating Workspace" subtitle="Initializing..." loading />;
+    return (
+      <CenteredStatus
+        color="#60a5fa"
+        title="Creating Workspace"
+        subtitle="Initializing..."
+        loading
+      />
+    );
   }
 
   // Deduplicate: show latest status per step
@@ -793,12 +1400,20 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
   const statusIcon = (status: BootLogEntry['status']) => {
     switch (status) {
       case 'completed':
-        return <span style={{ color: '#4ade80', marginRight: 8, fontSize: '0.875rem' }}>&#10003;</span>;
+        return (
+          <span style={{ color: '#4ade80', marginRight: 8, fontSize: '0.875rem' }}>&#10003;</span>
+        );
       case 'failed':
-        return <span style={{ color: '#f87171', marginRight: 8, fontSize: '0.875rem' }}>&#10007;</span>;
+        return (
+          <span style={{ color: '#f87171', marginRight: 8, fontSize: '0.875rem' }}>&#10007;</span>
+        );
       case 'started':
       default:
-        return <span style={{ marginRight: 8, display: 'inline-flex' }}><Spinner size="sm" /></span>;
+        return (
+          <span style={{ marginRight: 8, display: 'inline-flex' }}>
+            <Spinner size="sm" />
+          </span>
+        );
     }
   };
 
@@ -806,30 +1421,68 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
   const hasFailed = lastStep?.status === 'failed';
 
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      height: '100%', backgroundColor: '#1a1b26', color: '#a9b1d6', padding: '24px',
-    }}>
-      <h3 style={{ fontSize: '1rem', fontWeight: 600, color: hasFailed ? '#f87171' : '#60a5fa', margin: '0 0 16px 0' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100%',
+        backgroundColor: '#1a1b26',
+        color: '#a9b1d6',
+        padding: '24px',
+      }}
+    >
+      <h3
+        style={{
+          fontSize: '1rem',
+          fontWeight: 600,
+          color: hasFailed ? '#f87171' : '#60a5fa',
+          margin: '0 0 16px 0',
+        }}
+      >
         {hasFailed ? 'Provisioning Failed' : 'Creating Workspace'}
       </h3>
-      <div style={{
-        display: 'flex', flexDirection: 'column', gap: '6px',
-        maxWidth: '400px', width: '100%',
-      }}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '6px',
+          maxWidth: '400px',
+          width: '100%',
+        }}
+      >
         {steps.map((entry, i) => (
-          <div key={i} style={{
-            display: 'flex', alignItems: 'center',
-            fontSize: '0.8125rem',
-            color: entry.status === 'failed' ? '#f87171' : entry.status === 'completed' ? '#787c99' : '#a9b1d6',
-          }}>
+          <div
+            key={i}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              fontSize: '0.8125rem',
+              color:
+                entry.status === 'failed'
+                  ? '#f87171'
+                  : entry.status === 'completed'
+                    ? '#787c99'
+                    : '#a9b1d6',
+            }}
+          >
             {statusIcon(entry.status)}
             <span>{entry.message}</span>
           </div>
         ))}
       </div>
       {lastStep?.status === 'failed' && lastStep.detail && (
-        <p style={{ fontSize: '0.75rem', color: '#787c99', margin: '12px 0 0', maxWidth: '400px', textAlign: 'center', wordBreak: 'break-word' }}>
+        <p
+          style={{
+            fontSize: '0.75rem',
+            color: '#787c99',
+            margin: '12px 0 0',
+            maxWidth: '400px',
+            textAlign: 'center',
+            wordBreak: 'break-word',
+          }}
+        >
           {lastStep.detail}
         </p>
       )}

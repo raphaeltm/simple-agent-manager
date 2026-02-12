@@ -32,7 +32,7 @@ import {
   stopAgentSessionOnNode,
   stopWorkspaceOnNode,
 } from '../services/node-agent';
-import { verifyCallbackToken } from '../services/jwt';
+import { signCallbackToken, verifyCallbackToken } from '../services/jwt';
 import { recordNodeRoutingMetric } from '../services/telemetry';
 import { getDecryptedAgentKey } from './credentials';
 import { getInstallationToken } from '../services/github-app';
@@ -107,12 +107,7 @@ async function getOwnedWorkspace(
   const rows = await db
     .select()
     .from(schema.workspaces)
-    .where(
-      and(
-        eq(schema.workspaces.id, workspaceId),
-        eq(schema.workspaces.userId, userId)
-      )
-    )
+    .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.userId, userId)))
     .limit(1);
 
   const workspace = rows[0];
@@ -131,12 +126,7 @@ async function getOwnedNode(
   const rows = await db
     .select()
     .from(schema.nodes)
-    .where(
-      and(
-        eq(schema.nodes.id, nodeId),
-        eq(schema.nodes.userId, userId)
-      )
-    )
+    .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)))
     .limit(1);
 
   const node = rows[0];
@@ -167,9 +157,27 @@ async function verifyWorkspaceCallbackAuth(
 
   const token = authHeader.slice(7);
   const payload = await verifyCallbackToken(token, c.env);
-  if (payload.workspace !== workspaceId) {
-    throw errors.forbidden('Token workspace mismatch');
+  if (payload.workspace === workspaceId) {
+    return;
   }
+
+  const db = drizzle(c.env.DATABASE, { schema });
+  const rows = await db
+    .select({ nodeId: schema.workspaces.nodeId })
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+
+  const workspace = rows[0];
+  if (!workspace) {
+    throw errors.notFound('Workspace');
+  }
+
+  if (workspace.nodeId && payload.workspace === workspace.nodeId) {
+    return;
+  }
+
+  throw errors.forbidden('Token workspace mismatch');
 }
 
 async function scheduleWorkspaceCreateOnNode(
@@ -189,10 +197,12 @@ async function scheduleWorkspaceCreateOnNode(
     .where(eq(schema.workspaces.id, workspaceId));
 
   try {
+    const callbackToken = await signCallbackToken(workspaceId, env);
     await createWorkspaceOnNode(nodeId, env, userId, {
       workspaceId,
       repository,
       branch,
+      callbackToken,
     });
 
     await db
@@ -254,14 +264,14 @@ workspacesRoutes.get('/:id/events', async (c) => {
   }
 
   try {
-    const result = await fetchWorkspaceEvents(
+    const result = (await fetchWorkspaceEvents(
       workspace.nodeId,
       workspace.id,
       c.env,
       userId,
       limit,
       cursor
-    ) as { events?: Event[]; nextCursor?: string | null };
+    )) as { events?: Event[]; nextCursor?: string | null };
 
     return c.json({
       events: result.events ?? [],
@@ -395,12 +405,7 @@ workspacesRoutes.post('/', async (c) => {
   const nodeWorkspaceRows = await db
     .select({ id: schema.workspaces.id })
     .from(schema.workspaces)
-    .where(
-      and(
-        eq(schema.workspaces.userId, userId),
-        eq(schema.workspaces.nodeId, targetNodeId)
-      )
-    );
+    .where(and(eq(schema.workspaces.userId, userId), eq(schema.workspaces.nodeId, targetNodeId)));
 
   if (nodeWorkspaceRows.length >= limits.maxWorkspacesPerNode) {
     throw errors.badRequest(`Maximum ${limits.maxWorkspacesPerNode} workspaces allowed per node`);
@@ -437,28 +442,34 @@ workspacesRoutes.post('/', async (c) => {
   const reusedExistingNode = !mustProvisionNode;
   const workspaceCountOnNodeBefore = nodeWorkspaceRows.length;
 
-  recordNodeRoutingMetric({
-    metric: 'sc_002_workspace_creation_flow',
-    nodeId: targetNodeId,
-    workspaceId,
-    userId,
-    repository: normalizedRepository,
-    reusedExistingNode,
-    workspaceCountOnNodeBefore,
-    nodeCountForUser,
-    workspaceCountForUser,
-  }, c.env);
+  recordNodeRoutingMetric(
+    {
+      metric: 'sc_002_workspace_creation_flow',
+      nodeId: targetNodeId,
+      workspaceId,
+      userId,
+      repository: normalizedRepository,
+      reusedExistingNode,
+      workspaceCountOnNodeBefore,
+      nodeCountForUser,
+      workspaceCountForUser,
+    },
+    c.env
+  );
 
-  recordNodeRoutingMetric({
-    metric: 'sc_006_node_efficiency',
-    nodeId: targetNodeId,
-    workspaceId,
-    userId,
-    repository: normalizedRepository,
-    reusedExistingNode,
-    nodeCountForUser,
-    workspaceCountForUser,
-  }, c.env);
+  recordNodeRoutingMetric(
+    {
+      metric: 'sc_006_node_efficiency',
+      nodeId: targetNodeId,
+      workspaceId,
+      userId,
+      repository: normalizedRepository,
+      reusedExistingNode,
+      nodeCountForUser,
+      workspaceCountForUser,
+    },
+    c.env
+  );
 
   c.executionCtx.waitUntil(
     (async () => {
@@ -601,18 +612,11 @@ workspacesRoutes.delete('/:id', async (c) => {
     }
   }
 
-  await db
-    .delete(schema.agentSessions)
-    .where(eq(schema.agentSessions.workspaceId, workspace.id));
+  await db.delete(schema.agentSessions).where(eq(schema.agentSessions.workspaceId, workspace.id));
 
   await db
     .delete(schema.workspaces)
-    .where(
-      and(
-        eq(schema.workspaces.id, workspace.id),
-        eq(schema.workspaces.userId, userId)
-      )
-    );
+    .where(and(eq(schema.workspaces.id, workspace.id), eq(schema.workspaces.userId, userId)));
 
   return c.json({ success: true });
 });
@@ -658,7 +662,9 @@ workspacesRoutes.post('/:id/agent-sessions', async (c) => {
   assertNodeOperational(node, 'create agent session');
 
   if (idempotencyKey) {
-    const existingSessionId = await c.env.KV.get(`agent-session-idempotency:${workspace.id}:${userId}:${idempotencyKey}`);
+    const existingSessionId = await c.env.KV.get(
+      `agent-session-idempotency:${workspace.id}:${userId}:${idempotencyKey}`
+    );
     if (existingSessionId) {
       const existingRows = await db
         .select()
@@ -690,7 +696,9 @@ workspacesRoutes.post('/:id/agent-sessions', async (c) => {
     );
 
   if (existingRunning.length >= limits.maxAgentSessionsPerWorkspace) {
-    throw errors.badRequest(`Maximum ${limits.maxAgentSessionsPerWorkspace} agent sessions per workspace`);
+    throw errors.badRequest(
+      `Maximum ${limits.maxAgentSessionsPerWorkspace} agent sessions per workspace`
+    );
   }
 
   const sessionId = ulid();

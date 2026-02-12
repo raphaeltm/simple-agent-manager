@@ -9,6 +9,7 @@ Simple Agent Manager now supports multiple terminal sessions within a single bro
 The multi-terminal feature is controlled by a feature flag. To enable it:
 
 1. Set the environment variable in your `.env` file:
+
    ```bash
    VITE_FEATURE_MULTI_TERMINAL=true
    ```
@@ -19,7 +20,8 @@ The multi-terminal feature is controlled by a feature flag. To enable it:
 
 ### Creating New Terminals
 
-- Click the **+** button in the tab bar
+- In the Workspace page, click the top tab bar **+** menu, then choose **New Terminal Session**
+- In embedded/standalone terminal views, click the **+** button in the terminal tab bar
 - Use keyboard shortcut `Ctrl+Shift+T` (or `Cmd+T` on Mac)
 - Maximum of 10 concurrent terminals per workspace (configurable)
 
@@ -47,6 +49,7 @@ The multi-terminal feature is controlled by a feature flag. To enable it:
 ### Tab Overflow
 
 When you have more tabs than can fit in the viewport:
+
 - Scroll arrows appear on the left/right
 - Click the **⋮** menu to see all terminals in a dropdown
 - The tab bar is horizontally scrollable on touch devices
@@ -60,13 +63,13 @@ When you have more tabs than can fit in the viewport:
 
 ## Keyboard Shortcuts
 
-| Action | Windows/Linux | Mac |
-|--------|--------------|-----|
-| New Terminal | `Ctrl+Shift+T` | `Cmd+T` |
-| Close Terminal | `Ctrl+Shift+W` | `Cmd+W` |
-| Next Tab | `Ctrl+Tab` | `Cmd+Shift+]` |
-| Previous Tab | `Ctrl+Shift+Tab` | `Cmd+Shift+[` |
-| Jump to Tab N | `Alt+[1-9]` | `Cmd+[1-9]` |
+| Action         | Windows/Linux    | Mac           |
+| -------------- | ---------------- | ------------- |
+| New Terminal   | `Ctrl+Shift+T`   | `Cmd+T`       |
+| Close Terminal | `Ctrl+Shift+W`   | `Cmd+W`       |
+| Next Tab       | `Ctrl+Tab`       | `Cmd+Shift+]` |
+| Previous Tab   | `Ctrl+Shift+Tab` | `Cmd+Shift+[` |
+| Jump to Tab N  | `Alt+[1-9]`      | `Cmd+[1-9]`   |
 
 ## Configuration
 
@@ -106,6 +109,7 @@ The multi-terminal interface is fully responsive:
 ## Session Independence
 
 Each terminal maintains its own:
+
 - Working directory
 - Environment variables
 - Command history
@@ -124,17 +128,20 @@ Switching between tabs doesn't affect running commands - they continue executing
 ## Troubleshooting
 
 ### Can't Create New Terminal
+
 - Check if you've reached the maximum limit (10 by default)
 - Verify the VM Agent is running and accepting connections
 - Check browser console for WebSocket errors
 
 ### Tab Not Responding
+
 - The terminal session may have been explicitly closed from another tab/window
 - The workspace may have restarted (fresh PTY sessions are created after restart)
 - Try closing and creating a new tab
 - Check the connection status indicator
 
 ### Keyboard Shortcuts Not Working
+
 - Ensure the terminal doesn't have focus (click outside the terminal area)
 - Check for conflicts with browser or OS shortcuts
 - Some shortcuts may differ on macOS
@@ -182,6 +189,7 @@ The multi-terminal system uses an extended WebSocket protocol:
 ## Future Enhancements
 
 Planned features for future releases:
+
 - Terminal splitting/panes within tabs
 - Terminal sharing between users
 - Command history search across all terminals

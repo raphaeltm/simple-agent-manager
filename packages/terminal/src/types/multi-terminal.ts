@@ -69,7 +69,15 @@ export interface ClientMessage {
   sessionId?: string;
 
   /** Message type */
-  type: 'input' | 'resize' | 'ping' | 'create_session' | 'close_session' | 'rename_session' | 'list_sessions' | 'reattach_session';
+  type:
+    | 'input'
+    | 'resize'
+    | 'ping'
+    | 'create_session'
+    | 'close_session'
+    | 'rename_session'
+    | 'list_sessions'
+    | 'reattach_session';
 
   /** Message payload */
   data?: any;
@@ -80,7 +88,17 @@ export interface ServerMessage {
   sessionId?: string;
 
   /** Message type */
-  type: 'output' | 'session' | 'error' | 'pong' | 'session_created' | 'session_closed' | 'session_renamed' | 'session_list' | 'session_reattached' | 'scrollback';
+  type:
+    | 'output'
+    | 'session'
+    | 'error'
+    | 'pong'
+    | 'session_created'
+    | 'session_closed'
+    | 'session_renamed'
+    | 'session_list'
+    | 'session_reattached'
+    | 'scrollback';
 
   /** Message payload */
   data?: any;
@@ -262,6 +280,32 @@ export interface MultiTerminalProps {
 
   /** Key for sessionStorage persistence. Sessions survive page refresh while VM is alive. */
   persistenceKey?: string;
+
+  /** Hide the built-in terminal tab bar when parent renders its own tab UI. */
+  hideTabBar?: boolean;
+
+  /** Emits session snapshots whenever terminal sessions or active tab changes. */
+  onSessionsChange?: (
+    sessions: MultiTerminalSessionSnapshot[],
+    activeSessionId: string | null
+  ) => void;
+}
+
+/** Read-only terminal session snapshot for parent-level tab UIs. */
+export interface MultiTerminalSessionSnapshot {
+  id: string;
+  name: string;
+  status: TerminalSession['status'];
+  workingDirectory?: string;
+  serverSessionId?: string;
+}
+
+/** Imperative API for controlling MultiTerminal from parent components. */
+export interface MultiTerminalHandle {
+  createSession: () => string | null;
+  activateSession: (sessionId: string) => void;
+  closeSession: (sessionId: string) => void;
+  renameSession: (sessionId: string, name: string) => void;
 }
 
 /**

@@ -28,7 +28,8 @@
 
 - `POST /workspaces`
 - Creates a workspace runtime on the node.
-- Body includes: `workspaceId`, `repository`, `branch`, optional runtime settings.
+- Body includes: `workspaceId`, `repository`, `branch`, `callbackToken`, optional runtime settings.
+- `callbackToken` is workspace-scoped and is used by the Node Agent for control-plane callbacks and per-workspace credential fetches.
 
 - `GET /workspaces/{workspaceId}`
 - Returns workspace runtime status/details.
@@ -75,6 +76,7 @@ Typical codes: `unauthorized`, `forbidden`, `workspace_not_found`, `workspace_no
 ## Related Control Plane Callback Endpoints
 
 Node Agent callback targets exposed by Control Plane:
+
 - `POST https://api.${BASE_DOMAIN}/api/nodes/{nodeId}/ready`
 - `POST https://api.${BASE_DOMAIN}/api/nodes/{nodeId}/heartbeat`
 

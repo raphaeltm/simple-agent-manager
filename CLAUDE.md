@@ -253,6 +253,7 @@ Claude Code now supports dual authentication methods:
 - Cloudflare D1 (SQLite) for app state; Cloudflare KV for bootstrap tokens and boot logs; Cloudflare R2 for Node Agent binaries (014-multi-workspace-nodes)
 
 ## Recent Changes
+- 014-multi-workspace-nodes: Added workspace-scoped callback token flow for Node Agent workspace provisioning/ACP/git credential requests, and unified workspace tab creation UX (`+` menu for terminal/chat sessions with agent-specific chat options when multiple agent keys are configured)
 - 014-multi-workspace-nodes: Added first-class Nodes with multi-workspace hosting, node/workspace event streams, agent sessions, node-scoped routing/auth, and explicit lifecycle control (no idle-triggered shutdown)
 - 014-auth-profile-sync: Resolve and persist the GitHub account primary email at login (via `/user/emails`) and propagate git user name/email into workspace bootstrap so VM agent configures commit identity
 - 013-agent-oauth-support: Dual credential support for Claude Code (API key + OAuth token), credential switching capability, auto-activation behavior

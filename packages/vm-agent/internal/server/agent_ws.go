@@ -41,6 +41,8 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	runtime := s.upsertWorkspaceRuntime(workspaceID, "", "", "running", "")
+
 	requestedSessionID := strings.TrimSpace(r.URL.Query().Get("sessionId"))
 	idempotencyKey := strings.TrimSpace(r.URL.Query().Get("idempotencyKey"))
 	takeover := parseTakeoverParam(r.URL.Query().Get("takeover"))
@@ -113,6 +115,17 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 
 	gatewayCfg := s.acpConfig
 	gatewayCfg.WorkspaceID = workspaceID
+	if callbackToken := s.callbackTokenForWorkspace(workspaceID); callbackToken != "" {
+		gatewayCfg.CallbackToken = callbackToken
+	}
+	if runtime != nil {
+		if workDir := strings.TrimSpace(runtime.ContainerWorkDir); workDir != "" {
+			gatewayCfg.ContainerWorkDir = workDir
+		}
+		if resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue); resolver != nil {
+			gatewayCfg.ContainerResolver = resolver
+		}
+	}
 	gateway := acp.NewGateway(gatewayCfg, conn)
 
 	s.acpMu.Lock()
