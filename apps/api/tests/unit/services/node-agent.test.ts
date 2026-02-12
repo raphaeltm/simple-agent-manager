@@ -38,9 +38,10 @@ describe('node-agent readiness helpers', () => {
     } as never);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith('http://vm-node_abc.example.com:8080/health', {
-      method: 'GET',
-    });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit | undefined];
+    expect(url).toBe('http://vm-node_abc.example.com:8080/health');
+    expect(init?.method).toBe('GET');
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('throws after timeout when node agent health never becomes reachable', async () => {
@@ -59,6 +60,39 @@ describe('node-agent readiness helpers', () => {
 
     const rejection = expect(waitPromise).rejects.toThrow('Node Agent not reachable');
     await vi.advanceTimersByTimeAsync(25);
+    await rejection;
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it('aborts each health probe when fetch hangs and reports timeout details', async () => {
+    vi.useFakeTimers();
+
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      const signal = init?.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        if (!signal) {
+          reject(new Error('missing abort signal'));
+          return;
+        }
+
+        const onAbort = () => reject(new DOMException('Aborted', 'AbortError'));
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal.addEventListener('abort', onAbort, { once: true });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const waitPromise = waitForNodeAgentReady('NODE_HANG', {
+      BASE_DOMAIN: 'example.com',
+      NODE_AGENT_READY_TIMEOUT_MS: '40',
+      NODE_AGENT_READY_POLL_INTERVAL_MS: '10',
+    } as never);
+
+    const rejection = expect(waitPromise).rejects.toThrow(/request timeout after/i);
+    await vi.advanceTimersByTimeAsync(45);
     await rejection;
     expect(fetchMock).toHaveBeenCalled();
   });
