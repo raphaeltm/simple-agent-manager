@@ -315,9 +315,9 @@ function startControlPlaneWorker(publicJwk) {
   };
 }
 
-function connectWebSocket(url, timeoutMs = 10_000) {
+function connectWebSocket(url, timeoutMs = 10_000, options = undefined) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
+    const ws = options ? new WebSocket(url, options) : new WebSocket(url);
 
     const timer = setTimeout(() => {
       ws.close();
@@ -524,7 +524,12 @@ async function runTerminalSmoke(jwtToken) {
 
 async function runAcpSmoke(jwtToken, controlPlane) {
   const acpWsUrl = `ws://127.0.0.1:${VM_AGENT_PORT}/agent/ws?token=${encodeURIComponent(jwtToken)}`;
-  const ws = await connectWebSocket(acpWsUrl);
+  const ws = await connectWebSocket(acpWsUrl, 10_000, {
+    headers: {
+      'X-SAM-Workspace-Id': WORKSPACE_ID,
+      'X-SAM-Node-Id': WORKSPACE_ID,
+    },
+  });
 
   try {
     ws.send(JSON.stringify({ type: 'select_agent', agentType: 'claude-code' }));
