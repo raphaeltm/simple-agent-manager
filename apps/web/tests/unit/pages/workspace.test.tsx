@@ -38,6 +38,7 @@ vi.mock('../../../src/lib/api', () => ({
   stopAgentSession: mocks.stopAgentSession,
   updateWorkspace: mocks.updateWorkspace,
   listAgents: mocks.listAgents,
+  getTranscribeApiUrl: () => 'https://api.example.com/api/transcribe',
 }));
 
 vi.mock('@simple-agent-manager/terminal', () => ({

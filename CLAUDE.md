@@ -471,6 +471,9 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 ### Terminal Access
 - `POST /api/terminal/token` — Get terminal WebSocket token
 
+### Voice Transcription
+- `POST /api/transcribe` — Transcribe audio via Workers AI (Whisper)
+
 ### Authentication (BetterAuth)
 - `POST /api/auth/sign-in/social` — GitHub OAuth login
 - `GET /api/auth/session` — Get current session
@@ -626,6 +629,10 @@ See `apps/api/.env.example`:
 - `NODE_HEARTBEAT_STALE_SECONDS` - Optional staleness threshold for node health
 - `NODE_AGENT_READY_TIMEOUT_MS` - Optional max wait for freshly provisioned node-agent health before first workspace create
 - `NODE_AGENT_READY_POLL_INTERVAL_MS` - Optional polling interval for fresh-node readiness checks
+- `WHISPER_MODEL_ID` - Workers AI model for transcription (default: `@cf/openai/whisper-large-v3-turbo`)
+- `MAX_AUDIO_SIZE_BYTES` - Maximum audio upload size in bytes (default: 10485760)
+- `MAX_AUDIO_DURATION_SECONDS` - Maximum recording duration in seconds (default: 60)
+- `RATE_LIMIT_TRANSCRIBE` - Optional rate limit for transcription requests
 
 ## Testing
 
@@ -661,6 +668,7 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 - **Infra**: Pulumi, Wrangler, @devcontainers/cli, pnpm 9.0+, Cloudflare Pages
 
 ## Recent Changes
+- voice-to-text: Voice input button for agent chat with Workers AI Whisper transcription, VoiceButton component in acp-client, POST /api/transcribe endpoint, configurable model/limits
 - node-data-ownership: Workspace events and node events fetched directly from VM Agent (browser -> VM Agent), removing control plane proxy; new `POST /api/nodes/:id/token` for node-scoped auth tokens; VM Agent event handlers accept browser workspace/session auth
 - 014-multi-workspace-nodes: First-class Nodes with multi-workspace hosting, async provisioning (callback-driven `/ready` + `/provisioning-failed`), workspace recovery on attach, session tab UX with `+` dropdown, node-scoped routing/auth, explicit lifecycle control
 - 014-multi-workspace-nodes: Default fallback devcontainer image changed to `mcr.microsoft.com/devcontainers/base:ubuntu`; bind-mount permission normalization before `devcontainer up`; fresh-node readiness probing with hard timeouts

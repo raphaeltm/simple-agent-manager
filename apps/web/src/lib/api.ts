@@ -359,3 +359,12 @@ export async function deleteAgentCredential(agentType: string): Promise<void> {
     method: 'DELETE',
   });
 }
+
+
+/**
+ * Get the full URL for the voice transcription API endpoint.
+ * Used by the VoiceButton component to send audio for transcription.
+ */
+export function getTranscribeApiUrl(): string {
+  return `${API_URL}/api/transcribe`;
+}
