@@ -341,33 +341,7 @@ Tasks are tracked as markdown files in `tasks/`. See `tasks/README.md` for the f
 
 Task files use the naming convention: `YYYY-MM-DD-descriptive-name.md`
 
-### Task File Template
-
-```markdown
-# Task Title
-
-**Created**: YYYY-MM-DD
-**Status**: backlog | active | complete
-
-## Summary
-Brief description of what needs to be done.
-
-## Requirements
-Detailed requirements from the user request.
-
-## Plan
-Implementation plan with phases/steps. Can be as detailed as needed.
-
-## Checklist
-- [ ] Item 1
-- [ ] Item 2
-
-## Implementation Notes
-Notes added during implementation (decisions, approaches, context).
-
-## Issues & Failures
-Things that didn't work and why.
-```
+Task file template and conventions are defined in `tasks/README.md`.
 
 ## Development Approach
 
@@ -512,21 +486,6 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 - `GET /api/github/installations` — List user's GitHub App installations
 - `GET /api/github/repositories` — List accessible repositories
 
-## Platform Secrets (Cloudflare Worker)
-
-| Secret | Purpose | Required |
-|--------|---------|----------|
-| `ENCRYPTION_KEY` | Encrypt user credentials | Yes |
-| `JWT_PRIVATE_KEY` | Sign auth tokens | Yes |
-| `JWT_PUBLIC_KEY` | Verify auth tokens | Yes |
-| `CF_API_TOKEN` | DNS operations | Yes |
-| `CF_ZONE_ID` | DNS zone | Yes |
-| `GITHUB_CLIENT_ID` | OAuth login | Yes |
-| `GITHUB_CLIENT_SECRET` | OAuth login | Yes |
-| `GITHUB_APP_ID` | Repo access | Yes |
-| `GITHUB_APP_PRIVATE_KEY` | Repo access | Yes |
-| `GITHUB_APP_SLUG` | GitHub App slug for install URL | Yes |
-
 ## Troubleshooting
 
 ### Build Errors
@@ -592,18 +551,6 @@ Claude Code now supports dual authentication methods:
 3. API endpoints go in `apps/api/src/routes/`
 4. UI components go in `apps/web/src/components/`
 
-### Writing Tests
-
-- **MANDATORY**: Any new feature or behavior change MUST include tests before the work is considered complete.
-- Unit tests: `tests/unit/` in each package
-- Unit tests are required for all new or changed business logic, utilities, and UI behavior.
-- Integration tests: `apps/api/tests/integration/`
-- Add integration tests when a change crosses boundaries (route <-> service <-> database, API <-> UI data loading, etc.).
-- Add end-to-end tests for critical user journeys where applicable (especially primary UI flows and regression-prone paths).
-- Do not mark implementation complete unless the relevant test suites pass locally and in CI.
-- Use Miniflare for Worker integration tests
-- Critical paths require >90% coverage
-
 ### Post-Push CI Procedure (Required)
 
 - After every push, check GitHub Actions runs for the pushed commit/branch.
@@ -623,19 +570,6 @@ Claude Code now supports dual authentication methods:
 6. During development Playwright runs, store screenshots in `.codex/tmp/playwright-screenshots/` (gitignored). Do not write screenshots to tracked directories.
 7. For Playwright verification that needs live resources, create fresh test workspaces/nodes and clean them up when testing is complete (delete test workspaces, then delete test nodes if empty).
 8. Do not repurpose or modify old/long-lived workspaces or nodes for validation; only use newly created test resources for the current run.
-
-### Documentation & File Naming
-
-When creating documentation or implementation notes:
-
-- **Location**: Never put documentation files in package roots
-  - Ephemeral working notes (implementation summaries, checklists): `docs/notes/`
-  - Permanent documentation (guides, architecture): `docs/`
-  - Feature specs and design docs: `specs/<feature>/`
-- **Naming**: Use kebab-case for all markdown files
-  - Good: `phase8-implementation-summary.md`, `idle-detection-design.md`
-  - Bad: `PHASE8_IMPLEMENTATION_SUMMARY.md`, `IdleDetectionDesign.md`
-- **Exceptions**: Only `README.md`, `LICENSE`, `CONTRIBUTING.md`, `CHANGELOG.md` use UPPER_CASE
 
 ### Error Handling
 
@@ -694,77 +628,6 @@ See `apps/api/.env.example`:
 - `NODE_AGENT_READY_TIMEOUT_MS` - Optional max wait for freshly provisioned node-agent health before first workspace create
 - `NODE_AGENT_READY_POLL_INTERVAL_MS` - Optional polling interval for fresh-node readiness checks
 
-## Code Patterns
-
-### Provider Implementation
-
-```typescript
-import { Provider, VMConfig, VMInstance } from './types';
-
-export class MyProvider implements Provider {
-  async createVM(config: VMConfig): Promise<VMInstance> {
-    // Implementation
-  }
-}
-```
-
-### Hono Route Handler
-
-```typescript
-import { Hono } from 'hono';
-import { errors } from '../middleware/error';
-
-const routes = new Hono();
-
-routes.post('/endpoint', async (c) => {
-  const body = await c.req.json();
-  if (!body.name) {
-    throw errors.badRequest('Name is required'); // Caught by app.onError()
-  }
-  return c.json({ result: 'success' }, 201);
-});
-```
-
-### React Component
-
-```typescript
-import { FC } from 'react';
-
-interface Props {
-  workspace: Workspace;
-}
-
-export const WorkspaceCard: FC<Props> = ({ workspace }) => {
-  return (
-    <div className="workspace-card">
-      {/* Implementation */}
-    </div>
-  );
-};
-```
-
-## Common Tasks
-
-### Adding a New API Endpoint
-
-1. Create route handler in `apps/api/src/routes/`
-2. Register in `apps/api/src/index.ts`
-3. Add integration tests
-4. Update API contract in `specs/001-mvp/contracts/api.md`
-
-### Adding a New Provider
-
-1. Create provider class in `packages/providers/src/`
-2. Implement `Provider` interface
-3. Export from `packages/providers/src/index.ts`
-4. Add unit tests
-
-### Modifying Cloud-Init
-
-1. Edit `packages/cloud-init/src/template.ts`
-2. Update variable wiring in `packages/cloud-init/src/generate.ts` when needed
-3. Test cloud-init generation through the workspace provisioning flow
-
 ## Testing
 
 **Test credentials** for the live app (`app.simple-agent-manager.org`) are stored at `/workspaces/.tmp/secure/demo-credentials.md` (outside this git repository). This path is intentionally outside the repo so credentials cannot be committed. If the file is missing or outdated, ask the human for the latest credentials, update that file, and then continue Playwright testing.
@@ -792,54 +655,15 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
    - document a temporary exception with rationale and expiration.
 
 ## Active Technologies
-- Markdown (CommonMark) with GitHub Flavored Markdown extensions + None (documentation-only review) (010-docs-review)
-- Git (version-controlled markdown files) (010-docs-review)
-- TypeScript 5.x (React frontend), Go 1.22 (VM Agent) + React 18, xterm.js 5.3, Hono 3.x, gorilla/websocket, creack/pty (011-multi-terminal-ui)
-- In-memory session state only (no persistent storage per constitution) (011-multi-terminal-ui)
-- TypeScript 5.x + Hono (API), React + Vite (UI), Cloudflare Workers (001-mvp)
-- Cloudflare KV (MVP), D1 (future multi-tenancy) (001-mvp)
-- TypeScript 5.x + @devcontainers/cli (exec'd via child process), Hono (API), React + Vite (UI) (002-local-mock-mode)
-- In-memory (Map) for mock mode; no persistent storage (002-local-mock-mode)
-- TypeScript 5.x + BetterAuth + Drizzle ORM + jose (API), React + Vite + TailwindCSS + xterm.js (Web) (003-browser-terminal-saas)
-- Go 1.22+ + creack/pty + gorilla/websocket + golang-jwt (VM Agent) (003-browser-terminal-saas)
-- Cloudflare D1 (SQLite) + KV (sessions) + R2 (binaries) (003-browser-terminal-saas)
-- TypeScript 5.x (API, Web, packages) + Go 1.22+ (VM Agent) + Hono (API), React + Vite (Web), xterm.js (Terminal), Drizzle ORM (Database) (004-mvp-hardening)
-- Cloudflare D1 (workspaces), Cloudflare KV (sessions, bootstrap tokens) (004-mvp-hardening)
-- TypeScript 5.x (Node.js 20+) + Wrangler 3.100+, Hono (API), React + Vite (Web), pnpm 9.0+ (005-automated-deployment)
-- Cloudflare D1 (SQLite), KV (sessions/tokens), R2 (binaries) (005-automated-deployment)
-- TypeScript 5.x (Node.js 20+) + `@pulumi/pulumi`, `@pulumi/cloudflare`, `wrangler`, `@iarna/toml` (005-automated-deployment)
-- Cloudflare R2 (Pulumi state), D1 (app data), KV (sessions) (005-automated-deployment)
-- TypeScript 5.x + React 18 + Vite 5 + shadcn-compatible open-code component workflow, Radix UI primitives, Tailwind-style design tokens/utilities, existing `lucide-react` icons (009-ui-system-standards)
-- Git-tracked specification artifacts and shared package source files (no new runtime database storage) (009-ui-system-standards)
-- Go 1.22+ (VM Agent), TypeScript 5.x (Browser terminal package) + `github.com/creack/pty`, `github.com/gorilla/websocket` (Go); React 18, xterm.js 5.3 (Browser) (012-pty-session-persistence)
-- In-memory only (Go maps, ring buffers) — no database or persistent storage (012-pty-session-persistence)
-- TypeScript 5.x (API, Web), Go 1.22 (VM Agent) + Hono (API), React 18 (Web UI), Drizzle ORM (database), creack/pty + gorilla/websocket (VM Agent) (013-agent-oauth-support)
-- Cloudflare D1 (credentials table with new schema), AES-256-GCM encryption (013-agent-oauth-support)
-- TypeScript 5.x (Node.js >= 20) and Go 1.22 (Node Agent) + Cloudflare Workers (Hono), React 18 + Vite (UI), Drizzle ORM (D1), BetterAuth, Cloudflare KV/R2; Go `net/http` + WebSockets (014-multi-workspace-nodes)
-- Cloudflare D1 (SQLite) for app state; Cloudflare KV for bootstrap tokens and boot logs; Cloudflare R2 for Node Agent binaries (014-multi-workspace-nodes)
+- **API**: TypeScript 5.x, Hono, Drizzle ORM, BetterAuth, jose, Cloudflare Workers
+- **Web**: TypeScript 5.x, React 18, Vite 5, TailwindCSS, xterm.js 5.3, Radix UI, lucide-react
+- **VM Agent**: Go 1.22+, creack/pty, gorilla/websocket, golang-jwt, modernc.org/sqlite
+- **Storage**: Cloudflare D1 (SQLite), KV (sessions/tokens/boot logs), R2 (binaries/Pulumi state)
+- **Infra**: Pulumi, Wrangler, @devcontainers/cli, pnpm 9.0+, Cloudflare Pages
 
 ## Recent Changes
-- 014-multi-workspace-nodes: Node-mode `PrepareWorkspace` now calls `POST /api/workspaces/:id/ready` after successful provisioning (same as bootstrap `Run`), preventing workspaces from getting stuck in `creating` after successful devcontainer setup
-- 014-multi-workspace-nodes: VM Agent now normalizes workspace bind-mount permissions (`chmod -R a+rwX`) before `devcontainer up` so repo `postCreateCommand` steps can write files (for example `npm install` updating lockfiles) when container lifecycle commands run as non-root users
-- 014-multi-workspace-nodes: Unified workspace session tabs were refined to match the existing integrated terminal tab style and now support tab-close actions (`terminal` close for extra terminals, `chat` close to stop session) while keeping the `+` dropdown for terminal or agent-specific chat creation
-- 014-multi-workspace-nodes: Default fallback devcontainer image for repos without a `.devcontainer` config is now `mcr.microsoft.com/devcontainers/base:ubuntu` (instead of `.../universal:2`) to reduce bootstrap resource pressure and avoid frequent `devcontainer up ... signal: killed` failures on modest nodes
-- 014-multi-workspace-nodes: Node `ready` callbacks now dispatch queued `creating` workspaces on that node, so auto-created-node workspace requests are not stranded when long node bootstrap work outlives the original create-request background window
-- 014-multi-workspace-nodes: VM Agent workspace create/restart now runs provisioning asynchronously and final state is callback-driven (`/ready` or `/provisioning-failed`) instead of blocking control-plane dispatch requests on full devcontainer setup duration
-- 014-multi-workspace-nodes: Workspace provisioning failures now callback via `POST /api/workspaces/:id/provisioning-failed`, so control-plane status transitions to `error` even when long background create tasks outlive Worker `waitUntil` execution windows
-- 014-multi-workspace-nodes: VM Agent ACP WebSocket workspace routing now resolves workspace scope from token/session context for browser clients (instead of requiring `X-SAM-Workspace-Id`), restoring chat attach for Claude/Codex sessions
-- 014-multi-workspace-nodes: Workspace desktop session tabs now use an integrated terminal-style strip inside the primary workspace pane (above terminal/chat content, not across the sidebar) with a `+` dropdown that creates terminal sessions or agent-specific chat sessions (`terminal` + `claude/codex/...` when multiple agent keys are configured)
-- 014-multi-workspace-nodes: Fresh-node readiness probing now enforces hard per-request timeouts (`Promise.race` + `AbortController`) so workspace creation fails fast with explicit timeout errors even when runtime fetch abort signals are ignored
-- 014-multi-workspace-nodes: Workspace creation now waits for fresh node-agent backend readiness (`/health`) before dispatching first node workspace create, avoiding immediate fresh-node routing failures (for example Cloudflare 1014/404 races)
-- 014-multi-workspace-nodes: VM Agent legacy-layout recovery now adopts repo-specific workspace paths even when the current runtime path is the existing generic base workspace dir (for example `/workspace`), preventing stale terminal container-label routing on recovered sessions
-- 014-multi-workspace-nodes: VM Agent now avoids reusing legacy single-workspace PTY manager wiring when runtime recovery updates workspace/container paths, so terminal attach uses the recovered workspace-specific devcontainer label instead of stale `/workspace` routing
-- 014-multi-workspace-nodes: Added VM Agent workspace recovery on terminal/ACP attach (rebuilds missing devcontainers and recreates missing in-memory agent sessions by explicit `sessionId`), and ACP client now surfaces gateway error payloads instead of stalling in a waiting state
-- 014-multi-workspace-nodes: Added callback-auth runtime metadata endpoint (`GET /api/workspaces/:id/runtime`) and legacy workspace layout recovery so node restarts can rehydrate terminal/ACP context before attach
-- 014-multi-workspace-nodes: Workspace ACP WebSocket now includes `takeover=1` so selecting an existing chat session can reclaim stale attachments instead of failing with WebSocket 409
-- 014-multi-workspace-nodes: Added workspace-scoped callback token flow for Node Agent workspace provisioning/ACP/git credential requests, and unified workspace tab creation UX (`+` menu for terminal/chat sessions with agent-specific chat options when multiple agent keys are configured)
-- 014-multi-workspace-nodes: Added first-class Nodes with multi-workspace hosting, node/workspace event streams, agent sessions, node-scoped routing/auth, and explicit lifecycle control (no idle-triggered shutdown)
-- 014-auth-profile-sync: Resolve and persist the GitHub account primary email at login (via `/user/emails`) and propagate git user name/email into workspace bootstrap so VM agent configures commit identity
-- 013-agent-oauth-support: Dual credential support for Claude Code (API key + OAuth token), credential switching capability, auto-activation behavior
-- 012-pty-session-persistence: PTY sessions survive page refresh/network interruptions with ring buffer replay and session reattach; orphan cleanup is configurable and disabled by default (`PTY_ORPHAN_GRACE_PERIOD=0`)
-- 010-docs-review: Added Markdown (CommonMark) with GitHub Flavored Markdown extensions + None (documentation-only review)
-- 004-mvp-hardening: Secure bootstrap tokens, workspace ownership validation, provisioning timeouts, shared terminal package, WebSocket reconnection, idle deadline tracking
-- 003-browser-terminal-saas: Added multi-tenant SaaS with GitHub OAuth, VM Agent (Go), browser terminal
+- 014-multi-workspace-nodes: First-class Nodes with multi-workspace hosting, async provisioning (callback-driven `/ready` + `/provisioning-failed`), workspace recovery on attach, session tab UX with `+` dropdown, node-scoped routing/auth, explicit lifecycle control
+- 014-multi-workspace-nodes: Default fallback devcontainer image changed to `mcr.microsoft.com/devcontainers/base:ubuntu`; bind-mount permission normalization before `devcontainer up`; fresh-node readiness probing with hard timeouts
+- 014-auth-profile-sync: GitHub primary email resolved at login, propagated into workspace bootstrap for git commit identity
+- 013-agent-oauth-support: Dual credential support for Claude Code (API key + OAuth token), credential switching, auto-activation
+- 012-pty-session-persistence: PTY sessions survive page refresh with ring buffer replay and session reattach
