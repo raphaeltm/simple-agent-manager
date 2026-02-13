@@ -13,21 +13,13 @@ describe('agent sessions source contract', () => {
     expect(workspacesFile).toContain("workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop'");
   });
 
-  it('passes idempotency key through to node agent create call', () => {
-    expect(workspacesFile).toContain("c.req.header('Idempotency-Key')");
-    expect(nodeAgentFile).toContain('idempotencyKey');
-    expect(nodeAgentFile).toContain("headers.set('Idempotency-Key', options.idempotencyKey)");
-  });
-
   it('supports session lifecycle operations on node agent client', () => {
     expect(nodeAgentFile).toContain('createAgentSessionOnNode');
     expect(nodeAgentFile).toContain('stopAgentSessionOnNode');
   });
 
-  it('contains idempotency and concurrency guards for create-session retries', () => {
-    expect(workspacesFile).toContain('existingSessionId');
+  it('contains concurrency guards for create-session requests', () => {
     expect(workspacesFile).toContain('existingRunning.length >= limits.maxAgentSessionsPerWorkspace');
-    expect(workspacesFile).toContain("c.req.header('Idempotency-Key')");
   });
 
   it('includes attach-stop race handling hooks in ACP websocket layer', () => {

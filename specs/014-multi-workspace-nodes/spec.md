@@ -149,7 +149,7 @@ As a user, I can stop or delete a Node while understanding the impact on its Wor
 #### Agent Sessions (Within a Workspace)
 
 - **FR-012**: System MUST allow a user to create an Agent Session within a Workspace.
-- **FR-012a**: System MUST support idempotent Agent Session creation (for example via client-provided idempotency key) so retried create actions do not create duplicate sessions unintentionally.
+- **FR-012a**: System MUST support idempotent Agent Session creation so retried create actions do not create duplicate sessions unintentionally. This is handled by the VM agent's in-memory deduplication map (not the control plane).
 - **FR-013**: System MUST allow a user to list Agent Sessions for a Workspace, including whether they are running or stopped.
 - **FR-014**: System MUST allow a user to attach to (resume viewing/controlling) a running Agent Session.
 - **FR-014a**: System MUST only allow attaching to an Agent Session while it is running within a running Workspace; after a Workspace stop/restart, prior sessions MUST be shown as stopped and MUST not be attachable.

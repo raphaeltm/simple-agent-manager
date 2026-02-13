@@ -19,7 +19,7 @@
 - If `sessionId` is omitted:
 - Node Agent creates a new Agent Session.
 - Response includes `session.created` event with generated `sessionId`.
-- Session creation supports idempotency via optional `idempotencyKey` query parameter; retries with the same key return/attach to the same created running session.
+- Session creation supports idempotency via optional `idempotencyKey` query parameter; retries with the same key return/attach to the same created running session. This deduplication is handled in-memory by the VM agent (no control-plane KV layer).
 - If `sessionId` is provided:
 - Node Agent attempts to attach to an existing running session in the same Workspace.
 - Response includes `session.attached` event if attach succeeds.

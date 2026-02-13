@@ -346,18 +346,13 @@ export function Workspace() {
 
     try {
       setSessionsLoading(true);
-      const key =
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random()}`;
       const preferredAgent = preferredAgentId
         ? configuredAgents.find((agent) => agent.id === preferredAgentId)
         : undefined;
 
       const created = await createAgentSession(
         id,
-        preferredAgent ? { label: `${preferredAgent.name} Chat` } : {},
-        key
+        preferredAgent ? { label: `${preferredAgent.name} Chat` } : {}
       );
 
       setAgentSessions((prev) => {

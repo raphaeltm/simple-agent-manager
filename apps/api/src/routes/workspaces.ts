@@ -679,7 +679,6 @@ workspacesRoutes.post('/:id/agent-sessions', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const body = await c.req.json<CreateAgentSessionRequest>();
   const limits = getRuntimeLimits(c.env);
-  const idempotencyKey = c.req.header('Idempotency-Key')?.trim();
 
   const workspace = await getOwnedWorkspace(db, workspaceId, userId);
   if (!workspace.nodeId) {
@@ -688,29 +687,6 @@ workspacesRoutes.post('/:id/agent-sessions', async (c) => {
 
   const node = await getOwnedNode(db, workspace.nodeId, userId);
   assertNodeOperational(node, 'create agent session');
-
-  if (idempotencyKey) {
-    const existingSessionId = await c.env.KV.get(
-      `agent-session-idempotency:${workspace.id}:${userId}:${idempotencyKey}`
-    );
-    if (existingSessionId) {
-      const existingRows = await db
-        .select()
-        .from(schema.agentSessions)
-        .where(
-          and(
-            eq(schema.agentSessions.id, existingSessionId),
-            eq(schema.agentSessions.workspaceId, workspace.id),
-            eq(schema.agentSessions.userId, userId)
-          )
-        )
-        .limit(1);
-      const existing = existingRows[0];
-      if (existing) {
-        return c.json(toAgentSessionResponse(existing));
-      }
-    }
-  }
 
   const existingRunning = await db
     .select({ id: schema.agentSessions.id })
@@ -748,7 +724,6 @@ workspacesRoutes.post('/:id/agent-sessions', async (c) => {
       workspace.id,
       sessionId,
       body.label?.trim() || null,
-      idempotencyKey,
       c.env,
       userId
     );
@@ -763,14 +738,6 @@ workspacesRoutes.post('/:id/agent-sessions', async (c) => {
       .where(eq(schema.agentSessions.id, sessionId));
 
     throw errors.internal('Failed to create agent session on node');
-  }
-
-  if (idempotencyKey) {
-    await c.env.KV.put(
-      `agent-session-idempotency:${workspace.id}:${userId}:${idempotencyKey}`,
-      sessionId,
-      { expirationTtl: 60 * 60 }
-    );
   }
 
   const rows = await db
