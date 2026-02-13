@@ -153,6 +153,8 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		Repository    string `json:"repository"`
 		Branch        string `json:"branch"`
 		CallbackToken string `json:"callbackToken,omitempty"`
+		GitUserName   string `json:"gitUserName,omitempty"`
+		GitUserEmail  string `json:"gitUserEmail,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -175,6 +177,8 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runtime := s.upsertWorkspaceRuntime(body.WorkspaceID, strings.TrimSpace(body.Repository), branch, "creating", strings.TrimSpace(body.CallbackToken))
+	runtime.GitUserName = strings.TrimSpace(body.GitUserName)
+	runtime.GitUserEmail = strings.TrimSpace(body.GitUserEmail)
 	s.appendNodeEvent(body.WorkspaceID, "info", "workspace.provisioning", "Workspace provisioning started", map[string]interface{}{
 		"workspaceId": body.WorkspaceID,
 		"repository":  body.Repository,

@@ -189,7 +189,9 @@ async function scheduleWorkspaceCreateOnNode(
   nodeId: string,
   userId: string,
   repository: string,
-  branch: string
+  branch: string,
+  gitUserName?: string | null,
+  gitUserEmail?: string | null
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date().toISOString();
@@ -206,6 +208,8 @@ async function scheduleWorkspaceCreateOnNode(
       repository,
       branch,
       callbackToken,
+      gitUserName,
+      gitUserEmail,
     });
   } catch (err) {
     await db
@@ -514,7 +518,9 @@ workspacesRoutes.post('/', async (c) => {
         targetNodeId,
         userId,
         body.repository,
-        branch
+        branch,
+        auth.user.name,
+        auth.user.email
       );
     })()
   );

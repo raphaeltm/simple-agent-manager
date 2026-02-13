@@ -59,6 +59,8 @@ type WorkspaceRuntime struct {
 	ContainerLabelValue string
 	ContainerWorkDir    string
 	CallbackToken       string
+	GitUserName         string
+	GitUserEmail        string
 	PTY                 *pty.Manager
 }
 
