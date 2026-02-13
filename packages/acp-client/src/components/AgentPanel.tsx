@@ -1,15 +1,30 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import type { AcpSessionHandle } from '../hooks/useAcpSession';
 import type { AcpMessagesHandle, ConversationItem } from '../hooks/useAcpMessages';
+import type { SlashCommand } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { ToolCallCard } from './ToolCallCard';
 import { ThinkingBlock } from './ThinkingBlock';
 import { UsageIndicator } from './UsageIndicator';
 import { ModeSelector } from './ModeSelector';
+import { SlashCommandPalette } from './SlashCommandPalette';
+import type { SlashCommandPaletteHandle } from './SlashCommandPalette';
+
+// =============================================================================
+// Client-side commands (not forwarded to agent)
+// =============================================================================
+
+export const CLIENT_COMMANDS: SlashCommand[] = [
+  { name: 'clear', description: 'Clear chat history', source: 'client' },
+  { name: 'copy', description: 'Copy last response to clipboard', source: 'client' },
+  { name: 'export', description: 'Export conversation as markdown', source: 'client' },
+];
 
 interface AgentPanelProps {
   session: AcpSessionHandle;
   messages: AcpMessagesHandle;
+  /** Slash commands provided by the ACP agent */
+  availableCommands?: SlashCommand[];
   /** Available agent modes (from agent capabilities) */
   modes?: string[];
   /** Currently active mode */
@@ -20,12 +35,43 @@ interface AgentPanelProps {
 
 /**
  * Main conversation container for structured agent interaction.
- * Renders message list, prompt input, and usage indicator.
+ * Renders message list, prompt input, slash command palette, and usage indicator.
  */
-export function AgentPanel({ session, messages, modes, currentMode, onSelectMode }: AgentPanelProps) {
+export function AgentPanel({
+  session,
+  messages,
+  availableCommands = [],
+  modes,
+  currentMode,
+  onSelectMode,
+}: AgentPanelProps) {
   const [input, setInput] = useState('');
+  const [showPalette, setShowPalette] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const paletteRef = useRef<SlashCommandPaletteHandle>(null);
+
+  // Merge agent commands with client commands for the palette
+  const allCommands = useMemo(
+    () => [...availableCommands, ...CLIENT_COMMANDS],
+    [availableCommands]
+  );
+
+  // Derive the filter text from the input
+  const slashFilter = useMemo(() => {
+    const trimmed = input.trimStart();
+    if (!trimmed.startsWith('/')) return null;
+    // Only show palette when the input is a single word starting with /
+    // (i.e., no spaces after the command — once they add args, palette hides)
+    const afterSlash = trimmed.slice(1);
+    if (afterSlash.includes(' ')) return null;
+    return afterSlash;
+  }, [input]);
+
+  // Show/hide palette based on slash filter
+  useEffect(() => {
+    setShowPalette(slashFilter !== null);
+  }, [slashFilter]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -34,11 +80,76 @@ export function AgentPanel({ session, messages, modes, currentMode, onSelectMode
     }
   }, [messages.items.length]);
 
+  // Handle client-side command execution
+  const handleClientCommand = useCallback(
+    (cmd: SlashCommand, _fullText: string) => {
+      switch (cmd.name) {
+        case 'clear':
+          messages.clear();
+          break;
+        case 'copy': {
+          // Find last agent message and copy it
+          const lastAgent = [...messages.items]
+            .reverse()
+            .find((item) => item.kind === 'agent_message');
+          if (lastAgent && lastAgent.kind === 'agent_message') {
+            void navigator.clipboard.writeText(lastAgent.text);
+          }
+          break;
+        }
+        case 'export': {
+          const markdown = exportConversationAsMarkdown(messages.items);
+          downloadTextFile(markdown, 'conversation.md');
+          break;
+        }
+      }
+    },
+    [messages]
+  );
+
+  // Handle slash command selection from the palette
+  const handleCommandSelect = useCallback(
+    (cmd: SlashCommand) => {
+      setShowPalette(false);
+      // For client commands, execute immediately
+      if (cmd.source === 'client') {
+        handleClientCommand(cmd, `/${cmd.name}`);
+        setInput('');
+        return;
+      }
+      // For agent commands, replace input with the command and submit
+      const commandText = `/${cmd.name}`;
+      setInput('');
+      messages.addUserMessage(commandText);
+      session.sendMessage({
+        jsonrpc: '2.0',
+        method: 'session/prompt',
+        id: Date.now(),
+        params: {
+          prompt: [{ type: 'text', text: commandText }],
+        },
+      });
+    },
+    [handleClientCommand, messages, session]
+  );
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const text = input.trim();
     if (!text || session.state !== 'ready') return;
 
+    // Check for client-side commands
+    if (text.startsWith('/')) {
+      const cmdName = (text.slice(1).split(' ')[0] ?? '').toLowerCase();
+      const clientCmd = CLIENT_COMMANDS.find((c) => c.name === cmdName);
+      if (clientCmd) {
+        handleClientCommand(clientCmd, text);
+        setInput('');
+        return;
+      }
+    }
+
+    // Send to agent as normal
     messages.addUserMessage(text);
     session.sendMessage({
       jsonrpc: '2.0',
@@ -52,6 +163,12 @@ export function AgentPanel({ session, messages, modes, currentMode, onSelectMode
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // When palette is visible, delegate navigation keys to it
+    if (showPalette && paletteRef.current) {
+      const consumed = paletteRef.current.handleKeyDown(e);
+      if (consumed) return;
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
@@ -84,34 +201,47 @@ export function AgentPanel({ session, messages, modes, currentMode, onSelectMode
 
       {/* Input area */}
       <div className="border-t border-gray-200 bg-white p-3">
-        <form onSubmit={handleSubmit} className="flex items-end space-x-2">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={session.state === 'ready' ? 'Send a message...' : 'Waiting for agent...'}
-            disabled={session.state !== 'ready'}
-            rows={1}
-            className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm resize-none focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+        <div className="relative">
+          {/* Slash command palette (positioned above input) */}
+          <SlashCommandPalette
+            ref={paletteRef}
+            commands={allCommands}
+            filter={slashFilter ?? ''}
+            onSelect={handleCommandSelect}
+            onDismiss={() => setShowPalette(false)}
+            visible={showPalette}
           />
-          <button
-            type="submit"
-            disabled={!canSend}
-            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Send
-          </button>
-          {isPrompting && (
+          <form onSubmit={handleSubmit} className="flex items-end space-x-2">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={session.state === 'ready' ? 'Send a message... (type / for commands)' : 'Waiting for agent...'}
+              disabled={session.state !== 'ready'}
+              rows={1}
+              className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm resize-none focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+            />
             <button
-              type="button"
-              onClick={() => session.sendMessage({ jsonrpc: '2.0', method: 'session/cancel', params: {} })}
-              className="px-3 py-2 text-sm text-red-600 border border-red-300 rounded-md hover:bg-red-50"
+              type="submit"
+              disabled={!canSend}
+              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ minHeight: 44 }}
             >
-              Cancel
+              Send
             </button>
-          )}
-        </form>
+            {isPrompting && (
+              <button
+                type="button"
+                onClick={() => session.sendMessage({ jsonrpc: '2.0', method: 'session/cancel', params: {} })}
+                className="px-3 py-2 text-sm text-red-600 border border-red-300 rounded-md hover:bg-red-50"
+                style={{ minHeight: 44 }}
+              >
+                Cancel
+              </button>
+            )}
+          </form>
+        </div>
         {/* Usage indicator */}
         <div className="mt-2 flex justify-end">
           <UsageIndicator usage={messages.usage} />
@@ -163,4 +293,48 @@ function ConversationItemView({ item }: { item: ConversationItem }) {
     default:
       return null;
   }
+}
+
+// =============================================================================
+// Helpers for client commands
+// =============================================================================
+
+function exportConversationAsMarkdown(items: ConversationItem[]): string {
+  const lines: string[] = ['# Conversation Export', '', `Exported: ${new Date().toISOString()}`, ''];
+
+  for (const item of items) {
+    switch (item.kind) {
+      case 'user_message':
+        lines.push(`## User`, '', item.text, '');
+        break;
+      case 'agent_message':
+        lines.push(`## Agent`, '', item.text, '');
+        break;
+      case 'thinking':
+        lines.push(`> **Thinking:** ${item.text}`, '');
+        break;
+      case 'tool_call':
+        lines.push(`### Tool: ${item.title}`, '');
+        for (const c of item.content) {
+          if (c.text) {
+            lines.push('```', c.text, '```', '');
+          }
+        }
+        break;
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function downloadTextFile(content: string, filename: string): void {
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
 }
