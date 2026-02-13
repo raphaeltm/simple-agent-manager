@@ -14,13 +14,19 @@ describe('nodes routes source contract', () => {
     expect(file).toContain("nodesRoutes.delete('/:id',");
   });
 
-  it('defines node callback and events endpoints', () => {
-    expect(file).toContain("nodesRoutes.get('/:id/events',");
+  it('defines node callback and token endpoints', () => {
+    expect(file).toContain("nodesRoutes.post('/:id/token',");
     expect(file).toContain("nodesRoutes.post('/:id/ready',");
     expect(file).toContain("nodesRoutes.post('/:id/heartbeat',");
     expect(file).toContain('createWorkspaceOnNode');
     expect(file).toContain('signCallbackToken');
     expect(file).toContain("eq(schema.workspaces.status, 'creating')");
+  });
+
+  it('does not proxy node events (browser fetches directly from VM Agent)', () => {
+    expect(file).not.toContain("nodesRoutes.get('/:id/events',");
+    expect(file).not.toContain('fetchNodeEvents');
+    expect(file).toContain('signNodeManagementToken');
   });
 
   it('implements stop/delete semantics for child workspaces and sessions', () => {

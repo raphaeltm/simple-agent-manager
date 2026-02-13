@@ -114,6 +114,7 @@ export function Workspace() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [wsUrl, setWsUrl] = useState<string | null>(null);
+  const [terminalToken, setTerminalToken] = useState<string | null>(null);
   const [terminalLoading, setTerminalLoading] = useState(false);
   const [terminalError, setTerminalError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(viewOverride ?? 'terminal');
@@ -143,14 +144,12 @@ export function Workspace() {
 
     try {
       setError(null);
-      const [workspaceData, eventsData, sessionsData] = await Promise.all([
+      const [workspaceData, sessionsData] = await Promise.all([
         getWorkspace(id),
-        listWorkspaceEvents(id, 50),
         listAgentSessions(id),
       ]);
       setWorkspace(workspaceData);
       setDisplayNameInput(workspaceData.displayName || workspaceData.name);
-      setWorkspaceEvents(eventsData.events || []);
       setAgentSessions(sessionsData || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load workspace');
@@ -188,12 +187,14 @@ export function Workspace() {
       setTerminalError(null);
 
       const { token } = await getTerminalToken(id);
+      setTerminalToken(token);
       const url = new URL(workspace.url);
       const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsPath = featureFlags.multiTerminal ? '/terminal/ws/multi' : '/terminal/ws';
       setWsUrl(`${wsProtocol}//${url.host}${wsPath}?token=${encodeURIComponent(token)}`);
     } catch (err) {
       setWsUrl(null);
+      setTerminalToken(null);
       setTerminalError(terminalConnectionErrorMessage(err));
     } finally {
       setTerminalLoading(false);
@@ -204,12 +205,29 @@ export function Workspace() {
   useEffect(() => {
     if (!id || !workspace || workspace.status !== 'running' || !workspace.url) {
       setWsUrl(null);
+      setTerminalToken(null);
       setTerminalError(null);
       return;
     }
 
     void connectTerminal();
   }, [id, workspace?.status, workspace?.url, connectTerminal]);
+
+  // Fetch workspace events directly from the VM Agent (not proxied through control plane)
+  useEffect(() => {
+    if (!id || !workspace?.url || !terminalToken || workspace.status !== 'running') {
+      return;
+    }
+
+    const fetchEvents = async () => {
+      const data = await listWorkspaceEvents(workspace.url!, id, terminalToken, 50);
+      setWorkspaceEvents(data.events || []);
+    };
+
+    void fetchEvents();
+    const interval = setInterval(() => void fetchEvents(), 10000);
+    return () => clearInterval(interval);
+  }, [id, workspace?.url, workspace?.status, terminalToken]);
 
   // Load agent options when running
   useEffect(() => {

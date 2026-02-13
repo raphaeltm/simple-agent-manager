@@ -13,7 +13,6 @@ import type {
   BootstrapTokenData,
   CreateAgentSessionRequest,
   CreateWorkspaceRequest,
-  Event,
   HeartbeatRequest,
   HeartbeatResponse,
   UpdateWorkspaceRequest,
@@ -27,7 +26,6 @@ import {
   createAgentSessionOnNode,
   createWorkspaceOnNode,
   deleteWorkspaceOnNode,
-  listWorkspaceEvents as fetchWorkspaceEvents,
   rebuildWorkspaceOnNode,
   restartWorkspaceOnNode,
   stopAgentSessionOnNode,
@@ -247,37 +245,6 @@ workspacesRoutes.get('/', async (c) => {
   });
 
   return c.json(filtered.map((workspace) => toWorkspaceResponse(workspace, c.env.BASE_DOMAIN)));
-});
-
-workspacesRoutes.get('/:id/events', async (c) => {
-  const userId = getUserId(c);
-  const workspaceId = c.req.param('id');
-  const db = drizzle(c.env.DATABASE, { schema });
-  const limit = Number.parseInt(c.req.query('limit') ?? '100', 10);
-  const cursor = c.req.query('cursor');
-
-  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
-  if (!workspace.nodeId) {
-    return c.json({ events: [] as Event[], nextCursor: null });
-  }
-
-  try {
-    const result = (await fetchWorkspaceEvents(
-      workspace.nodeId,
-      workspace.id,
-      c.env,
-      userId,
-      limit,
-      cursor
-    )) as { events?: Event[]; nextCursor?: string | null };
-
-    return c.json({
-      events: result.events ?? [],
-      nextCursor: result.nextCursor ?? null,
-    });
-  } catch {
-    return c.json({ events: [] as Event[], nextCursor: null });
-  }
 });
 
 workspacesRoutes.get('/:id', async (c) => {

@@ -474,6 +474,11 @@ describe('Workspace page', () => {
       renderWorkspace('/workspaces/ws-123');
       await screen.findByText('Workspace A');
 
+      // Wait for events to load (fetched from VM Agent after terminal token is available)
+      await waitFor(() => {
+        expect(mocks.listWorkspaceEvents).toHaveBeenCalled();
+      });
+
       // No overlay initially
       expect(screen.queryByRole('dialog', { name: 'Workspace menu' })).not.toBeInTheDocument();
 

@@ -19,8 +19,9 @@ describe('workspaces routes source contract', () => {
     expect(file).toContain('normalizedDisplayName');
   });
 
-  it('defines workspace events and agent sessions endpoints', () => {
-    expect(file).toContain("workspacesRoutes.get('/:id/events'");
+  it('defines agent sessions endpoints (events moved to direct VM Agent access)', () => {
+    expect(file).not.toContain("workspacesRoutes.get('/:id/events'");
+    expect(file).not.toContain('fetchWorkspaceEvents');
     expect(file).toContain("workspacesRoutes.get('/:id/agent-sessions'");
     expect(file).toContain("workspacesRoutes.post('/:id/agent-sessions'");
     expect(file).toContain("workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop'");
