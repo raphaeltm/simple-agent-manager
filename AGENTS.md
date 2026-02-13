@@ -1,6 +1,6 @@
-# Agent Instructions
+# Simple Agent Manager (SAM) — Agent Instructions
 
-This document provides detailed instructions for AI coding agents working on this project. It combines behavioral rules (equivalent to `.claude/rules/` for non-Claude agents) with project reference information (synced with `CLAUDE.md`).
+> **SYNC DIRECTIVE**: `CLAUDE.md` and `AGENTS.md` MUST be kept identical. Any edit to one file MUST be applied to the other in the same commit. No exceptions.
 
 ---
 
