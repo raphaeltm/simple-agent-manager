@@ -18,6 +18,8 @@ import type {
   AgentCredentialInfo,
   SaveAgentCredentialRequest,
   WorkspaceTab,
+  AgentSettingsResponse,
+  SaveAgentSettingsRequest,
 } from '@simple-agent-manager/shared';
 
 // In production, VITE_API_URL must be explicitly set
@@ -360,11 +362,33 @@ export async function deleteAgentCredential(agentType: string): Promise<void> {
   });
 }
 
-
 /**
  * Get the full URL for the voice transcription API endpoint.
  * Used by the VoiceButton component to send audio for transcription.
  */
 export function getTranscribeApiUrl(): string {
   return `${API_URL}/api/transcribe`;
+}
+
+// =============================================================================
+// Agent Settings
+// =============================================================================
+export async function getAgentSettings(agentType: string): Promise<AgentSettingsResponse> {
+  return request<AgentSettingsResponse>(`/api/agent-settings/${agentType}`);
+}
+
+export async function saveAgentSettings(
+  agentType: string,
+  data: SaveAgentSettingsRequest
+): Promise<AgentSettingsResponse> {
+  return request<AgentSettingsResponse>(`/api/agent-settings/${agentType}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteAgentSettings(agentType: string): Promise<void> {
+  return request<void>(`/api/agent-settings/${agentType}`, {
+    method: 'DELETE',
+  });
 }

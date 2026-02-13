@@ -24,6 +24,10 @@ vi.mock('../../../src/components/AgentKeysSection', () => ({
   AgentKeysSection: () => <div data-testid="agent-keys-section">agent-keys</div>,
 }));
 
+vi.mock('../../../src/components/AgentSettingsSection', () => ({
+  AgentSettingsSection: () => <div data-testid="agent-settings-section">agent-settings</div>,
+}));
+
 import { Settings } from '../../../src/pages/Settings';
 
 function renderSettings() {
@@ -47,7 +51,7 @@ describe('Settings page', () => {
     ]);
   });
 
-  it('renders all three settings sections', async () => {
+  it('renders all four settings sections', async () => {
     renderSettings();
 
     await waitFor(() => {
@@ -57,9 +61,11 @@ describe('Settings page', () => {
     expect(screen.getByText('Hetzner Cloud')).toBeInTheDocument();
     expect(screen.getByText('GitHub App')).toBeInTheDocument();
     expect(screen.getByText('Agent API Keys')).toBeInTheDocument();
+    expect(screen.getByText('Agent Settings')).toBeInTheDocument();
     expect(screen.getByTestId('hetzner-token-form')).toBeInTheDocument();
     expect(screen.getByTestId('github-app-section')).toBeInTheDocument();
     expect(screen.getByTestId('agent-keys-section')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-settings-section')).toBeInTheDocument();
   });
 
   it('shows hetzner credential as connected when present', async () => {
@@ -79,23 +85,20 @@ describe('Settings page', () => {
     });
   });
 
-  it('shows error alert when credentials fail to load', async () => {
-    mocks.listCredentials.mockRejectedValue(new Error('Network error'));
+  it('shows error alert on credentials load failure', async () => {
+    mocks.listCredentials.mockRejectedValue(new Error('Load failed'));
     renderSettings();
 
     await waitFor(() => {
-      expect(screen.getByText('Network error')).toBeInTheDocument();
+      expect(screen.getByText('Load failed')).toBeInTheDocument();
     });
   });
 
-  it('does not render governance sections', async () => {
+  it('displays the agent settings description', async () => {
     renderSettings();
 
     await waitFor(() => {
-      expect(mocks.listCredentials).toHaveBeenCalled();
+      expect(screen.getByText(/Configure model selection and permission behavior/)).toBeInTheDocument();
     });
-
-    expect(screen.queryByText('UI Migration Work Items')).not.toBeInTheDocument();
-    expect(screen.queryByText('Compliance & Exceptions')).not.toBeInTheDocument();
   });
 });

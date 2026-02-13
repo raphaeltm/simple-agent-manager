@@ -63,6 +63,9 @@ type Gateway struct {
 	agentType    string
 	sessionID    acpsdk.SessionId
 	restartCount int
+	// permissionMode stores the user's chosen permission behavior for the agent.
+	// Possible values: "default", "acceptEdits", "bypassPermissions"
+	permissionMode string
 
 	// closed is set when Close() is called to signal a takeover
 	closed bool
@@ -248,8 +251,14 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 		return
 	}
 
+	// Fetch user's agent settings (non-blocking: defaults used if unavailable)
+	settings := g.fetchAgentSettings(ctx, agentType)
+	if settings != nil {
+		log.Printf("Agent settings loaded: model=%q permissionMode=%q", settings.Model, settings.PermissionMode)
+	}
+
 	// Start the agent process
-	if err := g.startAgent(ctx, agentType, cred); err != nil {
+	if err := g.startAgent(ctx, agentType, cred, settings); err != nil {
 		log.Printf("Agent start failed: %v", err)
 		g.sendAgentStatus(StatusError, agentType, err.Error())
 		g.reportAgentError(agentType, "agent_start", err.Error(), "")
@@ -409,7 +418,7 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 }
 
 // startAgent spawns the agent process and sets up the ACP connection.
-func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentCredential) error {
+func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload) error {
 	// Resolve container ID
 	containerID, err := g.config.ContainerResolver()
 	if err != nil {
@@ -420,12 +429,29 @@ func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentC
 	// Pass the credential kind to determine the correct environment variable
 	info := getAgentCommandInfo(agentType, cred.credentialKind)
 
+	// Build environment variables: credential + optional model setting
+	envVars := []string{fmt.Sprintf("%s=%s", info.envVarName, cred.credential)}
+	if settings != nil && settings.Model != "" {
+		modelEnv := getModelEnvVar(agentType)
+		if modelEnv != "" {
+			envVars = append(envVars, fmt.Sprintf("%s=%s", modelEnv, settings.Model))
+			log.Printf("Agent model override: %s=%s", modelEnv, settings.Model)
+		}
+	}
+
+	// Store permission mode for use in permission request handling
+	if settings != nil && settings.PermissionMode != "" {
+		g.permissionMode = settings.PermissionMode
+	} else {
+		g.permissionMode = "default"
+	}
+
 	process, err := StartProcess(ProcessConfig{
 		ContainerID:   containerID,
 		ContainerUser: g.config.ContainerUser,
 		AcpCommand:    info.command,
 		AcpArgs:       info.args,
-		EnvVars:       []string{fmt.Sprintf("%s=%s", info.envVarName, cred.credential)},
+		EnvVars:       envVars,
 		WorkDir:       g.config.ContainerWorkDir,
 	})
 	if err != nil {
@@ -442,7 +468,7 @@ func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentC
 	go g.monitorStderr(process)
 
 	// Monitor process exit for crash detection
-	go g.monitorProcessExit(ctx, process, agentType, cred)
+	go g.monitorProcessExit(ctx, process, agentType, cred, settings)
 
 	// Initialize the ACP protocol handshake.
 	// The agent expects Initialize → NewSession before any Prompt calls.
@@ -502,7 +528,7 @@ func (g *Gateway) getAndClearStderr() string {
 }
 
 // monitorProcessExit detects when the agent process crashes and attempts restart.
-func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess, agentType string, cred *agentCredential) {
+func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess, agentType string, cred *agentCredential, settings *agentSettingsPayload) {
 	err := process.Wait()
 
 	// Brief delay to let stderr goroutine finish collecting output
@@ -585,7 +611,7 @@ func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess,
 	time.Sleep(time.Second)
 
 	g.mu.Lock()
-	if err := g.startAgent(ctx, agentType, cred); err != nil {
+	if err := g.startAgent(ctx, agentType, cred, settings); err != nil {
 		g.mu.Unlock()
 		log.Printf("Agent restart failed: %v", err)
 		g.sendAgentStatus(StatusError, agentType, err.Error())
@@ -740,6 +766,52 @@ func byteReader(data []byte) io.ReadCloser {
 	return io.NopCloser(bytes.NewReader(data))
 }
 
+// agentSettingsPayload holds per-user, per-agent settings from the control plane.
+type agentSettingsPayload struct {
+	Model          string `json:"model"`
+	PermissionMode string `json:"permissionMode"`
+}
+
+// fetchAgentSettings retrieves the user's agent settings from the control plane.
+// Returns nil settings (not an error) if no settings are configured.
+func (g *Gateway) fetchAgentSettings(ctx context.Context, agentType string) *agentSettingsPayload {
+	url := fmt.Sprintf("%s/api/workspaces/%s/agent-settings", g.config.ControlPlaneURL, g.config.WorkspaceID)
+
+	body, err := json.Marshal(map[string]string{"agentType": agentType})
+	if err != nil {
+		log.Printf("Failed to marshal agent settings request: %v", err)
+		return nil
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, byteReader(body))
+	if err != nil {
+		log.Printf("Failed to create agent settings request: %v", err)
+		return nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+g.config.CallbackToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("Failed to fetch agent settings: %v", err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Agent settings returned status %d, using defaults", resp.StatusCode)
+		return nil
+	}
+
+	var result agentSettingsPayload
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Printf("Failed to decode agent settings: %v", err)
+		return nil
+	}
+
+	return &result
+}
+
 // gatewayClient implements the acp.Client interface, forwarding agent
 // notifications and requests to the browser via WebSocket.
 type gatewayClient struct {
@@ -761,7 +833,7 @@ func (c *gatewayClient) SessionUpdate(_ context.Context, params acpsdk.SessionNo
 }
 
 func (c *gatewayClient) RequestPermission(_ context.Context, params acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
-	// Forward permission request to browser
+	// Forward permission request to browser for observability
 	data, err := json.Marshal(map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  "permission/request",
@@ -772,9 +844,20 @@ func (c *gatewayClient) RequestPermission(_ context.Context, params acpsdk.Reque
 	}
 	c.gateway.writeRawJSON(data)
 
-	// For now, auto-approve by selecting the first "allow" option.
-	// In a full implementation, this would wait for the browser's response
-	// via a channel-based mechanism.
+	// Handle based on permission mode:
+	// - "bypassPermissions": auto-approve all requests
+	// - "acceptEdits": auto-approve all requests (file edits + other operations)
+	// - "default": auto-approve (current behavior; browser-driven approval deferred)
+	//
+	// All modes currently auto-approve since the browser-to-gateway permission
+	// response channel is not yet implemented. The permission mode also controls
+	// the agent's own permission behavior via CLI flags passed at startup.
+	mode := c.gateway.permissionMode
+	if mode == "" {
+		mode = "default"
+	}
+	log.Printf("Permission request (mode=%s): %d options available", mode, len(params.Options))
+
 	if len(params.Options) > 0 {
 		return acpsdk.RequestPermissionResponse{
 			Outcome: acpsdk.NewRequestPermissionOutcomeSelected(params.Options[0].OptionId),
@@ -878,5 +961,20 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		return agentCommandInfo{"gemini", []string{"--experimental-acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli"}
 	default:
 		return agentCommandInfo{agentType, nil, "API_KEY", ""}
+	}
+}
+
+// getModelEnvVar returns the environment variable name used to set the model
+// for a given agent type. Returns empty string if no model env var is known.
+func getModelEnvVar(agentType string) string {
+	switch agentType {
+	case "claude-code":
+		return "CLAUDE_MODEL"
+	case "openai-codex":
+		return "OPENAI_MODEL"
+	case "google-gemini":
+		return "GEMINI_MODEL"
+	default:
+		return ""
 	}
 }

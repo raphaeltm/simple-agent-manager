@@ -16,6 +16,7 @@ import { agentsCatalogRoutes } from './routes/agents-catalog';
 import { bootstrapRoutes } from './routes/bootstrap';
 import { uiGovernanceRoutes } from './routes/ui-governance';
 import { transcribeRoutes } from './routes/transcribe';
+import { agentSettingsRoutes } from './routes/agent-settings';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { getRuntimeLimits } from './services/limits';
 import { recordNodeRoutingMetric } from './services/telemetry';
@@ -247,6 +248,7 @@ app.route('/api/agents', agentsCatalogRoutes);
 app.route('/api/bootstrap', bootstrapRoutes);
 app.route('/api/ui-governance', uiGovernanceRoutes);
 app.route('/api/transcribe', transcribeRoutes);
+app.route('/api/agent-settings', agentSettingsRoutes);
 
 // 404 handler
 app.notFound((c) => {
