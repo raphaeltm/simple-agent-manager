@@ -10,6 +10,7 @@ import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { ChatSession } from '../components/ChatSession';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { MoreVertical, X } from 'lucide-react';
 import {
   ApiClientError,
   createAgentSession,
@@ -128,6 +129,7 @@ export function Workspace() {
     Record<string, AgentInfo['id']>
   >({});
   const [hoveredWorkspaceTabId, setHoveredWorkspaceTabId] = useState<string | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const multiTerminalRef = useRef<MultiTerminalHandle | null>(null);
   const createMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -255,6 +257,18 @@ export function Workspace() {
       document.removeEventListener('mousedown', handlePointerDown);
     };
   }, [createMenuOpen]);
+
+  // Close mobile menu on Escape key
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [mobileMenuOpen]);
 
   // Auto-select session from URL on reload
   useEffect(() => {
@@ -914,6 +928,99 @@ export function Workspace() {
     </div>
   ) : null;
 
+  // ── Sidebar content (shared between desktop sidebar and mobile overlay) ──
+  const sidebarContent = (
+    <>
+      <div
+        style={{
+          padding: 'var(--sam-space-3)',
+          borderBottom: '1px solid var(--sam-color-border-default)',
+          display: 'grid',
+          gap: 'var(--sam-space-2)',
+        }}
+      >
+        <label style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+          Workspace name
+        </label>
+        <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
+          <input
+            value={displayNameInput}
+            onChange={(event) => setDisplayNameInput(event.target.value)}
+            style={{
+              flex: 1,
+              borderRadius: 'var(--sam-radius-sm)',
+              border: '1px solid var(--sam-color-border-default)',
+              background: 'var(--sam-color-bg-canvas)',
+              color: 'var(--sam-color-fg-primary)',
+              padding: '6px 8px',
+              minWidth: 0,
+            }}
+          />
+          <Button
+            size="sm"
+            onClick={handleRename}
+            disabled={renaming || !displayNameInput.trim()}
+          >
+            {renaming ? 'Saving...' : 'Rename'}
+          </Button>
+        </div>
+      </div>
+
+      <section
+        style={{
+          borderTop: '1px solid var(--sam-color-border-default)',
+          overflow: 'auto',
+          flex: 1,
+        }}
+      >
+        <div
+          style={{
+            padding: 'var(--sam-space-3)',
+            borderBottom: '1px solid var(--sam-color-border-default)',
+          }}
+        >
+          <strong style={{ fontSize: '0.875rem' }}>Workspace Events</strong>
+        </div>
+        {workspaceEvents.length === 0 ? (
+          <div
+            style={{
+              padding: 'var(--sam-space-3)',
+              fontSize: '0.875rem',
+              color: 'var(--sam-color-fg-muted)',
+            }}
+          >
+            No events yet.
+          </div>
+        ) : (
+          workspaceEvents.map((event) => (
+            <div
+              key={event.id}
+              style={{
+                borderBottom: '1px solid var(--sam-color-border-default)',
+                padding: 'var(--sam-space-3)',
+                fontSize: '0.8125rem',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: 'var(--sam-space-2)',
+                }}
+              >
+                <strong>{event.type}</strong>
+                <span style={{ color: 'var(--sam-color-fg-muted)' }}>
+                  {new Date(event.createdAt).toLocaleTimeString()}
+                </span>
+              </div>
+              <div style={{ color: 'var(--sam-color-fg-muted)' }}>{event.message}</div>
+            </div>
+          ))
+        )}
+      </section>
+    </>
+  );
+
   // ══════════════════════════════════════════════════════════════
   // UNIFIED LAYOUT (responsive for desktop and mobile)
   // ══════════════════════════════════════════════════════════════
@@ -1066,6 +1173,29 @@ export function Workspace() {
           </Button>
         )}
 
+        {/* Mobile sidebar menu button */}
+        {isMobile && (
+          <button
+            onClick={() => setMobileMenuOpen(true)}
+            aria-label="Open workspace menu"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--sam-color-fg-muted)',
+              padding: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minWidth: 44,
+              minHeight: 44,
+              flexShrink: 0,
+            }}
+          >
+            <MoreVertical size={18} />
+          </button>
+        )}
+
         {/* User menu */}
         <UserMenu />
       </header>
@@ -1148,96 +1278,91 @@ export function Workspace() {
               flexDirection: 'column',
             }}
           >
-            <div
-              style={{
-                padding: 'var(--sam-space-3)',
-                borderBottom: '1px solid var(--sam-color-border-default)',
-                display: 'grid',
-                gap: 'var(--sam-space-2)',
-              }}
-            >
-              <label style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
-                Workspace name
-              </label>
-              <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
-                <input
-                  value={displayNameInput}
-                  onChange={(event) => setDisplayNameInput(event.target.value)}
-                  style={{
-                    flex: 1,
-                    borderRadius: 'var(--sam-radius-sm)',
-                    border: '1px solid var(--sam-color-border-default)',
-                    background: 'var(--sam-color-bg-canvas)',
-                    color: 'var(--sam-color-fg-primary)',
-                    padding: '6px 8px',
-                    minWidth: 0,
-                  }}
-                />
-                <Button
-                  size="sm"
-                  onClick={handleRename}
-                  disabled={renaming || !displayNameInput.trim()}
-                >
-                  {renaming ? 'Saving...' : 'Rename'}
-                </Button>
-              </div>
-            </div>
-
-            <section
-              style={{
-                borderTop: '1px solid var(--sam-color-border-default)',
-                overflow: 'auto',
-                flex: 1,
-              }}
-            >
-              <div
-                style={{
-                  padding: 'var(--sam-space-3)',
-                  borderBottom: '1px solid var(--sam-color-border-default)',
-                }}
-              >
-                <strong style={{ fontSize: '0.875rem' }}>Workspace Events</strong>
-              </div>
-              {workspaceEvents.length === 0 ? (
-                <div
-                  style={{
-                    padding: 'var(--sam-space-3)',
-                    fontSize: '0.875rem',
-                    color: 'var(--sam-color-fg-muted)',
-                  }}
-                >
-                  No events yet.
-                </div>
-              ) : (
-                workspaceEvents.map((event) => (
-                  <div
-                    key={event.id}
-                    style={{
-                      borderBottom: '1px solid var(--sam-color-border-default)',
-                      padding: 'var(--sam-space-3)',
-                      fontSize: '0.8125rem',
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        gap: 'var(--sam-space-2)',
-                      }}
-                    >
-                      <strong>{event.type}</strong>
-                      <span style={{ color: 'var(--sam-color-fg-muted)' }}>
-                        {new Date(event.createdAt).toLocaleTimeString()}
-                      </span>
-                    </div>
-                    <div style={{ color: 'var(--sam-color-fg-muted)' }}>{event.message}</div>
-                  </div>
-                ))
-              )}
-            </section>
+            {sidebarContent}
           </aside>
         )}
       </div>
+
+      {/* ── Mobile sidebar overlay ── */}
+      {isMobile && mobileMenuOpen && (
+        <>
+          {/* Backdrop */}
+          <div
+            data-testid="mobile-menu-backdrop"
+            onClick={() => setMobileMenuOpen(false)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              zIndex: 50,
+            }}
+          />
+          {/* Panel (slides from right) */}
+          <div
+            role="dialog"
+            aria-label="Workspace menu"
+            data-testid="mobile-menu-panel"
+            style={{
+              position: 'fixed',
+              top: 0,
+              right: 0,
+              bottom: 0,
+              width: '85vw',
+              maxWidth: 360,
+              backgroundColor: 'var(--sam-color-bg-surface)',
+              borderLeft: '1px solid var(--sam-color-border-default)',
+              zIndex: 51,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Close button header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: 'var(--sam-space-3) var(--sam-space-4)',
+                borderBottom: '1px solid var(--sam-color-border-default)',
+                flexShrink: 0,
+              }}
+            >
+              <span
+                style={{
+                  fontWeight: 600,
+                  fontSize: '0.875rem',
+                  color: 'var(--sam-color-fg-primary)',
+                }}
+              >
+                Workspace
+              </span>
+              <button
+                onClick={() => setMobileMenuOpen(false)}
+                aria-label="Close workspace menu"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--sam-color-fg-muted)',
+                  padding: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minWidth: 44,
+                  minHeight: 44,
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            {/* Scrollable sidebar content */}
+            <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+              {sidebarContent}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
