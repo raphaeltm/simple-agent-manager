@@ -116,7 +116,11 @@ export function ChatSession({
         flexDirection: 'column',
       }}
     >
-      <AgentPanel session={acpSession} messages={acpMessages} />
+      <AgentPanel
+        session={acpSession}
+        messages={acpMessages}
+        availableCommands={acpMessages.availableCommands}
+      />
     </div>
   );
 }

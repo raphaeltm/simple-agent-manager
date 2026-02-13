@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import type { AcpMessage } from './useAcpSession';
+import type { SlashCommand } from '../types';
 
 // =============================================================================
 // Conversation Item Types
@@ -89,6 +90,7 @@ export interface TokenUsage {
 export interface AcpMessagesHandle {
   items: ConversationItem[];
   usage: TokenUsage;
+  availableCommands: SlashCommand[];
   processMessage: (msg: AcpMessage) => void;
   addUserMessage: (text: string) => void;
   clear: () => void;
@@ -110,6 +112,7 @@ function nextId(): string {
 export function useAcpMessages(): AcpMessagesHandle {
   const [items, setItems] = useState<ConversationItem[]>([]);
   const [usage, setUsage] = useState<TokenUsage>({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+  const [availableCommands, setAvailableCommands] = useState<SlashCommand[]>([]);
 
   const processMessage = useCallback((msg: AcpMessage) => {
     // Handle session notifications (method === 'session/update')
@@ -224,11 +227,24 @@ export function useAcpMessages(): AcpMessagesHandle {
           break;
         }
 
-        case 'usage_update':
         case 'available_commands_update': {
-          // Acknowledged ACP notification types that don't need conversation rendering.
-          // usage_update: context window stats
-          // available_commands_update: agent slash commands (not rendered in chat)
+          const commandUpdate = update as {
+            availableCommands?: Array<{ name: string; description?: string; input?: unknown }>;
+          };
+          if (commandUpdate.availableCommands) {
+            setAvailableCommands(
+              commandUpdate.availableCommands.map((cmd) => ({
+                name: cmd.name,
+                description: cmd.description || '',
+                source: 'agent' as const,
+              }))
+            );
+          }
+          break;
+        }
+
+        case 'usage_update': {
+          // Acknowledged ACP notification — context window stats (not rendered in chat)
           break;
         }
 
@@ -282,7 +298,7 @@ export function useAcpMessages(): AcpMessagesHandle {
     setUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   }, []);
 
-  return { items, usage, processMessage, addUserMessage, clear };
+  return { items, usage, availableCommands, processMessage, addUserMessage, clear };
 }
 
 // =============================================================================

@@ -1,3 +1,6 @@
+// Types
+export * from './types';
+
 // Transport
 export * from './transport/types';
 export * from './transport/websocket';
@@ -7,7 +10,9 @@ export * from './hooks/useAcpSession';
 export * from './hooks/useAcpMessages';
 
 // Components
-export { AgentPanel } from './components/AgentPanel';
+export { AgentPanel, CLIENT_COMMANDS } from './components/AgentPanel';
+export { SlashCommandPalette } from './components/SlashCommandPalette';
+export type { SlashCommandPaletteHandle, SlashCommandPaletteProps } from './components/SlashCommandPalette';
 export { MessageBubble } from './components/MessageBubble';
 export { ToolCallCard } from './components/ToolCallCard';
 export { PermissionDialog } from './components/PermissionDialog';
