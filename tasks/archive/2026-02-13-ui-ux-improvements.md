@@ -1,7 +1,7 @@
 # UI/UX Improvements: Dashboard Nav, Node Page, Workspace Sessions
 
 **Created**: 2026-02-13
-**Status**: active
+**Status**: complete
 
 ## Summary
 
@@ -110,7 +110,7 @@ A collection of UI/UX improvements spanning three areas:
 - [x] Fix node detail card padding/spacing — added proper padding, grid layout for node metadata (size, location, IP, heartbeat, created), error message display
 - [x] Add navigation from node page back to dashboard — added breadcrumb nav (Dashboard / Nodes / NodeName)
 - [x] Conditionally hide VM size/location when existing node selected in CreateWorkspace — wrapped in `{!selectedNodeId && (...)}`, also cleaned up labels (removed "(for auto-create)" suffix)
-- [ ] Verify on mobile viewport
+- [x] Verify on mobile viewport — Playwright validated breadcrumb nav, card metadata, conditional fields all render properly on 375x812
 
 ### Phase 2: Workspace Session UX Overhaul
 - [x] Audit current desktop tab strip code
@@ -122,20 +122,20 @@ A collection of UI/UX improvements spanning three areas:
 - [x] Extract TerminalTabContent component — terminal content stays in Workspace.tsx (always mounted, shown/hidden), not extracted to separate component since it shares MultiTerminal ref
 - [x] Update "+" dropdown: agent selection happens when creating a new chat — dropdown lists Terminal + configured agents
 - [x] Test multiple chat sessions are fully independent — each ChatSession has own WebSocket via useAcpSession hook
-- [ ] Verify mobile layout works with tab strip (manual/Playwright)
-- [ ] Verify desktop layout still works (manual/Playwright)
+- [x] Verify mobile layout works with tab strip (manual/Playwright) — Playwright 375x812: tab strip scrolls horizontally, all 3 tabs visible, tab switching works, + menu with touch targets, no old MobileBottomBar
+- [x] Verify desktop layout still works (manual/Playwright) — Playwright 1280x720: header, tab strip, terminal, sidebar, + menu with Terminal/Claude Code, multi-tab creation, tab switching all working
 - [x] Clean up unused mobile components (MobileBottomBar, MobileOverflowMenu, AgentSelector, AgentSessionList, workspace-mobile.css) — deleted files + removed dead mocks from tests
 
 ### Phase 3: VM Agent SQLite Persistence
-- [ ] Choose SQLite library (pure Go preferred)
-- [ ] Design persistence schema
-- [ ] Implement persistence package
-- [ ] Integrate with terminal session create/close
-- [ ] Integrate with agent session create/close
-- [ ] Add API endpoint for tab state
-- [ ] Client-side: load tab state from API on connect
-- [ ] Test cross-device continuity
-- [ ] Handle schema migrations
+- [x] Choose SQLite library (pure Go preferred) — `modernc.org/sqlite` (pure Go, no CGO)
+- [x] Design persistence schema — `tabs` table with id, workspace_id, type, label, agent_id, sort_order, created_at + `schema_version` for migrations
+- [x] Implement persistence package — write-through pattern (insert on create, delete on close, clear on workspace stop/delete)
+- [x] Integrate with terminal session create/close
+- [x] Integrate with agent session create/close
+- [x] Add API endpoint for tab state — `GET /workspaces/{workspaceId}/tabs` with JWT token auth via `?token=` query param
+- [x] Client-side: load tab state from API on connect — `getWorkspaceTabs()` in `apps/web/src/lib/api.ts`
+- [x] Test cross-device continuity
+- [x] Handle schema migrations — `schema_version` table with auto-migration on startup
 
 ## Implementation Notes
 
