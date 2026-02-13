@@ -195,6 +195,12 @@ export async function restartWorkspace(id: string): Promise<{ status: string }> 
   });
 }
 
+export async function rebuildWorkspace(id: string): Promise<{ status: string }> {
+  return request<{ status: string }>(`/api/workspaces/${id}/rebuild`, {
+    method: 'POST',
+  });
+}
+
 export async function deleteWorkspace(id: string): Promise<void> {
   return request<void>(`/api/workspaces/${id}`, {
     method: 'DELETE',

@@ -308,3 +308,16 @@ export async function listAgentSessionsOnNode(
     workspaceId,
   });
 }
+
+export async function rebuildWorkspaceOnNode(
+  nodeId: string,
+  workspaceId: string,
+  env: Env,
+  userId: string
+): Promise<unknown> {
+  return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/rebuild`, {
+    method: 'POST',
+    userId,
+    workspaceId,
+  });
+}

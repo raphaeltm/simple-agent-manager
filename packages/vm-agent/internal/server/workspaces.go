@@ -120,7 +120,8 @@ func (s *Server) startWorkspaceProvision(
 	detail map[string]interface{},
 ) {
 	go func() {
-		if err := s.provisionWorkspaceRuntime(context.Background(), runtime); err != nil {
+		usedFallback, err := s.provisionWorkspaceRuntime(context.Background(), runtime)
+		if err != nil {
 			runtime.Status = "error"
 			runtime.UpdatedAt = nowUTC()
 
@@ -143,7 +144,16 @@ func (s *Server) startWorkspaceProvision(
 
 		runtime.Status = "running"
 		runtime.UpdatedAt = nowUTC()
-		s.appendNodeEvent(runtime.ID, "info", successType, successMessage, detail)
+
+		successDetail := make(map[string]interface{}, len(detail)+1)
+		for key, value := range detail {
+			successDetail[key] = value
+		}
+		if usedFallback {
+			successDetail["devcontainerFallback"] = true
+		}
+
+		s.appendNodeEvent(runtime.ID, "info", successType, successMessage, successDetail)
 	}()
 }
 
@@ -273,6 +283,47 @@ func (s *Server) handleRestartWorkspace(w http.ResponseWriter, r *http.Request) 
 		map[string]interface{}{},
 	)
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{"status": "creating"})
+}
+
+func (s *Server) handleRebuildWorkspace(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		return
+	}
+
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+
+	runtime, ok := s.getWorkspaceRuntime(workspaceID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+
+	if runtime.Status != "running" && runtime.Status != "error" {
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"error":   "workspace_not_ready",
+			"message": "Workspace must be running or in error state to rebuild",
+		})
+		return
+	}
+
+	runtime.Status = "creating"
+	runtime.UpdatedAt = nowUTC()
+	s.appendNodeEvent(workspaceID, "info", "workspace.rebuilding", "Rebuilding devcontainer", nil)
+
+	s.startWorkspaceProvision(
+		runtime,
+		"workspace.rebuild_failed",
+		"Workspace rebuild failed",
+		"workspace.rebuilt",
+		"Workspace rebuilt with devcontainer",
+		map[string]interface{}{},
+	)
+
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{"status": "rebuilding"})
 }
 
 func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {

@@ -19,6 +19,7 @@ import {
   listAgents,
   listAgentSessions,
   listWorkspaceEvents,
+  rebuildWorkspace,
   restartWorkspace,
   stopAgentSession,
   stopWorkspace,
@@ -303,6 +304,23 @@ export function Workspace() {
       setWorkspace((prev) => (prev ? { ...prev, status: 'creating' } : null));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to restart workspace');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRebuild = async () => {
+    if (!id) return;
+    const confirmed = window.confirm(
+      'This will rebuild the devcontainer from scratch. Any unsaved terminal state will be lost. Continue?'
+    );
+    if (!confirmed) return;
+    try {
+      setActionLoading(true);
+      await rebuildWorkspace(id);
+      setWorkspace((prev) => (prev ? { ...prev, status: 'creating' } : null));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to rebuild workspace');
     } finally {
       setActionLoading(false);
     }
@@ -668,6 +686,28 @@ export function Workspace() {
         color="#f87171"
         title="Workspace Error"
         subtitle={workspace?.errorMessage || 'An unexpected error occurred.'}
+        action={
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleRebuild}
+              disabled={actionLoading}
+              loading={actionLoading}
+            >
+              Rebuild Container
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleRestart}
+              disabled={actionLoading}
+              loading={actionLoading}
+            >
+              Restart Workspace
+            </Button>
+          </div>
+        }
       />
     ) : null
   ) : null;
@@ -1149,16 +1189,28 @@ export function Workspace() {
 
         {/* Stop/Restart */}
         {isRunning && (
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={handleStop}
-            disabled={actionLoading}
-            loading={actionLoading}
-            style={{ minHeight: '28px', padding: '0 10px', fontSize: '0.75rem' }}
-          >
-            Stop
-          </Button>
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleRebuild}
+              disabled={actionLoading}
+              loading={actionLoading}
+              style={{ minHeight: '28px', padding: '0 10px', fontSize: '0.75rem' }}
+            >
+              Rebuild
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={handleStop}
+              disabled={actionLoading}
+              loading={actionLoading}
+              style={{ minHeight: '28px', padding: '0 10px', fontSize: '0.75rem' }}
+            >
+              Stop
+            </Button>
+          </>
         )}
         {workspace?.status === 'stopped' && (
           <Button

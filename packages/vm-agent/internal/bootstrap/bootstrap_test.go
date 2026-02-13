@@ -590,7 +590,7 @@ func TestPrepareWorkspaceMarksReady(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := PrepareWorkspace(ctx, cfg, ProvisionState{}); err != nil {
+	if _, err := PrepareWorkspace(ctx, cfg, ProvisionState{}); err != nil {
 		t.Fatalf("PrepareWorkspace returned error: %v", err)
 	}
 
@@ -636,11 +636,145 @@ func TestPrepareWorkspaceReturnsReadyEndpointError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := PrepareWorkspace(ctx, cfg, ProvisionState{})
+	_, err := PrepareWorkspace(ctx, cfg, ProvisionState{})
 	if err == nil {
 		t.Fatal("expected PrepareWorkspace to fail when /ready returns non-2xx")
 	}
 	if !strings.Contains(err.Error(), "ready endpoint returned HTTP 500") {
 		t.Fatalf("expected ready endpoint error, got: %v", err)
+	}
+}
+
+func TestPrepareWorkspaceReturnsFallbackFlag(t *testing.T) {
+	// Mock devcontainer CLI that exits 0 (success, no fallback needed).
+	mockBinDir := t.TempDir()
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	if err := os.WriteFile(mockDevcontainer, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/ready") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer controlPlane.Close()
+
+	cfg := &config.Config{
+		ControlPlaneURL:               controlPlane.URL,
+		WorkspaceID:                   "ws-fallback-test",
+		CallbackToken:                 "cb-token",
+		WorkspaceDir:                  t.TempDir(),
+		ContainerMode:                 false,
+		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	usedFallback, err := PrepareWorkspace(ctx, cfg, ProvisionState{})
+	if err != nil {
+		t.Fatalf("PrepareWorkspace returned error: %v", err)
+	}
+	if usedFallback {
+		t.Fatal("expected usedFallback=false when no fallback is needed")
+	}
+}
+
+func TestEnsureDevcontainerReadyFallsBackOnRepoConfigFailure(t *testing.T) {
+	// Mock devcontainer CLI that fails on first call (repo config)
+	// but succeeds on second call (default config).
+	mockBinDir := t.TempDir()
+	callCountFile := filepath.Join(t.TempDir(), "call-count")
+	os.WriteFile(callCountFile, []byte("0"), 0o644)
+
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	// Script: first invocation fails if no --override-config flag, second (with --override-config) succeeds
+	mockScript := `#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in
+    --override-config) exit 0 ;;
+  esac
+done
+echo "Error: build failed" >&2
+exit 1
+`
+	if err := os.WriteFile(mockDevcontainer, []byte(mockScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+
+	workspaceDir := t.TempDir()
+	// Create a repo devcontainer config so hasDevcontainerConfig returns true
+	devcontainerDir := filepath.Join(workspaceDir, ".devcontainer")
+	os.MkdirAll(devcontainerDir, 0o755)
+	os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(`{"image":"node:20"}`), 0o644)
+
+	cfg := &config.Config{
+		WorkspaceDir:                  workspaceDir,
+		ContainerMode:                 true,
+		ContainerLabelKey:             "devcontainer.local_folder",
+		ContainerLabelValue:           workspaceDir,
+		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
+		DefaultDevcontainerImage:      "mcr.microsoft.com/devcontainers/base:ubuntu",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg)
+	if err != nil {
+		t.Fatalf("ensureDevcontainerReady returned error: %v", err)
+	}
+	if !usedFallback {
+		t.Fatal("expected usedFallback=true when repo config fails and fallback succeeds")
+	}
+
+	// Verify the error log was written
+	errorLogPath := filepath.Join(workspaceDir, ".devcontainer-build-error.log")
+	if _, err := os.Stat(errorLogPath); os.IsNotExist(err) {
+		t.Fatal("expected .devcontainer-build-error.log to exist")
+	}
+}
+
+func TestEnsureDevcontainerReadyNoFallbackWhenRepoConfigSucceeds(t *testing.T) {
+	// Mock devcontainer CLI that always succeeds
+	mockBinDir := t.TempDir()
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	if err := os.WriteFile(mockDevcontainer, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+
+	workspaceDir := t.TempDir()
+	// Create a repo devcontainer config
+	devcontainerDir := filepath.Join(workspaceDir, ".devcontainer")
+	os.MkdirAll(devcontainerDir, 0o755)
+	os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(`{"image":"node:20"}`), 0o644)
+
+	cfg := &config.Config{
+		WorkspaceDir:                  workspaceDir,
+		ContainerMode:                 true,
+		ContainerLabelKey:             "devcontainer.local_folder",
+		ContainerLabelValue:           workspaceDir,
+		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg)
+	if err != nil {
+		t.Fatalf("ensureDevcontainerReady returned error: %v", err)
+	}
+	if usedFallback {
+		t.Fatal("expected usedFallback=false when repo config succeeds")
 	}
 }

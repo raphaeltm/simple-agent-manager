@@ -15,7 +15,7 @@ import (
 	"github.com/workspace/vm-agent/internal/bootstrap"
 )
 
-var prepareWorkspaceForRuntime = bootstrap.PrepareWorkspace
+var prepareWorkspaceForRuntime = bootstrap.PrepareWorkspace // returns (usedFallback bool, error)
 
 type workspaceRuntimeMetadataResponse struct {
 	WorkspaceID string `json:"workspaceId"`
@@ -33,9 +33,9 @@ func (s *Server) callbackTokenForWorkspace(workspaceID string) string {
 	return strings.TrimSpace(s.config.CallbackToken)
 }
 
-func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *WorkspaceRuntime) error {
+func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *WorkspaceRuntime) (bool, error) {
 	if runtime == nil {
-		return fmt.Errorf("workspace runtime is required")
+		return false, fmt.Errorf("workspace runtime is required")
 	}
 
 	callbackToken := strings.TrimSpace(runtime.CallbackToken)
@@ -109,15 +109,16 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 
 	state := bootstrap.ProvisionState{}
 	if cfg.Repository != "" && callbackToken != "" {
-		gitToken, err := s.fetchGitTokenForWorkspace(recoveryCtx, runtime.ID, callbackToken)
-		if err != nil {
-			log.Printf("Workspace %s: recovery proceeding without git token: %v", runtime.ID, err)
+		gitToken, fetchErr := s.fetchGitTokenForWorkspace(recoveryCtx, runtime.ID, callbackToken)
+		if fetchErr != nil {
+			log.Printf("Workspace %s: recovery proceeding without git token: %v", runtime.ID, fetchErr)
 		} else {
 			state.GitHubToken = gitToken
 		}
 	}
 
-	return prepareWorkspaceForRuntime(recoveryCtx, &cfg, state)
+	_, err := prepareWorkspaceForRuntime(recoveryCtx, &cfg, state)
+	return err
 }
 
 func (s *Server) hydrateWorkspaceRuntimeForRecovery(

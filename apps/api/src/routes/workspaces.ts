@@ -28,6 +28,7 @@ import {
   createWorkspaceOnNode,
   deleteWorkspaceOnNode,
   listWorkspaceEvents as fetchWorkspaceEvents,
+  rebuildWorkspaceOnNode,
   restartWorkspaceOnNode,
   stopAgentSessionOnNode,
   stopWorkspaceOnNode,
@@ -620,6 +621,48 @@ workspacesRoutes.post('/:id/restart', async (c) => {
   );
 
   return c.json({ status: 'creating' });
+});
+
+workspacesRoutes.post('/:id/rebuild', async (c) => {
+  const userId = getUserId(c);
+  const workspaceId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  if (!workspace.nodeId) {
+    throw errors.badRequest('Workspace is not attached to a node');
+  }
+  if (workspace.status !== 'running' && workspace.status !== 'error') {
+    throw errors.badRequest(`Workspace must be running or in error state to rebuild, currently ${workspace.status}`);
+  }
+
+  const node = await getOwnedNode(db, workspace.nodeId, userId);
+  assertNodeOperational(node, 'rebuild workspace');
+
+  await db
+    .update(schema.workspaces)
+    .set({ status: 'creating', errorMessage: null, updatedAt: new Date().toISOString() })
+    .where(eq(schema.workspaces.id, workspace.id));
+
+  c.executionCtx.waitUntil(
+    (async () => {
+      const innerDb = drizzle(c.env.DATABASE, { schema });
+      try {
+        await rebuildWorkspaceOnNode(workspace.nodeId!, workspace.id, c.env, userId);
+      } catch (err) {
+        await innerDb
+          .update(schema.workspaces)
+          .set({
+            status: 'error',
+            errorMessage: err instanceof Error ? err.message : 'Failed to rebuild workspace',
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(schema.workspaces.id, workspace.id));
+      }
+    })()
+  );
+
+  return c.json({ status: 'rebuilding' }, 202);
 });
 
 workspacesRoutes.delete('/:id', async (c) => {
