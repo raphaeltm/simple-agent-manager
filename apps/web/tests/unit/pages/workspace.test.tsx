@@ -84,6 +84,22 @@ function renderWorkspace(initialEntry = '/workspaces/ws-123', includeProbe = fal
   );
 }
 
+function setMobileViewport() {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: query.includes('max-width'),
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
+
 describe('Workspace page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -423,6 +439,94 @@ describe('Workspace page', () => {
         { label: 'Codex Chat' },
         expect.any(String)
       );
+    });
+  });
+
+  describe('mobile sidebar menu', () => {
+    it('does NOT show mobile menu button on desktop viewport', async () => {
+      renderWorkspace('/workspaces/ws-123');
+      await screen.findByText('Workspace A');
+
+      expect(screen.queryByRole('button', { name: 'Open workspace menu' })).not.toBeInTheDocument();
+    });
+
+    it('shows mobile menu button on mobile viewport', async () => {
+      setMobileViewport();
+      renderWorkspace('/workspaces/ws-123');
+      await screen.findByText('Workspace A');
+
+      expect(screen.getByRole('button', { name: 'Open workspace menu' })).toBeInTheDocument();
+    });
+
+    it('opens overlay with rename and events sections when menu button is clicked', async () => {
+      mocks.listWorkspaceEvents.mockResolvedValue({
+        events: [
+          {
+            id: 'evt-1',
+            type: 'workspace.created',
+            message: 'Workspace created',
+            createdAt: '2026-02-08T00:00:00.000Z',
+          },
+        ],
+        nextCursor: null,
+      });
+      setMobileViewport();
+      renderWorkspace('/workspaces/ws-123');
+      await screen.findByText('Workspace A');
+
+      // No overlay initially
+      expect(screen.queryByRole('dialog', { name: 'Workspace menu' })).not.toBeInTheDocument();
+
+      // Click the menu button
+      fireEvent.click(screen.getByRole('button', { name: 'Open workspace menu' }));
+
+      // Overlay should now be visible
+      expect(screen.getByRole('dialog', { name: 'Workspace menu' })).toBeInTheDocument();
+
+      // Should contain rename section
+      expect(screen.getByText('Workspace name')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('Workspace A')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /rename/i })).toBeInTheDocument();
+
+      // Should contain events section
+      expect(screen.getByText('Workspace Events')).toBeInTheDocument();
+      expect(screen.getByText('workspace.created')).toBeInTheDocument();
+    });
+
+    it('closes overlay when close button is clicked', async () => {
+      setMobileViewport();
+      renderWorkspace('/workspaces/ws-123');
+      await screen.findByText('Workspace A');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open workspace menu' }));
+      expect(screen.getByRole('dialog', { name: 'Workspace menu' })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Close workspace menu' }));
+      expect(screen.queryByRole('dialog', { name: 'Workspace menu' })).not.toBeInTheDocument();
+    });
+
+    it('closes overlay when backdrop is clicked', async () => {
+      setMobileViewport();
+      renderWorkspace('/workspaces/ws-123');
+      await screen.findByText('Workspace A');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open workspace menu' }));
+      expect(screen.getByRole('dialog', { name: 'Workspace menu' })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId('mobile-menu-backdrop'));
+      expect(screen.queryByRole('dialog', { name: 'Workspace menu' })).not.toBeInTheDocument();
+    });
+
+    it('closes overlay on Escape key press', async () => {
+      setMobileViewport();
+      renderWorkspace('/workspaces/ws-123');
+      await screen.findByText('Workspace A');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open workspace menu' }));
+      expect(screen.getByRole('dialog', { name: 'Workspace menu' })).toBeInTheDocument();
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.queryByRole('dialog', { name: 'Workspace menu' })).not.toBeInTheDocument();
     });
   });
 });
