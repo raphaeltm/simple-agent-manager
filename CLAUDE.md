@@ -33,9 +33,20 @@ packages/
 scripts/
 └── vm/           # VM-side scripts (cloud-init, idle detection)
 
+tasks/            # Task tracking (backlog → active → archive)
 specs/            # Feature specifications
 docs/             # Documentation
 ```
+
+## Task Tracking
+
+Tasks are tracked as markdown files in `tasks/`. See `tasks/README.md` for the full system.
+
+- **`tasks/backlog/`** — Tasks waiting to be worked on
+- **`tasks/active/`** — Tasks currently in progress (with checklists, implementation notes)
+- **`tasks/archive/`** — Completed tasks (moved here when both human and agent agree work is done)
+
+Task files use the naming convention: `YYYY-MM-DD-descriptive-name.md`
 
 ## Development Approach
 

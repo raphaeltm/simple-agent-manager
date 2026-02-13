@@ -46,7 +46,7 @@ vi.mock('@simple-agent-manager/terminal', () => ({
 }));
 
 vi.mock('@simple-agent-manager/acp-client', () => ({
-  useAcpMessages: () => ({ processMessage: vi.fn() }),
+  useAcpMessages: () => ({ processMessage: vi.fn(), items: [] }),
   useAcpSession: mocks.useAcpSession,
   AgentPanel: () => <div data-testid="agent-panel">agent-panel</div>,
 }));
@@ -54,41 +54,6 @@ vi.mock('@simple-agent-manager/acp-client', () => ({
 vi.mock('../../../src/components/UserMenu', () => ({
   UserMenu: () => <div data-testid="user-menu" />,
 }));
-vi.mock('../../../src/components/AgentSelector', () => ({
-  AgentSelector: () => <div data-testid="agent-selector" />,
-}));
-vi.mock('../../../src/components/AgentSessionList', () => ({
-  AgentSessionList: ({
-    sessions,
-    loading,
-    onCreate,
-    onAttach,
-    onStop,
-  }: {
-    sessions: Array<{ id: string; label?: string | null }>;
-    loading?: boolean;
-    onCreate?: () => void;
-    onAttach: (sessionId: string) => void;
-    onStop: (sessionId: string) => void;
-  }) => (
-    <div data-testid="agent-session-list">
-      {onCreate && (
-        <button onClick={onCreate} disabled={loading}>
-          new-session
-        </button>
-      )}
-      {sessions.map((session) => (
-        <div key={session.id}>
-          <span>{session.label || session.id}</span>
-          <button onClick={() => onAttach(session.id)}>attach-{session.id}</button>
-          <button onClick={() => onStop(session.id)}>stop-{session.id}</button>
-        </div>
-      ))}
-    </div>
-  ),
-}));
-vi.mock('../../../src/components/MobileBottomBar', () => ({ MobileBottomBar: () => null }));
-vi.mock('../../../src/components/MobileOverflowMenu', () => ({ MobileOverflowMenu: () => null }));
 
 import { Workspace } from '../../../src/pages/Workspace';
 
@@ -291,6 +256,17 @@ describe('Workspace page', () => {
   });
 
   it('adds takeover flag to ACP websocket URL when a sessionId is selected', async () => {
+    mocks.listAgentSessions.mockResolvedValue([
+      {
+        id: 'sess-1',
+        workspaceId: 'ws-123',
+        status: 'running',
+        label: 'Claude Chat',
+        createdAt: '2026-02-08T00:10:00.000Z',
+        updatedAt: '2026-02-08T00:10:00.000Z',
+      },
+    ]);
+
     renderWorkspace('/workspaces/ws-123?view=conversation&sessionId=sess-1');
 
     await waitFor(() => {

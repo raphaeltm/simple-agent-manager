@@ -96,11 +96,11 @@ describe('Node page', () => {
       expect(mocks.getNode).toHaveBeenCalledWith('node-1');
     });
 
-    expect(screen.getByText('Node 1')).toBeInTheDocument();
+    expect(screen.getAllByText('Node 1').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('button', { name: /stop node/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /delete node/i })).toBeInTheDocument();
     expect(screen.getByText('Node started')).toBeInTheDocument();
-    expect(screen.getByText(/Last heartbeat:/i)).toBeInTheDocument();
+    expect(screen.getByText('Last Heartbeat')).toBeInTheDocument();
   });
 
   it('supports create-workspace navigation from node detail', async () => {
@@ -190,7 +190,7 @@ describe('Node page', () => {
       expect(mocks.getNode).toHaveBeenCalledWith('node-1');
     });
 
-    expect(screen.getByText(/Last heartbeat:/i)).toBeInTheDocument();
+    expect(screen.getByText('Last Heartbeat')).toBeInTheDocument();
     expect(screen.getAllByText(/stale/i).length).toBeGreaterThan(0);
   });
 });

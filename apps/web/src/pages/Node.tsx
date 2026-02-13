@@ -105,6 +105,48 @@ export function Node() {
 
   return (
     <PageLayout title="Node" maxWidth="xl" headerRight={<UserMenu />}>
+      {/* Breadcrumb navigation */}
+      <nav
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--sam-space-2)',
+          marginBottom: 'var(--sam-space-4)',
+          fontSize: '0.875rem',
+          color: 'var(--sam-color-fg-muted)',
+        }}
+      >
+        <button
+          onClick={() => navigate('/dashboard')}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--sam-color-accent-primary)',
+            cursor: 'pointer',
+            padding: 0,
+            fontSize: 'inherit',
+          }}
+        >
+          Dashboard
+        </button>
+        <span>/</span>
+        <button
+          onClick={() => navigate('/nodes')}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--sam-color-accent-primary)',
+            cursor: 'pointer',
+            padding: 0,
+            fontSize: 'inherit',
+          }}
+        >
+          Nodes
+        </button>
+        <span>/</span>
+        <span style={{ color: 'var(--sam-color-fg-primary)' }}>{node?.name || 'Loading...'}</span>
+      </nav>
+
       <div
         style={{
           display: 'flex',
@@ -114,9 +156,6 @@ export function Node() {
           flexWrap: 'wrap',
         }}
       >
-        <Button variant="secondary" onClick={() => navigate('/nodes')}>
-          Back to Nodes
-        </Button>
         <Button onClick={() => navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })}>
           Create Workspace
         </Button>
@@ -157,21 +196,68 @@ export function Node() {
             style={{
               border: '1px solid var(--sam-color-border-default)',
               borderRadius: 'var(--sam-radius-md)',
-              padding: 'var(--sam-space-5)',
+              padding: 'var(--sam-space-6)',
               background: 'var(--sam-color-bg-surface)',
               marginBottom: 'var(--sam-space-6)',
               display: 'grid',
-              gap: 'var(--sam-space-2)',
+              gap: 'var(--sam-space-4)',
             }}
           >
-            <h2 style={{ marginTop: 0, marginBottom: 'var(--sam-space-2)' }}>{node.name}</h2>
-            <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
-              <StatusBadge status={node.status} />
-              <StatusBadge status={node.healthStatus || 'stale'} />
-              <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.875rem' }}>
-                Last heartbeat: {formatTimestamp(node.lastHeartbeatAt)}
-              </span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 'var(--sam-space-3)' }}>
+              <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>{node.name}</h2>
+              <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'center' }}>
+                <StatusBadge status={node.status} />
+                <StatusBadge status={node.healthStatus || 'stale'} />
+              </div>
             </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+                gap: 'var(--sam-space-4)',
+                borderTop: '1px solid var(--sam-color-border-default)',
+                paddingTop: 'var(--sam-space-4)',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginBottom: 'var(--sam-space-1)' }}>Size</div>
+                <div style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-primary)', fontWeight: 500 }}>{node.vmSize}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginBottom: 'var(--sam-space-1)' }}>Location</div>
+                <div style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-primary)', fontWeight: 500 }}>{node.vmLocation}</div>
+              </div>
+              {node.ipAddress && (
+                <div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginBottom: 'var(--sam-space-1)' }}>IP Address</div>
+                  <div style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-primary)', fontFamily: 'monospace' }}>{node.ipAddress}</div>
+                </div>
+              )}
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginBottom: 'var(--sam-space-1)' }}>Last Heartbeat</div>
+                <div style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-primary)' }}>{formatTimestamp(node.lastHeartbeatAt)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginBottom: 'var(--sam-space-1)' }}>Created</div>
+                <div style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-primary)' }}>{new Date(node.createdAt).toLocaleString()}</div>
+              </div>
+            </div>
+
+            {node.errorMessage && (
+              <div
+                style={{
+                  padding: 'var(--sam-space-3)',
+                  backgroundColor: 'rgba(248, 113, 113, 0.1)',
+                  borderRadius: 'var(--sam-radius-sm)',
+                  border: '1px solid rgba(248, 113, 113, 0.3)',
+                  fontSize: '0.875rem',
+                  color: '#f87171',
+                }}
+              >
+                {node.errorMessage}
+              </div>
+            )}
           </section>
 
           <section style={{ marginBottom: 'var(--sam-space-6)' }}>

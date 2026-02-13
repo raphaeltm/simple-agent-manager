@@ -39,6 +39,66 @@ Spec files are historical records tied to a specific feature context. Apply thes
 
 Stale documentation causes real user-facing failures. Users follow setup guides that reference incorrect permissions, wrong URLs, or outdated configuration — and then things break in ways that are hard to debug. Every code change without a corresponding doc update is technical debt that compounds.
 
+## Task Tracking System
+
+Tasks are tracked as markdown files in `tasks/`. This is a lightweight system for managing smaller work items (larger features use speckit).
+
+### Directory Structure
+
+- **`tasks/backlog/`** — Tasks waiting to be worked on
+- **`tasks/active/`** — Tasks currently in progress
+- **`tasks/archive/`** — Completed tasks
+
+### File Naming
+
+`YYYY-MM-DD-descriptive-name.md` (e.g., `2026-02-13-workspace-ux-overhaul.md`)
+
+### Task Lifecycle
+
+1. **Create**: When the user describes work, create a `.md` file in `tasks/backlog/` with the requirements
+2. **Activate**: When starting work, move the file to `tasks/active/`. Add detailed implementation plans, checklists, and notes
+3. **Work**: Keep the task file updated as you work — check off items, add implementation notes, record failures and decisions
+4. **Reference**: Consult the active task file frequently to stay on track
+5. **Archive**: When both human and agent agree the work is complete, move to `tasks/archive/`
+
+### Task File Template
+
+```markdown
+# Task Title
+
+**Created**: YYYY-MM-DD
+**Status**: backlog | active | complete
+
+## Summary
+Brief description of what needs to be done.
+
+## Requirements
+Detailed requirements from the user request.
+
+## Plan
+Implementation plan with phases/steps. Can be as detailed as needed.
+
+## Checklist
+- [ ] Item 1
+- [ ] Item 2
+
+## Implementation Notes
+Notes added during implementation (decisions, approaches, context).
+
+## Issues & Failures
+Things that didn't work and why.
+```
+
+### Rules
+
+- One task file per logical unit of work (may contain multiple subtasks)
+- Keep the checklist current — check items off as you complete them
+- Add implementation notes as you discover things during development
+- Record failures so the same mistakes aren't repeated
+- The task file is the single source of truth for "what am I working on and where am I"
+
+---
+
 ## Architecture Overview
 
 ### Stateless Design
