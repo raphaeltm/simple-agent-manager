@@ -21,3 +21,6 @@ export { FileDiffView } from './components/FileDiffView';
 export { TerminalBlock } from './components/TerminalBlock';
 export { UsageIndicator } from './components/UsageIndicator';
 export { ModeSelector } from './components/ModeSelector';
+
+export { VoiceButton } from './components/VoiceButton';
+export type { VoiceButtonProps } from './components/VoiceButton';

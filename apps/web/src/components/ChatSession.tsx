@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAcpSession, useAcpMessages, AgentPanel } from '@simple-agent-manager/acp-client';
 import type { AgentInfo } from '@simple-agent-manager/shared';
-import { getTerminalToken } from '../lib/api';
+import { getTerminalToken, getTranscribeApiUrl } from '../lib/api';
 
 interface ChatSessionProps {
   /** Workspace ID for token fetching */
@@ -34,6 +34,9 @@ export function ChatSession({
   onActivity,
 }: ChatSessionProps) {
   const [resolvedWsUrl, setResolvedWsUrl] = useState<string | null>(null);
+
+  // Resolve transcription API URL once (stable across renders)
+  const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
   // Parse workspace URL once
   const wsHostInfo = useMemo(() => {
@@ -120,6 +123,7 @@ export function ChatSession({
         session={acpSession}
         messages={acpMessages}
         availableCommands={acpMessages.availableCommands}
+        transcribeApiUrl={transcribeApiUrl}
       />
     </div>
   );
