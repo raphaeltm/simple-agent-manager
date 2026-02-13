@@ -184,6 +184,7 @@ export function createAuth(env: Env) {
       },
     },
     account: {
+      encryptOAuthTokens: true,
       accountLinking: {
         enabled: true,
         trustedProviders: ['github'],
