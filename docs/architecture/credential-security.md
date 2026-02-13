@@ -164,6 +164,34 @@ If `ENCRYPTION_KEY` needs to be rotated:
 3. Remove old key
 4. This is a manual process requiring database migration
 
+## OAuth Token Encryption (BetterAuth)
+
+In addition to user-provided cloud credentials, the platform also encrypts **OAuth tokens** stored by BetterAuth during GitHub login. This is enabled via BetterAuth's built-in `encryptOAuthTokens` option in the account configuration.
+
+### What Is Encrypted
+
+The following fields in the `accounts` table are encrypted at rest:
+
+| Field | Description |
+|-------|-------------|
+| `access_token` | GitHub OAuth access token used for API calls |
+| `refresh_token` | GitHub OAuth refresh token (when available) |
+| `id_token` | OpenID Connect ID token (when available) |
+
+### How It Works
+
+- BetterAuth uses the `secret` value (our `ENCRYPTION_KEY`) to encrypt these token fields before writing them to D1.
+- Decryption happens transparently when BetterAuth reads account records.
+- No application code changes are needed beyond enabling the flag — BetterAuth handles encryption/decryption internally.
+
+### Migration of Existing Tokens
+
+Existing plaintext tokens in the `accounts` table will be re-encrypted on the next user login. This works because `overrideUserInfoOnSignIn` is already enabled in the GitHub social provider config, which causes BetterAuth to overwrite account data (including tokens) on each sign-in.
+
+### Why This Matters
+
+Without this setting, GitHub OAuth tokens are stored as plaintext in D1. If the database were compromised, an attacker could use these tokens to access users' GitHub accounts (within the granted scopes: `read:user`, `user:email`). Encrypting them at rest ensures that a database breach alone does not expose usable tokens.
+
 ## Related Documentation
 
 - [Secrets Taxonomy](./secrets-taxonomy.md) - Full breakdown of all secrets

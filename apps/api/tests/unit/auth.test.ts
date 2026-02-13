@@ -1,5 +1,41 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { selectPrimaryGitHubEmail } from '../../src/auth';
+
+// Capture the options passed to betterAuth so we can assert on config
+let capturedOptions: Record<string, unknown> | undefined;
+vi.mock('better-auth', () => ({
+  betterAuth: (opts: Record<string, unknown>) => {
+    capturedOptions = opts;
+    return { options: opts, handler: vi.fn(), api: {}, $context: Promise.resolve({}) };
+  },
+}));
+vi.mock('drizzle-orm/d1', () => ({
+  drizzle: () => ({}),
+}));
+
+describe('BetterAuth configuration', () => {
+  it('enables OAuth token encryption (encryptOAuthTokens: true)', async () => {
+    // Reset captured options before import
+    capturedOptions = undefined;
+
+    // Dynamic import so mocks are active when createAuth runs
+    const { createAuth } = await import('../../src/auth');
+
+    const fakeEnv = {
+      DATABASE: {},
+      BASE_DOMAIN: 'example.com',
+      ENCRYPTION_KEY: 'test-key',
+      GITHUB_CLIENT_ID: 'test-client-id',
+      GITHUB_CLIENT_SECRET: 'test-client-secret',
+    };
+
+    createAuth(fakeEnv as never);
+
+    expect(capturedOptions).toBeDefined();
+    const account = capturedOptions!.account as { encryptOAuthTokens?: boolean };
+    expect(account.encryptOAuthTokens).toBe(true);
+  });
+});
 
 describe('GitHub auth email selection', () => {
   it('prefers verified primary email from email list', () => {
