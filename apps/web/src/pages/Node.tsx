@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type { Event, NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Alert, Button, PageLayout, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
-import { deleteNode, getNode, listNodeEvents, listWorkspaces, stopNode } from '../lib/api';
+import { deleteNode, getNode, getNodeToken, listNodeEvents, listWorkspaces, stopNode } from '../lib/api';
 
 function formatTimestamp(value: string | null): string {
   if (!value) {
@@ -24,6 +24,8 @@ export function Node() {
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
+  const [nodeToken, setNodeToken] = useState<string | null>(null);
+  const [nodeAgentUrl, setNodeAgentUrl] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,14 +37,12 @@ export function Node() {
 
     try {
       setError(null);
-      const [nodeResponse, workspaceResponse, eventsResponse] = await Promise.all([
+      const [nodeResponse, workspaceResponse] = await Promise.all([
         getNode(id),
         listWorkspaces(undefined, id),
-        listNodeEvents(id, 50),
       ]);
       setNode(nodeResponse);
       setWorkspaces(workspaceResponse);
-      setEvents(eventsResponse.events || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load node');
     } finally {
@@ -57,6 +57,45 @@ export function Node() {
     }, 10000);
     return () => window.clearInterval(interval);
   }, [loadNode]);
+
+  // Fetch a node token when the node is running (for direct VM Agent access)
+  useEffect(() => {
+    if (!id || !node || node.status !== 'running') {
+      setNodeToken(null);
+      setNodeAgentUrl(null);
+      return;
+    }
+
+    const fetchToken = async () => {
+      try {
+        const { token, nodeAgentUrl: agentUrl } = await getNodeToken(id);
+        setNodeToken(token);
+        setNodeAgentUrl(agentUrl);
+      } catch {
+        // Node may not be reachable yet — token fetch is best-effort
+        setNodeToken(null);
+        setNodeAgentUrl(null);
+      }
+    };
+
+    void fetchToken();
+  }, [id, node?.status]);
+
+  // Fetch node events directly from the VM Agent
+  useEffect(() => {
+    if (!nodeToken || !nodeAgentUrl) {
+      return;
+    }
+
+    const fetchEvents = async () => {
+      const data = await listNodeEvents(nodeAgentUrl, nodeToken, 50);
+      setEvents(data.events || []);
+    };
+
+    void fetchEvents();
+    const interval = window.setInterval(() => void fetchEvents(), 10000);
+    return () => window.clearInterval(interval);
+  }, [nodeToken, nodeAgentUrl]);
 
   const handleStop = async () => {
     if (!id || !node) {

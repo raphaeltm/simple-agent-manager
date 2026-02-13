@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const mocks = vi.hoisted(() => ({
   getNode: vi.fn(),
+  getNodeToken: vi.fn(),
   listWorkspaces: vi.fn(),
   listNodeEvents: vi.fn(),
   stopNode: vi.fn(),
@@ -14,6 +15,7 @@ let confirmSpy: ReturnType<typeof vi.spyOn>;
 
 vi.mock('../../../src/lib/api', () => ({
   getNode: mocks.getNode,
+  getNodeToken: mocks.getNodeToken,
   listWorkspaces: mocks.listWorkspaces,
   listNodeEvents: mocks.listNodeEvents,
   stopNode: mocks.stopNode,
@@ -65,6 +67,11 @@ describe('Node page', () => {
         url: 'https://ws-ws-1.example.com',
       },
     ]);
+    mocks.getNodeToken.mockResolvedValue({
+      token: 'node-tok-123',
+      expiresAt: '2026-01-01T01:00:00.000Z',
+      nodeAgentUrl: 'https://vm-node-1.example.com:8080',
+    });
     mocks.listNodeEvents.mockResolvedValue({
       events: [
         {
@@ -99,8 +106,13 @@ describe('Node page', () => {
     expect(screen.getAllByText('Node 1').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('button', { name: /stop node/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /delete node/i })).toBeInTheDocument();
-    expect(screen.getByText('Node started')).toBeInTheDocument();
     expect(screen.getByText('Last Heartbeat')).toBeInTheDocument();
+
+    // Events are now fetched asynchronously from the VM Agent (requires token + agent URL)
+    await waitFor(() => {
+      expect(mocks.listNodeEvents).toHaveBeenCalled();
+    });
+    expect(screen.getByText('Node started')).toBeInTheDocument();
   });
 
   it('supports create-workspace navigation from node detail', async () => {

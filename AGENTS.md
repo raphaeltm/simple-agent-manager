@@ -440,7 +440,7 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 - `GET /api/nodes/:id` — Get node details
 - `POST /api/nodes/:id/stop` — Stop node
 - `DELETE /api/nodes/:id` — Delete node
-- `GET /api/nodes/:id/events` — List node events
+- `POST /api/nodes/:id/token` — Get node-scoped token for direct VM Agent access
 
 ### Workspace Management
 - `POST /api/workspaces` — Create workspace
@@ -450,7 +450,6 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 - `POST /api/workspaces/:id/stop` — Stop a running workspace
 - `POST /api/workspaces/:id/restart` — Restart a workspace
 - `DELETE /api/workspaces/:id` — Delete a workspace
-- `GET /api/workspaces/:id/events` — List workspace events
 
 ### Agent Sessions
 - `GET /api/workspaces/:id/agent-sessions` — List workspace agent sessions
@@ -662,6 +661,7 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 - **Infra**: Pulumi, Wrangler, @devcontainers/cli, pnpm 9.0+, Cloudflare Pages
 
 ## Recent Changes
+- node-data-ownership: Workspace events and node events fetched directly from VM Agent (browser -> VM Agent), removing control plane proxy; new `POST /api/nodes/:id/token` for node-scoped auth tokens; VM Agent event handlers accept browser workspace/session auth
 - 014-multi-workspace-nodes: First-class Nodes with multi-workspace hosting, async provisioning (callback-driven `/ready` + `/provisioning-failed`), workspace recovery on attach, session tab UX with `+` dropdown, node-scoped routing/auth, explicit lifecycle control
 - 014-multi-workspace-nodes: Default fallback devcontainer image changed to `mcr.microsoft.com/devcontainers/base:ubuntu`; bind-mount permission normalization before `devcontainer up`; fresh-node readiness probing with hard timeouts
 - 014-auth-profile-sync: GitHub primary email resolved at login, propagated into workspace bootstrap for git commit identity

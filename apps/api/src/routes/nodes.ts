@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type { CreateNodeRequest, Event, NodeHealthStatus, NodeResponse } from '@simple-agent-manager/shared';
+import type { CreateNodeRequest, NodeHealthStatus, NodeResponse } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import { getUserId, requireAuth } from '../middleware/auth';
@@ -11,11 +11,10 @@ import { requireNodeOwnership } from '../middleware/node-auth';
 import * as schema from '../db/schema';
 import { getRuntimeLimits } from '../services/limits';
 import { createNodeRecord, deleteNodeResources, provisionNode, stopNodeResources } from '../services/nodes';
-import { signCallbackToken, verifyCallbackToken } from '../services/jwt';
+import { signCallbackToken, signNodeManagementToken, verifyCallbackToken } from '../services/jwt';
 import { recordNodeRoutingMetric } from '../services/telemetry';
 import {
   createWorkspaceOnNode,
-  listNodeEvents as fetchNodeEvents,
   stopWorkspaceOnNode,
 } from '../services/node-agent';
 
@@ -273,30 +272,28 @@ nodesRoutes.delete('/:id', async (c) => {
   return c.json({ success: true });
 });
 
-nodesRoutes.get('/:id/events', async (c) => {
+/**
+ * POST /:id/token — Issue a node-scoped management token for direct VM Agent access.
+ * The browser uses this token to call the VM Agent directly for node-level data
+ * (events, health, etc.) without proxying through the control plane.
+ */
+nodesRoutes.post('/:id/token', async (c) => {
   const nodeId = c.req.param('id');
   const userId = getUserId(c);
-  const limit = Number.parseInt(c.req.query('limit') ?? '100', 10);
-  const cursor = c.req.query('cursor');
   const node = await requireNodeOwnership(c, nodeId);
 
   if (!node) {
     throw errors.notFound('Node');
   }
 
-  try {
-    const result = await fetchNodeEvents(nodeId, c.env, userId, limit, cursor) as {
-      events?: Event[];
-      nextCursor?: string | null;
-    };
-
-    return c.json({
-      events: result.events ?? [],
-      nextCursor: result.nextCursor ?? null,
-    });
-  } catch {
-    return c.json({ events: [] as Event[], nextCursor: null });
+  if (node.status !== 'running') {
+    throw errors.badRequest(`Node is not running (status: ${node.status})`);
   }
+
+  const { token, expiresAt } = await signNodeManagementToken(userId, nodeId, null, c.env);
+  const nodeAgentUrl = `https://vm-${nodeId.toLowerCase()}.${c.env.BASE_DOMAIN}:8080`;
+
+  return c.json({ token, expiresAt, nodeAgentUrl });
 });
 
 nodesRoutes.post('/:id/ready', async (c) => {
