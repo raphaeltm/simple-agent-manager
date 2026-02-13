@@ -217,16 +217,10 @@ export async function listAgentSessions(workspaceId: string): Promise<AgentSessi
 
 export async function createAgentSession(
   workspaceId: string,
-  data: CreateAgentSessionRequest = {},
-  idempotencyKey?: string
+  data: CreateAgentSessionRequest = {}
 ): Promise<AgentSession> {
-  const headers: Record<string, string> = {};
-  if (idempotencyKey) {
-    headers['Idempotency-Key'] = idempotencyKey;
-  }
   return request<AgentSession>(`/api/workspaces/${workspaceId}/agent-sessions`, {
     method: 'POST',
-    headers,
     body: JSON.stringify(data),
   });
 }

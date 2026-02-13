@@ -26,11 +26,6 @@ describe('workspaces routes source contract', () => {
     expect(file).toContain("workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop'");
   });
 
-  it('implements idempotent session creation support', () => {
-    expect(file).toContain("c.req.header('Idempotency-Key')");
-    expect(file).toContain('agent-session-idempotency');
-  });
-
   it('uses DB-backed node-scoped unique display names for create and rename', () => {
     expect(file).toContain(
       'const uniqueName = await resolveUniqueWorkspaceDisplayName(db, targetNodeId, body.name)'

@@ -12,7 +12,6 @@ function getNodeBackendBaseUrl(nodeId: string, env: Env): string {
 interface NodeAgentRequestOptions extends RequestInit {
   userId: string;
   workspaceId?: string | null;
-  idempotencyKey?: string;
 }
 
 export function getNodeAgentReadyTimeoutMs(env: { NODE_AGENT_READY_TIMEOUT_MS?: string }): number {
@@ -117,10 +116,6 @@ async function nodeAgentRequest<T>(
     headers.set('X-SAM-Workspace-Id', options.workspaceId);
   } else {
     headers.delete('X-SAM-Workspace-Id');
-  }
-
-  if (options.idempotencyKey) {
-    headers.set('Idempotency-Key', options.idempotencyKey);
   }
 
   const startedAt = Date.now();
@@ -264,7 +259,6 @@ export async function createAgentSessionOnNode(
   workspaceId: string,
   sessionId: string,
   label: string | null,
-  idempotencyKey: string | undefined,
   env: Env,
   userId: string
 ): Promise<unknown> {
@@ -272,7 +266,6 @@ export async function createAgentSessionOnNode(
     method: 'POST',
     userId,
     workspaceId,
-    idempotencyKey,
     body: JSON.stringify({ sessionId, label }),
   });
 }

@@ -202,7 +202,7 @@ app.use('*', cors({
     return origin;
   },
   credentials: true,
-  allowHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
+  allowHeaders: ['Content-Type', 'Authorization'],
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
 

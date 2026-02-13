@@ -54,7 +54,7 @@
 
 - `POST /workspaces/{workspaceId}/agent-sessions`
 - Creates a new agent session.
-- Supports idempotency via `Idempotency-Key` header.
+- The VM agent handles session deduplication in-memory (no control-plane KV layer).
 
 - `POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/stop`
 - Stops a running agent session.

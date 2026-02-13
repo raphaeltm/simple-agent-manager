@@ -65,7 +65,7 @@ Behavior:
 - Agent Sessions do not survive Workspace stop/restart.
 - Stopping/restarting a Workspace terminates all its Agent Sessions and they become non-attachable.
 - By default, only one interactive attachment is active per Agent Session; a second attach shows a clear "already attached" conflict unless the user explicitly chooses takeover.
-- Repeated "create session" actions caused by client retry use idempotency semantics to avoid duplicate sessions.
+- Repeated "create session" actions caused by client retry use VM-agent in-memory idempotency to avoid duplicate sessions.
 
 ## Run Services Without Port Conflicts
 
