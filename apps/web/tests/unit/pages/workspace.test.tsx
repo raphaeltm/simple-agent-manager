@@ -388,7 +388,6 @@ describe('Workspace page', () => {
       expect(mocks.createAgentSession).toHaveBeenCalledWith(
         'ws-123',
         { label: 'Claude Code Chat' },
-        expect.any(String)
       );
     });
   });
@@ -438,7 +437,6 @@ describe('Workspace page', () => {
       expect(mocks.createAgentSession).toHaveBeenCalledWith(
         'ws-123',
         { label: 'Codex Chat' },
-        expect.any(String)
       );
     });
   });

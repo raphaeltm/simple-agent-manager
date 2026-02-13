@@ -15,6 +15,7 @@ import { signCallbackToken, signNodeManagementToken, verifyCallbackToken } from 
 import { recordNodeRoutingMetric } from '../services/telemetry';
 import {
   createWorkspaceOnNode,
+  listNodeEventsOnNode,
   stopWorkspaceOnNode,
 } from '../services/node-agent';
 
@@ -270,6 +271,36 @@ nodesRoutes.delete('/:id', async (c) => {
     );
 
   return c.json({ success: true });
+});
+
+/**
+ * GET /:id/events — Proxy node events from the VM Agent.
+ * Node events are proxied through the control plane because vm-* DNS records are
+ * DNS-only (no Cloudflare SSL termination), so the browser cannot reach them directly
+ * from an HTTPS page. Workspace events use ws-{id} subdomains which ARE Cloudflare-proxied.
+ */
+nodesRoutes.get('/:id/events', async (c) => {
+  const nodeId = c.req.param('id');
+  const userId = getUserId(c);
+  const node = await requireNodeOwnership(c, nodeId);
+
+  if (!node) {
+    throw errors.notFound('Node');
+  }
+
+  if (node.status !== 'running') {
+    return c.json({ events: [], nextCursor: null });
+  }
+
+  const limit = Math.min(Math.max(Number(c.req.query('limit')) || 100, 1), 500);
+
+  try {
+    const result = await listNodeEventsOnNode(nodeId, c.env, userId, limit);
+    return c.json(result);
+  } catch {
+    // Node agent may be unreachable — return empty rather than 500
+    return c.json({ events: [], nextCursor: null });
+  }
 });
 
 /**

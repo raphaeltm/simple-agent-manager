@@ -440,6 +440,7 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 - `GET /api/nodes/:id` — Get node details
 - `POST /api/nodes/:id/stop` — Stop node
 - `DELETE /api/nodes/:id` — Delete node
+- `GET /api/nodes/:id/events` — List node events (proxied from VM Agent; vm-* DNS lacks SSL)
 - `POST /api/nodes/:id/token` — Get node-scoped token for direct VM Agent access
 
 ### Workspace Management
@@ -675,7 +676,7 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 
 ## Recent Changes
 - voice-to-text: Voice input button for agent chat with Workers AI Whisper transcription, VoiceButton component in acp-client, POST /api/transcribe endpoint, configurable model/limits
-- node-data-ownership: Workspace events and node events fetched directly from VM Agent (browser -> VM Agent), removing control plane proxy; new `POST /api/nodes/:id/token` for node-scoped auth tokens; VM Agent event handlers accept browser workspace/session auth
+- node-data-ownership: Workspace events fetched directly from VM Agent (browser -> VM Agent via ws-{id} proxy); node events proxied through control plane (vm-* DNS records lack SSL termination); new `POST /api/nodes/:id/token` for node-scoped auth tokens; VM Agent event handlers accept browser workspace/session auth
 - 014-multi-workspace-nodes: First-class Nodes with multi-workspace hosting, async provisioning (callback-driven `/ready` + `/provisioning-failed`), workspace recovery on attach, session tab UX with `+` dropdown, node-scoped routing/auth, explicit lifecycle control
 - 014-multi-workspace-nodes: Default fallback devcontainer image changed to `mcr.microsoft.com/devcontainers/base:ubuntu`; bind-mount permission normalization before `devcontainer up`; fresh-node readiness probing with hard timeouts
 - 014-auth-profile-sync: GitHub primary email resolved at login, propagated into workspace bootstrap for git commit identity

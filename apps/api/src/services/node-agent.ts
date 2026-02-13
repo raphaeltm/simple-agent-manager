@@ -264,6 +264,18 @@ export async function listAgentSessionsOnNode(
   });
 }
 
+export async function listNodeEventsOnNode(
+  nodeId: string,
+  env: Env,
+  userId: string,
+  limit = 100
+): Promise<{ events: unknown[]; nextCursor?: string | null }> {
+  return nodeAgentRequest(nodeId, env, `/events?limit=${limit}`, {
+    method: 'GET',
+    userId,
+  });
+}
+
 export async function rebuildWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,

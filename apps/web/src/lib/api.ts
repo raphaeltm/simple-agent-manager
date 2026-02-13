@@ -149,39 +149,23 @@ export async function deleteNode(id: string): Promise<{ success: boolean }> {
   });
 }
 
-/**
- * Get a node-scoped management token for direct VM Agent access.
- * Used to fetch node events, health data, etc. directly from the VM Agent.
- */
-export async function getNodeToken(nodeId: string): Promise<{ token: string; expiresAt: string; nodeAgentUrl: string }> {
-  return request<{ token: string; expiresAt: string; nodeAgentUrl: string }>(`/api/nodes/${nodeId}/token`, {
-    method: 'POST',
-  });
-}
-
 
 /**
- * Fetch node events directly from the VM Agent.
- * Requires a node management token obtained from getNodeToken().
+ * Fetch node events via the control plane proxy.
+ * Node events are proxied because vm-* DNS records are DNS-only (no Cloudflare SSL
+ * termination), so the browser cannot reach them directly from an HTTPS page.
  */
 export async function listNodeEvents(
-  nodeAgentUrl: string,
-  token: string,
+  nodeId: string,
   limit = 100,
-  cursor?: string
 ): Promise<{ events: Event[]; nextCursor?: string | null }> {
   const params = new URLSearchParams();
   params.set('limit', String(limit));
-  params.set('token', token);
-  if (cursor) params.set('cursor', cursor);
 
   try {
-    const res = await fetch(`${nodeAgentUrl}/events?${params.toString()}`);
-    if (!res.ok) {
-      return { events: [], nextCursor: null };
-    }
-    const data = await res.json() as { events: Event[]; nextCursor?: string | null };
-    return { events: data.events ?? [], nextCursor: data.nextCursor ?? null };
+    return await request<{ events: Event[]; nextCursor?: string | null }>(
+      `/api/nodes/${nodeId}/events?${params.toString()}`
+    );
   } catch {
     return { events: [], nextCursor: null };
   }

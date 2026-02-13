@@ -23,9 +23,9 @@ describe('nodes routes source contract', () => {
     expect(file).toContain("eq(schema.workspaces.status, 'creating')");
   });
 
-  it('does not proxy node events (browser fetches directly from VM Agent)', () => {
-    expect(file).not.toContain("nodesRoutes.get('/:id/events',");
-    expect(file).not.toContain('fetchNodeEvents');
+  it('proxies node events from VM Agent (vm-* DNS records lack SSL termination)', () => {
+    expect(file).toContain("nodesRoutes.get('/:id/events',");
+    expect(file).toContain('listNodeEventsOnNode');
     expect(file).toContain('signNodeManagementToken');
   });
 
