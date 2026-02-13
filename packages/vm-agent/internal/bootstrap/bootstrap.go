@@ -105,11 +105,16 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 
 	reporter.Log("devcontainer_wait", "started", "Waiting for devcontainer CLI")
 	reporter.Log("devcontainer_up", "started", "Building devcontainer")
-	if err := ensureDevcontainerReady(ctx, cfg); err != nil {
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg)
+	if err != nil {
 		reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", err.Error())
 		return err
 	}
-	reporter.Log("devcontainer_up", "completed", "Devcontainer ready")
+	if usedFallback {
+		reporter.Log("devcontainer_up", "completed", "Devcontainer ready (fallback to default image)")
+	} else {
+		reporter.Log("devcontainer_up", "completed", "Devcontainer ready")
+	}
 
 	reporter.Log("workspace_perms", "started", "Setting workspace permissions")
 	if err := ensureWorkspaceWritable(ctx, cfg); err != nil {
@@ -145,9 +150,11 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 // PrepareWorkspace provisions a workspace repository/devcontainer and configures
 // git credentials/identity using the provided state. This is used by node-mode
 // workspace creation where workspaces are prepared on demand rather than at VM boot.
-func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionState) error {
+// Returns (usedFallback, error) where usedFallback is true if the devcontainer
+// build fell back to the default image.
+func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionState) (bool, error) {
 	if cfg == nil {
-		return errors.New("config is required")
+		return false, errors.New("config is required")
 	}
 
 	bootstrap := &bootstrapState{
@@ -159,28 +166,29 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	}
 
 	if err := ensureRepositoryReady(ctx, cfg, bootstrap); err != nil {
-		return err
+		return false, err
 	}
 	if err := ensureWorkspaceWritablePreDevcontainer(ctx, cfg); err != nil {
-		return err
+		return false, err
 	}
-	if err := ensureDevcontainerReady(ctx, cfg); err != nil {
-		return err
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg)
+	if err != nil {
+		return false, err
 	}
 	if err := ensureWorkspaceWritable(ctx, cfg); err != nil {
-		return err
+		return usedFallback, err
 	}
 	if err := ensureGitCredentialHelper(ctx, cfg); err != nil {
-		return err
+		return usedFallback, err
 	}
 	if err := ensureGitIdentity(ctx, cfg, bootstrap); err != nil {
-		return err
+		return usedFallback, err
 	}
 	if err := markWorkspaceReady(ctx, cfg); err != nil {
-		return err
+		return usedFallback, err
 	}
 
-	return nil
+	return usedFallback, nil
 }
 
 func ensureWorkspaceWritablePreDevcontainer(ctx context.Context, cfg *config.Config) error {
@@ -459,53 +467,88 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 	return nil
 }
 
-func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) error {
+// ensureDevcontainerReady builds and starts the devcontainer for the workspace.
+// It returns (usedFallback, error) where usedFallback is true if the repo's own
+// devcontainer config failed and the default image was used instead.
+func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) (bool, error) {
 	if _, err := findDevcontainerID(ctx, cfg); err == nil {
 		log.Printf("Devcontainer already running for %s=%s", cfg.ContainerLabelKey, cfg.ContainerLabelValue)
-		return nil
+		return false, nil
 	}
 
 	// Wait for devcontainer CLI to be available. Cloud-init installs Node.js and
 	// devcontainer CLI asynchronously AFTER the VM Agent starts — there is a race
 	// where the agent tries to run "devcontainer up" before the CLI exists.
 	if err := waitForCommand(ctx, "devcontainer"); err != nil {
-		return fmt.Errorf("devcontainer CLI never became available: %w", err)
+		return false, fmt.Errorf("devcontainer CLI never became available: %w", err)
 	}
 
 	log.Printf("Starting devcontainer for workspace at %s", cfg.WorkspaceDir)
 
-	args := []string{"up", "--workspace-folder", cfg.WorkspaceDir}
 	hasConfig := hasDevcontainerConfig(cfg.WorkspaceDir)
 
-	if !hasConfig {
-		// Repo has no devcontainer config — provide a default via --override-config.
-		// The devcontainer CLI requires a config file; without one it fails with
-		// "Dev container config not found". We write a default config that uses
-		// DEFAULT_DEVCONTAINER_IMAGE (configurable at runtime).
-		configPath, err := writeDefaultDevcontainerConfig(cfg)
-		if err != nil {
-			return fmt.Errorf("failed to write default devcontainer config: %w", err)
+	if hasConfig {
+		// Try with repo's own devcontainer config first.
+		args := []string{"up", "--workspace-folder", cfg.WorkspaceDir}
+		if cfg.AdditionalFeatures != "" {
+			log.Printf("Repo has its own devcontainer config — skipping additional-features injection")
 		}
-		log.Printf("Repo has no devcontainer config — using default: %s (image: %s)", configPath, cfg.DefaultDevcontainerImage)
-		args = append(args, "--override-config", configPath)
+
+		cmd := exec.CommandContext(ctx, "devcontainer", args...)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			// Repo config failed — log the error and fall back to default image.
+			log.Printf("Devcontainer build failed with repo config, falling back to default image: %v: %s", err, strings.TrimSpace(string(output)))
+
+			// Write build error log to the workspace directory for debugging.
+			errorLogPath := filepath.Join(cfg.WorkspaceDir, ".devcontainer-build-error.log")
+			if writeErr := os.WriteFile(errorLogPath, output, 0o644); writeErr != nil {
+				log.Printf("Warning: failed to write devcontainer build error log to %s: %v", errorLogPath, writeErr)
+			}
+
+			// Retry with the default config.
+			usedFallback, fallbackErr := runDevcontainerWithDefault(ctx, cfg)
+			if fallbackErr != nil {
+				return false, fmt.Errorf("devcontainer fallback also failed: %w (original error: %v)", fallbackErr, err)
+			}
+			_ = usedFallback // always true here
+			log.Printf("Devcontainer fallback succeeded with default image")
+			return true, nil
+		}
+
+		return false, nil
 	}
 
-	if cfg.AdditionalFeatures != "" && !hasConfig {
-		// Inject additional features (e.g. Node.js for ACP adapters) on top of the
-		// default config. These compose with --override-config.
+	// No config — use default.
+	_, err := runDevcontainerWithDefault(ctx, cfg)
+	if err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+// runDevcontainerWithDefault writes a default devcontainer config and runs devcontainer up
+// with --override-config and optional --additional-features.
+func runDevcontainerWithDefault(ctx context.Context, cfg *config.Config) (bool, error) {
+	configPath, err := writeDefaultDevcontainerConfig(cfg)
+	if err != nil {
+		return false, fmt.Errorf("failed to write default devcontainer config: %w", err)
+	}
+	log.Printf("Using default devcontainer config: %s (image: %s)", configPath, cfg.DefaultDevcontainerImage)
+
+	args := []string{"up", "--workspace-folder", cfg.WorkspaceDir, "--override-config", configPath}
+	if cfg.AdditionalFeatures != "" {
 		log.Printf("Injecting additional devcontainer features: %s", cfg.AdditionalFeatures)
 		args = append(args, "--additional-features", cfg.AdditionalFeatures)
-	} else if cfg.AdditionalFeatures != "" && hasConfig {
-		log.Printf("Repo has its own devcontainer config — skipping additional-features injection")
 	}
 
 	cmd := exec.CommandContext(ctx, "devcontainer", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("devcontainer up failed: %w: %s", err, strings.TrimSpace(string(output)))
+		return false, fmt.Errorf("devcontainer up failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
-	return nil
+	return true, nil
 }
 
 // writeDefaultDevcontainerConfig writes a default devcontainer.json to the configured

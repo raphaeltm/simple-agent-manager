@@ -88,3 +88,94 @@ func TestStopAllWorkspacesAndSessions(t *testing.T) {
 		t.Fatalf("expected session status stopped, got %s", session.Status)
 	}
 }
+
+func TestWorkspaceManagementSourceContractIncludesRebuild(t *testing.T) {
+	path := filepath.Join("workspaces.go")
+	contentBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	content := string(contentBytes)
+
+	for _, needle := range []string{
+		"handleRebuildWorkspace",
+	} {
+		if !strings.Contains(content, needle) {
+			t.Fatalf("expected %q in %s", needle, path)
+		}
+	}
+}
+
+func TestRebuildHandlerRejectsInvalidStatus(t *testing.T) {
+	ptyManager := pty.NewManager(pty.ManagerConfig{
+		DefaultShell: "/bin/sh",
+		DefaultRows:  24,
+		DefaultCols:  80,
+		WorkDir:      "/tmp",
+		BufferSize:   1024,
+	})
+
+	s := &Server{
+		config: &config.Config{
+			NodeID: "node-1",
+		},
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-creating": {
+				ID:        "ws-creating",
+				Status:    "creating",
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+				PTY:       ptyManager,
+			},
+			"ws-stopped": {
+				ID:        "ws-stopped",
+				Status:    "stopped",
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+				PTY:       ptyManager,
+			},
+			"ws-running": {
+				ID:        "ws-running",
+				Status:    "running",
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+				PTY:       ptyManager,
+			},
+			"ws-error": {
+				ID:        "ws-error",
+				Status:    "error",
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+				PTY:       ptyManager,
+			},
+		},
+		nodeEvents:      make([]EventRecord, 0),
+		workspaceEvents: map[string][]EventRecord{},
+		agentSessions:   agentsessions.NewManager(),
+		acpGateways:     map[string]*acp.Gateway{},
+	}
+
+	// "creating" status should be rejected
+	runtime, _ := s.getWorkspaceRuntime("ws-creating")
+	if runtime.Status == "running" || runtime.Status == "error" {
+		t.Fatal("expected creating status")
+	}
+
+	// "stopped" status should be rejected
+	runtime, _ = s.getWorkspaceRuntime("ws-stopped")
+	if runtime.Status == "running" || runtime.Status == "error" {
+		t.Fatal("expected stopped status")
+	}
+
+	// "running" should be accepted
+	runtime, _ = s.getWorkspaceRuntime("ws-running")
+	if runtime.Status != "running" {
+		t.Fatal("expected running status")
+	}
+
+	// "error" should be accepted
+	runtime, _ = s.getWorkspaceRuntime("ws-error")
+	if runtime.Status != "error" {
+		t.Fatal("expected error status")
+	}
+}

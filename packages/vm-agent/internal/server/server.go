@@ -323,6 +323,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workspaces/{workspaceId}/events", s.handleListWorkspaceEvents)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/stop", s.handleStopWorkspace)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/restart", s.handleRestartWorkspace)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/rebuild", s.handleRebuildWorkspace)
 	mux.HandleFunc("DELETE /workspaces/{workspaceId}", s.handleDeleteWorkspace)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions", s.handleListAgentSessions)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions", s.handleCreateAgentSession)

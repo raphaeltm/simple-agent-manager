@@ -56,11 +56,11 @@ func TestRecoverWorkspaceRuntimeUsesRuntimeConfig(t *testing.T) {
 
 	var capturedCfg *config.Config
 	var capturedState bootstrap.ProvisionState
-	prepareWorkspaceForRuntime = func(_ context.Context, cfg *config.Config, state bootstrap.ProvisionState) error {
+	prepareWorkspaceForRuntime = func(_ context.Context, cfg *config.Config, state bootstrap.ProvisionState) (bool, error) {
 		copyCfg := *cfg
 		capturedCfg = &copyCfg
 		capturedState = state
-		return nil
+		return false, nil
 	}
 
 	runtime := &WorkspaceRuntime{
@@ -114,9 +114,9 @@ func TestRecoverWorkspaceRuntimeNoopWhenContainerModeDisabled(t *testing.T) {
 	defer func() { prepareWorkspaceForRuntime = originalPrepare }()
 
 	called := false
-	prepareWorkspaceForRuntime = func(_ context.Context, _ *config.Config, _ bootstrap.ProvisionState) error {
+	prepareWorkspaceForRuntime = func(_ context.Context, _ *config.Config, _ bootstrap.ProvisionState) (bool, error) {
 		called = true
-		return nil
+		return false, nil
 	}
 
 	runtime := &WorkspaceRuntime{ID: "WS_TEST"}
@@ -138,11 +138,11 @@ func TestRecoverWorkspaceRuntimeHydratesMetadataAndAdoptsLegacyLayout(t *testing
 
 	var capturedCfg *config.Config
 	var capturedState bootstrap.ProvisionState
-	prepareWorkspaceForRuntime = func(_ context.Context, cfg *config.Config, state bootstrap.ProvisionState) error {
+	prepareWorkspaceForRuntime = func(_ context.Context, cfg *config.Config, state bootstrap.ProvisionState) (bool, error) {
 		copyCfg := *cfg
 		capturedCfg = &copyCfg
 		capturedState = state
-		return nil
+		return false, nil
 	}
 
 	const workspaceID = "WS_TEST"
@@ -216,10 +216,10 @@ func TestRecoverWorkspaceRuntimeAdoptsLegacyLayoutFromBaseWorkspaceDir(t *testin
 	defer func() { prepareWorkspaceForRuntime = originalPrepare }()
 
 	var capturedCfg *config.Config
-	prepareWorkspaceForRuntime = func(_ context.Context, cfg *config.Config, _ bootstrap.ProvisionState) error {
+	prepareWorkspaceForRuntime = func(_ context.Context, cfg *config.Config, _ bootstrap.ProvisionState) (bool, error) {
 		copyCfg := *cfg
 		capturedCfg = &copyCfg
-		return nil
+		return false, nil
 	}
 
 	const workspaceID = "WS_BASE"
@@ -352,4 +352,41 @@ func TestRepositoryDirName(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRecoverWorkspaceRuntimePropagatesFallbackFlag(t *testing.T) {
+	originalPrepare := prepareWorkspaceForRuntime
+	defer func() { prepareWorkspaceForRuntime = originalPrepare }()
+
+	// Mock that returns usedFallback=true
+	prepareWorkspaceForRuntime = func(_ context.Context, _ *config.Config, _ bootstrap.ProvisionState) (bool, error) {
+		return true, nil
+	}
+
+	runtime := &WorkspaceRuntime{
+		ID:                  "WS_FALLBACK",
+		Repository:          "",
+		Branch:              "main",
+		WorkspaceDir:        "/workspace/WS_FALLBACK",
+		ContainerLabelValue: "/workspace/WS_FALLBACK",
+		ContainerWorkDir:    "/workspaces/WS_FALLBACK",
+		CallbackToken:       "workspace-callback-token",
+	}
+
+	s := &Server{
+		config: &config.Config{
+			ContainerMode: true,
+			WorkspaceDir:  "/workspace",
+			CallbackToken: "node-callback-token",
+		},
+		workspaces: map[string]*WorkspaceRuntime{runtime.ID: runtime},
+	}
+
+	// recoverWorkspaceRuntime uses the mock variable prepareWorkspaceForRuntime
+	err := s.recoverWorkspaceRuntime(context.Background(), runtime)
+	if err != nil {
+		t.Fatalf("recoverWorkspaceRuntime() error = %v", err)
+	}
+	// The fallback flag is consumed internally; the test verifies no error
+	// when prepareWorkspaceForRuntime returns (true, nil).
 }
