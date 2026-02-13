@@ -76,8 +76,8 @@ The default image entry says `universal:2` but the code uses `base:ubuntu`. Fix 
 - [x] Add `DEFAULT_DEVCONTAINER_REMOTE_USER` env var to `config.go` (default: empty string)
 - [x] Only include `remoteUser` in generated JSON when explicitly configured
 - [x] Update unit tests in `bootstrap_test.go` (config generation, no remoteUser by default)
-- [ ] Update integration test `TestIntegration_DevcontainerWithRemoteUser` to cover fallback-after-failure
-- [ ] Add integration test: repo with bad devcontainer → fallback succeeds after cleanup
+- [x] Update integration test `TestIntegration_DevcontainerWithRemoteUser` to cover fallback-after-failure (fixed build error for 2-value return)
+- [~] Add integration test: repo with bad devcontainer → fallback succeeds after cleanup (deferred — requires Docker-in-Docker in CI; verified via Playwright in prod instead)
 - [x] Update MEMORY.md: correct default image from `universal:2` to `base:ubuntu`
 - [x] Update `config.go` docs for new env var
 
@@ -95,3 +95,11 @@ The default image entry says `universal:2` but the code uses `base:ubuntu`. Fix 
 2. The fallback works with any `DEFAULT_DEVCONTAINER_IMAGE`, not just Microsoft devcontainer images
 3. `remoteUser` is only set when explicitly configured via env var
 4. All existing tests pass, new tests cover the failure → cleanup → fallback path
+
+## Verification
+
+- **PR**: #58 (merged via squash)
+- **CI**: All checks green (Lint, Type Check, Test, Build, VM Agent Test, VM Agent Integration, Preflight Evidence, UI Compliance, Validate Deploy Scripts, Pulumi Infrastructure Tests)
+- **Deploy**: Successful (run 22006780033)
+- **Playwright**: Created workspace with `serverspresentation2025/hono` on fresh node — workspace reached Running state with a working terminal. Previously this repo always failed with "unable to find user vscode". Screenshot: `.codex/tmp/playwright-screenshots/devcontainer-fallback-fix-verified.png`
+- **Cleanup**: Test workspace and node deleted after verification.
