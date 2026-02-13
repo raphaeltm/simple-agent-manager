@@ -862,9 +862,9 @@ Users provide their own Hetzner API token. Workspace VMs are billed to their acc
 
 | VM Size | Specs | Hourly | Monthly |
 |---------|-------|--------|---------|
-| **Small** (CX22) | 2 vCPU, 4GB RAM | €0.006 (~$0.007) | €3.79 (~$4.15) |
-| **Medium** (CX32) | 4 vCPU, 8GB RAM | €0.011 (~$0.012) | €6.80 (~$7.50) |
-| **Large** (CX42) | 8 vCPU, 16GB RAM | €0.027 (~$0.030) | €16.40 (~$18) |
+| **Small** (CX11) | 1 vCPU, 2GB RAM | €0.004 (~$0.004) | €3.29 (~$3.60) |
+| **Medium** (CX22) | 2 vCPU, 4GB RAM | €0.008 (~$0.009) | €4.90 (~$5.40) |
+| **Large** (CX32) | 4 vCPU, 8GB RAM | €0.014 (~$0.015) | €8.90 (~$9.80) |
 
 VMs are billed hourly and self-terminate after 30 minutes of inactivity.
 

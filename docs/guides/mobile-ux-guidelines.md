@@ -137,11 +137,11 @@ function Component() {
 
 ## CSS Framework Note
 
-Currently using custom CSS with Tailwind-like classes. Consider migrating to actual Tailwind CSS for:
-- Better mobile utilities
-- Consistent responsive design system
-- JIT compilation for smaller bundles
-- Built-in mobile-first approach
+Currently using CSS Variables with semantic design tokens (not Tailwind). The system uses:
+- Custom CSS properties in `packages/ui/src/tokens/theme.css`
+- Semantic tokens in `packages/ui/src/tokens/semantic-tokens.ts`
+- Shadcn-compatible component patterns
+- Mobile-first responsive design approach
 
 ## Validation Before Deploy
 

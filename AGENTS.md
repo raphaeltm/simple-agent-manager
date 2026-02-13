@@ -76,8 +76,7 @@ Build order matters: shared → providers → api/web
 - **MANDATORY**: Any new feature or behavior change MUST include tests before the work is considered complete.
 - Unit tests: `tests/unit/` in each package
 - Unit tests are required for all new or changed business logic, utilities, and UI behavior.
-- Integration tests: `apps/api/tests/integration/`
-- Add integration tests when a change crosses boundaries (route ↔ service ↔ database, API ↔ UI data loading, etc.).
+- Integration tests should be added when a change crosses boundaries (route ↔ service ↔ database, API ↔ UI data loading, etc.).
 - Add end-to-end tests for critical user journeys where applicable (especially primary UI flows and regression-prone paths).
 - Do not mark implementation complete unless the relevant test suites pass locally and in CI.
 - Use Miniflare for Worker integration tests
@@ -633,8 +632,7 @@ You can also trigger deployment manually via GitHub Actions → Deploy → Run w
 ### VM Communication
 - `POST /api/workspaces/:id/heartbeat` - VM heartbeat with idle detection
 - `POST /api/bootstrap/:token` - Redeem one-time bootstrap token (VM startup)
-- `POST /api/agent/ready` - VM agent ready callback
-- `POST /api/agent/activity` - VM agent activity report
+- `GET /api/workspaces/:id/ready` - Check workspace readiness (used instead of agent/ready)
 
 ### Terminal Access
 - `POST /api/terminal/token` - Get terminal WebSocket token (workspaceId in request body)
@@ -646,7 +644,7 @@ You can also trigger deployment manually via GitHub Actions → Deploy → Run w
 
 ### Credentials
 - `GET /api/credentials` - Get user's cloud provider credentials (encrypted)
-- `PUT /api/credentials` - Save cloud provider credentials
+- `POST /api/credentials` - Save cloud provider credentials
 
 ### GitHub Integration
 - `GET /api/github/installations` - List user's GitHub App installations
@@ -690,7 +688,7 @@ See `apps/api/.env.example`:
 - Cloudflare KV (MVP), D1 (future multi-tenancy) (001-mvp)
 - TypeScript 5.x + @devcontainers/cli (exec'd via child process), Hono (API), React + Vite (UI) (002-local-mock-mode)
 - In-memory (Map) for mock mode; no persistent storage (002-local-mock-mode)
-- TypeScript 5.x + BetterAuth + Drizzle ORM + jose (API), React + Vite + TailwindCSS + xterm.js (Web) (003-browser-terminal-saas)
+- TypeScript 5.x + BetterAuth + Drizzle ORM + jose (API), React + Vite + xterm.js (Web) (003-browser-terminal-saas)
 - Go 1.22+ + creack/pty + gorilla/websocket + golang-jwt (VM Agent) (003-browser-terminal-saas)
 - Cloudflare D1 (SQLite) + KV (sessions) + R2 (binaries) (003-browser-terminal-saas)
 - TypeScript 5.x (API, Web, packages) + Go 1.22+ (VM Agent) + Hono (API), React + Vite (Web), xterm.js (Terminal), Drizzle ORM (Database) (004-mvp-hardening)
