@@ -24,8 +24,6 @@ Simple Agent Manager (SAM) is a serverless platform for creating ephemeral cloud
 
 Think **GitHub Codespaces, but built for AI-assisted development** with explicit lifecycle controls and node-level consolidation.
 
-## **WARNING** this thing is fully vibe coded, with some code review, but not a lot yet. It has not yet beeen tested, so you should not use it at the moment.
-
 ## Why Simple Agent Manager?
 
 |                   | GitHub Codespaces       | Simple Agent Manager                 |
@@ -149,50 +147,60 @@ Then push to main or manually trigger the Deploy workflow.
 
 ## Architecture
 
+> For a comprehensive deep-dive with Mermaid diagrams, see **[Architecture Walkthrough](docs/architecture/walkthrough.md)**.
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         Your Browser                             │
+│                   app.{domain} (React UI)                        │
 └─────────────────────────────────────────────────────────────────┘
+                              │
+              HTTPS (api.{domain} + ws-{id}.{domain})
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Cloudflare Pages (UI)                         │
-│                      React + Vite                                │
+│              Cloudflare Worker (API + Reverse Proxy)              │
+│                        Hono + TypeScript                         │
+│                                                                   │
+│  Routes: /api/auth, /api/nodes, /api/workspaces, /api/terminal  │
+│  Proxy:  app.* → Pages | ws-*.* → VM Agent                      │
+│  Cron:   Provisioning timeout checks (every 5 min)              │
+│                                                                   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐    │
+│  │ D1       │  │ KV       │  │ R2       │  │ External     │    │
+│  │ (SQLite) │  │ Sessions │  │ Binaries │  │ Hetzner API  │    │
+│  │ Users    │  │ Tokens   │  │ VM Agent │  │ GitHub API   │    │
+│  │ Nodes    │  │ Boot Log │  │ Pulumi   │  │ CF DNS API   │    │
+│  │ Workspcs │  │          │  │          │  │              │    │
+│  │ Creds    │  │          │  │          │  │              │    │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
+                              │
+                  HTTP proxy via vm-{nodeId}.{domain}:8080
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                  Cloudflare Workers (API)                        │
-│                     Hono + TypeScript                            │
-│  ┌──────────────┬──────────────┬──────────────┬──────────────┐  │
-│  │  Workspace   │    GitHub    │     DNS      │  Cloud-Init  │  │
-│  │   Service    │   Service    │   Service    │  Generator   │  │
-│  └──────────────┴──────────────┴──────────────┴──────────────┘  │
+│                    Hetzner Cloud Node VM                          │
+│                                                                   │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │  VM Agent (Go binary, port 8080)                           │  │
+│  │  • HTTP + WebSocket server                                │  │
+│  │  • JWT auth (via JWKS from control plane)                 │  │
+│  │  • Terminal PTY multiplexing + ring buffer replay         │  │
+│  │  • ACP gateway (Claude Code agent protocol)               │  │
+│  │  • SQLite tab persistence                                 │  │
+│  │  • Docker container management                            │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                              │                                    │
+│            ┌─────────────────┼─────────────────┐                 │
+│            ▼                 ▼                  ▼                 │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+│  │ Workspace 1   │  │ Workspace 2   │  │ Workspace N   │          │
+│  │ (Devcontainer │  │ (Devcontainer │  │ (Devcontainer │          │
+│  │  + Claude     │  │  + Claude     │  │  + Claude     │          │
+│  │    Code)      │  │    Code)      │  │    Code)      │          │
+│  └──────────────┘  └──────────────┘  └──────────────┘          │
 └─────────────────────────────────────────────────────────────────┘
-           │                │                │
-           ▼                ▼                ▼
-    ┌────────────┐   ┌────────────┐   ┌────────────┐
-    │  Hetzner   │   │   GitHub   │   │ Cloudflare │
-    │   Cloud    │   │    API     │   │    DNS     │
-    └────────────┘   └────────────┘   └────────────┘
-           │
-           ▼
-    ┌─────────────────────────────────────────────┐
-    │            Hetzner Cloud VM                  │
-    │  ┌─────────────────────────────────────┐    │
-    │  │  Docker + DevContainer               │    │
-    │  │  ┌───────────────────────────────┐  │    │
-    │  │  │         Your Code             │  │    │
-    │  │  └───────────────────────────────┘  │    │
-    │  └─────────────────────────────────────┘    │
-    │  ┌─────────────────────────────────────┐    │
-    │  │  VM Agent (Go)                       │    │
-    │  │  • WebSocket terminal (xterm.js)    │    │
-    │  │  • JWT authentication               │    │
-    │  │  • Workspace/session routing         │    │
-    │  │  • Node/workspace health heartbeats  │    │
-    │  └─────────────────────────────────────┘    │
-    └─────────────────────────────────────────────┘
 ```
 
 ## Project Structure
@@ -249,13 +257,14 @@ docs/                 # Documentation
 
 ### GitHub
 
-| Endpoint                    | Method | Description                   |
-| --------------------------- | ------ | ----------------------------- |
-| `/api/github/installations` | `GET`  | List GitHub App installations |
-| `/api/github/install-url`   | `GET`  | Get GitHub App install URL    |
-| `/api/github/repositories`  | `GET`  | List accessible repositories  |
-| `/api/github/webhook`       | `POST` | GitHub webhook handler        |
-| `/api/github/callback`      | `GET`  | GitHub App OAuth callback     |
+| Endpoint                          | Method   | Description                   |
+| --------------------------------- | -------- | ----------------------------- |
+| `/api/github/installations`       | `GET`    | List GitHub App installations |
+| `/api/github/installations/:id`   | `DELETE` | Remove installation record    |
+| `/api/github/install-url`         | `GET`    | Get GitHub App install URL    |
+| `/api/github/repositories`        | `GET`    | List accessible repositories  |
+| `/api/github/webhook`             | `POST`   | GitHub webhook handler        |
+| `/api/github/callback`            | `GET`    | GitHub App OAuth callback     |
 
 ### Nodes
 
@@ -279,37 +288,36 @@ docs/                 # Documentation
 | `/api/workspaces/:id`                            | `DELETE` | Delete workspace                 |
 | `/api/workspaces/:id/stop`                       | `POST`   | Stop workspace                   |
 | `/api/workspaces/:id/restart`                    | `POST`   | Restart workspace                |
-| `/api/workspaces/:id/events`                     | `GET`    | List workspace events            |
-| `/api/workspaces/:id/agent-sessions`             | `GET`    | List agent sessions              |
-| `/api/workspaces/:id/agent-sessions`             | `POST`   | Create agent session             |
-| `/api/workspaces/:id/agent-sessions/:sessionId/stop` | `POST` | Stop agent session               |
-| `/api/workspaces/:id/ready`                      | `POST`   | Workspace ready callback         |
-| `/api/workspaces/:id/heartbeat`                  | `POST`   | Workspace heartbeat callback     |
-| `/api/workspaces/:id/runtime`                    | `GET`    | Workspace runtime metadata callback |
-| `/api/workspaces/:id/boot-log`                   | `POST`   | Workspace boot-log callback      |
+| `/api/workspaces/:id/events`                          | `GET`    | List workspace events            |
+| `/api/workspaces/:id/agent-sessions`                  | `GET`    | List agent sessions              |
+| `/api/workspaces/:id/agent-sessions`                  | `POST`   | Create agent session             |
+| `/api/workspaces/:id/agent-sessions/:sessionId/stop`  | `POST`   | Stop agent session               |
 
-### Terminal
+### VM Callbacks (Node Agent → API)
 
-| Endpoint                 | Method | Description               |
-| ------------------------ | ------ | ------------------------- |
-| `/api/terminal/token`    | `POST` | Get terminal access token |
-| `/.well-known/jwks.json` | `GET`  | JWKS for JWT verification |
+| Endpoint                              | Method | Description                                                     |
+| ------------------------------------- | ------ | --------------------------------------------------------------- |
+| `/api/nodes/:id/ready`                | `POST` | Node ready callback                                             |
+| `/api/nodes/:id/heartbeat`            | `POST` | Node heartbeat callback                                         |
+| `/api/workspaces/:id/ready`           | `POST` | Workspace ready callback                                        |
+| `/api/workspaces/:id/provisioning-failed` | `POST` | Workspace provisioning failure callback                     |
+| `/api/workspaces/:id/heartbeat`       | `POST` | Workspace heartbeat callback                                    |
+| `/api/workspaces/:id/runtime`         | `GET`  | Workspace runtime metadata (repo/branch for recovery)           |
+| `/api/workspaces/:id/boot-log`        | `POST` | Workspace boot progress log                                     |
+| `/api/bootstrap/:token`               | `POST` | Redeem one-time bootstrap token for credentials + git identity  |
 
-### VM Agent
+### Terminal & Agent Access
 
 | Endpoint                    | Method | Description                                |
 | --------------------------- | ------ | ------------------------------------------ |
+| `/api/terminal/token`       | `POST` | Get workspace JWT for WebSocket auth       |
+| `/.well-known/jwks.json`    | `GET`  | JWKS public key set for JWT verification   |
 | `/api/agent/download`       | `GET`  | Download VM agent binary (query: os, arch) |
 | `/api/agent/version`        | `GET`  | Get current agent version                  |
 | `/api/agent/install-script` | `GET`  | Get VM agent install script                |
+| `/api/agents`               | `GET`  | List available agents + credential status  |
 
-### Bootstrap (VM Credential Delivery)
-
-| Endpoint                | Method | Description                                     |
-| ----------------------- | ------ | ----------------------------------------------- |
-| `/api/bootstrap/:token` | `POST` | Redeem one-time bootstrap token for credentials + git identity |
-
-Authentication is session-based via cookies (BetterAuth + GitHub OAuth).
+Authentication is session-based via cookies (BetterAuth + GitHub OAuth). For full architecture details, see the **[Architecture Walkthrough](docs/architecture/walkthrough.md)**.
 
 ## Security
 
@@ -362,13 +370,14 @@ New team members can spin up fully configured development environments in minute
 
 ## Roadmap
 
-| Phase                   | Target   | Features                                               |
-| ----------------------- | -------- | ------------------------------------------------------ |
-| **1. MVP**              | Complete | Core workspace management and GitHub OAuth             |
-| **2. Browser Terminal** | Current  | Web terminal, VM agent, multi-workspace nodes/sessions |
-| **3. Enhanced UX**      | Q1 2026  | Logs, SSH access, templates, persistent storage        |
-| **4. Multi-Tenancy**    | Q2 2026  | Teams, usage quotas, billing                           |
-| **5. Enterprise**       | Q3 2026  | VPC, SSO, compliance, multi-region                     |
+| Phase                        | Status   | Features                                                    |
+| ---------------------------- | -------- | ----------------------------------------------------------- |
+| **1. MVP**                   | Complete | Core workspace management and GitHub OAuth                  |
+| **2. Browser Terminal SaaS** | Complete | Web terminal, VM agent, D1 database, multi-tenancy          |
+| **3. Hardening**             | Complete | Bootstrap tokens, ownership validation, session persistence |
+| **4. Multi-Workspace Nodes** | Complete | One node hosts multiple workspaces, tab persistence, ACP agent sessions |
+| **5. Enhanced UX**           | Planned  | Templates, persistent storage, improved onboarding          |
+| **6. Enterprise**            | Planned  | Teams, usage quotas, billing, SSO                           |
 
 See [ROADMAP.md](ROADMAP.md) for details.
 
