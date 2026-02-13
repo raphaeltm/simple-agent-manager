@@ -355,6 +355,18 @@ func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 				allowed = true
 				break
 			}
+			// Support wildcard subdomain patterns like "https://*.example.com"
+			if strings.Contains(o, "*.") {
+				// Split pattern into scheme + wildcard domain
+				// e.g. "https://*.example.com" → prefix="https://", suffix=".example.com"
+				wildcardIdx := strings.Index(o, "*.")
+				prefix := o[:wildcardIdx]
+				suffix := o[wildcardIdx+1:] // includes the dot
+				if strings.HasPrefix(origin, prefix) && strings.HasSuffix(origin, suffix) {
+					allowed = true
+					break
+				}
+			}
 		}
 
 		if allowed {
