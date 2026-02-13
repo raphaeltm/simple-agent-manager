@@ -65,7 +65,9 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 	}
 
 	return bootstrap.PrepareWorkspace(provisionCtx, &cfg, bootstrap.ProvisionState{
-		GitHubToken: gitToken,
+		GitHubToken:  gitToken,
+		GitUserName:  runtime.GitUserName,
+		GitUserEmail: runtime.GitUserEmail,
 	})
 }
 
