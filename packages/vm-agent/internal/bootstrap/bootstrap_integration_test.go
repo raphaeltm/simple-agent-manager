@@ -478,7 +478,7 @@ echo '{"outcome":"success","containerId":"mock-container-id"}'
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		_ = ensureDevcontainerReady(ctx, cfg)
+		_, _ = ensureDevcontainerReady(ctx, cfg)
 
 		args, err := os.ReadFile(argsFile)
 		if err != nil {
@@ -507,7 +507,7 @@ echo '{"outcome":"success","containerId":"mock-container-id"}'
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		_ = ensureDevcontainerReady(ctx, cfg)
+		_, _ = ensureDevcontainerReady(ctx, cfg)
 
 		args, err := os.ReadFile(argsFile)
 		if err != nil {

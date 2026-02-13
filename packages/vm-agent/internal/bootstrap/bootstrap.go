@@ -506,6 +506,12 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) (bool, err
 				log.Printf("Warning: failed to write devcontainer build error log to %s: %v", errorLogPath, writeErr)
 			}
 
+			// Remove the stale container left by the failed first attempt.
+			// Without this, devcontainer up --override-config reuses the existing
+			// container (built from the repo's image) instead of creating a new one
+			// from the fallback image.
+			removeStaleContainers(ctx, cfg)
+
 			// Retry with the default config.
 			usedFallback, fallbackErr := runDevcontainerWithDefault(ctx, cfg)
 			if fallbackErr != nil {
@@ -551,10 +557,38 @@ func runDevcontainerWithDefault(ctx context.Context, cfg *config.Config) (bool, 
 	return true, nil
 }
 
+// removeStaleContainers finds and removes any containers (running or stopped)
+// matching the workspace label. This is used before the fallback devcontainer
+// build to ensure a clean slate — without it, devcontainer up may reuse a
+// broken container from a failed first attempt.
+func removeStaleContainers(ctx context.Context, cfg *config.Config) {
+	filter := fmt.Sprintf("label=%s=%s", cfg.ContainerLabelKey, cfg.ContainerLabelValue)
+	// Use -a to find containers in ANY state (running, stopped, created, exited).
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-aq", "--filter", filter)
+	output, err := cmd.Output()
+	if err != nil {
+		log.Printf("Warning: failed to list stale containers for cleanup: %v", err)
+		return
+	}
+
+	containers := strings.Fields(string(output))
+	for _, id := range containers {
+		log.Printf("Removing stale container %s before fallback", id)
+		rmCmd := exec.CommandContext(ctx, "docker", "rm", "-f", id)
+		if rmOutput, rmErr := rmCmd.CombinedOutput(); rmErr != nil {
+			log.Printf("Warning: failed to remove stale container %s: %v: %s", id, rmErr, strings.TrimSpace(string(rmOutput)))
+		}
+	}
+}
+
 // writeDefaultDevcontainerConfig writes a default devcontainer.json to the configured
 // path (DefaultDevcontainerConfigPath) and returns the path. The config uses the image
 // specified by DefaultDevcontainerImage. This is only used when a repo has no devcontainer
 // config of its own.
+//
+// The remoteUser field is only included when DefaultDevcontainerRemoteUser is explicitly
+// set. When omitted, the container runs as the image's default USER (e.g., "vscode" for
+// Microsoft devcontainer images), which is the correct behavior for most images.
 func writeDefaultDevcontainerConfig(cfg *config.Config) (string, error) {
 	configPath := cfg.DefaultDevcontainerConfigPath
 	if configPath == "" {
@@ -571,16 +605,20 @@ func writeDefaultDevcontainerConfig(cfg *config.Config) (string, error) {
 		image = config.DefaultDevcontainerImage
 	}
 
+	remoteUserLine := ""
+	if user := strings.TrimSpace(cfg.DefaultDevcontainerRemoteUser); user != "" {
+		remoteUserLine = fmt.Sprintf(",\n  \"remoteUser\": %q", user)
+	}
+
 	configJSON := fmt.Sprintf(`{
   "name": "Default Workspace",
   "image": %q,
   "features": {
     "ghcr.io/devcontainers/features/git:1": {},
     "ghcr.io/devcontainers/features/github-cli:1": {}
-  },
-  "remoteUser": "vscode"
+  }%s
 }
-`, image)
+`, image, remoteUserLine)
 
 	if err := os.WriteFile(configPath, []byte(configJSON), 0o644); err != nil {
 		return "", fmt.Errorf("failed to write default config: %w", err)

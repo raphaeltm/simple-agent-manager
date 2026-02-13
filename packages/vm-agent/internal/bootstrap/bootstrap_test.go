@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -386,12 +387,44 @@ func TestWriteDefaultDevcontainerConfig(t *testing.T) {
 		`"mcr.microsoft.com/devcontainers/base:ubuntu"`,
 		`"ghcr.io/devcontainers/features/git:1"`,
 		`"ghcr.io/devcontainers/features/github-cli:1"`,
-		`"remoteUser": "vscode"`,
 	}
 	for _, fragment := range required {
 		if !strings.Contains(content, fragment) {
 			t.Fatalf("expected config to contain %q, got:\n%s", fragment, content)
 		}
+	}
+
+	// By default, remoteUser should NOT be present (empty DefaultDevcontainerRemoteUser)
+	if strings.Contains(content, "remoteUser") {
+		t.Fatalf("expected no remoteUser when DefaultDevcontainerRemoteUser is empty, got:\n%s", content)
+	}
+}
+
+func TestWriteDefaultDevcontainerConfigWithRemoteUser(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "remote-user-config.json")
+
+	cfg := &config.Config{
+		DefaultDevcontainerImage:      "mcr.microsoft.com/devcontainers/base:ubuntu",
+		DefaultDevcontainerConfigPath: configPath,
+		DefaultDevcontainerRemoteUser: "vscode",
+	}
+
+	_, err := writeDefaultDevcontainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("writeDefaultDevcontainerConfig returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read written config: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, `"remoteUser": "vscode"`) {
+		t.Fatalf("expected remoteUser when DefaultDevcontainerRemoteUser is set, got:\n%s", content)
 	}
 }
 
@@ -690,8 +723,20 @@ func TestEnsureDevcontainerReadyFallsBackOnRepoConfigFailure(t *testing.T) {
 	// Mock devcontainer CLI that fails on first call (repo config)
 	// but succeeds on second call (default config).
 	mockBinDir := t.TempDir()
-	callCountFile := filepath.Join(t.TempDir(), "call-count")
-	os.WriteFile(callCountFile, []byte("0"), 0o644)
+
+	// Also mock docker for stale container cleanup (removeStaleContainers calls docker ps -aq and docker rm -f)
+	mockDocker := filepath.Join(mockBinDir, "docker")
+	dockerScript := `#!/bin/sh
+# Mock docker: ps -aq returns nothing (no stale containers), rm -f is a no-op
+if [ "$1" = "ps" ]; then
+  echo ""
+  exit 0
+fi
+exit 0
+`
+	if err := os.WriteFile(mockDocker, []byte(dockerScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock docker command: %v", err)
+	}
 
 	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
 	// Script: first invocation fails if no --override-config flag, second (with --override-config) succeeds
@@ -740,6 +785,65 @@ exit 1
 	errorLogPath := filepath.Join(workspaceDir, ".devcontainer-build-error.log")
 	if _, err := os.Stat(errorLogPath); os.IsNotExist(err) {
 		t.Fatal("expected .devcontainer-build-error.log to exist")
+	}
+
+	// Verify the fallback config does NOT contain remoteUser (since DefaultDevcontainerRemoteUser is empty)
+	fallbackConfig, err := os.ReadFile(cfg.DefaultDevcontainerConfigPath)
+	if err != nil {
+		t.Fatalf("failed to read fallback config: %v", err)
+	}
+	if strings.Contains(string(fallbackConfig), "remoteUser") {
+		t.Fatalf("fallback config should not contain remoteUser, got:\n%s", string(fallbackConfig))
+	}
+}
+
+func TestRemoveStaleContainersCallsDockerCorrectly(t *testing.T) {
+	// Cannot use t.Parallel() because t.Setenv modifies process environment.
+
+	// Mock docker that records calls and returns a fake container ID
+	mockBinDir := t.TempDir()
+	callLog := filepath.Join(t.TempDir(), "docker-calls.log")
+
+	mockDocker := filepath.Join(mockBinDir, "docker")
+	dockerScript := fmt.Sprintf(`#!/bin/sh
+echo "$@" >> %s
+if [ "$1" = "ps" ]; then
+  echo "abc123def456"
+  exit 0
+fi
+exit 0
+`, callLog)
+	if err := os.WriteFile(mockDocker, []byte(dockerScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock docker command: %v", err)
+	}
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+
+	cfg := &config.Config{
+		ContainerLabelKey:   "devcontainer.local_folder",
+		ContainerLabelValue: "/workspace/test-repo",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	removeStaleContainers(ctx, cfg)
+
+	// Read call log and verify docker was called correctly
+	data, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("failed to read docker call log: %v", err)
+	}
+	calls := string(data)
+
+	// Should have called docker ps -aq with filter
+	if !strings.Contains(calls, "ps -aq --filter label=devcontainer.local_folder=/workspace/test-repo") {
+		t.Fatalf("expected docker ps call with label filter, got:\n%s", calls)
+	}
+
+	// Should have called docker rm -f on the returned container ID
+	if !strings.Contains(calls, "rm -f abc123def456") {
+		t.Fatalf("expected docker rm -f abc123def456, got:\n%s", calls)
 	}
 }
 
