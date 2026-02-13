@@ -91,3 +91,17 @@ export const HETZNER_IMAGE = DEFAULT_HETZNER_IMAGE;
 // Note: GitHub App install URL is NOT provided as a constant.
 // It must be derived from the actual GitHub App configuration at runtime.
 // Format: https://github.com/apps/{app-slug}/installations/new
+
+// =============================================================================
+// Agent Settings
+// =============================================================================
+
+/** Valid permission modes for agent sessions */
+export const VALID_PERMISSION_MODES = ['default', 'acceptEdits', 'bypassPermissions'] as const;
+
+/** Human-readable labels for permission modes */
+export const AGENT_PERMISSION_MODE_LABELS: Record<string, string> = {
+  default: 'Default',
+  acceptEdits: 'Accept Edits',
+  bypassPermissions: 'Bypass Permissions',
+};

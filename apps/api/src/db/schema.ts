@@ -197,6 +197,31 @@ export const agentSessions = sqliteTable('agent_sessions', {
   userIdIdx: index('idx_agent_sessions_user_id').on(table.userId),
 }));
 
+
+// =============================================================================
+// Agent Settings (per-user, per-agent configuration)
+// =============================================================================
+export const agentSettings = sqliteTable('agent_settings', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  agentType: text('agent_type').notNull(),
+  model: text('model'),
+  permissionMode: text('permission_mode'),
+  allowedTools: text('allowed_tools'),
+  deniedTools: text('denied_tools'),
+  additionalEnv: text('additional_env'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(cast(unixepoch() * 1000 as integer))`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(cast(unixepoch() * 1000 as integer))`),
+}, (table) => ({
+  userIdIdx: index('idx_agent_settings_user_id').on(table.userId),
+  userAgentTypeUnique: uniqueIndex('idx_agent_settings_user_agent_type')
+    .on(table.userId, table.agentType),
+}));
+
 // =============================================================================
 // UI Governance
 // =============================================================================
@@ -349,3 +374,5 @@ export type ComplianceRun = typeof complianceRuns.$inferSelect;
 export type NewComplianceRun = typeof complianceRuns.$inferInsert;
 export type MigrationWorkItem = typeof migrationWorkItems.$inferSelect;
 export type NewMigrationWorkItem = typeof migrationWorkItems.$inferInsert;
+export type AgentSettingsRow = typeof agentSettings.$inferSelect;
+export type NewAgentSettingsRow = typeof agentSettings.$inferInsert;

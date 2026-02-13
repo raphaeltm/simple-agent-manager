@@ -456,6 +456,11 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 - `POST /api/workspaces/:id/agent-sessions` — Create agent session
 - `POST /api/workspaces/:id/agent-sessions/:sessionId/stop` — Stop agent session
 
+### Agent Settings
+- `GET /api/agent-settings/:agentType` — Get user's agent settings
+- `PUT /api/agent-settings/:agentType` — Upsert agent settings (model, permissionMode)
+- `DELETE /api/agent-settings/:agentType` — Reset agent settings to defaults
+
 ### VM Communication
 - `POST /api/nodes/:id/ready` — Node Agent ready callback
 - `POST /api/nodes/:id/heartbeat` — Node Agent heartbeat callback
@@ -464,6 +469,7 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 - `POST /api/workspaces/:id/heartbeat` — Workspace activity heartbeat callback
 - `GET /api/workspaces/:id/runtime` — Workspace runtime metadata callback (repository/branch for recovery)
 - `POST /api/workspaces/:id/boot-log` — Workspace boot progress log callback
+- `POST /api/workspaces/:id/agent-settings` — Workspace agent settings callback (model, permissionMode)
 - `POST /api/bootstrap/:token` — Redeem one-time bootstrap token (credentials + git identity)
 - `POST /api/agent/ready` — VM agent ready callback
 - `POST /api/agent/activity` — VM agent activity report
