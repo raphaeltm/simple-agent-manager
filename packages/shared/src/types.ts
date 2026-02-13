@@ -286,6 +286,21 @@ export interface TerminalTokenResponse {
 }
 
 // =============================================================================
+// Workspace Tabs (Persisted Session State)
+// =============================================================================
+
+/** A persisted workspace tab (terminal or chat session) from the VM agent. */
+export interface WorkspaceTab {
+  id: string;
+  workspaceId: string;
+  type: 'terminal' | 'chat';
+  label: string;
+  agentId: string;
+  sortOrder: number;
+  createdAt: string;
+}
+
+// =============================================================================
 // Bootstrap Token (Secure Credential Delivery)
 // =============================================================================
 

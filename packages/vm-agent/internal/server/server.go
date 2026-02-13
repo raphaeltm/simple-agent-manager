@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/idle"
+	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/pty"
 )
 
@@ -42,6 +45,7 @@ type Server struct {
 	acpMu           sync.Mutex
 	acpGateway      *acp.Gateway
 	acpGateways     map[string]*acp.Gateway
+	store           *persistence.Store
 }
 
 type WorkspaceRuntime struct {
@@ -147,6 +151,16 @@ func New(cfg *config.Config) (*Server, error) {
 		OnActivity:         idleDetector.RecordActivity,
 	}
 
+	// Open persistence store for cross-device session state.
+	// Ensure the parent directory exists.
+	if err := os.MkdirAll(filepath.Dir(cfg.PersistenceDBPath), 0o755); err != nil {
+		return nil, fmt.Errorf("create persistence directory: %w", err)
+	}
+	store, err := persistence.Open(cfg.PersistenceDBPath)
+	if err != nil {
+		return nil, fmt.Errorf("open persistence store: %w", err)
+	}
+
 	s := &Server{
 		config:          cfg,
 		jwtValidator:    jwtValidator,
@@ -159,6 +173,7 @@ func New(cfg *config.Config) (*Server, error) {
 		agentSessions:   agentsessions.NewManager(),
 		acpConfig:       acpGatewayConfig,
 		acpGateways:     make(map[string]*acp.Gateway),
+		store:           store,
 	}
 
 	if cfg.WorkspaceID != "" {
@@ -274,6 +289,13 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 	s.workspaceMu.Unlock()
 
+	// Close persistence store
+	if s.store != nil {
+		if err := s.store.Close(); err != nil {
+			log.Printf("Warning: failed to close persistence store: %v", err)
+		}
+	}
+
 	// Shutdown HTTP server
 	return s.httpServer.Shutdown(ctx)
 }
@@ -303,6 +325,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions", s.handleListAgentSessions)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions", s.handleCreateAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/stop", s.handleStopAgentSession)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/tabs", s.handleListTabs)
 	mux.HandleFunc("GET /events", s.handleListNodeEvents)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/ports/{port}", s.handleWorkspacePortProxy)
 

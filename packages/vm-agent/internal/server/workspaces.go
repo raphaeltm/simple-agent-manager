@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"strings"
+
+	"github.com/workspace/vm-agent/internal/persistence"
 )
 
 func (s *Server) closeAgentGateway(workspaceID, sessionID string) {
@@ -226,6 +228,13 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 		s.closeAgentGateway(workspaceID, session.ID)
 	}
 
+	// Clear persisted tabs — workspace is stopped, no live sessions remain
+	if s.store != nil {
+		if err := s.store.DeleteWorkspaceTabs(workspaceID); err != nil {
+			log.Printf("Warning: failed to delete persisted tabs on workspace stop %s: %v", workspaceID, err)
+		}
+	}
+
 	s.appendNodeEvent(workspaceID, "info", "workspace.stopped", "Workspace stopped", nil)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "stopped"})
 }
@@ -275,8 +284,47 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	s.closeAgentGatewaysForWorkspace(workspaceID)
 	s.removeWorkspaceRuntime(workspaceID)
+
+	// Remove all persisted tabs for this workspace
+	if s.store != nil {
+		if err := s.store.DeleteWorkspaceTabs(workspaceID); err != nil {
+			log.Printf("Warning: failed to delete persisted tabs for workspace %s: %v", workspaceID, err)
+		}
+	}
+
 	s.appendNodeEvent(workspaceID, "info", "workspace.deleted", "Workspace deleted", nil)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+}
+
+func (s *Server) handleListTabs(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		return
+	}
+
+	// Accept both workspace session cookies (browser) and management tokens (control plane).
+	// Also accept workspace JWT token via ?token= query param for first-load scenarios
+	// before a session cookie has been established.
+	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
+		if !s.requireNodeManagementAuth(w, r, workspaceID) {
+			return
+		}
+	}
+
+	if s.store == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"tabs": []interface{}{}})
+		return
+	}
+
+	tabs, err := s.store.ListTabs(workspaceID)
+	if err != nil {
+		log.Printf("Error listing tabs for workspace %s: %v", workspaceID, err)
+		writeError(w, http.StatusInternalServerError, "failed to list tabs")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"tabs": tabs})
 }
 
 func (s *Server) handleListAgentSessions(w http.ResponseWriter, r *http.Request) {
@@ -326,6 +374,21 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 
 	if !idempotentHit {
 		s.appendNodeEvent(workspaceID, "info", "agent_session.created", "Agent session created", map[string]interface{}{"sessionId": session.ID})
+
+		// Persist chat tab for cross-device continuity
+		if s.store != nil {
+			tabCount, _ := s.store.TabCount(workspaceID)
+			if err := s.store.InsertTab(persistence.Tab{
+				ID:          session.ID,
+				WorkspaceID: workspaceID,
+				Type:        "chat",
+				Label:       session.Label,
+				AgentID:     "", // Agent ID is inferred from label currently
+				SortOrder:   tabCount,
+			}); err != nil {
+				log.Printf("Warning: failed to persist chat tab: %v", err)
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusCreated, session)
@@ -349,6 +412,14 @@ func (s *Server) handleStopAgentSession(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.closeAgentGateway(workspaceID, sessionID)
+
+	// Remove persisted chat tab
+	if s.store != nil {
+		if err := s.store.DeleteTab(sessionID); err != nil {
+			log.Printf("Warning: failed to delete persisted chat tab: %v", err)
+		}
+	}
+
 	s.appendNodeEvent(workspaceID, "info", "agent_session.stopped", "Agent session stopped", map[string]interface{}{"sessionId": sessionID})
 	writeJSON(w, http.StatusOK, session)
 }

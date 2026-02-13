@@ -17,6 +17,7 @@ import type {
   AgentInfo,
   AgentCredentialInfo,
   SaveAgentCredentialRequest,
+  WorkspaceTab,
 } from '@simple-agent-manager/shared';
 
 // In production, VITE_API_URL must be explicitly set
@@ -244,6 +245,28 @@ export async function getTerminalToken(workspaceId: string): Promise<TerminalTok
     method: 'POST',
     body: JSON.stringify({ workspaceId }),
   });
+}
+
+// =============================================================================
+// Workspace Tabs (persisted session state from VM Agent)
+// =============================================================================
+
+/**
+ * Fetch persisted tab state directly from the VM Agent.
+ * Requires a workspace JWT token for authentication.
+ */
+export async function getWorkspaceTabs(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string
+): Promise<WorkspaceTab[]> {
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/tabs?token=${encodeURIComponent(token)}`;
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) {
+    return [];
+  }
+  const data = (await res.json()) as { tabs: WorkspaceTab[] };
+  return data.tabs ?? [];
 }
 
 // =============================================================================

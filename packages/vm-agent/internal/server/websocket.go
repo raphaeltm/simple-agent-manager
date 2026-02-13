@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
+	"github.com/workspace/vm-agent/internal/persistence"
 )
 
 func (s *Server) createUpgrader() websocket.Upgrader {
@@ -438,6 +439,24 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				_ = runtime.PTY.SetSessionName(data.SessionID, data.Name)
 			}
 
+			// Persist terminal tab for cross-device continuity
+			label := data.Name
+			if label == "" {
+				label = "Terminal"
+			}
+			if s.store != nil {
+				tabCount, _ := s.store.TabCount(workspaceID)
+				if err := s.store.InsertTab(persistence.Tab{
+					ID:          data.SessionID,
+					WorkspaceID: workspaceID,
+					Type:        "terminal",
+					Label:       label,
+					SortOrder:   tabCount,
+				}); err != nil {
+					log.Printf("Warning: failed to persist terminal tab: %v", err)
+				}
+			}
+
 			asMu.Lock()
 			attachedSessions[data.SessionID] = struct{}{}
 			asMu.Unlock()
@@ -489,6 +508,13 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 			if err := runtime.PTY.CloseSession(data.SessionID); err != nil {
 				sendSessionError(data.SessionID, err.Error())
 				continue
+			}
+
+			// Remove persisted terminal tab
+			if s.store != nil {
+				if err := s.store.DeleteTab(data.SessionID); err != nil {
+					log.Printf("Warning: failed to delete persisted terminal tab: %v", err)
+				}
 			}
 
 			closedData, _ := json.Marshal(map[string]interface{}{"sessionId": data.SessionID, "reason": "user_requested"})

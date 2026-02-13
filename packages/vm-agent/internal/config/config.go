@@ -110,6 +110,9 @@ type Config struct {
 	// Configurable per constitution principle XI.
 	DefaultDevcontainerImage      string // Container image for the default config
 	DefaultDevcontainerConfigPath string // Path to write the generated default config
+
+	// Persistence settings - configurable per constitution principle XI
+	PersistenceDBPath string // SQLite database path for session state persistence
 }
 
 // Load reads configuration from environment variables.
@@ -210,6 +213,9 @@ func Load() (*Config, error) {
 		// Default devcontainer settings for repos without their own config.
 		DefaultDevcontainerImage:      getEnv("DEFAULT_DEVCONTAINER_IMAGE", DefaultDevcontainerImage),
 		DefaultDevcontainerConfigPath: getEnv("DEFAULT_DEVCONTAINER_CONFIG_PATH", DefaultDevcontainerConfigPath),
+
+		// Persistence settings
+		PersistenceDBPath: getEnv("PERSISTENCE_DB_PATH", "/var/lib/vm-agent/state.db"),
 	}
 
 	// Validate required fields
