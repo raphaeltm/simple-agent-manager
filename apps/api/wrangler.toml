@@ -30,6 +30,11 @@ id = "your-kv-namespace-id"
 binding = "R2"
 bucket_name = "workspaces-dev-assets"
 
+
+# Workers AI for speech-to-text transcription
+[ai]
+binding = "AI"
+
 # Environment-specific configuration
 [env.staging]
 name = "sam-api-staging"

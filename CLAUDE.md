@@ -440,7 +440,7 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 - `GET /api/nodes/:id` — Get node details
 - `POST /api/nodes/:id/stop` — Stop node
 - `DELETE /api/nodes/:id` — Delete node
-- `GET /api/nodes/:id/events` — List node events
+- `POST /api/nodes/:id/token` — Get node-scoped token for direct VM Agent access
 
 ### Workspace Management
 - `POST /api/workspaces` — Create workspace
@@ -450,12 +450,16 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 - `POST /api/workspaces/:id/stop` — Stop a running workspace
 - `POST /api/workspaces/:id/restart` — Restart a workspace
 - `DELETE /api/workspaces/:id` — Delete a workspace
-- `GET /api/workspaces/:id/events` — List workspace events
 
 ### Agent Sessions
 - `GET /api/workspaces/:id/agent-sessions` — List workspace agent sessions
 - `POST /api/workspaces/:id/agent-sessions` — Create agent session
 - `POST /api/workspaces/:id/agent-sessions/:sessionId/stop` — Stop agent session
+
+### Agent Settings
+- `GET /api/agent-settings/:agentType` — Get user's agent settings
+- `PUT /api/agent-settings/:agentType` — Upsert agent settings (model, permissionMode)
+- `DELETE /api/agent-settings/:agentType` — Reset agent settings to defaults
 
 ### VM Communication
 - `POST /api/nodes/:id/ready` — Node Agent ready callback
@@ -465,12 +469,16 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 - `POST /api/workspaces/:id/heartbeat` — Workspace activity heartbeat callback
 - `GET /api/workspaces/:id/runtime` — Workspace runtime metadata callback (repository/branch for recovery)
 - `POST /api/workspaces/:id/boot-log` — Workspace boot progress log callback
+- `POST /api/workspaces/:id/agent-settings` — Workspace agent settings callback (model, permissionMode)
 - `POST /api/bootstrap/:token` — Redeem one-time bootstrap token (credentials + git identity)
 - `POST /api/agent/ready` — VM agent ready callback
 - `POST /api/agent/activity` — VM agent activity report
 
 ### Terminal Access
 - `POST /api/terminal/token` — Get terminal WebSocket token
+
+### Voice Transcription
+- `POST /api/transcribe` — Transcribe audio via Workers AI (Whisper)
 
 ### Authentication (BetterAuth)
 - `POST /api/auth/sign-in/social` — GitHub OAuth login
@@ -627,6 +635,10 @@ See `apps/api/.env.example`:
 - `NODE_HEARTBEAT_STALE_SECONDS` - Optional staleness threshold for node health
 - `NODE_AGENT_READY_TIMEOUT_MS` - Optional max wait for freshly provisioned node-agent health before first workspace create
 - `NODE_AGENT_READY_POLL_INTERVAL_MS` - Optional polling interval for fresh-node readiness checks
+- `WHISPER_MODEL_ID` - Workers AI model for transcription (default: `@cf/openai/whisper-large-v3-turbo`)
+- `MAX_AUDIO_SIZE_BYTES` - Maximum audio upload size in bytes (default: 10485760)
+- `MAX_AUDIO_DURATION_SECONDS` - Maximum recording duration in seconds (default: 60)
+- `RATE_LIMIT_TRANSCRIBE` - Optional rate limit for transcription requests
 
 ## Testing
 
@@ -662,6 +674,8 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 - **Infra**: Pulumi, Wrangler, @devcontainers/cli, pnpm 9.0+, Cloudflare Pages
 
 ## Recent Changes
+- voice-to-text: Voice input button for agent chat with Workers AI Whisper transcription, VoiceButton component in acp-client, POST /api/transcribe endpoint, configurable model/limits
+- node-data-ownership: Workspace events and node events fetched directly from VM Agent (browser -> VM Agent), removing control plane proxy; new `POST /api/nodes/:id/token` for node-scoped auth tokens; VM Agent event handlers accept browser workspace/session auth
 - 014-multi-workspace-nodes: First-class Nodes with multi-workspace hosting, async provisioning (callback-driven `/ready` + `/provisioning-failed`), workspace recovery on attach, session tab UX with `+` dropdown, node-scoped routing/auth, explicit lifecycle control
 - 014-multi-workspace-nodes: Default fallback devcontainer image changed to `mcr.microsoft.com/devcontainers/base:ubuntu`; bind-mount permission normalization before `devcontainer up`; fresh-node readiness probing with hard timeouts
 - 014-auth-profile-sync: GitHub primary email resolved at login, propagated into workspace bootstrap for git commit identity

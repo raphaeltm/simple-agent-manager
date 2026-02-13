@@ -9,6 +9,7 @@ import { UsageIndicator } from './UsageIndicator';
 import { ModeSelector } from './ModeSelector';
 import { SlashCommandPalette } from './SlashCommandPalette';
 import type { SlashCommandPaletteHandle } from './SlashCommandPalette';
+import { VoiceButton } from './VoiceButton';
 
 // =============================================================================
 // Client-side commands (not forwarded to agent)
@@ -31,11 +32,14 @@ interface AgentPanelProps {
   currentMode?: string | null;
   /** Called when user selects a mode */
   onSelectMode?: (mode: string) => void;
+  /** URL for the voice transcription API endpoint (e.g., https://api.example.com/api/transcribe).
+   *  When provided, a voice input button is shown next to the send button. */
+  transcribeApiUrl?: string;
 }
 
 /**
  * Main conversation container for structured agent interaction.
- * Renders message list, prompt input, slash command palette, and usage indicator.
+ * Renders message list, prompt input, slash command palette, voice button, and usage indicator.
  */
 export function AgentPanel({
   session,
@@ -44,6 +48,7 @@ export function AgentPanel({
   modes,
   currentMode,
   onSelectMode,
+  transcribeApiUrl,
 }: AgentPanelProps) {
   const [input, setInput] = useState('');
   const [showPalette, setShowPalette] = useState(false);
@@ -175,6 +180,16 @@ export function AgentPanel({
     }
   };
 
+  // Handle voice transcription — append transcribed text to current input
+  const handleTranscription = useCallback((text: string) => {
+    setInput((prev) => {
+      const separator = prev.length > 0 && !prev.endsWith(' ') ? ' ' : '';
+      return prev + separator + text;
+    });
+    // Focus the input after transcription so user can review/edit
+    inputRef.current?.focus();
+  }, []);
+
   const isPrompting = session.state === 'prompting';
   const canSend = session.state === 'ready' && input.trim().length > 0;
 
@@ -222,6 +237,13 @@ export function AgentPanel({
               rows={1}
               className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm resize-none focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
             />
+            {transcribeApiUrl && (
+              <VoiceButton
+                onTranscription={handleTranscription}
+                disabled={session.state !== 'ready'}
+                apiUrl={transcribeApiUrl}
+              />
+            )}
             <button
               type="submit"
               disabled={!canSend}

@@ -13,7 +13,6 @@ import type {
   BootstrapTokenData,
   CreateAgentSessionRequest,
   CreateWorkspaceRequest,
-  Event,
   HeartbeatRequest,
   HeartbeatResponse,
   UpdateWorkspaceRequest,
@@ -27,7 +26,6 @@ import {
   createAgentSessionOnNode,
   createWorkspaceOnNode,
   deleteWorkspaceOnNode,
-  listWorkspaceEvents as fetchWorkspaceEvents,
   rebuildWorkspaceOnNode,
   restartWorkspaceOnNode,
   stopAgentSessionOnNode,
@@ -48,6 +46,7 @@ workspacesRoutes.use('/*', async (c, next) => {
     path.endsWith('/ready') ||
     path.endsWith('/heartbeat') ||
     path.endsWith('/agent-key') ||
+    path.endsWith('/agent-settings') ||
     path.endsWith('/runtime') ||
     path.endsWith('/git-token') ||
     path.endsWith('/boot-log') ||
@@ -247,37 +246,6 @@ workspacesRoutes.get('/', async (c) => {
   });
 
   return c.json(filtered.map((workspace) => toWorkspaceResponse(workspace, c.env.BASE_DOMAIN)));
-});
-
-workspacesRoutes.get('/:id/events', async (c) => {
-  const userId = getUserId(c);
-  const workspaceId = c.req.param('id');
-  const db = drizzle(c.env.DATABASE, { schema });
-  const limit = Number.parseInt(c.req.query('limit') ?? '100', 10);
-  const cursor = c.req.query('cursor');
-
-  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
-  if (!workspace.nodeId) {
-    return c.json({ events: [] as Event[], nextCursor: null });
-  }
-
-  try {
-    const result = (await fetchWorkspaceEvents(
-      workspace.nodeId,
-      workspace.id,
-      c.env,
-      userId,
-      limit,
-      cursor
-    )) as { events?: Event[]; nextCursor?: string | null };
-
-    return c.json({
-      events: result.events ?? [],
-      nextCursor: result.nextCursor ?? null,
-    });
-  } catch {
-    return c.json({ events: [] as Event[], nextCursor: null });
-  }
 });
 
 workspacesRoutes.get('/:id', async (c) => {
@@ -982,6 +950,57 @@ workspacesRoutes.post('/:id/agent-key', async (c) => {
   });
 });
 
+
+/**
+ * POST /:id/agent-settings — VM agent callback to fetch user's agent settings.
+ * Uses workspace callback auth (same as agent-key).
+ */
+workspacesRoutes.post('/:id/agent-settings', async (c) => {
+  const workspaceId = c.req.param('id');
+  await verifyWorkspaceCallbackAuth(c, workspaceId);
+  const body = await c.req.json<{ agentType: string }>();
+
+  if (!body.agentType) {
+    throw errors.badRequest('agentType is required');
+  }
+
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  const workspaceRows = await db
+    .select({ userId: schema.workspaces.userId })
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+
+  const workspace = workspaceRows[0];
+  if (!workspace) {
+    throw errors.notFound('Workspace');
+  }
+
+  const settingsRows = await db
+    .select()
+    .from(schema.agentSettings)
+    .where(
+      and(
+        eq(schema.agentSettings.userId, workspace.userId),
+        eq(schema.agentSettings.agentType, body.agentType)
+      )
+    )
+    .limit(1);
+
+  const row = settingsRows[0];
+  if (!row) {
+    return c.json({
+      model: null,
+      permissionMode: null,
+    });
+  }
+
+  return c.json({
+    model: row.model,
+    permissionMode: row.permissionMode,
+  });
+});
 workspacesRoutes.get('/:id/runtime', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);

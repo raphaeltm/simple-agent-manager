@@ -15,6 +15,8 @@ import { agentRoutes } from './routes/agent';
 import { agentsCatalogRoutes } from './routes/agents-catalog';
 import { bootstrapRoutes } from './routes/bootstrap';
 import { uiGovernanceRoutes } from './routes/ui-governance';
+import { transcribeRoutes } from './routes/transcribe';
+import { agentSettingsRoutes } from './routes/agent-settings';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { getRuntimeLimits } from './services/limits';
 import { recordNodeRoutingMetric } from './services/telemetry';
@@ -27,6 +29,8 @@ export interface Env {
   KV: KVNamespace;
   // R2 for VM Agent binaries
   R2: R2Bucket;
+  // Workers AI for speech-to-text transcription
+  AI: Ai;
   // Environment variables
   BASE_DOMAIN: string;
   VERSION: string;
@@ -71,6 +75,11 @@ export interface Env {
   // Boot log configuration
   BOOT_LOG_TTL_SECONDS?: string;
   BOOT_LOG_MAX_ENTRIES?: string;
+  // Voice-to-text transcription (Workers AI)
+  WHISPER_MODEL_ID?: string;
+  MAX_AUDIO_SIZE_BYTES?: string;
+  MAX_AUDIO_DURATION_SECONDS?: string;
+  RATE_LIMIT_TRANSCRIBE?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -238,6 +247,8 @@ app.route('/api/agent', agentRoutes);
 app.route('/api/agents', agentsCatalogRoutes);
 app.route('/api/bootstrap', bootstrapRoutes);
 app.route('/api/ui-governance', uiGovernanceRoutes);
+app.route('/api/transcribe', transcribeRoutes);
+app.route('/api/agent-settings', agentSettingsRoutes);
 
 // 404 handler
 app.notFound((c) => {

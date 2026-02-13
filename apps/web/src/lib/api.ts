@@ -18,6 +18,8 @@ import type {
   AgentCredentialInfo,
   SaveAgentCredentialRequest,
   WorkspaceTab,
+  AgentSettingsResponse,
+  SaveAgentSettingsRequest,
 } from '@simple-agent-manager/shared';
 
 // In production, VITE_API_URL must be explicitly set
@@ -147,11 +149,42 @@ export async function deleteNode(id: string): Promise<{ success: boolean }> {
   });
 }
 
-export async function listNodeEvents(nodeId: string, limit = 100, cursor?: string): Promise<{ events: Event[]; nextCursor?: string | null }> {
+/**
+ * Get a node-scoped management token for direct VM Agent access.
+ * Used to fetch node events, health data, etc. directly from the VM Agent.
+ */
+export async function getNodeToken(nodeId: string): Promise<{ token: string; expiresAt: string; nodeAgentUrl: string }> {
+  return request<{ token: string; expiresAt: string; nodeAgentUrl: string }>(`/api/nodes/${nodeId}/token`, {
+    method: 'POST',
+  });
+}
+
+
+/**
+ * Fetch node events directly from the VM Agent.
+ * Requires a node management token obtained from getNodeToken().
+ */
+export async function listNodeEvents(
+  nodeAgentUrl: string,
+  token: string,
+  limit = 100,
+  cursor?: string
+): Promise<{ events: Event[]; nextCursor?: string | null }> {
   const params = new URLSearchParams();
   params.set('limit', String(limit));
+  params.set('token', token);
   if (cursor) params.set('cursor', cursor);
-  return request<{ events: Event[]; nextCursor?: string | null }>(`/api/nodes/${nodeId}/events?${params.toString()}`);
+
+  try {
+    const res = await fetch(`${nodeAgentUrl}/events?${params.toString()}`);
+    if (!res.ok) {
+      return { events: [], nextCursor: null };
+    }
+    const data = await res.json() as { events: Event[]; nextCursor?: string | null };
+    return { events: data.events ?? [], nextCursor: data.nextCursor ?? null };
+  } catch {
+    return { events: [], nextCursor: null };
+  }
 }
 
 // =============================================================================
@@ -207,11 +240,34 @@ export async function deleteWorkspace(id: string): Promise<void> {
   });
 }
 
-export async function listWorkspaceEvents(workspaceId: string, limit = 100, cursor?: string): Promise<{ events: Event[]; nextCursor?: string | null }> {
+/**
+ * Fetch workspace events directly from the VM Agent.
+ * Requires a workspace JWT token for authentication (same as getWorkspaceTabs).
+ */
+export async function listWorkspaceEvents(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string,
+  limit = 100,
+  cursor?: string
+): Promise<{ events: Event[]; nextCursor?: string | null }> {
   const params = new URLSearchParams();
   params.set('limit', String(limit));
+  params.set('token', token);
   if (cursor) params.set('cursor', cursor);
-  return request<{ events: Event[]; nextCursor?: string | null }>(`/api/workspaces/${workspaceId}/events?${params.toString()}`);
+
+  try {
+    const res = await fetch(
+      `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/events?${params.toString()}`
+    );
+    if (!res.ok) {
+      return { events: [], nextCursor: null };
+    }
+    const data = await res.json() as { events: Event[]; nextCursor?: string | null };
+    return { events: data.events ?? [], nextCursor: data.nextCursor ?? null };
+  } catch {
+    return { events: [], nextCursor: null };
+  }
 }
 
 // =============================================================================
@@ -302,6 +358,37 @@ export async function deleteAgentCredentialByKind(agentType: string, credentialK
 
 export async function deleteAgentCredential(agentType: string): Promise<void> {
   return request<void>(`/api/credentials/agent/${agentType}`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * Get the full URL for the voice transcription API endpoint.
+ * Used by the VoiceButton component to send audio for transcription.
+ */
+export function getTranscribeApiUrl(): string {
+  return `${API_URL}/api/transcribe`;
+}
+
+// =============================================================================
+// Agent Settings
+// =============================================================================
+export async function getAgentSettings(agentType: string): Promise<AgentSettingsResponse> {
+  return request<AgentSettingsResponse>(`/api/agent-settings/${agentType}`);
+}
+
+export async function saveAgentSettings(
+  agentType: string,
+  data: SaveAgentSettingsRequest
+): Promise<AgentSettingsResponse> {
+  return request<AgentSettingsResponse>(`/api/agent-settings/${agentType}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteAgentSettings(agentType: string): Promise<void> {
+  return request<void>(`/api/agent-settings/${agentType}`, {
     method: 'DELETE',
   });
 }

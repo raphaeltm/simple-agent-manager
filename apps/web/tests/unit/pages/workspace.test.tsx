@@ -38,6 +38,7 @@ vi.mock('../../../src/lib/api', () => ({
   stopAgentSession: mocks.stopAgentSession,
   updateWorkspace: mocks.updateWorkspace,
   listAgents: mocks.listAgents,
+  getTranscribeApiUrl: () => 'https://api.example.com/api/transcribe',
 }));
 
 vi.mock('@simple-agent-manager/terminal', () => ({
@@ -473,6 +474,11 @@ describe('Workspace page', () => {
       setMobileViewport();
       renderWorkspace('/workspaces/ws-123');
       await screen.findByText('Workspace A');
+
+      // Wait for events to load (fetched from VM Agent after terminal token is available)
+      await waitFor(() => {
+        expect(mocks.listWorkspaceEvents).toHaveBeenCalled();
+      });
 
       // No overlay initially
       expect(screen.queryByRole('dialog', { name: 'Workspace menu' })).not.toBeInTheDocument();

@@ -216,44 +216,6 @@ export async function deleteWorkspaceOnNode(
   });
 }
 
-export async function listNodeEvents(
-  nodeId: string,
-  env: Env,
-  userId: string,
-  limit = 100,
-  cursor?: string
-): Promise<unknown> {
-  const params = new URLSearchParams({ limit: String(limit) });
-  if (cursor) {
-    params.set('cursor', cursor);
-  }
-
-  return nodeAgentRequest(nodeId, env, `/events?${params.toString()}`, {
-    method: 'GET',
-    userId,
-  });
-}
-
-export async function listWorkspaceEvents(
-  nodeId: string,
-  workspaceId: string,
-  env: Env,
-  userId: string,
-  limit = 100,
-  cursor?: string
-): Promise<unknown> {
-  const params = new URLSearchParams({ limit: String(limit) });
-  if (cursor) {
-    params.set('cursor', cursor);
-  }
-
-  return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/events?${params.toString()}`, {
-    method: 'GET',
-    userId,
-    workspaceId,
-  });
-}
-
 export async function createAgentSessionOnNode(
   nodeId: string,
   workspaceId: string,

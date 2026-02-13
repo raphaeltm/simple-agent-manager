@@ -336,3 +336,44 @@ export interface ApiError {
   message: string;
   details?: Record<string, unknown>;
 }
+
+// =============================================================================
+// Agent Settings (per-user, per-agent configuration)
+// =============================================================================
+
+/** Valid permission modes for agent sessions */
+export type AgentPermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
+
+/** Agent settings stored per-user, per-agent in D1 */
+export interface AgentSettings {
+  id: string;
+  agentType: string;
+  model: string | null;
+  permissionMode: AgentPermissionMode | null;
+  allowedTools: string[] | null;
+  deniedTools: string[] | null;
+  additionalEnv: Record<string, string> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** API response for GET /api/agent-settings/:agentType */
+export interface AgentSettingsResponse {
+  agentType: string;
+  model: string | null;
+  permissionMode: AgentPermissionMode | null;
+  allowedTools: string[] | null;
+  deniedTools: string[] | null;
+  additionalEnv: Record<string, string> | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+/** Request body for PUT /api/agent-settings/:agentType */
+export interface SaveAgentSettingsRequest {
+  model?: string | null;
+  permissionMode?: AgentPermissionMode | null;
+  allowedTools?: string[] | null;
+  deniedTools?: string[] | null;
+  additionalEnv?: Record<string, string> | null;
+}
