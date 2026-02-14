@@ -688,6 +688,7 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 - **Infra**: Pulumi, Wrangler, @devcontainers/cli, pnpm 9.0+, Cloudflare Pages
 
 ## Recent Changes
+- voice-transcribe-logging: Added comprehensive server-side logging to POST /api/transcribe for debugging voice input issues; logs request receipt, audio file metadata, base64 conversion, Workers AI call timing, response details, and errors with full context
 - agent-file-ops: Implement ACP ReadTextFile and WriteTextFile handlers in gateway; agent can now read/write files via docker exec instead of falling back to Bash cat/echo; supports partial reads (Line/Limit params); reuses GIT_EXEC_TIMEOUT and GIT_FILE_MAX_SIZE config
 - file-browser: File browser with directory listing and syntax-highlighted file viewer; VM Agent endpoint `GET /files/list` via docker exec `find -printf`; breadcrumb navigation, mobile-first full-screen overlays, cross-link to git diff viewer; configurable FILE_LIST_TIMEOUT and FILE_LIST_MAX_ENTRIES
 - git-changes-viewer: GitHub PR-style git changes viewer accessible via nav bar icon; VM Agent endpoints for git status/diff/file via docker exec; full-screen overlay with staged/unstaged/untracked sections, unified diff view with green/red coloring, Diff/Full toggle; URL search params for browser back/forward navigation
