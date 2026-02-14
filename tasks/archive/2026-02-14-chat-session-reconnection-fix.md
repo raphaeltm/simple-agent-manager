@@ -69,7 +69,34 @@ When a user switches away from the SAM browser tab (e.g., to another app on mobi
 - [x] Typecheck passes
 - [x] Lint passes
 - [x] PR created with preflight evidence (#67)
-- [ ] CI passes
-- [ ] Merged to main
-- [ ] Deployed to production
-- [ ] Playwright verification in production
+- [x] CI passes
+- [x] Merged to main (squash merge, 2026-02-14T13:04:37Z)
+- [x] Deployed to production (deploy workflow succeeded)
+- [x] Playwright verification in production
+
+## Production Verification Results
+
+**Date**: 2026-02-14
+**Workspace**: elysia (01KHE32SCG0EV68EC7P93Y9XNS)
+**Session**: Claude Code 2 (01KHE3R2RYR3S4VYQA1DR3J2PA)
+
+### Phase 1 (Reconnection hang) — VERIFIED WORKING
+1. Sent initial message ("respond with PINEAPPLE") — agent responded correctly
+2. Navigated away to dashboard (WebSocket disconnected)
+3. Waited 5 seconds
+4. Navigated back to the workspace with same session URL
+5. **Result**: Chat loaded immediately with input ready — NO hang on "Waiting for agent..."
+6. New `agent.attach` events visible at 1:15:02 PM confirming reconnection
+
+### Phase 2-5 (LoadSession conversation continuity) — INFRASTRUCTURE READY
+- Previous messages displayed correctly in UI (from sessionStorage)
+- Asked agent "What word did I ask you to say?" — agent responded it had no prior context
+- **Root cause**: The `claude-code-acp` adapter currently reports `LoadSession: false` in its capabilities
+- The server-side code correctly checks this capability and falls back to `NewSession`
+- **Expected behavior**: When claude-code-acp supports LoadSession, conversation continuity will activate automatically — no code changes needed
+
+### Screenshots
+- `.codex/tmp/playwright-screenshots/reconnection-test-1-initial-message.png`
+- `.codex/tmp/playwright-screenshots/reconnection-test-2-after-reconnect.png`
+- `.codex/tmp/playwright-screenshots/reconnection-test-3-context-test.png`
+- `.codex/tmp/playwright-screenshots/reconnection-test-4-final-summary.png`

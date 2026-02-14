@@ -122,6 +122,12 @@ type Config struct {
 	// File browser settings - configurable per constitution principle XI
 	FileListTimeout    time.Duration // Timeout for file listing commands (default: 10s)
 	FileListMaxEntries int           // Max entries returned per directory listing (default: 1000)
+
+	// Error reporting settings - configurable per constitution principle XI
+	ErrorReportFlushInterval time.Duration // Background flush interval (default: 30s)
+	ErrorReportMaxBatchSize  int           // Immediate flush threshold (default: 10)
+	ErrorReportMaxQueueSize  int           // Max queued entries before dropping (default: 100)
+	ErrorReportHTTPTimeout   time.Duration // HTTP POST timeout (default: 10s)
 }
 
 // Load reads configuration from environment variables.
@@ -234,6 +240,12 @@ func Load() (*Config, error) {
 		// File browser settings
 		FileListTimeout:    getEnvDuration("FILE_LIST_TIMEOUT", 10*time.Second),
 		FileListMaxEntries: getEnvInt("FILE_LIST_MAX_ENTRIES", 1000),
+
+		// Error reporting settings - configurable per constitution principle XI
+		ErrorReportFlushInterval: getEnvDuration("ERROR_REPORT_FLUSH_INTERVAL", 30*time.Second),
+		ErrorReportMaxBatchSize:  getEnvInt("ERROR_REPORT_MAX_BATCH_SIZE", 10),
+		ErrorReportMaxQueueSize:  getEnvInt("ERROR_REPORT_MAX_QUEUE_SIZE", 100),
+		ErrorReportHTTPTimeout:   getEnvDuration("ERROR_REPORT_HTTP_TIMEOUT", 10*time.Second),
 	}
 
 	// Validate required fields

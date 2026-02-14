@@ -19,6 +19,7 @@ import (
 	"github.com/workspace/vm-agent/internal/auth"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/container"
+	"github.com/workspace/vm-agent/internal/errorreport"
 	"github.com/workspace/vm-agent/internal/idle"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/pty"
@@ -46,6 +47,7 @@ type Server struct {
 	acpGateway      *acp.Gateway
 	acpGateways     map[string]*acp.Gateway
 	store           *persistence.Store
+	errorReporter   *errorreport.Reporter
 }
 
 type WorkspaceRuntime struct {
@@ -140,6 +142,14 @@ func New(cfg *config.Config) (*Server, error) {
 		BufferSize:        cfg.PTYOutputBufferSize,
 	})
 
+	// Create error reporter for sending VM agent errors to CF observability.
+	errorReporter := errorreport.New(cfg.ControlPlaneURL, cfg.NodeID, cfg.CallbackToken, errorreport.Config{
+		FlushInterval: cfg.ErrorReportFlushInterval,
+		MaxBatchSize:  cfg.ErrorReportMaxBatchSize,
+		MaxQueueSize:  cfg.ErrorReportMaxQueueSize,
+		HTTPTimeout:   cfg.ErrorReportHTTPTimeout,
+	})
+
 	// Build ACP gateway configuration
 	acpGatewayConfig := acp.GatewayConfig{
 		InitTimeoutMs:      cfg.ACPInitTimeoutMs,
@@ -153,6 +163,7 @@ func New(cfg *config.Config) (*Server, error) {
 		OnActivity:         idleDetector.RecordActivity,
 		FileExecTimeout:    cfg.GitExecTimeout,
 		FileMaxSize:        cfg.GitFileMaxSize,
+		ErrorReporter:      errorReporter,
 	}
 
 	// Open persistence store for cross-device session state.
@@ -178,6 +189,7 @@ func New(cfg *config.Config) (*Server, error) {
 		acpConfig:       acpGatewayConfig,
 		acpGateways:     make(map[string]*acp.Gateway),
 		store:           store,
+		errorReporter:   errorReporter,
 	}
 
 	if cfg.WorkspaceID != "" {
@@ -226,6 +238,9 @@ func (s *Server) Start() error {
 	// Start idle detector
 	go s.idleDetector.Start()
 	s.startNodeHealthReporter()
+
+	// Start error reporter background flush
+	s.errorReporter.Start()
 
 	log.Printf("Starting VM Agent on %s", s.httpServer.Addr)
 	return s.httpServer.ListenAndServe()
@@ -292,6 +307,9 @@ func (s *Server) Stop(ctx context.Context) error {
 		runtime.PTY.CloseAllSessions()
 	}
 	s.workspaceMu.Unlock()
+
+	// Flush and stop error reporter
+	s.errorReporter.Shutdown()
 
 	// Close persistence store
 	if s.store != nil {

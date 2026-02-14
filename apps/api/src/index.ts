@@ -85,6 +85,9 @@ export interface Env {
   RATE_LIMIT_CLIENT_ERRORS?: string;
   MAX_CLIENT_ERROR_BATCH_SIZE?: string;
   MAX_CLIENT_ERROR_BODY_BYTES?: string;
+  // VM agent error reporting
+  MAX_VM_AGENT_ERROR_BODY_BYTES?: string;
+  MAX_VM_AGENT_ERROR_BATCH_SIZE?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();

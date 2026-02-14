@@ -24,6 +24,12 @@ type BootLogReporter interface {
 	Log(step, status, message string, detail ...string)
 }
 
+// ErrorReporter sends structured error entries to CF Workers observability.
+// All methods must be nil-safe.
+type ErrorReporter interface {
+	ReportError(err error, source, workspaceID string, ctx map[string]interface{})
+}
+
 // SessionUpdater persists ACP session IDs for reconnection with LoadSession.
 type SessionUpdater interface {
 	// UpdateAcpSessionID updates the ACP session ID and agent type for a session.
@@ -73,6 +79,9 @@ type GatewayConfig struct {
 	FileExecTimeout time.Duration
 	// FileMaxSize is the maximum file size in bytes for read operations.
 	FileMaxSize int
+	// ErrorReporter sends structured error entries to CF Workers observability.
+	// Agent errors (crashes, install failures, prompt failures) are reported here.
+	ErrorReporter ErrorReporter
 }
 
 // Gateway bridges a gorilla/websocket connection to an ACP agent subprocess.
@@ -698,13 +707,24 @@ func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess,
 	g.sendAgentStatus(StatusReady, agentType, "")
 }
 
-// reportAgentError sends an agent error to the control plane boot-log endpoint
-// for observability. It is fire-and-forget — failures are logged but don't block.
+// reportAgentError sends an agent error to both the boot-log endpoint and
+// the error reporter for CF Workers observability. Fire-and-forget.
 func (g *Gateway) reportAgentError(agentType, step, message, detail string) {
-	if g.config.BootLog == nil {
-		return
+	if g.config.BootLog != nil {
+		g.config.BootLog.Log(step, "failed", fmt.Sprintf("[%s] %s", agentType, message), detail)
 	}
-	g.config.BootLog.Log(step, "failed", fmt.Sprintf("[%s] %s", agentType, message), detail)
+	if g.config.ErrorReporter != nil {
+		g.config.ErrorReporter.ReportError(
+			fmt.Errorf("%s", message),
+			"acp-gateway",
+			g.config.WorkspaceID,
+			map[string]interface{}{
+				"agentType": agentType,
+				"step":      step,
+				"detail":    detail,
+			},
+		)
+	}
 }
 
 // truncate limits a string to maxLen characters, appending "..." if truncated.
