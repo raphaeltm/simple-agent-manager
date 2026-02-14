@@ -61,6 +61,25 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		session = created
+
+		// Hydrate AcpSessionID from SQLite persistence if available.
+		// The in-memory manager starts empty, but SQLite may have the
+		// AcpSessionID from a previous connection (persisted by the gateway).
+		if s.store != nil {
+			if tabs, tabErr := s.store.ListTabs(workspaceID); tabErr == nil {
+				for _, tab := range tabs {
+					if tab.ID == requestedSessionID && tab.AcpSessionID != "" {
+						session.AcpSessionID = tab.AcpSessionID
+						session.AgentType = tab.AgentID
+						_ = s.agentSessions.UpdateAcpSessionID(workspaceID, requestedSessionID, tab.AcpSessionID, tab.AgentID)
+						log.Printf("Workspace %s: hydrated AcpSessionID=%s agentType=%s from SQLite for session %s",
+							workspaceID, tab.AcpSessionID, tab.AgentID, requestedSessionID)
+						break
+					}
+				}
+			}
+		}
+
 		if autoCreateSession {
 			s.appendNodeEvent(workspaceID, "info", "agent.session_created", "Agent session created for websocket attach", map[string]interface{}{
 				"sessionId": requestedSessionID,
@@ -120,10 +139,11 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	gatewayCfg.SessionID = requestedSessionID
 	gatewayCfg.SessionManager = s.agentSessions
 	gatewayCfg.TabStore = s.store
-	// Pass previous ACP session ID for LoadSession on reconnection
+	// Pass previous ACP session ID and agent type for LoadSession on reconnection
 	if session.AcpSessionID != "" {
 		gatewayCfg.PreviousAcpSessionID = session.AcpSessionID
-		log.Printf("Workspace %s: passing previous ACP session ID %s for potential LoadSession", workspaceID, session.AcpSessionID)
+		gatewayCfg.PreviousAgentType = session.AgentType
+		log.Printf("Workspace %s: passing previous ACP session ID %s (agentType=%s) for potential LoadSession", workspaceID, session.AcpSessionID, session.AgentType)
 	}
 	if callbackToken := s.callbackTokenForWorkspace(workspaceID); callbackToken != "" {
 		gatewayCfg.CallbackToken = callbackToken
