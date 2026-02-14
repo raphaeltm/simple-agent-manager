@@ -118,6 +118,10 @@ type Config struct {
 	// Git integration settings - configurable per constitution principle XI
 	GitExecTimeout time.Duration // Timeout for git commands via docker exec (default: 30s)
 	GitFileMaxSize int           // Max file size in bytes for /git/file (default: 1MB)
+
+	// File browser settings - configurable per constitution principle XI
+	FileListTimeout    time.Duration // Timeout for file listing commands (default: 10s)
+	FileListMaxEntries int           // Max entries returned per directory listing (default: 1000)
 }
 
 // Load reads configuration from environment variables.
@@ -226,6 +230,10 @@ func Load() (*Config, error) {
 		// Git integration settings - configurable per constitution principle XI
 		GitExecTimeout: getEnvDuration("GIT_EXEC_TIMEOUT", 30*time.Second),
 		GitFileMaxSize: getEnvInt("GIT_FILE_MAX_SIZE", 1048576), // 1 MB
+
+		// File browser settings
+		FileListTimeout:    getEnvDuration("FILE_LIST_TIMEOUT", 10*time.Second),
+		FileListMaxEntries: getEnvInt("FILE_LIST_MAX_ENTRIES", 1000),
 	}
 
 	// Validate required fields

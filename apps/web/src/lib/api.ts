@@ -477,3 +477,36 @@ export async function getGitFile(
   }
   return res.json() as Promise<GitFileData>;
 }
+
+// ---------- File Browser (VM Agent direct) ----------
+
+export interface FileEntry {
+  name: string;
+  type: 'file' | 'dir' | 'symlink';
+  size: number;
+  modifiedAt: string;
+}
+
+export interface FileListData {
+  path: string;
+  entries: FileEntry[];
+}
+
+/**
+ * Fetch directory listing from the VM Agent.
+ */
+export async function getFileList(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string,
+  path = '.'
+): Promise<FileListData> {
+  const params = new URLSearchParams({ token, path });
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/list?${params.toString()}`;
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`File listing failed: ${text}`);
+  }
+  return res.json() as Promise<FileListData>;
+}
