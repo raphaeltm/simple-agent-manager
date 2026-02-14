@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   stopAgentSession: vi.fn(),
   updateWorkspace: vi.fn(),
   listAgents: vi.fn(),
+  getGitStatus: vi.fn(),
   useAcpSession: vi.fn(),
 }));
 
@@ -38,6 +39,7 @@ vi.mock('../../../src/lib/api', () => ({
   stopAgentSession: mocks.stopAgentSession,
   updateWorkspace: mocks.updateWorkspace,
   listAgents: mocks.listAgents,
+  getGitStatus: mocks.getGitStatus,
   getTranscribeApiUrl: () => 'https://api.example.com/api/transcribe',
 }));
 
@@ -173,6 +175,7 @@ describe('Workspace page', () => {
       updatedAt: '2026-02-08T00:00:00.000Z',
       url: 'https://ws-ws-123.example.com',
     });
+    mocks.getGitStatus.mockResolvedValue({ staged: [], unstaged: [], untracked: [] });
     mocks.listAgents.mockResolvedValue({
       agents: [
         {

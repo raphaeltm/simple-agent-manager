@@ -114,6 +114,10 @@ type Config struct {
 
 	// Persistence settings - configurable per constitution principle XI
 	PersistenceDBPath string // SQLite database path for session state persistence
+
+	// Git integration settings - configurable per constitution principle XI
+	GitExecTimeout time.Duration // Timeout for git commands via docker exec (default: 30s)
+	GitFileMaxSize int           // Max file size in bytes for /git/file (default: 1MB)
 }
 
 // Load reads configuration from environment variables.
@@ -218,6 +222,10 @@ func Load() (*Config, error) {
 
 		// Persistence settings
 		PersistenceDBPath: getEnv("PERSISTENCE_DB_PATH", "/var/lib/vm-agent/state.db"),
+
+		// Git integration settings - configurable per constitution principle XI
+		GitExecTimeout: getEnvDuration("GIT_EXEC_TIMEOUT", 30*time.Second),
+		GitFileMaxSize: getEnvInt("GIT_FILE_MAX_SIZE", 1048576), // 1 MB
 	}
 
 	// Validate required fields
