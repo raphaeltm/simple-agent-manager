@@ -82,24 +82,81 @@ function Spinner({ className }: { className?: string }) {
 export function VoiceButton({ onTranscription, disabled = false, apiUrl }: VoiceButtonProps) {
   const [state, setState] = useState<VoiceState>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [amplitude, setAmplitude] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
 
   // Clean up on unmount
   useEffect(() => {
     return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+      if (audioContextRef.current) {
+        void audioContextRef.current.close();
+      }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
   }, []);
 
+  /** Start monitoring audio amplitude via AnalyserNode */
+  const startAmplitudeMonitor = useCallback((stream: MediaStream) => {
+    try {
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.6;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+      const tick = () => {
+        analyser.getByteFrequencyData(dataArray);
+        // Compute average amplitude (0-255), normalize to 0-1
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i]!;
+        }
+        const avg = sum / dataArray.length;
+        setAmplitude(Math.min(avg / 128, 1)); // 0-1 range, capped
+        animationFrameRef.current = requestAnimationFrame(tick);
+      };
+
+      tick();
+    } catch {
+      // AudioContext not supported — fall back to no amplitude visualization
+    }
+  }, []);
+
+  /** Stop amplitude monitoring */
+  const stopAmplitudeMonitor = useCallback(() => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    if (audioContextRef.current) {
+      void audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    analyserRef.current = null;
+    setAmplitude(0);
+  }, []);
+
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
     }
-  }, []);
+    stopAmplitudeMonitor();
+  }, [stopAmplitudeMonitor]);
 
   const startRecording = useCallback(async () => {
     setErrorMessage(null);
@@ -114,6 +171,9 @@ export function VoiceButton({ onTranscription, disabled = false, apiUrl }: Voice
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+
+      // Start amplitude monitoring for visual feedback
+      startAmplitudeMonitor(stream);
 
       // Determine supported MIME type
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
@@ -159,10 +219,14 @@ export function VoiceButton({ onTranscription, disabled = false, apiUrl }: Voice
           });
 
           if (!response.ok) {
-            const errorData = await response.json().catch(() => null);
-            const message =
-              (errorData as { message?: string })?.message ||
-              `Transcription failed (${response.status})`;
+            const errorText = await response.text().catch(() => '');
+            let message = `Transcription failed (${response.status})`;
+            try {
+              const errorData = JSON.parse(errorText) as { message?: string };
+              if (errorData.message) message = errorData.message;
+            } catch {
+              if (errorText) message = errorText;
+            }
             throw new Error(message);
           }
 
@@ -184,6 +248,7 @@ export function VoiceButton({ onTranscription, disabled = false, apiUrl }: Voice
       recorder.onerror = () => {
         stream.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
+        stopAmplitudeMonitor();
         setState('error');
         setErrorMessage('Recording failed');
         setTimeout(() => setState('idle'), 3000);
@@ -192,6 +257,7 @@ export function VoiceButton({ onTranscription, disabled = false, apiUrl }: Voice
       recorder.start();
       setState('recording');
     } catch (err) {
+      stopAmplitudeMonitor();
       setState('error');
       if (err instanceof DOMException && err.name === 'NotAllowedError') {
         setErrorMessage('Microphone permission denied');
@@ -205,7 +271,7 @@ export function VoiceButton({ onTranscription, disabled = false, apiUrl }: Voice
       // Auto-recover to idle after a brief delay
       setTimeout(() => setState('idle'), 3000);
     }
-  }, [apiUrl, onTranscription]);
+  }, [apiUrl, onTranscription, startAmplitudeMonitor, stopAmplitudeMonitor]);
 
   const handleClick = useCallback(() => {
     if (state === 'recording') {
@@ -220,7 +286,7 @@ export function VoiceButton({ onTranscription, disabled = false, apiUrl }: Voice
 
   // Determine button styling based on state
   let buttonClasses =
-    'relative flex items-center justify-center rounded-md text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1';
+    'relative flex items-center justify-center rounded-full text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1';
   let title = 'Voice input';
 
   switch (state) {
@@ -246,40 +312,36 @@ export function VoiceButton({ onTranscription, disabled = false, apiUrl }: Voice
     buttonClasses += ' opacity-50 cursor-not-allowed';
   }
 
+  // Glow size scales with amplitude: base 4px + up to 16px more
+  const glowSize = 4 + amplitude * 16;
+  // Glow opacity scales with amplitude: 0.3 base + up to 0.6 more
+  const glowOpacity = 0.3 + amplitude * 0.6;
+
   return (
     <button
       type="button"
       onClick={handleClick}
       disabled={isDisabled}
       className={buttonClasses}
-      style={{ minWidth: 44, minHeight: 44 }}
+      style={{
+        minWidth: 44,
+        minHeight: 44,
+        boxShadow:
+          state === 'recording'
+            ? `0 0 ${glowSize}px ${glowSize / 2}px rgba(239, 68, 68, ${glowOpacity})`
+            : undefined,
+        transition: 'box-shadow 0.1s ease-out, background-color 0.15s ease',
+      }}
       title={title}
       aria-label={title}
+      data-amplitude={state === 'recording' ? amplitude.toFixed(2) : undefined}
     >
-      {state === 'recording' && (
-        <>
-          {/* Pulsing recording indicator */}
-          <span
-            className="absolute top-1 right-1 h-2 w-2 rounded-full bg-red-500"
-            style={{ animation: 'pulse 1.5s ease-in-out infinite' }}
-          />
-          <StopIcon />
-        </>
-      )}
+      {state === 'recording' && <StopIcon />}
       {state === 'processing' && (
         <Spinner className="animate-spin" />
       )}
       {(state === 'idle' || state === 'error') && (
         <MicIcon />
-      )}
-      {/* CSS animation for pulsing dot (injected inline for package portability) */}
-      {state === 'recording' && (
-        <style>{`
-          @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.5; transform: scale(1.3); }
-          }
-        `}</style>
       )}
     </button>
   );

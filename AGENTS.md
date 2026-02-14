@@ -494,6 +494,7 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 ### GitHub Integration
 - `GET /api/github/installations` — List user's GitHub App installations
 - `GET /api/github/repositories` — List accessible repositories
+- `GET /api/github/branches?repository=owner/repo` — List branches for a repository
 
 ## Troubleshooting
 

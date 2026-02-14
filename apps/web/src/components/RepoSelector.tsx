@@ -7,6 +7,8 @@ interface RepoSelectorProps {
   id?: string;
   value: string;
   onChange: (value: string) => void;
+  /** Called when a repository is selected from the dropdown with its metadata */
+  onRepoSelect?: (repo: { fullName: string; defaultBranch: string } | null) => void;
   disabled?: boolean;
   required?: boolean;
   placeholder?: string;
@@ -16,6 +18,7 @@ export function RepoSelector({
   id,
   value,
   onChange,
+  onRepoSelect,
   disabled = false,
   required = false,
   placeholder = 'https://github.com/user/repo or select from list',
@@ -92,6 +95,7 @@ export function RepoSelector({
 
   const handleRepoSelect = (repo: Repository) => {
     onChange(`https://github.com/${repo.fullName}`);
+    onRepoSelect?.({ fullName: repo.fullName, defaultBranch: repo.defaultBranch });
     setShowDropdown(false);
   };
 

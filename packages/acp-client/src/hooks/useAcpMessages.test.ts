@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { useAcpMessages } from './useAcpMessages';
 import type { AcpMessage } from './useAcpSession';
@@ -229,6 +229,110 @@ describe('useAcpMessages clear', () => {
 
     // Commands should persist
     expect(result.current.availableCommands).toHaveLength(1);
+    expect(result.current.items).toHaveLength(0);
+  });
+});
+
+describe('useAcpMessages sessionStorage persistence', () => {
+  afterEach(() => {
+    sessionStorage.clear();
+  });
+
+  it('persists messages to sessionStorage when sessionId is provided', () => {
+    const sessionId = 'test-session-1';
+    const { result } = renderHook(() => useAcpMessages({ sessionId }));
+
+    act(() => {
+      result.current.addUserMessage('Hello world');
+    });
+
+    const stored = sessionStorage.getItem(`acp-messages-${sessionId}`);
+    expect(stored).not.toBeNull();
+
+    const parsed = JSON.parse(stored!);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].kind).toBe('user_message');
+    expect(parsed[0].text).toBe('Hello world');
+  });
+
+  it('restores messages from sessionStorage on mount', () => {
+    const sessionId = 'test-session-2';
+
+    // Pre-populate sessionStorage
+    const messages = [
+      { kind: 'user_message', id: 'item-1', text: 'Previous message', timestamp: 1000 },
+      { kind: 'agent_message', id: 'item-2', text: 'Previous response', streaming: false, timestamp: 1001 },
+    ];
+    sessionStorage.setItem(`acp-messages-${sessionId}`, JSON.stringify(messages));
+
+    const { result } = renderHook(() => useAcpMessages({ sessionId }));
+
+    expect(result.current.items).toHaveLength(2);
+    expect(result.current.items[0]?.kind).toBe('user_message');
+    expect(result.current.items[1]?.kind).toBe('agent_message');
+  });
+
+  it('finalizes streaming items when restoring from sessionStorage', () => {
+    const sessionId = 'test-session-3';
+
+    // Pre-populate with a streaming agent message (interrupted by disconnect)
+    const messages = [
+      { kind: 'agent_message', id: 'item-1', text: 'Partial response...', streaming: true, timestamp: 1000 },
+      { kind: 'thinking', id: 'item-2', text: 'Thinking...', active: true, timestamp: 1001 },
+    ];
+    sessionStorage.setItem(`acp-messages-${sessionId}`, JSON.stringify(messages));
+
+    const { result } = renderHook(() => useAcpMessages({ sessionId }));
+
+    // Streaming and thinking should be finalized on restore
+    const agentMsg = result.current.items[0];
+    expect(agentMsg?.kind).toBe('agent_message');
+    if (agentMsg?.kind === 'agent_message') {
+      expect(agentMsg.streaming).toBe(false);
+    }
+
+    const thinking = result.current.items[1];
+    expect(thinking?.kind).toBe('thinking');
+    if (thinking?.kind === 'thinking') {
+      expect(thinking.active).toBe(false);
+    }
+  });
+
+  it('clears sessionStorage when clear() is called with sessionId', () => {
+    const sessionId = 'test-session-4';
+    const { result } = renderHook(() => useAcpMessages({ sessionId }));
+
+    act(() => {
+      result.current.addUserMessage('Will be cleared');
+    });
+
+    expect(sessionStorage.getItem(`acp-messages-${sessionId}`)).not.toBeNull();
+
+    act(() => {
+      result.current.clear();
+    });
+
+    expect(sessionStorage.getItem(`acp-messages-${sessionId}`)).toBeNull();
+  });
+
+  it('does not persist when no sessionId is provided', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    act(() => {
+      result.current.addUserMessage('Not persisted');
+    });
+
+    // No sessionStorage keys should be set
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it('handles corrupted sessionStorage data gracefully', () => {
+    const sessionId = 'test-session-5';
+    sessionStorage.setItem(`acp-messages-${sessionId}`, 'not valid json {{{');
+
+    const { result } = renderHook(() => useAcpMessages({ sessionId }));
+
+    // Should start with empty items, not crash
     expect(result.current.items).toHaveLength(0);
   });
 });

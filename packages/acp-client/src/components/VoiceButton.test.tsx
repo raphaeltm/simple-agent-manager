@@ -243,7 +243,7 @@ describe('VoiceButton', () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: false,
       status: 500,
-      json: async () => ({ error: 'INTERNAL_ERROR', message: 'Server error' }),
+      text: async () => JSON.stringify({ error: 'INTERNAL_ERROR', message: 'Server error' }),
     });
 
     render(
@@ -266,6 +266,38 @@ describe('VoiceButton', () => {
     // Should show error but NOT call onTranscription
     await waitFor(() => {
       expect(mockOnTranscription).not.toHaveBeenCalled();
+    });
+  });
+
+  it('uses rounded-full for circular button shape', () => {
+    render(
+      <VoiceButton
+        onTranscription={mockOnTranscription}
+        apiUrl="https://api.example.com/api/transcribe"
+      />
+    );
+
+    const button = screen.getByRole('button');
+    expect(button.className).toContain('rounded-full');
+  });
+
+  it('shows amplitude glow when recording', async () => {
+    render(
+      <VoiceButton
+        onTranscription={mockOnTranscription}
+        apiUrl="https://api.example.com/api/transcribe"
+      />
+    );
+
+    const button = screen.getByRole('button');
+    await act(async () => {
+      fireEvent.click(button);
+    });
+
+    await waitFor(() => {
+      const recordingButton = screen.getByRole('button', { name: /stop recording/i });
+      // Should have a box-shadow style for glow effect
+      expect(recordingButton.style.boxShadow).toContain('rgba(239, 68, 68');
     });
   });
 

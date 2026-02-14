@@ -124,8 +124,9 @@ func (m *Manager) List(workspaceID string) []Session {
 		result = append(result, session)
 	}
 
+	// Sort oldest first so tab ordering matches creation order
 	sort.Slice(result, func(i, j int) bool {
-		return result[i].CreatedAt.After(result[j].CreatedAt)
+		return result[i].CreatedAt.Before(result[j].CreatedAt)
 	})
 
 	return result
