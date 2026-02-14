@@ -154,6 +154,19 @@ export function useAcpMessages(): AcpMessagesHandle {
           break;
         }
 
+        case 'user_message_chunk': {
+          // Replayed user messages from LoadSession — render as regular user bubbles
+          const content = update as { content?: { type: string; text?: string } };
+          const text = content.content?.type === 'text' ? (content.content.text ?? '') : '';
+          if (text) {
+            setItems((prev) => [
+              ...prev,
+              { kind: 'user_message', id: nextId(), text, timestamp: now },
+            ]);
+          }
+          break;
+        }
+
         case 'tool_call': {
           const tc = update as {
             toolCallId?: string;

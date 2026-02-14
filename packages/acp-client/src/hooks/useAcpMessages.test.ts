@@ -277,3 +277,55 @@ describe('useAcpMessages starts empty (no persistence)', () => {
     expect(sessionStorage.length).toBe(0);
   });
 });
+
+describe('useAcpMessages user_message_chunk (LoadSession replay)', () => {
+  it('renders replayed user messages as user_message items', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    act(() => {
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: 'What is 2+2?' },
+      }));
+    });
+
+    expect(result.current.items).toHaveLength(1);
+    const item = result.current.items[0]!;
+    expect(item.kind).toBe('user_message');
+    if (item.kind === 'user_message') {
+      expect(item.text).toBe('What is 2+2?');
+    }
+  });
+
+  it('ignores empty user_message_chunk content', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    act(() => {
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: '' },
+      }));
+    });
+
+    expect(result.current.items).toHaveLength(0);
+  });
+
+  it('replays a full conversation (user + agent) from LoadSession', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    act(() => {
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: 'Hello' },
+      }));
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'Hi there!' },
+      }));
+    });
+
+    expect(result.current.items).toHaveLength(2);
+    expect(result.current.items[0]!.kind).toBe('user_message');
+    expect(result.current.items[1]!.kind).toBe('agent_message');
+  });
+});
