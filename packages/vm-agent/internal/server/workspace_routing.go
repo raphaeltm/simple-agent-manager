@@ -108,7 +108,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			runtime.CallbackToken = strings.TrimSpace(callbackToken)
 		}
 		if runtime.WorkspaceDir == "" {
-			runtime.WorkspaceDir = s.workspaceDirForRuntime(workspaceID)
+			runtime.WorkspaceDir = s.workspaceDirForRepo(workspaceID, runtime.Repository)
 		}
 		if runtime.ContainerLabelValue == "" {
 			runtime.ContainerLabelValue = runtime.WorkspaceDir
@@ -120,7 +120,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		return runtime
 	}
 
-	workspaceDir := s.workspaceDirForRuntime(workspaceID)
+	workspaceDir := s.workspaceDirForRepo(workspaceID, repository)
 	containerLabelValue := workspaceDir
 	containerWorkDir := deriveContainerWorkDir(workspaceDir)
 
@@ -250,6 +250,12 @@ func (s *Server) workspaceSessionCount(workspaceID string) int {
 }
 
 func (s *Server) workspaceDirForRuntime(workspaceID string) string {
+	return s.workspaceDirForRepo(workspaceID, "")
+}
+
+// workspaceDirForRepo derives the workspace directory using the repository name
+// when available (e.g., /workspace/my-repo), falling back to workspace ID.
+func (s *Server) workspaceDirForRepo(workspaceID, repository string) string {
 	baseDir := strings.TrimSpace(s.config.WorkspaceDir)
 	if baseDir == "" {
 		baseDir = "/workspace"
@@ -260,6 +266,13 @@ func (s *Server) workspaceDirForRuntime(workspaceID string) string {
 		return baseDir
 	}
 
+	// Use repository name when available for human-readable directories
+	repoDir := repositoryDirName(repository)
+	if repoDir != "" {
+		return filepath.Join(baseDir, repoDir)
+	}
+
+	// Fallback to workspace ID
 	safeWorkspaceID := strings.TrimSpace(workspaceID)
 	if safeWorkspaceID == "" {
 		return baseDir
