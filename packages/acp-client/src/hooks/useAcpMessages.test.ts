@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { useAcpMessages, cleanupStaleMessageStorage, ACP_MESSAGES_STORAGE_PREFIX } from './useAcpMessages';
+import { useAcpMessages } from './useAcpMessages';
 import type { AcpMessage } from './useAcpSession';
 
 function sessionUpdateMessage(update: Record<string, unknown>): AcpMessage {
@@ -231,163 +231,49 @@ describe('useAcpMessages clear', () => {
     expect(result.current.availableCommands).toHaveLength(1);
     expect(result.current.items).toHaveLength(0);
   });
-});
 
-describe('useAcpMessages localStorage persistence', () => {
-  afterEach(() => {
-    localStorage.clear();
-  });
-
-  it('persists messages to localStorage when sessionId is provided', () => {
-    const sessionId = 'test-session-1';
-    const { result } = renderHook(() => useAcpMessages({ sessionId }));
-
-    act(() => {
-      result.current.addUserMessage('Hello world');
-    });
-
-    const stored = localStorage.getItem(`${ACP_MESSAGES_STORAGE_PREFIX}${sessionId}`);
-    expect(stored).not.toBeNull();
-
-    const parsed = JSON.parse(stored!);
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0].kind).toBe('user_message');
-    expect(parsed[0].text).toBe('Hello world');
-  });
-
-  it('restores messages from localStorage on mount', () => {
-    const sessionId = 'test-session-2';
-
-    // Pre-populate localStorage
-    const messages = [
-      { kind: 'user_message', id: 'item-1', text: 'Previous message', timestamp: 1000 },
-      { kind: 'agent_message', id: 'item-2', text: 'Previous response', streaming: false, timestamp: 1001 },
-    ];
-    localStorage.setItem(`${ACP_MESSAGES_STORAGE_PREFIX}${sessionId}`, JSON.stringify(messages));
-
-    const { result } = renderHook(() => useAcpMessages({ sessionId }));
-
-    expect(result.current.items).toHaveLength(2);
-    expect(result.current.items[0]?.kind).toBe('user_message');
-    expect(result.current.items[1]?.kind).toBe('agent_message');
-  });
-
-  it('finalizes streaming items when restoring from localStorage', () => {
-    const sessionId = 'test-session-3';
-
-    // Pre-populate with a streaming agent message (interrupted by disconnect)
-    const messages = [
-      { kind: 'agent_message', id: 'item-1', text: 'Partial response...', streaming: true, timestamp: 1000 },
-      { kind: 'thinking', id: 'item-2', text: 'Thinking...', active: true, timestamp: 1001 },
-    ];
-    localStorage.setItem(`${ACP_MESSAGES_STORAGE_PREFIX}${sessionId}`, JSON.stringify(messages));
-
-    const { result } = renderHook(() => useAcpMessages({ sessionId }));
-
-    // Streaming and thinking should be finalized on restore
-    const agentMsg = result.current.items[0];
-    expect(agentMsg?.kind).toBe('agent_message');
-    if (agentMsg?.kind === 'agent_message') {
-      expect(agentMsg.streaming).toBe(false);
-    }
-
-    const thinking = result.current.items[1];
-    expect(thinking?.kind).toBe('thinking');
-    if (thinking?.kind === 'thinking') {
-      expect(thinking.active).toBe(false);
-    }
-  });
-
-  it('clears localStorage when clear() is called with sessionId', () => {
-    const sessionId = 'test-session-4';
-    const { result } = renderHook(() => useAcpMessages({ sessionId }));
-
-    act(() => {
-      result.current.addUserMessage('Will be cleared');
-    });
-
-    expect(localStorage.getItem(`${ACP_MESSAGES_STORAGE_PREFIX}${sessionId}`)).not.toBeNull();
-
-    act(() => {
-      result.current.clear();
-    });
-
-    expect(localStorage.getItem(`${ACP_MESSAGES_STORAGE_PREFIX}${sessionId}`)).toBeNull();
-  });
-
-  it('does not persist when no sessionId is provided', () => {
+  it('does not touch localStorage or sessionStorage', () => {
     const { result } = renderHook(() => useAcpMessages());
 
     act(() => {
-      result.current.addUserMessage('Not persisted');
+      result.current.addUserMessage('Hello');
+      result.current.clear();
     });
 
-    // No localStorage keys should be set for acp-messages
-    let acpKeyCount = 0;
-    for (let i = 0; i < localStorage.length; i++) {
-      if (localStorage.key(i)?.startsWith(ACP_MESSAGES_STORAGE_PREFIX)) {
-        acpKeyCount++;
-      }
-    }
-    expect(acpKeyCount).toBe(0);
-  });
-
-  it('handles corrupted localStorage data gracefully', () => {
-    const sessionId = 'test-session-5';
-    localStorage.setItem(`${ACP_MESSAGES_STORAGE_PREFIX}${sessionId}`, 'not valid json {{{');
-
-    const { result } = renderHook(() => useAcpMessages({ sessionId }));
-
-    // Should start with empty items, not crash
-    expect(result.current.items).toHaveLength(0);
+    // No storage should be used — messages are server-managed via LoadSession
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
   });
 });
 
-describe('cleanupStaleMessageStorage', () => {
-  afterEach(() => {
-    localStorage.clear();
+describe('useAcpMessages starts empty (no persistence)', () => {
+  it('starts with empty items and no storage access', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    expect(result.current.items).toHaveLength(0);
+    expect(result.current.usage).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+    });
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
   });
 
-  it('removes localStorage entries for sessions not in the active set', () => {
-    localStorage.setItem(`${ACP_MESSAGES_STORAGE_PREFIX}active-1`, '[]');
-    localStorage.setItem(`${ACP_MESSAGES_STORAGE_PREFIX}active-2`, '[]');
-    localStorage.setItem(`${ACP_MESSAGES_STORAGE_PREFIX}stale-1`, '[]');
-    localStorage.setItem(`${ACP_MESSAGES_STORAGE_PREFIX}stale-2`, '[]');
+  it('accumulates messages from processMessage without persistence', () => {
+    const { result } = renderHook(() => useAcpMessages());
 
-    cleanupStaleMessageStorage(['active-1', 'active-2']);
+    act(() => {
+      result.current.addUserMessage('First');
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'Response' },
+      }));
+    });
 
-    expect(localStorage.getItem(`${ACP_MESSAGES_STORAGE_PREFIX}active-1`)).not.toBeNull();
-    expect(localStorage.getItem(`${ACP_MESSAGES_STORAGE_PREFIX}active-2`)).not.toBeNull();
-    expect(localStorage.getItem(`${ACP_MESSAGES_STORAGE_PREFIX}stale-1`)).toBeNull();
-    expect(localStorage.getItem(`${ACP_MESSAGES_STORAGE_PREFIX}stale-2`)).toBeNull();
-  });
-
-  it('does not remove non-acp localStorage entries', () => {
-    localStorage.setItem('other-key', 'keep me');
-    localStorage.setItem(`${ACP_MESSAGES_STORAGE_PREFIX}stale`, '[]');
-
-    cleanupStaleMessageStorage([]);
-
-    expect(localStorage.getItem('other-key')).toBe('keep me');
-    expect(localStorage.getItem(`${ACP_MESSAGES_STORAGE_PREFIX}stale`)).toBeNull();
-  });
-
-  it('handles empty active session list by removing all acp entries', () => {
-    localStorage.setItem(`${ACP_MESSAGES_STORAGE_PREFIX}s1`, '[]');
-    localStorage.setItem(`${ACP_MESSAGES_STORAGE_PREFIX}s2`, '[]');
-
-    cleanupStaleMessageStorage([]);
-
-    expect(localStorage.getItem(`${ACP_MESSAGES_STORAGE_PREFIX}s1`)).toBeNull();
-    expect(localStorage.getItem(`${ACP_MESSAGES_STORAGE_PREFIX}s2`)).toBeNull();
-  });
-
-  it('handles no existing acp entries gracefully', () => {
-    localStorage.setItem('unrelated', 'value');
-
-    // Should not throw
-    cleanupStaleMessageStorage(['some-id']);
-
-    expect(localStorage.getItem('unrelated')).toBe('value');
+    expect(result.current.items).toHaveLength(2);
+    // Nothing written to storage
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
   });
 });
