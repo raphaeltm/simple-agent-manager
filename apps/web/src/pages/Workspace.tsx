@@ -1168,6 +1168,53 @@ export function Workspace() {
         </div>
       </div>
 
+      {/* Lifecycle actions */}
+      <div
+        style={{
+          padding: 'var(--sam-space-3)',
+          borderBottom: '1px solid var(--sam-color-border-default)',
+          display: 'flex',
+          gap: 'var(--sam-space-2)',
+        }}
+      >
+        {isRunning && (
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleRebuild}
+              disabled={actionLoading}
+              loading={actionLoading}
+              style={{ flex: 1 }}
+            >
+              Rebuild
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={handleStop}
+              disabled={actionLoading}
+              loading={actionLoading}
+              style={{ flex: 1 }}
+            >
+              Stop
+            </Button>
+          </>
+        )}
+        {workspace?.status === 'stopped' && (
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleRestart}
+            disabled={actionLoading}
+            loading={actionLoading}
+            style={{ flex: 1 }}
+          >
+            Restart
+          </Button>
+        )}
+      </div>
+
       <section
         style={{
           borderTop: '1px solid var(--sam-color-border-default)',
@@ -1347,44 +1394,6 @@ export function Workspace() {
               x
             </button>
           </span>
-        )}
-
-        {/* Stop/Restart */}
-        {isRunning && (
-          <>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleRebuild}
-              disabled={actionLoading}
-              loading={actionLoading}
-              style={{ minHeight: '28px', padding: '0 10px', fontSize: '0.75rem' }}
-            >
-              Rebuild
-            </Button>
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={handleStop}
-              disabled={actionLoading}
-              loading={actionLoading}
-              style={{ minHeight: '28px', padding: '0 10px', fontSize: '0.75rem' }}
-            >
-              Stop
-            </Button>
-          </>
-        )}
-        {workspace?.status === 'stopped' && (
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleRestart}
-            disabled={actionLoading}
-            loading={actionLoading}
-            style={{ minHeight: '28px', padding: '0 10px', fontSize: '0.75rem' }}
-          >
-            Restart
-          </Button>
         )}
 
         {/* File browser button */}
