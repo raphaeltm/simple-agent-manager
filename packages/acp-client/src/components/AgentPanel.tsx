@@ -216,17 +216,16 @@ export function AgentPanel({
 
       {/* Input area */}
       <div className="border-t border-gray-200 bg-white p-3">
-        <div className="relative">
-          {/* Slash command palette (positioned above input) */}
-          <SlashCommandPalette
-            ref={paletteRef}
-            commands={allCommands}
-            filter={slashFilter ?? ''}
-            onSelect={handleCommandSelect}
-            onDismiss={() => setShowPalette(false)}
-            visible={showPalette}
-          />
-          <form onSubmit={handleSubmit} className="flex items-end space-x-2">
+        {/* Slash command palette (above input, in document flow) */}
+        <SlashCommandPalette
+          ref={paletteRef}
+          commands={allCommands}
+          filter={slashFilter ?? ''}
+          onSelect={handleCommandSelect}
+          onDismiss={() => setShowPalette(false)}
+          visible={showPalette}
+        />
+        <form onSubmit={handleSubmit} className="flex items-end space-x-2">
             <textarea
               ref={inputRef}
               value={input}
@@ -263,7 +262,6 @@ export function AgentPanel({
               </button>
             )}
           </form>
-        </div>
         {/* Usage indicator */}
         <div className="mt-2 flex justify-end">
           <UsageIndicator usage={messages.usage} />
