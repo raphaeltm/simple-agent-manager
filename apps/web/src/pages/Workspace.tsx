@@ -9,6 +9,7 @@ import { useFeatureFlags } from '../config/features';
 import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { ChatSession } from '../components/ChatSession';
+import { ACP_MESSAGES_STORAGE_PREFIX, cleanupStaleMessageStorage } from '@simple-agent-manager/acp-client';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { MoreVertical, X } from 'lucide-react';
 import { GitChangesButton } from '../components/GitChangesButton';
@@ -169,6 +170,9 @@ export function Workspace() {
       setWorkspace(workspaceData);
       setDisplayNameInput(workspaceData.displayName || workspaceData.name);
       setAgentSessions(sessionsData || []);
+      // Clean up localStorage for sessions that no longer exist
+      const activeIds = (sessionsData || []).map((s: AgentSession) => s.id);
+      cleanupStaleMessageStorage(activeIds);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load workspace');
     } finally {
@@ -570,6 +574,12 @@ export function Workspace() {
     try {
       setSessionsLoading(true);
       await stopAgentSession(id, sessionId);
+      // Clean up persisted conversation for this session
+      try {
+        localStorage.removeItem(`${ACP_MESSAGES_STORAGE_PREFIX}${sessionId}`);
+      } catch {
+        // ignore
+      }
       const sessions = await listAgentSessions(id);
       setAgentSessions(sessions);
       setPreferredAgentsBySession((prev) => {

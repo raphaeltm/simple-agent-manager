@@ -112,14 +112,14 @@ function nextId(): string {
   return `item-${++itemCounter}-${Date.now()}`;
 }
 
-/** sessionStorage key prefix for persisted conversation items */
-const STORAGE_KEY_PREFIX = 'acp-messages-';
+/** localStorage key prefix for persisted conversation items */
+export const ACP_MESSAGES_STORAGE_PREFIX = 'acp-messages-';
 
-/** Load persisted conversation items from sessionStorage */
+/** Load persisted conversation items from localStorage */
 function loadPersistedItems(sessionId: string): ConversationItem[] {
-  if (typeof sessionStorage === 'undefined') return [];
+  if (typeof localStorage === 'undefined') return [];
   try {
-    const stored = sessionStorage.getItem(`${STORAGE_KEY_PREFIX}${sessionId}`);
+    const stored = localStorage.getItem(`${ACP_MESSAGES_STORAGE_PREFIX}${sessionId}`);
     if (!stored) return [];
     const parsed = JSON.parse(stored) as ConversationItem[];
     if (!Array.isArray(parsed)) return [];
@@ -134,13 +134,39 @@ function loadPersistedItems(sessionId: string): ConversationItem[] {
   }
 }
 
-/** Persist conversation items to sessionStorage */
+/** Persist conversation items to localStorage */
 function persistItems(sessionId: string, items: ConversationItem[]): void {
-  if (typeof sessionStorage === 'undefined') return;
+  if (typeof localStorage === 'undefined') return;
   try {
-    sessionStorage.setItem(`${STORAGE_KEY_PREFIX}${sessionId}`, JSON.stringify(items));
+    localStorage.setItem(`${ACP_MESSAGES_STORAGE_PREFIX}${sessionId}`, JSON.stringify(items));
   } catch {
-    // sessionStorage full or unavailable — silently ignore
+    // localStorage full or unavailable — silently ignore
+  }
+}
+
+/**
+ * Remove localStorage entries for sessions that no longer exist.
+ * Call after loading active sessions to prevent unbounded growth.
+ */
+export function cleanupStaleMessageStorage(activeSessionIds: string[]): void {
+  if (typeof localStorage === 'undefined') return;
+  const activeSet = new Set(activeSessionIds);
+  const keysToRemove: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith(ACP_MESSAGES_STORAGE_PREFIX)) {
+      const sessionId = key.slice(ACP_MESSAGES_STORAGE_PREFIX.length);
+      if (!activeSet.has(sessionId)) {
+        keysToRemove.push(key);
+      }
+    }
+  }
+  for (const key of keysToRemove) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // ignore
+    }
   }
 }
 
@@ -148,8 +174,8 @@ function persistItems(sessionId: string, items: ConversationItem[]): void {
  * Hook that processes ACP session update messages into a structured conversation.
  * Maps SessionNotification.Update variants to ConversationItem types.
  *
- * When `sessionId` is provided, messages are persisted in sessionStorage so they
- * survive WebSocket reconnections (e.g. mobile background tab resume).
+ * When `sessionId` is provided, messages are persisted in localStorage so they
+ * survive page reloads and browser restarts.
  */
 export function useAcpMessages(options?: UseAcpMessagesOptions): AcpMessagesHandle {
   const sessionId = options?.sessionId;
@@ -348,9 +374,9 @@ export function useAcpMessages(options?: UseAcpMessagesOptions): AcpMessagesHand
   const clear = useCallback(() => {
     setItems([]);
     setUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
-    if (sessionId && typeof sessionStorage !== 'undefined') {
+    if (sessionId && typeof localStorage !== 'undefined') {
       try {
-        sessionStorage.removeItem(`${STORAGE_KEY_PREFIX}${sessionId}`);
+        localStorage.removeItem(`${ACP_MESSAGES_STORAGE_PREFIX}${sessionId}`);
       } catch {
         // ignore
       }
