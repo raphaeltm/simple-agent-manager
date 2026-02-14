@@ -14,13 +14,14 @@ import (
 
 // Tab represents a persisted tab (terminal or chat session).
 type Tab struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspaceId"`
-	Type        string `json:"type"`    // "terminal" or "chat"
-	Label       string `json:"label"`   // Display name
-	AgentID     string `json:"agentId"` // Agent type for chat tabs (empty for terminals)
-	SortOrder   int    `json:"sortOrder"`
-	CreatedAt   string `json:"createdAt"` // ISO 8601
+	ID           string `json:"id"`
+	WorkspaceID  string `json:"workspaceId"`
+	Type         string `json:"type"`    // "terminal" or "chat"
+	Label        string `json:"label"`   // Display name
+	AgentID      string `json:"agentId"` // Agent type for chat tabs (empty for terminals)
+	SortOrder    int    `json:"sortOrder"`
+	CreatedAt    string `json:"createdAt"`    // ISO 8601
+	AcpSessionID string `json:"acpSessionId"` // ACP session ID for LoadSession on reconnect
 }
 
 // Store provides persistent session state backed by SQLite.
@@ -80,6 +81,7 @@ func (s *Store) migrate() error {
 
 	migrations := []func(*sql.DB) error{
 		migrateV1,
+		migrateV2,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -112,6 +114,12 @@ func migrateV1(db *sql.DB) error {
 	return err
 }
 
+// migrateV2 adds acp_session_id column for LoadSession reconnection support.
+func migrateV2(db *sql.DB) error {
+	_, err := db.Exec(`ALTER TABLE tabs ADD COLUMN acp_session_id TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
 // InsertTab adds a new tab to the store.
 func (s *Store) InsertTab(tab Tab) error {
 	s.mu.Lock()
@@ -122,8 +130,8 @@ func (s *Store) InsertTab(tab Tab) error {
 	}
 
 	_, err := s.db.Exec(
-		"INSERT OR REPLACE INTO tabs (id, workspace_id, type, label, agent_id, sort_order, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		tab.ID, tab.WorkspaceID, tab.Type, tab.Label, tab.AgentID, tab.SortOrder, tab.CreatedAt,
+		"INSERT OR REPLACE INTO tabs (id, workspace_id, type, label, agent_id, sort_order, created_at, acp_session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		tab.ID, tab.WorkspaceID, tab.Type, tab.Label, tab.AgentID, tab.SortOrder, tab.CreatedAt, tab.AcpSessionID,
 	)
 	if err != nil {
 		return fmt.Errorf("insert tab: %w", err)
@@ -149,7 +157,7 @@ func (s *Store) ListTabs(workspaceID string) ([]Tab, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(
-		"SELECT id, workspace_id, type, label, agent_id, sort_order, created_at FROM tabs WHERE workspace_id = ? ORDER BY sort_order ASC, created_at ASC",
+		"SELECT id, workspace_id, type, label, agent_id, sort_order, created_at, acp_session_id FROM tabs WHERE workspace_id = ? ORDER BY sort_order ASC, created_at ASC",
 		workspaceID,
 	)
 	if err != nil {
@@ -160,7 +168,7 @@ func (s *Store) ListTabs(workspaceID string) ([]Tab, error) {
 	var tabs []Tab
 	for rows.Next() {
 		var t Tab
-		if err := rows.Scan(&t.ID, &t.WorkspaceID, &t.Type, &t.Label, &t.AgentID, &t.SortOrder, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.WorkspaceID, &t.Type, &t.Label, &t.AgentID, &t.SortOrder, &t.CreatedAt, &t.AcpSessionID); err != nil {
 			return nil, fmt.Errorf("scan tab: %w", err)
 		}
 		tabs = append(tabs, t)
@@ -207,6 +215,20 @@ func (s *Store) UpdateTabOrder(tabID string, sortOrder int) error {
 	_, err := s.db.Exec("UPDATE tabs SET sort_order = ? WHERE id = ?", sortOrder, tabID)
 	if err != nil {
 		return fmt.Errorf("update tab order: %w", err)
+	}
+	return nil
+}
+
+// UpdateTabAcpSessionID updates the ACP session ID for a tab.
+// Called after a successful NewSession or LoadSession to persist the ACP session ID
+// for reconnection with LoadSession.
+func (s *Store) UpdateTabAcpSessionID(tabID, acpSessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec("UPDATE tabs SET acp_session_id = ? WHERE id = ?", acpSessionID, tabID)
+	if err != nil {
+		return fmt.Errorf("update tab acp session id: %w", err)
 	}
 	return nil
 }

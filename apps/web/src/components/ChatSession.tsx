@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAcpSession, useAcpMessages, AgentPanel } from '@simple-agent-manager/acp-client';
 import type { AgentInfo } from '@simple-agent-manager/shared';
 import { getTerminalToken, getTranscribeApiUrl } from '../lib/api';
@@ -88,8 +88,28 @@ export function ChatSession({
     onAcpMessage: acpMessages.processMessage,
   });
 
-  // Auto-select preferred agent when connected
+  // Clear message cache on reconnection so LoadSession replay doesn't duplicate.
+  // When the WebSocket re-opens (state → 'no_session') after having been connected
+  // before, the server will replay the full conversation via LoadSession. We clear
+  // the local cache so the replay is the single source of truth.
   const { connected, agentType, state, switchAgent } = acpSession;
+  const prevStateRef = useRef(state);
+  useEffect(() => {
+    const prevState = prevStateRef.current;
+    prevStateRef.current = state;
+
+    // Detect reconnection: previous state was reconnecting/error/disconnected,
+    // and we just transitioned to 'no_session' (WebSocket opened successfully)
+    if (
+      state === 'no_session' &&
+      (prevState === 'reconnecting' || prevState === 'error' || prevState === 'disconnected') &&
+      acpMessages.items.length > 0
+    ) {
+      acpMessages.clear();
+    }
+  }, [state, acpMessages]);
+
+  // Auto-select preferred agent when connected
   useEffect(() => {
     if (!preferredAgentId) return;
     if (!connected) return;

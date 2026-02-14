@@ -136,6 +136,44 @@ func TestStopIdempotent(t *testing.T) {
 	}
 }
 
+func TestUpdateAcpSessionID(t *testing.T) {
+	m := NewManager()
+	m.Create("ws1", "s1", "Chat 1", "")
+
+	err := m.UpdateAcpSessionID("ws1", "s1", "acp-session-abc123", "claude-code")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	session, ok := m.Get("ws1", "s1")
+	if !ok {
+		t.Fatal("session not found after update")
+	}
+	if session.AcpSessionID != "acp-session-abc123" {
+		t.Errorf("expected AcpSessionID 'acp-session-abc123', got %q", session.AcpSessionID)
+	}
+	if session.AgentType != "claude-code" {
+		t.Errorf("expected AgentType 'claude-code', got %q", session.AgentType)
+	}
+}
+
+func TestUpdateAcpSessionIDNotFound(t *testing.T) {
+	m := NewManager()
+
+	// Non-existent workspace
+	err := m.UpdateAcpSessionID("ws-nonexistent", "s1", "acp-123", "claude-code")
+	if err == nil {
+		t.Fatal("expected error for non-existent workspace")
+	}
+
+	// Non-existent session
+	m.Create("ws1", "s1", "Chat 1", "")
+	err = m.UpdateAcpSessionID("ws1", "s-nonexistent", "acp-123", "claude-code")
+	if err == nil {
+		t.Fatal("expected error for non-existent session")
+	}
+}
+
 func TestRemoveWorkspace(t *testing.T) {
 	m := NewManager()
 	m.Create("ws1", "s1", "Chat 1", "")

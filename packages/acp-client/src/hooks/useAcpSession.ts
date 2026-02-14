@@ -151,6 +151,12 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       reconnectStartRef.current = 0;
       wasConnectedRef.current = true;
       setState('no_session');
+      // Clear stale agent type and error so the auto-select effect in
+      // ChatSession fires switchAgent() after reconnection. Without this,
+      // agentType === preferredAgentId evaluates true and the server never
+      // receives select_agent, causing an infinite hang.
+      setAgentType(null);
+      setError(null);
     });
 
     const transport = createAcpWebSocketTransport(
