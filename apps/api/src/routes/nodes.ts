@@ -23,7 +23,7 @@ const nodesRoutes = new Hono<{ Bindings: Env }>();
 
 nodesRoutes.use('/*', async (c, next) => {
   const path = c.req.path;
-  if (path.endsWith('/ready') || path.endsWith('/heartbeat')) {
+  if (path.endsWith('/ready') || path.endsWith('/heartbeat') || path.endsWith('/errors')) {
     return next();
   }
   return requireAuth()(c, next);
@@ -419,6 +419,109 @@ nodesRoutes.post('/:id/heartbeat', async (c) => {
     lastHeartbeatAt: now,
     healthStatus: 'healthy',
   });
+});
+
+/** Default max body size for VM agent error reports: 32 KB */
+const DEFAULT_MAX_VM_ERROR_BODY_BYTES = 32_768;
+
+/** Default max batch size for VM agent error reports */
+const DEFAULT_MAX_VM_ERROR_BATCH_SIZE = 10;
+
+/** Truncation limits for VM agent error string fields */
+const MAX_VM_ERROR_MESSAGE_LENGTH = 2048;
+const MAX_VM_ERROR_SOURCE_LENGTH = 256;
+const MAX_VM_ERROR_STACK_LENGTH = 4096;
+
+const VALID_VM_ERROR_LEVELS = new Set(['error', 'warn']);
+
+function truncateString(value: string, maxLength: number): string {
+  return value.length > maxLength ? value.slice(0, maxLength) + '...' : value;
+}
+
+/**
+ * POST /:id/errors
+ *
+ * Accepts a batch of VM agent error entries and logs each to
+ * Workers observability via console.error(). Uses callback JWT auth
+ * (same as heartbeat/ready). Returns 204.
+ *
+ * Body: { errors: VMAgentErrorEntry[] }
+ */
+nodesRoutes.post('/:id/errors', async (c) => {
+  const nodeId = c.req.param('id');
+  await verifyNodeCallbackAuth(c, nodeId);
+
+  const maxBodyBytes = parseInt(
+    c.env.MAX_VM_AGENT_ERROR_BODY_BYTES || String(DEFAULT_MAX_VM_ERROR_BODY_BYTES),
+    10
+  );
+  const maxBatchSize = parseInt(
+    c.env.MAX_VM_AGENT_ERROR_BATCH_SIZE || String(DEFAULT_MAX_VM_ERROR_BATCH_SIZE),
+    10
+  );
+
+  // Check Content-Length before reading body
+  const contentLength = parseInt(c.req.header('Content-Length') || '0', 10);
+  if (contentLength > maxBodyBytes) {
+    throw errors.badRequest(`Request body too large (max ${maxBodyBytes} bytes)`);
+  }
+
+  // Parse JSON body
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    throw errors.badRequest('Invalid JSON body');
+  }
+
+  // Validate structure
+  if (!body || typeof body !== 'object' || !('errors' in body)) {
+    throw errors.badRequest('Body must contain an "errors" array');
+  }
+
+  const { errors: entries } = body as { errors: unknown };
+
+  if (!Array.isArray(entries)) {
+    throw errors.badRequest('"errors" must be an array');
+  }
+
+  if (entries.length === 0) {
+    return c.body(null, 204);
+  }
+
+  if (entries.length > maxBatchSize) {
+    throw errors.badRequest(`Batch too large (max ${maxBatchSize} entries)`);
+  }
+
+  // Log each entry individually for CF observability searchability
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') continue;
+
+    const e = entry as Record<string, unknown>;
+
+    // Validate required fields
+    const message = typeof e.message === 'string' ? e.message : null;
+    const source = typeof e.source === 'string' ? e.source : null;
+
+    if (!message || !source) continue; // Skip malformed entries
+
+    const level = typeof e.level === 'string' && VALID_VM_ERROR_LEVELS.has(e.level)
+      ? e.level
+      : 'error';
+
+    console.error('[vm-agent-error]', {
+      level,
+      message: truncateString(message, MAX_VM_ERROR_MESSAGE_LENGTH),
+      source: truncateString(source, MAX_VM_ERROR_SOURCE_LENGTH),
+      stack: typeof e.stack === 'string' ? truncateString(e.stack, MAX_VM_ERROR_STACK_LENGTH) : null,
+      workspaceId: typeof e.workspaceId === 'string' ? e.workspaceId : null,
+      timestamp: typeof e.timestamp === 'string' ? e.timestamp : null,
+      context: e.context && typeof e.context === 'object' ? e.context : null,
+      nodeId,
+    });
+  }
+
+  return c.body(null, 204);
 });
 
 export { nodesRoutes };

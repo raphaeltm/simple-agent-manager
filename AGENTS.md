@@ -465,6 +465,7 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 ### VM Communication
 - `POST /api/nodes/:id/ready` — Node Agent ready callback
 - `POST /api/nodes/:id/heartbeat` — Node Agent heartbeat callback
+- `POST /api/nodes/:id/errors` — VM agent error report (batch, logged to CF Workers observability)
 - `POST /api/workspaces/:id/ready` — Workspace ready callback
 - `POST /api/workspaces/:id/provisioning-failed` — Workspace provisioning failure callback (sets workspace to `error`)
 - `POST /api/workspaces/:id/heartbeat` — Workspace activity heartbeat callback
@@ -659,6 +660,12 @@ See `apps/api/.env.example`:
 - `GIT_FILE_MAX_SIZE` - VM Agent: max file size in bytes for git/file endpoint (default: 1048576)
 - `FILE_LIST_TIMEOUT` - VM Agent: timeout for file listing commands (default: 10s)
 - `FILE_LIST_MAX_ENTRIES` - VM Agent: max entries returned per directory listing (default: 1000)
+- `ERROR_REPORT_FLUSH_INTERVAL` - VM Agent: background error flush interval (default: 30s)
+- `ERROR_REPORT_MAX_BATCH_SIZE` - VM Agent: immediate flush threshold (default: 10)
+- `ERROR_REPORT_MAX_QUEUE_SIZE` - VM Agent: max queued error entries (default: 100)
+- `ERROR_REPORT_HTTP_TIMEOUT` - VM Agent: HTTP POST timeout for error reports (default: 10s)
+- `MAX_VM_AGENT_ERROR_BODY_BYTES` - API: max VM agent error request body (default: 32768)
+- `MAX_VM_AGENT_ERROR_BATCH_SIZE` - API: max VM agent errors per request (default: 10)
 
 ## Testing
 
@@ -694,6 +701,7 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 - **Infra**: Pulumi, Wrangler, @devcontainers/cli, pnpm 9.0+, Cloudflare Pages
 
 ## Recent Changes
+- vm-agent-error-reporting: VM agent error reporting to CF Workers observability; Go errorreport package with thread-safe batching and periodic flushing; POST /api/nodes/:id/errors endpoint with callback JWT auth; ACP gateway reports agent crashes, install failures, rapid exits, and prompt failures; configurable flush interval, batch size, queue size, HTTP timeout
 - client-error-reporting: Client-side error reporting pipeline; browser batches errors and sends to POST /api/client-errors which logs to Workers observability via console.error; global window.onerror and unhandledrejection handlers; VoiceButton/AgentPanel onError callback; sendBeacon on page close; configurable rate limit, batch size, body size
 - voice-transcribe-logging: Added comprehensive server-side logging to POST /api/transcribe for debugging voice input issues; logs request receipt, audio file metadata, base64 conversion, Workers AI call timing, response details, and errors with full context
 - agent-file-ops: Implement ACP ReadTextFile and WriteTextFile handlers in gateway; agent can now read/write files via docker exec instead of falling back to Bash cat/echo; supports partial reads (Line/Limit params); reuses GIT_EXEC_TIMEOUT and GIT_FILE_MAX_SIZE config
