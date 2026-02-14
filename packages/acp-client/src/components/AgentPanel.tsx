@@ -45,6 +45,8 @@ interface AgentPanelProps {
   permissionModes?: { value: string; label: string }[];
   /** Called when user saves settings from the in-chat panel */
   onSaveSettings?: (data: { model?: string | null; permissionMode?: string | null }) => Promise<void>;
+  /** Optional callback for reporting client-side errors to telemetry */
+  onError?: (info: { message: string; source: string; context?: Record<string, unknown> }) => void;
 }
 
 /**
@@ -63,6 +65,7 @@ export function AgentPanel({
   agentSettingsLoading,
   permissionModes,
   onSaveSettings,
+  onError,
 }: AgentPanelProps) {
   const [input, setInput] = useState('');
   const [showPalette, setShowPalette] = useState(false);
@@ -316,6 +319,7 @@ export function AgentPanel({
                 onTranscription={handleTranscription}
                 disabled={session.state !== 'ready'}
                 apiUrl={transcribeApiUrl}
+                onError={onError}
               />
             )}
             <button

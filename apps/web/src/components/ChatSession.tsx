@@ -4,6 +4,7 @@ import type { ChatSettingsData } from '@simple-agent-manager/acp-client';
 import type { AgentInfo } from '@simple-agent-manager/shared';
 import { VALID_PERMISSION_MODES, AGENT_PERMISSION_MODE_LABELS } from '@simple-agent-manager/shared';
 import { getTerminalToken, getTranscribeApiUrl, getAgentSettings, saveAgentSettings } from '../lib/api';
+import { reportError } from '../lib/error-reporter';
 
 interface ChatSessionProps {
   /** Workspace ID for token fetching */
@@ -190,6 +191,18 @@ export function ChatSession({
     [activeAgentType]
   );
 
+  const handleError = useCallback(
+    (info: { message: string; source: string; context?: Record<string, unknown> }) => {
+      reportError({
+        level: 'error',
+        message: info.message,
+        source: info.source,
+        context: info.context,
+      });
+    },
+    []
+  );
+
   return (
     <div
       style={{
@@ -208,6 +221,7 @@ export function ChatSession({
         agentSettingsLoading={agentSettingsLoading}
         permissionModes={permissionModes}
         onSaveSettings={handleSaveSettings}
+        onError={handleError}
       />
     </div>
   );

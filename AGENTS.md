@@ -489,6 +489,9 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 ### Voice Transcription
 - `POST /api/transcribe` — Transcribe audio via Workers AI (Whisper)
 
+### Client Error Reporting
+- `POST /api/client-errors` — Receive batched client-side errors for Workers observability logging
+
 ### Authentication (BetterAuth)
 - `POST /api/auth/sign-in/social` — GitHub OAuth login
 - `GET /api/auth/session` — Get current session
@@ -649,6 +652,9 @@ See `apps/api/.env.example`:
 - `MAX_AUDIO_SIZE_BYTES` - Maximum audio upload size in bytes (default: 10485760)
 - `MAX_AUDIO_DURATION_SECONDS` - Maximum recording duration in seconds (default: 60)
 - `RATE_LIMIT_TRANSCRIBE` - Optional rate limit for transcription requests
+- `RATE_LIMIT_CLIENT_ERRORS` - Rate limit for client error reporting per hour per IP (default: 30)
+- `MAX_CLIENT_ERROR_BATCH_SIZE` - Max errors per client error report request (default: 25)
+- `MAX_CLIENT_ERROR_BODY_BYTES` - Max request body size for client error reports in bytes (default: 65536)
 - `GIT_EXEC_TIMEOUT` - VM Agent: timeout for git commands via docker exec (default: 30s)
 - `GIT_FILE_MAX_SIZE` - VM Agent: max file size in bytes for git/file endpoint (default: 1048576)
 - `FILE_LIST_TIMEOUT` - VM Agent: timeout for file listing commands (default: 10s)
@@ -688,6 +694,7 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 - **Infra**: Pulumi, Wrangler, @devcontainers/cli, pnpm 9.0+, Cloudflare Pages
 
 ## Recent Changes
+- client-error-reporting: Client-side error reporting pipeline; browser batches errors and sends to POST /api/client-errors which logs to Workers observability via console.error; global window.onerror and unhandledrejection handlers; VoiceButton/AgentPanel onError callback; sendBeacon on page close; configurable rate limit, batch size, body size
 - voice-transcribe-logging: Added comprehensive server-side logging to POST /api/transcribe for debugging voice input issues; logs request receipt, audio file metadata, base64 conversion, Workers AI call timing, response details, and errors with full context
 - agent-file-ops: Implement ACP ReadTextFile and WriteTextFile handlers in gateway; agent can now read/write files via docker exec instead of falling back to Bash cat/echo; supports partial reads (Line/Limit params); reuses GIT_EXEC_TIMEOUT and GIT_FILE_MAX_SIZE config
 - file-browser: File browser with directory listing and syntax-highlighted file viewer; VM Agent endpoint `GET /files/list` via docker exec `find -printf`; breadcrumb navigation, mobile-first full-screen overlays, cross-link to git diff viewer; configurable FILE_LIST_TIMEOUT and FILE_LIST_MAX_ENTRIES
