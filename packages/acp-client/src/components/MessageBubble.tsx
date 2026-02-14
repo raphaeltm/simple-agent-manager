@@ -23,10 +23,13 @@ export function MessageBubble({ text, role, streaming }: MessageBubbleProps) {
             : 'bg-white border border-gray-200 text-gray-900'
         }`}
       >
-        <div className="prose prose-sm max-w-none overflow-hidden">
+        <div className="prose prose-sm max-w-none overflow-y-visible">
           <Markdown
             remarkPlugins={[remarkGfm]}
             components={{
+              // Override <pre> to avoid double-wrapping (react-markdown renders
+              // <pre><code>...</code></pre>; our code component adds its own <pre>)
+              pre: ({ children }) => <>{children}</>,
               code: ({ className, children, ...props }) => {
                 const match = /language-(\w+)/.exec(className || '');
                 const isInline = !match && !className;
@@ -41,7 +44,7 @@ export function MessageBubble({ text, role, streaming }: MessageBubbleProps) {
                   );
                 }
                 return (
-                  <pre className="bg-gray-900 text-gray-100 p-3 rounded-md overflow-x-auto text-xs">
+                  <pre className="bg-gray-900 text-gray-100 p-3 rounded-md overflow-x-auto text-xs whitespace-pre">
                     <code className={className} {...props}>
                       {children}
                     </code>
