@@ -42,7 +42,6 @@ export function CreateWorkspace() {
 
   const [name, setName] = useState('');
   const [repository, setRepository] = useState('');
-  const [repoFullName, setRepoFullName] = useState('');
   const [branch, setBranch] = useState('main');
   const [branches, setBranches] = useState<Array<{ name: string }>>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
@@ -71,11 +70,9 @@ export function CreateWorkspace() {
   const handleRepoSelect = useCallback(
     (repo: { fullName: string; defaultBranch: string } | null) => {
       if (repo) {
-        setRepoFullName(repo.fullName);
         setBranch(repo.defaultBranch);
         void fetchBranches(repo.fullName, installationId);
       } else {
-        setRepoFullName('');
         setBranches([]);
       }
     },
