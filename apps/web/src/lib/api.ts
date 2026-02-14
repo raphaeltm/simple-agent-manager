@@ -365,6 +365,14 @@ export function getTranscribeApiUrl(): string {
   return `${API_URL}/api/transcribe`;
 }
 
+/**
+ * Get the full URL for the client error reporting API endpoint.
+ * Used by the error reporter to send batched client-side errors.
+ */
+export function getClientErrorsApiUrl(): string {
+  return `${API_URL}/api/client-errors`;
+}
+
 // =============================================================================
 // Agent Settings
 // =============================================================================

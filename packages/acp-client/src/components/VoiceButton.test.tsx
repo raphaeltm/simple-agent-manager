@@ -301,6 +301,75 @@ describe('VoiceButton', () => {
     });
   });
 
+  it('calls onError callback on transcription API failure', async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => JSON.stringify({ error: 'INTERNAL_ERROR', message: 'Server error' }),
+    });
+
+    const mockOnError = vi.fn();
+
+    render(
+      <VoiceButton
+        onTranscription={mockOnTranscription}
+        apiUrl="https://api.example.com/api/transcribe"
+        onError={mockOnError}
+      />
+    );
+
+    // Start recording
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button'));
+    });
+
+    // Stop recording (triggers transcription)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /stop recording/i }));
+    });
+
+    await waitFor(() => {
+      expect(mockOnError).toHaveBeenCalledTimes(1);
+      expect(mockOnError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.any(String),
+          source: 'VoiceButton',
+          context: expect.objectContaining({ phase: 'transcription' }),
+        })
+      );
+    });
+  });
+
+  it('calls onError callback on microphone permission denied', async () => {
+    const error = new DOMException('Permission denied', 'NotAllowedError');
+    (navigator.mediaDevices.getUserMedia as ReturnType<typeof vi.fn>).mockRejectedValue(error);
+
+    const mockOnError = vi.fn();
+
+    render(
+      <VoiceButton
+        onTranscription={mockOnTranscription}
+        apiUrl="https://api.example.com/api/transcribe"
+        onError={mockOnError}
+      />
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button'));
+    });
+
+    await waitFor(() => {
+      expect(mockOnError).toHaveBeenCalledTimes(1);
+      expect(mockOnError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Microphone permission denied',
+          source: 'VoiceButton',
+          context: expect.objectContaining({ phase: 'mic-access' }),
+        })
+      );
+    });
+  });
+
   it('handles browser without mediaDevices support', async () => {
     Object.defineProperty(navigator, 'mediaDevices', {
       value: undefined,

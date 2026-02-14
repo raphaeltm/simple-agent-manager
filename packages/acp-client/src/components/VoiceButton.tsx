@@ -10,6 +10,8 @@ export interface VoiceButtonProps {
   disabled?: boolean;
   /** Full URL for the transcription endpoint (e.g., https://api.example.com/api/transcribe) */
   apiUrl: string;
+  /** Optional callback for reporting errors to telemetry */
+  onError?: (info: { message: string; source: string; context?: Record<string, unknown> }) => void;
 }
 
 /** Inline SVG microphone icon (idle state) */
@@ -79,7 +81,7 @@ function Spinner({ className }: { className?: string }) {
  * States: idle -> recording -> processing -> idle (or error -> idle)
  * Toggle interaction: click to start, click to stop.
  */
-export function VoiceButton({ onTranscription, disabled = false, apiUrl }: VoiceButtonProps) {
+export function VoiceButton({ onTranscription, disabled = false, apiUrl, onError }: VoiceButtonProps) {
   const [state, setState] = useState<VoiceState>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [amplitude, setAmplitude] = useState(0);
@@ -236,10 +238,10 @@ export function VoiceButton({ onTranscription, disabled = false, apiUrl }: Voice
           }
           setState('idle');
         } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Transcription failed';
           setState('error');
-          setErrorMessage(
-            err instanceof Error ? err.message : 'Transcription failed'
-          );
+          setErrorMessage(msg);
+          onError?.({ message: msg, source: 'VoiceButton', context: { phase: 'transcription' } });
           // Auto-recover to idle after a brief delay
           setTimeout(() => setState('idle'), 3000);
         }
@@ -251,6 +253,7 @@ export function VoiceButton({ onTranscription, disabled = false, apiUrl }: Voice
         stopAmplitudeMonitor();
         setState('error');
         setErrorMessage('Recording failed');
+        onError?.({ message: 'Recording failed', source: 'VoiceButton', context: { phase: 'recording' } });
         setTimeout(() => setState('idle'), 3000);
       };
 
@@ -259,19 +262,27 @@ export function VoiceButton({ onTranscription, disabled = false, apiUrl }: Voice
     } catch (err) {
       stopAmplitudeMonitor();
       setState('error');
+      let msg: string;
       if (err instanceof DOMException && err.name === 'NotAllowedError') {
-        setErrorMessage('Microphone permission denied');
+        msg = 'Microphone permission denied';
       } else if (err instanceof DOMException && err.name === 'NotFoundError') {
-        setErrorMessage('No microphone found');
+        msg = 'No microphone found';
       } else {
-        setErrorMessage(
-          err instanceof Error ? err.message : 'Failed to access microphone'
-        );
+        msg = err instanceof Error ? err.message : 'Failed to access microphone';
       }
+      setErrorMessage(msg);
+      onError?.({
+        message: msg,
+        source: 'VoiceButton',
+        context: {
+          phase: 'mic-access',
+          errorName: err instanceof DOMException ? err.name : undefined,
+        },
+      });
       // Auto-recover to idle after a brief delay
       setTimeout(() => setState('idle'), 3000);
     }
-  }, [apiUrl, onTranscription, startAmplitudeMonitor, stopAmplitudeMonitor]);
+  }, [apiUrl, onTranscription, onError, startAmplitudeMonitor, stopAmplitudeMonitor]);
 
   const handleClick = useCallback(() => {
     if (state === 'recording') {

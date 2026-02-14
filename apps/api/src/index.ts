@@ -17,6 +17,7 @@ import { bootstrapRoutes } from './routes/bootstrap';
 import { uiGovernanceRoutes } from './routes/ui-governance';
 import { transcribeRoutes } from './routes/transcribe';
 import { agentSettingsRoutes } from './routes/agent-settings';
+import { clientErrorsRoutes } from './routes/client-errors';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { getRuntimeLimits } from './services/limits';
 import { recordNodeRoutingMetric } from './services/telemetry';
@@ -80,6 +81,10 @@ export interface Env {
   MAX_AUDIO_SIZE_BYTES?: string;
   MAX_AUDIO_DURATION_SECONDS?: string;
   RATE_LIMIT_TRANSCRIBE?: string;
+  // Client error reporting
+  RATE_LIMIT_CLIENT_ERRORS?: string;
+  MAX_CLIENT_ERROR_BATCH_SIZE?: string;
+  MAX_CLIENT_ERROR_BODY_BYTES?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -249,6 +254,7 @@ app.route('/api/bootstrap', bootstrapRoutes);
 app.route('/api/ui-governance', uiGovernanceRoutes);
 app.route('/api/transcribe', transcribeRoutes);
 app.route('/api/agent-settings', agentSettingsRoutes);
+app.route('/api/client-errors', clientErrorsRoutes);
 
 // 404 handler
 app.notFound((c) => {

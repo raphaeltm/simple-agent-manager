@@ -32,6 +32,7 @@ export const DEFAULT_RATE_LIMITS = {
   TERMINAL_TOKEN: 60,
   CREDENTIAL_UPDATE: 5,
   ANONYMOUS: 100,
+  CLIENT_ERRORS: 30,
 } as const;
 
 /** Default time window (1 hour in seconds) */

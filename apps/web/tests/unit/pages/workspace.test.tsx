@@ -45,6 +45,7 @@ vi.mock('../../../src/lib/api', () => ({
   getAgentSettings: mocks.getAgentSettings,
   saveAgentSettings: mocks.saveAgentSettings,
   getTranscribeApiUrl: () => 'https://api.example.com/api/transcribe',
+  getClientErrorsApiUrl: () => 'https://api.example.com/api/client-errors',
 }));
 
 vi.mock('@simple-agent-manager/terminal', () => ({
