@@ -69,6 +69,10 @@ type GatewayConfig struct {
 	SessionManager SessionUpdater
 	// TabStore persists ACP session IDs to the SQLite store.
 	TabStore TabSessionUpdater
+	// FileExecTimeout is the timeout for file read/write operations via docker exec.
+	FileExecTimeout time.Duration
+	// FileMaxSize is the maximum file size in bytes for read operations.
+	FileMaxSize int
 }
 
 // Gateway bridges a gorilla/websocket connection to an ACP agent subprocess.
@@ -912,6 +916,53 @@ func (g *Gateway) fetchAgentSettings(ctx context.Context, agentType string) *age
 	return &result
 }
 
+// applyLineLimit applies Line and Limit parameters to file content for partial reads.
+// Line is 1-based. Returns the selected portion of content.
+func applyLineLimit(content string, line *int, limit *int) string {
+	if line == nil && limit == nil {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	startLine := 0
+	if line != nil && *line > 1 {
+		startLine = *line - 1
+		if startLine >= len(lines) {
+			return ""
+		}
+		lines = lines[startLine:]
+	}
+	if limit != nil && *limit > 0 && *limit < len(lines) {
+		lines = lines[:*limit]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// execInContainer runs a command inside a devcontainer and returns stdout.
+// Uses docker exec with optional user flag.
+func execInContainer(ctx context.Context, containerID, user, workDir string, args ...string) (stdout string, stderr string, err error) {
+	dockerArgs := []string{"exec", "-i"}
+	if user != "" {
+		dockerArgs = append(dockerArgs, "-u", user)
+	}
+	if workDir != "" {
+		dockerArgs = append(dockerArgs, "-w", workDir)
+	}
+	dockerArgs = append(dockerArgs, containerID)
+	dockerArgs = append(dockerArgs, args...)
+
+	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	if err := cmd.Run(); err != nil {
+		return "", strings.TrimSpace(stderrBuf.String()), fmt.Errorf("command failed: %w", err)
+	}
+
+	return stdoutBuf.String(), strings.TrimSpace(stderrBuf.String()), nil
+}
+
 // gatewayClient implements the acp.Client interface, forwarding agent
 // notifications and requests to the browser via WebSocket.
 type gatewayClient struct {
@@ -968,12 +1019,80 @@ func (c *gatewayClient) RequestPermission(_ context.Context, params acpsdk.Reque
 	}, nil
 }
 
-func (c *gatewayClient) ReadTextFile(_ context.Context, _ acpsdk.ReadTextFileRequest) (acpsdk.ReadTextFileResponse, error) {
-	return acpsdk.ReadTextFileResponse{}, fmt.Errorf("ReadTextFile not supported by gateway")
+func (c *gatewayClient) ReadTextFile(ctx context.Context, params acpsdk.ReadTextFileRequest) (acpsdk.ReadTextFileResponse, error) {
+	if params.Path == "" {
+		return acpsdk.ReadTextFileResponse{}, fmt.Errorf("file path is required")
+	}
+
+	containerID, err := c.gateway.config.ContainerResolver()
+	if err != nil {
+		return acpsdk.ReadTextFileResponse{}, fmt.Errorf("failed to resolve container: %w", err)
+	}
+
+	timeout := c.gateway.config.FileExecTimeout
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+	execCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	content, stderr, err := execInContainer(execCtx, containerID, c.gateway.config.ContainerUser, "", "cat", params.Path)
+	if err != nil {
+		log.Printf("[acp] ReadTextFile error for %q: %v, stderr: %s", params.Path, err, stderr)
+		return acpsdk.ReadTextFileResponse{}, fmt.Errorf("failed to read file %q: %v", params.Path, err)
+	}
+
+	maxSize := c.gateway.config.FileMaxSize
+	if maxSize == 0 {
+		maxSize = 1048576 // 1 MB
+	}
+	if len(content) > maxSize {
+		return acpsdk.ReadTextFileResponse{}, fmt.Errorf("file %q exceeds maximum size of %d bytes", params.Path, maxSize)
+	}
+
+	content = applyLineLimit(content, params.Line, params.Limit)
+
+	return acpsdk.ReadTextFileResponse{Content: content}, nil
 }
 
-func (c *gatewayClient) WriteTextFile(_ context.Context, _ acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error) {
-	return acpsdk.WriteTextFileResponse{}, fmt.Errorf("WriteTextFile not supported by gateway")
+func (c *gatewayClient) WriteTextFile(ctx context.Context, params acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error) {
+	if params.Path == "" {
+		return acpsdk.WriteTextFileResponse{}, fmt.Errorf("file path is required")
+	}
+
+	containerID, err := c.gateway.config.ContainerResolver()
+	if err != nil {
+		return acpsdk.WriteTextFileResponse{}, fmt.Errorf("failed to resolve container: %w", err)
+	}
+
+	timeout := c.gateway.config.FileExecTimeout
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+	execCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Use tee to write stdin to the file. tee handles creating/overwriting files.
+	dockerArgs := []string{"exec", "-i"}
+	if c.gateway.config.ContainerUser != "" {
+		dockerArgs = append(dockerArgs, "-u", c.gateway.config.ContainerUser)
+	}
+	dockerArgs = append(dockerArgs, containerID, "tee", params.Path)
+
+	cmd := exec.CommandContext(execCtx, "docker", dockerArgs...)
+	cmd.Stdin = strings.NewReader(params.Content)
+
+	var stderrBuf bytes.Buffer
+	cmd.Stdout = io.Discard // tee echoes input to stdout, discard it
+	cmd.Stderr = &stderrBuf
+
+	if err := cmd.Run(); err != nil {
+		stderrStr := strings.TrimSpace(stderrBuf.String())
+		log.Printf("[acp] WriteTextFile error for %q: %v, stderr: %s", params.Path, err, stderrStr)
+		return acpsdk.WriteTextFileResponse{}, fmt.Errorf("failed to write file %q: %v", params.Path, err)
+	}
+
+	return acpsdk.WriteTextFileResponse{}, nil
 }
 
 func (c *gatewayClient) CreateTerminal(_ context.Context, _ acpsdk.CreateTerminalRequest) (acpsdk.CreateTerminalResponse, error) {
