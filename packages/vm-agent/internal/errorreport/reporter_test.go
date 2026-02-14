@@ -287,6 +287,75 @@ func TestReportErrorNilError(t *testing.T) {
 	}
 }
 
+func TestReportInfo(t *testing.T) {
+	r := New("http://localhost", "node-1", "token", Config{
+		FlushInterval: 1 * time.Hour,
+		MaxBatchSize:  100,
+		MaxQueueSize:  50,
+	})
+
+	r.ReportInfo("agent started", "acp-gateway", "ws-abc", map[string]interface{}{
+		"agentType": "claude-code",
+	})
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.queue) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(r.queue))
+	}
+
+	entry := r.queue[0]
+	if entry.Level != "info" {
+		t.Errorf("expected level 'info', got %q", entry.Level)
+	}
+	if entry.Message != "agent started" {
+		t.Errorf("expected message 'agent started', got %q", entry.Message)
+	}
+	if entry.Source != "acp-gateway" {
+		t.Errorf("expected source 'acp-gateway', got %q", entry.Source)
+	}
+	if entry.WorkspaceID != "ws-abc" {
+		t.Errorf("expected workspaceID 'ws-abc', got %q", entry.WorkspaceID)
+	}
+}
+
+func TestReportWarn(t *testing.T) {
+	r := New("http://localhost", "node-1", "token", Config{
+		FlushInterval: 1 * time.Hour,
+		MaxBatchSize:  100,
+		MaxQueueSize:  50,
+	})
+
+	r.ReportWarn("LoadSession failed", "acp-gateway", "ws-xyz", map[string]interface{}{
+		"error": "session not found",
+	})
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.queue) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(r.queue))
+	}
+
+	entry := r.queue[0]
+	if entry.Level != "warn" {
+		t.Errorf("expected level 'warn', got %q", entry.Level)
+	}
+	if entry.Message != "LoadSession failed" {
+		t.Errorf("expected message 'LoadSession failed', got %q", entry.Message)
+	}
+	if entry.Context["error"] != "session not found" {
+		t.Errorf("expected context error 'session not found', got %v", entry.Context["error"])
+	}
+}
+
+func TestNilReporterInfoWarnSafe(t *testing.T) {
+	var r *Reporter
+
+	// All methods should be no-ops on nil receiver
+	r.ReportInfo("msg", "src", "ws", nil)
+	r.ReportWarn("msg", "src", "ws", nil)
+}
+
 func TestDefaultConfig(t *testing.T) {
 	r := New("http://localhost", "node-1", "token", Config{})
 

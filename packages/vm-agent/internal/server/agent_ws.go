@@ -12,6 +12,16 @@ import (
 	"github.com/workspace/vm-agent/internal/agentsessions"
 )
 
+// serverEventAppender adapts the Server's appendNodeEvent method to the
+// acp.EventAppender interface so the gateway can emit workspace events.
+type serverEventAppender struct {
+	server *Server
+}
+
+func (a *serverEventAppender) AppendEvent(workspaceID, level, eventType, message string, detail map[string]interface{}) {
+	a.server.appendNodeEvent(workspaceID, level, eventType, message, detail)
+}
+
 func parseTakeoverParam(raw string) bool {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "1", "true", "yes", "on":
@@ -139,6 +149,7 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	gatewayCfg.SessionID = requestedSessionID
 	gatewayCfg.SessionManager = s.agentSessions
 	gatewayCfg.TabStore = s.store
+	gatewayCfg.EventAppender = &serverEventAppender{server: s}
 	// Pass previous ACP session ID and agent type for LoadSession on reconnection
 	if session.AcpSessionID != "" {
 		gatewayCfg.PreviousAcpSessionID = session.AcpSessionID
@@ -184,12 +195,19 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	s.acpGateways[gatewayKey] = gateway
 	s.acpMu.Unlock()
 
-	s.appendNodeEvent(workspaceID, "info", "agent.attach", "Agent session attached", map[string]interface{}{
-		"sessionId": requestedSessionID,
-		"takeover":  takeover,
+	s.appendNodeEvent(workspaceID, "info", "agent.websocket_connected", "Agent WebSocket connected", map[string]interface{}{
+		"sessionId":           requestedSessionID,
+		"takeover":            takeover,
+		"hasPreviousSession":  session.AcpSessionID != "",
+		"previousAcpSession":  session.AcpSessionID,
+		"previousAgentType":   session.AgentType,
 	})
 
 	gateway.Run(context.Background())
+
+	s.appendNodeEvent(workspaceID, "info", "agent.websocket_disconnected", "Agent WebSocket disconnected", map[string]interface{}{
+		"sessionId": requestedSessionID,
+	})
 
 	s.acpMu.Lock()
 	if s.acpGateways[gatewayKey] == gateway {

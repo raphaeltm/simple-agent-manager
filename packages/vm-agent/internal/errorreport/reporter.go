@@ -142,6 +142,34 @@ func (r *Reporter) ReportError(err error, source, workspaceID string, ctx map[st
 	})
 }
 
+// ReportInfo is a convenience method for info-level lifecycle events.
+func (r *Reporter) ReportInfo(message, source, workspaceID string, ctx map[string]interface{}) {
+	if r == nil {
+		return
+	}
+	r.Report(ErrorEntry{
+		Level:       "info",
+		Message:     message,
+		Source:      source,
+		WorkspaceID: workspaceID,
+		Context:     ctx,
+	})
+}
+
+// ReportWarn is a convenience method for warn-level lifecycle events.
+func (r *Reporter) ReportWarn(message, source, workspaceID string, ctx map[string]interface{}) {
+	if r == nil {
+		return
+	}
+	r.Report(ErrorEntry{
+		Level:       "warn",
+		Message:     message,
+		Source:      source,
+		WorkspaceID: workspaceID,
+		Context:     ctx,
+	})
+}
+
 // flushLoop runs the periodic flush in the background.
 func (r *Reporter) flushLoop() {
 	defer close(r.doneC)
