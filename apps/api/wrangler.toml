@@ -54,6 +54,9 @@ id = "your-staging-kv-id"
 binding = "R2"
 bucket_name = "workspaces-staging-assets"
 
+[env.staging.ai]
+binding = "AI"
+
 [env.production]
 name = "sam-api-prod"
 vars = { BASE_DOMAIN = "workspaces.example.com", VERSION = "0.1.0", MAX_NODES_PER_USER = "10", MAX_WORKSPACES_PER_USER = "10", MAX_WORKSPACES_PER_NODE = "10", MAX_AGENT_SESSIONS_PER_WORKSPACE = "10", NODE_HEARTBEAT_STALE_SECONDS = "180" }
@@ -78,6 +81,9 @@ id = "your-production-kv-id"
 [[env.production.r2_buckets]]
 binding = "R2"
 bucket_name = "workspaces-assets"
+
+[env.production.ai]
+binding = "AI"
 
 # Cron trigger for provisioning timeout checks (every 5 minutes)
 [triggers]
