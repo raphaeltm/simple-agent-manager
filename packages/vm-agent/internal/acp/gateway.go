@@ -28,6 +28,15 @@ type BootLogReporter interface {
 // All methods must be nil-safe.
 type ErrorReporter interface {
 	ReportError(err error, source, workspaceID string, ctx map[string]interface{})
+	ReportInfo(message, source, workspaceID string, ctx map[string]interface{})
+	ReportWarn(message, source, workspaceID string, ctx map[string]interface{})
+}
+
+// EventAppender appends structured events to the workspace event log.
+// This allows the gateway to emit events visible in the UI event log
+// without depending on the server package directly.
+type EventAppender interface {
+	AppendEvent(workspaceID, level, eventType, message string, detail map[string]interface{})
 }
 
 // SessionUpdater persists ACP session IDs for reconnection with LoadSession.
@@ -86,6 +95,8 @@ type GatewayConfig struct {
 	// ErrorReporter sends structured error entries to CF Workers observability.
 	// Agent errors (crashes, install failures, prompt failures) are reported here.
 	ErrorReporter ErrorReporter
+	// EventAppender appends events to the workspace event log (visible in UI).
+	EventAppender EventAppender
 }
 
 // Gateway bridges a gorilla/websocket connection to an ACP agent subprocess.
@@ -192,8 +203,14 @@ func (g *Gateway) Run(ctx context.Context) error {
 			wasClosed := g.closed
 			g.mu.Unlock()
 			if wasClosed || websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				g.reportLifecycle("info", "Gateway WebSocket closed normally", map[string]interface{}{
+					"wasTakeover": wasClosed,
+				})
 				return nil
 			}
+			g.reportLifecycle("warn", "Gateway WebSocket read error (connection lost)", map[string]interface{}{
+				"error": err.Error(),
+			})
 			return fmt.Errorf("failed to read WebSocket message: %w", err)
 		}
 
@@ -288,6 +305,13 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 	g.stderrBuf.Reset()
 	g.stderrMu.Unlock()
 
+	g.reportLifecycle("info", "Agent selection started", map[string]interface{}{
+		"agentType":            agentType,
+		"previousAcpSessionID": previousAcpSessionID,
+		"previousAgentType":    previousAgentType,
+		"sessionId":            g.config.SessionID,
+	})
+
 	// Fetch credential from control plane
 	cred, err := g.fetchAgentKey(ctx, agentType)
 	if err != nil {
@@ -297,6 +321,10 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 		g.reportAgentError(agentType, "agent_key_fetch", errMsg, err.Error())
 		return
 	}
+	g.reportLifecycle("info", "Agent credential fetched", map[string]interface{}{
+		"agentType":      agentType,
+		"credentialKind": cred.credentialKind,
+	})
 
 	// Ensure the ACP adapter binary is installed in the devcontainer.
 	// Repos with their own .devcontainer config skip --additional-features
@@ -309,6 +337,10 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 		g.reportAgentError(agentType, "agent_install", errMsg, err.Error())
 		return
 	}
+	g.reportLifecycle("info", "Agent binary verified/installed", map[string]interface{}{
+		"agentType": agentType,
+		"command":   info.command,
+	})
 
 	// Fetch user's agent settings (non-blocking: defaults used if unavailable)
 	settings := g.fetchAgentSettings(ctx, agentType)
@@ -321,8 +353,16 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 	if previousAcpSessionID != "" && previousAgentType == agentType {
 		loadSessionID = previousAcpSessionID
 		log.Printf("ACP: will attempt LoadSession with sessionID=%s (previousAgentType=%s matches requested=%s)", loadSessionID, previousAgentType, agentType)
+		g.reportLifecycle("info", "LoadSession will be attempted", map[string]interface{}{
+			"agentType":            agentType,
+			"previousAcpSessionID": previousAcpSessionID,
+		})
 	} else if previousAcpSessionID != "" {
 		log.Printf("ACP: skipping LoadSession — agent type mismatch (previous=%q, requested=%q)", previousAgentType, agentType)
+		g.reportLifecycle("info", "LoadSession skipped: agent type mismatch", map[string]interface{}{
+			"previousAgentType": previousAgentType,
+			"requestedAgent":    agentType,
+		})
 	}
 
 	// Start the agent process
@@ -336,6 +376,13 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 	}
 	g.mu.Unlock()
 
+	g.reportLifecycle("info", "Agent ready", map[string]interface{}{
+		"agentType": agentType,
+		"sessionId": g.config.SessionID,
+	})
+	g.reportEvent("info", "agent.ready", fmt.Sprintf("Agent %s is ready", agentType), map[string]interface{}{
+		"agentType": agentType,
+	})
 	g.sendAgentStatus(StatusReady, agentType, "")
 }
 
@@ -356,6 +403,7 @@ func (g *Gateway) handlePromptRequest(ctx context.Context, reqID json.RawMessage
 
 	if acpConn == nil || sessionID == acpsdk.SessionId("") {
 		log.Printf("Prompt request received but no ACP session active")
+		g.reportLifecycle("warn", "Prompt received but no ACP session active", nil)
 		g.sendJSONRPCError(reqID, -32603, "No ACP session active")
 		return
 	}
@@ -387,6 +435,11 @@ func (g *Gateway) handlePromptRequest(ctx context.Context, reqID json.RawMessage
 	}
 
 	log.Printf("ACP: sending Prompt (session=%s, blocks=%d)", sessionID, len(blocks))
+	promptStart := time.Now()
+	g.reportLifecycle("info", "ACP Prompt started", map[string]interface{}{
+		"acpSessionId": string(sessionID),
+		"blockCount":   len(blocks),
+	})
 
 	// Prompt() is blocking — it waits for the agent to complete processing.
 	// While it runs, session/update notifications are dispatched to
@@ -397,11 +450,19 @@ func (g *Gateway) handlePromptRequest(ctx context.Context, reqID json.RawMessage
 	})
 	if err != nil {
 		log.Printf("ACP Prompt failed: %v", err)
+		g.reportLifecycle("warn", "ACP Prompt failed", map[string]interface{}{
+			"error":    err.Error(),
+			"duration": time.Since(promptStart).String(),
+		})
 		g.sendJSONRPCError(reqID, -32603, fmt.Sprintf("Prompt failed: %v", err))
 		return
 	}
 
 	log.Printf("ACP: Prompt completed (stopReason=%s)", resp.StopReason)
+	g.reportLifecycle("info", "ACP Prompt completed", map[string]interface{}{
+		"stopReason": string(resp.StopReason),
+		"duration":   time.Since(promptStart).String(),
+	})
 
 	// Send the prompt response back to the browser as a JSON-RPC result
 	result, _ := json.Marshal(resp)
@@ -550,6 +611,9 @@ func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentC
 	defer initCancel()
 
 	log.Printf("ACP: sending Initialize request")
+	g.reportLifecycle("info", "ACP Initialize started", map[string]interface{}{
+		"agentType": agentType,
+	})
 	initResp, err := g.acpConn.Initialize(initCtx, acpsdk.InitializeRequest{
 		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		ClientCapabilities: acpsdk.ClientCapabilities{
@@ -557,15 +621,30 @@ func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentC
 		},
 	})
 	if err != nil {
+		g.reportLifecycle("warn", "ACP Initialize failed", map[string]interface{}{
+			"agentType": agentType,
+			"error":     err.Error(),
+		})
 		return fmt.Errorf("ACP initialize failed: %w", err)
 	}
 	log.Printf("ACP: Initialize succeeded (loadSession=%v)", initResp.AgentCapabilities.LoadSession)
+	g.reportLifecycle("info", "ACP Initialize succeeded", map[string]interface{}{
+		"agentType":          agentType,
+		"supportsLoadSession": initResp.AgentCapabilities.LoadSession,
+	})
 
 	// Attempt LoadSession if we have a previous session ID and the agent supports it.
 	// LoadSession restores conversation context — the agent replays all messages
 	// as session/update notifications which flow to the browser.
 	if previousAcpSessionID != "" && initResp.AgentCapabilities.LoadSession {
 		log.Printf("ACP: attempting LoadSession with previous sessionID=%s", previousAcpSessionID)
+		g.reportLifecycle("info", "ACP LoadSession started", map[string]interface{}{
+			"agentType":            agentType,
+			"previousAcpSessionID": previousAcpSessionID,
+		})
+		g.reportEvent("info", "agent.load_session", "Restoring previous conversation", map[string]interface{}{
+			"previousAcpSessionID": previousAcpSessionID,
+		})
 		_, loadErr := g.acpConn.LoadSession(initCtx, acpsdk.LoadSessionRequest{
 			SessionId:  acpsdk.SessionId(previousAcpSessionID),
 			Cwd:        g.config.ContainerWorkDir,
@@ -574,24 +653,52 @@ func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentC
 		if loadErr == nil {
 			g.sessionID = acpsdk.SessionId(previousAcpSessionID)
 			log.Printf("ACP: LoadSession succeeded, sessionID=%s", previousAcpSessionID)
+			g.reportLifecycle("info", "ACP LoadSession succeeded", map[string]interface{}{
+				"agentType":   agentType,
+				"acpSessionId": previousAcpSessionID,
+			})
+			g.reportEvent("info", "agent.load_session_ok", "Previous conversation restored", map[string]interface{}{
+				"acpSessionId": previousAcpSessionID,
+			})
 			g.persistAcpSessionID(agentType)
 			return nil
 		}
 		log.Printf("ACP: LoadSession failed (falling back to NewSession): %v", loadErr)
+		g.reportLifecycle("warn", "ACP LoadSession failed, falling back to NewSession", map[string]interface{}{
+			"agentType": agentType,
+			"error":     loadErr.Error(),
+		})
+		g.reportEvent("warn", "agent.load_session_failed", "Could not restore conversation, starting fresh", map[string]interface{}{
+			"error": loadErr.Error(),
+		})
 	} else if previousAcpSessionID != "" {
 		log.Printf("ACP: agent does not support LoadSession, using NewSession instead")
+		g.reportLifecycle("info", "Agent does not support LoadSession", map[string]interface{}{
+			"agentType": agentType,
+		})
 	}
 
 	log.Printf("ACP: sending NewSession request")
+	g.reportLifecycle("info", "ACP NewSession started", map[string]interface{}{
+		"agentType": agentType,
+	})
 	sessResp, err := g.acpConn.NewSession(initCtx, acpsdk.NewSessionRequest{
 		Cwd:        g.config.ContainerWorkDir,
 		McpServers: []acpsdk.McpServer{},
 	})
 	if err != nil {
+		g.reportLifecycle("warn", "ACP NewSession failed", map[string]interface{}{
+			"agentType": agentType,
+			"error":     err.Error(),
+		})
 		return fmt.Errorf("ACP new session failed: %w", err)
 	}
 	g.sessionID = sessResp.SessionId
 	log.Printf("ACP: NewSession succeeded, sessionID=%s", string(g.sessionID))
+	g.reportLifecycle("info", "ACP NewSession succeeded", map[string]interface{}{
+		"agentType":   agentType,
+		"acpSessionId": string(g.sessionID),
+	})
 	g.persistAcpSessionID(agentType)
 
 	return nil
@@ -739,6 +846,27 @@ func (g *Gateway) reportAgentError(agentType, step, message, detail string) {
 	}
 }
 
+// reportLifecycle sends an info or warn lifecycle event to the error reporter
+// for CF Workers observability. Fire-and-forget.
+func (g *Gateway) reportLifecycle(level, message string, ctx map[string]interface{}) {
+	if g.config.ErrorReporter == nil {
+		return
+	}
+	switch level {
+	case "warn":
+		g.config.ErrorReporter.ReportWarn(message, "acp-gateway", g.config.WorkspaceID, ctx)
+	default:
+		g.config.ErrorReporter.ReportInfo(message, "acp-gateway", g.config.WorkspaceID, ctx)
+	}
+}
+
+// reportEvent emits a workspace event visible in the UI event log.
+func (g *Gateway) reportEvent(level, eventType, message string, detail map[string]interface{}) {
+	if g.config.EventAppender != nil {
+		g.config.EventAppender.AppendEvent(g.config.WorkspaceID, level, eventType, message, detail)
+	}
+}
+
 // truncate limits a string to maxLen characters, appending "..." if truncated.
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
@@ -782,6 +910,9 @@ func (g *Gateway) writeJSON(v interface{}) {
 	defer g.writeMu.Unlock()
 	if err := g.conn.WriteJSON(v); err != nil {
 		log.Printf("Failed to write to WebSocket: %v", err)
+		g.reportLifecycle("warn", "WebSocket writeJSON failed", map[string]interface{}{
+			"error": err.Error(),
+		})
 	}
 }
 
@@ -791,6 +922,10 @@ func (g *Gateway) writeRawJSON(data []byte) {
 	defer g.writeMu.Unlock()
 	if err := g.conn.WriteMessage(websocket.TextMessage, data); err != nil {
 		log.Printf("Failed to write raw message to WebSocket: %v", err)
+		g.reportLifecycle("warn", "WebSocket writeRawJSON failed", map[string]interface{}{
+			"error":      err.Error(),
+			"dataLength": len(data),
+		})
 	}
 }
 
@@ -835,6 +970,10 @@ func (g *Gateway) persistAcpSessionID(agentType string) {
 
 // cleanup stops any running agent process.
 func (g *Gateway) cleanup() {
+	g.reportLifecycle("info", "Gateway cleanup started", map[string]interface{}{
+		"agentType": g.agentType,
+		"sessionId": g.config.SessionID,
+	})
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.stopCurrentAgentLocked()
