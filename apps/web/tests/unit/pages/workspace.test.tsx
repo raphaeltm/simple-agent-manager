@@ -371,7 +371,7 @@ describe('Workspace page', () => {
       id: 'sess-new',
       workspaceId: 'ws-123',
       status: 'running',
-      label: 'Claude Code Chat',
+      label: 'Claude Code 1',
       createdAt: '2026-02-08T00:12:00.000Z',
       updatedAt: '2026-02-08T00:12:00.000Z',
       stoppedAt: null,
@@ -387,7 +387,7 @@ describe('Workspace page', () => {
     await waitFor(() => {
       expect(mocks.createAgentSession).toHaveBeenCalledWith(
         'ws-123',
-        { label: 'Claude Code Chat' },
+        { label: 'Claude Code 1' },
       );
     });
   });
@@ -417,7 +417,7 @@ describe('Workspace page', () => {
       id: 'sess-codex',
       workspaceId: 'ws-123',
       status: 'running',
-      label: 'Codex Chat',
+      label: 'Codex 1',
       createdAt: '2026-02-08T00:12:00.000Z',
       updatedAt: '2026-02-08T00:12:00.000Z',
       stoppedAt: null,
@@ -436,7 +436,7 @@ describe('Workspace page', () => {
     await waitFor(() => {
       expect(mocks.createAgentSession).toHaveBeenCalledWith(
         'ws-123',
-        { label: 'Codex Chat' },
+        { label: 'Codex 1' },
       );
     });
   });

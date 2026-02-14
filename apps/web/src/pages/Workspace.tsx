@@ -386,14 +386,18 @@ export function Workspace() {
         ? configuredAgents.find((agent) => agent.id === preferredAgentId)
         : undefined;
 
-      const created = await createAgentSession(
-        id,
-        preferredAgent ? { label: `${preferredAgent.name} Chat` } : {}
-      );
+      // Generate a numbered label: count existing running sessions + 1
+      const runningCount = agentSessions.filter((s) => s.status === 'running').length;
+      const nextNumber = runningCount + 1;
+      const label = preferredAgent
+        ? `${preferredAgent.name} ${nextNumber}`
+        : `Chat ${nextNumber}`;
+
+      const created = await createAgentSession(id, { label });
 
       setAgentSessions((prev) => {
         const remaining = prev.filter((session) => session.id !== created.id);
-        return [created, ...remaining];
+        return [...remaining, created];
       });
 
       if (preferredAgentId) {
