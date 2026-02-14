@@ -142,6 +142,39 @@ describe('SlashCommandPalette', () => {
     }
   });
 
+  it('renders in document flow (not absolute positioned) to avoid overlapping input', () => {
+    render(
+      <SlashCommandPalette
+        commands={MOCK_COMMANDS}
+        filter=""
+        onSelect={vi.fn()}
+        onDismiss={vi.fn()}
+        visible={true}
+      />
+    );
+
+    const listbox = screen.getByRole('listbox');
+    // Must NOT use absolute positioning which causes overlap on mobile
+    expect(listbox.className).not.toContain('absolute');
+    expect(listbox.className).not.toContain('bottom-full');
+  });
+
+  it('does not truncate command descriptions (text wraps)', () => {
+    render(
+      <SlashCommandPalette
+        commands={MOCK_COMMANDS}
+        filter=""
+        onSelect={vi.fn()}
+        onDismiss={vi.fn()}
+        visible={true}
+      />
+    );
+
+    const description = screen.getByText('Compress conversation context');
+    // Description should not have the "truncate" class
+    expect(description.className).not.toContain('truncate');
+  });
+
   it('case-insensitive filtering', () => {
     render(
       <SlashCommandPalette
