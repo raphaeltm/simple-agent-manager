@@ -54,7 +54,7 @@ vi.mock('@simple-agent-manager/terminal', () => ({
 }));
 
 vi.mock('@simple-agent-manager/acp-client', () => ({
-  useAcpMessages: () => ({ processMessage: vi.fn(), items: [] }),
+  useAcpMessages: () => ({ processMessage: vi.fn(), items: [], usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }, availableCommands: [], addUserMessage: vi.fn(), clear: vi.fn() }),
   useAcpSession: mocks.useAcpSession,
   AgentPanel: () => <div data-testid="agent-panel">agent-panel</div>,
 }));
