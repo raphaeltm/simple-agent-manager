@@ -68,7 +68,7 @@ When a user switches away from the SAM browser tab (e.g., to another app on mobi
 - [x] Unit tests pass (Go + TypeScript)
 - [x] Typecheck passes
 - [x] Lint passes
-- [ ] PR created with preflight evidence
+- [x] PR created with preflight evidence (#67)
 - [ ] CI passes
 - [ ] Merged to main
 - [ ] Deployed to production
