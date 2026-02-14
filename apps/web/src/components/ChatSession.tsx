@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAcpSession, useAcpMessages, AgentPanel } from '@simple-agent-manager/acp-client';
+import type { ChatSettingsData } from '@simple-agent-manager/acp-client';
 import type { AgentInfo } from '@simple-agent-manager/shared';
-import { getTerminalToken, getTranscribeApiUrl } from '../lib/api';
+import { VALID_PERMISSION_MODES, AGENT_PERMISSION_MODE_LABELS } from '@simple-agent-manager/shared';
+import { getTerminalToken, getTranscribeApiUrl, getAgentSettings, saveAgentSettings } from '../lib/api';
 
 interface ChatSessionProps {
   /** Workspace ID for token fetching */
@@ -130,6 +132,64 @@ export function ChatSession({
     }
   }, [acpMessages.items.length, handleActivity]);
 
+  // ── Agent settings ──
+  const [agentSettings, setAgentSettings] = useState<ChatSettingsData | null>(null);
+  const [agentSettingsLoading, setAgentSettingsLoading] = useState(false);
+
+  // Build permission mode options from shared constants
+  const permissionModes = useMemo(
+    () =>
+      VALID_PERMISSION_MODES.map((mode) => ({
+        value: mode,
+        label: AGENT_PERMISSION_MODE_LABELS[mode] ?? mode,
+      })),
+    []
+  );
+
+  // Fetch settings when agent type is known
+  const activeAgentType = agentType ?? preferredAgentId;
+  useEffect(() => {
+    if (!activeAgentType) return;
+    let cancelled = false;
+    setAgentSettingsLoading(true);
+
+    getAgentSettings(activeAgentType)
+      .then((result) => {
+        if (cancelled) return;
+        setAgentSettings({
+          model: result.model,
+          permissionMode: result.permissionMode,
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // No saved settings — use defaults
+        setAgentSettings({ model: null, permissionMode: null });
+      })
+      .finally(() => {
+        if (!cancelled) setAgentSettingsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeAgentType]);
+
+  const handleSaveSettings = useCallback(
+    async (data: { model?: string | null; permissionMode?: string | null }) => {
+      if (!activeAgentType) return;
+      const result = await saveAgentSettings(activeAgentType, {
+        model: data.model,
+        permissionMode: data.permissionMode as import('@simple-agent-manager/shared').AgentPermissionMode | null | undefined,
+      });
+      setAgentSettings({
+        model: result.model,
+        permissionMode: result.permissionMode,
+      });
+    },
+    [activeAgentType]
+  );
+
   return (
     <div
       style={{
@@ -144,6 +204,10 @@ export function ChatSession({
         messages={acpMessages}
         availableCommands={acpMessages.availableCommands}
         transcribeApiUrl={transcribeApiUrl}
+        agentSettings={agentSettings}
+        agentSettingsLoading={agentSettingsLoading}
+        permissionModes={permissionModes}
+        onSaveSettings={handleSaveSettings}
       />
     </div>
   );

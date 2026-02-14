@@ -10,6 +10,8 @@ import { ModeSelector } from './ModeSelector';
 import { SlashCommandPalette } from './SlashCommandPalette';
 import type { SlashCommandPaletteHandle } from './SlashCommandPalette';
 import { VoiceButton } from './VoiceButton';
+import { ChatSettingsPanel } from './ChatSettingsPanel';
+import type { ChatSettingsData } from './ChatSettingsPanel';
 
 // =============================================================================
 // Client-side commands (not forwarded to agent)
@@ -35,6 +37,14 @@ interface AgentPanelProps {
   /** URL for the voice transcription API endpoint (e.g., https://api.example.com/api/transcribe).
    *  When provided, a voice input button is shown next to the send button. */
   transcribeApiUrl?: string;
+  /** Current agent settings (null = not loaded yet) */
+  agentSettings?: ChatSettingsData | null;
+  /** Whether agent settings are loading */
+  agentSettingsLoading?: boolean;
+  /** Permission mode options for the settings panel */
+  permissionModes?: { value: string; label: string }[];
+  /** Called when user saves settings from the in-chat panel */
+  onSaveSettings?: (data: { model?: string | null; permissionMode?: string | null }) => Promise<void>;
 }
 
 /**
@@ -49,9 +59,14 @@ export function AgentPanel({
   currentMode,
   onSelectMode,
   transcribeApiUrl,
+  agentSettings,
+  agentSettingsLoading,
+  permissionModes,
+  onSaveSettings,
 }: AgentPanelProps) {
   const [input, setInput] = useState('');
   const [showPalette, setShowPalette] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const paletteRef = useRef<SlashCommandPaletteHandle>(null);
@@ -245,7 +260,17 @@ export function AgentPanel({
       </div>
 
       {/* Input area */}
-      <div className="border-t border-gray-200 bg-white p-3">
+      <div className="border-t border-gray-200 bg-white p-3 relative">
+        {/* Settings popover (above input) */}
+        {showSettings && onSaveSettings && permissionModes && (
+          <ChatSettingsPanel
+            settings={agentSettings ?? null}
+            loading={agentSettingsLoading}
+            permissionModes={permissionModes}
+            onSave={onSaveSettings}
+            onClose={() => setShowSettings(false)}
+          />
+        )}
         {/* Slash command palette (above input, in document flow) */}
         <SlashCommandPalette
           ref={paletteRef}
@@ -256,6 +281,26 @@ export function AgentPanel({
           visible={showPalette}
         />
         <form onSubmit={handleSubmit} className="flex items-end space-x-2">
+            {/* Settings gear button */}
+            {onSaveSettings && (
+              <button
+                type="button"
+                onClick={() => setShowSettings((prev) => !prev)}
+                className={`p-2 rounded-md border transition-colors flex-shrink-0 ${
+                  showSettings
+                    ? 'bg-blue-50 border-blue-300 text-blue-600'
+                    : 'bg-white border-gray-300 text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                }`}
+                style={{ minHeight: 38, minWidth: 38 }}
+                aria-label="Agent settings"
+                title="Agent settings"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+              </button>
+            )}
             <textarea
               ref={inputRef}
               value={input}

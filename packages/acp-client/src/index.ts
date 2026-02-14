@@ -24,3 +24,6 @@ export { ModeSelector } from './components/ModeSelector';
 
 export { VoiceButton } from './components/VoiceButton';
 export type { VoiceButtonProps } from './components/VoiceButton';
+
+export { ChatSettingsPanel } from './components/ChatSettingsPanel';
+export type { ChatSettingsData, ChatSettingsPanelProps } from './components/ChatSettingsPanel';
