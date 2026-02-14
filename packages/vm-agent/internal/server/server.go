@@ -151,6 +151,8 @@ func New(cfg *config.Config) (*Server, error) {
 		ContainerUser:      containerUser,
 		ContainerWorkDir:   containerWorkDir,
 		OnActivity:         idleDetector.RecordActivity,
+		FileExecTimeout:    cfg.GitExecTimeout,
+		FileMaxSize:        cfg.GitFileMaxSize,
 	}
 
 	// Open persistence store for cross-device session state.
