@@ -14,6 +14,9 @@ import { MoreVertical, X } from 'lucide-react';
 import { GitChangesButton } from '../components/GitChangesButton';
 import { GitChangesPanel } from '../components/GitChangesPanel';
 import { GitDiffView } from '../components/GitDiffView';
+import { FileBrowserButton } from '../components/FileBrowserButton';
+import { FileBrowserPanel } from '../components/FileBrowserPanel';
+import { FileViewerPanel } from '../components/FileViewerPanel';
 import {
   ApiClientError,
   createAgentSession,
@@ -118,6 +121,10 @@ export function Workspace() {
   const gitParam = searchParams.get('git'); // 'changes' | 'diff' | null
   const gitFileParam = searchParams.get('file');
   const gitStagedParam = searchParams.get('staged');
+
+  // File browser state (URL-driven, mutually exclusive with git overlay)
+  const filesParam = searchParams.get('files'); // 'browse' | 'view' | null
+  const filesPathParam = searchParams.get('path');
 
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -374,6 +381,9 @@ export function Workspace() {
   // ── Git changes panel navigation ──
   const handleOpenGitChanges = useCallback(() => {
     const params = new URLSearchParams(searchParams);
+    // Clear file browser params (mutually exclusive)
+    params.delete('files');
+    params.delete('path');
     params.set('git', 'changes');
     params.delete('file');
     params.delete('staged');
@@ -406,6 +416,82 @@ export function Workspace() {
     params.delete('staged');
     navigate(`/workspaces/${id}?${params.toString()}`);
   }, [id, navigate, searchParams]);
+
+  // ── File browser navigation ──
+  const handleOpenFileBrowser = useCallback(() => {
+    const params = new URLSearchParams(searchParams);
+    // Clear git params (mutually exclusive)
+    params.delete('git');
+    params.delete('file');
+    params.delete('staged');
+    params.set('files', 'browse');
+    params.delete('path');
+    navigate(`/workspaces/${id}?${params.toString()}`);
+  }, [id, navigate, searchParams]);
+
+  const handleFileBrowserNavigate = useCallback(
+    (dirPath: string) => {
+      const params = new URLSearchParams(searchParams);
+      params.delete('git');
+      params.delete('file');
+      params.delete('staged');
+      params.set('files', 'browse');
+      if (dirPath && dirPath !== '.') {
+        params.set('path', dirPath);
+      } else {
+        params.delete('path');
+      }
+      navigate(`/workspaces/${id}?${params.toString()}`);
+    },
+    [id, navigate, searchParams]
+  );
+
+  const handleFileViewerOpen = useCallback(
+    (filePath: string) => {
+      const params = new URLSearchParams(searchParams);
+      params.delete('git');
+      params.delete('file');
+      params.delete('staged');
+      params.set('files', 'view');
+      params.set('path', filePath);
+      navigate(`/workspaces/${id}?${params.toString()}`);
+    },
+    [id, navigate, searchParams]
+  );
+
+  const handleFileViewerBack = useCallback(() => {
+    const params = new URLSearchParams(searchParams);
+    params.set('files', 'browse');
+    // Navigate to the parent directory of the current file
+    const currentPath = params.get('path') ?? '';
+    const lastSlash = currentPath.lastIndexOf('/');
+    if (lastSlash > 0) {
+      params.set('path', currentPath.slice(0, lastSlash));
+    } else {
+      params.delete('path');
+    }
+    navigate(`/workspaces/${id}?${params.toString()}`);
+  }, [id, navigate, searchParams]);
+
+  const handleCloseFileBrowser = useCallback(() => {
+    const params = new URLSearchParams(searchParams);
+    params.delete('files');
+    params.delete('path');
+    navigate(`/workspaces/${id}?${params.toString()}`);
+  }, [id, navigate, searchParams]);
+
+  const handleFileViewerToDiff = useCallback(
+    (filePath: string, staged: boolean) => {
+      const params = new URLSearchParams(searchParams);
+      params.delete('files');
+      params.delete('path');
+      params.set('git', 'diff');
+      params.set('file', filePath);
+      params.set('staged', String(staged));
+      navigate(`/workspaces/${id}?${params.toString()}`);
+    },
+    [id, navigate, searchParams]
+  );
 
   // Fetch git change count for the badge (once when terminal is ready)
   useEffect(() => {
@@ -1301,6 +1387,14 @@ export function Workspace() {
           </Button>
         )}
 
+        {/* File browser button */}
+        {isRunning && terminalToken && (
+          <FileBrowserButton
+            onClick={handleOpenFileBrowser}
+            isMobile={isMobile}
+          />
+        )}
+
         {/* Git changes button */}
         {isRunning && terminalToken && (
           <GitChangesButton
@@ -1522,6 +1616,32 @@ export function Workspace() {
           isMobile={isMobile}
           onBack={handleBackFromGitDiff}
           onClose={handleCloseGitPanel}
+        />
+      )}
+
+      {/* ── File browser overlay ── */}
+      {filesParam === 'browse' && terminalToken && workspace?.url && id && (
+        <FileBrowserPanel
+          workspaceUrl={workspace.url}
+          workspaceId={id}
+          token={terminalToken}
+          initialPath={filesPathParam ?? '.'}
+          isMobile={isMobile}
+          onClose={handleCloseFileBrowser}
+          onSelectFile={handleFileViewerOpen}
+          onNavigate={handleFileBrowserNavigate}
+        />
+      )}
+      {filesParam === 'view' && filesPathParam && terminalToken && workspace?.url && id && (
+        <FileViewerPanel
+          workspaceUrl={workspace.url}
+          workspaceId={id}
+          token={terminalToken}
+          filePath={filesPathParam}
+          isMobile={isMobile}
+          onBack={handleFileViewerBack}
+          onClose={handleCloseFileBrowser}
+          onViewDiff={handleFileViewerToDiff}
         />
       )}
     </div>

@@ -335,6 +335,9 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workspaces/{workspaceId}/git/diff", s.handleGitDiff)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/git/file", s.handleGitFile)
 
+	// File browser (browser-authenticated via workspace session/token)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/files/list", s.handleFileList)
+
 	mux.HandleFunc("GET /events", s.handleListNodeEvents)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/ports/{port}", s.handleWorkspacePortProxy)
 

@@ -483,6 +483,9 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 - `GET /workspaces/:id/git/diff?path=...&staged=true|false` — Unified diff for a single file
 - `GET /workspaces/:id/git/file?path=...&ref=HEAD` — Full file content (optional ref for committed version)
 
+### File Browser (VM Agent direct — browser calls via ws-{id} subdomain)
+- `GET /workspaces/:id/files/list?path=.` — Directory listing (type, size, modifiedAt per entry)
+
 ### Voice Transcription
 - `POST /api/transcribe` — Transcribe audio via Workers AI (Whisper)
 
@@ -648,6 +651,8 @@ See `apps/api/.env.example`:
 - `RATE_LIMIT_TRANSCRIBE` - Optional rate limit for transcription requests
 - `GIT_EXEC_TIMEOUT` - VM Agent: timeout for git commands via docker exec (default: 30s)
 - `GIT_FILE_MAX_SIZE` - VM Agent: max file size in bytes for git/file endpoint (default: 1048576)
+- `FILE_LIST_TIMEOUT` - VM Agent: timeout for file listing commands (default: 10s)
+- `FILE_LIST_MAX_ENTRIES` - VM Agent: max entries returned per directory listing (default: 1000)
 
 ## Testing
 
@@ -683,6 +688,7 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 - **Infra**: Pulumi, Wrangler, @devcontainers/cli, pnpm 9.0+, Cloudflare Pages
 
 ## Recent Changes
+- file-browser: File browser with directory listing and syntax-highlighted file viewer; VM Agent endpoint `GET /files/list` via docker exec `find -printf`; breadcrumb navigation, mobile-first full-screen overlays, cross-link to git diff viewer; configurable FILE_LIST_TIMEOUT and FILE_LIST_MAX_ENTRIES
 - git-changes-viewer: GitHub PR-style git changes viewer accessible via nav bar icon; VM Agent endpoints for git status/diff/file via docker exec; full-screen overlay with staged/unstaged/untracked sections, unified diff view with green/red coloring, Diff/Full toggle; URL search params for browser back/forward navigation
 - voice-to-text: Voice input button for agent chat with Workers AI Whisper transcription, VoiceButton component in acp-client, POST /api/transcribe endpoint, configurable model/limits
 - node-data-ownership: Workspace events fetched directly from VM Agent (browser -> VM Agent via ws-{id} proxy); node events proxied through control plane (vm-* DNS records lack SSL termination); new `POST /api/nodes/:id/token` for node-scoped auth tokens; VM Agent event handlers accept browser workspace/session auth
