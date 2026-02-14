@@ -63,6 +63,11 @@ export interface Repository {
   installationId: string;
 }
 
+export interface Branch {
+  name: string;
+  isDefault: boolean;
+}
+
 /** GitHub repository returned from GitHub API */
 export interface GitHubRepository {
   fullName: string;

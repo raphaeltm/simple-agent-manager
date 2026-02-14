@@ -7,6 +7,7 @@ import { requireAuth, getUserId, optionalAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import {
   getInstallationRepositories,
+  getRepositoryBranches,
   verifyWebhookSignature,
   generateAppJWT,
 } from '../services/github-app';
@@ -103,6 +104,60 @@ githubRoutes.get('/repositories', requireAuth(), async (c) => {
   }
 
   return c.json(allRepos);
+});
+
+/**
+ * GET /api/github/branches - List branches for a repository
+ * Query params: repository (full name like owner/repo), installation_id (DB row id)
+ */
+githubRoutes.get('/branches', requireAuth(), async (c) => {
+  const userId = getUserId(c);
+  const repoFullName = c.req.query('repository');
+  const installationRowId = c.req.query('installation_id');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  if (!repoFullName) {
+    throw errors.badRequest('repository query parameter is required');
+  }
+
+  const parts = repoFullName.split('/');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw errors.badRequest('repository must be in owner/repo format');
+  }
+  const [owner, repo] = parts;
+
+  // Get user's installations
+  const installations = await db
+    .select()
+    .from(schema.githubInstallations)
+    .where(eq(schema.githubInstallations.userId, userId));
+
+  if (installations.length === 0) {
+    throw errors.notFound('No GitHub installations found');
+  }
+
+  // Use the specified installation or find the one that has access
+  const targetInstallation = installationRowId
+    ? installations.find((i) => i.id === installationRowId)
+    : installations[0];
+
+  if (!targetInstallation) {
+    throw errors.notFound('Installation');
+  }
+
+  try {
+    const branches = await getRepositoryBranches(
+      targetInstallation.installationId,
+      owner!,
+      repo!,
+      c.env
+    );
+    return c.json(branches);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to list branches for ${repoFullName}:`, message);
+    throw errors.internal(`Failed to list branches: ${message}`);
+  }
 });
 
 /**

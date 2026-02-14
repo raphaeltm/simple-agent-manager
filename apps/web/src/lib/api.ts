@@ -119,6 +119,17 @@ export async function listRepositories(installationId?: string): Promise<Reposit
   return request<Repository[]>(url);
 }
 
+export async function listBranches(
+  repository: string,
+  installationId?: string
+): Promise<Array<{ name: string }>> {
+  const params = new URLSearchParams({ repository });
+  if (installationId) {
+    params.set('installation_id', installationId);
+  }
+  return request<Array<{ name: string }>>(`/api/github/branches?${params.toString()}`);
+}
+
 // =============================================================================
 // Nodes
 // =============================================================================
