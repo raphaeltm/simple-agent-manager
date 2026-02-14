@@ -73,6 +73,8 @@ export interface AcpSessionHandle {
   sendMessage: (message: unknown) => void;
   /** Whether the WebSocket is connected */
   connected: boolean;
+  /** Manually trigger a reconnection attempt */
+  reconnect: () => void;
 }
 
 /**
@@ -243,6 +245,67 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     };
   }, [wsUrl, connect]);
 
+  // Reconnect immediately when tab becomes visible again (mobile background tab fix)
+  useEffect(() => {
+    if (!wsUrl) return;
+    if (typeof document === 'undefined') return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+
+      // Only reconnect if we were previously connected and WebSocket is no longer open
+      if (!wasConnectedRef.current) return;
+      if (transportRef.current?.connected) return;
+
+      // Cancel any pending backoff timer — reconnect immediately
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+
+      // Reset backoff state for a fresh immediate attempt
+      reconnectAttemptRef.current = 0;
+      reconnectStartRef.current = 0;
+      intentionalCloseRef.current = false;
+
+      setState('reconnecting');
+      connect(wsUrl);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [wsUrl, connect]);
+
+  // Manual reconnect (exposed to UI for "Reconnect" button)
+  const reconnect = useCallback(() => {
+    if (!wsUrl) return;
+    if (transportRef.current?.connected) return;
+
+    // Close existing transport if any
+    if (transportRef.current) {
+      intentionalCloseRef.current = true;
+      transportRef.current.close();
+      transportRef.current = null;
+    }
+
+    // Cancel pending timer
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+
+    // Reset state and reconnect
+    reconnectAttemptRef.current = 0;
+    reconnectStartRef.current = 0;
+    intentionalCloseRef.current = false;
+    wasConnectedRef.current = true; // We want to reconnect
+    setError(null);
+    setState('reconnecting');
+    connect(wsUrl);
+  }, [wsUrl, connect]);
+
   // Switch to a different agent
   const switchAgent = useCallback((newAgentType: string) => {
     if (transportRef.current?.connected) {
@@ -267,5 +330,6 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     switchAgent,
     sendMessage,
     connected: transportRef.current?.connected ?? false,
+    reconnect,
   };
 }

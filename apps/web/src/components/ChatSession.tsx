@@ -79,8 +79,8 @@ export function ChatSession({
     };
   }, [wsHostInfo, workspaceId, sessionId]);
 
-  // Each chat session gets its own message store
-  const acpMessages = useAcpMessages();
+  // Each chat session gets its own message store (persisted in sessionStorage for reconnect recovery)
+  const acpMessages = useAcpMessages({ sessionId });
 
   // Own ACP session hook — separate WebSocket per chat tab
   const acpSession = useAcpSession({
