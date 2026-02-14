@@ -440,6 +440,8 @@ function startVmAgent(privateKeyPem, issuer, binaryPath) {
     IDLE_TIMEOUT: '24h',
     HEARTBEAT_INTERVAL: '24h',
     ACP_MAX_RESTART_ATTEMPTS: '1',
+    PERSISTENCE_DB_PATH: '/tmp/sam-e2e-state.db',
+    BOOTSTRAP_STATE_PATH: '/tmp/sam-e2e-bootstrap-state.json',
   };
 
   const sampleToken = signJwt(
