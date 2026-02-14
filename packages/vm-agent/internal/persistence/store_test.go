@@ -269,6 +269,100 @@ func TestMigrationIdempotent(t *testing.T) {
 	}
 }
 
+func TestUpdateTabAcpSessionID(t *testing.T) {
+	store, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	_ = store.InsertTab(Tab{ID: "chat-1", WorkspaceID: "ws-1", Type: "chat", AgentID: "claude-code"})
+
+	// Verify initial AcpSessionID is empty
+	tabs, _ := store.ListTabs("ws-1")
+	if tabs[0].AcpSessionID != "" {
+		t.Errorf("expected empty AcpSessionID initially, got %q", tabs[0].AcpSessionID)
+	}
+
+	// Update ACP session ID
+	if err := store.UpdateTabAcpSessionID("chat-1", "acp-session-xyz"); err != nil {
+		t.Fatalf("UpdateTabAcpSessionID: %v", err)
+	}
+
+	// Verify update
+	tabs, _ = store.ListTabs("ws-1")
+	if tabs[0].AcpSessionID != "acp-session-xyz" {
+		t.Errorf("expected AcpSessionID 'acp-session-xyz', got %q", tabs[0].AcpSessionID)
+	}
+}
+
+func TestAcpSessionIDPersistedThroughInsert(t *testing.T) {
+	store, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	_ = store.InsertTab(Tab{
+		ID:           "chat-1",
+		WorkspaceID:  "ws-1",
+		Type:         "chat",
+		AgentID:      "claude-code",
+		AcpSessionID: "acp-session-initial",
+	})
+
+	tabs, _ := store.ListTabs("ws-1")
+	if tabs[0].AcpSessionID != "acp-session-initial" {
+		t.Errorf("expected AcpSessionID 'acp-session-initial', got %q", tabs[0].AcpSessionID)
+	}
+}
+
+func TestMigrationV2AddsAcpSessionIDColumn(t *testing.T) {
+	dbPath := tempDBPath(t)
+
+	// Open store (runs both migrations)
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Insert a tab and verify acp_session_id column works
+	err = store.InsertTab(Tab{
+		ID:           "t1",
+		WorkspaceID:  "ws-1",
+		Type:         "chat",
+		AcpSessionID: "test-acp-id",
+	})
+	if err != nil {
+		t.Fatalf("InsertTab with acp_session_id: %v", err)
+	}
+
+	tabs, err := store.ListTabs("ws-1")
+	if err != nil {
+		t.Fatalf("ListTabs: %v", err)
+	}
+	if len(tabs) != 1 {
+		t.Fatalf("expected 1 tab, got %d", len(tabs))
+	}
+	if tabs[0].AcpSessionID != "test-acp-id" {
+		t.Errorf("expected AcpSessionID 'test-acp-id', got %q", tabs[0].AcpSessionID)
+	}
+
+	store.Close()
+
+	// Reopen — should not fail (migration is idempotent)
+	store2, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Reopen after migration v2: %v", err)
+	}
+	defer store2.Close()
+
+	tabs, _ = store2.ListTabs("ws-1")
+	if tabs[0].AcpSessionID != "test-acp-id" {
+		t.Errorf("expected AcpSessionID persisted after reopen, got %q", tabs[0].AcpSessionID)
+	}
+}
+
 func TestInsertOrReplace(t *testing.T) {
 	store, err := Open(tempDBPath(t))
 	if err != nil {

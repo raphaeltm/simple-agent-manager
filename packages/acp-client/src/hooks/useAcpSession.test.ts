@@ -181,6 +181,99 @@ describe('useAcpSession visibilitychange reconnection', () => {
   });
 });
 
+describe('useAcpSession agentType reset on reconnect', () => {
+  it('clears agentType to null when WebSocket opens (Phase 1 hang fix)', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    // First connection — receive an agent_status to set agentType
+    const ws1 = MockWebSocket.instances[0]!;
+    act(() => ws1.emitOpen());
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+
+    // Simulate receiving agent_status (setting agentType to 'claude-code')
+    act(() => {
+      ws1.emitMessage({
+        type: 'agent_status',
+        status: 'ready',
+        agentType: 'claude-code',
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.agentType).toBe('claude-code');
+    });
+
+    // Simulate WebSocket close (mobile background)
+    act(() => ws1.close());
+
+    // Simulate visibilitychange reconnect
+    act(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', writable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    // New WebSocket should be created
+    const ws2 = MockWebSocket.instances[MockWebSocket.instances.length - 1]!;
+    expect(ws2).not.toBe(ws1);
+
+    // When new WebSocket opens, agentType should be cleared to null
+    act(() => ws2.emitOpen());
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+
+    // agentType should be null after reconnection (not stale 'claude-code')
+    expect(result.current.agentType).toBeNull();
+  });
+
+  it('clears error state when WebSocket opens', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws1 = MockWebSocket.instances[0]!;
+    act(() => ws1.emitOpen());
+
+    // Simulate an error
+    act(() => {
+      ws1.emitMessage({
+        type: 'agent_status',
+        status: 'error',
+        agentType: 'claude-code',
+        error: 'Something went wrong',
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.error).toBe('Something went wrong');
+    });
+
+    // Close and trigger reconnect
+    act(() => ws1.close());
+
+    act(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', writable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    const ws2 = MockWebSocket.instances[MockWebSocket.instances.length - 1]!;
+    act(() => ws2.emitOpen());
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+
+    // Error should be cleared
+    expect(result.current.error).toBeNull();
+  });
+});
+
 describe('useAcpSession manual reconnect', () => {
   it('exposes a reconnect function that creates a new connection', async () => {
     const { result } = renderHook(() => useAcpSession({

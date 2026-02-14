@@ -16,14 +16,16 @@ const (
 )
 
 type Session struct {
-	ID          string     `json:"id"`
-	WorkspaceID string     `json:"workspaceId"`
-	Status      Status     `json:"status"`
-	Label       string     `json:"label,omitempty"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
-	StoppedAt   *time.Time `json:"stoppedAt,omitempty"`
-	Error       string     `json:"errorMessage,omitempty"`
+	ID           string     `json:"id"`
+	WorkspaceID  string     `json:"workspaceId"`
+	Status       Status     `json:"status"`
+	Label        string     `json:"label,omitempty"`
+	AgentType    string     `json:"agentType,omitempty"`
+	AcpSessionID string     `json:"acpSessionId,omitempty"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+	StoppedAt    *time.Time `json:"stoppedAt,omitempty"`
+	Error        string     `json:"errorMessage,omitempty"`
 }
 
 type Manager struct {
@@ -143,6 +145,30 @@ func (m *Manager) Get(workspaceID, sessionID string) (Session, bool) {
 
 	session, ok := workspaceMap[sessionID]
 	return session, ok
+}
+
+// UpdateAcpSessionID updates the ACP session ID and agent type for a session.
+// Called after a successful NewSession or LoadSession to track the ACP session
+// for reconnection with LoadSession.
+func (m *Manager) UpdateAcpSessionID(workspaceID, sessionID, acpSessionID, agentType string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	workspaceMap, ok := m.workspaceSessions[workspaceID]
+	if !ok {
+		return fmt.Errorf("workspace not found: %s", workspaceID)
+	}
+
+	session, ok := workspaceMap[sessionID]
+	if !ok {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	session.AcpSessionID = acpSessionID
+	session.AgentType = agentType
+	session.UpdatedAt = time.Now().UTC()
+	workspaceMap[sessionID] = session
+	return nil
 }
 
 func (m *Manager) RemoveWorkspace(workspaceID string) {

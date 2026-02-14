@@ -117,6 +117,14 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 
 	gatewayCfg := s.acpConfig
 	gatewayCfg.WorkspaceID = workspaceID
+	gatewayCfg.SessionID = requestedSessionID
+	gatewayCfg.SessionManager = s.agentSessions
+	gatewayCfg.TabStore = s.store
+	// Pass previous ACP session ID for LoadSession on reconnection
+	if session.AcpSessionID != "" {
+		gatewayCfg.PreviousAcpSessionID = session.AcpSessionID
+		log.Printf("Workspace %s: passing previous ACP session ID %s for potential LoadSession", workspaceID, session.AcpSessionID)
+	}
 	if callbackToken := s.callbackTokenForWorkspace(workspaceID); callbackToken != "" {
 		gatewayCfg.CallbackToken = callbackToken
 	}

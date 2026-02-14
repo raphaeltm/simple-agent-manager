@@ -24,6 +24,18 @@ type BootLogReporter interface {
 	Log(step, status, message string, detail ...string)
 }
 
+// SessionUpdater persists ACP session IDs for reconnection with LoadSession.
+type SessionUpdater interface {
+	// UpdateAcpSessionID updates the ACP session ID and agent type for a session.
+	UpdateAcpSessionID(workspaceID, sessionID, acpSessionID, agentType string) error
+}
+
+// TabSessionUpdater persists ACP session IDs to the SQLite persistence store.
+type TabSessionUpdater interface {
+	// UpdateTabAcpSessionID updates the ACP session ID for a tab.
+	UpdateTabAcpSessionID(tabID, acpSessionID string) error
+}
+
 // GatewayConfig holds configuration for the ACP gateway.
 type GatewayConfig struct {
 	// InitTimeoutMs is the ACP initialization timeout in milliseconds.
@@ -34,6 +46,8 @@ type GatewayConfig struct {
 	ControlPlaneURL string
 	// WorkspaceID is the current workspace identifier.
 	WorkspaceID string
+	// SessionID is the agent session identifier (used for persistence).
+	SessionID string
 	// CallbackToken is the JWT for authenticating with the control plane.
 	CallbackToken string
 	// ContainerResolver returns the devcontainer's Docker container ID.
@@ -47,6 +61,14 @@ type GatewayConfig struct {
 	// BootLog is the reporter for sending structured logs to the control plane.
 	// Agent errors (stderr, crashes) are reported here for observability.
 	BootLog BootLogReporter
+	// PreviousAcpSessionID is the ACP session ID from a previous connection.
+	// When set, the gateway will attempt LoadSession instead of NewSession
+	// to restore conversation context on reconnection.
+	PreviousAcpSessionID string
+	// SessionManager persists ACP session IDs for reconnection.
+	SessionManager SessionUpdater
+	// TabStore persists ACP session IDs to the SQLite store.
+	TabStore TabSessionUpdater
 }
 
 // Gateway bridges a gorilla/websocket connection to an ACP agent subprocess.
@@ -209,9 +231,23 @@ func (g *Gateway) handleControlMessage(ctx context.Context, data []byte) error {
 // handleSelectAgent handles agent selection requests from the browser.
 func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
 
 	log.Printf("Agent selection requested: %s", agentType)
+
+	// Capture previous ACP session ID before stopping the agent.
+	// On reconnection, if the same agent type is selected, we can use
+	// LoadSession to restore conversation context.
+	previousAcpSessionID := ""
+	previousAgentType := g.agentType
+	if g.sessionID != "" {
+		previousAcpSessionID = string(g.sessionID)
+	}
+	// Also check config for session ID from a previous WebSocket connection
+	if previousAcpSessionID == "" && g.config.PreviousAcpSessionID != "" {
+		previousAcpSessionID = g.config.PreviousAcpSessionID
+		// Clear it after use to avoid stale references
+		g.config.PreviousAcpSessionID = ""
+	}
 
 	// Stop current agent if running
 	if g.process != nil {
@@ -220,6 +256,7 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 
 	g.agentType = agentType
 	g.restartCount = 0
+	g.mu.Unlock()
 
 	// Send starting status
 	g.sendAgentStatus(StatusStarting, agentType, "")
@@ -257,13 +294,22 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 		log.Printf("Agent settings loaded: model=%q permissionMode=%q", settings.Model, settings.PermissionMode)
 	}
 
+	// Only attempt LoadSession if reconnecting with the same agent type
+	loadSessionID := ""
+	if previousAcpSessionID != "" && previousAgentType == agentType {
+		loadSessionID = previousAcpSessionID
+	}
+
 	// Start the agent process
-	if err := g.startAgent(ctx, agentType, cred, settings); err != nil {
+	g.mu.Lock()
+	if err := g.startAgent(ctx, agentType, cred, settings, loadSessionID); err != nil {
+		g.mu.Unlock()
 		log.Printf("Agent start failed: %v", err)
 		g.sendAgentStatus(StatusError, agentType, err.Error())
 		g.reportAgentError(agentType, "agent_start", err.Error(), "")
 		return
 	}
+	g.mu.Unlock()
 
 	g.sendAgentStatus(StatusReady, agentType, "")
 }
@@ -418,7 +464,10 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 }
 
 // startAgent spawns the agent process and sets up the ACP connection.
-func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload) error {
+// If previousAcpSessionID is non-empty and the agent supports LoadSession,
+// it will attempt to restore the previous conversation instead of creating
+// a new blank session.
+func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload, previousAcpSessionID string) error {
 	// Resolve container ID
 	containerID, err := g.config.ContainerResolver()
 	if err != nil {
@@ -471,12 +520,12 @@ func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentC
 	go g.monitorProcessExit(ctx, process, agentType, cred, settings)
 
 	// Initialize the ACP protocol handshake.
-	// The agent expects Initialize → NewSession before any Prompt calls.
+	// The agent expects Initialize → NewSession (or LoadSession) before any Prompt calls.
 	initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer initCancel()
 
 	log.Printf("ACP: sending Initialize request")
-	_, err = g.acpConn.Initialize(initCtx, acpsdk.InitializeRequest{
+	initResp, err := g.acpConn.Initialize(initCtx, acpsdk.InitializeRequest{
 		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		ClientCapabilities: acpsdk.ClientCapabilities{
 			Fs: acpsdk.FileSystemCapability{ReadTextFile: true, WriteTextFile: true},
@@ -485,7 +534,28 @@ func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentC
 	if err != nil {
 		return fmt.Errorf("ACP initialize failed: %w", err)
 	}
-	log.Printf("ACP: Initialize succeeded")
+	log.Printf("ACP: Initialize succeeded (loadSession=%v)", initResp.AgentCapabilities.LoadSession)
+
+	// Attempt LoadSession if we have a previous session ID and the agent supports it.
+	// LoadSession restores conversation context — the agent replays all messages
+	// as session/update notifications which flow to the browser.
+	if previousAcpSessionID != "" && initResp.AgentCapabilities.LoadSession {
+		log.Printf("ACP: attempting LoadSession with previous sessionID=%s", previousAcpSessionID)
+		_, loadErr := g.acpConn.LoadSession(initCtx, acpsdk.LoadSessionRequest{
+			SessionId:  acpsdk.SessionId(previousAcpSessionID),
+			Cwd:        g.config.ContainerWorkDir,
+			McpServers: []acpsdk.McpServer{},
+		})
+		if loadErr == nil {
+			g.sessionID = acpsdk.SessionId(previousAcpSessionID)
+			log.Printf("ACP: LoadSession succeeded, sessionID=%s", previousAcpSessionID)
+			g.persistAcpSessionID(agentType)
+			return nil
+		}
+		log.Printf("ACP: LoadSession failed (falling back to NewSession): %v", loadErr)
+	} else if previousAcpSessionID != "" {
+		log.Printf("ACP: agent does not support LoadSession, using NewSession instead")
+	}
 
 	log.Printf("ACP: sending NewSession request")
 	sessResp, err := g.acpConn.NewSession(initCtx, acpsdk.NewSessionRequest{
@@ -497,6 +567,7 @@ func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentC
 	}
 	g.sessionID = sessResp.SessionId
 	log.Printf("ACP: NewSession succeeded, sessionID=%s", string(g.sessionID))
+	g.persistAcpSessionID(agentType)
 
 	return nil
 }
@@ -611,7 +682,7 @@ func (g *Gateway) monitorProcessExit(ctx context.Context, process *AgentProcess,
 	time.Sleep(time.Second)
 
 	g.mu.Lock()
-	if err := g.startAgent(ctx, agentType, cred, settings); err != nil {
+	if err := g.startAgent(ctx, agentType, cred, settings, ""); err != nil {
 		g.mu.Unlock()
 		log.Printf("Agent restart failed: %v", err)
 		g.sendAgentStatus(StatusError, agentType, err.Error())
@@ -695,6 +766,35 @@ func (g *Gateway) stopCurrentAgentLocked() {
 	}
 	g.acpConn = nil
 	g.sessionID = ""
+}
+
+// persistAcpSessionID saves the current ACP session ID to both the in-memory
+// session manager and the SQLite persistence store for reconnection support.
+func (g *Gateway) persistAcpSessionID(agentType string) {
+	sessionID := string(g.sessionID)
+	if sessionID == "" {
+		return
+	}
+
+	// Update in-memory session manager
+	if g.config.SessionManager != nil && g.config.SessionID != "" {
+		if err := g.config.SessionManager.UpdateAcpSessionID(
+			g.config.WorkspaceID, g.config.SessionID, sessionID, agentType,
+		); err != nil {
+			log.Printf("Failed to persist ACP session ID to session manager: %v", err)
+		} else {
+			log.Printf("ACP session ID persisted to session manager: %s", sessionID)
+		}
+	}
+
+	// Update SQLite persistence store
+	if g.config.TabStore != nil && g.config.SessionID != "" {
+		if err := g.config.TabStore.UpdateTabAcpSessionID(g.config.SessionID, sessionID); err != nil {
+			log.Printf("Failed to persist ACP session ID to tab store: %v", err)
+		} else {
+			log.Printf("ACP session ID persisted to tab store: %s", sessionID)
+		}
+	}
 }
 
 // cleanup stops any running agent process.
