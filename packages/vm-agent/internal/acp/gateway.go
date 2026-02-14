@@ -71,6 +71,10 @@ type GatewayConfig struct {
 	// When set, the gateway will attempt LoadSession instead of NewSession
 	// to restore conversation context on reconnection.
 	PreviousAcpSessionID string
+	// PreviousAgentType is the agent type from the previous connection.
+	// Used together with PreviousAcpSessionID to decide whether LoadSession
+	// should be attempted (only if the same agent type is being reconnected).
+	PreviousAgentType string
 	// SessionManager persists ACP session IDs for reconnection.
 	SessionManager SessionUpdater
 	// TabStore persists ACP session IDs to the SQLite store.
@@ -255,11 +259,16 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 	if g.sessionID != "" {
 		previousAcpSessionID = string(g.sessionID)
 	}
-	// Also check config for session ID from a previous WebSocket connection
+	// Also check config for session ID from a previous WebSocket connection.
+	// On reconnect (fresh gateway), g.sessionID and g.agentType are empty,
+	// so we fall back to the values passed via config from the persistent store.
 	if previousAcpSessionID == "" && g.config.PreviousAcpSessionID != "" {
 		previousAcpSessionID = g.config.PreviousAcpSessionID
-		// Clear it after use to avoid stale references
 		g.config.PreviousAcpSessionID = ""
+	}
+	if previousAgentType == "" && g.config.PreviousAgentType != "" {
+		previousAgentType = g.config.PreviousAgentType
+		g.config.PreviousAgentType = ""
 	}
 
 	// Stop current agent if running
@@ -311,6 +320,9 @@ func (g *Gateway) handleSelectAgent(ctx context.Context, agentType string) {
 	loadSessionID := ""
 	if previousAcpSessionID != "" && previousAgentType == agentType {
 		loadSessionID = previousAcpSessionID
+		log.Printf("ACP: will attempt LoadSession with sessionID=%s (previousAgentType=%s matches requested=%s)", loadSessionID, previousAgentType, agentType)
+	} else if previousAcpSessionID != "" {
+		log.Printf("ACP: skipping LoadSession — agent type mismatch (previous=%q, requested=%q)", previousAgentType, agentType)
 	}
 
 	// Start the agent process
