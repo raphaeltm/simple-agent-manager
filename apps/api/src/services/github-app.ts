@@ -218,6 +218,39 @@ export async function getInstallationRepositories(
 }
 
 /**
+ * List branches for a repository via an installation token.
+ */
+export async function getRepositoryBranches(
+  installationId: string,
+  owner: string,
+  repo: string,
+  env: Env
+): Promise<Array<{ name: string }>> {
+  const { token } = await getInstallationToken(installationId, env);
+
+  const perPage = 100;
+  const response = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?per_page=${perPage}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'Simple-Agent-Manager',
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({})) as { message?: string };
+    throw new Error(error.message || `Failed to list branches: ${response.status}`);
+  }
+
+  const data = await response.json() as Array<{ name: string }>;
+  return data.map((b) => ({ name: b.name }));
+}
+
+/**
  * Get all installations for the app.
  */
 export async function getAppInstallations(

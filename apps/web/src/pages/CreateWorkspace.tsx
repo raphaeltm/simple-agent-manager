@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { UserMenu } from '../components/UserMenu';
 import { RepoSelector } from '../components/RepoSelector';
 import {
   createWorkspace,
+  listBranches,
   listCredentials,
   listGitHubInstallations,
   listNodes,
@@ -41,7 +42,10 @@ export function CreateWorkspace() {
 
   const [name, setName] = useState('');
   const [repository, setRepository] = useState('');
+  const [repoFullName, setRepoFullName] = useState('');
   const [branch, setBranch] = useState('main');
+  const [branches, setBranches] = useState<Array<{ name: string }>>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
   const [installationId, setInstallationId] = useState('');
   const [vmSize, setVmSize] = useState('medium');
   const [vmLocation, setVmLocation] = useState('nbg1');
@@ -50,6 +54,33 @@ export function CreateWorkspace() {
   useEffect(() => {
     void checkPrerequisites();
   }, []);
+
+  const fetchBranches = useCallback(async (fullName: string, instId: string) => {
+    setBranchesLoading(true);
+    setBranches([]);
+    try {
+      const result = await listBranches(fullName, instId || undefined);
+      setBranches(result);
+    } catch (err) {
+      console.log('Could not fetch branches:', err);
+    } finally {
+      setBranchesLoading(false);
+    }
+  }, []);
+
+  const handleRepoSelect = useCallback(
+    (repo: { fullName: string; defaultBranch: string } | null) => {
+      if (repo) {
+        setRepoFullName(repo.fullName);
+        setBranch(repo.defaultBranch);
+        void fetchBranches(repo.fullName, installationId);
+      } else {
+        setRepoFullName('');
+        setBranches([]);
+      }
+    },
+    [fetchBranches, installationId]
+  );
 
   const checkPrerequisites = async () => {
     try {
@@ -203,20 +234,47 @@ export function CreateWorkspace() {
             <label htmlFor="repository" style={labelStyle}>
               Repository
             </label>
-            <RepoSelector id="repository" value={repository} onChange={setRepository} required />
+            <RepoSelector
+              id="repository"
+              value={repository}
+              onChange={setRepository}
+              onRepoSelect={handleRepoSelect}
+              required
+            />
           </div>
 
           <div>
             <label htmlFor="branch" style={labelStyle}>
               Branch
             </label>
-            <Input
-              id="branch"
-              type="text"
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
-              placeholder="main"
-            />
+            <div style={{ position: 'relative' }}>
+              {branches.length > 0 ? (
+                <Select
+                  id="branch"
+                  value={branch}
+                  onChange={(e) => setBranch(e.target.value)}
+                >
+                  {branches.map((b) => (
+                    <option key={b.name} value={b.name}>
+                      {b.name}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <Input
+                  id="branch"
+                  type="text"
+                  value={branch}
+                  onChange={(e) => setBranch(e.target.value)}
+                  placeholder="main"
+                />
+              )}
+              {branchesLoading && (
+                <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }}>
+                  <Spinner size="sm" />
+                </div>
+              )}
+            </div>
           </div>
 
           <div>
