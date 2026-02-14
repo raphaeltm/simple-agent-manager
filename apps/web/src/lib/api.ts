@@ -387,3 +387,93 @@ export async function deleteAgentSettings(agentType: string): Promise<void> {
     method: 'DELETE',
   });
 }
+
+// =============================================================================
+// Git Integration (direct VM Agent calls via ws-{id} subdomain)
+// =============================================================================
+
+export interface GitFileStatus {
+  path: string;
+  status: string;
+  oldPath?: string;
+}
+
+export interface GitStatusData {
+  staged: GitFileStatus[];
+  unstaged: GitFileStatus[];
+  untracked: GitFileStatus[];
+}
+
+export interface GitDiffData {
+  diff: string;
+  filePath: string;
+}
+
+export interface GitFileData {
+  content: string;
+  filePath: string;
+}
+
+/**
+ * Fetch git status (staged, unstaged, untracked files) from the VM Agent.
+ * Calls directly to ws-{id} subdomain, authenticated via workspace JWT token.
+ */
+export async function getGitStatus(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string
+): Promise<GitStatusData> {
+  const params = new URLSearchParams({ token });
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/git/status?${params.toString()}`;
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Git status failed: ${text}`);
+  }
+  return res.json() as Promise<GitStatusData>;
+}
+
+/**
+ * Fetch unified diff for a single file from the VM Agent.
+ */
+export async function getGitDiff(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string,
+  filePath: string,
+  staged = false
+): Promise<GitDiffData> {
+  const params = new URLSearchParams({
+    token,
+    path: filePath,
+    staged: String(staged),
+  });
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/git/diff?${params.toString()}`;
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Git diff failed: ${text}`);
+  }
+  return res.json() as Promise<GitDiffData>;
+}
+
+/**
+ * Fetch full file content from the VM Agent.
+ */
+export async function getGitFile(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string,
+  filePath: string,
+  ref?: string
+): Promise<GitFileData> {
+  const params = new URLSearchParams({ token, path: filePath });
+  if (ref) params.set('ref', ref);
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/git/file?${params.toString()}`;
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Git file fetch failed: ${text}`);
+  }
+  return res.json() as Promise<GitFileData>;
+}

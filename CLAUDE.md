@@ -478,6 +478,11 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 ### Terminal Access
 - `POST /api/terminal/token` — Get terminal WebSocket token
 
+### Git Integration (VM Agent direct — browser calls via ws-{id} subdomain)
+- `GET /workspaces/:id/git/status` — Git status (staged, unstaged, untracked files)
+- `GET /workspaces/:id/git/diff?path=...&staged=true|false` — Unified diff for a single file
+- `GET /workspaces/:id/git/file?path=...&ref=HEAD` — Full file content (optional ref for committed version)
+
 ### Voice Transcription
 - `POST /api/transcribe` — Transcribe audio via Workers AI (Whisper)
 
@@ -641,6 +646,8 @@ See `apps/api/.env.example`:
 - `MAX_AUDIO_SIZE_BYTES` - Maximum audio upload size in bytes (default: 10485760)
 - `MAX_AUDIO_DURATION_SECONDS` - Maximum recording duration in seconds (default: 60)
 - `RATE_LIMIT_TRANSCRIBE` - Optional rate limit for transcription requests
+- `GIT_EXEC_TIMEOUT` - VM Agent: timeout for git commands via docker exec (default: 30s)
+- `GIT_FILE_MAX_SIZE` - VM Agent: max file size in bytes for git/file endpoint (default: 1048576)
 
 ## Testing
 
@@ -676,6 +683,7 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 - **Infra**: Pulumi, Wrangler, @devcontainers/cli, pnpm 9.0+, Cloudflare Pages
 
 ## Recent Changes
+- git-changes-viewer: GitHub PR-style git changes viewer accessible via nav bar icon; VM Agent endpoints for git status/diff/file via docker exec; full-screen overlay with staged/unstaged/untracked sections, unified diff view with green/red coloring, Diff/Full toggle; URL search params for browser back/forward navigation
 - voice-to-text: Voice input button for agent chat with Workers AI Whisper transcription, VoiceButton component in acp-client, POST /api/transcribe endpoint, configurable model/limits
 - node-data-ownership: Workspace events fetched directly from VM Agent (browser -> VM Agent via ws-{id} proxy); node events proxied through control plane (vm-* DNS records lack SSL termination); new `POST /api/nodes/:id/token` for node-scoped auth tokens; VM Agent event handlers accept browser workspace/session auth
 - 014-multi-workspace-nodes: First-class Nodes with multi-workspace hosting, async provisioning (callback-driven `/ready` + `/provisioning-failed`), workspace recovery on attach, session tab UX with `+` dropdown, node-scoped routing/auth, explicit lifecycle control

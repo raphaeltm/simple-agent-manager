@@ -329,6 +329,12 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions", s.handleCreateAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/stop", s.handleStopAgentSession)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/tabs", s.handleListTabs)
+
+	// Git integration (browser-authenticated via workspace session/token)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/git/status", s.handleGitStatus)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/git/diff", s.handleGitDiff)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/git/file", s.handleGitFile)
+
 	mux.HandleFunc("GET /events", s.handleListNodeEvents)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/ports/{port}", s.handleWorkspacePortProxy)
 

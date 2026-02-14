@@ -11,9 +11,13 @@ import { UserMenu } from '../components/UserMenu';
 import { ChatSession } from '../components/ChatSession';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { MoreVertical, X } from 'lucide-react';
+import { GitChangesButton } from '../components/GitChangesButton';
+import { GitChangesPanel } from '../components/GitChangesPanel';
+import { GitDiffView } from '../components/GitDiffView';
 import {
   ApiClientError,
   createAgentSession,
+  getGitStatus,
   getTerminalToken,
   getWorkspace,
   listAgents,
@@ -109,6 +113,12 @@ export function Workspace() {
   const sessionIdParam = searchParams.get('sessionId');
   const viewOverride: ViewMode | null =
     viewParam === 'terminal' || viewParam === 'conversation' ? viewParam : null;
+
+  // Git changes panel state (URL-driven for browser back/forward support)
+  const gitParam = searchParams.get('git'); // 'changes' | 'diff' | null
+  const gitFileParam = searchParams.get('file');
+  const gitStagedParam = searchParams.get('staged');
+
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +127,7 @@ export function Workspace() {
   const [terminalToken, setTerminalToken] = useState<string | null>(null);
   const [terminalLoading, setTerminalLoading] = useState(false);
   const [terminalError, setTerminalError] = useState<string | null>(null);
+  const [gitChangeCount, setGitChangeCount] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>(viewOverride ?? 'terminal');
   const [workspaceEvents, setWorkspaceEvents] = useState<Event[]>([]);
   const [agentSessions, setAgentSessions] = useState<AgentSession[]>([]);
@@ -359,6 +370,54 @@ export function Workspace() {
       setRenaming(false);
     }
   };
+
+  // ── Git changes panel navigation ──
+  const handleOpenGitChanges = useCallback(() => {
+    const params = new URLSearchParams(searchParams);
+    params.set('git', 'changes');
+    params.delete('file');
+    params.delete('staged');
+    navigate(`/workspaces/${id}?${params.toString()}`);
+  }, [id, navigate, searchParams]);
+
+  const handleCloseGitPanel = useCallback(() => {
+    const params = new URLSearchParams(searchParams);
+    params.delete('git');
+    params.delete('file');
+    params.delete('staged');
+    navigate(`/workspaces/${id}?${params.toString()}`);
+  }, [id, navigate, searchParams]);
+
+  const handleNavigateToGitDiff = useCallback(
+    (filePath: string, staged: boolean) => {
+      const params = new URLSearchParams(searchParams);
+      params.set('git', 'diff');
+      params.set('file', filePath);
+      params.set('staged', String(staged));
+      navigate(`/workspaces/${id}?${params.toString()}`);
+    },
+    [id, navigate, searchParams]
+  );
+
+  const handleBackFromGitDiff = useCallback(() => {
+    const params = new URLSearchParams(searchParams);
+    params.set('git', 'changes');
+    params.delete('file');
+    params.delete('staged');
+    navigate(`/workspaces/${id}?${params.toString()}`);
+  }, [id, navigate, searchParams]);
+
+  // Fetch git change count for the badge (once when terminal is ready)
+  useEffect(() => {
+    if (!workspace?.url || !terminalToken || !id || !isRunning) return;
+    getGitStatus(workspace.url, id, terminalToken)
+      .then((data) => {
+        setGitChangeCount(data.staged.length + data.unstaged.length + data.untracked.length);
+      })
+      .catch(() => {
+        // Silently fail — badge just won't show a count
+      });
+  }, [workspace?.url, terminalToken, id, isRunning]);
 
   const configuredAgents = useMemo(
     () => agentOptions.filter((agent) => agent.configured && agent.supportsAcp),
@@ -1242,6 +1301,15 @@ export function Workspace() {
           </Button>
         )}
 
+        {/* Git changes button */}
+        {isRunning && terminalToken && (
+          <GitChangesButton
+            onClick={handleOpenGitChanges}
+            changeCount={gitChangeCount}
+            isMobile={isMobile}
+          />
+        )}
+
         {/* Mobile sidebar menu button */}
         {isMobile && (
           <button
@@ -1431,6 +1499,30 @@ export function Workspace() {
             </div>
           </div>
         </>
+      )}
+
+      {/* ── Git changes overlay ── */}
+      {gitParam === 'changes' && terminalToken && workspace?.url && id && (
+        <GitChangesPanel
+          workspaceUrl={workspace.url}
+          workspaceId={id}
+          token={terminalToken}
+          isMobile={isMobile}
+          onClose={handleCloseGitPanel}
+          onSelectFile={handleNavigateToGitDiff}
+        />
+      )}
+      {gitParam === 'diff' && gitFileParam && terminalToken && workspace?.url && id && (
+        <GitDiffView
+          workspaceUrl={workspace.url}
+          workspaceId={id}
+          token={terminalToken}
+          filePath={gitFileParam}
+          staged={gitStagedParam === 'true'}
+          isMobile={isMobile}
+          onBack={handleBackFromGitDiff}
+          onClose={handleCloseGitPanel}
+        />
       )}
     </div>
   );
