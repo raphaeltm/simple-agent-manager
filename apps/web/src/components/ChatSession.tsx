@@ -82,8 +82,10 @@ export function ChatSession({
     };
   }, [wsHostInfo, workspaceId, sessionId]);
 
-  // Each chat session gets its own message store (persisted in sessionStorage for reconnect recovery)
-  const acpMessages = useAcpMessages({ sessionId });
+  // Each chat session gets its own message store.
+  // No client-side persistence — on reconnect, LoadSession replays the full
+  // conversation from the agent via session/update notifications.
+  const acpMessages = useAcpMessages();
 
   // Own ACP session hook — separate WebSocket per chat tab
   const acpSession = useAcpSession({
@@ -91,11 +93,17 @@ export function ChatSession({
     onAcpMessage: acpMessages.processMessage,
   });
 
-  // Note: LoadSession restores the agent's internal context server-side so it
-  // knows the conversation history for follow-up prompts. It does NOT replay
-  // messages to the browser. The browser keeps its own copy in localStorage
-  // via useAcpMessages, so we do NOT clear messages on reconnection.
   const { connected, agentType, state, switchAgent } = acpSession;
+  const { clear: clearMessages } = acpMessages;
+
+  // Clear messages when the WebSocket reconnects (state transitions to
+  // no_session) so that LoadSession can replay the full conversation from
+  // the agent without duplicates. On initial mount items are already empty.
+  useEffect(() => {
+    if (state === 'no_session') {
+      clearMessages();
+    }
+  }, [state, clearMessages]);
 
   // Auto-select preferred agent when connected
   useEffect(() => {

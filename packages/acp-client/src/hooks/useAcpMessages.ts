@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import type { AcpMessage } from './useAcpSession';
 import type { SlashCommand } from '../types';
 
@@ -96,13 +96,6 @@ export interface AcpMessagesHandle {
   clear: () => void;
 }
 
-/** Options for the useAcpMessages hook */
-export interface UseAcpMessagesOptions {
-  /** Session ID used as the key for sessionStorage persistence.
-   *  When provided, messages survive WebSocket reconnections (e.g. mobile tab resume). */
-  sessionId?: string;
-}
-
 // =============================================================================
 // Hook implementation
 // =============================================================================
@@ -112,85 +105,18 @@ function nextId(): string {
   return `item-${++itemCounter}-${Date.now()}`;
 }
 
-/** localStorage key prefix for persisted conversation items */
-export const ACP_MESSAGES_STORAGE_PREFIX = 'acp-messages-';
-
-/** Load persisted conversation items from localStorage */
-function loadPersistedItems(sessionId: string): ConversationItem[] {
-  if (typeof localStorage === 'undefined') return [];
-  try {
-    const stored = localStorage.getItem(`${ACP_MESSAGES_STORAGE_PREFIX}${sessionId}`);
-    if (!stored) return [];
-    const parsed = JSON.parse(stored) as ConversationItem[];
-    if (!Array.isArray(parsed)) return [];
-    // Finalize any items that were streaming when we persisted
-    return parsed.map((item) => {
-      if (item.kind === 'agent_message' && item.streaming) return { ...item, streaming: false };
-      if (item.kind === 'thinking' && item.active) return { ...item, active: false };
-      return item;
-    });
-  } catch {
-    return [];
-  }
-}
-
-/** Persist conversation items to localStorage */
-function persistItems(sessionId: string, items: ConversationItem[]): void {
-  if (typeof localStorage === 'undefined') return;
-  try {
-    localStorage.setItem(`${ACP_MESSAGES_STORAGE_PREFIX}${sessionId}`, JSON.stringify(items));
-  } catch {
-    // localStorage full or unavailable — silently ignore
-  }
-}
-
-/**
- * Remove localStorage entries for sessions that no longer exist.
- * Call after loading active sessions to prevent unbounded growth.
- */
-export function cleanupStaleMessageStorage(activeSessionIds: string[]): void {
-  if (typeof localStorage === 'undefined') return;
-  const activeSet = new Set(activeSessionIds);
-  const keysToRemove: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key && key.startsWith(ACP_MESSAGES_STORAGE_PREFIX)) {
-      const sessionId = key.slice(ACP_MESSAGES_STORAGE_PREFIX.length);
-      if (!activeSet.has(sessionId)) {
-        keysToRemove.push(key);
-      }
-    }
-  }
-  for (const key of keysToRemove) {
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      // ignore
-    }
-  }
-}
-
 /**
  * Hook that processes ACP session update messages into a structured conversation.
  * Maps SessionNotification.Update variants to ConversationItem types.
  *
- * When `sessionId` is provided, messages are persisted in localStorage so they
- * survive page reloads and browser restarts.
+ * No client-side persistence — on reconnect, the ACP agent replays the full
+ * conversation via LoadSession, which sends session/update notifications
+ * through the WebSocket. Call `clear()` before reconnection to avoid duplicates.
  */
-export function useAcpMessages(options?: UseAcpMessagesOptions): AcpMessagesHandle {
-  const sessionId = options?.sessionId;
-  const [items, setItems] = useState<ConversationItem[]>(() =>
-    sessionId ? loadPersistedItems(sessionId) : []
-  );
+export function useAcpMessages(): AcpMessagesHandle {
+  const [items, setItems] = useState<ConversationItem[]>([]);
   const [usage, setUsage] = useState<TokenUsage>({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   const [availableCommands, setAvailableCommands] = useState<SlashCommand[]>([]);
-
-  // Persist items to sessionStorage when they change
-  useEffect(() => {
-    if (sessionId && items.length > 0) {
-      persistItems(sessionId, items);
-    }
-  }, [sessionId, items]);
 
   const processMessage = useCallback((msg: AcpMessage) => {
     // Handle session notifications (method === 'session/update')
@@ -374,14 +300,7 @@ export function useAcpMessages(options?: UseAcpMessagesOptions): AcpMessagesHand
   const clear = useCallback(() => {
     setItems([]);
     setUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
-    if (sessionId && typeof localStorage !== 'undefined') {
-      try {
-        localStorage.removeItem(`${ACP_MESSAGES_STORAGE_PREFIX}${sessionId}`);
-      } catch {
-        // ignore
-      }
-    }
-  }, [sessionId]);
+  }, []);
 
   return { items, usage, availableCommands, processMessage, addUserMessage, clear };
 }
