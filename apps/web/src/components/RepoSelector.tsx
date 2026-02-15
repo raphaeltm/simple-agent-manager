@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { listRepositories } from '../lib/api';
 import { Input, Spinner } from '@simple-agent-manager/ui';
 import type { Repository } from '@simple-agent-manager/shared';
@@ -28,8 +28,10 @@ export function RepoSelector({
   const [showDropdown, setShowDropdown] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastCheckedRepo, setLastCheckedRepo] = useState<string>('');
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch GitHub repositories on mount
   useEffect(() => {
@@ -63,7 +65,8 @@ export function RepoSelector({
       (repo) => repo.fullName.toLowerCase().includes(searchTerm)
     );
 
-    setFilteredRepos(filtered.slice(0, 10)); // Limit to 10 results
+    // Show more results (25) to help users with many repos find what they need
+    setFilteredRepos(filtered.slice(0, 25));
   }, [value, repositories]);
 
   // Handle clicks outside dropdown
@@ -83,13 +86,86 @@ export function RepoSelector({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Clean up debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Extract repository name from URL
+  const extractRepoName = useCallback((url: string): string | null => {
+    // Handle various formats:
+    // https://github.com/user/repo
+    // https://github.com/user/repo.git
+    // git@github.com:user/repo.git
+    // user/repo
+    let repoName = url;
+
+    if (url.startsWith('https://github.com/')) {
+      repoName = url.replace('https://github.com/', '');
+    } else if (url.startsWith('git@github.com:')) {
+      repoName = url.replace('git@github.com:', '');
+    }
+
+    // Remove .git suffix if present
+    repoName = repoName.replace(/\.git$/, '');
+
+    // Validate format (should be owner/repo)
+    const parts = repoName.split('/');
+    if (parts.length === 2 && parts[0] && parts[1]) {
+      return repoName;
+    }
+
+    return null;
+  }, []);
+
+  // Check if manually entered repo exists and get its default branch
+  const checkManualRepo = useCallback((repoValue: string) => {
+    const repoName = extractRepoName(repoValue);
+
+    // Don't re-check the same repo
+    if (!repoName || repoName === lastCheckedRepo) {
+      return;
+    }
+
+    setLastCheckedRepo(repoName);
+
+    // Check if this repo exists in our fetched list
+    const foundRepo = repositories.find(r => r.fullName === repoName);
+    if (foundRepo) {
+      // We have metadata for this repo
+      onRepoSelect?.({ fullName: foundRepo.fullName, defaultBranch: foundRepo.defaultBranch });
+    } else {
+      // For manually entered repos not in the list, default to 'main'
+      // The branch fetching will happen in CreateWorkspace component
+      onRepoSelect?.({ fullName: repoName, defaultBranch: 'main' });
+    }
+  }, [repositories, lastCheckedRepo, extractRepoName, onRepoSelect]);
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
     onChange(newValue);
 
-    // Show dropdown if we have repos and user is typing
+    // Clear previous debounce timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    // Show dropdown if we have repos and user is typing a search term
     if (repositories.length > 0 && newValue && !newValue.startsWith('http') && !newValue.startsWith('git@')) {
       setShowDropdown(true);
+    } else {
+      setShowDropdown(false);
+
+      // For URLs, check after a delay to trigger branch fetching
+      if (newValue && (newValue.startsWith('http') || newValue.startsWith('git@') || newValue.includes('/'))) {
+        debounceTimerRef.current = setTimeout(() => {
+          checkManualRepo(newValue);
+        }, 500); // Wait 500ms after user stops typing
+      }
     }
   };
 
@@ -180,10 +256,20 @@ export function RepoSelector({
         </div>
       )}
 
-      {/* Info message if GitHub not connected */}
+      {/* Status messages */}
+      {loading && repositories.length === 0 && (
+        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+          Loading repositories...
+        </p>
+      )}
       {error && repositories.length === 0 && value && !value.startsWith('http') && !value.startsWith('git@') && (
         <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
           Connect GitHub App for repository autocomplete
+        </p>
+      )}
+      {!loading && repositories.length > 0 && value && !value.startsWith('http') && !value.startsWith('git@') && filteredRepos.length === 0 && (
+        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+          No matching repositories found
         </p>
       )}
     </div>

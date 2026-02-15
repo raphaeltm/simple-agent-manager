@@ -176,6 +176,7 @@ export async function getInstallationToken(
 
 /**
  * Get repositories accessible to an installation.
+ * Fetches all pages to ensure users with many repositories can find all of them.
  */
 export async function getInstallationRepositories(
   installationId: string,
@@ -183,38 +184,60 @@ export async function getInstallationRepositories(
 ): Promise<Array<{ id: number; fullName: string; private: boolean; defaultBranch: string }>> {
   const { token } = await getInstallationToken(installationId, env);
 
-  const response = await fetch(
-    'https://api.github.com/installation/repositories',
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'Simple-Agent-Manager',
-      },
-    }
-  );
+  const allRepos: Array<{ id: number; fullName: string; private: boolean; defaultBranch: string }> = [];
+  let page = 1;
+  const perPage = 100; // GitHub's max per_page value
+  let hasMore = true;
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({})) as { message?: string };
-    throw new Error(error.message || `Failed to get repositories: ${response.status}`);
+  while (hasMore) {
+    const response = await fetch(
+      `https://api.github.com/installation/repositories?per_page=${perPage}&page=${page}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'User-Agent': 'Simple-Agent-Manager',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({})) as { message?: string };
+      throw new Error(error.message || `Failed to get repositories: ${response.status}`);
+    }
+
+    const data = await response.json() as {
+      repositories: Array<{
+        id: number;
+        full_name: string;
+        private: boolean;
+        default_branch: string;
+      }>;
+      total_count: number;
+    };
+
+    const repos = data.repositories.map((repo) => ({
+      id: repo.id,
+      fullName: repo.full_name,
+      private: repo.private,
+      defaultBranch: repo.default_branch,
+    }));
+
+    allRepos.push(...repos);
+
+    // Check if there are more pages
+    hasMore = data.repositories.length === perPage;
+    page++;
+
+    // Safety limit to prevent infinite loops (10,000 repos max)
+    if (allRepos.length >= 10000) {
+      console.warn(`Hit safety limit of 10,000 repositories for installation ${installationId}`);
+      break;
+    }
   }
 
-  const data = await response.json() as {
-    repositories: Array<{
-      id: number;
-      full_name: string;
-      private: boolean;
-      default_branch: string;
-    }>;
-  };
-
-  return data.repositories.map((repo) => ({
-    id: repo.id,
-    fullName: repo.full_name,
-    private: repo.private,
-    defaultBranch: repo.default_branch,
-  }));
+  return allRepos;
 }
 
 /**

@@ -45,6 +45,7 @@ export function CreateWorkspace() {
   const [branch, setBranch] = useState('main');
   const [branches, setBranches] = useState<Array<{ name: string }>>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branchesError, setBranchesError] = useState<string | null>(null);
   const [installationId, setInstallationId] = useState('');
   const [vmSize, setVmSize] = useState('medium');
   const [vmLocation, setVmLocation] = useState('nbg1');
@@ -57,11 +58,21 @@ export function CreateWorkspace() {
   const fetchBranches = useCallback(async (fullName: string, instId: string) => {
     setBranchesLoading(true);
     setBranches([]);
+    setBranchesError(null);
     try {
       const result = await listBranches(fullName, instId || undefined);
       setBranches(result);
+
+      // If no branches returned (shouldn't happen), add common defaults
+      if (result.length === 0) {
+        setBranches([{ name: 'main' }, { name: 'master' }]);
+        setBranchesError('Could not fetch branches, showing common defaults');
+      }
     } catch (err) {
       console.log('Could not fetch branches:', err);
+      // Provide common branch names as fallback
+      setBranches([{ name: 'main' }, { name: 'master' }, { name: 'develop' }]);
+      setBranchesError('Unable to fetch branches. Common branch names provided.');
     } finally {
       setBranchesLoading(false);
     }
@@ -272,6 +283,11 @@ export function CreateWorkspace() {
                 </div>
               )}
             </div>
+            {branchesError && (
+              <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+                {branchesError}
+              </p>
+            )}
           </div>
 
           <div>
