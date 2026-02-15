@@ -666,6 +666,9 @@ See `apps/api/.env.example`:
 - `ERROR_REPORT_HTTP_TIMEOUT` - VM Agent: HTTP POST timeout for error reports (default: 10s)
 - `MAX_VM_AGENT_ERROR_BODY_BYTES` - API: max VM agent error request body (default: 32768)
 - `MAX_VM_AGENT_ERROR_BATCH_SIZE` - API: max VM agent errors per request (default: 10)
+- `HETZNER_API_TIMEOUT_MS` - Timeout for Hetzner Cloud API calls in milliseconds (default: 30000)
+- `CF_API_TIMEOUT_MS` - Timeout for Cloudflare DNS API calls in milliseconds (default: 30000)
+- `NODE_AGENT_REQUEST_TIMEOUT_MS` - Timeout for Node Agent HTTP requests in milliseconds (default: 30000)
 
 ## Testing
 

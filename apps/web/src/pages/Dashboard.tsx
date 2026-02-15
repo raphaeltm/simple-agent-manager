@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../components/AuthProvider';
 import { UserMenu } from '../components/UserMenu';
@@ -38,11 +38,25 @@ export function Dashboard() {
     }
   }, []);
 
+  // Use setTimeout chain instead of setInterval so the poll rate
+  // adapts immediately when workspaces enter/leave transitional states
+  // without tearing down and recreating the interval on every data change.
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     loadWorkspaces();
-    const pollInterval = hasTransitionalWorkspaces ? 5000 : 30000;
-    const interval = setInterval(loadWorkspaces, pollInterval);
-    return () => clearInterval(interval);
+  }, [loadWorkspaces]);
+
+  useEffect(() => {
+    const pollMs = hasTransitionalWorkspaces ? 5000 : 30000;
+    timerRef.current = setTimeout(function tick() {
+      loadWorkspaces().finally(() => {
+        timerRef.current = setTimeout(tick, pollMs);
+      });
+    }, pollMs);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
   }, [loadWorkspaces, hasTransitionalWorkspaces]);
 
   const handleStopWorkspace = async (id: string) => {
