@@ -32,3 +32,18 @@ export function isControlMessage(msg: unknown): msg is ControlMessage {
       (msg as ControlMessage).type === 'select_agent')
   );
 }
+
+// =============================================================================
+// Lifecycle Logging (Observability)
+// =============================================================================
+
+/** Structured lifecycle event for observability logging */
+export interface AcpLifecycleEvent {
+  source: 'acp-session' | 'acp-transport' | 'acp-chat';
+  level: 'info' | 'warn' | 'error';
+  message: string;
+  context?: Record<string, unknown>;
+}
+
+/** Callback for lifecycle event logging (injected by consumer) */
+export type LifecycleEventCallback = (event: AcpLifecycleEvent) => void;

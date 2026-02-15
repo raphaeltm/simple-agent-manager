@@ -653,7 +653,7 @@ See `apps/api/.env.example`:
 - `MAX_AUDIO_SIZE_BYTES` - Maximum audio upload size in bytes (default: 10485760)
 - `MAX_AUDIO_DURATION_SECONDS` - Maximum recording duration in seconds (default: 60)
 - `RATE_LIMIT_TRANSCRIBE` - Optional rate limit for transcription requests
-- `RATE_LIMIT_CLIENT_ERRORS` - Rate limit for client error reporting per hour per IP (default: 30)
+- `RATE_LIMIT_CLIENT_ERRORS` - Rate limit for client error reporting per hour per IP (default: 200)
 - `MAX_CLIENT_ERROR_BATCH_SIZE` - Max errors per client error report request (default: 25)
 - `MAX_CLIENT_ERROR_BODY_BYTES` - Max request body size for client error reports in bytes (default: 65536)
 - `GIT_EXEC_TIMEOUT` - VM Agent: timeout for git commands via docker exec (default: 30s)
@@ -701,6 +701,7 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 - **Infra**: Pulumi, Wrangler, @devcontainers/cli, pnpm 9.0+, Cloudflare Pages
 
 ## Recent Changes
+- comprehensive-lifecycle-logging: End-to-end ACP/WebSocket lifecycle observability; client-side AcpLifecycleEvent callback from transport/session/chat layers piped to CF Workers observability via error reporter; VM agent ErrorReporter extended with ReportInfo/ReportWarn; gateway reports Initialize/LoadSession/NewSession/Prompt lifecycle; EventAppender interface for gateway-to-UI event log; WebSocket connect/disconnect events in agent_ws; rate limit for client errors increased to 200/hr to accommodate lifecycle info-level logging
 - vm-agent-error-reporting: VM agent error reporting to CF Workers observability; Go errorreport package with thread-safe batching and periodic flushing; POST /api/nodes/:id/errors endpoint with callback JWT auth; ACP gateway reports agent crashes, install failures, rapid exits, and prompt failures; configurable flush interval, batch size, queue size, HTTP timeout
 - client-error-reporting: Client-side error reporting pipeline; browser batches errors and sends to POST /api/client-errors which logs to Workers observability via console.error; global window.onerror and unhandledrejection handlers; VoiceButton/AgentPanel onError callback; sendBeacon on page close; configurable rate limit, batch size, body size
 - voice-transcribe-logging: Added comprehensive server-side logging to POST /api/transcribe for debugging voice input issues; logs request receipt, audio file metadata, base64 conversion, Workers AI call timing, response details, and errors with full context

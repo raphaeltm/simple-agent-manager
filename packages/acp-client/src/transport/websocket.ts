@@ -1,4 +1,4 @@
-import type { AgentStatusMessage } from './types';
+import type { AgentStatusMessage, LifecycleEventCallback } from './types';
 import { isControlMessage } from './types';
 
 /**
@@ -38,13 +38,15 @@ export interface AcpTransport {
  * @param onAcpMessage - Callback for ACP JSON-RPC messages from the agent
  * @param onClose - Callback when the WebSocket closes
  * @param onError - Callback when a WebSocket error occurs
+ * @param onLifecycleEvent - Optional callback for lifecycle observability logging
  */
 export function createAcpWebSocketTransport(
   ws: WebSocket,
   onAgentStatus: AgentStatusCallback,
   onAcpMessage: AcpMessageCallback,
   onClose?: () => void,
-  onError?: (error: Event) => void
+  onError?: (error: Event) => void,
+  onLifecycleEvent?: LifecycleEventCallback
 ): AcpTransport {
   ws.addEventListener('message', (event) => {
     try {
@@ -57,7 +59,15 @@ export function createAcpWebSocketTransport(
         onAcpMessage(data);
       }
     } catch {
-      // Ignore non-JSON messages
+      onLifecycleEvent?.({
+        source: 'acp-transport',
+        level: 'warn',
+        message: 'Failed to parse WebSocket message as JSON',
+        context: {
+          dataLength: typeof event.data === 'string' ? event.data.length : 0,
+          preview: typeof event.data === 'string' ? event.data.slice(0, 200) : 'non-string',
+        },
+      });
     }
   });
 
@@ -72,12 +82,26 @@ export function createAcpWebSocketTransport(
     sendAcpMessage(message: unknown) {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify(message));
+      } else {
+        onLifecycleEvent?.({
+          source: 'acp-transport',
+          level: 'warn',
+          message: 'Send failed: WebSocket not open',
+          context: { readyState: ws.readyState, messageType: 'acp' },
+        });
       }
     },
 
     sendSelectAgent(agentType: string) {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'select_agent', agentType }));
+      } else {
+        onLifecycleEvent?.({
+          source: 'acp-transport',
+          level: 'warn',
+          message: 'Send failed: WebSocket not open',
+          context: { readyState: ws.readyState, messageType: 'select_agent', agentType },
+        });
       }
     },
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAcpSession, useAcpMessages, AgentPanel } from '@simple-agent-manager/acp-client';
-import type { ChatSettingsData } from '@simple-agent-manager/acp-client';
+import type { ChatSettingsData, AcpLifecycleEvent } from '@simple-agent-manager/acp-client';
 import type { AgentInfo } from '@simple-agent-manager/shared';
 import { VALID_PERMISSION_MODES, AGENT_PERMISSION_MODE_LABELS } from '@simple-agent-manager/shared';
 import { getTerminalToken, getTranscribeApiUrl, getAgentSettings, saveAgentSettings } from '../lib/api';
@@ -53,6 +53,24 @@ export function ChatSession({
     }
   }, [workspaceUrl]);
 
+  // Lifecycle event callback — routes ACP lifecycle events to the error reporter
+  // for CF Workers observability. Enriches with workspaceId/sessionId context.
+  const handleLifecycleEvent = useCallback(
+    (event: AcpLifecycleEvent) => {
+      reportError({
+        level: event.level,
+        message: event.message,
+        source: event.source,
+        context: {
+          ...event.context,
+          workspaceId,
+          sessionId,
+        },
+      });
+    },
+    [workspaceId, sessionId]
+  );
+
   // Fetch token and build full WS URL
   useEffect(() => {
     if (!wsHostInfo) {
@@ -63,16 +81,37 @@ export function ChatSession({
     let cancelled = false;
 
     const fetchToken = async () => {
+      reportError({
+        level: 'info',
+        message: 'Fetching terminal token',
+        source: 'acp-chat',
+        context: { workspaceId, sessionId },
+      });
+
       try {
         const { token } = await getTerminalToken(workspaceId);
         if (cancelled) return;
+
+        reportError({
+          level: 'info',
+          message: 'Terminal token fetched',
+          source: 'acp-chat',
+          context: { workspaceId, sessionId, tokenLength: token.length },
+        });
+
         const sessionQuery = `&sessionId=${encodeURIComponent(sessionId)}`;
         const takeoverQuery = '&takeover=1';
         setResolvedWsUrl(
           `${wsHostInfo}/agent/ws?token=${encodeURIComponent(token)}${sessionQuery}${takeoverQuery}`
         );
-      } catch {
-        // Will retry on next render cycle or user action
+      } catch (err) {
+        if (cancelled) return;
+        reportError({
+          level: 'error',
+          message: `Terminal token fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+          source: 'acp-chat',
+          context: { workspaceId, sessionId },
+        });
       }
     };
 
@@ -91,6 +130,7 @@ export function ChatSession({
   const acpSession = useAcpSession({
     wsUrl: resolvedWsUrl,
     onAcpMessage: acpMessages.processMessage,
+    onLifecycleEvent: handleLifecycleEvent,
   });
 
   const { connected, agentType, state, switchAgent } = acpSession;
@@ -101,9 +141,15 @@ export function ChatSession({
   // the agent without duplicates. On initial mount items are already empty.
   useEffect(() => {
     if (state === 'no_session') {
+      reportError({
+        level: 'info',
+        message: 'Clearing messages on no_session (pre-replay)',
+        source: 'acp-chat',
+        context: { workspaceId, sessionId },
+      });
       clearMessages();
     }
-  }, [state, clearMessages]);
+  }, [state, clearMessages, workspaceId, sessionId]);
 
   // Auto-select preferred agent when connected
   useEffect(() => {
@@ -112,8 +158,14 @@ export function ChatSession({
     if (agentType === preferredAgentId) return;
     if (state === 'connecting' || state === 'reconnecting' || state === 'initializing') return;
 
+    reportError({
+      level: 'info',
+      message: `Auto-selecting agent: ${preferredAgentId}`,
+      source: 'acp-chat',
+      context: { workspaceId, sessionId, preferredAgentId, currentAgentType: agentType },
+    });
     switchAgent(preferredAgentId);
-  }, [preferredAgentId, connected, agentType, state, switchAgent]);
+  }, [preferredAgentId, connected, agentType, state, switchAgent, workspaceId, sessionId]);
 
   // Report activity
   const handleActivity = useCallback(() => {
