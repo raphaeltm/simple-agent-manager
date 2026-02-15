@@ -88,6 +88,10 @@ export interface Env {
   // VM agent error reporting
   MAX_VM_AGENT_ERROR_BODY_BYTES?: string;
   MAX_VM_AGENT_ERROR_BATCH_SIZE?: string;
+  // External API timeouts (milliseconds)
+  HETZNER_API_TIMEOUT_MS?: string;
+  CF_API_TIMEOUT_MS?: string;
+  NODE_AGENT_REQUEST_TIMEOUT_MS?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();

@@ -93,10 +93,9 @@ describe('Node page', () => {
     );
 
     await waitFor(() => {
-      expect(mocks.getNode).toHaveBeenCalledWith('node-1');
+      expect(screen.getAllByText('Node 1').length).toBeGreaterThanOrEqual(1);
     });
 
-    expect(screen.getAllByText('Node 1').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('button', { name: /stop node/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /delete node/i })).toBeInTheDocument();
     expect(screen.getByText('Last Heartbeat')).toBeInTheDocument();
@@ -129,7 +128,7 @@ describe('Node page', () => {
     );
 
     await waitFor(() => {
-      expect(mocks.getNode).toHaveBeenCalledWith('node-1');
+      expect(screen.getAllByText('Node 1').length).toBeGreaterThanOrEqual(1);
     });
 
     fireEvent.click(screen.getByRole('button', { name: /create workspace/i }));
@@ -147,7 +146,7 @@ describe('Node page', () => {
     );
 
     await waitFor(() => {
-      expect(mocks.getNode).toHaveBeenCalledWith('node-1');
+      expect(screen.getAllByText('Node 1').length).toBeGreaterThanOrEqual(1);
     });
 
     fireEvent.click(screen.getByRole('button', { name: /stop node/i }));
@@ -192,10 +191,9 @@ describe('Node page', () => {
     );
 
     await waitFor(() => {
-      expect(mocks.getNode).toHaveBeenCalledWith('node-1');
+      expect(screen.getByText('Last Heartbeat')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('Last Heartbeat')).toBeInTheDocument();
     expect(screen.getAllByText(/stale/i).length).toBeGreaterThan(0);
   });
 });

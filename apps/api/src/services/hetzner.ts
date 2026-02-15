@@ -3,18 +3,22 @@
  * Handles token validation and server management.
  */
 
+import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
+
 const HETZNER_API_BASE = 'https://api.hetzner.cloud/v1';
+const DEFAULT_HETZNER_TIMEOUT_MS = 30_000;
 
 /**
  * Validate a Hetzner API token by making a test request.
  * Returns true if valid, throws an error if invalid.
  */
-export async function validateHetznerToken(token: string): Promise<boolean> {
-  const response = await fetch(`${HETZNER_API_BASE}/datacenters`, {
+export async function validateHetznerToken(token: string, env?: { HETZNER_API_TIMEOUT_MS?: string }): Promise<boolean> {
+  const timeoutMs = getTimeoutMs(env?.HETZNER_API_TIMEOUT_MS, DEFAULT_HETZNER_TIMEOUT_MS);
+  const response = await fetchWithTimeout(`${HETZNER_API_BASE}/datacenters`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
-  });
+  }, timeoutMs);
 
   if (!response.ok) {
     if (response.status === 401) {
@@ -65,9 +69,11 @@ export interface HetznerServer {
  */
 export async function createServer(
   token: string,
-  options: CreateServerOptions
+  options: CreateServerOptions,
+  env?: { HETZNER_API_TIMEOUT_MS?: string }
 ): Promise<HetznerServer> {
-  const response = await fetch(`${HETZNER_API_BASE}/servers`, {
+  const timeoutMs = getTimeoutMs(env?.HETZNER_API_TIMEOUT_MS, DEFAULT_HETZNER_TIMEOUT_MS);
+  const response = await fetchWithTimeout(`${HETZNER_API_BASE}/servers`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -82,7 +88,7 @@ export async function createServer(
       labels: options.labels || {},
       start_after_create: true,
     }),
-  });
+  }, timeoutMs);
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({})) as { error?: { message?: string } };
@@ -107,14 +113,16 @@ export async function createServer(
  */
 export async function deleteServer(
   token: string,
-  serverId: string
+  serverId: string,
+  env?: { HETZNER_API_TIMEOUT_MS?: string }
 ): Promise<void> {
-  const response = await fetch(`${HETZNER_API_BASE}/servers/${serverId}`, {
+  const timeoutMs = getTimeoutMs(env?.HETZNER_API_TIMEOUT_MS, DEFAULT_HETZNER_TIMEOUT_MS);
+  const response = await fetchWithTimeout(`${HETZNER_API_BASE}/servers/${serverId}`, {
     method: 'DELETE',
     headers: {
       Authorization: `Bearer ${token}`,
     },
-  });
+  }, timeoutMs);
 
   if (!response.ok && response.status !== 404) {
     const error = await response.json().catch(() => ({})) as { error?: { message?: string } };
@@ -127,13 +135,15 @@ export async function deleteServer(
  */
 export async function getServerStatus(
   token: string,
-  serverId: string
+  serverId: string,
+  env?: { HETZNER_API_TIMEOUT_MS?: string }
 ): Promise<string | null> {
-  const response = await fetch(`${HETZNER_API_BASE}/servers/${serverId}`, {
+  const timeoutMs = getTimeoutMs(env?.HETZNER_API_TIMEOUT_MS, DEFAULT_HETZNER_TIMEOUT_MS);
+  const response = await fetchWithTimeout(`${HETZNER_API_BASE}/servers/${serverId}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
-  });
+  }, timeoutMs);
 
   if (response.status === 404) {
     return null;
@@ -152,14 +162,16 @@ export async function getServerStatus(
  */
 export async function powerOffServer(
   token: string,
-  serverId: string
+  serverId: string,
+  env?: { HETZNER_API_TIMEOUT_MS?: string }
 ): Promise<void> {
-  const response = await fetch(`${HETZNER_API_BASE}/servers/${serverId}/actions/poweroff`, {
+  const timeoutMs = getTimeoutMs(env?.HETZNER_API_TIMEOUT_MS, DEFAULT_HETZNER_TIMEOUT_MS);
+  const response = await fetchWithTimeout(`${HETZNER_API_BASE}/servers/${serverId}/actions/poweroff`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
     },
-  });
+  }, timeoutMs);
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({})) as { error?: { message?: string } };
@@ -172,14 +184,16 @@ export async function powerOffServer(
  */
 export async function powerOnServer(
   token: string,
-  serverId: string
+  serverId: string,
+  env?: { HETZNER_API_TIMEOUT_MS?: string }
 ): Promise<void> {
-  const response = await fetch(`${HETZNER_API_BASE}/servers/${serverId}/actions/poweron`, {
+  const timeoutMs = getTimeoutMs(env?.HETZNER_API_TIMEOUT_MS, DEFAULT_HETZNER_TIMEOUT_MS);
+  const response = await fetchWithTimeout(`${HETZNER_API_BASE}/servers/${serverId}/actions/poweron`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
     },
-  });
+  }, timeoutMs);
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({})) as { error?: { message?: string } };

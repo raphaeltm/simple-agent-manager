@@ -1,6 +1,9 @@
 import type { Env } from '../index';
+import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { signNodeManagementToken } from './jwt';
 import { recordNodeRoutingMetric } from './telemetry';
+
+const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
 
 const DEFAULT_NODE_AGENT_READY_TIMEOUT_MS = 120000;
 const DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS = 5000;
@@ -128,10 +131,14 @@ async function nodeAgentRequest<T>(
     env
   );
 
-  const response = await fetch(url, {
+  const requestTimeoutMs = getTimeoutMs(
+    env.NODE_AGENT_REQUEST_TIMEOUT_MS,
+    DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS
+  );
+  const response = await fetchWithTimeout(url, {
     ...options,
     headers,
-  });
+  }, requestTimeoutMs);
 
   recordNodeRoutingMetric(
     {

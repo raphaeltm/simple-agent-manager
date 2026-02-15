@@ -1,9 +1,13 @@
 import type { Env } from '../index';
+import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 
 const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
 
 /** Default DNS TTL in seconds (1 minute) */
 const DEFAULT_DNS_TTL = 60;
+
+/** Default timeout for Cloudflare API calls (per Constitution Principle XI) */
+const DEFAULT_CF_API_TIMEOUT_MS = 30_000;
 
 /**
  * Get DNS TTL from env or use default (per constitution principle XI).
@@ -82,7 +86,8 @@ export async function createDNSRecord(
   ip: string,
   env: Env
 ): Promise<string> {
-  const response = await fetch(
+  const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
+  const response = await fetchWithTimeout(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records`,
     {
       method: 'POST',
@@ -97,7 +102,8 @@ export async function createDNSRecord(
         ttl: getDnsTTL(env), // Configurable TTL (default 1 minute for fast updates)
         proxied: true, // Enable Cloudflare proxy for HTTPS
       }),
-    }
+    },
+    timeoutMs
   );
 
   if (!response.ok) {
@@ -117,14 +123,16 @@ export async function deleteDNSRecord(
   recordId: string,
   env: Env
 ): Promise<void> {
-  const response = await fetch(
+  const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
+  const response = await fetchWithTimeout(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records/${recordId}`,
     {
       method: 'DELETE',
       headers: {
         Authorization: `Bearer ${env.CF_API_TOKEN}`,
       },
-    }
+    },
+    timeoutMs
   );
 
   // Ignore 404 errors (record already deleted)
@@ -143,7 +151,8 @@ export async function updateDNSRecord(
   ip: string,
   env: Env
 ): Promise<void> {
-  const response = await fetch(
+  const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
+  const response = await fetchWithTimeout(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records/${recordId}`,
     {
       method: 'PATCH',
@@ -154,7 +163,8 @@ export async function updateDNSRecord(
       body: JSON.stringify({
         content: ip,
       }),
-    }
+    },
+    timeoutMs
   );
 
   if (!response.ok) {
@@ -183,11 +193,12 @@ export async function cleanupWorkspaceDNSRecords(
   for (const prefix of prefixes) {
     const recordName = `${prefix}-${id}.${baseDomain}`;
     const searchUrl = `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records?name=${encodeURIComponent(recordName)}`;
-    const response = await fetch(searchUrl, {
+    const cfTimeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
+    const response = await fetchWithTimeout(searchUrl, {
       headers: {
         Authorization: `Bearer ${env.CF_API_TOKEN}`,
       },
-    });
+    }, cfTimeoutMs);
 
     if (!response.ok) {
       console.error(`Failed to search DNS records for ${recordName}: ${response.status}`);
@@ -236,7 +247,8 @@ export async function createNodeBackendDNSRecord(
   ip: string,
   env: Env
 ): Promise<string> {
-  const response = await fetch(
+  const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
+  const response = await fetchWithTimeout(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records`,
     {
       method: 'POST',
@@ -251,7 +263,8 @@ export async function createNodeBackendDNSRecord(
         ttl: getDnsTTL(env),
         proxied: false, // DNS-only — Worker subrequests go directly to VM IP
       }),
-    }
+    },
+    timeoutMs
   );
 
   if (!response.ok) {
