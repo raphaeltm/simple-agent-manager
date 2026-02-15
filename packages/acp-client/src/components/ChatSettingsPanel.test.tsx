@@ -29,6 +29,23 @@ describe('ChatSettingsPanel', () => {
     vi.clearAllMocks();
   });
 
+  it('renders as a fixed bottom sheet dialog', () => {
+    renderPanel();
+    const dialog = screen.getByRole('dialog', { name: /agent settings/i });
+    expect(dialog).not.toBeNull();
+    expect(dialog.style.position).toBe('fixed');
+    expect(dialog.style.bottom).toBe('0px');
+  });
+
+  it('renders a backdrop overlay', () => {
+    renderPanel();
+    // Backdrop is the element before the dialog
+    const dialog = screen.getByRole('dialog', { name: /agent settings/i });
+    const backdrop = dialog.previousElementSibling;
+    expect(backdrop).not.toBeNull();
+    expect(backdrop?.getAttribute('aria-hidden')).toBe('true');
+  });
+
   it('renders permission mode buttons', () => {
     renderPanel();
     expect(screen.getByText('Default')).not.toBeNull();
@@ -46,10 +63,11 @@ describe('ChatSettingsPanel', () => {
     expect(screen.getByText('Loading settings...')).not.toBeNull();
   });
 
-  it('highlights the currently selected permission mode', () => {
+  it('visually distinguishes the selected permission mode', () => {
     renderPanel({ settings: { model: null, permissionMode: 'acceptEdits' } });
     const acceptBtn = screen.getByText('Accept Edits');
-    expect(acceptBtn.className).toContain('bg-blue-50');
+    // Selected mode uses accent color border
+    expect(acceptBtn.style.borderColor).toContain('accent-primary');
   });
 
   it('shows warning when bypassPermissions is selected', () => {
@@ -102,6 +120,14 @@ describe('ChatSettingsPanel', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('calls onClose when backdrop is clicked', () => {
+    const { onClose } = renderPanel();
+    const dialog = screen.getByRole('dialog', { name: /agent settings/i });
+    const backdrop = dialog.previousElementSibling as HTMLElement;
+    fireEvent.click(backdrop);
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it('calls onClose when Escape is pressed', () => {
     const { onClose } = renderPanel();
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -112,5 +138,17 @@ describe('ChatSettingsPanel', () => {
     renderPanel({ settings: { model: 'gpt-5-codex', permissionMode: 'default' } });
     const input = screen.getByPlaceholderText('Default (agent decides)') as HTMLInputElement;
     expect(input.value).toBe('gpt-5-codex');
+  });
+
+  it('constrains max width for desktop readability', () => {
+    renderPanel();
+    const dialog = screen.getByRole('dialog', { name: /agent settings/i });
+    expect(dialog.style.maxWidth).toBe('480px');
+  });
+
+  it('constrains max height to 80vh for scroll safety', () => {
+    renderPanel();
+    const dialog = screen.getByRole('dialog', { name: /agent settings/i });
+    expect(dialog.style.maxHeight).toBe('80vh');
   });
 });
