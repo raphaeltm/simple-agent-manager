@@ -134,12 +134,17 @@
 
 ---
 
-## Top 3 to Implement Now
+## Implementation Status
 
-Based on impact and feasibility:
+### Completed (PR #81, merged 2026-02-15)
 
-1. **R4. React Error Boundary** — Prevents white-screen crashes, easy to implement, huge UX impact
-2. **R2. External API Timeouts** — Prevents hung Workers, critical for reliability
-3. **R8. Dashboard Polling Fix** — Fixes stale UI, small targeted change
+- [x] **R4. React Error Boundary** — `ErrorBoundary` component wrapping App.tsx with recovery UI, error reporting to CF Workers observability, and reload/home buttons. 4 unit tests.
+- [x] **R2. External API Timeouts** — `fetchWithTimeout()` utility applied to all Hetzner (6 functions), DNS (5 calls), and Node Agent requests. Configurable via `HETZNER_API_TIMEOUT_MS`, `CF_API_TIMEOUT_MS`, `NODE_AGENT_REQUEST_TIMEOUT_MS` env vars (default 30s). 13 unit tests.
+- [x] **R8. Dashboard Polling Fix** — Replaced `setInterval` with `setTimeout` chain so poll rate adapts immediately when workspaces enter/leave transitional states (5s → 30s).
+- [x] **Bonus: Node test flakiness fix** — `node.test.tsx` waited for API mock call instead of rendered content, causing CI-only failures on slow runners.
+
+### Remaining (backlog)
+
+All other items (R1, R3, R5-R7, R9, U1-U5, P1-P4) remain as backlog for future work.
 
 ---

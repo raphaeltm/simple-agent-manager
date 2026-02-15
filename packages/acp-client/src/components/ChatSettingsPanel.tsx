@@ -42,17 +42,6 @@ export function ChatSettingsPanel({
     }
   }, [settings]);
 
-  // Close on click outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [onClose]);
-
   // Close on Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -82,81 +71,204 @@ export function ChatSettingsPanel({
   };
 
   return (
-    <div
-      ref={panelRef}
-      className="absolute bottom-full left-0 right-0 mb-2 mx-3 bg-white border border-gray-200 rounded-lg shadow-lg z-10"
-      role="dialog"
-      aria-label="Agent settings"
-    >
-      <div className="p-3 space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium text-gray-700">Agent Settings</span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 p-1"
-            aria-label="Close settings"
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M1 1l12 12M13 1L1 13" />
-            </svg>
-          </button>
+    <>
+      {/* Backdrop overlay — blocks interaction with the rest of the page */}
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.4)',
+          zIndex: 49,
+        }}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      {/* Settings panel — fixed bottom sheet */}
+      <div
+        ref={panelRef}
+        style={{
+          position: 'fixed',
+          bottom: 0,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: '100%',
+          maxWidth: 480,
+          backgroundColor: 'var(--sam-color-bg-surface, #1a1a1a)',
+          borderTop: '1px solid var(--sam-color-border-default, #333)',
+          borderRadius: '12px 12px 0 0',
+          boxShadow: '0 -4px 20px rgba(0, 0, 0, 0.4)',
+          zIndex: 50,
+          maxHeight: '80vh',
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+        }}
+        role="dialog"
+        aria-label="Agent settings"
+      >
+        {/* Drag handle indicator */}
+        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 8 }}>
+          <div style={{
+            width: 36,
+            height: 4,
+            borderRadius: 2,
+            backgroundColor: 'var(--sam-color-fg-muted, #666)',
+            opacity: 0.5,
+          }} />
         </div>
 
-        {loading ? (
-          <div className="text-sm text-gray-400 text-center py-2">Loading settings...</div>
-        ) : (
-          <>
-            {/* Permission Mode */}
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Permission Mode</label>
-              <div className="flex flex-wrap gap-1">
-                {permissionModes.map((mode) => (
-                  <button
-                    key={mode.value}
-                    type="button"
-                    onClick={() => setPermissionMode(mode.value)}
-                    className={`px-2 py-1 text-xs rounded-md border transition-colors ${
-                      permissionMode === mode.value
-                        ? 'bg-blue-50 border-blue-300 text-blue-700'
-                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    {mode.label}
-                  </button>
-                ))}
-              </div>
-              {permissionMode === 'bypassPermissions' && (
-                <p className="text-xs text-amber-600 mt-1">
-                  Agent will auto-approve all actions without prompts.
-                </p>
-              )}
-            </div>
-
-            {/* Model */}
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Model</label>
-              <input
-                type="text"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder="Default (agent decides)"
-                className="w-full px-2 py-1 text-xs border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-
-            {/* Save button */}
+        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="flex items-center justify-between">
+            <span style={{
+              fontSize: '1rem',
+              fontWeight: 600,
+              color: 'var(--sam-color-fg-primary, #e5e5e5)',
+            }}>
+              Agent Settings
+            </span>
             <button
               type="button"
-              onClick={handleSave}
-              disabled={!hasChanges || saving}
-              className="w-full px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={onClose}
+              style={{
+                padding: 8,
+                color: 'var(--sam-color-fg-muted, #888)',
+                minHeight: 44,
+                minWidth: 44,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              aria-label="Close settings"
             >
-              {saving ? 'Saving...' : 'Save'}
+              <svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M1 1l12 12M13 1L1 13" />
+              </svg>
             </button>
-          </>
-        )}
+          </div>
+
+          {loading ? (
+            <div style={{
+              fontSize: '0.875rem',
+              color: 'var(--sam-color-fg-muted, #888)',
+              textAlign: 'center',
+              padding: '16px 0',
+            }}>
+              Loading settings...
+            </div>
+          ) : (
+            <>
+              {/* Permission Mode */}
+              <div>
+                <label style={{
+                  display: 'block',
+                  fontSize: '0.75rem',
+                  color: 'var(--sam-color-fg-muted, #888)',
+                  marginBottom: 8,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  fontWeight: 500,
+                }}>
+                  Permission Mode
+                </label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {permissionModes.map((mode) => (
+                    <button
+                      key={mode.value}
+                      type="button"
+                      onClick={() => setPermissionMode(mode.value)}
+                      style={{
+                        padding: '8px 14px',
+                        fontSize: '0.875rem',
+                        borderRadius: 8,
+                        border: '1px solid',
+                        borderColor: permissionMode === mode.value
+                          ? 'var(--sam-color-accent-primary, #10b981)'
+                          : 'var(--sam-color-border-default, #333)',
+                        backgroundColor: permissionMode === mode.value
+                          ? 'rgba(16, 185, 129, 0.15)'
+                          : 'var(--sam-color-bg-inset, #111)',
+                        color: permissionMode === mode.value
+                          ? 'var(--sam-color-accent-primary, #10b981)'
+                          : 'var(--sam-color-fg-primary, #e5e5e5)',
+                        cursor: 'pointer',
+                        minHeight: 44,
+                      }}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+                {permissionMode === 'bypassPermissions' && (
+                  <p style={{
+                    fontSize: '0.75rem',
+                    color: 'var(--sam-color-warning, #f59e0b)',
+                    marginTop: 8,
+                  }}>
+                    Agent will auto-approve all actions without prompts.
+                  </p>
+                )}
+              </div>
+
+              {/* Model */}
+              <div>
+                <label style={{
+                  display: 'block',
+                  fontSize: '0.75rem',
+                  color: 'var(--sam-color-fg-muted, #888)',
+                  marginBottom: 8,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  fontWeight: 500,
+                }}>
+                  Model
+                </label>
+                <input
+                  type="text"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder="Default (agent decides)"
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    fontSize: '0.875rem',
+                    border: '1px solid var(--sam-color-border-default, #333)',
+                    borderRadius: 8,
+                    backgroundColor: 'var(--sam-color-bg-inset, #111)',
+                    color: 'var(--sam-color-fg-primary, #e5e5e5)',
+                    minHeight: 44,
+                  }}
+                />
+              </div>
+
+              {/* Save button */}
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={!hasChanges || saving}
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  fontSize: '0.95rem',
+                  fontWeight: 600,
+                  color: '#ffffff',
+                  backgroundColor: hasChanges && !saving
+                    ? 'var(--sam-color-accent-primary, #10b981)'
+                    : 'var(--sam-color-fg-muted, #555)',
+                  border: 'none',
+                  borderRadius: 8,
+                  cursor: hasChanges && !saving ? 'pointer' : 'not-allowed',
+                  opacity: hasChanges && !saving ? 1 : 0.5,
+                  minHeight: 48,
+                }}
+              >
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            </>
+          )}
+
+          {/* Bottom safe area for devices with home indicator */}
+          <div style={{ height: 'env(safe-area-inset-bottom, 0px)' }} />
+        </div>
       </div>
-    </div>
+    </>
   );
 }

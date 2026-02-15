@@ -108,8 +108,21 @@ Before committing any business logic changes, verify:
 1. **MUST** ensure login/primary CTAs are prominent and have min 56px touch targets
 2. **MUST** use responsive text sizes (mobile -> tablet -> desktop)
 3. **MUST** start with single-column layouts on mobile
-4. **MUST** test on mobile viewport before deploying
+4. **MUST** visually verify on mobile viewport via Playwright **during development** (before committing)
 5. **MUST** follow `docs/guides/mobile-ux-guidelines.md`
+
+### Visual Verification with Playwright (Required During Development)
+
+ALL UI changes MUST be visually verified on a mobile viewport **before committing**, not just after deployment. This catches overflow, clipping, and layout issues early.
+
+1. Start a local Vite dev server (`pnpm --filter @simple-agent-manager/web dev` or `npx vite`)
+2. Use Playwright to set a mobile viewport (375x667 minimum) and navigate to the page
+3. Take a screenshot and inspect for: overflow, clipping, touch target size, readability
+4. If the component requires authentication to reach, inject a mock HTML harness via `browser_evaluate` that renders the component's markup with the project's CSS variables
+5. Fix any issues before committing — do NOT defer to post-deployment testing
+6. Save screenshots to `.codex/tmp/playwright-screenshots/` (gitignored)
+
+This workflow avoids deploy-fix-deploy cycles and catches mobile layout bugs that unit tests cannot detect.
 
 ### Quick Mobile Check
 
@@ -117,7 +130,8 @@ Before deploying any UI changes:
 - [ ] Login button visible and large (min 56px height)
 - [ ] Text readable without zooming (responsive sizing)
 - [ ] Grid layouts collapse to single column on mobile
-- [ ] Tested in Chrome DevTools mobile view
+- [ ] Visually verified on mobile viewport via Playwright during development
+- [ ] Dialogs/popovers/panels stay within viewport bounds on 320px-wide screens
 
 ---
 
