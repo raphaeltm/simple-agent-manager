@@ -9,7 +9,7 @@ func TestGetModelEnvVar(t *testing.T) {
 		agentType string
 		want      string
 	}{
-		{"claude-code", "CLAUDE_MODEL"},
+		{"claude-code", "ANTHROPIC_MODEL"},
 		{"openai-codex", "OPENAI_MODEL"},
 		{"google-gemini", "GEMINI_MODEL"},
 		{"unknown-agent", ""},
@@ -52,7 +52,7 @@ func TestAgentSettingsEnvVarInjection(t *testing.T) {
 			name:      "Claude Code with model override",
 			agentType: "claude-code",
 			settings:  &agentSettingsPayload{Model: "claude-opus-4-6"},
-			wantEnv:   "CLAUDE_MODEL=claude-opus-4-6",
+			wantEnv:   "ANTHROPIC_MODEL=claude-opus-4-6",
 		},
 		{
 			name:      "OpenAI Codex with model override",

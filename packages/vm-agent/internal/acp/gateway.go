@@ -1359,7 +1359,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 func getModelEnvVar(agentType string) string {
 	switch agentType {
 	case "claude-code":
-		return "CLAUDE_MODEL"
+		return "ANTHROPIC_MODEL"
 	case "openai-codex":
 		return "OPENAI_MODEL"
 	case "google-gemini":
