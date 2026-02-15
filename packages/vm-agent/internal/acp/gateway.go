@@ -1084,6 +1084,7 @@ func (g *Gateway) fetchAgentSettings(ctx context.Context, agentType string) *age
 		return nil
 	}
 
+	log.Printf("Fetched agent settings from control plane: model=%q permissionMode=%q", result.Model, result.PermissionMode)
 	return &result
 }
 
