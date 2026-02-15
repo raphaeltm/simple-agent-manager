@@ -1,0 +1,9 @@
+This is a test file created in a git worktree.
+
+Testing if Claude Code can:
+1. Create a new worktree
+2. Make changes in that worktree
+3. Commit those changes
+4. Push the worktree branch
+
+Timestamp: 2026-02-15 12:39 UTC
