@@ -24,6 +24,43 @@ import (
 // Shared test helpers
 // ---------------------------------------------------------------------------
 
+// prepopulateVolume creates a Docker volume and copies a local git repo into it
+// at /workspaces/<repoDirName>. This allows integration tests to use the volume-
+// based bootstrap flow without needing to clone from a remote URL. The volume is
+// cleaned up via t.Cleanup.
+func prepopulateVolume(t *testing.T, workspaceID, repoDir, repoDirName string) string {
+	t.Helper()
+	ctx := context.Background()
+
+	volumeName, err := ensureVolumeReady(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("ensureVolumeReady: %v", err)
+	}
+	t.Cleanup(func() { _ = RemoveVolume(context.Background(), workspaceID) })
+
+	// Use a throwaway container to copy the local repo into the volume.
+	// 1. Create a container with the volume mounted.
+	containerName := "prepopulate-" + workspaceID
+	createArgs := []string{
+		"create", "--name", containerName,
+		"-v", volumeName + ":/workspaces",
+		"alpine:latest", "true",
+	}
+	if out, err := exec.CommandContext(ctx, "docker", createArgs...).CombinedOutput(); err != nil {
+		t.Fatalf("docker create for prepopulate: %v\n%s", err, string(out))
+	}
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", containerName).Run() })
+
+	// 2. Copy the local repo into the container volume.
+	// docker cp copies repoDir/. into /workspaces/repoDirName/
+	targetPath := containerName + ":/workspaces/" + repoDirName
+	if out, err := exec.CommandContext(ctx, "docker", "cp", repoDir+"/.", targetPath).CombinedOutput(); err != nil {
+		t.Fatalf("docker cp for prepopulate: %v\n%s", err, string(out))
+	}
+
+	return volumeName
+}
+
 // requireDockerAvailable skips the test if Docker is not available.
 func requireDockerAvailable(t *testing.T) {
 	t.Helper()
@@ -1146,6 +1183,10 @@ func TestIntegration_FullBootstrapWithRemoteUser(t *testing.T) {
 	}`
 	repoDir := mustCreateTestRepo(t, true, devcontainerJSON)
 
+	// Pre-populate volume so ensureRepositoryReady skips the remote clone.
+	repoDirName := config.DeriveRepoDirName("https://github.com/test/repo")
+	prepopulateVolume(t, workspaceID, repoDir, repoDirName)
+
 	cfg := &config.Config{
 		BootstrapToken:      bootstrapToken,
 		ControlPlaneURL:     server.URL,
@@ -1261,9 +1302,14 @@ func TestIntegration_FullBootstrapFlow(t *testing.T) {
 	// Start mock control plane
 	server, cpState := startMockControlPlane(t, workspaceID, bootstrapToken, callbackToken)
 
-	// Create test repo with devcontainer config (pre-populated so git clone is skipped)
+	// Create test repo with devcontainer config and pre-populate the Docker volume
+	// so the bootstrap flow finds the repo already present and skips the remote clone.
 	devcontainerJSON := `{"image": "mcr.microsoft.com/devcontainers/base:debian"}`
 	repoDir := mustCreateTestRepo(t, true, devcontainerJSON)
+
+	// Pre-populate volume so ensureRepositoryReady skips the remote clone.
+	repoDirName := config.DeriveRepoDirName("https://github.com/test/repo")
+	prepopulateVolume(t, workspaceID, repoDir, repoDirName)
 
 	cfg := &config.Config{
 		BootstrapToken:      bootstrapToken,
