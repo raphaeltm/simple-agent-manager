@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useImperativeHandle } from 'react';
 import { useAcpSession, useAcpMessages, AgentPanel } from '@simple-agent-manager/acp-client';
-import type { ChatSettingsData, AcpLifecycleEvent } from '@simple-agent-manager/acp-client';
+import type { AgentPanelHandle, ChatSettingsData, AcpLifecycleEvent } from '@simple-agent-manager/acp-client';
 import type { AgentInfo } from '@simple-agent-manager/shared';
 import { VALID_PERMISSION_MODES, AGENT_PERMISSION_MODE_LABELS } from '@simple-agent-manager/shared';
 import { getTerminalToken, getTranscribeApiUrl, getAgentSettings, saveAgentSettings } from '../lib/api';
@@ -23,19 +23,27 @@ interface ChatSessionProps {
   onActivity?: () => void;
 }
 
+/** Imperative handle for ChatSession — mirrors AgentPanelHandle. */
+export type ChatSessionHandle = AgentPanelHandle;
+
 /**
  * Self-contained chat session component.
  * Each instance owns its own ACP WebSocket connection, message history,
  * and agent selection — fully independent of other chat tabs.
  */
-export function ChatSession({
+export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>(function ChatSession({
   workspaceId,
   workspaceUrl,
   sessionId,
   preferredAgentId,
   active,
   onActivity,
-}: ChatSessionProps) {
+}, ref) {
+  const agentPanelRef = useRef<AgentPanelHandle>(null);
+
+  useImperativeHandle(ref, () => ({
+    focusInput: () => agentPanelRef.current?.focusInput(),
+  }));
   const [resolvedWsUrl, setResolvedWsUrl] = useState<string | null>(null);
 
   // Resolve transcription API URL once (stable across renders)
@@ -258,6 +266,7 @@ export function ChatSession({
       }}
     >
       <AgentPanel
+        ref={agentPanelRef}
         session={acpSession}
         messages={acpMessages}
         availableCommands={acpMessages.availableCommands}
@@ -270,4 +279,4 @@ export function ChatSession({
       />
     </div>
   );
-}
+});

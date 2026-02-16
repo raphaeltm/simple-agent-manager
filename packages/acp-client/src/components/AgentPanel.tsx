@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback, useImperativeHandle } from 'react';
 import type { AcpSessionHandle } from '../hooks/useAcpSession';
 import type { AcpMessagesHandle, ConversationItem } from '../hooks/useAcpMessages';
 import type { SlashCommand } from '../types';
@@ -22,6 +22,11 @@ export const CLIENT_COMMANDS: SlashCommand[] = [
   { name: 'copy', description: 'Copy last response to clipboard', source: 'client' },
   { name: 'export', description: 'Export conversation as markdown', source: 'client' },
 ];
+
+export interface AgentPanelHandle {
+  /** Focus the chat input textarea. */
+  focusInput: () => void;
+}
 
 interface AgentPanelProps {
   session: AcpSessionHandle;
@@ -53,7 +58,7 @@ interface AgentPanelProps {
  * Main conversation container for structured agent interaction.
  * Renders message list, prompt input, slash command palette, voice button, and usage indicator.
  */
-export function AgentPanel({
+export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(function AgentPanel({
   session,
   messages,
   availableCommands = [],
@@ -66,13 +71,17 @@ export function AgentPanel({
   permissionModes,
   onSaveSettings,
   onError,
-}: AgentPanelProps) {
+}, ref) {
   const [input, setInput] = useState('');
   const [showPalette, setShowPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const paletteRef = useRef<SlashCommandPaletteHandle>(null);
+
+  useImperativeHandle(ref, () => ({
+    focusInput: () => inputRef.current?.focus(),
+  }));
 
   // Merge agent commands with client commands for the palette
   const allCommands = useMemo(
@@ -348,7 +357,7 @@ export function AgentPanel({
       </div>
     </div>
   );
-}
+});
 
 /** Routes a ConversationItem to the appropriate component */
 function ConversationItemView({ item }: { item: ConversationItem }) {

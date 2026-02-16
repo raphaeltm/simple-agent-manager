@@ -11,6 +11,7 @@ export * from './hooks/useAcpMessages';
 
 // Components
 export { AgentPanel, CLIENT_COMMANDS } from './components/AgentPanel';
+export type { AgentPanelHandle } from './components/AgentPanel';
 export { SlashCommandPalette } from './components/SlashCommandPalette';
 export type { SlashCommandPaletteHandle, SlashCommandPaletteProps } from './components/SlashCommandPalette';
 export { MessageBubble } from './components/MessageBubble';

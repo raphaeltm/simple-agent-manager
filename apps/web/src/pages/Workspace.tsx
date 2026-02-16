@@ -9,7 +9,10 @@ import { useFeatureFlags } from '../config/features';
 import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { ChatSession } from '../components/ChatSession';
+import type { ChatSessionHandle } from '../components/ChatSession';
+import { KeyboardShortcutsHelp } from '../components/KeyboardShortcutsHelp';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { MoreVertical, X } from 'lucide-react';
 import { GitChangesButton } from '../components/GitChangesButton';
 import { GitChangesPanel } from '../components/GitChangesPanel';
@@ -152,6 +155,8 @@ export function Workspace() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const multiTerminalRef = useRef<MultiTerminalHandle | null>(null);
   const createMenuRef = useRef<HTMLDivElement | null>(null);
+  const chatSessionRefs = useRef<Map<string, ChatSessionHandle>>(new Map());
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
   const isRunning = workspace?.status === 'running';
 
@@ -721,6 +726,76 @@ export function Workspace() {
     () => agentSessions.filter((s) => s.status === 'running'),
     [agentSessions]
   );
+
+  // ── Keyboard shortcuts ──
+  // The hook stores handlers via a ref internally, so it's safe to pass an
+  // inline object here — no useMemo needed, and no stale closure issues.
+  useKeyboardShortcuts({
+    'toggle-file-browser': () => {
+      if (!isRunning || !terminalToken) return;
+      if (filesParam) handleCloseFileBrowser();
+      else handleOpenFileBrowser();
+    },
+    'toggle-git-changes': () => {
+      if (!isRunning || !terminalToken) return;
+      if (gitParam) handleCloseGitPanel();
+      else handleOpenGitChanges();
+    },
+    'focus-chat': () => {
+      if (activeChatSessionId) {
+        if (viewMode !== 'conversation') {
+          handleAttachSession(activeChatSessionId);
+        }
+        // Small delay to let the view switch render before focusing
+        requestAnimationFrame(() => {
+          chatSessionRefs.current.get(activeChatSessionId)?.focusInput();
+        });
+      }
+    },
+    'focus-terminal': () => {
+      if (viewMode !== 'terminal') {
+        const firstTermTab = workspaceTabs.find((t) => t.kind === 'terminal');
+        if (firstTermTab) handleSelectWorkspaceTab(firstTermTab);
+      }
+      requestAnimationFrame(() => {
+        multiTerminalRef.current?.focus();
+      });
+    },
+    'next-tab': () => {
+      if (workspaceTabs.length <= 1) return;
+      const currentIdx = workspaceTabs.findIndex((t) => t.id === activeTabId);
+      const nextIdx = currentIdx < 0 ? 0 : (currentIdx + 1) % workspaceTabs.length;
+      handleSelectWorkspaceTab(workspaceTabs[nextIdx]!);
+    },
+    'prev-tab': () => {
+      if (workspaceTabs.length <= 1) return;
+      const currentIdx = workspaceTabs.findIndex((t) => t.id === activeTabId);
+      const prevIdx =
+        currentIdx <= 0 ? workspaceTabs.length - 1 : currentIdx - 1;
+      handleSelectWorkspaceTab(workspaceTabs[prevIdx]!);
+    },
+    ...Object.fromEntries(
+      Array.from({ length: 9 }, (_, i) => [
+        `tab-${i + 1}`,
+        () => {
+          if (i < workspaceTabs.length) {
+            handleSelectWorkspaceTab(workspaceTabs[i]!);
+          }
+        },
+      ])
+    ),
+    'new-chat': () => {
+      if (!isRunning) return;
+      void handleCreateSession(defaultAgentId ?? undefined);
+    },
+    'new-terminal': () => {
+      if (!isRunning) return;
+      handleCreateTerminalTab();
+    },
+    'show-shortcuts': () => {
+      setShowShortcutsHelp((prev) => !prev);
+    },
+  }, isRunning);
 
   // ── Loading state ──
   if (loading) {
@@ -1487,6 +1562,10 @@ export function Workspace() {
                 {id && workspace?.url && runningChatSessions.map((session) => (
                   <ChatSession
                     key={session.id}
+                    ref={(handle) => {
+                      if (handle) chatSessionRefs.current.set(session.id, handle);
+                      else chatSessionRefs.current.delete(session.id);
+                    }}
                     workspaceId={id}
                     workspaceUrl={workspace.url!}
                     sessionId={session.id}
@@ -1652,6 +1731,11 @@ export function Workspace() {
           onClose={handleCloseFileBrowser}
           onViewDiff={handleFileViewerToDiff}
         />
+      )}
+
+      {/* ── Keyboard shortcuts help overlay ── */}
+      {showShortcutsHelp && (
+        <KeyboardShortcutsHelp onClose={() => setShowShortcutsHelp(false)} />
       )}
     </div>
   );
