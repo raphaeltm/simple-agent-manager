@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { NodeResponse } from '@simple-agent-manager/shared';
-import { Alert, Button, PageLayout, Spinner, StatusBadge } from '@simple-agent-manager/ui';
+import { Alert, Button, PageLayout, Skeleton, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { createNode, listNodes } from '../lib/api';
 
@@ -91,8 +91,30 @@ export function Nodes() {
       )}
 
       {loading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-8)' }}>
-          <Spinner size="lg" />
+        <div style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
+          {Array.from({ length: 3 }, (_, i) => (
+            <div
+              key={i}
+              aria-hidden="true"
+              style={{
+                border: '1px solid var(--sam-color-border-default)',
+                borderRadius: 'var(--sam-radius-md)',
+                padding: 'var(--sam-space-4)',
+                background: 'var(--sam-color-bg-surface)',
+                display: 'grid',
+                gap: 'var(--sam-space-2)',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Skeleton width="40%" height="1.125rem" />
+                <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
+                  <Skeleton width="60px" height="1.25rem" borderRadius="9999px" />
+                  <Skeleton width="60px" height="1.25rem" borderRadius="9999px" />
+                </div>
+              </div>
+              <Skeleton width="50%" height="0.875rem" />
+            </div>
+          ))}
         </div>
       ) : sortedNodes.length === 0 ? (
         <div

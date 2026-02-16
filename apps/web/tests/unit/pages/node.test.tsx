@@ -166,6 +166,51 @@ describe('Node page', () => {
     });
   });
 
+  it('shows error with retry when events fail to load', async () => {
+    mocks.listNodeEvents.mockRejectedValue(new Error('Network timeout'));
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/node-1']}>
+        <Routes>
+          <Route path="/nodes/:id" element={<Node />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Node 1').length).toBeGreaterThanOrEqual(1);
+    });
+
+    // Should show the events error with retry button
+    await waitFor(() => {
+      expect(screen.getByText('Failed to load events')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+
+    // Retry should call the API again
+    mocks.listNodeEvents.mockResolvedValue({
+      events: [
+        {
+          id: 'evt-1',
+          nodeId: 'node-1',
+          workspaceId: null,
+          level: 'info',
+          type: 'node.started',
+          message: 'Node started',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+      nextCursor: null,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Node started')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Failed to load events')).not.toBeInTheDocument();
+  });
+
   it('renders stale health state with heartbeat freshness text', async () => {
     mocks.getNode.mockResolvedValue({
       id: 'node-1',

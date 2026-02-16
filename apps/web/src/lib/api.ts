@@ -173,13 +173,9 @@ export async function listNodeEvents(
   const params = new URLSearchParams();
   params.set('limit', String(limit));
 
-  try {
-    return await request<{ events: Event[]; nextCursor?: string | null }>(
-      `/api/nodes/${nodeId}/events?${params.toString()}`
-    );
-  } catch {
-    return { events: [], nextCursor: null };
-  }
+  return request<{ events: Event[]; nextCursor?: string | null }>(
+    `/api/nodes/${nodeId}/events?${params.toString()}`
+  );
 }
 
 // =============================================================================
@@ -251,18 +247,15 @@ export async function listWorkspaceEvents(
   params.set('token', token);
   if (cursor) params.set('cursor', cursor);
 
-  try {
-    const res = await fetch(
-      `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/events?${params.toString()}`
-    );
-    if (!res.ok) {
-      return { events: [], nextCursor: null };
-    }
-    const data = await res.json() as { events: Event[]; nextCursor?: string | null };
-    return { events: data.events ?? [], nextCursor: data.nextCursor ?? null };
-  } catch {
-    return { events: [], nextCursor: null };
+  const res = await fetch(
+    `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/events?${params.toString()}`
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Unknown error');
+    throw new Error(`Failed to load workspace events: ${text}`);
   }
+  const data = await res.json() as { events: Event[]; nextCursor?: string | null };
+  return { events: data.events ?? [], nextCursor: data.nextCursor ?? null };
 }
 
 // =============================================================================
@@ -325,7 +318,8 @@ export async function getWorkspaceTabs(
   const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/tabs?token=${encodeURIComponent(token)}`;
   const res = await fetch(url, { credentials: 'include' });
   if (!res.ok) {
-    return [];
+    const text = await res.text().catch(() => 'Unknown error');
+    throw new Error(`Failed to load workspace tabs: ${text}`);
   }
   const data = (await res.json()) as { tabs: WorkspaceTab[] };
   return data.tabs ?? [];

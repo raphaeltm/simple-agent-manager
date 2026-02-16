@@ -6,7 +6,7 @@ import { WorkspaceCard } from '../components/WorkspaceCard';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { listWorkspaces, stopWorkspace, restartWorkspace, deleteWorkspace } from '../lib/api';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
-import { PageLayout, Button, Alert, Spinner } from '@simple-agent-manager/ui';
+import { PageLayout, Button, Alert, Spinner, SkeletonCard } from '@simple-agent-manager/ui';
 
 /**
  * Dashboard page showing user profile and workspaces.
@@ -193,8 +193,10 @@ export function Dashboard() {
         </div>
 
         {loading ? (
-          <div style={{ padding: 'var(--sam-space-8)', display: 'flex', justifyContent: 'center' }}>
-            <Spinner size="lg" />
+          <div className="sam-workspace-grid" style={{ display: 'grid', gap: 'var(--sam-space-4)' }}>
+            {Array.from({ length: 3 }, (_, i) => (
+              <SkeletonCard key={i} lines={2} />
+            ))}
           </div>
         ) : workspaces.length === 0 ? (
           <div style={{

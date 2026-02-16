@@ -15,6 +15,7 @@ import { KeyboardShortcutsHelp } from '../components/KeyboardShortcutsHelp';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useTabOrder } from '../hooks/useTabOrder';
+import { useTokenRefresh } from '../hooks/useTokenRefresh';
 import { WorkspaceTabStrip, type WorkspaceTabItem } from '../components/WorkspaceTabStrip';
 import { MoreVertical, X } from 'lucide-react';
 import { GitChangesButton } from '../components/GitChangesButton';
@@ -26,7 +27,6 @@ import { FileViewerPanel } from '../components/FileViewerPanel';
 import { WorkspaceSidebar } from '../components/WorkspaceSidebar';
 import type { SessionTokenUsage, SidebarTab } from '../components/WorkspaceSidebar';
 import {
-  ApiClientError,
   createAgentSession,
   getFileIndex,
   getGitStatus,
@@ -53,21 +53,6 @@ import type {
 } from '@simple-agent-manager/shared';
 import '../styles/acp-chat.css';
 
-function terminalConnectionErrorMessage(err: unknown): string {
-  if (err instanceof ApiClientError) {
-    if (err.status === 401 || err.status === 403) {
-      return 'Your session expired. Sign in again, then retry the terminal connection.';
-    }
-    if (err.status === 404) {
-      return 'Workspace connection endpoint is not ready yet. Retry in a few seconds.';
-    }
-    if (err.status >= 500) {
-      return 'Terminal service is temporarily unavailable. Please retry.';
-    }
-  }
-
-  return 'Unable to establish terminal connection right now. Please retry.';
-}
 
 /** View modes */
 type ViewMode = 'terminal' | 'conversation';
@@ -143,8 +128,6 @@ export function Workspace() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [wsUrl, setWsUrl] = useState<string | null>(null);
-  const [terminalToken, setTerminalToken] = useState<string | null>(null);
-  const [terminalLoading, setTerminalLoading] = useState(false);
   const [terminalError, setTerminalError] = useState<string | null>(null);
   const [gitChangeCount, setGitChangeCount] = useState(0);
   const [gitStatus, setGitStatus] = useState<GitStatusData | null>(null);
@@ -175,6 +158,30 @@ export function Workspace() {
   const tabOrder = useTabOrder<WorkspaceTab>(id);
 
   const isRunning = workspace?.status === 'running';
+
+  // Proactive token refresh (R3 fix): fetches token on mount and schedules
+  // refresh 5 minutes before expiry. On 401 during reconnection, call refresh().
+  const tokenRefreshFetchToken = useCallback(async () => {
+    if (!id) throw new Error('No workspace ID');
+    return getTerminalToken(id);
+  }, [id]);
+
+  const {
+    token: terminalToken,
+    loading: terminalLoading,
+    error: tokenRefreshError,
+    refresh: refreshTerminalToken,
+  } = useTokenRefresh({
+    fetchToken: tokenRefreshFetchToken,
+    enabled: isRunning && !!id,
+  });
+
+  // Propagate token refresh errors to the terminal error display
+  useEffect(() => {
+    if (tokenRefreshError) {
+      setTerminalError(tokenRefreshError);
+    }
+  }, [tokenRefreshError]);
 
   const loadWorkspaceState = useCallback(async () => {
     if (!id) {
@@ -216,41 +223,25 @@ export function Workspace() {
     return () => clearInterval(interval);
   }, [id, workspace?.status, loadWorkspaceState]);
 
-  const connectTerminal = useCallback(async () => {
-    if (!id || !workspace?.url || workspace.status !== 'running') {
+  // Derive WebSocket URL from the proactively-refreshed token (R3 fix).
+  // When the token refreshes, the wsUrl updates automatically.
+  useEffect(() => {
+    if (!workspace?.url || !terminalToken || !isRunning) {
+      setWsUrl(null);
       return;
     }
 
     try {
-      setTerminalLoading(true);
-      setTerminalError(null);
-
-      const { token } = await getTerminalToken(id);
-      setTerminalToken(token);
       const url = new URL(workspace.url);
       const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsPath = featureFlags.multiTerminal ? '/terminal/ws/multi' : '/terminal/ws';
-      setWsUrl(`${wsProtocol}//${url.host}${wsPath}?token=${encodeURIComponent(token)}`);
-    } catch (err) {
-      setWsUrl(null);
-      setTerminalToken(null);
-      setTerminalError(terminalConnectionErrorMessage(err));
-    } finally {
-      setTerminalLoading(false);
-    }
-  }, [id, workspace?.status, workspace?.url, featureFlags.multiTerminal]);
-
-  // Fetch terminal token and build WebSocket URL
-  useEffect(() => {
-    if (!id || !workspace || workspace.status !== 'running' || !workspace.url) {
-      setWsUrl(null);
-      setTerminalToken(null);
+      setWsUrl(`${wsProtocol}//${url.host}${wsPath}?token=${encodeURIComponent(terminalToken)}`);
       setTerminalError(null);
-      return;
+    } catch {
+      setWsUrl(null);
+      setTerminalError('Invalid workspace URL');
     }
-
-    void connectTerminal();
-  }, [id, workspace?.status, workspace?.url, connectTerminal]);
+  }, [workspace?.url, terminalToken, isRunning, featureFlags.multiTerminal]);
 
   // Fetch workspace events directly from the VM Agent (not proxied through control plane)
   useEffect(() => {
@@ -259,8 +250,13 @@ export function Workspace() {
     }
 
     const fetchEvents = async () => {
-      const data = await listWorkspaceEvents(workspace.url!, id, terminalToken, 50);
-      setWorkspaceEvents(data.events || []);
+      try {
+        const data = await listWorkspaceEvents(workspace.url!, id, terminalToken, 50);
+        setWorkspaceEvents(data.events || []);
+      } catch {
+        // Events are a secondary concern — don't overwrite primary workspace errors.
+        // The sidebar will show an empty events list; polling will retry on next tick.
+      }
     };
 
     void fetchEvents();
@@ -1015,7 +1011,7 @@ export function Workspace() {
               variant="secondary"
               size="sm"
               onClick={() => {
-                void connectTerminal();
+                void refreshTerminalToken();
               }}
               disabled={terminalLoading}
             >
