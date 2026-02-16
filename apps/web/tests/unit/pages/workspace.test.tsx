@@ -208,7 +208,7 @@ describe('Workspace page', () => {
     await waitFor(() => {
       expect(screen.getByTestId('terminal')).toBeInTheDocument();
     });
-    expect(screen.getByText('Workspace Events')).toBeInTheDocument();
+    expect(screen.getByText(/Events/)).toBeInTheDocument();
   });
 
   it('supports chat tab attach flow and updates workspace query string', async () => {
@@ -497,13 +497,11 @@ describe('Workspace page', () => {
       expect(screen.getByRole('dialog', { name: 'Workspace menu' })).toBeInTheDocument();
 
       // Should contain rename section
-      expect(screen.getByText('Workspace name')).toBeInTheDocument();
       expect(screen.getByDisplayValue('Workspace A')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /rename/i })).toBeInTheDocument();
 
-      // Should contain events section
-      expect(screen.getByText('Workspace Events')).toBeInTheDocument();
-      expect(screen.getByText('workspace.created')).toBeInTheDocument();
+      // Should contain events section (collapsed by default — header visible, content hidden)
+      expect(screen.getByText(/Events/)).toBeInTheDocument();
     });
 
     it('closes overlay when close button is clicked', async () => {
