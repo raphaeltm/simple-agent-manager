@@ -62,21 +62,29 @@ export function Dashboard() {
   }, [loadWorkspaces, hasTransitionalWorkspaces]);
 
   const handleStopWorkspace = async (id: string) => {
+    // Optimistic: immediately show workspace as stopping
+    const prev = workspaces;
+    setWorkspaces(ws => ws.map(w => w.id === id ? { ...w, status: 'stopping' as const } : w));
     try {
       await stopWorkspace(id);
       toast.success('Workspace stopping');
-      await loadWorkspaces();
     } catch (err) {
+      // Revert optimistic update on failure
+      setWorkspaces(prev);
       toast.error(err instanceof Error ? err.message : 'Failed to stop workspace');
     }
   };
 
   const handleRestartWorkspace = async (id: string) => {
+    // Optimistic: immediately show workspace as creating
+    const prev = workspaces;
+    setWorkspaces(ws => ws.map(w => w.id === id ? { ...w, status: 'creating' as const } : w));
     try {
       await restartWorkspace(id);
       toast.success('Workspace restarting');
-      await loadWorkspaces();
     } catch (err) {
+      // Revert optimistic update on failure
+      setWorkspaces(prev);
       toast.error(err instanceof Error ? err.message : 'Failed to restart workspace');
     }
   };
@@ -92,14 +100,18 @@ export function Dashboard() {
     if (!deleteTarget) return;
 
     setDeleteLoading(true);
+    // Optimistic: immediately remove workspace from list
+    const prev = workspaces;
+    const targetId = deleteTarget.id;
+    setWorkspaces(ws => ws.filter(w => w.id !== targetId));
+    setDeleteTarget(null);
     try {
-      await deleteWorkspace(deleteTarget.id);
+      await deleteWorkspace(targetId);
       toast.success('Workspace deleted');
-      setDeleteTarget(null);
-      await loadWorkspaces();
     } catch (err) {
+      // Revert optimistic update on failure
+      setWorkspaces(prev);
       toast.error(err instanceof Error ? err.message : 'Failed to delete workspace');
-      setDeleteTarget(null);
     } finally {
       setDeleteLoading(false);
     }

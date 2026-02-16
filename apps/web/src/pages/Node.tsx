@@ -92,12 +92,21 @@ export function Node() {
       return;
     }
 
+    // Optimistic: immediately show node as stopping
+    const prevNode = node;
+    const prevWorkspaces = workspaces;
+    setNode({ ...node, status: 'stopping' });
+    setWorkspaces(ws => ws.map(w =>
+      w.status === 'running' ? { ...w, status: 'stopping' as const } : w
+    ));
+    setStopping(true);
     try {
-      setStopping(true);
       await stopNode(id);
       toast.success('Node stopping');
-      await loadNode();
     } catch (err) {
+      // Revert optimistic update on failure
+      setNode(prevNode);
+      setWorkspaces(prevWorkspaces);
       toast.error(err instanceof Error ? err.message : 'Failed to stop node');
     } finally {
       setStopping(false);

@@ -12,6 +12,75 @@ import {
 import type { GitHubInstallation, NodeResponse } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, Input, PageLayout, Select, Spinner } from '@simple-agent-manager/ui';
 
+type PrereqStatus = 'loading' | 'ready' | 'missing' | 'error';
+
+interface PrereqItemProps {
+  label: string;
+  status: PrereqStatus;
+  detail?: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}
+
+function PrereqItem({ label, status, detail, actionLabel, onAction }: PrereqItemProps) {
+  const iconMap: Record<PrereqStatus, { symbol: string; color: string }> = {
+    loading: { symbol: '\u2026', color: 'var(--sam-color-fg-muted)' },
+    ready: { symbol: '\u2713', color: 'var(--sam-color-success)' },
+    missing: { symbol: '\u2717', color: 'var(--sam-color-danger)' },
+    error: { symbol: '!', color: 'var(--sam-color-warning)' },
+  };
+  const icon = iconMap[status];
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: 'var(--sam-space-3) var(--sam-space-4)',
+        borderBottom: '1px solid var(--sam-color-border-default)',
+        gap: 'var(--sam-space-3)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)', minWidth: 0 }}>
+        <span
+          aria-label={status}
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: status === 'loading' ? '1rem' : '0.875rem',
+            fontWeight: 700,
+            color: icon.color,
+            backgroundColor: `color-mix(in srgb, ${icon.color} 12%, transparent)`,
+            flexShrink: 0,
+          }}
+        >
+          {status === 'loading' ? <Spinner size="sm" /> : icon.symbol}
+        </span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>
+            {label}
+          </div>
+          {detail && (
+            <div style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginTop: 2 }}>
+              {detail}
+            </div>
+          )}
+        </div>
+      </div>
+      {actionLabel && onAction && (
+        <Button variant="secondary" size="sm" onClick={onAction} style={{ flexShrink: 0 }}>
+          {actionLabel}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 const VM_SIZES = [
   { value: 'small', label: 'Small', description: '2 vCPUs, 4GB RAM' },
   { value: 'medium', label: 'Medium', description: '4 vCPUs, 8GB RAM' },
@@ -35,7 +104,9 @@ export function CreateWorkspace() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [checkingPrereqs, setCheckingPrereqs] = useState(true);
+  const [hetznerStatus, setHetznerStatus] = useState<PrereqStatus>('loading');
+  const [githubStatus, setGithubStatus] = useState<PrereqStatus>('loading');
+  const [nodesStatus, setNodesStatus] = useState<PrereqStatus>('loading');
   const [hasHetzner, setHasHetzner] = useState(false);
   const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
   const [nodes, setNodes] = useState<NodeResponse[]>([]);
@@ -51,9 +122,41 @@ export function CreateWorkspace() {
   const [vmLocation, setVmLocation] = useState('nbg1');
   const [selectedNodeId, setSelectedNodeId] = useState<string>(locationState?.nodeId ?? '');
 
+  // Check each prerequisite independently so status appears incrementally
   useEffect(() => {
-    void checkPrerequisites();
+    // Hetzner credentials
+    listCredentials()
+      .then((creds) => {
+        const found = creds.some((c) => c.provider === 'hetzner');
+        setHasHetzner(found);
+        setHetznerStatus(found ? 'ready' : 'missing');
+      })
+      .catch(() => setHetznerStatus('error'));
+
+    // GitHub App installations
+    listGitHubInstallations()
+      .then((installs) => {
+        setInstallations(installs);
+        setGithubStatus(installs.length > 0 ? 'ready' : 'missing');
+        const first = installs[0];
+        if (first) setInstallationId(first.id);
+      })
+      .catch(() => setGithubStatus('error'));
+
+    // Available nodes
+    listNodes()
+      .then((nodeRows) => {
+        const usable = nodeRows.filter((n) => n.status !== 'error');
+        setNodes(usable);
+        setNodesStatus('ready');
+        if (locationState?.nodeId && usable.some((n) => n.id === locationState.nodeId)) {
+          setSelectedNodeId(locationState.nodeId);
+        }
+      })
+      .catch(() => setNodesStatus('error'));
   }, []);
+
+  const checkingPrereqs = hetznerStatus === 'loading' || githubStatus === 'loading';
 
   const fetchBranches = useCallback(async (fullName: string, instId: string) => {
     setBranchesLoading(true);
@@ -90,34 +193,6 @@ export function CreateWorkspace() {
     [fetchBranches, installationId]
   );
 
-  const checkPrerequisites = async () => {
-    try {
-      const [creds, installs, nodeRows] = await Promise.all([
-        listCredentials(),
-        listGitHubInstallations(),
-        listNodes(),
-      ]);
-
-      setHasHetzner(creds.some((credential) => credential.provider === 'hetzner'));
-      setInstallations(installs);
-      setNodes(nodeRows.filter((node) => node.status !== 'error'));
-
-      const firstInstallation = installs[0];
-      if (firstInstallation) {
-        setInstallationId(firstInstallation.id);
-      }
-
-      if (locationState?.nodeId && nodeRows.some((node) => node.id === locationState.nodeId)) {
-        setSelectedNodeId(locationState.nodeId);
-      }
-    } catch (err) {
-      console.error('Failed to check prerequisites:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load prerequisites');
-    } finally {
-      setCheckingPrereqs(false);
-    }
-  };
-
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setLoading(true);
@@ -148,23 +223,10 @@ export function CreateWorkspace() {
     }
   };
 
-  if (checkingPrereqs) {
-    return (
-      <div
-        style={{
-          minHeight: 'var(--sam-app-height)',
-          backgroundColor: 'var(--sam-color-bg-canvas)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Spinner size="lg" />
-      </div>
-    );
-  }
-
   const canCreate = hasHetzner && installations.length > 0;
+  const anyMissing = hetznerStatus === 'missing' || githubStatus === 'missing'
+    || hetznerStatus === 'error' || githubStatus === 'error';
+  const showPrereqs = checkingPrereqs || anyMissing;
 
   const labelStyle = {
     display: 'block',
@@ -181,30 +243,55 @@ export function CreateWorkspace() {
       maxWidth="md"
       headerRight={<UserMenu />}
     >
-      {!canCreate ? (
-        <Card style={{ padding: 'var(--sam-space-6)' }}>
-          <div style={{ textAlign: 'center', padding: 'var(--sam-space-8) 0' }}>
-            <h3
-              style={{
-                marginTop: 'var(--sam-space-4)',
-                fontSize: '1.125rem',
-                fontWeight: 500,
-                color: 'var(--sam-color-fg-primary)',
-              }}
-            >
-              Setup Required
+      {showPrereqs && (
+        <Card style={{ marginBottom: 'var(--sam-space-6)', overflow: 'hidden' }}>
+          <div style={{ padding: 'var(--sam-space-4)', borderBottom: '1px solid var(--sam-color-border-default)' }}>
+            <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: 'var(--sam-color-fg-primary)' }}>
+              {checkingPrereqs ? 'Checking prerequisites...' : 'Setup Required'}
             </h3>
-            <p style={{ marginTop: 'var(--sam-space-2)', color: 'var(--sam-color-fg-muted)' }}>
-              Before creating a workspace, connect Hetzner and install the GitHub App.
-            </p>
-            <div style={{ marginTop: 'var(--sam-space-6)' }}>
-              <Button onClick={() => navigate('/settings')} size="lg">
-                Go to Settings
-              </Button>
-            </div>
+            {!checkingPrereqs && anyMissing && (
+              <p style={{ margin: '4px 0 0', fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>
+                Complete the items below before creating a workspace.
+              </p>
+            )}
           </div>
+          <PrereqItem
+            label="Hetzner Cloud Token"
+            status={hetznerStatus}
+            detail={
+              hetznerStatus === 'ready' ? 'Connected' :
+              hetznerStatus === 'missing' ? 'Required to provision VMs' :
+              hetznerStatus === 'error' ? 'Failed to check credentials' : undefined
+            }
+            actionLabel={hetznerStatus === 'missing' || hetznerStatus === 'error' ? 'Settings' : undefined}
+            onAction={hetznerStatus === 'missing' || hetznerStatus === 'error' ? () => navigate('/settings') : undefined}
+          />
+          <PrereqItem
+            label="GitHub App Installation"
+            status={githubStatus}
+            detail={
+              githubStatus === 'ready' ? `${installations.length} installation${installations.length > 1 ? 's' : ''} found` :
+              githubStatus === 'missing' ? 'Required to access repositories' :
+              githubStatus === 'error' ? 'Failed to check installations' : undefined
+            }
+            actionLabel={githubStatus === 'missing' || githubStatus === 'error' ? 'Settings' : undefined}
+            onAction={githubStatus === 'missing' || githubStatus === 'error' ? () => navigate('/settings') : undefined}
+          />
+          <PrereqItem
+            label="Nodes"
+            status={nodesStatus}
+            detail={
+              nodesStatus === 'ready'
+                ? nodes.length > 0
+                  ? `${nodes.length} available node${nodes.length > 1 ? 's' : ''}`
+                  : 'None yet \u2014 one will be created automatically'
+                : nodesStatus === 'error' ? 'Failed to load nodes' : undefined
+            }
+          />
         </Card>
-      ) : (
+      )}
+
+      {canCreate && (
         <form
           onSubmit={handleSubmit}
           style={{

@@ -190,6 +190,41 @@ describe('Node page', () => {
     expect(screen.queryByText('Failed to load events')).not.toBeInTheDocument();
   });
 
+  it('optimistically shows node as stopping when stop is clicked', async () => {
+    mocks.stopNode.mockReturnValue(new Promise(() => {}));
+
+    renderNode('/nodes/node-1');
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Node 1').length).toBeGreaterThanOrEqual(1);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /stop node/i }));
+
+    // Optimistic: node status should change to stopping, button should be disabled
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /stopping/i })).toBeInTheDocument();
+    });
+  });
+
+  it('reverts optimistic stop on API failure', async () => {
+    mocks.stopNode.mockRejectedValue(new Error('Server error'));
+
+    renderNode('/nodes/node-1');
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Node 1').length).toBeGreaterThanOrEqual(1);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /stop node/i }));
+
+    // Should revert: stop button should be available again (not in "stopping" state)
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^stop node$/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^stop node$/i })).not.toBeDisabled();
+    });
+  });
+
   it('renders stale health state with heartbeat freshness text', async () => {
     mocks.getNode.mockResolvedValue({
       id: 'node-1',
