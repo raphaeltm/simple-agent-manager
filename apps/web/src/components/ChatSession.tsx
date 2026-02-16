@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, useImperativeHandle } from 'react';
 import { useAcpSession, useAcpMessages, AgentPanel } from '@simple-agent-manager/acp-client';
-import type { AgentPanelHandle, ChatSettingsData, AcpLifecycleEvent } from '@simple-agent-manager/acp-client';
+import type { AgentPanelHandle, ChatSettingsData, AcpLifecycleEvent, TokenUsage } from '@simple-agent-manager/acp-client';
 import type { AgentInfo } from '@simple-agent-manager/shared';
 import { VALID_PERMISSION_MODES, AGENT_PERMISSION_MODE_LABELS } from '@simple-agent-manager/shared';
 import { getTerminalToken, getTranscribeApiUrl, getAgentSettings, saveAgentSettings } from '../lib/api';
@@ -21,6 +21,8 @@ interface ChatSessionProps {
   active: boolean;
   /** Called on any activity (for idle detection) */
   onActivity?: () => void;
+  /** Called when token usage changes (for sidebar aggregation) */
+  onUsageChange?: (sessionId: string, usage: TokenUsage) => void;
 }
 
 /** Imperative handle for ChatSession — mirrors AgentPanelHandle. */
@@ -38,6 +40,7 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
   preferredAgentId,
   active,
   onActivity,
+  onUsageChange,
 }, ref) {
   const agentPanelRef = useRef<AgentPanelHandle>(null);
 
@@ -189,6 +192,13 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
       handleActivity();
     }
   }, [acpMessages.items.length, handleActivity]);
+
+  // Report token usage changes to parent for sidebar aggregation
+  useEffect(() => {
+    if (acpMessages.usage.totalTokens > 0) {
+      onUsageChange?.(sessionId, acpMessages.usage);
+    }
+  }, [acpMessages.usage, sessionId, onUsageChange]);
 
   // ── Agent settings ──
   const [agentSettings, setAgentSettings] = useState<ChatSettingsData | null>(null);

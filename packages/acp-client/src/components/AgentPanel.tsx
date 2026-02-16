@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback, useImperative
 import type { AcpSessionHandle } from '../hooks/useAcpSession';
 import type { AcpMessagesHandle, ConversationItem } from '../hooks/useAcpMessages';
 import type { SlashCommand } from '../types';
+import { useAutoScroll } from '../hooks/useAutoScroll';
 import { MessageBubble } from './MessageBubble';
 import { ToolCallCard } from './ToolCallCard';
 import { ThinkingBlock } from './ThinkingBlock';
@@ -75,7 +76,7 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
   const [input, setInput] = useState('');
   const [showPalette, setShowPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const { scrollRef } = useAutoScroll();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const paletteRef = useRef<SlashCommandPaletteHandle>(null);
 
@@ -104,13 +105,6 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
   useEffect(() => {
     setShowPalette(slashFilter !== null);
   }, [slashFilter]);
-
-  // Auto-scroll to bottom on new messages
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages.items.length]);
 
   // Handle client-side command execution
   const handleClientCommand = useCallback(

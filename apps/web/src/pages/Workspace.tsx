@@ -10,6 +10,7 @@ import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { ChatSession } from '../components/ChatSession';
 import type { ChatSessionHandle } from '../components/ChatSession';
+import { CommandPalette } from '../components/CommandPalette';
 import { KeyboardShortcutsHelp } from '../components/KeyboardShortcutsHelp';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
@@ -22,6 +23,8 @@ import { GitDiffView } from '../components/GitDiffView';
 import { FileBrowserButton } from '../components/FileBrowserButton';
 import { FileBrowserPanel } from '../components/FileBrowserPanel';
 import { FileViewerPanel } from '../components/FileViewerPanel';
+import { WorkspaceSidebar } from '../components/WorkspaceSidebar';
+import type { SessionTokenUsage, SidebarTab } from '../components/WorkspaceSidebar';
 import {
   ApiClientError,
   createAgentSession,
@@ -38,6 +41,8 @@ import {
   stopWorkspace,
   updateWorkspace,
 } from '../lib/api';
+import type { GitStatusData } from '../lib/api';
+import type { TokenUsage } from '@simple-agent-manager/acp-client';
 import type {
   AgentInfo,
   AgentSession,
@@ -141,6 +146,8 @@ export function Workspace() {
   const [terminalLoading, setTerminalLoading] = useState(false);
   const [terminalError, setTerminalError] = useState<string | null>(null);
   const [gitChangeCount, setGitChangeCount] = useState(0);
+  const [gitStatus, setGitStatus] = useState<GitStatusData | null>(null);
+  const [sessionTokenUsages, setSessionTokenUsages] = useState<SessionTokenUsage[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>(viewOverride ?? 'terminal');
   const [workspaceEvents, setWorkspaceEvents] = useState<Event[]>([]);
   const [agentSessions, setAgentSessions] = useState<AgentSession[]>([]);
@@ -159,6 +166,7 @@ export function Workspace() {
   const createMenuRef = useRef<HTMLDivElement | null>(null);
   const chatSessionRefs = useRef<Map<string, ChatSessionHandle>>(new Map());
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
 
   const tabOrder = useTabOrder<WorkspaceTab>(id);
 
@@ -327,6 +335,22 @@ export function Workspace() {
     if (!id) return;
     void loadWorkspaceState();
   }, [id, loadWorkspaceState]);
+
+  const handleUsageChange = useCallback((sessionId: string, usage: TokenUsage) => {
+    setSessionTokenUsages((prev) => {
+      const idx = prev.findIndex((s) => s.sessionId === sessionId);
+      // Find a label from agentSessions
+      const session = agentSessions.find((s) => s.id === sessionId);
+      const label = session?.label ?? `Chat ${sessionId.slice(-4)}`;
+      const entry: SessionTokenUsage = { sessionId, label, usage };
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = entry;
+        return next;
+      }
+      return [...prev, entry];
+    });
+  }, [agentSessions]);
 
   const handleStop = async () => {
     if (!id) return;
@@ -507,6 +531,7 @@ export function Workspace() {
     if (!workspace?.url || !terminalToken || !id || !isRunning) return;
     getGitStatus(workspace.url, id, terminalToken)
       .then((data) => {
+        setGitStatus(data);
         setGitChangeCount(data.staged.length + data.unstaged.length + data.untracked.length);
       })
       .catch(() => {
@@ -789,7 +814,8 @@ export function Workspace() {
   // ── Keyboard shortcuts ──
   // The hook stores handlers via a ref internally, so it's safe to pass an
   // inline object here — no useMemo needed, and no stale closure issues.
-  useKeyboardShortcuts({
+  // Extracted into a variable so the same handlers can be shared with CommandPalette.
+  const shortcutHandlers = {
     'toggle-file-browser': () => {
       if (!isRunning || !terminalToken) return;
       if (filesParam) handleCloseFileBrowser();
@@ -851,10 +877,15 @@ export function Workspace() {
       if (!isRunning) return;
       handleCreateTerminalTab();
     },
+    'command-palette': () => {
+      setShowCommandPalette((prev) => !prev);
+      setShowShortcutsHelp(false);
+    },
     'show-shortcuts': () => {
       setShowShortcutsHelp((prev) => !prev);
     },
-  }, isRunning);
+  };
+  useKeyboardShortcuts(shortcutHandlers, isRunning);
 
   // ── Loading state ──
   if (loading) {
@@ -1138,142 +1169,29 @@ export function Workspace() {
 
   // ── Sidebar content (shared between desktop sidebar and mobile overlay) ──
   const sidebarContent = (
-    <>
-      <div
-        style={{
-          padding: 'var(--sam-space-3)',
-          borderBottom: '1px solid var(--sam-color-border-default)',
-          display: 'grid',
-          gap: 'var(--sam-space-2)',
-        }}
-      >
-        <label style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
-          Workspace name
-        </label>
-        <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
-          <input
-            value={displayNameInput}
-            onChange={(event) => setDisplayNameInput(event.target.value)}
-            style={{
-              flex: 1,
-              borderRadius: 'var(--sam-radius-sm)',
-              border: '1px solid var(--sam-color-border-default)',
-              background: 'var(--sam-color-bg-canvas)',
-              color: 'var(--sam-color-fg-primary)',
-              padding: '6px 8px',
-              minWidth: 0,
-            }}
-          />
-          <Button
-            size="sm"
-            onClick={handleRename}
-            disabled={renaming || !displayNameInput.trim()}
-          >
-            {renaming ? 'Saving...' : 'Rename'}
-          </Button>
-        </div>
-      </div>
-
-      {/* Lifecycle actions */}
-      <div
-        style={{
-          padding: 'var(--sam-space-3)',
-          borderBottom: '1px solid var(--sam-color-border-default)',
-          display: 'flex',
-          gap: 'var(--sam-space-2)',
-        }}
-      >
-        {isRunning && (
-          <>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleRebuild}
-              disabled={actionLoading}
-              loading={actionLoading}
-              style={{ flex: 1 }}
-            >
-              Rebuild
-            </Button>
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={handleStop}
-              disabled={actionLoading}
-              loading={actionLoading}
-              style={{ flex: 1 }}
-            >
-              Stop
-            </Button>
-          </>
-        )}
-        {workspace?.status === 'stopped' && (
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleRestart}
-            disabled={actionLoading}
-            loading={actionLoading}
-            style={{ flex: 1 }}
-          >
-            Restart
-          </Button>
-        )}
-      </div>
-
-      <section
-        style={{
-          borderTop: '1px solid var(--sam-color-border-default)',
-          overflow: 'auto',
-          flex: 1,
-        }}
-      >
-        <div
-          style={{
-            padding: 'var(--sam-space-3)',
-            borderBottom: '1px solid var(--sam-color-border-default)',
-          }}
-        >
-          <strong style={{ fontSize: '0.875rem' }}>Workspace Events</strong>
-        </div>
-        {workspaceEvents.length === 0 ? (
-          <div
-            style={{
-              padding: 'var(--sam-space-3)',
-              fontSize: '0.875rem',
-              color: 'var(--sam-color-fg-muted)',
-            }}
-          >
-            No events yet.
-          </div>
-        ) : (
-          workspaceEvents.map((event) => (
-            <div
-              key={event.id}
-              style={{
-                borderBottom: '1px solid var(--sam-color-border-default)',
-                padding: 'var(--sam-space-3)',
-                fontSize: '0.8125rem',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  gap: 'var(--sam-space-2)',
-                }}
-              >
-                <strong>{event.type}</strong>
-                <span style={{ color: 'var(--sam-color-fg-muted)' }}>
-                  {new Date(event.createdAt).toLocaleTimeString()}
-                </span>
-              </div>
-              <div style={{ color: 'var(--sam-color-fg-muted)' }}>{event.message}</div>
-            </div>
-          ))
-        )}
-      </section>
-    </>
+    <WorkspaceSidebar
+      workspace={workspace}
+      isRunning={isRunning}
+      isMobile={isMobile}
+      actionLoading={actionLoading}
+      onStop={handleStop}
+      onRestart={handleRestart}
+      onRebuild={handleRebuild}
+      displayNameInput={displayNameInput}
+      onDisplayNameChange={setDisplayNameInput}
+      onRename={handleRename}
+      renaming={renaming}
+      workspaceTabs={workspaceTabs}
+      activeTabId={activeTabId}
+      onSelectTab={(tab: SidebarTab) => {
+        const found = workspaceTabs.find((t) => t.id === tab.id);
+        if (found) handleSelectWorkspaceTab(found);
+      }}
+      gitStatus={gitStatus}
+      onOpenGitChanges={handleOpenGitChanges}
+      sessionTokenUsages={sessionTokenUsages}
+      workspaceEvents={workspaceEvents}
+    />
   );
 
   // ══════════════════════════════════════════════════════════════
@@ -1507,6 +1425,7 @@ export function Workspace() {
                     configuredAgents={configuredAgents}
                     active={viewMode === 'conversation' && activeChatSessionId === session.id}
                     onActivity={handleTerminalActivity}
+                    onUsageChange={handleUsageChange}
                   />
                 ))}
               </>
@@ -1667,6 +1586,14 @@ export function Workspace() {
       {/* ── Keyboard shortcuts help overlay ── */}
       {showShortcutsHelp && (
         <KeyboardShortcutsHelp onClose={() => setShowShortcutsHelp(false)} />
+      )}
+
+      {/* ── Command palette overlay ── */}
+      {showCommandPalette && (
+        <CommandPalette
+          onClose={() => setShowCommandPalette(false)}
+          handlers={shortcutHandlers}
+        />
       )}
     </div>
   );
