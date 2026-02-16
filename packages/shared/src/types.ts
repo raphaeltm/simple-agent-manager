@@ -347,7 +347,7 @@ export interface ApiError {
 // =============================================================================
 
 /** Valid permission modes for agent sessions */
-export type AgentPermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
+export type AgentPermissionMode = 'default' | 'acceptEdits' | 'plan' | 'dontAsk' | 'bypassPermissions';
 
 /** Agent settings stored per-user, per-agent in D1 */
 export interface AgentSettings {

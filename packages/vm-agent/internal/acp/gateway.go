@@ -661,6 +661,7 @@ func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentC
 				"acpSessionId": previousAcpSessionID,
 			})
 			g.persistAcpSessionID(agentType)
+			g.applySessionSettings(initCtx, settings)
 			return nil
 		}
 		log.Printf("ACP: LoadSession failed (falling back to NewSession): %v", loadErr)
@@ -700,8 +701,65 @@ func (g *Gateway) startAgent(ctx context.Context, agentType string, cred *agentC
 		"acpSessionId": string(g.sessionID),
 	})
 	g.persistAcpSessionID(agentType)
+	g.applySessionSettings(initCtx, settings)
 
 	return nil
+}
+
+// applySessionSettings calls SetSessionModel and SetSessionMode on the ACP
+// connection to apply the user's agent settings. Both calls are non-fatal —
+// if they fail, the agent continues with its defaults.
+//
+// This must be called after NewSession or LoadSession succeeds, when
+// g.sessionID and g.acpConn are valid.
+func (g *Gateway) applySessionSettings(ctx context.Context, settings *agentSettingsPayload) {
+	if settings == nil || g.acpConn == nil || g.sessionID == "" {
+		return
+	}
+
+	// Apply model override via ACP protocol.
+	// The ANTHROPIC_MODEL env var (set at process start) adds custom model IDs
+	// to the agent's available models list. SetSessionModel selects the model.
+	if settings.Model != "" {
+		log.Printf("ACP: setting session model to %q", settings.Model)
+		if _, err := g.acpConn.SetSessionModel(ctx, acpsdk.SetSessionModelRequest{
+			SessionId: g.sessionID,
+			ModelId:   acpsdk.ModelId(settings.Model),
+		}); err != nil {
+			log.Printf("ACP SetSessionModel(%q) failed (non-fatal): %v", settings.Model, err)
+			g.reportLifecycle("warn", "ACP SetSessionModel failed", map[string]interface{}{
+				"model": settings.Model,
+				"error": err.Error(),
+			})
+		} else {
+			log.Printf("ACP: session model set to %q", settings.Model)
+			g.reportLifecycle("info", "ACP session model applied", map[string]interface{}{
+				"model": settings.Model,
+			})
+		}
+	}
+
+	// Apply permission mode via ACP protocol.
+	// "default" is the agent's initial mode, so only call SetSessionMode for
+	// non-default modes to avoid unnecessary RPC.
+	if settings.PermissionMode != "" && settings.PermissionMode != "default" {
+		log.Printf("ACP: setting session mode to %q", settings.PermissionMode)
+		if _, err := g.acpConn.SetSessionMode(ctx, acpsdk.SetSessionModeRequest{
+			SessionId: g.sessionID,
+			ModeId:    acpsdk.SessionModeId(settings.PermissionMode),
+		}); err != nil {
+			log.Printf("ACP SetSessionMode(%q) failed (non-fatal): %v", settings.PermissionMode, err)
+			g.reportLifecycle("warn", "ACP SetSessionMode failed", map[string]interface{}{
+				"mode":  settings.PermissionMode,
+				"error": err.Error(),
+			})
+		} else {
+			log.Printf("ACP: session mode set to %q", settings.PermissionMode)
+			g.reportLifecycle("info", "ACP session mode applied", map[string]interface{}{
+				"mode": settings.PermissionMode,
+			})
+		}
+	}
 }
 
 // monitorStderr reads the agent's stderr, logs it, and collects it for error reporting.
