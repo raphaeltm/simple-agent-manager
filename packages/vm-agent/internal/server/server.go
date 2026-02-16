@@ -352,6 +352,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 
 	// File browser (browser-authenticated via workspace session/token)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/files/list", s.handleFileList)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/files/find", s.handleFileFind)
 
 	mux.HandleFunc("GET /events", s.handleListNodeEvents)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/ports/{port}", s.handleWorkspacePortProxy)

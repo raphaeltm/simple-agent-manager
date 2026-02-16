@@ -501,6 +501,7 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 
 ### File Browser (VM Agent direct — browser calls via ws-{id} subdomain)
 - `GET /workspaces/:id/files/list?path=.` — Directory listing (type, size, modifiedAt per entry)
+- `GET /workspaces/:id/files/find` — Recursive flat file index (all file paths, excludes node_modules/.git/dist etc.)
 
 ### Voice Transcription
 - `POST /api/transcribe` — Transcribe audio via Workers AI (Whisper)
@@ -675,6 +676,8 @@ See `apps/api/.env.example`:
 - `GIT_FILE_MAX_SIZE` - VM Agent: max file size in bytes for git/file endpoint (default: 1048576)
 - `FILE_LIST_TIMEOUT` - VM Agent: timeout for file listing commands (default: 10s)
 - `FILE_LIST_MAX_ENTRIES` - VM Agent: max entries returned per directory listing (default: 1000)
+- `FILE_FIND_TIMEOUT` - VM Agent: timeout for recursive file index commands (default: 15s)
+- `FILE_FIND_MAX_ENTRIES` - VM Agent: max entries returned by file index (default: 5000)
 - `ERROR_REPORT_FLUSH_INTERVAL` - VM Agent: background error flush interval (default: 30s)
 - `ERROR_REPORT_MAX_BATCH_SIZE` - VM Agent: immediate flush threshold (default: 10)
 - `ERROR_REPORT_MAX_QUEUE_SIZE` - VM Agent: max queued error entries (default: 100)
@@ -721,6 +724,7 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 - **Infra**: Pulumi, Wrangler, @devcontainers/cli, pnpm 9.0+, Cloudflare Pages
 
 ## Recent Changes
+- command-palette-search: Enhanced command palette (Cmd+K) with fuzzy file search and tab switching; VS Code-style camelCase-aware fuzzy matching (fuzzy-match.ts) with word boundary scoring, consecutive bonuses, and space-skipping; categorized results (Tabs, Files, Commands) with HighlightedText match visualization; lazy file index loading via new VM Agent `GET /files/find` endpoint (recursive flat file list with noise exclusion); filename-vs-path best-score matching; file results capped at 20; configurable FILE_FIND_TIMEOUT and FILE_FIND_MAX_ENTRIES
 - tab-reorder-rename: Unified tab ordering, rename, and drag-and-drop reordering for workspace tab strip; useTabOrder hook with localStorage persistence replaces hardcoded terminal-first/chat-second ordering; new tabs always appear rightmost; extracted WorkspaceTabStrip component from Workspace.tsx inline JSX; double-click to rename (desktop), long-press to rename (mobile); PATCH /api/workspaces/:id/agent-sessions/:sessionId endpoint for chat tab rename; @dnd-kit/core + @dnd-kit/sortable for drag-and-drop with PointerSensor (distance:5) and KeyboardSensor; DragOverlay ghost tab; full accessibility with custom screen reader announcements; UpdateAgentSessionRequest shared type
 - command-palette: VS Code-style command palette (Cmd+K / Ctrl+K) for workspace UI; searchable list of all shortcut-backed actions with keyboard shortcut display; substring filtering, arrow key navigation, Enter to execute; extends ShortcutDefinition with paletteHidden field; getPaletteShortcuts() helper
 - persistent-agent-sessions: Agent processes now survive browser disconnects; new SessionHost struct owns agent lifecycle independently of WebSocket connections; multiple browser tabs/devices can connect simultaneously as viewers with fan-out message broadcasting; bounded message ring buffer (configurable via ACP_MESSAGE_BUFFER_SIZE, default 5000) enables late-join replay; per-viewer buffered send channels (ACP_VIEWER_SEND_BUFFER, default 256) protect against slow clients; Gateway simplified to thin per-WebSocket relay; new control messages session_state/session_replay_complete/session_prompting/session_prompt_done; browser state machine extended with replaying state; takeover semantics removed

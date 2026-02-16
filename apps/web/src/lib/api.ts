@@ -529,3 +529,23 @@ export async function getFileList(
   }
   return res.json() as Promise<FileListData>;
 }
+
+/**
+ * Fetch a flat list of all file paths in the workspace (recursive find).
+ * Used by the command palette for file search.
+ */
+export async function getFileIndex(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string
+): Promise<string[]> {
+  const params = new URLSearchParams({ token });
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/find?${params.toString()}`;
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`File find failed: ${text}`);
+  }
+  const data = (await res.json()) as { files: string[] };
+  return data.files;
+}
