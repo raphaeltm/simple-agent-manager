@@ -124,6 +124,8 @@ type Config struct {
 	// File browser settings - configurable per constitution principle XI
 	FileListTimeout    time.Duration // Timeout for file listing commands (default: 10s)
 	FileListMaxEntries int           // Max entries returned per directory listing (default: 1000)
+	FileFindTimeout    time.Duration // Timeout for recursive file find (default: 15s)
+	FileFindMaxEntries int           // Max entries returned by file find (default: 5000)
 
 	// Error reporting settings - configurable per constitution principle XI
 	ErrorReportFlushInterval time.Duration // Background flush interval (default: 30s)
@@ -244,6 +246,8 @@ func Load() (*Config, error) {
 		// File browser settings
 		FileListTimeout:    getEnvDuration("FILE_LIST_TIMEOUT", 10*time.Second),
 		FileListMaxEntries: getEnvInt("FILE_LIST_MAX_ENTRIES", 1000),
+		FileFindTimeout:    getEnvDuration("FILE_FIND_TIMEOUT", 15*time.Second),
+		FileFindMaxEntries: getEnvInt("FILE_FIND_MAX_ENTRIES", 5000),
 
 		// Error reporting settings - configurable per constitution principle XI
 		ErrorReportFlushInterval: getEnvDuration("ERROR_REPORT_FLUSH_INTERVAL", 30*time.Second),

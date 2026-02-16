@@ -1,11 +1,56 @@
-import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, useEffect, useRef, useState, useMemo } from 'react';
 import { getPaletteShortcuts, formatShortcut } from '../lib/keyboard-shortcuts';
 import type { ShortcutDefinition } from '../lib/keyboard-shortcuts';
+import { fuzzyMatch, fileNameFromPath, type FuzzyMatchResult } from '../lib/fuzzy-match';
+import type { WorkspaceTabItem } from './WorkspaceTabStrip';
+
+// ── Result types ──
+
+interface TabResult {
+  kind: 'tab';
+  tab: WorkspaceTabItem;
+  label: string;
+  score: number;
+  matches: number[];
+}
+
+interface FileResult {
+  kind: 'file';
+  path: string;
+  label: string;
+  score: number;
+  matches: number[];
+}
+
+interface CommandResult {
+  kind: 'command';
+  shortcut: ShortcutDefinition;
+  label: string;
+  score: number;
+  matches: number[];
+  shortcutKey: string;
+}
+
+type PaletteResult = TabResult | FileResult | CommandResult;
+
+interface CategoryGroup {
+  category: 'Tabs' | 'Files' | 'Commands';
+  results: PaletteResult[];
+}
+
+// ── Props ──
 
 interface CommandPaletteProps {
   onClose: () => void;
   handlers: Record<string, () => void>;
+  tabs?: WorkspaceTabItem[];
+  fileIndex?: string[];
+  fileIndexLoading?: boolean;
+  onSelectTab?: (tab: WorkspaceTabItem) => void;
+  onSelectFile?: (path: string) => void;
 }
+
+// ── Helpers ──
 
 const paletteShortcuts = getPaletteShortcuts();
 
@@ -19,22 +64,174 @@ function displayShortcutKey(shortcut: ShortcutDefinition): string {
   return formatShortcut(shortcut);
 }
 
+function buildResults(
+  query: string,
+  tabs: WorkspaceTabItem[],
+  fileIndex: string[],
+): CategoryGroup[] {
+  const groups: CategoryGroup[] = [];
+
+  // ── Tabs ──
+  const tabResults: TabResult[] = [];
+  for (const tab of tabs) {
+    if (!query) {
+      tabResults.push({ kind: 'tab', tab, label: tab.title, score: 0, matches: [] });
+    } else {
+      const m = fuzzyMatch(query, tab.title);
+      if (m) {
+        tabResults.push({ kind: 'tab', tab, label: tab.title, score: m.score, matches: m.matches });
+      }
+    }
+  }
+  tabResults.sort((a, b) => b.score - a.score);
+  if (tabResults.length > 0) {
+    groups.push({ category: 'Tabs', results: tabResults });
+  }
+
+  // ── Files ──
+  if (fileIndex.length > 0) {
+    const fileResults: FileResult[] = [];
+    for (const path of fileIndex) {
+      if (!query) continue; // Don't show files on empty query (too many)
+      // Match against full path and filename — take the better score
+      const pathMatch = fuzzyMatch(query, path);
+      const fileName = fileNameFromPath(path);
+      const nameMatch = fuzzyMatch(query, fileName);
+      let best: FuzzyMatchResult | null = null;
+      if (pathMatch && nameMatch) {
+        if (nameMatch.score >= pathMatch.score) {
+          // Prefer name match but adjust indices to reference full path
+          const offset = path.length - fileName.length;
+          best = { score: nameMatch.score, matches: nameMatch.matches.map((i) => i + offset) };
+        } else {
+          best = pathMatch;
+        }
+      } else {
+        best = pathMatch ?? nameMatch
+          ? (nameMatch ? {
+              score: nameMatch!.score,
+              matches: nameMatch!.matches.map((i) => i + path.length - fileName.length),
+            } : pathMatch)
+          : null;
+      }
+      if (best) {
+        fileResults.push({ kind: 'file', path, label: path, score: best.score, matches: best.matches });
+      }
+    }
+    fileResults.sort((a, b) => b.score - a.score);
+    // Cap to top 20 file results for performance
+    const cappedFiles = fileResults.slice(0, 20);
+    if (cappedFiles.length > 0) {
+      groups.push({ category: 'Files', results: cappedFiles });
+    }
+  }
+
+  // ── Commands ──
+  const cmdResults: CommandResult[] = [];
+  for (const shortcut of paletteShortcuts) {
+    const label = displayLabel(shortcut);
+    if (!query) {
+      cmdResults.push({
+        kind: 'command',
+        shortcut,
+        label,
+        score: 0,
+        matches: [],
+        shortcutKey: displayShortcutKey(shortcut),
+      });
+    } else {
+      const m = fuzzyMatch(query, label);
+      if (m) {
+        cmdResults.push({
+          kind: 'command',
+          shortcut,
+          label,
+          score: m.score,
+          matches: m.matches,
+          shortcutKey: displayShortcutKey(shortcut),
+        });
+      }
+    }
+  }
+  cmdResults.sort((a, b) => b.score - a.score);
+  if (cmdResults.length > 0) {
+    groups.push({ category: 'Commands', results: cmdResults });
+  }
+
+  return groups;
+}
+
+/** Render text with matched character indices highlighted. */
+function HighlightedText({ text, matches }: { text: string; matches: number[] }) {
+  if (matches.length === 0) return <>{text}</>;
+
+  const matchSet = new Set(matches);
+  const parts: Array<{ text: string; highlighted: boolean }> = [];
+  let current = '';
+  let currentHighlighted = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const isMatch = matchSet.has(i);
+    if (i === 0) {
+      currentHighlighted = isMatch;
+      current = text[i]!;
+    } else if (isMatch === currentHighlighted) {
+      current += text[i];
+    } else {
+      parts.push({ text: current, highlighted: currentHighlighted });
+      current = text[i]!;
+      currentHighlighted = isMatch;
+    }
+  }
+  if (current) parts.push({ text: current, highlighted: currentHighlighted });
+
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.highlighted ? (
+          <span key={i} style={{ color: '#7aa2f7', fontWeight: 600 }}>
+            {part.text}
+          </span>
+        ) : (
+          <span key={i}>{part.text}</span>
+        )
+      )}
+    </>
+  );
+}
+
+// ── Component ──
+
 /**
- * VS Code-style command palette overlay. Lists all shortcut-backed actions
- * with substring search filtering and keyboard navigation.
+ * VS Code-style command palette with fuzzy search across tabs, files, and commands.
  */
-export function CommandPalette({ onClose, handlers }: CommandPaletteProps) {
+export function CommandPalette({
+  onClose,
+  handlers,
+  tabs = [],
+  fileIndex = [],
+  fileIndexLoading = false,
+  onSelectTab,
+  onSelectFile,
+}: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
 
-  const filtered = query
-    ? paletteShortcuts.filter((s) =>
-        displayLabel(s).toLowerCase().includes(query.toLowerCase())
-      )
-    : paletteShortcuts;
+  const groups = useMemo(
+    () => buildResults(query, tabs, fileIndex),
+    [query, tabs, fileIndex]
+  );
+
+  // Flatten all results for keyboard navigation
+  const flatResults = useMemo(() => {
+    const flat: PaletteResult[] = [];
+    for (const group of groups) {
+      flat.push(...group.results);
+    }
+    return flat;
+  }, [groups]);
 
   // Auto-focus on mount
   useEffect(() => {
@@ -53,9 +250,20 @@ export function CommandPalette({ onClose, handlers }: CommandPaletteProps) {
     setSelectedIndex(0);
   }, [query]);
 
-  const execute = (shortcut: ShortcutDefinition) => {
-    const handler = handlers[shortcut.id];
-    if (handler) handler();
+  const executeResult = (result: PaletteResult) => {
+    switch (result.kind) {
+      case 'tab':
+        if (onSelectTab) onSelectTab(result.tab);
+        break;
+      case 'file':
+        if (onSelectFile) onSelectFile(result.path);
+        break;
+      case 'command': {
+        const handler = handlers[result.shortcut.id];
+        if (handler) handler();
+        break;
+      }
+    }
     onClose();
   };
 
@@ -63,7 +271,7 @@ export function CommandPalette({ onClose, handlers }: CommandPaletteProps) {
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
-        setSelectedIndex((prev) => Math.min(prev + 1, filtered.length - 1));
+        setSelectedIndex((prev) => Math.min(prev + 1, flatResults.length - 1));
         break;
       case 'ArrowUp':
         e.preventDefault();
@@ -71,8 +279,8 @@ export function CommandPalette({ onClose, handlers }: CommandPaletteProps) {
         break;
       case 'Enter':
         e.preventDefault();
-        if (filtered[selectedIndex]) {
-          execute(filtered[selectedIndex]);
+        if (flatResults[selectedIndex]) {
+          executeResult(flatResults[selectedIndex]);
         }
         break;
       case 'Escape':
@@ -81,6 +289,9 @@ export function CommandPalette({ onClose, handlers }: CommandPaletteProps) {
         break;
     }
   };
+
+  // Track the flat index for rendering
+  let flatIndex = -1;
 
   const backdropStyle: CSSProperties = {
     position: 'fixed',
@@ -119,9 +330,19 @@ export function CommandPalette({ onClose, handlers }: CommandPaletteProps) {
   };
 
   const listStyle: CSSProperties = {
-    maxHeight: 300,
+    maxHeight: 360,
     overflowY: 'auto',
     padding: '4px 0',
+  };
+
+  const categoryHeaderStyle: CSSProperties = {
+    padding: '6px 16px 4px',
+    fontSize: '0.6875rem',
+    fontWeight: 600,
+    color: '#565f89',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    userSelect: 'none',
   };
 
   return (
@@ -135,15 +356,15 @@ export function CommandPalette({ onClose, handlers }: CommandPaletteProps) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Type a command..."
+          placeholder="Search tabs, files, or commands..."
           style={inputStyle}
-          aria-label="Search commands"
+          aria-label="Search tabs, files, and commands"
           autoComplete="off"
           spellCheck={false}
         />
 
-        <div ref={listRef} role="listbox" style={listStyle}>
-          {filtered.length === 0 && (
+        <div role="listbox" style={listStyle}>
+          {flatResults.length === 0 && !fileIndexLoading && (
             <div
               style={{
                 padding: '16px',
@@ -152,59 +373,124 @@ export function CommandPalette({ onClose, handlers }: CommandPaletteProps) {
                 fontSize: '0.8125rem',
               }}
             >
-              No matching commands
+              No matching results
             </div>
           )}
-          {filtered.map((shortcut, index) => {
-            const isSelected = index === selectedIndex;
-            const itemStyle: CSSProperties = {
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '8px 16px',
-              cursor: 'pointer',
-              backgroundColor: isSelected ? '#292e42' : 'transparent',
-              transition: 'background-color 0.1s',
-            };
 
-            return (
-              <div
-                key={shortcut.id}
-                ref={isSelected ? selectedRef : undefined}
-                role="option"
-                aria-selected={isSelected}
-                onClick={() => execute(shortcut)}
-                onMouseEnter={() => setSelectedIndex(index)}
-                style={itemStyle}
-              >
-                <span
-                  style={{
-                    fontSize: '0.8125rem',
-                    color: '#a9b1d6',
-                  }}
-                >
-                  {displayLabel(shortcut)}
-                </span>
-                <kbd
-                  style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.75rem',
-                    color: '#c0caf5',
-                    backgroundColor: '#292e42',
-                    border: '1px solid #3b4261',
-                    borderRadius: 4,
-                    padding: '2px 8px',
-                    whiteSpace: 'nowrap',
-                    marginLeft: 16,
-                  }}
-                >
-                  {displayShortcutKey(shortcut)}
-                </kbd>
-              </div>
-            );
-          })}
+          {fileIndexLoading && query && flatResults.length === 0 && (
+            <div
+              style={{
+                padding: '16px',
+                textAlign: 'center',
+                color: '#787c99',
+                fontSize: '0.8125rem',
+              }}
+            >
+              Loading files...
+            </div>
+          )}
+
+          {groups.map((group) => (
+            <div key={group.category}>
+              <div style={categoryHeaderStyle}>{group.category}</div>
+
+              {group.results.map((result) => {
+                flatIndex++;
+                const currentFlatIndex = flatIndex;
+                const isSelected = currentFlatIndex === selectedIndex;
+                const itemStyle: CSSProperties = {
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '7px 16px',
+                  cursor: 'pointer',
+                  backgroundColor: isSelected ? '#292e42' : 'transparent',
+                  transition: 'background-color 0.1s',
+                  gap: 12,
+                };
+
+                return (
+                  <div
+                    key={resultKey(result)}
+                    ref={isSelected ? selectedRef : undefined}
+                    role="option"
+                    aria-selected={isSelected}
+                    onClick={() => executeResult(result)}
+                    onMouseEnter={() => setSelectedIndex(currentFlatIndex)}
+                    style={itemStyle}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                      <span style={{ fontSize: '0.8125rem', flexShrink: 0 }}>
+                        {resultIcon(result)}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '0.8125rem',
+                          color: '#a9b1d6',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        <HighlightedText text={result.label} matches={result.matches} />
+                      </span>
+                    </div>
+                    {result.kind === 'command' && (
+                      <kbd
+                        style={{
+                          fontFamily: 'monospace',
+                          fontSize: '0.75rem',
+                          color: '#c0caf5',
+                          backgroundColor: '#292e42',
+                          border: '1px solid #3b4261',
+                          borderRadius: 4,
+                          padding: '2px 8px',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {result.shortcutKey}
+                      </kbd>
+                    )}
+                    {result.kind === 'tab' && (
+                      <span
+                        style={{
+                          fontSize: '0.6875rem',
+                          color: '#565f89',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {result.tab.kind === 'terminal' ? 'terminal' : 'chat'}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
         </div>
       </div>
     </>
   );
+}
+
+// ── Helpers ──
+
+function resultKey(result: PaletteResult): string {
+  switch (result.kind) {
+    case 'tab': return `tab:${result.tab.id}`;
+    case 'file': return `file:${result.path}`;
+    case 'command': return `cmd:${result.shortcut.id}`;
+  }
+}
+
+function resultIcon(result: PaletteResult): string {
+  switch (result.kind) {
+    case 'tab':
+      return result.tab.kind === 'terminal' ? '>' : '#';
+    case 'file':
+      return '~';
+    case 'command':
+      return '/';
+  }
 }

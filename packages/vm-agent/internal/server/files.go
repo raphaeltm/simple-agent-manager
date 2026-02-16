@@ -100,6 +100,91 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// FileFindResponse is the response from the recursive file find endpoint.
+type FileFindResponse struct {
+	Files []string `json:"files"`
+}
+
+// handleFileFind handles GET /workspaces/{workspaceId}/files/find
+// Returns a flat list of all file paths (relative to workdir), excluding
+// common noise directories (node_modules, .git, dist, etc.).
+func (s *Server) handleFileFind(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	if workspaceID == "" {
+		http.Error(w, `{"error":"missing workspaceId"}`, http.StatusBadRequest)
+		return
+	}
+
+	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
+		return
+	}
+
+	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	maxEntries := s.config.FileFindMaxEntries
+	// Exclude common noise directories and files
+	findCmd := fmt.Sprintf(
+		`find . -type f `+
+			`-not -path '*/node_modules/*' `+
+			`-not -path '*/.git/*' `+
+			`-not -path '*/dist/*' `+
+			`-not -path '*/.next/*' `+
+			`-not -path '*/coverage/*' `+
+			`-not -path '*/__pycache__/*' `+
+			`-not -path '*/.DS_Store' `+
+			`-not -path '*/vendor/*' `+
+			`-not -name '*.pyc' `+
+			`2>/dev/null | head -n %d`,
+		maxEntries,
+	)
+
+	timeout := s.config.FileFindTimeout
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+
+	output, _, err := s.execInContainer(ctx, containerID, user, workDir, "sh", "-c", findCmd)
+	if err != nil {
+		log.Printf("[files] Error finding files in workspace %s: %v", workspaceID, err)
+		http.Error(w, `{"error":"failed to find files"}`, http.StatusInternalServerError)
+		return
+	}
+
+	files := parseFileFindOutput(output)
+
+	resp := FileFindResponse{Files: files}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("[files] Error encoding find response: %v", err)
+	}
+}
+
+// parseFileFindOutput parses the output of find -type f, one path per line.
+// Strips the leading "./" prefix from each path.
+func parseFileFindOutput(output string) []string {
+	if strings.TrimSpace(output) == "" {
+		return []string{}
+	}
+
+	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
+	files := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Strip leading ./
+		if strings.HasPrefix(line, "./") {
+			line = line[2:]
+		}
+		files = append(files, line)
+	}
+	return files
+}
+
 // parseFileListOutput parses the output of find -printf '%y\t%s\t%T@\t%f\n'
 // Each line: type(d/f/l)\tsize\tmtime_epoch\tname
 func parseFileListOutput(output string) []FileEntry {

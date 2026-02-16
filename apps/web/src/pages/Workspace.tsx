@@ -28,6 +28,7 @@ import type { SessionTokenUsage, SidebarTab } from '../components/WorkspaceSideb
 import {
   ApiClientError,
   createAgentSession,
+  getFileIndex,
   getGitStatus,
   getTerminalToken,
   getWorkspace,
@@ -167,6 +168,9 @@ export function Workspace() {
   const chatSessionRefs = useRef<Map<string, ChatSessionHandle>>(new Map());
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [paletteFileIndex, setPaletteFileIndex] = useState<string[]>([]);
+  const [paletteFileIndexLoading, setPaletteFileIndexLoading] = useState(false);
+  const paletteFileIndexLoaded = useRef(false);
 
   const tabOrder = useTabOrder<WorkspaceTab>(id);
 
@@ -887,6 +891,44 @@ export function Workspace() {
   };
   useKeyboardShortcuts(shortcutHandlers, isRunning);
 
+  // ── Palette: lazy-load file index when palette opens ──
+  useEffect(() => {
+    if (!showCommandPalette || paletteFileIndexLoaded.current) return;
+    if (!workspace?.url || !terminalToken || !id || !isRunning) return;
+
+    paletteFileIndexLoaded.current = true;
+    setPaletteFileIndexLoading(true);
+    getFileIndex(workspace.url, id, terminalToken)
+      .then((files) => setPaletteFileIndex(files))
+      .catch((err) => console.warn('[palette] Failed to load file index:', err))
+      .finally(() => setPaletteFileIndexLoading(false));
+  }, [showCommandPalette, workspace?.url, terminalToken, id, isRunning]);
+
+  const handlePaletteSelectTab = useCallback(
+    (tab: WorkspaceTabItem) => {
+      // Find the matching WorkspaceTab and select it
+      const wsTab = workspaceTabs.find((t) => t.id === tab.id);
+      if (wsTab) {
+        handleSelectWorkspaceTab(wsTab);
+        // Focus the selected tab content
+        if (wsTab.kind === 'terminal') {
+          multiTerminalRef.current?.focus?.();
+        } else if (wsTab.kind === 'chat') {
+          const chatRef = chatSessionRefs.current.get(wsTab.sessionId);
+          chatRef?.focusInput?.();
+        }
+      }
+    },
+    [workspaceTabs, handleSelectWorkspaceTab]
+  );
+
+  const handlePaletteSelectFile = useCallback(
+    (filePath: string) => {
+      handleFileViewerOpen(filePath);
+    },
+    [handleFileViewerOpen]
+  );
+
   // ── Loading state ──
   if (loading) {
     return (
@@ -1593,6 +1635,11 @@ export function Workspace() {
         <CommandPalette
           onClose={() => setShowCommandPalette(false)}
           handlers={shortcutHandlers}
+          tabs={tabStripItems}
+          fileIndex={paletteFileIndex}
+          fileIndexLoading={paletteFileIndexLoading}
+          onSelectTab={handlePaletteSelectTab}
+          onSelectFile={handlePaletteSelectFile}
         />
       )}
     </div>
