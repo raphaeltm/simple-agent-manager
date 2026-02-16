@@ -6,6 +6,7 @@ import {
   modifierLabel,
   getShortcutsByCategory,
   getShortcut,
+  getPaletteShortcuts,
 } from '../../src/lib/keyboard-shortcuts';
 
 describe('keyboard-shortcuts', () => {
@@ -50,6 +51,31 @@ describe('keyboard-shortcuts', () => {
 
     it('contains show-shortcuts', () => {
       expect(getShortcut('show-shortcuts')).toBeDefined();
+    });
+
+    it('contains command-palette', () => {
+      const s = getShortcut('command-palette');
+      expect(s).toBeDefined();
+      expect(s!.key).toBe('k');
+      expect(s!.modifiers.meta).toBe(true);
+      expect(s!.category).toBe('General');
+    });
+
+    it('marks command-palette as paletteHidden', () => {
+      const s = getShortcut('command-palette')!;
+      expect(s.paletteHidden).toBe(true);
+    });
+
+    it('marks tab-2 through tab-9 as paletteHidden', () => {
+      for (let i = 2; i <= 9; i++) {
+        const s = getShortcut(`tab-${i}`)!;
+        expect(s.paletteHidden).toBe(true);
+      }
+    });
+
+    it('does not mark tab-1 as paletteHidden', () => {
+      const s = getShortcut('tab-1')!;
+      expect(s.paletteHidden).toBeFalsy();
     });
   });
 
@@ -163,6 +189,50 @@ describe('keyboard-shortcuts', () => {
       const shortcut = getShortcut('focus-chat')!;
       const event = createKeyboardEvent({ key: '/', ctrlKey: true, altKey: true });
       expect(matchesShortcut(event, shortcut)).toBe(false);
+    });
+
+    it('matches Ctrl+K for command-palette on non-mac', () => {
+      const shortcut = getShortcut('command-palette')!;
+      const event = createKeyboardEvent({ key: 'k', ctrlKey: true });
+      expect(matchesShortcut(event, shortcut)).toBe(true);
+    });
+
+    it('does not match K without modifier for command-palette', () => {
+      const shortcut = getShortcut('command-palette')!;
+      const event = createKeyboardEvent({ key: 'k' });
+      expect(matchesShortcut(event, shortcut)).toBe(false);
+    });
+  });
+
+  describe('getPaletteShortcuts', () => {
+    it('excludes entries with paletteHidden: true', () => {
+      const palette = getPaletteShortcuts();
+      for (const s of palette) {
+        expect(s.paletteHidden).toBeFalsy();
+      }
+    });
+
+    it('does not include command-palette', () => {
+      const palette = getPaletteShortcuts();
+      expect(palette.find((s) => s.id === 'command-palette')).toBeUndefined();
+    });
+
+    it('does not include tab-2 through tab-9', () => {
+      const palette = getPaletteShortcuts();
+      for (let i = 2; i <= 9; i++) {
+        expect(palette.find((s) => s.id === `tab-${i}`)).toBeUndefined();
+      }
+    });
+
+    it('includes tab-1', () => {
+      const palette = getPaletteShortcuts();
+      expect(palette.find((s) => s.id === 'tab-1')).toBeDefined();
+    });
+
+    it('includes all non-hidden shortcuts', () => {
+      const palette = getPaletteShortcuts();
+      const allNonHidden = SHORTCUTS.filter((s) => !s.paletteHidden);
+      expect(palette.length).toBe(allNonHidden.length);
     });
   });
 });
