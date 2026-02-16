@@ -1215,6 +1215,9 @@ func (c *sessionHostClient) ReadTextFile(ctx context.Context, params acpsdk.Read
 	if params.Path == "" {
 		return acpsdk.ReadTextFileResponse{}, fmt.Errorf("file path is required")
 	}
+	if strings.ContainsRune(params.Path, 0) {
+		return acpsdk.ReadTextFileResponse{}, fmt.Errorf("file path contains null byte")
+	}
 
 	containerID, err := c.host.config.ContainerResolver()
 	if err != nil {
@@ -1250,6 +1253,17 @@ func (c *sessionHostClient) ReadTextFile(ctx context.Context, params acpsdk.Read
 func (c *sessionHostClient) WriteTextFile(ctx context.Context, params acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error) {
 	if params.Path == "" {
 		return acpsdk.WriteTextFileResponse{}, fmt.Errorf("file path is required")
+	}
+	if strings.ContainsRune(params.Path, 0) {
+		return acpsdk.WriteTextFileResponse{}, fmt.Errorf("file path contains null byte")
+	}
+
+	maxSize := c.host.config.FileMaxSize
+	if maxSize == 0 {
+		maxSize = 1048576
+	}
+	if len(params.Content) > maxSize {
+		return acpsdk.WriteTextFileResponse{}, fmt.Errorf("content exceeds maximum size of %d bytes", maxSize)
 	}
 
 	containerID, err := c.host.config.ContainerResolver()
