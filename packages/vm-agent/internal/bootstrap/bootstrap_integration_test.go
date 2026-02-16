@@ -700,7 +700,7 @@ func TestIntegration_DevcontainerWithRemoteUser(t *testing.T) {
 	}
 
 	// Verify credential helper is configured
-	out, err := exec.CommandContext(ctx, "docker", "exec", containerID,
+	out, err = exec.CommandContext(ctx, "docker", "exec", containerID,
 		"git", "config", "--system", "credential.helper").CombinedOutput()
 	if err != nil {
 		t.Fatalf("git config read: %v\n%s", err, string(out))
