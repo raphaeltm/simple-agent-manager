@@ -18,6 +18,8 @@ export interface ShortcutDefinition {
   modifiers: ShortcutModifiers;
   description: string;
   category: 'Navigation' | 'Tabs' | 'Sessions' | 'General';
+  /** When true, this shortcut is hidden from the command palette (but still functional). */
+  paletteHidden?: boolean;
 }
 
 /** Detect macOS once at module load */
@@ -138,6 +140,7 @@ export const SHORTCUTS: ShortcutDefinition[] = [
     modifiers: { meta: true } as ShortcutModifiers,
     description: `Switch to tab ${i + 1}`,
     category: 'Tabs' as const,
+    ...(i > 0 ? { paletteHidden: true } : {}),
   })),
 
   // Sessions
@@ -158,6 +161,14 @@ export const SHORTCUTS: ShortcutDefinition[] = [
 
   // General
   {
+    id: 'command-palette',
+    key: 'k',
+    modifiers: { meta: true },
+    description: 'Open command palette',
+    category: 'General',
+    paletteHidden: true,
+  },
+  {
     id: 'show-shortcuts',
     key: '/',
     modifiers: { meta: true, shift: true },
@@ -165,6 +176,11 @@ export const SHORTCUTS: ShortcutDefinition[] = [
     category: 'General',
   },
 ];
+
+/** Get shortcuts visible in the command palette (excludes paletteHidden entries). */
+export function getPaletteShortcuts(): ShortcutDefinition[] {
+  return SHORTCUTS.filter((s) => !s.paletteHidden);
+}
 
 /** Look up a shortcut by ID. */
 export function getShortcut(id: string): ShortcutDefinition | undefined {

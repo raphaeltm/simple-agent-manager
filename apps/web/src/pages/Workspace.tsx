@@ -10,6 +10,7 @@ import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { ChatSession } from '../components/ChatSession';
 import type { ChatSessionHandle } from '../components/ChatSession';
+import { CommandPalette } from '../components/CommandPalette';
 import { KeyboardShortcutsHelp } from '../components/KeyboardShortcutsHelp';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
@@ -157,6 +158,7 @@ export function Workspace() {
   const createMenuRef = useRef<HTMLDivElement | null>(null);
   const chatSessionRefs = useRef<Map<string, ChatSessionHandle>>(new Map());
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
 
   const isRunning = workspace?.status === 'running';
 
@@ -730,7 +732,8 @@ export function Workspace() {
   // ── Keyboard shortcuts ──
   // The hook stores handlers via a ref internally, so it's safe to pass an
   // inline object here — no useMemo needed, and no stale closure issues.
-  useKeyboardShortcuts({
+  // Extracted into a variable so the same handlers can be shared with CommandPalette.
+  const shortcutHandlers = {
     'toggle-file-browser': () => {
       if (!isRunning || !terminalToken) return;
       if (filesParam) handleCloseFileBrowser();
@@ -792,10 +795,15 @@ export function Workspace() {
       if (!isRunning) return;
       handleCreateTerminalTab();
     },
+    'command-palette': () => {
+      setShowCommandPalette((prev) => !prev);
+      setShowShortcutsHelp(false);
+    },
     'show-shortcuts': () => {
       setShowShortcutsHelp((prev) => !prev);
     },
-  }, isRunning);
+  };
+  useKeyboardShortcuts(shortcutHandlers, isRunning);
 
   // ── Loading state ──
   if (loading) {
@@ -1736,6 +1744,14 @@ export function Workspace() {
       {/* ── Keyboard shortcuts help overlay ── */}
       {showShortcutsHelp && (
         <KeyboardShortcutsHelp onClose={() => setShowShortcutsHelp(false)} />
+      )}
+
+      {/* ── Command palette overlay ── */}
+      {showCommandPalette && (
+        <CommandPalette
+          onClose={() => setShowCommandPalette(false)}
+          handlers={shortcutHandlers}
+        />
       )}
     </div>
   );
