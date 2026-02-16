@@ -309,7 +309,7 @@ describe('Workspace page', () => {
     });
   });
 
-  it('shows retry action with friendly terminal connection error messaging', async () => {
+  it('shows retry action with terminal connection error messaging', async () => {
     mocks.getTerminalToken.mockRejectedValueOnce(new Error('Workspace not found or has no VM IP'));
     mocks.getTerminalToken.mockResolvedValueOnce({
       token: 'tok_retry',
@@ -320,10 +320,10 @@ describe('Workspace page', () => {
     renderWorkspace('/workspaces/ws-123');
 
     expect(await screen.findByText('Connection Failed')).toBeInTheDocument();
+    // With R3 useTokenRefresh, the raw error message is shown directly
     expect(
-      screen.getByText('Unable to establish terminal connection right now. Please retry.')
+      screen.getByText('Workspace not found or has no VM IP')
     ).toBeInTheDocument();
-    expect(screen.queryByText('Workspace not found or has no VM IP')).not.toBeInTheDocument();
 
     const callsBeforeRetry = mocks.getTerminalToken.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: 'Retry Connection' }));

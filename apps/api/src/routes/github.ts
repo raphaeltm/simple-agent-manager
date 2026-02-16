@@ -82,24 +82,27 @@ githubRoutes.get('/repositories', requireAuth(), async (c) => {
     throw errors.notFound('Installation');
   }
 
-  // Get repositories from each installation
-  const allRepos: Repository[] = [];
-  for (const inst of targetInstallations) {
-    try {
+  // Fetch repositories from all installations in parallel (was sequential for-of loop).
+  const repoResults = await Promise.allSettled(
+    targetInstallations.map(async (inst) => {
       const repos = await getInstallationRepositories(inst.installationId, c.env);
-      allRepos.push(
-        ...repos.map((repo) => ({
-          id: repo.id,
-          fullName: repo.fullName,
-          name: repo.fullName.split('/').pop() || repo.fullName,
-          private: repo.private,
-          defaultBranch: repo.defaultBranch,
-          installationId: inst.id,
-        }))
-      );
-    } catch (err) {
-      console.error(`Failed to get repos for installation ${inst.installationId}:`, err);
-      // Continue with other installations
+      return repos.map((repo) => ({
+        id: repo.id,
+        fullName: repo.fullName,
+        name: repo.fullName.split('/').pop() || repo.fullName,
+        private: repo.private,
+        defaultBranch: repo.defaultBranch,
+        installationId: inst.id,
+      }));
+    })
+  );
+
+  const allRepos: Repository[] = [];
+  for (const result of repoResults) {
+    if (result.status === 'fulfilled') {
+      allRepos.push(...result.value);
+    } else {
+      console.error('Failed to get repos for installation:', result.reason);
     }
   }
 

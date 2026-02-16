@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './components/AuthProvider';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { ToastProvider } from './hooks/useToast';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Landing } from './pages/Landing';
 import { Dashboard } from './pages/Dashboard';
@@ -15,6 +16,7 @@ export default function App() {
   return (
     <ErrorBoundary>
     <AuthProvider>
+    <ToastProvider>
       <BrowserRouter>
         <Routes>
           {/* Public routes */}
@@ -82,6 +84,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+    </ToastProvider>
     </AuthProvider>
     </ErrorBoundary>
   );

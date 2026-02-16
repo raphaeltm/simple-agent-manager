@@ -355,11 +355,14 @@ credentialsRoutes.put('/agent', async (c) => {
 
 /**
  * POST /api/credentials/agent/:agentType/toggle - Toggle active credential
+ *
+ * Uses D1 batch to atomically deactivate all credentials then activate the
+ * target, preventing race conditions where concurrent requests could leave
+ * multiple credentials active or none active.
  */
 credentialsRoutes.post('/agent/:agentType/toggle', async (c) => {
   const userId = getUserId(c);
   const agentType = c.req.param('agentType');
-  const db = drizzle(c.env.DATABASE, { schema });
 
   if (!isValidAgentType(agentType)) {
     throw errors.badRequest('Invalid agent type');
@@ -371,34 +374,26 @@ credentialsRoutes.post('/agent/:agentType/toggle', async (c) => {
     throw errors.badRequest('Invalid credential kind');
   }
 
-  // Start transaction-like operation
-  // First, deactivate all credentials for this agent
-  await db
-    .update(schema.credentials)
-    .set({ isActive: false })
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.credentialType, 'agent-api-key'),
-        eq(schema.credentials.agentType, agentType)
-      )
-    );
+  const now = new Date().toISOString();
 
-  // Then activate the specified credential
-  const result = await db
-    .update(schema.credentials)
-    .set({ isActive: true, updatedAt: new Date().toISOString() })
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.credentialType, 'agent-api-key'),
-        eq(schema.credentials.agentType, agentType),
-        eq(schema.credentials.credentialKind, body.credentialKind)
-      )
-    )
-    .returning();
+  // Use D1 batch for atomic multi-statement execution.
+  // Both statements execute in a single implicit transaction,
+  // preventing race conditions between deactivate and activate.
+  const deactivateStmt = c.env.DATABASE.prepare(
+    `UPDATE credentials SET is_active = 0
+     WHERE user_id = ? AND credential_type = 'agent-api-key' AND agent_type = ?`
+  ).bind(userId, agentType);
 
-  if (result.length === 0) {
+  const activateStmt = c.env.DATABASE.prepare(
+    `UPDATE credentials SET is_active = 1, updated_at = ?
+     WHERE user_id = ? AND credential_type = 'agent-api-key'
+       AND agent_type = ? AND credential_kind = ?`
+  ).bind(now, userId, agentType, body.credentialKind);
+
+  const batchResults = await c.env.DATABASE.batch([deactivateStmt, activateStmt]);
+  const activateResult = batchResults[1];
+
+  if (!activateResult?.meta.changes || activateResult.meta.changes === 0) {
     throw errors.notFound(`No ${body.credentialKind} found for ${agentType}`);
   }
 

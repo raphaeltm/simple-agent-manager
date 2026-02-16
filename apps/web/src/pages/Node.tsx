@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { Event, NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { Alert, Button, PageLayout, Spinner, StatusBadge } from '@simple-agent-manager/ui';
+import { Alert, Button, PageLayout, Skeleton, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
+import { useToast } from '../hooks/useToast';
 import { deleteNode, getNode, listNodeEvents, listWorkspaces, stopNode } from '../lib/api';
 
 function formatTimestamp(value: string | null): string {
@@ -19,10 +20,12 @@ function formatTimestamp(value: string | null): string {
 export function Node() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const toast = useToast();
 
   const [node, setNode] = useState<NodeResponse | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
+  const [eventsError, setEventsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [stopping, setStopping] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -63,8 +66,13 @@ export function Node() {
     }
 
     const fetchEvents = async () => {
-      const data = await listNodeEvents(id, 50);
-      setEvents(data.events || []);
+      try {
+        const data = await listNodeEvents(id, 50);
+        setEvents(data.events || []);
+        setEventsError(null);
+      } catch (err) {
+        setEventsError(err instanceof Error ? err.message : 'Failed to load events');
+      }
     };
 
     void fetchEvents();
@@ -84,12 +92,22 @@ export function Node() {
       return;
     }
 
+    // Optimistic: immediately show node as stopping
+    const prevNode = node;
+    const prevWorkspaces = workspaces;
+    setNode({ ...node, status: 'stopping' });
+    setWorkspaces(ws => ws.map(w =>
+      w.status === 'running' ? { ...w, status: 'stopping' as const } : w
+    ));
+    setStopping(true);
     try {
-      setStopping(true);
       await stopNode(id);
-      await loadNode();
+      toast.success('Node stopping');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to stop node');
+      // Revert optimistic update on failure
+      setNode(prevNode);
+      setWorkspaces(prevWorkspaces);
+      toast.error(err instanceof Error ? err.message : 'Failed to stop node');
     } finally {
       setStopping(false);
     }
@@ -110,9 +128,10 @@ export function Node() {
     try {
       setDeleting(true);
       await deleteNode(id);
+      toast.success('Node deleted');
       navigate('/nodes');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete node');
+      toast.error(err instanceof Error ? err.message : 'Failed to delete node');
       setDeleting(false);
     }
   };
@@ -199,8 +218,40 @@ export function Node() {
       )}
 
       {loading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-8)' }}>
-          <Spinner size="lg" />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-6)' }}>
+          {/* Node info skeleton */}
+          <div
+            aria-hidden="true"
+            style={{
+              border: '1px solid var(--sam-color-border-default)',
+              borderRadius: 'var(--sam-radius-md)',
+              padding: 'var(--sam-space-6)',
+              background: 'var(--sam-color-bg-surface)',
+              display: 'grid',
+              gap: 'var(--sam-space-4)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Skeleton width="40%" height="1.25rem" />
+              <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
+                <Skeleton width="60px" height="1.25rem" borderRadius="9999px" />
+                <Skeleton width="60px" height="1.25rem" borderRadius="9999px" />
+              </div>
+            </div>
+            <div style={{ borderTop: '1px solid var(--sam-color-border-default)', paddingTop: 'var(--sam-space-4)', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 'var(--sam-space-4)' }}>
+              {Array.from({ length: 4 }, (_, i) => (
+                <div key={i}>
+                  <Skeleton width="50%" height="0.75rem" style={{ marginBottom: 'var(--sam-space-1)' }} />
+                  <Skeleton width="70%" height="0.875rem" />
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* Workspaces skeleton */}
+          <div>
+            <Skeleton width="120px" height="1.125rem" style={{ marginBottom: 'var(--sam-space-3)' }} />
+            <Skeleton width="60%" height="0.875rem" />
+          </div>
         </div>
       ) : !node ? (
         <Alert variant="error">Node not found</Alert>
@@ -303,7 +354,44 @@ export function Node() {
 
           <section>
             <h3 style={{ marginTop: 0 }}>Node Events</h3>
-            {events.length === 0 ? (
+            {eventsError ? (
+              <div
+                style={{
+                  padding: 'var(--sam-space-3)',
+                  backgroundColor: 'rgba(248, 113, 113, 0.1)',
+                  borderRadius: 'var(--sam-radius-sm)',
+                  border: '1px solid rgba(248, 113, 113, 0.3)',
+                  fontSize: '0.875rem',
+                  color: '#f87171',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <span>Failed to load events</span>
+                <button
+                  onClick={() => {
+                    setEventsError(null);
+                    void listNodeEvents(id!, 50).then((data) => {
+                      setEvents(data.events || []);
+                    }).catch((err) => {
+                      setEventsError(err instanceof Error ? err.message : 'Failed to load events');
+                    });
+                  }}
+                  style={{
+                    background: 'none',
+                    border: '1px solid rgba(248, 113, 113, 0.5)',
+                    borderRadius: 'var(--sam-radius-sm)',
+                    color: '#f87171',
+                    cursor: 'pointer',
+                    padding: '4px 12px',
+                    fontSize: '0.8125rem',
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : events.length === 0 ? (
               <p style={{ color: 'var(--sam-color-fg-muted)' }}>No events yet.</p>
             ) : (
               <div

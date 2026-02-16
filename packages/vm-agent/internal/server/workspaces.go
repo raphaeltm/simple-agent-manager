@@ -122,8 +122,9 @@ func (s *Server) startWorkspaceProvision(
 	go func() {
 		usedFallback, err := s.provisionWorkspaceRuntime(context.Background(), runtime)
 		if err != nil {
-			runtime.Status = "error"
-			runtime.UpdatedAt = nowUTC()
+			// CAS: only transition to error if still in "creating" state.
+			// If the workspace was stopped/deleted while provisioning, skip.
+			s.casWorkspaceStatus(runtime.ID, []string{"creating"}, "error")
 
 			callbackToken := s.callbackTokenForWorkspace(runtime.ID)
 			if callbackToken != "" {
@@ -142,8 +143,12 @@ func (s *Server) startWorkspaceProvision(
 			return
 		}
 
-		runtime.Status = "running"
-		runtime.UpdatedAt = nowUTC()
+		// CAS: only transition to running if still in "creating" state.
+		// Prevents overwriting "stopped" if user stopped workspace during provisioning.
+		if !s.casWorkspaceStatus(runtime.ID, []string{"creating"}, "running") {
+			log.Printf("Workspace %s: provisioning completed but status already changed from creating, skipping running transition", runtime.ID)
+			return
+		}
 
 		successDetail := make(map[string]interface{}, len(detail)+1)
 		for key, value := range detail {
@@ -232,9 +237,16 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CAS-style transition: only stop from valid states
+	if !s.casWorkspaceStatus(workspaceID, []string{"running", "creating", "error"}, "stopped") {
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"error":   "invalid_transition",
+			"message": "Workspace cannot be stopped from current state: " + runtime.Status,
+		})
+		return
+	}
+
 	runtime.PTY.CloseAllSessions()
-	runtime.Status = "stopped"
-	runtime.UpdatedAt = nowUTC()
 
 	sessions := s.agentSessions.List(workspaceID)
 	for _, session := range sessions {
@@ -270,8 +282,14 @@ func (s *Server) handleRestartWorkspace(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	runtime.Status = "creating"
-	runtime.UpdatedAt = nowUTC()
+	// CAS-style transition: only restart from stopped or error
+	if !s.casWorkspaceStatus(workspaceID, []string{"stopped", "error"}, "creating") {
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"error":   "invalid_transition",
+			"message": "Workspace cannot be restarted from current state: " + runtime.Status,
+		})
+		return
+	}
 	s.appendNodeEvent(workspaceID, "info", "workspace.restarting", "Workspace restart started", nil)
 
 	s.startWorkspaceProvision(
@@ -302,16 +320,14 @@ func (s *Server) handleRebuildWorkspace(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if runtime.Status != "running" && runtime.Status != "error" {
+	// CAS-style transition: only rebuild from running or error
+	if !s.casWorkspaceStatus(workspaceID, []string{"running", "error"}, "creating") {
 		writeJSON(w, http.StatusConflict, map[string]interface{}{
-			"error":   "workspace_not_ready",
-			"message": "Workspace must be running or in error state to rebuild",
+			"error":   "invalid_transition",
+			"message": "Workspace must be running or in error state to rebuild, currently " + runtime.Status,
 		})
 		return
 	}
-
-	runtime.Status = "creating"
-	runtime.UpdatedAt = nowUTC()
 	s.appendNodeEvent(workspaceID, "info", "workspace.rebuilding", "Rebuilding devcontainer", nil)
 
 	s.startWorkspaceProvision(

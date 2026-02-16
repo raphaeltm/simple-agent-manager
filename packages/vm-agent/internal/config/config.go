@@ -92,8 +92,14 @@ type Config struct {
 	ACPReconnectDelayMs   int
 	ACPReconnectTimeoutMs int
 	ACPMaxRestartAttempts int
-	ACPMessageBufferSize  int // Max buffered messages per SessionHost for late-join replay
-	ACPViewerSendBuffer   int // Per-viewer send channel buffer size
+	ACPMessageBufferSize  int           // Max buffered messages per SessionHost for late-join replay
+	ACPViewerSendBuffer   int           // Per-viewer send channel buffer size
+	ACPPingInterval       time.Duration // WebSocket ping interval (default: 30s)
+	ACPPongTimeout        time.Duration // WebSocket pong deadline after ping (default: 10s)
+
+	// Event log settings - configurable per constitution principle XI
+	MaxNodeEvents      int // Max node-level events retained in memory (default: 500)
+	MaxWorkspaceEvents int // Max workspace-level events retained in memory (default: 500)
 
 	// Container settings - exec into devcontainer instead of host shell
 	ContainerMode       bool
@@ -217,6 +223,12 @@ func Load() (*Config, error) {
 		ACPMaxRestartAttempts: getEnvInt("ACP_MAX_RESTART_ATTEMPTS", 3),
 		ACPMessageBufferSize: getEnvInt("ACP_MESSAGE_BUFFER_SIZE", 5000),
 		ACPViewerSendBuffer:  getEnvInt("ACP_VIEWER_SEND_BUFFER", 256),
+		ACPPingInterval:      getEnvDuration("ACP_PING_INTERVAL", 30*time.Second),
+		ACPPongTimeout:       getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
+
+		// Event log settings
+		MaxNodeEvents:      getEnvInt("MAX_NODE_EVENTS", 500),
+		MaxWorkspaceEvents: getEnvInt("MAX_WORKSPACE_EVENTS", 500),
 
 		ContainerMode: getEnvBool("CONTAINER_MODE", true),
 		// Default to the container's configured user. If you need to force a specific user, set CONTAINER_USER.

@@ -4,9 +4,10 @@ import { useAuth } from '../components/AuthProvider';
 import { UserMenu } from '../components/UserMenu';
 import { WorkspaceCard } from '../components/WorkspaceCard';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { useToast } from '../hooks/useToast';
 import { listWorkspaces, stopWorkspace, restartWorkspace, deleteWorkspace } from '../lib/api';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
-import { PageLayout, Button, Alert, Spinner } from '@simple-agent-manager/ui';
+import { PageLayout, Button, Alert, Spinner, SkeletonCard } from '@simple-agent-manager/ui';
 
 /**
  * Dashboard page showing user profile and workspaces.
@@ -14,6 +15,7 @@ import { PageLayout, Button, Alert, Spinner } from '@simple-agent-manager/ui';
 export function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const toast = useToast();
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -60,20 +62,30 @@ export function Dashboard() {
   }, [loadWorkspaces, hasTransitionalWorkspaces]);
 
   const handleStopWorkspace = async (id: string) => {
+    // Optimistic: immediately show workspace as stopping
+    const prev = workspaces;
+    setWorkspaces(ws => ws.map(w => w.id === id ? { ...w, status: 'stopping' as const } : w));
     try {
       await stopWorkspace(id);
-      await loadWorkspaces();
+      toast.success('Workspace stopping');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to stop workspace');
+      // Revert optimistic update on failure
+      setWorkspaces(prev);
+      toast.error(err instanceof Error ? err.message : 'Failed to stop workspace');
     }
   };
 
   const handleRestartWorkspace = async (id: string) => {
+    // Optimistic: immediately show workspace as creating
+    const prev = workspaces;
+    setWorkspaces(ws => ws.map(w => w.id === id ? { ...w, status: 'creating' as const } : w));
     try {
       await restartWorkspace(id);
-      await loadWorkspaces();
+      toast.success('Workspace restarting');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to restart workspace');
+      // Revert optimistic update on failure
+      setWorkspaces(prev);
+      toast.error(err instanceof Error ? err.message : 'Failed to restart workspace');
     }
   };
 
@@ -88,13 +100,18 @@ export function Dashboard() {
     if (!deleteTarget) return;
 
     setDeleteLoading(true);
+    // Optimistic: immediately remove workspace from list
+    const prev = workspaces;
+    const targetId = deleteTarget.id;
+    setWorkspaces(ws => ws.filter(w => w.id !== targetId));
+    setDeleteTarget(null);
     try {
-      await deleteWorkspace(deleteTarget.id);
-      setDeleteTarget(null);
-      await loadWorkspaces();
+      await deleteWorkspace(targetId);
+      toast.success('Workspace deleted');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete workspace');
-      setDeleteTarget(null);
+      // Revert optimistic update on failure
+      setWorkspaces(prev);
+      toast.error(err instanceof Error ? err.message : 'Failed to delete workspace');
     } finally {
       setDeleteLoading(false);
     }
@@ -193,8 +210,10 @@ export function Dashboard() {
         </div>
 
         {loading ? (
-          <div style={{ padding: 'var(--sam-space-8)', display: 'flex', justifyContent: 'center' }}>
-            <Spinner size="lg" />
+          <div className="sam-workspace-grid" style={{ display: 'grid', gap: 'var(--sam-space-4)' }}>
+            {Array.from({ length: 3 }, (_, i) => (
+              <SkeletonCard key={i} lines={2} />
+            ))}
           </div>
         ) : workspaces.length === 0 ? (
           <div style={{

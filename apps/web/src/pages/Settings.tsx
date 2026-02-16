@@ -7,7 +7,7 @@ import { AgentKeysSection } from '../components/AgentKeysSection';
 import { AgentSettingsSection } from '../components/AgentSettingsSection';
 import { listCredentials } from '../lib/api';
 import type { CredentialResponse } from '@simple-agent-manager/shared';
-import { PageLayout, Alert, Spinner } from '@simple-agent-manager/ui';
+import { PageLayout, Alert, Skeleton } from '@simple-agent-manager/ui';
 
 /**
  * Settings page with credentials management and agent configuration.
@@ -101,8 +101,10 @@ export function Settings() {
           </div>
 
           {loading ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-4)' }}>
-              <Spinner size="md" />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-3)', padding: 'var(--sam-space-2) 0' }}>
+              <Skeleton width="30%" height="0.875rem" />
+              <Skeleton width="100%" height="2.5rem" borderRadius="var(--sam-radius-md)" />
+              <Skeleton width="80px" height="2.25rem" borderRadius="var(--sam-radius-md)" />
             </div>
           ) : (
             <HetznerTokenForm credential={hetznerCredential} onUpdate={loadCredentials} />

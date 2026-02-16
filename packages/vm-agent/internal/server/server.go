@@ -163,6 +163,8 @@ func New(cfg *config.Config) (*Server, error) {
 		FileExecTimeout:    cfg.GitExecTimeout,
 		FileMaxSize:        cfg.GitFileMaxSize,
 		ErrorReporter:      errorReporter,
+		PingInterval:       cfg.ACPPingInterval,
+		PongTimeout:        cfg.ACPPongTimeout,
 	}
 
 	// Open persistence store for cross-device session state.

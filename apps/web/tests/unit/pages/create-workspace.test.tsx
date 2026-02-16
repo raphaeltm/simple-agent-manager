@@ -153,4 +153,62 @@ describe('CreateWorkspace', () => {
     renderCreateWorkspace();
     expect(await screen.findByText('Setup Required')).toBeInTheDocument();
   });
+
+  it('shows prerequisites checklist with loading states initially', async () => {
+    // Use never-resolving promises so we can observe the loading state
+    mocks.listCredentials.mockReturnValue(new Promise(() => {}));
+    mocks.listGitHubInstallations.mockReturnValue(new Promise(() => {}));
+    mocks.listNodes.mockReturnValue(new Promise(() => {}));
+
+    renderCreateWorkspace();
+
+    expect(await screen.findByText('Checking prerequisites...')).toBeInTheDocument();
+    expect(screen.getByText('Hetzner Cloud Token')).toBeInTheDocument();
+    expect(screen.getByText('GitHub App Installation')).toBeInTheDocument();
+    expect(screen.getByText('Nodes')).toBeInTheDocument();
+  });
+
+  it('shows individual prereq status as each resolves', async () => {
+    // Hetzner ready, GitHub missing
+    mocks.listCredentials.mockResolvedValue([
+      { provider: 'hetzner', createdAt: '2026-01-01T00:00:00Z' },
+    ]);
+    mocks.listGitHubInstallations.mockResolvedValue([]);
+    mocks.listNodes.mockResolvedValue([]);
+
+    renderCreateWorkspace();
+
+    // Hetzner shows Connected, GitHub shows missing
+    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(await screen.findByText('Required to access repositories')).toBeInTheDocument();
+    // Settings button should appear for missing GitHub
+    const settingsButtons = screen.getAllByRole('button', { name: 'Settings' });
+    expect(settingsButtons.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('shows node count in prerequisites when prereqs card is visible', async () => {
+    // Make GitHub missing so prereqs card stays visible
+    mocks.listGitHubInstallations.mockResolvedValue([]);
+    mocks.listNodes.mockResolvedValue([
+      { id: 'n1', name: 'node-1', status: 'running' },
+      { id: 'n2', name: 'node-2', status: 'running' },
+    ]);
+
+    renderCreateWorkspace();
+
+    expect(await screen.findByText('2 available nodes')).toBeInTheDocument();
+  });
+
+  it('hides prerequisites checklist once all are met', async () => {
+    // All prerequisites met (default mocks)
+    renderCreateWorkspace();
+
+    // Form should appear
+    const nameInput = await screen.findByLabelText('Workspace Name');
+    expect(nameInput).toBeInTheDocument();
+
+    // Prerequisites checklist should not be visible (all passed, not in loading/missing state)
+    expect(screen.queryByText('Setup Required')).not.toBeInTheDocument();
+    expect(screen.queryByText('Checking prerequisites...')).not.toBeInTheDocument();
+  });
 });
