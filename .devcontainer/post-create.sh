@@ -6,7 +6,6 @@ set -e
 : "${CLOUDFLARE_OBSERVABILITY_MCP_URL:=https://observability.mcp.cloudflare.com/mcp}"
 
 echo "=== Ensuring agent config dirs exist ==="
-mkdir -p "${CLAUDE_CONFIG_DIR:-/workspaces/claude-home}"
 mkdir -p "${CODEX_HOME:-$HOME/.codex}"
 
 echo "=== Installing Claude Code (native) ==="

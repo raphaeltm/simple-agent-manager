@@ -1,11 +1,9 @@
 {
 	"name": "Simple Agent Manager",
 	"image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm",
-	// Ensure Claude CLI uses a config directory within the workspace
+	// Persist Codex state under the repo so MCP config survives container rebuilds.
+	// Note: the stateful files in `.codex/` are gitignored.
 	"containerEnv": {
-		"CLAUDE_CONFIG_DIR": "/workspaces/claude-home",
-		// Persist Codex state under the repo so MCP config survives container rebuilds.
-		// Note: the stateful files in `.codex/` are gitignored.
 		"CODEX_HOME": "/workspaces/simple-agent-manager/.codex"
 	},
 	"features": {
