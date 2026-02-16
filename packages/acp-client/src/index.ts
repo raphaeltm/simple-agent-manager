@@ -8,6 +8,7 @@ export * from './transport/websocket';
 // Hooks
 export * from './hooks/useAcpSession';
 export * from './hooks/useAcpMessages';
+export * from './hooks/useAutoScroll';
 
 // Components
 export { AgentPanel, CLIENT_COMMANDS } from './components/AgentPanel';
