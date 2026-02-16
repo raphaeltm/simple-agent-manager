@@ -14,7 +14,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -24,7 +23,16 @@ import (
 
 const (
 	maxBackoff = 30 * time.Second
+
+	// volumePrefix is prepended to workspace IDs to form Docker named volume names.
+	volumePrefix = "sam-ws-"
 )
+
+// VolumeNameForWorkspace returns the Docker named volume name for a workspace.
+// Exported so that workspace deletion can also remove the volume.
+func VolumeNameForWorkspace(workspaceID string) string {
+	return volumePrefix + workspaceID
+}
 
 type bootstrapResponse struct {
 	WorkspaceID     string  `json:"workspaceId"`
@@ -89,23 +97,30 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 		return errors.New("callback token is missing after bootstrap")
 	}
 
+	// Create a named Docker volume for container-mode workspaces.
+	// The volume replaces the host bind-mount, eliminating permission issues.
+	volumeName := ""
+	if cfg.ContainerMode {
+		reporter.Log("volume_create", "started", "Creating workspace volume")
+		var volErr error
+		volumeName, volErr = ensureVolumeReady(ctx, cfg.WorkspaceID)
+		if volErr != nil {
+			reporter.Log("volume_create", "failed", "Volume creation failed", volErr.Error())
+			return volErr
+		}
+		reporter.Log("volume_create", "completed", "Workspace volume ready")
+	}
+
 	reporter.Log("git_clone", "started", "Cloning repository")
-	if err := ensureRepositoryReady(ctx, cfg, state); err != nil {
+	if err := ensureRepositoryReady(ctx, cfg, state, volumeName); err != nil {
 		reporter.Log("git_clone", "failed", "Repository clone failed", err.Error())
 		return err
 	}
 	reporter.Log("git_clone", "completed", "Repository cloned")
 
-	reporter.Log("workspace_perms_pre", "started", "Preparing workspace permissions")
-	if err := ensureWorkspaceWritablePreDevcontainer(ctx, cfg); err != nil {
-		reporter.Log("workspace_perms_pre", "failed", "Pre-devcontainer permission setup failed", err.Error())
-		return err
-	}
-	reporter.Log("workspace_perms_pre", "completed", "Workspace permissions prepared")
-
 	reporter.Log("devcontainer_wait", "started", "Waiting for devcontainer CLI")
 	reporter.Log("devcontainer_up", "started", "Building devcontainer")
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg)
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, volumeName)
 	if err != nil {
 		reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", err.Error())
 		return err
@@ -115,13 +130,6 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	} else {
 		reporter.Log("devcontainer_up", "completed", "Devcontainer ready")
 	}
-
-	reporter.Log("workspace_perms", "started", "Setting workspace permissions")
-	if err := ensureWorkspaceWritable(ctx, cfg); err != nil {
-		reporter.Log("workspace_perms", "failed", "Permission setup failed", err.Error())
-		return err
-	}
-	reporter.Log("workspace_perms", "completed", "Workspace permissions set")
 
 	reporter.Log("git_creds", "started", "Configuring git credentials")
 	if err := ensureGitCredentialHelper(ctx, cfg); err != nil {
@@ -165,18 +173,22 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 		GitUserEmail:  strings.TrimSpace(state.GitUserEmail),
 	}
 
-	if err := ensureRepositoryReady(ctx, cfg, bootstrap); err != nil {
+	// Create a named Docker volume for container-mode workspaces.
+	volumeName := ""
+	if cfg.ContainerMode {
+		var volErr error
+		volumeName, volErr = ensureVolumeReady(ctx, cfg.WorkspaceID)
+		if volErr != nil {
+			return false, volErr
+		}
+	}
+
+	if err := ensureRepositoryReady(ctx, cfg, bootstrap, volumeName); err != nil {
 		return false, err
 	}
-	if err := ensureWorkspaceWritablePreDevcontainer(ctx, cfg); err != nil {
-		return false, err
-	}
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg)
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, volumeName)
 	if err != nil {
 		return false, err
-	}
-	if err := ensureWorkspaceWritable(ctx, cfg); err != nil {
-		return usedFallback, err
 	}
 	if err := ensureGitCredentialHelper(ctx, cfg); err != nil {
 		return usedFallback, err
@@ -191,128 +203,75 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	return usedFallback, nil
 }
 
-func ensureWorkspaceWritablePreDevcontainer(ctx context.Context, cfg *config.Config) error {
-	if cfg.WorkspaceDir == "" {
-		return nil
-	}
-	if !cfg.ContainerMode {
-		return nil
+// ensureVolumeReady creates a Docker named volume for the workspace if it doesn't
+// already exist. The volume persists across container rebuilds and is deleted when
+// the workspace is deleted.
+func ensureVolumeReady(ctx context.Context, workspaceID string) (string, error) {
+	volumeName := VolumeNameForWorkspace(workspaceID)
+
+	// docker volume create is idempotent — returns the volume name if it already exists.
+	cmd := exec.CommandContext(ctx, "docker", "volume", "create", volumeName)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to create Docker volume %s: %w: %s", volumeName, err, strings.TrimSpace(string(output)))
 	}
 
-	if _, err := os.Stat(cfg.WorkspaceDir); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("failed to stat workspace dir: %w", err)
-	}
+	log.Printf("Docker volume ready: %s", volumeName)
+	return volumeName, nil
+}
 
-	// Ensure lifecycle hooks that run as non-root users can mutate the bind mount.
-	cmd := exec.CommandContext(ctx, "chmod", "-R", "a+rwX", cfg.WorkspaceDir)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to normalize workspace permissions before devcontainer up: %w: %s", err, strings.TrimSpace(string(output)))
+// RemoveVolume removes the Docker named volume for a workspace. It is safe to call
+// even if the volume doesn't exist. Exported for use by workspace deletion.
+func RemoveVolume(ctx context.Context, workspaceID string) error {
+	volumeName := VolumeNameForWorkspace(workspaceID)
+	cmd := exec.CommandContext(ctx, "docker", "volume", "rm", "-f", volumeName)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to remove Docker volume %s: %w: %s", volumeName, err, strings.TrimSpace(string(output)))
 	}
-
+	log.Printf("Docker volume removed: %s", volumeName)
 	return nil
 }
 
-func ensureWorkspaceWritable(ctx context.Context, cfg *config.Config) error {
-	if cfg.WorkspaceDir == "" {
-		return nil
-	}
-	if _, err := os.Stat(cfg.WorkspaceDir); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("failed to stat workspace dir: %w", err)
+// cloneIntoVolume clones a git repository into a Docker named volume using a
+// lightweight throwaway container. This ensures the repo is present in the volume
+// before devcontainer up runs, so lifecycle hooks (postCreateCommand etc.) have
+// access to repo files.
+func cloneIntoVolume(ctx context.Context, volumeName, cloneURL, repoURL, branch, repoDirName string, cloneToken string) error {
+	targetPath := "/workspaces/" + repoDirName
+
+	// Use alpine/git for a minimal clone container with git preinstalled.
+	// Mount the named volume at /workspaces so the clone persists.
+	args := []string{
+		"run", "--rm",
+		"-v", volumeName + ":/workspaces",
+		"alpine/git:latest",
+		"clone", "--branch", branch, "--single-branch", cloneURL, targetPath,
 	}
 
-	// Only needed for devcontainer/bind-mount workflows.
-	if !cfg.ContainerMode {
-		return nil
-	}
-
-	containerID, err := findDevcontainerID(ctx, cfg)
+	log.Printf("Cloning repository into volume %s at %s", volumeName, targetPath)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("Workspace permission fix skipped: unable to locate devcontainer: %v", err)
-		return nil
+		return fmt.Errorf("git clone into volume failed: %w: %s", err, redactSecret(strings.TrimSpace(string(output)), cloneToken))
 	}
 
-	uid := 0
-	gid := 0
-	user := strings.TrimSpace(cfg.ContainerUser)
-	if user != "" {
-		// Prefer configured user, but fall back to container default user.
-		if u, g, err := getContainerUserIDs(ctx, containerID, user); err != nil {
-			log.Printf("Workspace permission fix: unable to resolve user %q in devcontainer (%v), falling back to container default user", user, err)
-		} else {
-			uid, gid = u, g
-		}
+	// Sanitize origin URL (remove embedded credentials) via another throwaway container.
+	sanitizeArgs := []string{
+		"run", "--rm",
+		"-v", volumeName + ":/workspaces",
+		"alpine/git:latest",
+		"-C", targetPath,
+		"remote", "set-url", "origin", repoURL,
 	}
-	if uid == 0 && gid == 0 {
-		u, g, err := getContainerCurrentUserIDs(ctx, containerID)
-		if err != nil {
-			log.Printf("Workspace permission fix skipped: unable to resolve devcontainer user: %v", err)
-			return nil
-		}
-		uid, gid = u, g
+	cmd = exec.CommandContext(ctx, "docker", sanitizeArgs...)
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to sanitize repository origin URL in volume: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
-	owner := fmt.Sprintf("%d:%d", uid, gid)
-	cmd := exec.CommandContext(ctx, "chown", "-R", owner, cfg.WorkspaceDir)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		log.Printf("Workspace permission fix failed (owner=%s, dir=%s): %v: %s", owner, cfg.WorkspaceDir, err, strings.TrimSpace(string(output)))
-		return nil
-	}
-
+	log.Printf("Repository cloned into volume %s at %s", volumeName, targetPath)
 	return nil
-}
-
-func getContainerUserIDs(ctx context.Context, containerID, user string) (int, int, error) {
-	uidCmd := exec.CommandContext(ctx, "docker", "exec", containerID, "id", "-u", user)
-	uidOut, err := uidCmd.CombinedOutput()
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to get uid for %s in devcontainer: %w: %s", user, err, strings.TrimSpace(string(uidOut)))
-	}
-	uid, err := strconv.Atoi(strings.TrimSpace(string(uidOut)))
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid uid output for %s in devcontainer: %q", user, strings.TrimSpace(string(uidOut)))
-	}
-
-	gidCmd := exec.CommandContext(ctx, "docker", "exec", containerID, "id", "-g", user)
-	gidOut, err := gidCmd.CombinedOutput()
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to get gid for %s in devcontainer: %w: %s", user, err, strings.TrimSpace(string(gidOut)))
-	}
-	gid, err := strconv.Atoi(strings.TrimSpace(string(gidOut)))
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid gid output for %s in devcontainer: %q", user, strings.TrimSpace(string(gidOut)))
-	}
-
-	return uid, gid, nil
-}
-
-func getContainerCurrentUserIDs(ctx context.Context, containerID string) (int, int, error) {
-	uidCmd := exec.CommandContext(ctx, "docker", "exec", containerID, "id", "-u")
-	uidOut, err := uidCmd.CombinedOutput()
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to get current uid in devcontainer: %w: %s", err, strings.TrimSpace(string(uidOut)))
-	}
-	uid, err := strconv.Atoi(strings.TrimSpace(string(uidOut)))
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid uid output in devcontainer: %q", strings.TrimSpace(string(uidOut)))
-	}
-
-	gidCmd := exec.CommandContext(ctx, "docker", "exec", containerID, "id", "-g")
-	gidOut, err := gidCmd.CombinedOutput()
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to get current gid in devcontainer: %w: %s", err, strings.TrimSpace(string(gidOut)))
-	}
-	gid, err := strconv.Atoi(strings.TrimSpace(string(gidOut)))
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid gid output in devcontainer: %q", strings.TrimSpace(string(gidOut)))
-	}
-
-	return uid, gid, nil
 }
 
 func redeemBootstrapTokenWithRetry(ctx context.Context, cfg *config.Config) (*bootstrapState, error) {
@@ -414,24 +373,10 @@ func redeemBootstrapToken(ctx context.Context, cfg *config.Config) (*bootstrapSt
 	}, false, nil
 }
 
-func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *bootstrapState) error {
+func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *bootstrapState, volumeName string) error {
 	if cfg.Repository == "" {
 		log.Printf("Repository is empty, skipping clone step")
 		return nil
-	}
-
-	gitDir := filepath.Join(cfg.WorkspaceDir, ".git")
-	if _, err := os.Stat(gitDir); err == nil {
-		log.Printf("Repository already present at %s, skipping clone", cfg.WorkspaceDir)
-		return nil
-	}
-
-	if err := os.MkdirAll(filepath.Dir(cfg.WorkspaceDir), 0o755); err != nil {
-		return fmt.Errorf("failed to create workspace parent directory: %w", err)
-	}
-
-	if err := os.RemoveAll(cfg.WorkspaceDir); err != nil {
-		return fmt.Errorf("failed to clean workspace directory: %w", err)
 	}
 
 	branch := cfg.Branch
@@ -448,6 +393,44 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 	cloneURL, err := withGitHubToken(repoURL, cloneToken)
 	if err != nil {
 		return fmt.Errorf("failed to prepare clone URL: %w", err)
+	}
+
+	repoDirName := config.DeriveRepoDirName(cfg.Repository)
+	if repoDirName == "" {
+		repoDirName = "workspace"
+	}
+
+	if volumeName != "" {
+		// Volume-based storage: check if repo already exists in the volume via a
+		// throwaway container, then clone into the volume if not.
+		checkArgs := []string{
+			"run", "--rm",
+			"-v", volumeName + ":/workspaces",
+			"alpine:latest",
+			"test", "-d", "/workspaces/" + repoDirName + "/.git",
+		}
+		checkCmd := exec.CommandContext(ctx, "docker", checkArgs...)
+		if err := checkCmd.Run(); err == nil {
+			log.Printf("Repository already present in volume %s at /workspaces/%s, skipping clone", volumeName, repoDirName)
+			return nil
+		}
+
+		return cloneIntoVolume(ctx, volumeName, cloneURL, repoURL, branch, repoDirName, cloneToken)
+	}
+
+	// Host-based storage (legacy/non-container mode): clone directly on host.
+	gitDir := filepath.Join(cfg.WorkspaceDir, ".git")
+	if _, err := os.Stat(gitDir); err == nil {
+		log.Printf("Repository already present at %s, skipping clone", cfg.WorkspaceDir)
+		return nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(cfg.WorkspaceDir), 0o755); err != nil {
+		return fmt.Errorf("failed to create workspace parent directory: %w", err)
+	}
+
+	if err := os.RemoveAll(cfg.WorkspaceDir); err != nil {
+		return fmt.Errorf("failed to clean workspace directory: %w", err)
 	}
 
 	log.Printf("Cloning repository %s (branch: %s) into %s", cfg.Repository, branch, cfg.WorkspaceDir)
@@ -470,7 +453,12 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 // ensureDevcontainerReady builds and starts the devcontainer for the workspace.
 // It returns (usedFallback, error) where usedFallback is true if the repo's own
 // devcontainer config failed and the default image was used instead.
-func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) (bool, error) {
+//
+// When volumeName is non-empty, the devcontainer is started with a named Docker
+// volume mounted at /workspaces instead of the default bind mount. This eliminates
+// host/container permission mismatches because the container user owns everything
+// inside the volume.
+func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName string) (bool, error) {
 	if _, err := findDevcontainerID(ctx, cfg); err == nil {
 		log.Printf("Devcontainer already running for %s=%s", cfg.ContainerLabelKey, cfg.ContainerLabelValue)
 		return false, nil
@@ -489,7 +477,7 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) (bool, err
 
 	if hasConfig {
 		// Try with repo's own devcontainer config first.
-		args := []string{"up", "--workspace-folder", cfg.WorkspaceDir}
+		args := devcontainerUpArgs(cfg, volumeName, "")
 		if cfg.AdditionalFeatures != "" {
 			log.Printf("Repo has its own devcontainer config — skipping additional-features injection")
 		}
@@ -513,7 +501,7 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) (bool, err
 			removeStaleContainers(ctx, cfg)
 
 			// Retry with the default config.
-			usedFallback, fallbackErr := runDevcontainerWithDefault(ctx, cfg)
+			usedFallback, fallbackErr := runDevcontainerWithDefault(ctx, cfg, volumeName)
 			if fallbackErr != nil {
 				return false, fmt.Errorf("devcontainer fallback also failed: %w (original error: %v)", fallbackErr, err)
 			}
@@ -526,23 +514,51 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config) (bool, err
 	}
 
 	// No config — use default.
-	_, err := runDevcontainerWithDefault(ctx, cfg)
+	_, err := runDevcontainerWithDefault(ctx, cfg, volumeName)
 	if err != nil {
 		return false, err
 	}
 	return false, nil
 }
 
+// devcontainerUpArgs builds the argument slice for `devcontainer up`.
+// When volumeName is non-empty, it injects a --mount flag to override the default
+// bind-mount with a named Docker volume at /workspaces.
+// When overrideConfigPath is non-empty, it adds --override-config.
+func devcontainerUpArgs(cfg *config.Config, volumeName, overrideConfigPath string) []string {
+	args := []string{"up", "--workspace-folder", cfg.WorkspaceDir}
+
+	if volumeName != "" {
+		// Override the default bind-mount with a named volume.
+		// The --mount flag adds the volume; the devcontainer CLI still needs
+		// --workspace-folder for configuration discovery on the host.
+		repoDirName := config.DeriveRepoDirName(cfg.Repository)
+		if repoDirName == "" {
+			repoDirName = filepath.Base(cfg.WorkspaceDir)
+		}
+		args = append(args,
+			"--mount", fmt.Sprintf("type=volume,source=%s,target=/workspaces", volumeName),
+			"--remote-env", fmt.Sprintf("WORKSPACE_FOLDER=/workspaces/%s", repoDirName),
+		)
+	}
+
+	if overrideConfigPath != "" {
+		args = append(args, "--override-config", overrideConfigPath)
+	}
+
+	return args
+}
+
 // runDevcontainerWithDefault writes a default devcontainer config and runs devcontainer up
 // with --override-config and optional --additional-features.
-func runDevcontainerWithDefault(ctx context.Context, cfg *config.Config) (bool, error) {
+func runDevcontainerWithDefault(ctx context.Context, cfg *config.Config, volumeName string) (bool, error) {
 	configPath, err := writeDefaultDevcontainerConfig(cfg)
 	if err != nil {
 		return false, fmt.Errorf("failed to write default devcontainer config: %w", err)
 	}
 	log.Printf("Using default devcontainer config: %s (image: %s)", configPath, cfg.DefaultDevcontainerImage)
 
-	args := []string{"up", "--workspace-folder", cfg.WorkspaceDir, "--override-config", configPath}
+	args := devcontainerUpArgs(cfg, volumeName, configPath)
 	if cfg.AdditionalFeatures != "" {
 		log.Printf("Injecting additional devcontainer features: %s", cfg.AdditionalFeatures)
 		args = append(args, "--additional-features", cfg.AdditionalFeatures)

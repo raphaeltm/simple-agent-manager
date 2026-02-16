@@ -519,68 +519,112 @@ func TestHasDevcontainerConfig(t *testing.T) {
 	})
 }
 
-func TestEnsureWorkspaceWritablePreDevcontainerNoopWhenContainerModeDisabled(t *testing.T) {
+func TestVolumeNameForWorkspace(t *testing.T) {
 	t.Parallel()
 
-	workspaceDir := t.TempDir()
-	targetFile := filepath.Join(workspaceDir, "package-lock.json")
-	if err := os.WriteFile(targetFile, []byte("{}"), 0o600); err != nil {
-		t.Fatalf("failed to write target file: %v", err)
+	tests := []struct {
+		name        string
+		workspaceID string
+		want        string
+	}{
+		{name: "normal id", workspaceID: "abc123", want: "sam-ws-abc123"},
+		{name: "uuid id", workspaceID: "550e8400-e29b-41d4-a716-446655440000", want: "sam-ws-550e8400-e29b-41d4-a716-446655440000"},
+		{name: "empty id", workspaceID: "", want: "sam-ws-"},
 	}
 
-	cfg := &config.Config{
-		WorkspaceDir:  workspaceDir,
-		ContainerMode: false,
-	}
-	if err := ensureWorkspaceWritablePreDevcontainer(context.Background(), cfg); err != nil {
-		t.Fatalf("ensureWorkspaceWritablePreDevcontainer returned error: %v", err)
-	}
-
-	info, err := os.Stat(targetFile)
-	if err != nil {
-		t.Fatalf("stat target file failed: %v", err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("expected mode 0600 when container mode is disabled, got %o", info.Mode().Perm())
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := VolumeNameForWorkspace(tc.workspaceID)
+			if got != tc.want {
+				t.Fatalf("VolumeNameForWorkspace(%q) = %q, want %q", tc.workspaceID, got, tc.want)
+			}
+		})
 	}
 }
 
-func TestEnsureWorkspaceWritablePreDevcontainerMakesWorkspaceWritable(t *testing.T) {
+func TestDevcontainerUpArgs(t *testing.T) {
 	t.Parallel()
 
-	workspaceDir := t.TempDir()
-	subDir := filepath.Join(workspaceDir, "subdir")
-	if err := os.MkdirAll(subDir, 0o700); err != nil {
-		t.Fatalf("failed to create subdir: %v", err)
-	}
-	targetFile := filepath.Join(workspaceDir, "package-lock.json")
-	if err := os.WriteFile(targetFile, []byte("{}"), 0o600); err != nil {
-		t.Fatalf("failed to write target file: %v", err)
-	}
+	t.Run("no volume no override", func(t *testing.T) {
+		t.Parallel()
+		cfg := &config.Config{
+			WorkspaceDir: "/workspace/my-repo",
+			Repository:   "owner/my-repo",
+		}
+		args := devcontainerUpArgs(cfg, "", "")
+		if len(args) != 3 {
+			t.Fatalf("expected 3 args, got %d: %v", len(args), args)
+		}
+		if args[0] != "up" || args[1] != "--workspace-folder" || args[2] != "/workspace/my-repo" {
+			t.Fatalf("unexpected args: %v", args)
+		}
+	})
 
-	cfg := &config.Config{
-		WorkspaceDir:  workspaceDir,
-		ContainerMode: true,
-	}
-	if err := ensureWorkspaceWritablePreDevcontainer(context.Background(), cfg); err != nil {
-		t.Fatalf("ensureWorkspaceWritablePreDevcontainer returned error: %v", err)
-	}
+	t.Run("with volume", func(t *testing.T) {
+		t.Parallel()
+		cfg := &config.Config{
+			WorkspaceDir: "/workspace/my-repo",
+			Repository:   "owner/my-repo",
+		}
+		args := devcontainerUpArgs(cfg, "sam-ws-abc123", "")
+		found := false
+		for i, a := range args {
+			if a == "--mount" && i+1 < len(args) {
+				if args[i+1] != "type=volume,source=sam-ws-abc123,target=/workspaces" {
+					t.Fatalf("unexpected --mount value: %s", args[i+1])
+				}
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected --mount flag in args: %v", args)
+		}
+	})
 
-	fileInfo, err := os.Stat(targetFile)
-	if err != nil {
-		t.Fatalf("stat target file failed: %v", err)
-	}
-	if fileInfo.Mode().Perm()&0o666 != 0o666 {
-		t.Fatalf("expected file mode to include 0666 bits, got %o", fileInfo.Mode().Perm())
-	}
+	t.Run("with override config", func(t *testing.T) {
+		t.Parallel()
+		cfg := &config.Config{
+			WorkspaceDir: "/workspace/my-repo",
+			Repository:   "owner/my-repo",
+		}
+		args := devcontainerUpArgs(cfg, "", "/etc/sam/default-devcontainer.json")
+		found := false
+		for i, a := range args {
+			if a == "--override-config" && i+1 < len(args) {
+				if args[i+1] != "/etc/sam/default-devcontainer.json" {
+					t.Fatalf("unexpected --override-config value: %s", args[i+1])
+				}
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected --override-config flag in args: %v", args)
+		}
+	})
 
-	dirInfo, err := os.Stat(subDir)
-	if err != nil {
-		t.Fatalf("stat subdir failed: %v", err)
-	}
-	if dirInfo.Mode().Perm()&0o777 != 0o777 {
-		t.Fatalf("expected directory mode to include 0777 bits, got %o", dirInfo.Mode().Perm())
-	}
+	t.Run("with volume and override config", func(t *testing.T) {
+		t.Parallel()
+		cfg := &config.Config{
+			WorkspaceDir: "/workspace/my-repo",
+			Repository:   "owner/my-repo",
+		}
+		args := devcontainerUpArgs(cfg, "sam-ws-abc123", "/etc/sam/default.json")
+		hasMount := false
+		hasOverride := false
+		for _, a := range args {
+			if a == "--mount" {
+				hasMount = true
+			}
+			if a == "--override-config" {
+				hasOverride = true
+			}
+		}
+		if !hasMount || !hasOverride {
+			t.Fatalf("expected both --mount and --override-config in args: %v", args)
+		}
+	})
 }
 
 func TestPrepareWorkspaceMarksReady(t *testing.T) {
@@ -773,7 +817,7 @@ exit 1
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg)
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "")
 	if err != nil {
 		t.Fatalf("ensureDevcontainerReady returned error: %v", err)
 	}
@@ -874,7 +918,7 @@ func TestEnsureDevcontainerReadyNoFallbackWhenRepoConfigSucceeds(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg)
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "")
 	if err != nil {
 		t.Fatalf("ensureDevcontainerReady returned error: %v", err)
 	}

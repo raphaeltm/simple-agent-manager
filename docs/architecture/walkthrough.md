@@ -455,7 +455,7 @@ graph TB
 | Subsystem | Package | Responsibility |
 |-----------|---------|---------------|
 | **PTY Manager** | `internal/pty/` | Terminal session multiplexing, ring buffer for replay on reconnect, session lifecycle |
-| **Container Manager** | `internal/container/` | Docker exec, devcontainer CLI, bind-mount permissions, git credential injection |
+| **Container Manager** | `internal/container/` | Docker exec, devcontainer CLI, named volume management, git credential injection |
 | **JWT Validator** | `internal/auth/` | Validates workspace JWTs via JWKS endpoint, extracts claims |
 | **Session Manager** | `internal/auth/` | HTTP cookie-based sessions, TTL cleanup |
 | **ACP Gateway** | `internal/acp/` | ACP SDK protocol — Initialize → NewSession → Prompt — streams to WebSocket |

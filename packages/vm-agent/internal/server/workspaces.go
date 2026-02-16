@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os/exec"
 	"strings"
 
+	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/persistence"
 )
 
@@ -19,6 +21,41 @@ func (s *Server) stopSessionHost(workspaceID, sessionID string) {
 		delete(s.sessionHosts, hostKey)
 	}
 	s.sessionHostMu.Unlock()
+}
+
+// removeWorkspaceContainer stops and removes the Docker container associated with
+// a workspace. This must be called before removing the workspace's Docker volume
+// (Docker won't remove a volume that's in use by a container).
+func (s *Server) removeWorkspaceContainer(workspaceID string) {
+	runtime, ok := s.getWorkspaceRuntime(workspaceID)
+	if !ok {
+		return
+	}
+
+	labelValue := strings.TrimSpace(runtime.ContainerLabelValue)
+	if labelValue == "" {
+		return
+	}
+
+	filter := "label=" + s.config.ContainerLabelKey + "=" + labelValue
+	ctx := context.Background()
+
+	// Find all containers (running or stopped) matching the label.
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-aq", "--filter", filter)
+	output, err := cmd.Output()
+	if err != nil {
+		log.Printf("Warning: failed to list containers for workspace %s: %v", workspaceID, err)
+		return
+	}
+
+	containers := strings.Fields(string(output))
+	for _, id := range containers {
+		log.Printf("Removing container %s for workspace %s", id, workspaceID)
+		rmCmd := exec.CommandContext(ctx, "docker", "rm", "-f", id)
+		if rmOutput, rmErr := rmCmd.CombinedOutput(); rmErr != nil {
+			log.Printf("Warning: failed to remove container %s: %v: %s", id, rmErr, strings.TrimSpace(string(rmOutput)))
+		}
+	}
 }
 
 func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
@@ -354,6 +391,14 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.stopSessionHostsForWorkspace(workspaceID)
+
+	// Remove the devcontainer and its Docker volume.
+	// The container must be removed before the volume (Docker won't remove a volume in use).
+	s.removeWorkspaceContainer(workspaceID)
+	if err := bootstrap.RemoveVolume(context.Background(), workspaceID); err != nil {
+		log.Printf("Warning: failed to remove Docker volume for workspace %s: %v", workspaceID, err)
+	}
+
 	s.removeWorkspaceRuntime(workspaceID)
 
 	// Remove all persisted tabs for this workspace

@@ -26,7 +26,7 @@ func TestDeriveRepoDirName(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := deriveRepoDirName(tc.in)
+			got := DeriveRepoDirName(tc.in)
 			if got != tc.want {
 				t.Fatalf("deriveRepoDirName(%q) = %q, want %q", tc.in, got, tc.want)
 			}

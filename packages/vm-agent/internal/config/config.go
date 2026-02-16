@@ -303,7 +303,7 @@ func deriveWorkspaceDir(workspaceBaseDir, repository string) string {
 		baseDir = "/workspace"
 	}
 
-	repoDirName := deriveRepoDirName(repository)
+	repoDirName := DeriveRepoDirName(repository)
 	if repoDirName == "" {
 		// Preserve legacy behavior when the repo is unknown: a fixed base directory.
 		return baseDir
@@ -323,7 +323,9 @@ func deriveContainerWorkDir(workspaceDir string) string {
 	return filepath.Join("/workspaces", base)
 }
 
-func deriveRepoDirName(repository string) string {
+// DeriveRepoDirName extracts a filesystem-safe directory name from a repository
+// URL or owner/repo string. Exported for use by the bootstrap package.
+func DeriveRepoDirName(repository string) string {
 	repo := strings.TrimSpace(repository)
 	if repo == "" {
 		return ""
