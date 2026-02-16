@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import type { AgentStatusMessage, AgentSessionStatus, LifecycleEventCallback } from '../transport/types';
+import type { AgentStatusMessage, AgentSessionStatus, SessionStateMessage, LifecycleEventCallback } from '../transport/types';
 import { createAcpWebSocketTransport } from '../transport/websocket';
 import type { AcpTransport } from '../transport/websocket';
 
@@ -16,6 +16,7 @@ export type AcpSessionState =
   | 'connecting'
   | 'no_session'
   | 'initializing'
+  | 'replaying'
   | 'ready'
   | 'prompting'
   | 'error'
@@ -69,6 +70,8 @@ export interface AcpSessionHandle {
   agentType: string | null;
   /** Error message if state is 'error' */
   error: string | null;
+  /** Whether the session is replaying buffered messages from a late join */
+  replaying: boolean;
   /** Switch to a different agent */
   switchAgent: (agentType: string) => void;
   /** Send an ACP JSON-RPC message to the agent */
@@ -110,6 +113,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
   const [state, setState] = useState<AcpSessionState>('disconnected');
   const [agentType, setAgentType] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [replaying, setReplaying] = useState(false);
 
   const transportRef = useRef<AcpTransport | null>(null);
   const onAcpMessageRef = useRef(onAcpMessage);
@@ -176,6 +180,73 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     onAcpMessageRef.current?.(data as AcpMessage);
   }, [logLifecycle]);
 
+  // Handle session_state control message from SessionHost on viewer attach.
+  // This tells us the current server-side state of the agent session.
+  const handleSessionState = useCallback((msg: SessionStateMessage) => {
+    logLifecycle('info', 'Session state received', {
+      status: msg.status,
+      agentType: msg.agentType,
+      replayCount: msg.replayCount,
+      error: msg.error,
+    });
+
+    // Map SessionHost status to our state machine
+    const status = msg.status;
+    // Always sync agentType from server state — clear to null when empty/idle
+    setAgentType(msg.agentType || null);
+    if (msg.error) {
+      setError(msg.error);
+    } else {
+      setError(null);
+    }
+
+    if (status === 'idle') {
+      // No agent selected yet — equivalent to no_session
+      setState('no_session');
+      setReplaying(false);
+    } else if (status === 'starting') {
+      setState('initializing');
+      setReplaying(false);
+    } else if (status === 'ready' || status === 'prompting') {
+      // Agent is running — we'll receive buffered messages, then replay_complete
+      if (msg.replayCount > 0) {
+        setState('replaying');
+        setReplaying(true);
+      } else {
+        setState(status === 'prompting' ? 'prompting' : 'ready');
+        setReplaying(false);
+      }
+    } else if (status === 'error') {
+      setState('error');
+      setReplaying(false);
+    } else if (status === 'stopped') {
+      setState('disconnected');
+      setReplaying(false);
+    } else {
+      // Unknown status — treat as no_session
+      setState('no_session');
+      setReplaying(false);
+    }
+  }, [logLifecycle]);
+
+  // Handle session_replay_complete — all buffered messages have been delivered
+  const handleSessionReplayComplete = useCallback(() => {
+    logLifecycle('info', 'Session replay complete');
+    setReplaying(false);
+    // Transition from replaying to ready (unless agent_status updates changed state)
+    setState((prev) => (prev === 'replaying' ? 'ready' : prev));
+  }, [logLifecycle]);
+
+  // Handle session prompting state changes
+  const handleSessionPrompting = useCallback((prompting: boolean) => {
+    logLifecycle('info', `Session prompting: ${prompting}`);
+    if (prompting) {
+      setState('prompting');
+    } else {
+      setState((prev) => (prev === 'prompting' ? 'ready' : prev));
+    }
+  }, [logLifecycle]);
+
   // Connect to the ACP WebSocket
   const connect = useCallback((url: string) => {
     const host = safeHost(url);
@@ -187,22 +258,23 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       reconnectAttemptRef.current = 0;
       reconnectStartRef.current = 0;
       wasConnectedRef.current = true;
-      setState('no_session');
-      // Clear stale agent type and error so the auto-select effect in
-      // ChatSession fires switchAgent() after reconnection. Without this,
-      // agentType === preferredAgentId evaluates true and the server never
-      // receives select_agent, causing an infinite hang.
-      setAgentType(null);
+      // Stay in 'connecting' until we receive session_state from the server.
+      // The server will send session_state immediately after the viewer
+      // attaches, telling us whether an agent is already running.
+      setState('connecting');
       setError(null);
 
-      logLifecycle('info', 'WebSocket connected', { host, wasReconnect });
+      logLifecycle('info', 'WebSocket connected, awaiting session_state', { host, wasReconnect });
     });
 
-    const transport = createAcpWebSocketTransport(
+    const transport = createAcpWebSocketTransport({
       ws,
-      handleAgentStatus,
-      handleAcpMessage,
-      () => {
+      onAgentStatus: handleAgentStatus,
+      onAcpMessage: handleAcpMessage,
+      onSessionState: handleSessionState,
+      onSessionReplayComplete: handleSessionReplayComplete,
+      onSessionPrompting: handleSessionPrompting,
+      onClose() {
         // WebSocket closed — attempt reconnection if not intentional
         transportRef.current = null;
 
@@ -226,7 +298,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
           setError('WebSocket connection failed');
         }
       },
-      () => {
+      onError() {
         // WebSocket error
         logLifecycle('warn', 'WebSocket error event', {
           host,
@@ -241,12 +313,12 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
         setState('error');
         setError('WebSocket connection error');
       },
-      onLifecycleEventRef.current // pass lifecycle callback to transport
-    );
+      onLifecycleEvent: onLifecycleEventRef.current,
+    });
 
     transportRef.current = transport;
     return transport;
-  }, [handleAgentStatus, handleAcpMessage, logLifecycle]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [handleAgentStatus, handleAcpMessage, handleSessionState, handleSessionReplayComplete, handleSessionPrompting, logLifecycle]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Attempt reconnection with exponential backoff
   const attemptReconnect = useCallback((url: string) => {
@@ -407,6 +479,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     state,
     agentType,
     error,
+    replaying,
     switchAgent,
     sendMessage,
     connected: transportRef.current?.connected ?? false,

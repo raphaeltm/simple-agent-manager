@@ -92,6 +92,8 @@ type Config struct {
 	ACPReconnectDelayMs   int
 	ACPReconnectTimeoutMs int
 	ACPMaxRestartAttempts int
+	ACPMessageBufferSize  int // Max buffered messages per SessionHost for late-join replay
+	ACPViewerSendBuffer   int // Per-viewer send channel buffer size
 
 	// Container settings - exec into devcontainer instead of host shell
 	ContainerMode       bool
@@ -211,6 +213,8 @@ func Load() (*Config, error) {
 		ACPReconnectDelayMs:   getEnvInt("ACP_RECONNECT_DELAY_MS", 2000),
 		ACPReconnectTimeoutMs: getEnvInt("ACP_RECONNECT_TIMEOUT_MS", 30000),
 		ACPMaxRestartAttempts: getEnvInt("ACP_MAX_RESTART_ATTEMPTS", 3),
+		ACPMessageBufferSize: getEnvInt("ACP_MESSAGE_BUFFER_SIZE", 5000),
+		ACPViewerSendBuffer:  getEnvInt("ACP_VIEWER_SEND_BUFFER", 256),
 
 		ContainerMode: getEnvBool("CONTAINER_MODE", true),
 		// Default to the container's configured user. If you need to force a specific user, set CONTAINER_USER.

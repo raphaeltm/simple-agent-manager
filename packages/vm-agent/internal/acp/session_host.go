@@ -1,0 +1,1307 @@
+package acp
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os/exec"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/gorilla/websocket"
+)
+
+// SessionHostStatus represents the lifecycle state of a SessionHost.
+type SessionHostStatus string
+
+const (
+	HostIdle     SessionHostStatus = "idle"      // No agent selected yet
+	HostStarting SessionHostStatus = "starting"  // Agent being initialized
+	HostReady    SessionHostStatus = "ready"      // Agent ready for prompts
+	HostPrompting SessionHostStatus = "prompting" // Prompt in progress
+	HostError    SessionHostStatus = "error"      // Agent in error state
+	HostStopped  SessionHostStatus = "stopped"    // Explicitly stopped
+)
+
+// DefaultMessageBufferSize is the default maximum number of messages buffered
+// per session for late-join replay. Override via ACP_MESSAGE_BUFFER_SIZE.
+const DefaultMessageBufferSize = 5000
+
+// DefaultViewerSendBuffer is the default channel buffer size per viewer.
+// Override via ACP_VIEWER_SEND_BUFFER.
+const DefaultViewerSendBuffer = 256
+
+// SessionHostConfig holds configuration for a SessionHost.
+// It extends GatewayConfig with multi-viewer settings.
+type SessionHostConfig struct {
+	GatewayConfig
+
+	// MessageBufferSize is the maximum number of messages to buffer for
+	// late-join replay. When the buffer is full, oldest messages are evicted.
+	MessageBufferSize int
+
+	// ViewerSendBuffer is the channel buffer size per viewer. If a viewer's
+	// channel is full, messages are dropped for that viewer.
+	ViewerSendBuffer int
+}
+
+// BufferedMessage holds a single message in the replay buffer.
+type BufferedMessage struct {
+	Data      []byte
+	SeqNum    uint64
+	Timestamp time.Time
+}
+
+// Viewer represents a single WebSocket connection to a SessionHost.
+type Viewer struct {
+	ID     string
+	conn   *websocket.Conn
+	sendCh chan []byte
+	done   chan struct{}
+	once   sync.Once
+}
+
+// SessionHost manages a single ACP agent session independently of any
+// browser WebSocket connection. It owns the agent process, the ACP SDK
+// connection, and a message buffer for late-join replay.
+//
+// Multiple WebSocket connections (viewers) can attach simultaneously.
+// The agent process lives until Stop() is called explicitly.
+type SessionHost struct {
+	config SessionHostConfig
+
+	// Agent state (guarded by mu)
+	mu             sync.RWMutex
+	process        *AgentProcess
+	acpConn        *acpsdk.ClientSideConnection
+	agentType      string
+	sessionID      acpsdk.SessionId
+	restartCount   int
+	permissionMode string
+	status         SessionHostStatus
+	statusErr      string
+
+	// Viewers (guarded by viewerMu)
+	viewerMu sync.RWMutex
+	viewers  map[string]*Viewer
+
+	// Message buffer for late-join replay (guarded by bufMu)
+	bufMu      sync.RWMutex
+	messageBuf []BufferedMessage
+	seqCounter uint64
+
+	// Prompt serialization — only one prompt at a time
+	promptMu sync.Mutex
+
+	// Stderr collection
+	stderrMu  sync.Mutex
+	stderrBuf strings.Builder
+
+	// Lifecycle
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+// NewSessionHost creates a new SessionHost for the given session.
+// The host starts in HostIdle status. Call SelectAgent to start an agent.
+func NewSessionHost(config SessionHostConfig) *SessionHost {
+	if config.MessageBufferSize <= 0 {
+		config.MessageBufferSize = DefaultMessageBufferSize
+	}
+	if config.ViewerSendBuffer <= 0 {
+		config.ViewerSendBuffer = DefaultViewerSendBuffer
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	return &SessionHost{
+		config:     config,
+		status:     HostIdle,
+		viewers:    make(map[string]*Viewer),
+		messageBuf: make([]BufferedMessage, 0, 256),
+		ctx:        ctx,
+		cancel:     cancel,
+	}
+}
+
+// Status returns the current status of the SessionHost.
+func (h *SessionHost) Status() SessionHostStatus {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.status
+}
+
+// AgentType returns the current agent type, or empty string if no agent selected.
+func (h *SessionHost) AgentType() string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.agentType
+}
+
+// ViewerCount returns the number of active viewers.
+func (h *SessionHost) ViewerCount() int {
+	h.viewerMu.RLock()
+	defer h.viewerMu.RUnlock()
+	return len(h.viewers)
+}
+
+// AttachViewer registers a new WebSocket connection as a viewer of this session.
+// It sends the current session state, replays all buffered messages, then signals
+// replay completion. Returns nil if the session is stopped.
+func (h *SessionHost) AttachViewer(id string, conn *websocket.Conn) *Viewer {
+	h.mu.RLock()
+	if h.status == HostStopped {
+		h.mu.RUnlock()
+		return nil
+	}
+	currentStatus := h.status
+	currentAgentType := h.agentType
+	currentErr := h.statusErr
+	h.mu.RUnlock()
+
+	viewer := &Viewer{
+		ID:     id,
+		conn:   conn,
+		sendCh: make(chan []byte, h.config.ViewerSendBuffer),
+		done:   make(chan struct{}),
+	}
+
+	// Start the viewer's write pump goroutine
+	go h.viewerWritePump(viewer)
+
+	// Register the viewer
+	h.viewerMu.Lock()
+	h.viewers[id] = viewer
+	h.viewerMu.Unlock()
+
+	log.Printf("SessionHost[%s]: viewer %s attached (total=%d)", h.config.SessionID, id, h.ViewerCount())
+
+	// Send current session state
+	h.sendToViewer(viewer, h.marshalSessionState(currentStatus, currentAgentType, currentErr))
+
+	// Replay buffered messages
+	h.replayToViewer(viewer)
+
+	// Signal replay complete
+	h.sendToViewer(viewer, h.marshalControl(MsgSessionReplayDone, nil))
+
+	return viewer
+}
+
+// DetachViewer removes a viewer from the session. This does NOT stop the agent.
+func (h *SessionHost) DetachViewer(viewerID string) {
+	h.viewerMu.Lock()
+	viewer, ok := h.viewers[viewerID]
+	if ok {
+		delete(h.viewers, viewerID)
+	}
+	h.viewerMu.Unlock()
+
+	if ok && viewer != nil {
+		viewer.once.Do(func() { close(viewer.done) })
+		log.Printf("SessionHost[%s]: viewer %s detached (total=%d)", h.config.SessionID, viewerID, h.ViewerCount())
+	}
+}
+
+// SelectAgent handles agent selection requests from a browser.
+// It fetches credentials, installs the binary, starts the process,
+// and initializes the ACP session.
+func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
+	h.mu.Lock()
+
+	log.Printf("SessionHost[%s]: agent selection requested: %s", h.config.SessionID, agentType)
+
+	// Capture previous ACP session ID before stopping the agent.
+	previousAcpSessionID := ""
+	previousAgentType := h.agentType
+	if h.sessionID != "" {
+		previousAcpSessionID = string(h.sessionID)
+	}
+	if previousAcpSessionID == "" && h.config.PreviousAcpSessionID != "" {
+		previousAcpSessionID = h.config.PreviousAcpSessionID
+		h.config.PreviousAcpSessionID = ""
+	}
+	if previousAgentType == "" && h.config.PreviousAgentType != "" {
+		previousAgentType = h.config.PreviousAgentType
+		h.config.PreviousAgentType = ""
+	}
+
+	// Stop current agent if running
+	if h.process != nil {
+		h.stopCurrentAgentLocked()
+	}
+
+	h.agentType = agentType
+	h.restartCount = 0
+	h.status = HostStarting
+	h.statusErr = ""
+	h.mu.Unlock()
+
+	// Broadcast starting status
+	h.broadcastAgentStatus(StatusStarting, agentType, "")
+
+	// Reset stderr buffer
+	h.stderrMu.Lock()
+	h.stderrBuf.Reset()
+	h.stderrMu.Unlock()
+
+	h.reportLifecycle("info", "Agent selection started", map[string]interface{}{
+		"agentType":            agentType,
+		"previousAcpSessionID": previousAcpSessionID,
+		"previousAgentType":    previousAgentType,
+		"sessionId":            h.config.SessionID,
+	})
+
+	// Fetch credential from control plane
+	cred, err := h.fetchAgentKey(ctx, agentType)
+	if err != nil {
+		errMsg := fmt.Sprintf("Failed to fetch credential for %s — check Settings", agentType)
+		log.Printf("Agent credential fetch failed: %v", err)
+		h.setStatus(HostError, errMsg)
+		h.broadcastAgentStatus(StatusError, agentType, errMsg)
+		h.reportAgentError(agentType, "agent_key_fetch", errMsg, err.Error())
+		return
+	}
+	h.reportLifecycle("info", "Agent credential fetched", map[string]interface{}{
+		"agentType":      agentType,
+		"credentialKind": cred.credentialKind,
+	})
+
+	// Ensure the ACP adapter binary is installed
+	info := getAgentCommandInfo(agentType, cred.credentialKind)
+	if err := h.ensureAgentInstalled(ctx, info); err != nil {
+		errMsg := fmt.Sprintf("Failed to install %s: %v", info.command, err)
+		log.Printf("Agent install failed: %v", err)
+		h.setStatus(HostError, errMsg)
+		h.broadcastAgentStatus(StatusError, agentType, errMsg)
+		h.reportAgentError(agentType, "agent_install", errMsg, err.Error())
+		return
+	}
+	h.reportLifecycle("info", "Agent binary verified/installed", map[string]interface{}{
+		"agentType": agentType,
+		"command":   info.command,
+	})
+
+	// Fetch user's agent settings (non-blocking)
+	settings := h.fetchAgentSettings(ctx, agentType)
+	if settings != nil {
+		log.Printf("Agent settings loaded: model=%q permissionMode=%q", settings.Model, settings.PermissionMode)
+	}
+
+	// Only attempt LoadSession if reconnecting with the same agent type
+	loadSessionID := ""
+	if previousAcpSessionID != "" && previousAgentType == agentType {
+		loadSessionID = previousAcpSessionID
+		log.Printf("ACP: will attempt LoadSession with sessionID=%s", loadSessionID)
+		h.reportLifecycle("info", "LoadSession will be attempted", map[string]interface{}{
+			"agentType":            agentType,
+			"previousAcpSessionID": previousAcpSessionID,
+		})
+	} else if previousAcpSessionID != "" {
+		log.Printf("ACP: skipping LoadSession — agent type mismatch (previous=%q, requested=%q)", previousAgentType, agentType)
+		h.reportLifecycle("info", "LoadSession skipped: agent type mismatch", map[string]interface{}{
+			"previousAgentType": previousAgentType,
+			"requestedAgent":    agentType,
+		})
+	}
+
+	// Start the agent process
+	h.mu.Lock()
+	if err := h.startAgent(ctx, agentType, cred, settings, loadSessionID); err != nil {
+		h.status = HostError
+		h.statusErr = err.Error()
+		h.mu.Unlock()
+		log.Printf("Agent start failed: %v", err)
+		h.broadcastAgentStatus(StatusError, agentType, err.Error())
+		h.reportAgentError(agentType, "agent_start", err.Error(), "")
+		return
+	}
+	h.status = HostReady
+	h.statusErr = ""
+	h.mu.Unlock()
+
+	h.reportLifecycle("info", "Agent ready", map[string]interface{}{
+		"agentType": agentType,
+		"sessionId": h.config.SessionID,
+	})
+	h.reportEvent("info", "agent.ready", fmt.Sprintf("Agent %s is ready", agentType), map[string]interface{}{
+		"agentType": agentType,
+	})
+	h.broadcastAgentStatus(StatusReady, agentType, "")
+}
+
+// HandlePrompt routes a session/prompt request through the ACP SDK.
+// Only one prompt runs at a time — concurrent requests are serialized.
+func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, params json.RawMessage, viewerID string) {
+	// Signal activity for idle detection
+	if h.config.OnActivity != nil {
+		h.config.OnActivity()
+	}
+
+	h.mu.RLock()
+	acpConn := h.acpConn
+	sessionID := h.sessionID
+	h.mu.RUnlock()
+
+	if acpConn == nil || sessionID == acpsdk.SessionId("") {
+		log.Printf("Prompt request received but no ACP session active")
+		h.reportLifecycle("warn", "Prompt received but no ACP session active", nil)
+		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, "No ACP session active")
+		return
+	}
+
+	// Parse the prompt content
+	var promptParams struct {
+		Prompt []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"prompt"`
+	}
+	if err := json.Unmarshal(params, &promptParams); err != nil {
+		log.Printf("Failed to parse prompt params: %v", err)
+		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32602, "Invalid prompt params")
+		return
+	}
+
+	var blocks []acpsdk.ContentBlock
+	for _, p := range promptParams.Prompt {
+		if p.Type == "text" && p.Text != "" {
+			blocks = append(blocks, acpsdk.TextBlock(p.Text))
+		}
+	}
+	if len(blocks) == 0 {
+		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32602, "Empty prompt")
+		return
+	}
+
+	// Serialize prompts — only one at a time
+	h.promptMu.Lock()
+	defer h.promptMu.Unlock()
+
+	// Update status to prompting
+	h.setStatus(HostPrompting, "")
+	h.broadcastControl(MsgSessionPrompting, nil)
+
+	log.Printf("ACP: sending Prompt (session=%s, blocks=%d)", sessionID, len(blocks))
+	promptStart := time.Now()
+	h.reportLifecycle("info", "ACP Prompt started", map[string]interface{}{
+		"acpSessionId": string(sessionID),
+		"blockCount":   len(blocks),
+		"viewerId":     viewerID,
+	})
+
+	// Prompt() is blocking — session/update notifications flow via sessionHostClient.SessionUpdate()
+	resp, err := acpConn.Prompt(ctx, acpsdk.PromptRequest{
+		SessionId: sessionID,
+		Prompt:    blocks,
+	})
+
+	// Update status back to ready
+	h.setStatus(HostReady, "")
+	h.broadcastControl(MsgSessionPromptDone, nil)
+
+	if err != nil {
+		log.Printf("ACP Prompt failed: %v", err)
+		h.reportLifecycle("warn", "ACP Prompt failed", map[string]interface{}{
+			"error":    err.Error(),
+			"duration": time.Since(promptStart).String(),
+		})
+		// Broadcast error to all viewers so all tabs see it
+		errResp := h.marshalJSONRPCError(reqID, -32603, fmt.Sprintf("Prompt failed: %v", err))
+		h.broadcastMessage(errResp)
+		return
+	}
+
+	log.Printf("ACP: Prompt completed (stopReason=%s)", resp.StopReason)
+	h.reportLifecycle("info", "ACP Prompt completed", map[string]interface{}{
+		"stopReason": string(resp.StopReason),
+		"duration":   time.Since(promptStart).String(),
+	})
+
+	// Broadcast the prompt response to all viewers
+	result, _ := json.Marshal(resp)
+	response := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      json.RawMessage(reqID),
+		"result":  json.RawMessage(result),
+	}
+	data, _ := json.Marshal(response)
+	h.broadcastMessage(data)
+}
+
+// ForwardToAgent sends a raw message to the agent's stdin.
+func (h *SessionHost) ForwardToAgent(message []byte) {
+	h.mu.RLock()
+	process := h.process
+	h.mu.RUnlock()
+
+	if process == nil {
+		log.Printf("No agent process running, dropping message")
+		return
+	}
+
+	data := append(message, '\n')
+	if _, err := process.Stdin().Write(data); err != nil {
+		log.Printf("Failed to write to agent stdin: %v", err)
+	}
+}
+
+// Stop kills the agent process, disconnects all viewers, and marks the session
+// as stopped. This is the only way to terminate the agent — browser disconnects
+// do NOT call this.
+func (h *SessionHost) Stop() {
+	h.mu.Lock()
+	if h.status == HostStopped {
+		h.mu.Unlock()
+		return
+	}
+	h.status = HostStopped
+	h.statusErr = ""
+	h.stopCurrentAgentLocked()
+	h.mu.Unlock()
+
+	h.cancel()
+
+	h.reportLifecycle("info", "SessionHost stopped", map[string]interface{}{
+		"sessionId": h.config.SessionID,
+	})
+
+	// Disconnect all viewers
+	h.viewerMu.Lock()
+	for id, viewer := range h.viewers {
+		viewer.once.Do(func() { close(viewer.done) })
+		_ = viewer.conn.WriteControl(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseGoingAway, "session stopped"),
+			time.Now().Add(5*time.Second),
+		)
+		_ = viewer.conn.Close()
+		delete(h.viewers, id)
+	}
+	h.viewerMu.Unlock()
+}
+
+// --- Internal: agent lifecycle (extracted from Gateway) ---
+
+// startAgent spawns the agent process and sets up the ACP connection.
+// Must hold h.mu when calling.
+func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload, previousAcpSessionID string) error {
+	containerID, err := h.config.ContainerResolver()
+	if err != nil {
+		return fmt.Errorf("failed to discover devcontainer: %w", err)
+	}
+
+	info := getAgentCommandInfo(agentType, cred.credentialKind)
+
+	envVars := []string{fmt.Sprintf("%s=%s", info.envVarName, cred.credential)}
+	if settings != nil && settings.Model != "" {
+		modelEnv := getModelEnvVar(agentType)
+		if modelEnv != "" {
+			envVars = append(envVars, fmt.Sprintf("%s=%s", modelEnv, settings.Model))
+			log.Printf("Agent model override: %s=%s", modelEnv, settings.Model)
+		}
+	}
+
+	if settings != nil && settings.PermissionMode != "" {
+		h.permissionMode = settings.PermissionMode
+	} else {
+		h.permissionMode = "default"
+	}
+
+	process, err := StartProcess(ProcessConfig{
+		ContainerID:   containerID,
+		ContainerUser: h.config.ContainerUser,
+		AcpCommand:    info.command,
+		AcpArgs:       info.args,
+		EnvVars:       envVars,
+		WorkDir:       h.config.ContainerWorkDir,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to start agent process: %w", err)
+	}
+
+	h.process = process
+
+	client := &sessionHostClient{host: h}
+	h.acpConn = acpsdk.NewClientSideConnection(client, process.Stdin(), process.Stdout())
+
+	go h.monitorStderr(process)
+	go h.monitorProcessExit(ctx, process, agentType, cred, settings)
+
+	// Initialize the ACP protocol handshake
+	initTimeout := time.Duration(h.config.InitTimeoutMs) * time.Millisecond
+	if initTimeout == 0 {
+		initTimeout = 30 * time.Second
+	}
+	initCtx, initCancel := context.WithTimeout(ctx, initTimeout)
+	defer initCancel()
+
+	log.Printf("ACP: sending Initialize request")
+	h.reportLifecycle("info", "ACP Initialize started", map[string]interface{}{
+		"agentType": agentType,
+	})
+	initResp, err := h.acpConn.Initialize(initCtx, acpsdk.InitializeRequest{
+		ProtocolVersion: acpsdk.ProtocolVersionNumber,
+		ClientCapabilities: acpsdk.ClientCapabilities{
+			Fs: acpsdk.FileSystemCapability{ReadTextFile: true, WriteTextFile: true},
+		},
+	})
+	if err != nil {
+		h.reportLifecycle("warn", "ACP Initialize failed", map[string]interface{}{
+			"agentType": agentType,
+			"error":     err.Error(),
+		})
+		return fmt.Errorf("ACP initialize failed: %w", err)
+	}
+	log.Printf("ACP: Initialize succeeded (loadSession=%v)", initResp.AgentCapabilities.LoadSession)
+	h.reportLifecycle("info", "ACP Initialize succeeded", map[string]interface{}{
+		"agentType":           agentType,
+		"supportsLoadSession": initResp.AgentCapabilities.LoadSession,
+	})
+
+	// Attempt LoadSession if we have a previous session ID and the agent supports it
+	if previousAcpSessionID != "" && initResp.AgentCapabilities.LoadSession {
+		log.Printf("ACP: attempting LoadSession with previous sessionID=%s", previousAcpSessionID)
+		h.reportLifecycle("info", "ACP LoadSession started", map[string]interface{}{
+			"agentType":            agentType,
+			"previousAcpSessionID": previousAcpSessionID,
+		})
+		h.reportEvent("info", "agent.load_session", "Restoring previous conversation", map[string]interface{}{
+			"previousAcpSessionID": previousAcpSessionID,
+		})
+		_, loadErr := h.acpConn.LoadSession(initCtx, acpsdk.LoadSessionRequest{
+			SessionId:  acpsdk.SessionId(previousAcpSessionID),
+			Cwd:        h.config.ContainerWorkDir,
+			McpServers: []acpsdk.McpServer{},
+		})
+		if loadErr == nil {
+			h.sessionID = acpsdk.SessionId(previousAcpSessionID)
+			log.Printf("ACP: LoadSession succeeded, sessionID=%s", previousAcpSessionID)
+			h.reportLifecycle("info", "ACP LoadSession succeeded", map[string]interface{}{
+				"agentType":    agentType,
+				"acpSessionId": previousAcpSessionID,
+			})
+			h.reportEvent("info", "agent.load_session_ok", "Previous conversation restored", map[string]interface{}{
+				"acpSessionId": previousAcpSessionID,
+			})
+			h.persistAcpSessionID(agentType)
+			h.applySessionSettings(initCtx, settings)
+			return nil
+		}
+		log.Printf("ACP: LoadSession failed (falling back to NewSession): %v", loadErr)
+		h.reportLifecycle("warn", "ACP LoadSession failed, falling back to NewSession", map[string]interface{}{
+			"agentType": agentType,
+			"error":     loadErr.Error(),
+		})
+		h.reportEvent("warn", "agent.load_session_failed", "Could not restore conversation, starting fresh", map[string]interface{}{
+			"error": loadErr.Error(),
+		})
+	} else if previousAcpSessionID != "" {
+		log.Printf("ACP: agent does not support LoadSession, using NewSession instead")
+		h.reportLifecycle("info", "Agent does not support LoadSession", map[string]interface{}{
+			"agentType": agentType,
+		})
+	}
+
+	log.Printf("ACP: sending NewSession request")
+	h.reportLifecycle("info", "ACP NewSession started", map[string]interface{}{
+		"agentType": agentType,
+	})
+	sessResp, err := h.acpConn.NewSession(initCtx, acpsdk.NewSessionRequest{
+		Cwd:        h.config.ContainerWorkDir,
+		McpServers: []acpsdk.McpServer{},
+	})
+	if err != nil {
+		h.reportLifecycle("warn", "ACP NewSession failed", map[string]interface{}{
+			"agentType": agentType,
+			"error":     err.Error(),
+		})
+		return fmt.Errorf("ACP new session failed: %w", err)
+	}
+	h.sessionID = sessResp.SessionId
+	log.Printf("ACP: NewSession succeeded, sessionID=%s", string(h.sessionID))
+	h.reportLifecycle("info", "ACP NewSession succeeded", map[string]interface{}{
+		"agentType":    agentType,
+		"acpSessionId": string(h.sessionID),
+	})
+	h.persistAcpSessionID(agentType)
+	h.applySessionSettings(initCtx, settings)
+
+	return nil
+}
+
+// applySessionSettings calls SetSessionModel and SetSessionMode on the ACP
+// connection. Both calls are non-fatal.
+func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentSettingsPayload) {
+	if settings == nil || h.acpConn == nil || h.sessionID == "" {
+		return
+	}
+
+	if settings.Model != "" {
+		log.Printf("ACP: setting session model to %q", settings.Model)
+		if _, err := h.acpConn.SetSessionModel(ctx, acpsdk.SetSessionModelRequest{
+			SessionId: h.sessionID,
+			ModelId:   acpsdk.ModelId(settings.Model),
+		}); err != nil {
+			log.Printf("ACP SetSessionModel(%q) failed (non-fatal): %v", settings.Model, err)
+			h.reportLifecycle("warn", "ACP SetSessionModel failed", map[string]interface{}{
+				"model": settings.Model,
+				"error": err.Error(),
+			})
+		} else {
+			log.Printf("ACP: session model set to %q", settings.Model)
+			h.reportLifecycle("info", "ACP session model applied", map[string]interface{}{
+				"model": settings.Model,
+			})
+		}
+	}
+
+	if settings.PermissionMode != "" && settings.PermissionMode != "default" {
+		log.Printf("ACP: setting session mode to %q", settings.PermissionMode)
+		if _, err := h.acpConn.SetSessionMode(ctx, acpsdk.SetSessionModeRequest{
+			SessionId: h.sessionID,
+			ModeId:    acpsdk.SessionModeId(settings.PermissionMode),
+		}); err != nil {
+			log.Printf("ACP SetSessionMode(%q) failed (non-fatal): %v", settings.PermissionMode, err)
+			h.reportLifecycle("warn", "ACP SetSessionMode failed", map[string]interface{}{
+				"mode":  settings.PermissionMode,
+				"error": err.Error(),
+			})
+		} else {
+			log.Printf("ACP: session mode set to %q", settings.PermissionMode)
+			h.reportLifecycle("info", "ACP session mode applied", map[string]interface{}{
+				"mode": settings.PermissionMode,
+			})
+		}
+	}
+}
+
+// ensureAgentInstalled checks if the ACP adapter binary exists and installs it
+// on-demand if missing.
+func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentCommandInfo) error {
+	if info.installCmd == "" {
+		return nil
+	}
+
+	containerID, err := h.config.ContainerResolver()
+	if err != nil {
+		return fmt.Errorf("failed to discover devcontainer: %w", err)
+	}
+
+	checkArgs := []string{"exec", containerID, "which", info.command}
+	checkCmd := exec.CommandContext(ctx, "docker", checkArgs...)
+	if err := checkCmd.Run(); err == nil {
+		log.Printf("Agent binary %s is already installed", info.command)
+		return nil
+	}
+
+	h.broadcastAgentStatus(StatusInstalling, info.command, "")
+	return installAgentBinary(ctx, containerID, info)
+}
+
+// monitorStderr reads the agent's stderr and collects it for error reporting.
+func (h *SessionHost) monitorStderr(process *AgentProcess) {
+	scanner := bufio.NewScanner(process.Stderr())
+	for scanner.Scan() {
+		line := scanner.Text()
+		log.Printf("Agent stderr: %s", line)
+		h.stderrMu.Lock()
+		if h.stderrBuf.Len() < 4096 {
+			if h.stderrBuf.Len() > 0 {
+				h.stderrBuf.WriteByte('\n')
+			}
+			h.stderrBuf.WriteString(line)
+		}
+		h.stderrMu.Unlock()
+	}
+}
+
+func (h *SessionHost) getAndClearStderr() string {
+	h.stderrMu.Lock()
+	defer h.stderrMu.Unlock()
+	s := h.stderrBuf.String()
+	h.stderrBuf.Reset()
+	return s
+}
+
+// monitorProcessExit detects agent crashes and attempts restart.
+func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProcess, agentType string, cred *agentCredential, settings *agentSettingsPayload) {
+	err := process.Wait()
+
+	time.Sleep(100 * time.Millisecond)
+	stderrOutput := h.getAndClearStderr()
+
+	uptime := time.Since(process.startTime)
+	exitInfo := "exit=0"
+	if err != nil {
+		exitInfo = fmt.Sprintf("exit=%v", err)
+	}
+	log.Printf("Agent process exited: type=%s, uptime=%v, %s, stderr=%d bytes",
+		agentType, uptime.Round(time.Millisecond), exitInfo, len(stderrOutput))
+
+	isRapidExit := uptime < 5*time.Second
+	if isRapidExit {
+		errMsg := fmt.Sprintf("Agent %s crashed on startup (exited in %v, %s)", agentType, uptime.Round(time.Millisecond), exitInfo)
+		if stderrOutput != "" {
+			errMsg = fmt.Sprintf("%s: %s", errMsg, truncate(stderrOutput, 500))
+		}
+		log.Printf("Agent rapid exit: %s", errMsg)
+		h.reportAgentError(agentType, "agent_crash", errMsg, stderrOutput)
+	}
+
+	h.mu.Lock()
+	if h.process != process {
+		h.mu.Unlock()
+		log.Printf("Agent process monitor: process replaced, skipping status/restart")
+		return
+	}
+
+	if h.status == HostStopped {
+		h.mu.Unlock()
+		log.Printf("Agent process monitor: session stopped, skipping restart")
+		return
+	}
+
+	if isRapidExit {
+		h.process = nil
+		h.acpConn = nil
+		h.sessionID = ""
+		h.status = HostError
+		errMsg := fmt.Sprintf("Agent %s crashed on startup (exited in %v, %s)", agentType, uptime.Round(time.Millisecond), exitInfo)
+		if stderrOutput != "" {
+			errMsg = fmt.Sprintf("%s: %s", errMsg, truncate(stderrOutput, 500))
+		}
+		h.statusErr = errMsg
+		h.mu.Unlock()
+		h.broadcastAgentStatus(StatusError, agentType, errMsg)
+		return
+	}
+
+	h.restartCount++
+	maxRestarts := h.config.MaxRestartAttempts
+	if maxRestarts == 0 {
+		maxRestarts = 3
+	}
+	if h.restartCount > maxRestarts {
+		log.Printf("Agent exceeded max restart attempts (%d)", maxRestarts)
+		h.process = nil
+		h.acpConn = nil
+		h.sessionID = ""
+		h.status = HostError
+		crashMsg := "Agent crashed and could not be restarted"
+		if stderrOutput != "" {
+			crashMsg = fmt.Sprintf("%s: %s", crashMsg, truncate(stderrOutput, 500))
+		}
+		h.statusErr = crashMsg
+		h.mu.Unlock()
+		h.broadcastAgentStatus(StatusError, agentType, crashMsg)
+		h.reportAgentError(agentType, "agent_max_restarts", crashMsg, stderrOutput)
+		return
+	}
+
+	h.process = nil
+	h.acpConn = nil
+	h.sessionID = ""
+	h.status = HostStarting
+	h.mu.Unlock()
+
+	log.Printf("Attempting agent restart (%d/%d)", h.restartCount, maxRestarts)
+	h.broadcastAgentStatus(StatusRestarting, agentType, "")
+
+	time.Sleep(time.Second)
+
+	h.mu.Lock()
+	if h.status == HostStopped {
+		h.mu.Unlock()
+		return
+	}
+	if err := h.startAgent(ctx, agentType, cred, settings, ""); err != nil {
+		h.status = HostError
+		h.statusErr = err.Error()
+		h.mu.Unlock()
+		log.Printf("Agent restart failed: %v", err)
+		h.broadcastAgentStatus(StatusError, agentType, err.Error())
+		h.reportAgentError(agentType, "agent_restart_failed", err.Error(), "")
+		return
+	}
+	h.status = HostReady
+	h.statusErr = ""
+	h.mu.Unlock()
+
+	h.broadcastAgentStatus(StatusReady, agentType, "")
+}
+
+// stopCurrentAgentLocked stops the current agent process. Must hold h.mu.
+func (h *SessionHost) stopCurrentAgentLocked() {
+	if h.process != nil {
+		_ = h.process.Stop()
+		h.process = nil
+	}
+	h.acpConn = nil
+	h.sessionID = ""
+}
+
+// persistAcpSessionID saves the ACP session ID for reconnection support.
+func (h *SessionHost) persistAcpSessionID(agentType string) {
+	sessionID := string(h.sessionID)
+	if sessionID == "" {
+		return
+	}
+
+	if h.config.SessionManager != nil && h.config.SessionID != "" {
+		if err := h.config.SessionManager.UpdateAcpSessionID(
+			h.config.WorkspaceID, h.config.SessionID, sessionID, agentType,
+		); err != nil {
+			log.Printf("Failed to persist ACP session ID to session manager: %v", err)
+		} else {
+			log.Printf("ACP session ID persisted to session manager: %s", sessionID)
+		}
+	}
+
+	if h.config.TabStore != nil && h.config.SessionID != "" {
+		if err := h.config.TabStore.UpdateTabAcpSessionID(h.config.SessionID, sessionID); err != nil {
+			log.Printf("Failed to persist ACP session ID to tab store: %v", err)
+		} else {
+			log.Printf("ACP session ID persisted to tab store: %s", sessionID)
+		}
+	}
+}
+
+// --- Internal: message broadcasting ---
+
+// broadcastMessage appends a message to the buffer and sends it to all viewers.
+func (h *SessionHost) broadcastMessage(data []byte) {
+	// Append to buffer — sequence number assigned under lock to ensure
+	// buffer ordering matches sequence ordering under concurrent writes.
+	h.bufMu.Lock()
+	seq := atomic.AddUint64(&h.seqCounter, 1)
+	h.messageBuf = append(h.messageBuf, BufferedMessage{
+		Data:      data,
+		SeqNum:    seq,
+		Timestamp: time.Now(),
+	})
+	// Evict oldest if over limit
+	if len(h.messageBuf) > h.config.MessageBufferSize {
+		excess := len(h.messageBuf) - h.config.MessageBufferSize
+		h.messageBuf = h.messageBuf[excess:]
+	}
+	h.bufMu.Unlock()
+
+	// Fan out to all viewers
+	h.viewerMu.RLock()
+	for _, viewer := range h.viewers {
+		h.sendToViewer(viewer, data)
+	}
+	h.viewerMu.RUnlock()
+}
+
+// broadcastAgentStatus broadcasts an agent_status control message to all viewers
+// and buffers it for late-join replay.
+func (h *SessionHost) broadcastAgentStatus(status AgentStatus, agentType, errMsg string) {
+	msg := AgentStatusMessage{
+		Type:      MsgAgentStatus,
+		Status:    status,
+		AgentType: agentType,
+		Error:     errMsg,
+	}
+	data, _ := json.Marshal(msg)
+	h.broadcastMessage(data)
+}
+
+// broadcastControl broadcasts a control message to all viewers and buffers it.
+func (h *SessionHost) broadcastControl(msgType ControlMessageType, extra map[string]interface{}) {
+	data := h.marshalControl(msgType, extra)
+	h.broadcastMessage(data)
+}
+
+// replayToViewer sends all buffered messages to a newly attached viewer.
+func (h *SessionHost) replayToViewer(viewer *Viewer) {
+	h.bufMu.RLock()
+	messages := make([]BufferedMessage, len(h.messageBuf))
+	copy(messages, h.messageBuf)
+	h.bufMu.RUnlock()
+
+	for _, msg := range messages {
+		h.sendToViewer(viewer, msg.Data)
+	}
+}
+
+// sendToViewer sends a message to a single viewer via its buffered channel.
+// If the channel is full, the message is dropped (viewer can reconnect).
+func (h *SessionHost) sendToViewer(viewer *Viewer, data []byte) {
+	select {
+	case viewer.sendCh <- data:
+	case <-viewer.done:
+	default:
+		// Channel full — drop message for this viewer
+		log.Printf("SessionHost[%s]: viewer %s send buffer full, dropping message", h.config.SessionID, viewer.ID)
+	}
+}
+
+// viewerWritePump drains the viewer's send channel and writes to its WebSocket.
+func (h *SessionHost) viewerWritePump(viewer *Viewer) {
+	defer viewer.conn.Close()
+
+	for {
+		select {
+		case data, ok := <-viewer.sendCh:
+			if !ok {
+				return
+			}
+			viewer.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := viewer.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+				log.Printf("SessionHost[%s]: viewer %s write failed: %v", h.config.SessionID, viewer.ID, err)
+				return
+			}
+		case <-viewer.done:
+			return
+		case <-h.ctx.Done():
+			return
+		}
+	}
+}
+
+// sendJSONRPCErrorToViewer sends a JSON-RPC error to a specific viewer.
+func (h *SessionHost) sendJSONRPCErrorToViewer(viewerID string, reqID json.RawMessage, code int, message string) {
+	data := h.marshalJSONRPCError(reqID, code, message)
+
+	h.viewerMu.RLock()
+	viewer, ok := h.viewers[viewerID]
+	h.viewerMu.RUnlock()
+
+	if ok {
+		h.sendToViewer(viewer, data)
+	}
+}
+
+// --- Internal: message marshaling ---
+
+func (h *SessionHost) marshalSessionState(status SessionHostStatus, agentType, errMsg string) []byte {
+	h.bufMu.RLock()
+	replayCount := len(h.messageBuf)
+	h.bufMu.RUnlock()
+
+	msg := SessionStateMessage{
+		Type:        MsgSessionState,
+		Status:      string(status),
+		AgentType:   agentType,
+		Error:       errMsg,
+		ReplayCount: replayCount,
+	}
+	data, _ := json.Marshal(msg)
+	return data
+}
+
+func (h *SessionHost) marshalControl(msgType ControlMessageType, extra map[string]interface{}) []byte {
+	msg := map[string]interface{}{
+		"type": string(msgType),
+	}
+	for k, v := range extra {
+		msg[k] = v
+	}
+	data, _ := json.Marshal(msg)
+	return data
+}
+
+func (h *SessionHost) marshalJSONRPCError(reqID json.RawMessage, code int, message string) []byte {
+	resp := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"error": map[string]interface{}{
+			"code":    code,
+			"message": message,
+		},
+	}
+	if reqID != nil {
+		resp["id"] = json.RawMessage(reqID)
+	}
+	data, _ := json.Marshal(resp)
+	return data
+}
+
+// --- Internal: helpers ---
+
+func (h *SessionHost) setStatus(status SessionHostStatus, errMsg string) {
+	h.mu.Lock()
+	h.status = status
+	h.statusErr = errMsg
+	h.mu.Unlock()
+}
+
+// reportAgentError sends an agent error to boot-log and error reporter.
+func (h *SessionHost) reportAgentError(agentType, step, message, detail string) {
+	if h.config.BootLog != nil {
+		h.config.BootLog.Log(step, "failed", fmt.Sprintf("[%s] %s", agentType, message), detail)
+	}
+	if h.config.ErrorReporter != nil {
+		h.config.ErrorReporter.ReportError(
+			fmt.Errorf("%s", message),
+			"session-host",
+			h.config.WorkspaceID,
+			map[string]interface{}{
+				"agentType": agentType,
+				"step":      step,
+				"detail":    detail,
+			},
+		)
+	}
+}
+
+func (h *SessionHost) reportLifecycle(level, message string, ctx map[string]interface{}) {
+	if h.config.ErrorReporter == nil {
+		return
+	}
+	switch level {
+	case "warn":
+		h.config.ErrorReporter.ReportWarn(message, "session-host", h.config.WorkspaceID, ctx)
+	default:
+		h.config.ErrorReporter.ReportInfo(message, "session-host", h.config.WorkspaceID, ctx)
+	}
+}
+
+func (h *SessionHost) reportEvent(level, eventType, message string, detail map[string]interface{}) {
+	if h.config.EventAppender != nil {
+		h.config.EventAppender.AppendEvent(h.config.WorkspaceID, level, eventType, message, detail)
+	}
+}
+
+// fetchAgentKey retrieves the decrypted agent credential from the control plane.
+func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*agentCredential, error) {
+	url := fmt.Sprintf("%s/api/workspaces/%s/agent-key", h.config.ControlPlaneURL, h.config.WorkspaceID)
+
+	body, err := json.Marshal(map[string]string{"agentType": agentType})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, byteReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+h.config.CallbackToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch agent key: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("no credential configured for %s", agentType)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("control plane returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		APIKey         string `json:"apiKey"`
+		CredentialKind string `json:"credentialKind"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if result.APIKey == "" {
+		return nil, fmt.Errorf("empty credential returned for %s", agentType)
+	}
+
+	if result.CredentialKind == "" {
+		result.CredentialKind = "api-key"
+	}
+
+	return &agentCredential{
+		credential:     result.APIKey,
+		credentialKind: result.CredentialKind,
+	}, nil
+}
+
+// fetchAgentSettings retrieves user's agent settings from the control plane.
+func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) *agentSettingsPayload {
+	url := fmt.Sprintf("%s/api/workspaces/%s/agent-settings", h.config.ControlPlaneURL, h.config.WorkspaceID)
+
+	body, err := json.Marshal(map[string]string{"agentType": agentType})
+	if err != nil {
+		log.Printf("Failed to marshal agent settings request: %v", err)
+		return nil
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, byteReader(body))
+	if err != nil {
+		log.Printf("Failed to create agent settings request: %v", err)
+		return nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+h.config.CallbackToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("Failed to fetch agent settings: %v", err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Agent settings returned status %d, using defaults", resp.StatusCode)
+		return nil
+	}
+
+	var result agentSettingsPayload
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Printf("Failed to decode agent settings: %v", err)
+		return nil
+	}
+
+	log.Printf("Fetched agent settings from control plane: model=%q permissionMode=%q", result.Model, result.PermissionMode)
+	return &result
+}
+
+// --- sessionHostClient: ACP SDK client interface ---
+
+// sessionHostClient implements the acp-go-sdk Client interface.
+// Instead of writing to a single WebSocket, it broadcasts to all viewers.
+type sessionHostClient struct {
+	host *SessionHost
+}
+
+func (c *sessionHostClient) SessionUpdate(_ context.Context, params acpsdk.SessionNotification) error {
+	data, err := json.Marshal(map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  "session/update",
+		"params":  params,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to marshal session update: %w", err)
+	}
+	c.host.broadcastMessage(data)
+	return nil
+}
+
+func (c *sessionHostClient) RequestPermission(_ context.Context, params acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
+	data, err := json.Marshal(map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  "permission/request",
+		"params":  params,
+	})
+	if err != nil {
+		return acpsdk.RequestPermissionResponse{}, fmt.Errorf("failed to marshal permission request: %w", err)
+	}
+	c.host.broadcastMessage(data)
+
+	mode := c.host.permissionMode
+	if mode == "" {
+		mode = "default"
+	}
+	log.Printf("Permission request (mode=%s): %d options available", mode, len(params.Options))
+
+	if len(params.Options) > 0 {
+		return acpsdk.RequestPermissionResponse{
+			Outcome: acpsdk.NewRequestPermissionOutcomeSelected(params.Options[0].OptionId),
+		}, nil
+	}
+	return acpsdk.RequestPermissionResponse{
+		Outcome: acpsdk.NewRequestPermissionOutcomeCancelled(),
+	}, nil
+}
+
+func (c *sessionHostClient) ReadTextFile(ctx context.Context, params acpsdk.ReadTextFileRequest) (acpsdk.ReadTextFileResponse, error) {
+	if params.Path == "" {
+		return acpsdk.ReadTextFileResponse{}, fmt.Errorf("file path is required")
+	}
+
+	containerID, err := c.host.config.ContainerResolver()
+	if err != nil {
+		return acpsdk.ReadTextFileResponse{}, fmt.Errorf("failed to resolve container: %w", err)
+	}
+
+	timeout := c.host.config.FileExecTimeout
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+	execCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	content, stderr, err := execInContainer(execCtx, containerID, c.host.config.ContainerUser, "", "cat", params.Path)
+	if err != nil {
+		log.Printf("[acp] ReadTextFile error for %q: %v, stderr: %s", params.Path, err, stderr)
+		return acpsdk.ReadTextFileResponse{}, fmt.Errorf("failed to read file %q: %v", params.Path, err)
+	}
+
+	maxSize := c.host.config.FileMaxSize
+	if maxSize == 0 {
+		maxSize = 1048576
+	}
+	if len(content) > maxSize {
+		return acpsdk.ReadTextFileResponse{}, fmt.Errorf("file %q exceeds maximum size of %d bytes", params.Path, maxSize)
+	}
+
+	content = applyLineLimit(content, params.Line, params.Limit)
+
+	return acpsdk.ReadTextFileResponse{Content: content}, nil
+}
+
+func (c *sessionHostClient) WriteTextFile(ctx context.Context, params acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error) {
+	if params.Path == "" {
+		return acpsdk.WriteTextFileResponse{}, fmt.Errorf("file path is required")
+	}
+
+	containerID, err := c.host.config.ContainerResolver()
+	if err != nil {
+		return acpsdk.WriteTextFileResponse{}, fmt.Errorf("failed to resolve container: %w", err)
+	}
+
+	timeout := c.host.config.FileExecTimeout
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+	execCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	dockerArgs := []string{"exec", "-i"}
+	if c.host.config.ContainerUser != "" {
+		dockerArgs = append(dockerArgs, "-u", c.host.config.ContainerUser)
+	}
+	dockerArgs = append(dockerArgs, containerID, "tee", params.Path)
+
+	cmd := exec.CommandContext(execCtx, "docker", dockerArgs...)
+	cmd.Stdin = strings.NewReader(params.Content)
+
+	var stderrBuf bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &stderrBuf
+
+	if err := cmd.Run(); err != nil {
+		stderrStr := strings.TrimSpace(stderrBuf.String())
+		log.Printf("[acp] WriteTextFile error for %q: %v, stderr: %s", params.Path, err, stderrStr)
+		return acpsdk.WriteTextFileResponse{}, fmt.Errorf("failed to write file %q: %v", params.Path, err)
+	}
+
+	return acpsdk.WriteTextFileResponse{}, nil
+}
+
+func (c *sessionHostClient) CreateTerminal(_ context.Context, _ acpsdk.CreateTerminalRequest) (acpsdk.CreateTerminalResponse, error) {
+	return acpsdk.CreateTerminalResponse{}, fmt.Errorf("CreateTerminal not supported")
+}
+
+func (c *sessionHostClient) KillTerminalCommand(_ context.Context, _ acpsdk.KillTerminalCommandRequest) (acpsdk.KillTerminalCommandResponse, error) {
+	return acpsdk.KillTerminalCommandResponse{}, fmt.Errorf("KillTerminalCommand not supported")
+}
+
+func (c *sessionHostClient) TerminalOutput(_ context.Context, _ acpsdk.TerminalOutputRequest) (acpsdk.TerminalOutputResponse, error) {
+	return acpsdk.TerminalOutputResponse{}, fmt.Errorf("TerminalOutput not supported")
+}
+
+func (c *sessionHostClient) ReleaseTerminal(_ context.Context, _ acpsdk.ReleaseTerminalRequest) (acpsdk.ReleaseTerminalResponse, error) {
+	return acpsdk.ReleaseTerminalResponse{}, fmt.Errorf("ReleaseTerminal not supported")
+}
+
+func (c *sessionHostClient) WaitForTerminalExit(_ context.Context, _ acpsdk.WaitForTerminalExitRequest) (acpsdk.WaitForTerminalExitResponse, error) {
+	return acpsdk.WaitForTerminalExitResponse{}, fmt.Errorf("WaitForTerminalExit not supported")
+}

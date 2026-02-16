@@ -22,9 +22,10 @@ describe('agent sessions source contract', () => {
     expect(workspacesFile).toContain('existingRunning.length >= limits.maxAgentSessionsPerWorkspace');
   });
 
-  it('includes attach-stop race handling hooks in ACP websocket layer', () => {
+  it('includes race handling and multi-viewer hooks in ACP websocket layer', () => {
     expect(agentWsFile).toContain('session_not_running');
-    expect(agentWsFile).toContain('session_already_attached');
-    expect(agentWsFile).toContain('attach/stop race handling');
+    expect(agentWsFile).toContain('Post-upgrade race check');
+    expect(agentWsFile).toContain('SessionHost');
+    expect(agentWsFile).toContain('DetachViewer');
   });
 });

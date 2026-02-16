@@ -105,21 +105,21 @@ func TestAgentSettingsEnvVarInjection(t *testing.T) {
 	}
 }
 
-func TestPermissionModeOnGateway(t *testing.T) {
-	// Test that Gateway struct stores permission mode correctly
-	g := &Gateway{}
+func TestPermissionModeOnSessionHost(t *testing.T) {
+	// Test that SessionHost stores permission mode correctly
+	h := &SessionHost{}
 
 	// Default should be empty string (not set)
-	if g.permissionMode != "" {
-		t.Errorf("default permissionMode = %q, want empty", g.permissionMode)
+	if h.permissionMode != "" {
+		t.Errorf("default permissionMode = %q, want empty", h.permissionMode)
 	}
 
 	// Set various modes — includes plan and dontAsk from ACP agent
 	modes := []string{"default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"}
 	for _, mode := range modes {
-		g.permissionMode = mode
-		if g.permissionMode != mode {
-			t.Errorf("permissionMode = %q, want %q", g.permissionMode, mode)
+		h.permissionMode = mode
+		if h.permissionMode != mode {
+			t.Errorf("permissionMode = %q, want %q", h.permissionMode, mode)
 		}
 	}
 }
@@ -127,16 +127,16 @@ func TestPermissionModeOnGateway(t *testing.T) {
 func TestApplySessionSettingsNilSafety(t *testing.T) {
 	// applySessionSettings must be safe to call with nil settings, nil acpConn,
 	// or empty sessionID. It should simply return without panic.
-	g := &Gateway{}
+	h := &SessionHost{}
 
 	// nil settings — should not panic
-	g.applySessionSettings(context.Background(), nil)
+	h.applySessionSettings(context.Background(), nil)
 
 	// non-nil settings but no acpConn — should not panic
-	g.applySessionSettings(context.Background(), &agentSettingsPayload{Model: "sonnet"})
+	h.applySessionSettings(context.Background(), &agentSettingsPayload{Model: "sonnet"})
 
 	// non-nil settings with empty sessionID — should not panic
-	g.applySessionSettings(context.Background(), &agentSettingsPayload{PermissionMode: "plan"})
+	h.applySessionSettings(context.Background(), &agentSettingsPayload{PermissionMode: "plan"})
 }
 
 func TestApplySessionSettingsSkipsDefault(t *testing.T) {
@@ -144,11 +144,11 @@ func TestApplySessionSettingsSkipsDefault(t *testing.T) {
 	// because that's the agent's initial mode (avoids unnecessary RPC).
 	// We verify this indirectly: applySessionSettings with no acpConn +
 	// default mode should return cleanly without attempting any call.
-	g := &Gateway{}
+	h := &SessionHost{}
 	settings := &agentSettingsPayload{
 		Model:          "",
 		PermissionMode: "default",
 	}
 	// Should not panic or attempt any ACP calls
-	g.applySessionSettings(context.Background(), settings)
+	h.applySessionSettings(context.Background(), settings)
 }

@@ -17,15 +17,15 @@ func TestAgentWebSocketSourceContract(t *testing.T) {
 
 	for _, needle := range []string{
 		"sessionId",
-		"gatewayKey",
-		"takeover",
-		"parseTakeoverParam",
+		"hostKey",
 		"agentSessions",
 		"idempotencyKey",
 		"session_not_running",
-		"session_already_attached",
 		"agent.session_recovered",
 		"ClosePolicyViolation",
+		"SessionHost",
+		"AttachViewer",
+		"DetachViewer",
 	} {
 		if !strings.Contains(content, needle) {
 			t.Fatalf("expected %q in %s", needle, path)
@@ -44,7 +44,7 @@ func TestAgentWebSocketRoutingAndAuthContract(t *testing.T) {
 	for _, needle := range []string{
 		"resolveWorkspaceIDForWebsocket",
 		"authenticateWorkspaceWebsocket",
-		"attach/stop race handling",
+		"Post-upgrade race check",
 	} {
 		if !strings.Contains(content, needle) {
 			t.Fatalf("expected %q in %s", needle, path)

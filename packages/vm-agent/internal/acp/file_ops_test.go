@@ -105,11 +105,13 @@ func TestApplyLineLimit(t *testing.T) {
 }
 
 func TestReadTextFileValidation(t *testing.T) {
-	client := &gatewayClient{
-		gateway: &Gateway{
-			config: GatewayConfig{
-				ContainerResolver: func() (string, error) {
-					return "test-container", nil
+	client := &sessionHostClient{
+		host: &SessionHost{
+			config: SessionHostConfig{
+				GatewayConfig: GatewayConfig{
+					ContainerResolver: func() (string, error) {
+						return "test-container", nil
+					},
 				},
 			},
 		},
@@ -129,11 +131,13 @@ func TestReadTextFileValidation(t *testing.T) {
 }
 
 func TestWriteTextFileValidation(t *testing.T) {
-	client := &gatewayClient{
-		gateway: &Gateway{
-			config: GatewayConfig{
-				ContainerResolver: func() (string, error) {
-					return "test-container", nil
+	client := &sessionHostClient{
+		host: &SessionHost{
+			config: SessionHostConfig{
+				GatewayConfig: GatewayConfig{
+					ContainerResolver: func() (string, error) {
+						return "test-container", nil
+					},
 				},
 			},
 		},
@@ -154,11 +158,13 @@ func TestWriteTextFileValidation(t *testing.T) {
 }
 
 func TestContainerResolverFailure(t *testing.T) {
-	client := &gatewayClient{
-		gateway: &Gateway{
-			config: GatewayConfig{
-				ContainerResolver: func() (string, error) {
-					return "", fmt.Errorf("no container available")
+	client := &sessionHostClient{
+		host: &SessionHost{
+			config: SessionHostConfig{
+				GatewayConfig: GatewayConfig{
+					ContainerResolver: func() (string, error) {
+						return "", fmt.Errorf("no container available")
+					},
 				},
 			},
 		},

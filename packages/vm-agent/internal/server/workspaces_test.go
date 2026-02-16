@@ -26,8 +26,8 @@ func TestWorkspaceManagementSourceContract(t *testing.T) {
 		"handleStopWorkspace",
 		"handleRestartWorkspace",
 		"handleDeleteWorkspace",
-		"closeAgentGateway",
-		"closeAgentGatewaysForWorkspace",
+		"stopSessionHost",
+		"stopSessionHostsForWorkspace",
 		"callbackToken",
 		"provisionWorkspaceRuntime",
 	} {
@@ -67,7 +67,7 @@ func TestStopAllWorkspacesAndSessions(t *testing.T) {
 		nodeEvents:      make([]EventRecord, 0),
 		workspaceEvents: map[string][]EventRecord{},
 		agentSessions:   sessionManager,
-		acpGateways:     map[string]*acp.Gateway{},
+		sessionHosts:    map[string]*acp.SessionHost{},
 	}
 
 	s.StopAllWorkspacesAndSessions()
@@ -152,7 +152,7 @@ func TestRebuildHandlerRejectsInvalidStatus(t *testing.T) {
 		nodeEvents:      make([]EventRecord, 0),
 		workspaceEvents: map[string][]EventRecord{},
 		agentSessions:   agentsessions.NewManager(),
-		acpGateways:     map[string]*acp.Gateway{},
+		sessionHosts:    map[string]*acp.SessionHost{},
 	}
 
 	// "creating" status should be rejected

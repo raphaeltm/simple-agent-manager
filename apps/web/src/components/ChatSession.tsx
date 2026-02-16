@@ -108,9 +108,8 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
         });
 
         const sessionQuery = `&sessionId=${encodeURIComponent(sessionId)}`;
-        const takeoverQuery = '&takeover=1';
         setResolvedWsUrl(
-          `${wsHostInfo}/agent/ws?token=${encodeURIComponent(token)}${sessionQuery}${takeoverQuery}`
+          `${wsHostInfo}/agent/ws?token=${encodeURIComponent(token)}${sessionQuery}`
         );
       } catch (err) {
         if (cancelled) return;
@@ -141,36 +140,41 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
     onLifecycleEvent: handleLifecycleEvent,
   });
 
-  const { connected, agentType, state, switchAgent } = acpSession;
+  const { connected, agentType, state, switchAgent, replaying } = acpSession;
   const { clear: clearMessages } = acpMessages;
 
-  // Clear messages when the WebSocket reconnects (state transitions to
-  // no_session) so that LoadSession can replay the full conversation from
-  // the agent without duplicates. On initial mount items are already empty.
+  // Clear messages when we start receiving a replay from the server.
+  // The SessionHost sends session_state with replayCount > 0, which puts
+  // us into 'replaying' state. Clear before the replayed messages arrive
+  // to avoid duplicates. Also clear on 'no_session' (idle SessionHost).
   useEffect(() => {
-    if (state === 'no_session') {
+    if (state === 'replaying' || state === 'no_session') {
       reportError({
         level: 'info',
-        message: 'Clearing messages on no_session (pre-replay)',
+        message: `Clearing messages on ${state} (pre-replay)`,
         source: 'acp-chat',
-        context: { workspaceId, sessionId },
+        context: { workspaceId, sessionId, replaying },
       });
       clearMessages();
     }
-  }, [state, clearMessages, workspaceId, sessionId]);
+  }, [state, clearMessages, workspaceId, sessionId, replaying]);
 
-  // Auto-select preferred agent when connected
+  // Auto-select preferred agent when connected.
+  // Skip if the server's session_state already indicates the agent is running
+  // (e.g., reconnecting to a session where the agent kept working).
   useEffect(() => {
     if (!preferredAgentId) return;
     if (!connected) return;
     if (agentType === preferredAgentId) return;
-    if (state === 'connecting' || state === 'reconnecting' || state === 'initializing') return;
+    // Don't send select_agent while still connecting, reconnecting, initializing,
+    // or replaying buffered messages from a running session.
+    if (state === 'connecting' || state === 'reconnecting' || state === 'initializing' || state === 'replaying') return;
 
     reportError({
       level: 'info',
       message: `Auto-selecting agent: ${preferredAgentId}`,
       source: 'acp-chat',
-      context: { workspaceId, sessionId, preferredAgentId, currentAgentType: agentType },
+      context: { workspaceId, sessionId, preferredAgentId, currentAgentType: agentType, state },
     });
     switchAgent(preferredAgentId);
   }, [preferredAgentId, connected, agentType, state, switchAgent, workspaceId, sessionId]);
