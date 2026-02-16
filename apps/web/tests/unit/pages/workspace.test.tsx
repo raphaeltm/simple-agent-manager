@@ -281,7 +281,7 @@ describe('Workspace page', () => {
     });
   });
 
-  it('adds takeover flag to ACP websocket URL when a sessionId is selected', async () => {
+  it('includes sessionId in ACP websocket URL when a sessionId is selected', async () => {
     mocks.listAgentSessions.mockResolvedValue([
       {
         id: 'sess-1',
@@ -304,7 +304,7 @@ describe('Workspace page', () => {
         .map(([options]) => options?.wsUrl)
         .filter((value): value is string => typeof value === 'string');
       expect(
-        wsUrls.some((url) => url.includes('sessionId=sess-1') && url.includes('takeover=1'))
+        wsUrls.some((url) => url.includes('sessionId=sess-1') && !url.includes('takeover='))
       ).toBe(true);
     });
   });

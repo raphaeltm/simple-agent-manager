@@ -10,29 +10,29 @@ import (
 	"github.com/workspace/vm-agent/internal/persistence"
 )
 
-func (s *Server) closeAgentGateway(workspaceID, sessionID string) {
-	gatewayKey := workspaceID + ":" + sessionID
-	s.acpMu.Lock()
-	existing := s.acpGateways[gatewayKey]
+func (s *Server) stopSessionHost(workspaceID, sessionID string) {
+	hostKey := workspaceID + ":" + sessionID
+	s.sessionHostMu.Lock()
+	existing := s.sessionHosts[hostKey]
 	if existing != nil {
-		existing.Close()
-		delete(s.acpGateways, gatewayKey)
+		existing.Stop()
+		delete(s.sessionHosts, hostKey)
 	}
-	s.acpMu.Unlock()
+	s.sessionHostMu.Unlock()
 }
 
-func (s *Server) closeAgentGatewaysForWorkspace(workspaceID string) {
+func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
 	prefix := workspaceID + ":"
 
-	s.acpMu.Lock()
-	defer s.acpMu.Unlock()
+	s.sessionHostMu.Lock()
+	defer s.sessionHostMu.Unlock()
 
-	for key, gateway := range s.acpGateways {
+	for key, host := range s.sessionHosts {
 		if !strings.HasPrefix(key, prefix) {
 			continue
 		}
-		gateway.Close()
-		delete(s.acpGateways, key)
+		host.Stop()
+		delete(s.sessionHosts, key)
 	}
 }
 
@@ -239,7 +239,7 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 	sessions := s.agentSessions.List(workspaceID)
 	for _, session := range sessions {
 		_, _ = s.agentSessions.Stop(workspaceID, session.ID)
-		s.closeAgentGateway(workspaceID, session.ID)
+		s.stopSessionHost(workspaceID, session.ID)
 	}
 
 	// Clear persisted tabs — workspace is stopped, no live sessions remain
@@ -337,7 +337,7 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.closeAgentGatewaysForWorkspace(workspaceID)
+	s.stopSessionHostsForWorkspace(workspaceID)
 	s.removeWorkspaceRuntime(workspaceID)
 
 	// Remove all persisted tabs for this workspace
@@ -466,7 +466,7 @@ func (s *Server) handleStopAgentSession(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	s.closeAgentGateway(workspaceID, sessionID)
+	s.stopSessionHost(workspaceID, sessionID)
 
 	// Remove persisted chat tab
 	if s.store != nil {

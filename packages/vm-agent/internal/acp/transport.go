@@ -12,6 +12,17 @@ const (
 	MsgSelectAgent ControlMessageType = "select_agent"
 	// MsgAgentStatus is sent by the gateway to the browser with agent lifecycle updates.
 	MsgAgentStatus ControlMessageType = "agent_status"
+	// MsgSessionState is sent to newly attached viewers with current session status
+	// and replay count so they can prepare for buffered message replay.
+	MsgSessionState ControlMessageType = "session_state"
+	// MsgSessionReplayDone is sent after all buffered messages have been replayed
+	// to a newly attached viewer, signaling the transition to live streaming.
+	MsgSessionReplayDone ControlMessageType = "session_replay_complete"
+	// MsgSessionPrompting is broadcast to all viewers when a prompt starts,
+	// allowing UIs to disable input and show a "working" indicator.
+	MsgSessionPrompting ControlMessageType = "session_prompting"
+	// MsgSessionPromptDone is broadcast to all viewers when a prompt completes.
+	MsgSessionPromptDone ControlMessageType = "session_prompt_done"
 )
 
 // AgentStatus represents the lifecycle state of an agent session.
@@ -37,6 +48,16 @@ type AgentStatusMessage struct {
 	Status    AgentStatus        `json:"status"`
 	AgentType string             `json:"agentType"`
 	Error     string             `json:"error,omitempty"`
+}
+
+// SessionStateMessage is sent to newly attached viewers with the current
+// session status and the number of buffered messages about to be replayed.
+type SessionStateMessage struct {
+	Type        ControlMessageType `json:"type"`
+	Status      string             `json:"status"`
+	AgentType   string             `json:"agentType,omitempty"`
+	Error       string             `json:"error,omitempty"`
+	ReplayCount int                `json:"replayCount"`
 }
 
 // WebSocketMessage is a raw message received from the WebSocket.
@@ -65,6 +86,14 @@ func ParseWebSocketMessage(data []byte) (isControl bool, controlType ControlMess
 		return true, MsgSelectAgent
 	case MsgAgentStatus:
 		return true, MsgAgentStatus
+	case MsgSessionState:
+		return true, MsgSessionState
+	case MsgSessionReplayDone:
+		return true, MsgSessionReplayDone
+	case MsgSessionPrompting:
+		return true, MsgSessionPrompting
+	case MsgSessionPromptDone:
+		return true, MsgSessionPromptDone
 	default:
 		// Not a control message — treat as ACP JSON-RPC
 		return false, ""

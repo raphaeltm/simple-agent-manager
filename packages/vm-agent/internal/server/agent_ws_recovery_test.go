@@ -41,7 +41,7 @@ func newAgentWSTestServer(t *testing.T) (*Server, *httptest.Server, string) {
 		workspaceEvents: make(map[string][]EventRecord),
 		agentSessions:   agentsessions.NewManager(),
 		acpConfig:       acp.GatewayConfig{},
-		acpGateways:     make(map[string]*acp.Gateway),
+		sessionHosts:    make(map[string]*acp.SessionHost),
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(s.handleAgentWS))

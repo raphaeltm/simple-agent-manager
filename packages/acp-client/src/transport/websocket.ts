@@ -1,10 +1,29 @@
-import type { AgentStatusMessage, LifecycleEventCallback } from './types';
+import type {
+  AgentStatusMessage,
+  SessionStateMessage,
+  LifecycleEventCallback,
+} from './types';
 import { isControlMessage } from './types';
 
 /**
  * Callback for receiving agent status control messages from the VM Agent.
  */
 export type AgentStatusCallback = (msg: AgentStatusMessage) => void;
+
+/**
+ * Callback for receiving session state on viewer attach.
+ */
+export type SessionStateCallback = (msg: SessionStateMessage) => void;
+
+/**
+ * Callback for session replay completion.
+ */
+export type SessionReplayCompleteCallback = () => void;
+
+/**
+ * Callback for session prompting state changes.
+ */
+export type SessionPromptingCallback = (prompting: boolean) => void;
 
 /**
  * Callback for receiving ACP JSON-RPC messages from the agent.
@@ -30,36 +49,87 @@ export interface AcpTransport {
   readonly connected: boolean;
 }
 
+/** Options for creating the ACP WebSocket transport. */
+export interface AcpTransportOptions {
+  /** An open WebSocket connection to /agent/ws */
+  ws: WebSocket;
+  /** Callback for agent_status control messages */
+  onAgentStatus: AgentStatusCallback;
+  /** Callback for ACP JSON-RPC messages from the agent */
+  onAcpMessage: AcpMessageCallback;
+  /** Callback when the WebSocket closes */
+  onClose?: () => void;
+  /** Callback when a WebSocket error occurs */
+  onError?: (error: Event) => void;
+  /** Optional callback for lifecycle observability logging */
+  onLifecycleEvent?: LifecycleEventCallback;
+  /** Callback for session_state control messages (multi-viewer) */
+  onSessionState?: SessionStateCallback;
+  /** Callback for session_replay_complete control messages */
+  onSessionReplayComplete?: SessionReplayCompleteCallback;
+  /** Callback for session_prompting / session_prompt_done */
+  onSessionPrompting?: SessionPromptingCallback;
+}
+
 /**
  * Create an ACP WebSocket transport connected to the VM Agent.
  *
- * @param ws - An open WebSocket connection to /agent/ws
- * @param onAgentStatus - Callback for agent_status control messages
- * @param onAcpMessage - Callback for ACP JSON-RPC messages from the agent
- * @param onClose - Callback when the WebSocket closes
- * @param onError - Callback when a WebSocket error occurs
- * @param onLifecycleEvent - Optional callback for lifecycle observability logging
+ * Supports both the positional argument signature (backward compat) and
+ * the options object signature. Prefer the options object for new code.
  */
 export function createAcpWebSocketTransport(
-  ws: WebSocket,
-  onAgentStatus: AgentStatusCallback,
-  onAcpMessage: AcpMessageCallback,
+  wsOrOptions: WebSocket | AcpTransportOptions,
+  onAgentStatus?: AgentStatusCallback,
+  onAcpMessage?: AcpMessageCallback,
   onClose?: () => void,
   onError?: (error: Event) => void,
   onLifecycleEvent?: LifecycleEventCallback
 ): AcpTransport {
+  // Normalize to options object
+  let opts: AcpTransportOptions;
+  if (wsOrOptions instanceof WebSocket) {
+    opts = {
+      ws: wsOrOptions,
+      onAgentStatus: onAgentStatus!,
+      onAcpMessage: onAcpMessage!,
+      onClose,
+      onError,
+      onLifecycleEvent,
+    };
+  } else {
+    opts = wsOrOptions;
+  }
+
+  const { ws } = opts;
+
   ws.addEventListener('message', (event) => {
     try {
       const data = JSON.parse(event.data as string);
       if (isControlMessage(data)) {
-        if (data.type === 'agent_status') {
-          onAgentStatus(data);
+        switch (data.type) {
+          case 'agent_status':
+            opts.onAgentStatus(data);
+            break;
+          case 'session_state':
+            opts.onSessionState?.(data);
+            break;
+          case 'session_replay_complete':
+            opts.onSessionReplayComplete?.();
+            break;
+          case 'session_prompting':
+            opts.onSessionPrompting?.(true);
+            break;
+          case 'session_prompt_done':
+            opts.onSessionPrompting?.(false);
+            break;
+          default:
+            break;
         }
       } else {
-        onAcpMessage(data);
+        opts.onAcpMessage(data);
       }
     } catch {
-      onLifecycleEvent?.({
+      opts.onLifecycleEvent?.({
         source: 'acp-transport',
         level: 'warn',
         message: 'Failed to parse WebSocket message as JSON',
@@ -71,11 +141,11 @@ export function createAcpWebSocketTransport(
     }
   });
 
-  if (onClose) {
-    ws.addEventListener('close', onClose);
+  if (opts.onClose) {
+    ws.addEventListener('close', opts.onClose);
   }
-  if (onError) {
-    ws.addEventListener('error', onError);
+  if (opts.onError) {
+    ws.addEventListener('error', opts.onError);
   }
 
   return {
@@ -83,7 +153,7 @@ export function createAcpWebSocketTransport(
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify(message));
       } else {
-        onLifecycleEvent?.({
+        opts.onLifecycleEvent?.({
           source: 'acp-transport',
           level: 'warn',
           message: 'Send failed: WebSocket not open',
@@ -96,7 +166,7 @@ export function createAcpWebSocketTransport(
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'select_agent', agentType }));
       } else {
-        onLifecycleEvent?.({
+        opts.onLifecycleEvent?.({
           source: 'acp-transport',
           level: 'warn',
           message: 'Send failed: WebSocket not open',

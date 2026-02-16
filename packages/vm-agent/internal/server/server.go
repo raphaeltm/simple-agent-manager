@@ -43,9 +43,8 @@ type Server struct {
 	workspaceEvents map[string][]EventRecord
 	agentSessions   *agentsessions.Manager
 	acpConfig       acp.GatewayConfig
-	acpMu           sync.Mutex
-	acpGateway      *acp.Gateway
-	acpGateways     map[string]*acp.Gateway
+	sessionHostMu   sync.Mutex
+	sessionHosts    map[string]*acp.SessionHost
 	store           *persistence.Store
 	errorReporter   *errorreport.Reporter
 }
@@ -187,7 +186,7 @@ func New(cfg *config.Config) (*Server, error) {
 		workspaceEvents: make(map[string][]EventRecord),
 		agentSessions:   agentsessions.NewManager(),
 		acpConfig:       acpGatewayConfig,
-		acpGateways:     make(map[string]*acp.Gateway),
+		sessionHosts:    make(map[string]*acp.SessionHost),
 		store:           store,
 		errorReporter:   errorReporter,
 	}
@@ -269,11 +268,11 @@ func (s *Server) StopAllWorkspacesAndSessions() {
 			sessions := s.agentSessions.List(workspaceID)
 			for _, session := range sessions {
 				_, _ = s.agentSessions.Stop(workspaceID, session.ID)
-				s.closeAgentGateway(workspaceID, session.ID)
+				s.stopSessionHost(workspaceID, session.ID)
 			}
 		}
 
-		s.closeAgentGatewaysForWorkspace(workspaceID)
+		s.stopSessionHostsForWorkspace(workspaceID)
 		s.appendNodeEvent(workspaceID, "info", "workspace.stopped", "Workspace stopped due to node shutdown", map[string]interface{}{
 			"reason": "node_shutdown",
 		})
@@ -288,18 +287,14 @@ func (s *Server) Stop(ctx context.Context) error {
 	// Close JWT validator
 	s.jwtValidator.Close()
 
-	s.acpMu.Lock()
-	for key, gateway := range s.acpGateways {
-		if gateway != nil {
-			gateway.Close()
+	s.sessionHostMu.Lock()
+	for key, host := range s.sessionHosts {
+		if host != nil {
+			host.Stop()
 		}
-		delete(s.acpGateways, key)
+		delete(s.sessionHosts, key)
 	}
-	if s.acpGateway != nil {
-		s.acpGateway.Close()
-		s.acpGateway = nil
-	}
-	s.acpMu.Unlock()
+	s.sessionHostMu.Unlock()
 
 	// Close all workspace PTY sessions.
 	s.workspaceMu.Lock()

@@ -13,22 +13,13 @@ import (
 )
 
 // serverEventAppender adapts the Server's appendNodeEvent method to the
-// acp.EventAppender interface so the gateway can emit workspace events.
+// acp.EventAppender interface so the SessionHost can emit workspace events.
 type serverEventAppender struct {
 	server *Server
 }
 
 func (a *serverEventAppender) AppendEvent(workspaceID, level, eventType, message string, detail map[string]interface{}) {
 	a.server.appendNodeEvent(workspaceID, level, eventType, message, detail)
-}
-
-func parseTakeoverParam(raw string) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
 }
 
 func writeSessionError(w http.ResponseWriter, statusCode int, code, message string) {
@@ -39,7 +30,9 @@ func writeSessionError(w http.ResponseWriter, statusCode int, code, message stri
 }
 
 // handleAgentWS handles WebSocket connections for ACP agent communication.
-// Supports optional sessionId query for deterministic attach/takeover semantics.
+// Multiple viewers can connect to the same session simultaneously.
+// The agent process lives in a SessionHost which persists independently of
+// any browser connection — it is only stopped via an explicit Stop API call.
 func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	workspaceID := s.resolveWorkspaceIDForWebsocket(r)
 	if workspaceID == "" {
@@ -56,7 +49,6 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 
 	requestedSessionID := strings.TrimSpace(r.URL.Query().Get("sessionId"))
 	idempotencyKey := strings.TrimSpace(r.URL.Query().Get("idempotencyKey"))
-	takeover := parseTakeoverParam(r.URL.Query().Get("takeover"))
 	autoCreateSession := requestedSessionID == ""
 
 	if autoCreateSession {
@@ -73,8 +65,6 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		session = created
 
 		// Hydrate AcpSessionID from SQLite persistence if available.
-		// The in-memory manager starts empty, but SQLite may have the
-		// AcpSessionID from a previous connection (persisted by the gateway).
 		if s.store != nil {
 			if tabs, tabErr := s.store.ListTabs(workspaceID); tabErr == nil {
 				for _, tab := range tabs {
@@ -106,29 +96,19 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get or create SessionHost for this session.
+	// The SessionHost persists independently of any WebSocket connection.
+	hostKey := workspaceID + ":" + requestedSessionID
+	host := s.getOrCreateSessionHost(hostKey, workspaceID, requestedSessionID, session, runtime)
+
 	upgrader := s.createUpgrader()
-	gatewayKey := workspaceID + ":" + requestedSessionID
-
-	s.acpMu.Lock()
-	if existing := s.acpGateways[gatewayKey]; existing != nil {
-		if !takeover {
-			s.acpMu.Unlock()
-			writeSessionError(w, http.StatusConflict, "session_already_attached", "Session already has an active interactive attachment")
-			return
-		}
-		existing.Close()
-		delete(s.acpGateways, gatewayKey)
-	}
-	s.acpMu.Unlock()
-
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("ACP WebSocket upgrade failed: %v", err)
 		return
 	}
 
-	// Deterministic attach/stop race handling:
-	// If stop wins before websocket attach completes, close with session_not_running.
+	// Post-upgrade race check: if session was stopped between request and upgrade
 	postUpgradeSession, postUpgradeExists := s.agentSessions.Get(workspaceID, requestedSessionID)
 	if !postUpgradeExists || postUpgradeSession.Status != agentsessions.StatusRunning {
 		_ = conn.WriteJSON(map[string]string{
@@ -144,74 +124,95 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gatewayCfg := s.acpConfig
-	gatewayCfg.WorkspaceID = workspaceID
-	gatewayCfg.SessionID = requestedSessionID
-	gatewayCfg.SessionManager = s.agentSessions
-	gatewayCfg.TabStore = s.store
-	gatewayCfg.EventAppender = &serverEventAppender{server: s}
-	// Pass previous ACP session ID and agent type for LoadSession on reconnection
+	// Attach as a viewer — multiple viewers can connect simultaneously.
+	// The SessionHost replays all buffered messages to the new viewer.
+	viewerID := "viewer-" + randomEventID()
+	viewer := host.AttachViewer(viewerID, conn)
+	if viewer == nil {
+		// Session was stopped between getOrCreate and attach
+		_ = conn.WriteJSON(map[string]string{
+			"error":   "session_not_running",
+			"message": "Session was stopped",
+		})
+		_ = conn.Close()
+		return
+	}
+
+	// Create thin Gateway relay (reads WebSocket messages, routes to SessionHost)
+	gateway := acp.NewGateway(host, conn, viewerID)
+
+	s.appendNodeEvent(workspaceID, "info", "agent.websocket_connected", "Agent WebSocket connected", map[string]interface{}{
+		"sessionId":          requestedSessionID,
+		"viewerId":           viewerID,
+		"viewerCount":        host.ViewerCount(),
+		"hasPreviousSession": session.AcpSessionID != "",
+		"previousAcpSession": session.AcpSessionID,
+		"previousAgentType":  session.AgentType,
+	})
+
+	// Run the gateway read loop (blocks until WebSocket closes)
+	gateway.Run(context.Background())
+
+	// Detach the viewer — agent continues running in the SessionHost
+	host.DetachViewer(viewerID)
+
+	s.appendNodeEvent(workspaceID, "info", "agent.websocket_disconnected", "Agent WebSocket disconnected", map[string]interface{}{
+		"sessionId":   requestedSessionID,
+		"viewerId":    viewerID,
+		"viewerCount": host.ViewerCount(),
+	})
+}
+
+// getOrCreateSessionHost returns an existing SessionHost or creates a new one.
+func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, session agentsessions.Session, runtime *WorkspaceRuntime) *acp.SessionHost {
+	s.sessionHostMu.Lock()
+	defer s.sessionHostMu.Unlock()
+
+	if host, ok := s.sessionHosts[hostKey]; ok {
+		return host
+	}
+
+	cfg := s.acpConfig
+	cfg.WorkspaceID = workspaceID
+	cfg.SessionID = sessionID
+	cfg.SessionManager = s.agentSessions
+	cfg.TabStore = s.store
+	cfg.EventAppender = &serverEventAppender{server: s}
+
 	if session.AcpSessionID != "" {
-		gatewayCfg.PreviousAcpSessionID = session.AcpSessionID
-		gatewayCfg.PreviousAgentType = session.AgentType
-		log.Printf("Workspace %s: passing previous ACP session ID %s (agentType=%s) for potential LoadSession", workspaceID, session.AcpSessionID, session.AgentType)
+		cfg.PreviousAcpSessionID = session.AcpSessionID
+		cfg.PreviousAgentType = session.AgentType
+		log.Printf("Workspace %s: SessionHost created with previous ACP session ID %s (agentType=%s)",
+			workspaceID, session.AcpSessionID, session.AgentType)
 	}
 	if callbackToken := s.callbackTokenForWorkspace(workspaceID); callbackToken != "" {
-		gatewayCfg.CallbackToken = callbackToken
+		cfg.CallbackToken = callbackToken
 	}
 	if runtime != nil {
 		if resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue); resolver != nil {
 			if _, resolveErr := resolver(); isContainerUnavailableError(resolveErr) {
-				log.Printf("Workspace %s: ACP attach detected unavailable container, attempting recovery: %v", workspaceID, resolveErr)
-				if recoverErr := s.recoverWorkspaceRuntime(r.Context(), runtime); recoverErr != nil {
-					log.Printf("Workspace %s: ACP recovery failed: %v", workspaceID, recoverErr)
+				log.Printf("Workspace %s: SessionHost detected unavailable container, attempting recovery: %v", workspaceID, resolveErr)
+				if recoverErr := s.recoverWorkspaceRuntime(context.Background(), runtime); recoverErr != nil {
+					log.Printf("Workspace %s: SessionHost recovery failed: %v", workspaceID, recoverErr)
 				}
 			}
 		}
-
 		if workDir := strings.TrimSpace(runtime.ContainerWorkDir); workDir != "" {
-			gatewayCfg.ContainerWorkDir = workDir
+			cfg.ContainerWorkDir = workDir
 		}
 		if resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue); resolver != nil {
-			gatewayCfg.ContainerResolver = resolver
+			cfg.ContainerResolver = resolver
 		}
 	}
-	gateway := acp.NewGateway(gatewayCfg, conn)
 
-	s.acpMu.Lock()
-	if existing := s.acpGateways[gatewayKey]; existing != nil {
-		if !takeover {
-			s.acpMu.Unlock()
-			_ = conn.WriteJSON(map[string]string{
-				"error":   "session_already_attached",
-				"message": "Session already has an active interactive attachment",
-			})
-			_ = conn.Close()
-			return
-		}
-		existing.Close()
-		delete(s.acpGateways, gatewayKey)
+	hostCfg := acp.SessionHostConfig{
+		GatewayConfig:     cfg,
+		MessageBufferSize: s.config.ACPMessageBufferSize,
+		ViewerSendBuffer:  s.config.ACPViewerSendBuffer,
 	}
-	s.acpGateways[gatewayKey] = gateway
-	s.acpMu.Unlock()
+	host := acp.NewSessionHost(hostCfg)
+	s.sessionHosts[hostKey] = host
 
-	s.appendNodeEvent(workspaceID, "info", "agent.websocket_connected", "Agent WebSocket connected", map[string]interface{}{
-		"sessionId":           requestedSessionID,
-		"takeover":            takeover,
-		"hasPreviousSession":  session.AcpSessionID != "",
-		"previousAcpSession":  session.AcpSessionID,
-		"previousAgentType":   session.AgentType,
-	})
-
-	gateway.Run(context.Background())
-
-	s.appendNodeEvent(workspaceID, "info", "agent.websocket_disconnected", "Agent WebSocket disconnected", map[string]interface{}{
-		"sessionId": requestedSessionID,
-	})
-
-	s.acpMu.Lock()
-	if s.acpGateways[gatewayKey] == gateway {
-		delete(s.acpGateways, gatewayKey)
-	}
-	s.acpMu.Unlock()
+	log.Printf("Workspace %s: SessionHost created for session %s", workspaceID, sessionID)
+	return host
 }
