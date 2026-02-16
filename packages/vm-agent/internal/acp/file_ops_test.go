@@ -128,6 +128,18 @@ func TestReadTextFileValidation(t *testing.T) {
 			t.Errorf("expected 'file path is required' error, got: %v", err)
 		}
 	})
+
+	t.Run("null byte in path returns error", func(t *testing.T) {
+		_, err := client.ReadTextFile(t.Context(), acpsdk.ReadTextFileRequest{
+			Path: "/tmp/test\x00.txt",
+		})
+		if err == nil {
+			t.Fatal("expected error for null byte in path")
+		}
+		if !strings.Contains(err.Error(), "null byte") {
+			t.Errorf("expected 'null byte' error, got: %v", err)
+		}
+	})
 }
 
 func TestWriteTextFileValidation(t *testing.T) {
@@ -153,6 +165,91 @@ func TestWriteTextFileValidation(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "file path is required") {
 			t.Errorf("expected 'file path is required' error, got: %v", err)
+		}
+	})
+
+	t.Run("null byte in path returns error", func(t *testing.T) {
+		_, err := client.WriteTextFile(t.Context(), acpsdk.WriteTextFileRequest{
+			Path:    "/tmp/test\x00.txt",
+			Content: "hello",
+		})
+		if err == nil {
+			t.Fatal("expected error for null byte in path")
+		}
+		if !strings.Contains(err.Error(), "null byte") {
+			t.Errorf("expected 'null byte' error, got: %v", err)
+		}
+	})
+
+	t.Run("content exceeding max size returns error", func(t *testing.T) {
+		clientWithLimit := &sessionHostClient{
+			host: &SessionHost{
+				config: SessionHostConfig{
+					GatewayConfig: GatewayConfig{
+						ContainerResolver: func() (string, error) {
+							return "test-container", nil
+						},
+						FileMaxSize: 10, // 10 bytes limit
+					},
+				},
+			},
+		}
+		_, err := clientWithLimit.WriteTextFile(t.Context(), acpsdk.WriteTextFileRequest{
+			Path:    "/tmp/test.txt",
+			Content: "this content is definitely longer than 10 bytes",
+		})
+		if err == nil {
+			t.Fatal("expected error for oversized content")
+		}
+		if !strings.Contains(err.Error(), "exceeds maximum size") {
+			t.Errorf("expected 'exceeds maximum size' error, got: %v", err)
+		}
+	})
+
+	t.Run("content within max size passes validation", func(t *testing.T) {
+		clientWithLimit := &sessionHostClient{
+			host: &SessionHost{
+				config: SessionHostConfig{
+					GatewayConfig: GatewayConfig{
+						ContainerResolver: func() (string, error) {
+							return "test-container", nil
+						},
+						FileMaxSize: 1000,
+					},
+				},
+			},
+		}
+		// This will fail at the docker exec step (no docker), but should
+		// pass the size validation — we check the error is NOT about size
+		_, err := clientWithLimit.WriteTextFile(t.Context(), acpsdk.WriteTextFileRequest{
+			Path:    "/tmp/test.txt",
+			Content: "small content",
+		})
+		if err != nil && strings.Contains(err.Error(), "exceeds maximum size") {
+			t.Errorf("should not fail size validation for small content, got: %v", err)
+		}
+	})
+
+	t.Run("default max size is 1MB", func(t *testing.T) {
+		clientNoLimit := &sessionHostClient{
+			host: &SessionHost{
+				config: SessionHostConfig{
+					GatewayConfig: GatewayConfig{
+						ContainerResolver: func() (string, error) {
+							return "test-container", nil
+						},
+						// FileMaxSize not set — should default to 1048576 (1MB)
+					},
+				},
+			},
+		}
+		// Content under 1MB should pass size validation (will fail at docker exec)
+		_, err := clientNoLimit.WriteTextFile(t.Context(), acpsdk.WriteTextFileRequest{
+			Path:    "/tmp/test.txt",
+			Content: "small content",
+		})
+		if err != nil && strings.Contains(err.Error(), "exceeds maximum size") {
+			t.Errorf("should not fail size validation with default limit for small content, got: %v", err)
 		}
 	})
 }
