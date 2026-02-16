@@ -54,6 +54,26 @@ Think **GitHub Codespaces, but built for AI-assisted development** with explicit
 - **Explicit Lifecycle Controls** — Stop, restart, and delete workspaces/nodes on demand
 - **GitHub Integration** — Works with both public and private repositories
 - **Keyboard-Safe Mobile Layout** — Viewport-aware sizing keeps core controls visible as browser UI and mobile keyboard appear/disappear
+- **Keyboard Shortcuts** — VS Code-style shortcuts for panel navigation, tab switching, and session management (press `Cmd+Shift+/` or `Ctrl+Shift+/` to see all)
+
+### Workspace Keyboard Shortcuts
+
+The workspace UI supports keyboard shortcuts for fast navigation. On macOS, shortcuts use `Cmd`; on Windows/Linux, they use `Ctrl`.
+
+| Shortcut | Action |
+|----------|--------|
+| `Cmd+Shift+E` | Toggle file browser |
+| `Cmd+Shift+G` | Toggle git changes panel |
+| `Cmd+/` | Focus chat input |
+| `` Cmd+` `` | Focus terminal |
+| `Ctrl+Tab` | Next tab |
+| `Ctrl+Shift+Tab` | Previous tab |
+| `Cmd+1` – `Cmd+9` | Jump to tab by number |
+| `Cmd+Shift+N` | New chat session |
+| `Cmd+Shift+T` | New terminal tab |
+| `Cmd+Shift+/` | Show keyboard shortcuts help |
+
+> **Tip:** Press `Cmd+Shift+/` (or `Ctrl+Shift+/` on Windows/Linux) inside any workspace to see the full shortcuts overlay.
 
 ## Quick Start
 
