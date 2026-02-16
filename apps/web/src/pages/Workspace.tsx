@@ -728,96 +728,74 @@ export function Workspace() {
   );
 
   // ── Keyboard shortcuts ──
-  useKeyboardShortcuts(
-    useMemo(
-      () => ({
-        'toggle-file-browser': () => {
-          if (!isRunning || !terminalToken) return;
-          if (filesParam) handleCloseFileBrowser();
-          else handleOpenFileBrowser();
-        },
-        'toggle-git-changes': () => {
-          if (!isRunning || !terminalToken) return;
-          if (gitParam) handleCloseGitPanel();
-          else handleOpenGitChanges();
-        },
-        'focus-chat': () => {
-          if (activeChatSessionId) {
-            if (viewMode !== 'conversation') {
-              handleAttachSession(activeChatSessionId);
-            }
-            // Small delay to let the view switch render before focusing
-            requestAnimationFrame(() => {
-              chatSessionRefs.current.get(activeChatSessionId)?.focusInput();
-            });
+  // The hook stores handlers via a ref internally, so it's safe to pass an
+  // inline object here — no useMemo needed, and no stale closure issues.
+  useKeyboardShortcuts({
+    'toggle-file-browser': () => {
+      if (!isRunning || !terminalToken) return;
+      if (filesParam) handleCloseFileBrowser();
+      else handleOpenFileBrowser();
+    },
+    'toggle-git-changes': () => {
+      if (!isRunning || !terminalToken) return;
+      if (gitParam) handleCloseGitPanel();
+      else handleOpenGitChanges();
+    },
+    'focus-chat': () => {
+      if (activeChatSessionId) {
+        if (viewMode !== 'conversation') {
+          handleAttachSession(activeChatSessionId);
+        }
+        // Small delay to let the view switch render before focusing
+        requestAnimationFrame(() => {
+          chatSessionRefs.current.get(activeChatSessionId)?.focusInput();
+        });
+      }
+    },
+    'focus-terminal': () => {
+      if (viewMode !== 'terminal') {
+        const firstTermTab = workspaceTabs.find((t) => t.kind === 'terminal');
+        if (firstTermTab) handleSelectWorkspaceTab(firstTermTab);
+      }
+      requestAnimationFrame(() => {
+        multiTerminalRef.current?.focus();
+      });
+    },
+    'next-tab': () => {
+      if (workspaceTabs.length <= 1) return;
+      const currentIdx = workspaceTabs.findIndex((t) => t.id === activeTabId);
+      const nextIdx = currentIdx < 0 ? 0 : (currentIdx + 1) % workspaceTabs.length;
+      handleSelectWorkspaceTab(workspaceTabs[nextIdx]!);
+    },
+    'prev-tab': () => {
+      if (workspaceTabs.length <= 1) return;
+      const currentIdx = workspaceTabs.findIndex((t) => t.id === activeTabId);
+      const prevIdx =
+        currentIdx <= 0 ? workspaceTabs.length - 1 : currentIdx - 1;
+      handleSelectWorkspaceTab(workspaceTabs[prevIdx]!);
+    },
+    ...Object.fromEntries(
+      Array.from({ length: 9 }, (_, i) => [
+        `tab-${i + 1}`,
+        () => {
+          if (i < workspaceTabs.length) {
+            handleSelectWorkspaceTab(workspaceTabs[i]!);
           }
         },
-        'focus-terminal': () => {
-          if (viewMode !== 'terminal') {
-            const firstTermTab = workspaceTabs.find((t) => t.kind === 'terminal');
-            if (firstTermTab) handleSelectWorkspaceTab(firstTermTab);
-          }
-          requestAnimationFrame(() => {
-            multiTerminalRef.current?.focus();
-          });
-        },
-        'next-tab': () => {
-          if (workspaceTabs.length <= 1) return;
-          const currentIdx = workspaceTabs.findIndex((t) => t.id === activeTabId);
-          const nextIdx = currentIdx < 0 ? 0 : (currentIdx + 1) % workspaceTabs.length;
-          handleSelectWorkspaceTab(workspaceTabs[nextIdx]!);
-        },
-        'prev-tab': () => {
-          if (workspaceTabs.length <= 1) return;
-          const currentIdx = workspaceTabs.findIndex((t) => t.id === activeTabId);
-          const prevIdx =
-            currentIdx <= 0 ? workspaceTabs.length - 1 : currentIdx - 1;
-          handleSelectWorkspaceTab(workspaceTabs[prevIdx]!);
-        },
-        ...Object.fromEntries(
-          Array.from({ length: 9 }, (_, i) => [
-            `tab-${i + 1}`,
-            () => {
-              if (i < workspaceTabs.length) {
-                handleSelectWorkspaceTab(workspaceTabs[i]!);
-              }
-            },
-          ])
-        ),
-        'new-chat': () => {
-          if (!isRunning) return;
-          void handleCreateSession(defaultAgentId ?? undefined);
-        },
-        'new-terminal': () => {
-          if (!isRunning) return;
-          handleCreateTerminalTab();
-        },
-        'show-shortcuts': () => {
-          setShowShortcutsHelp((prev) => !prev);
-        },
-      }),
-      [
-        isRunning,
-        terminalToken,
-        filesParam,
-        gitParam,
-        viewMode,
-        activeChatSessionId,
-        activeTabId,
-        workspaceTabs,
-        defaultAgentId,
-        handleCloseFileBrowser,
-        handleOpenFileBrowser,
-        handleCloseGitPanel,
-        handleOpenGitChanges,
-        handleAttachSession,
-        handleSelectWorkspaceTab,
-        handleCreateTerminalTab,
-        handleCreateSession,
-      ]
+      ])
     ),
-    isRunning
-  );
+    'new-chat': () => {
+      if (!isRunning) return;
+      void handleCreateSession(defaultAgentId ?? undefined);
+    },
+    'new-terminal': () => {
+      if (!isRunning) return;
+      handleCreateTerminalTab();
+    },
+    'show-shortcuts': () => {
+      setShowShortcutsHelp((prev) => !prev);
+    },
+  }, isRunning);
 
   // ── Loading state ──
   if (loading) {
