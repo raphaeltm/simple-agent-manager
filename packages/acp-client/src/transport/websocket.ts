@@ -85,11 +85,13 @@ export function createAcpWebSocketTransport(
   onError?: (error: Event) => void,
   onLifecycleEvent?: LifecycleEventCallback
 ): AcpTransport {
-  // Normalize to options object
+  // Normalize to options object.
+  // Duck-type check: if wsOrOptions has addEventListener it's a WebSocket
+  // (positional args form), otherwise it's an options object.
   let opts: AcpTransportOptions;
-  if (wsOrOptions instanceof WebSocket) {
+  if ('addEventListener' in wsOrOptions && typeof (wsOrOptions as WebSocket).addEventListener === 'function') {
     opts = {
-      ws: wsOrOptions,
+      ws: wsOrOptions as WebSocket,
       onAgentStatus: onAgentStatus!,
       onAcpMessage: onAcpMessage!,
       onClose,
@@ -97,7 +99,7 @@ export function createAcpWebSocketTransport(
       onLifecycleEvent,
     };
   } else {
-    opts = wsOrOptions;
+    opts = wsOrOptions as AcpTransportOptions;
   }
 
   const { ws } = opts;

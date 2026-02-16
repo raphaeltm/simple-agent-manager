@@ -192,9 +192,8 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
 
     // Map SessionHost status to our state machine
     const status = msg.status;
-    if (msg.agentType) {
-      setAgentType(msg.agentType);
-    }
+    // Always sync agentType from server state — clear to null when empty/idle
+    setAgentType(msg.agentType || null);
     if (msg.error) {
       setError(msg.error);
     } else {
