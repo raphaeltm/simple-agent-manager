@@ -306,6 +306,8 @@ export interface MultiTerminalHandle {
   activateSession: (sessionId: string) => void;
   closeSession: (sessionId: string) => void;
   renameSession: (sessionId: string, name: string) => void;
+  /** Focus the active terminal session's xterm instance. */
+  focus: () => void;
 }
 
 /**

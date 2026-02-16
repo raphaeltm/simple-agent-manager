@@ -553,8 +553,14 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
         renameSession: (sessionId: string, name: string) => {
           handleRenameTab(sessionId, name);
         },
+        focus: () => {
+          if (activeSessionId) {
+            const instance = terminalsRef.current.get(activeSessionId);
+            instance?.terminal.focus();
+          }
+        },
       }),
-      [activateSession, canCreateSession, handleCloseTab, handleNewTab, handleRenameTab]
+      [activeSessionId, activateSession, canCreateSession, handleCloseTab, handleNewTab, handleRenameTab]
     );
 
     useEffect(() => {
