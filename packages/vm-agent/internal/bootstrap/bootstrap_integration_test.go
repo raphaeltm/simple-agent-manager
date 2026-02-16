@@ -60,26 +60,6 @@ func mustStartContainer(t *testing.T, image, labelKey, labelValue string, extraA
 	return containerID
 }
 
-// mustStartContainerWithBindMount starts a Docker container with a host directory bind-mounted.
-// Extra args are inserted before the image name.
-func mustStartContainerWithBindMount(t *testing.T, image, labelKey, labelValue, hostDir, containerDir string, extraArgs ...string) string {
-	t.Helper()
-	label := fmt.Sprintf("%s=%s", labelKey, labelValue)
-	mount := fmt.Sprintf("%s:%s", hostDir, containerDir)
-	args := []string{"run", "-d", "--label", label, "-v", mount}
-	args = append(args, extraArgs...)
-	args = append(args, image, "sleep", "infinity")
-	out, err := exec.Command("docker", args...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("docker run %s with bind mount failed: %v\n%s", image, err, string(out))
-	}
-	containerID := strings.TrimSpace(string(out))
-	t.Cleanup(func() {
-		_ = exec.Command("docker", "rm", "-f", containerID).Run()
-	})
-	return containerID
-}
-
 // mustCreateTestRepo creates a temporary git repository. If withDevcontainerConfig is true,
 // it writes .devcontainer/devcontainer.json with the given content and commits it.
 func mustCreateTestRepo(t *testing.T, withDevcontainerConfig bool, devcontainerJSON string) string {
@@ -215,82 +195,49 @@ type testImage struct {
 	dockerRunArgs []string
 }
 
-var (
-	debianImage = testImage{
-		name: "debian-root", image: "debian:bookworm-slim",
-		defaultUID: 0, defaultGID: 0, defaultUser: "root",
-		hasGit: false, hasNonRootUser: false,
-	}
-	nodeImage = testImage{
-		name: "node-nonroot", image: "node:22-bookworm",
-		defaultUID: 1000, defaultGID: 1000, defaultUser: "node",
-		hasGit: true, hasNonRootUser: true,
-		dockerRunArgs: []string{"--user", "node:node"},
-	}
-	allImages = []testImage{debianImage, nodeImage}
-)
-
-// ---------------------------------------------------------------------------
-// Category 1: Container Permission Tests
-// ---------------------------------------------------------------------------
-
-func TestIntegration_GetContainerUserIDs(t *testing.T) {
-	requireDockerAvailable(t)
-
-	for _, img := range allImages {
-		img := img
-		t.Run(img.name, func(t *testing.T) {
-			containerID := mustStartContainer(t, img.image, "test.label", t.Name(), img.dockerRunArgs...)
-			ctx := context.Background()
-
-			// root user should always be uid=0, gid=0
-			uid, gid, err := getContainerUserIDs(ctx, containerID, "root")
-			if err != nil {
-				t.Fatalf("getContainerUserIDs(root) failed: %v", err)
-			}
-			if uid != 0 || gid != 0 {
-				t.Fatalf("expected root uid=0 gid=0, got uid=%d gid=%d", uid, gid)
-			}
-
-			// Test the image-specific non-root user
-			if img.hasNonRootUser {
-				uid, gid, err = getContainerUserIDs(ctx, containerID, img.defaultUser)
-				if err != nil {
-					t.Fatalf("getContainerUserIDs(%s) failed: %v", img.defaultUser, err)
-				}
-				if uid != img.defaultUID || gid != img.defaultGID {
-					t.Fatalf("expected %s uid=%d gid=%d, got uid=%d gid=%d",
-						img.defaultUser, img.defaultUID, img.defaultGID, uid, gid)
-				}
-			}
-
-			// Nonexistent user should error
-			_, _, err = getContainerUserIDs(ctx, containerID, "nonexistent-user-xyz-123")
-			if err == nil {
-				t.Fatal("expected error for nonexistent user")
-			}
-		})
-	}
+var nodeImage = testImage{
+	name: "node-nonroot", image: "node:22-bookworm",
+	defaultUID: 1000, defaultGID: 1000, defaultUser: "node",
+	hasGit: true, hasNonRootUser: true,
+	dockerRunArgs: []string{"--user", "node:node"},
 }
 
-func TestIntegration_GetContainerCurrentUserIDs(t *testing.T) {
+// ---------------------------------------------------------------------------
+// Category 1: Volume Lifecycle Tests
+// ---------------------------------------------------------------------------
+
+func TestIntegration_VolumeLifecycle(t *testing.T) {
 	requireDockerAvailable(t)
 
-	for _, img := range allImages {
-		img := img
-		t.Run(img.name, func(t *testing.T) {
-			containerID := mustStartContainer(t, img.image, "test.label", t.Name(), img.dockerRunArgs...)
-			ctx := context.Background()
+	workspaceID := "vol-test-" + strings.ReplaceAll(t.Name(), "/", "-")
+	ctx := context.Background()
 
-			uid, gid, err := getContainerCurrentUserIDs(ctx, containerID)
-			if err != nil {
-				t.Fatalf("getContainerCurrentUserIDs() failed: %v", err)
-			}
-			if uid != img.defaultUID || gid != img.defaultGID {
-				t.Fatalf("expected default uid=%d gid=%d, got uid=%d gid=%d",
-					img.defaultUID, img.defaultGID, uid, gid)
-			}
-		})
+	// Create volume
+	volumeName, err := ensureVolumeReady(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("ensureVolumeReady: %v", err)
+	}
+	if volumeName != VolumeNameForWorkspace(workspaceID) {
+		t.Fatalf("unexpected volume name: %s", volumeName)
+	}
+
+	// Idempotent create
+	volumeName2, err := ensureVolumeReady(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("ensureVolumeReady (idempotent): %v", err)
+	}
+	if volumeName2 != volumeName {
+		t.Fatalf("idempotent create returned different name: %s vs %s", volumeName, volumeName2)
+	}
+
+	// Remove volume
+	if err := RemoveVolume(ctx, workspaceID); err != nil {
+		t.Fatalf("RemoveVolume: %v", err)
+	}
+
+	// Remove is idempotent (volume already gone)
+	if err := RemoveVolume(ctx, workspaceID); err != nil {
+		t.Fatalf("RemoveVolume (idempotent): %v", err)
 	}
 }
 
@@ -344,48 +291,6 @@ func TestIntegration_DockerExecAsRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("file not executable: %v\n%s", err, string(out))
 	}
-}
-
-func TestIntegration_ChownWorkspaceDir(t *testing.T) {
-	requireDockerAvailable(t)
-
-	// Test with node image (non-root default user, uid 1000)
-	workspaceDir := t.TempDir()
-
-	// Create a file in the workspace directory
-	testFile := filepath.Join(workspaceDir, "test.txt")
-	if err := os.WriteFile(testFile, []byte("test"), 0o644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	labelKey := "devcontainer.local_folder"
-	labelValue := workspaceDir
-
-	containerID := mustStartContainerWithBindMount(t, nodeImage.image, labelKey, labelValue, workspaceDir, "/workspace", nodeImage.dockerRunArgs...)
-	_ = containerID // container discovery uses docker ps with label filter
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	cfg := &config.Config{
-		WorkspaceDir:        workspaceDir,
-		ContainerMode:       true,
-		ContainerUser:       "", // Auto-detect
-		ContainerLabelKey:   labelKey,
-		ContainerLabelValue: labelValue,
-	}
-
-	if err := ensureWorkspaceWritable(ctx, cfg); err != nil {
-		t.Fatalf("ensureWorkspaceWritable() failed: %v", err)
-	}
-
-	// Verify that the file is now owned by the container's default user (uid 1000)
-	info, err := os.Stat(testFile)
-	if err != nil {
-		t.Fatalf("stat test file: %v", err)
-	}
-	_ = info // On Linux we'd check Sys().(*syscall.Stat_t).Uid, but this varies by OS
-	// The important thing is that ensureWorkspaceWritable didn't error
 }
 
 // ---------------------------------------------------------------------------
@@ -478,7 +383,7 @@ echo '{"outcome":"success","containerId":"mock-container-id"}'
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		_, _ = ensureDevcontainerReady(ctx, cfg)
+		_, _ = ensureDevcontainerReady(ctx, cfg, "")
 
 		args, err := os.ReadFile(argsFile)
 		if err != nil {
@@ -507,7 +412,7 @@ echo '{"outcome":"success","containerId":"mock-container-id"}'
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		_, _ = ensureDevcontainerReady(ctx, cfg)
+		_, _ = ensureDevcontainerReady(ctx, cfg, "")
 
 		args, err := os.ReadFile(argsFile)
 		if err != nil {
@@ -651,7 +556,7 @@ func TestIntegration_DevcontainerBuildWithConfig(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if _, err := ensureDevcontainerReady(ctx, cfg); err != nil {
+	if _, err := ensureDevcontainerReady(ctx, cfg, ""); err != nil {
 		t.Fatalf("ensureDevcontainerReady: %v", err)
 	}
 
@@ -757,7 +662,7 @@ func TestIntegration_DevcontainerWithRemoteUser(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if _, err := ensureDevcontainerReady(ctx, cfg); err != nil {
+	if _, err := ensureDevcontainerReady(ctx, cfg, ""); err != nil {
 		t.Fatalf("ensureDevcontainerReady: %v", err)
 	}
 
@@ -770,20 +675,15 @@ func TestIntegration_DevcontainerWithRemoteUser(t *testing.T) {
 	})
 
 	// Verify the "vscode" user exists in the container and is non-root.
-	// NOTE: The exact uid varies by environment — on ubuntu-latest CI runners
-	// uid 1000 may be taken by the "runner" user, so the devcontainer image
-	// remaps vscode to 1001. We just verify it's a non-root user.
-	uid, gid, err := getContainerUserIDs(ctx, containerID, "vscode")
+	// Use `id` command directly instead of the removed getContainerUserIDs helper.
+	out, err := exec.CommandContext(ctx, "docker", "exec", containerID, "id", "-u", "vscode").CombinedOutput()
 	if err != nil {
-		t.Fatalf("getContainerUserIDs(vscode): %v", err)
+		t.Fatalf("id -u vscode failed: %v\n%s", err, string(out))
 	}
-	if uid == 0 {
+	if strings.TrimSpace(string(out)) == "0" {
 		t.Fatal("vscode user should not be root (uid 0)")
 	}
-	if gid == 0 {
-		t.Fatal("vscode user should not have root group (gid 0)")
-	}
-	t.Logf("vscode user: uid=%d gid=%d", uid, gid)
+	t.Logf("vscode user uid: %s", strings.TrimSpace(string(out)))
 
 	// Verify git credential helper works in a container with remoteUser set.
 	// This exercises the -u root pattern needed for non-root containers.
@@ -809,19 +709,7 @@ func TestIntegration_DevcontainerWithRemoteUser(t *testing.T) {
 		t.Fatalf("credential helper not configured, got: %s", string(out))
 	}
 
-	// Verify workspace permissions work with ContainerUser="vscode"
-	permCfg := &config.Config{
-		WorkspaceDir:        repo,
-		ContainerMode:       true,
-		ContainerUser:       "vscode",
-		ContainerLabelKey:   cfg.ContainerLabelKey,
-		ContainerLabelValue: cfg.ContainerLabelValue,
-	}
-	if err := ensureWorkspaceWritable(ctx, permCfg); err != nil {
-		t.Fatalf("ensureWorkspaceWritable with vscode user: %v", err)
-	}
-
-	t.Logf("Built devcontainer %s with remoteUser=vscode, credential helper and permissions work", containerID)
+	t.Logf("Built devcontainer %s with remoteUser=vscode, credential helper works", containerID)
 }
 
 func TestIntegration_DevcontainerWithDockerfile(t *testing.T) {
@@ -910,7 +798,7 @@ RUN echo "dockerfile-build-marker" > /tmp/dockerfile-marker
 		t.Fatal("hasDevcontainerConfig() should return true for Dockerfile-based config")
 	}
 
-	if _, err := ensureDevcontainerReady(ctx, cfg); err != nil {
+	if _, err := ensureDevcontainerReady(ctx, cfg, ""); err != nil {
 		t.Fatalf("ensureDevcontainerReady with Dockerfile: %v", err)
 	}
 
@@ -931,12 +819,12 @@ RUN echo "dockerfile-build-marker" > /tmp/dockerfile-marker
 		t.Fatalf("expected dockerfile-build-marker, got: %s", string(out))
 	}
 
-	// Verify the custom user exists
-	uid, _, err := getContainerUserIDs(ctx, containerID, "devuser")
+	// Verify the custom user exists and is non-root
+	out, err = exec.CommandContext(ctx, "docker", "exec", containerID, "id", "-u", "devuser").CombinedOutput()
 	if err != nil {
-		t.Fatalf("getContainerUserIDs(devuser): %v", err)
+		t.Fatalf("id -u devuser failed: %v\n%s", err, string(out))
 	}
-	if uid == 0 {
+	if strings.TrimSpace(string(out)) == "0" {
 		t.Fatal("devuser should not be root")
 	}
 
@@ -992,7 +880,7 @@ func TestIntegration_DevcontainerWithFeatures(t *testing.T) {
 		t.Fatal("hasDevcontainerConfig() should return true for config with features")
 	}
 
-	if _, err := ensureDevcontainerReady(ctx, cfg); err != nil {
+	if _, err := ensureDevcontainerReady(ctx, cfg, ""); err != nil {
 		t.Fatalf("ensureDevcontainerReady: %v", err)
 	}
 
@@ -1041,7 +929,7 @@ func TestIntegration_DevcontainerWithPostCreateCommand(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if _, err := ensureDevcontainerReady(ctx, cfg); err != nil {
+	if _, err := ensureDevcontainerReady(ctx, cfg, ""); err != nil {
 		t.Fatalf("ensureDevcontainerReady: %v", err)
 	}
 
@@ -1090,7 +978,7 @@ func TestIntegration_DevcontainerWithMultipleLifecycleHooks(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if _, err := ensureDevcontainerReady(ctx, cfg); err != nil {
+	if _, err := ensureDevcontainerReady(ctx, cfg, ""); err != nil {
 		t.Fatalf("ensureDevcontainerReady: %v", err)
 	}
 
@@ -1148,7 +1036,7 @@ func TestIntegration_DevcontainerWithRemoteEnv(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if _, err := ensureDevcontainerReady(ctx, cfg); err != nil {
+	if _, err := ensureDevcontainerReady(ctx, cfg, ""); err != nil {
 		t.Fatalf("ensureDevcontainerReady: %v", err)
 	}
 
@@ -1222,7 +1110,7 @@ func TestIntegration_DevcontainerRootDevcontainerJson(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if _, err := ensureDevcontainerReady(ctx, cfg); err != nil {
+	if _, err := ensureDevcontainerReady(ctx, cfg, ""); err != nil {
 		t.Fatalf("ensureDevcontainerReady with root .devcontainer.json: %v", err)
 	}
 
