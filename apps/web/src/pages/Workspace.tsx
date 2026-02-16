@@ -14,6 +14,8 @@ import { CommandPalette } from '../components/CommandPalette';
 import { KeyboardShortcutsHelp } from '../components/KeyboardShortcutsHelp';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import { useTabOrder } from '../hooks/useTabOrder';
+import { WorkspaceTabStrip, type WorkspaceTabItem } from '../components/WorkspaceTabStrip';
 import { MoreVertical, X } from 'lucide-react';
 import { GitChangesButton } from '../components/GitChangesButton';
 import { GitChangesPanel } from '../components/GitChangesPanel';
@@ -33,6 +35,7 @@ import {
   listAgentSessions,
   listWorkspaceEvents,
   rebuildWorkspace,
+  renameAgentSession,
   restartWorkspace,
   stopAgentSession,
   stopWorkspace,
@@ -158,13 +161,14 @@ export function Workspace() {
   const [preferredAgentsBySession, setPreferredAgentsBySession] = useState<
     Record<string, AgentInfo['id']>
   >({});
-  const [hoveredWorkspaceTabId, setHoveredWorkspaceTabId] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const multiTerminalRef = useRef<MultiTerminalHandle | null>(null);
   const createMenuRef = useRef<HTMLDivElement | null>(null);
   const chatSessionRefs = useRef<Map<string, ChatSessionHandle>>(new Map());
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+
+  const tabOrder = useTabOrder<WorkspaceTab>(id);
 
   const isRunning = workspace?.status === 'running';
 
@@ -575,6 +579,8 @@ export function Workspace() {
         return [...remaining, created];
       });
 
+      tabOrder.assignOrder(`chat:${created.id}`);
+
       if (preferredAgentId) {
         setPreferredAgentsBySession((prev) => ({ ...prev, [created.id]: preferredAgentId }));
       }
@@ -644,6 +650,7 @@ export function Workspace() {
     navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
     const sessionId = multiTerminalRef.current?.createSession();
     if (sessionId) {
+      tabOrder.assignOrder(`terminal:${sessionId}`);
       setActiveTerminalSessionId(sessionId);
       multiTerminalRef.current?.activateSession(sessionId);
     }
@@ -667,6 +674,8 @@ export function Workspace() {
   };
 
   const handleCloseWorkspaceTab = (tab: WorkspaceTab) => {
+    tabOrder.removeTab(tab.id);
+
     if (tab.kind === 'terminal') {
       if (tab.sessionId !== DEFAULT_TERMINAL_TAB_ID) {
         multiTerminalRef.current?.closeSession(tab.sessionId);
@@ -730,8 +739,30 @@ export function Workspace() {
         };
       });
 
-    return [...terminalSessionTabs, ...chatSessionTabs];
-  }, [agentNameById, agentSessions, preferredAgentsBySession, visibleTerminalTabs]);
+    return tabOrder.getSortedTabs([...terminalSessionTabs, ...chatSessionTabs]);
+  }, [agentNameById, agentSessions, preferredAgentsBySession, tabOrder, visibleTerminalTabs]);
+
+  const handleRenameWorkspaceTab = useCallback(
+    (tabItem: WorkspaceTabItem, newName: string) => {
+      const tab = workspaceTabs.find((t) => t.id === tabItem.id);
+      if (!tab) return;
+
+      if (tab.kind === 'terminal') {
+        multiTerminalRef.current?.renameSession(tab.sessionId, newName);
+      } else if (tab.kind === 'chat' && id) {
+        // Update local state immediately for responsiveness
+        setAgentSessions((prev) =>
+          prev.map((s) => (s.id === tab.sessionId ? { ...s, label: newName } : s))
+        );
+        // Persist via API (fire-and-forget; local state is already updated)
+        void renameAgentSession(id, tab.sessionId, newName).catch(() => {
+          // Revert on failure — reload sessions from server
+          void listAgentSessions(id).then(setAgentSessions);
+        });
+      }
+    },
+    [id, workspaceTabs]
+  );
 
   const activeTabId = useMemo(() => {
     if (viewMode === 'terminal') {
@@ -745,6 +776,34 @@ export function Workspace() {
     }
     return activeChatSessionId ? `chat:${activeChatSessionId}` : null;
   }, [activeChatSessionId, activeTerminalSessionId, viewMode, visibleTerminalTabs]);
+
+  const handleSelectTabItem = useCallback(
+    (tabItem: WorkspaceTabItem) => {
+      const tab = workspaceTabs.find((t) => t.id === tabItem.id);
+      if (tab) handleSelectWorkspaceTab(tab);
+    },
+    [workspaceTabs] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const handleCloseTabItem = useCallback(
+    (tabItem: WorkspaceTabItem) => {
+      const tab = workspaceTabs.find((t) => t.id === tabItem.id);
+      if (tab) handleCloseWorkspaceTab(tab);
+    },
+    [workspaceTabs] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const tabStripItems = useMemo<WorkspaceTabItem[]>(
+    () =>
+      workspaceTabs.map((tab) => ({
+        id: tab.id,
+        kind: tab.kind,
+        sessionId: tab.sessionId,
+        title: tab.title,
+        statusColor: workspaceTabStatusColor(tab),
+      })),
+    [workspaceTabs]
+  );
 
   // Running chat sessions (for rendering ChatSession components)
   const runningChatSessions = useMemo(
@@ -981,259 +1040,131 @@ export function Workspace() {
   ) : null;
 
   // ── Tab strip (shown on both desktop and mobile when running) ──
-  const workspaceTabStrip = isRunning ? (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'stretch',
-        backgroundColor: '#16171e',
-        borderBottom: '1px solid #2a2d3a',
-        height: isMobile ? 42 : 38,
-        flexShrink: 0,
-      }}
-    >
-      <div
+  const createMenuContent = (
+    <div ref={createMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        onClick={() => setCreateMenuOpen((prev) => !prev)}
+        disabled={sessionsLoading}
         style={{
           display: 'flex',
-          alignItems: 'stretch',
-          overflowX: 'auto',
-          flex: 1,
-          scrollbarWidth: 'none',
-          msOverflowStyle: 'none',
-          WebkitOverflowScrolling: 'touch',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: isMobile ? 42 : 36,
+          height: '100%',
+          background: 'none',
+          border: 'none',
+          borderLeft: '1px solid #2a2d3a',
+          color: '#787c99',
+          cursor: sessionsLoading ? 'not-allowed' : 'pointer',
+          fontSize: 18,
+          fontWeight: 300,
+          padding: 0,
+          opacity: sessionsLoading ? 0.6 : 1,
         }}
-        role="tablist"
-        aria-label="Workspace sessions"
+        aria-label="Create terminal or chat session"
+        aria-expanded={createMenuOpen}
       >
-        {workspaceTabs.map((tab) => {
-          const active = activeTabId === tab.id;
-          const statusColor = workspaceTabStatusColor(tab);
-          const hovered = hoveredWorkspaceTabId === tab.id;
-          const canClose = tab.kind === 'chat' || tab.sessionId !== DEFAULT_TERMINAL_TAB_ID;
+        +
+      </button>
 
-          return (
-            <div
-              key={tab.id}
-              onClick={() => handleSelectWorkspaceTab(tab)}
-              onMouseEnter={() => setHoveredWorkspaceTabId(tab.id)}
-              onMouseLeave={() => setHoveredWorkspaceTabId((prev) => (prev === tab.id ? null : prev))}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  handleSelectWorkspaceTab(tab);
-                }
-              }}
-              role="tab"
-              aria-selected={active}
-              aria-label={`${tab.kind === 'terminal' ? 'Terminal' : 'Chat'} tab: ${tab.title}`}
-              tabIndex={0}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: isMobile ? 4 : 6,
-                padding: isMobile ? '0 10px' : '0 12px',
-                minWidth: isMobile ? 80 : 100,
-                maxWidth: isMobile ? 150 : 180,
-                cursor: 'pointer',
-                fontSize: isMobile ? 12 : 13,
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                border: 'none',
-                borderRight: '1px solid #2a2d3a',
-                position: 'relative',
-                flexShrink: 0,
-                whiteSpace: 'nowrap',
-                backgroundColor: active ? '#1a1b26' : hovered ? '#1e2030' : 'transparent',
-                color: active || hovered ? '#a9b1d6' : '#787c99',
-              }}
-              title={tab.title}
-            >
-              {active && (
-                <span
-                  style={{
-                    position: 'absolute',
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    height: 2,
-                    backgroundColor: '#7aa2f7',
-                  }}
-                />
-              )}
-              <span
-                style={{
-                  display: 'inline-block',
-                  fontSize: 10,
-                  lineHeight: 1,
-                  color: statusColor,
-                  flexShrink: 0,
-                }}
-              >
-                ●
-              </span>
-              <span
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {tab.title}
-              </span>
-              {canClose && (
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    handleCloseWorkspaceTab(tab);
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: isMobile ? 24 : 20,
-                    height: isMobile ? 24 : 20,
-                    borderRadius: 4,
-                    border: 'none',
-                    background: 'none',
-                    color: '#787c99',
-                    cursor: 'pointer',
-                    fontSize: 14,
-                    lineHeight: 1,
-                    padding: 0,
-                    flexShrink: 0,
-                    opacity: isMobile ? 1 : active || hovered ? 1 : 0,
-                    transition: 'background-color 0.15s, color 0.15s',
-                  }}
-                  aria-label={tab.kind === 'terminal' ? `Close ${tab.title}` : `Stop ${tab.title}`}
-                  onMouseEnter={(event) => {
-                    event.currentTarget.style.backgroundColor = '#33467c';
-                    event.currentTarget.style.color = '#a9b1d6';
-                  }}
-                  onMouseLeave={(event) => {
-                    event.currentTarget.style.backgroundColor = 'transparent';
-                    event.currentTarget.style.color = '#787c99';
-                  }}
-                >
-                  ×
-                </button>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      <div ref={createMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
-        <button
-          onClick={() => setCreateMenuOpen((prev) => !prev)}
-          disabled={sessionsLoading}
+      {createMenuOpen && (
+        <div
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: isMobile ? 42 : 36,
-            height: '100%',
-            background: 'none',
-            border: 'none',
-            borderLeft: '1px solid #2a2d3a',
-            color: '#787c99',
-            cursor: sessionsLoading ? 'not-allowed' : 'pointer',
-            fontSize: 18,
-            fontWeight: 300,
-            padding: 0,
-            opacity: sessionsLoading ? 0.6 : 1,
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            right: 0,
+            minWidth: 220,
+            borderRadius: 'var(--sam-radius-md)',
+            border: '1px solid var(--sam-color-border-default)',
+            background: 'var(--sam-color-bg-surface)',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.35)',
+            zIndex: 30,
+            overflow: 'hidden',
           }}
-          aria-label="Create terminal or chat session"
-          aria-expanded={createMenuOpen}
         >
-          +
-        </button>
-
-        {createMenuOpen && (
-          <div
+          <button
+            onClick={handleCreateTerminalTab}
+            disabled={sessionsLoading}
             style={{
-              position: 'absolute',
-              top: 'calc(100% + 6px)',
-              right: 0,
-              minWidth: 220,
-              borderRadius: 'var(--sam-radius-md)',
-              border: '1px solid var(--sam-color-border-default)',
-              background: 'var(--sam-color-bg-surface)',
-              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.35)',
-              zIndex: 30,
-              overflow: 'hidden',
+              width: '100%',
+              textAlign: 'left',
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--sam-color-fg-primary)',
+              padding: isMobile ? '14px 16px' : '10px 12px',
+              fontSize: isMobile ? '0.875rem' : '0.8125rem',
+              cursor: sessionsLoading ? 'not-allowed' : 'pointer',
+              opacity: sessionsLoading ? 0.65 : 1,
             }}
           >
+            Terminal
+          </button>
+
+          {configuredAgents.length <= 1 ? (
             <button
-              onClick={handleCreateTerminalTab}
-              disabled={sessionsLoading}
+              onClick={() => {
+                void handleCreateSession(defaultAgentId ?? undefined);
+              }}
+              disabled={configuredAgents.length === 0 || sessionsLoading}
               style={{
                 width: '100%',
                 textAlign: 'left',
                 border: 'none',
                 background: 'transparent',
-                color: 'var(--sam-color-fg-primary)',
+                color:
+                  configuredAgents.length === 0 || sessionsLoading
+                    ? 'var(--sam-color-fg-muted)'
+                    : 'var(--sam-color-fg-primary)',
                 padding: isMobile ? '14px 16px' : '10px 12px',
                 fontSize: isMobile ? '0.875rem' : '0.8125rem',
-                cursor: sessionsLoading ? 'not-allowed' : 'pointer',
-                opacity: sessionsLoading ? 0.65 : 1,
+                cursor:
+                  configuredAgents.length === 0 || sessionsLoading ? 'not-allowed' : 'pointer',
+                opacity: configuredAgents.length === 0 || sessionsLoading ? 0.65 : 1,
               }}
             >
-              Terminal
+              {defaultAgentName ?? 'Chat'}
             </button>
-
-            {configuredAgents.length <= 1 ? (
+          ) : (
+            configuredAgents.map((agent) => (
               <button
+                key={agent.id}
                 onClick={() => {
-                  void handleCreateSession(defaultAgentId ?? undefined);
+                  void handleCreateSession(agent.id);
                 }}
-                disabled={configuredAgents.length === 0 || sessionsLoading}
+                disabled={sessionsLoading}
                 style={{
                   width: '100%',
                   textAlign: 'left',
                   border: 'none',
                   background: 'transparent',
-                  color:
-                    configuredAgents.length === 0 || sessionsLoading
-                      ? 'var(--sam-color-fg-muted)'
-                      : 'var(--sam-color-fg-primary)',
+                  color: 'var(--sam-color-fg-primary)',
                   padding: isMobile ? '14px 16px' : '10px 12px',
                   fontSize: isMobile ? '0.875rem' : '0.8125rem',
-                  cursor:
-                    configuredAgents.length === 0 || sessionsLoading ? 'not-allowed' : 'pointer',
-                  opacity: configuredAgents.length === 0 || sessionsLoading ? 0.65 : 1,
+                  cursor: sessionsLoading ? 'not-allowed' : 'pointer',
+                  opacity: sessionsLoading ? 0.65 : 1,
                 }}
               >
-                {defaultAgentName ?? 'Chat'}
+                {agent.name}
               </button>
-            ) : (
-              configuredAgents.map((agent) => (
-                <button
-                  key={agent.id}
-                  onClick={() => {
-                    void handleCreateSession(agent.id);
-                  }}
-                  disabled={sessionsLoading}
-                  style={{
-                    width: '100%',
-                    textAlign: 'left',
-                    border: 'none',
-                    background: 'transparent',
-                    color: 'var(--sam-color-fg-primary)',
-                    padding: isMobile ? '14px 16px' : '10px 12px',
-                    fontSize: isMobile ? '0.875rem' : '0.8125rem',
-                    cursor: sessionsLoading ? 'not-allowed' : 'pointer',
-                    opacity: sessionsLoading ? 0.65 : 1,
-                  }}
-                >
-                  {agent.name}
-                </button>
-              ))
-            )}
-          </div>
-        )}
-      </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
+  );
+
+  const workspaceTabStrip = isRunning ? (
+    <WorkspaceTabStrip
+      tabs={tabStripItems}
+      activeTabId={activeTabId}
+      isMobile={isMobile}
+      onSelect={handleSelectTabItem}
+      onClose={handleCloseTabItem}
+      onRename={handleRenameWorkspaceTab}
+      onReorder={tabOrder.reorderTab}
+      createMenuSlot={createMenuContent}
+      unclosableTabId={`terminal:${DEFAULT_TERMINAL_TAB_ID}`}
+    />
   ) : null;
 
   // ── Sidebar content (shared between desktop sidebar and mobile overlay) ──

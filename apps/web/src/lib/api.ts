@@ -282,6 +282,17 @@ export async function createAgentSession(
   });
 }
 
+export async function renameAgentSession(
+  workspaceId: string,
+  sessionId: string,
+  label: string
+): Promise<AgentSession> {
+  return request<AgentSession>(`/api/workspaces/${workspaceId}/agent-sessions/${sessionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ label }),
+  });
+}
+
 export async function stopAgentSession(workspaceId: string, sessionId: string): Promise<{ status: string }> {
   return request<{ status: string }>(`/api/workspaces/${workspaceId}/agent-sessions/${sessionId}/stop`, {
     method: 'POST',

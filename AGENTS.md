@@ -469,6 +469,7 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 ### Agent Sessions
 - `GET /api/workspaces/:id/agent-sessions` — List workspace agent sessions
 - `POST /api/workspaces/:id/agent-sessions` — Create agent session
+- `PATCH /api/workspaces/:id/agent-sessions/:sessionId` — Rename agent session label
 - `POST /api/workspaces/:id/agent-sessions/:sessionId/stop` — Stop agent session
 
 ### Agent Settings
@@ -714,12 +715,13 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 
 ## Active Technologies
 - **API**: TypeScript 5.x, Hono, Drizzle ORM, BetterAuth, jose, Cloudflare Workers
-- **Web**: TypeScript 5.x, React 18, Vite 5, TailwindCSS, xterm.js 5.3, Radix UI, lucide-react
+- **Web**: TypeScript 5.x, React 18, Vite 5, TailwindCSS, xterm.js 5.3, Radix UI, lucide-react, @dnd-kit
 - **VM Agent**: Go 1.22+, creack/pty, gorilla/websocket, golang-jwt, modernc.org/sqlite
 - **Storage**: Cloudflare D1 (SQLite), KV (sessions/tokens/boot logs), R2 (binaries/Pulumi state)
 - **Infra**: Pulumi, Wrangler, @devcontainers/cli, pnpm 9.0+, Cloudflare Pages
 
 ## Recent Changes
+- tab-reorder-rename: Unified tab ordering, rename, and drag-and-drop reordering for workspace tab strip; useTabOrder hook with localStorage persistence replaces hardcoded terminal-first/chat-second ordering; new tabs always appear rightmost; extracted WorkspaceTabStrip component from Workspace.tsx inline JSX; double-click to rename (desktop), long-press to rename (mobile); PATCH /api/workspaces/:id/agent-sessions/:sessionId endpoint for chat tab rename; @dnd-kit/core + @dnd-kit/sortable for drag-and-drop with PointerSensor (distance:5) and KeyboardSensor; DragOverlay ghost tab; full accessibility with custom screen reader announcements; UpdateAgentSessionRequest shared type
 - command-palette: VS Code-style command palette (Cmd+K / Ctrl+K) for workspace UI; searchable list of all shortcut-backed actions with keyboard shortcut display; substring filtering, arrow key navigation, Enter to execute; extends ShortcutDefinition with paletteHidden field; getPaletteShortcuts() helper
 - persistent-agent-sessions: Agent processes now survive browser disconnects; new SessionHost struct owns agent lifecycle independently of WebSocket connections; multiple browser tabs/devices can connect simultaneously as viewers with fan-out message broadcasting; bounded message ring buffer (configurable via ACP_MESSAGE_BUFFER_SIZE, default 5000) enables late-join replay; per-viewer buffered send channels (ACP_VIEWER_SEND_BUFFER, default 256) protect against slow clients; Gateway simplified to thin per-WebSocket relay; new control messages session_state/session_replay_complete/session_prompting/session_prompt_done; browser state machine extended with replaying state; takeover semantics removed
 - workspace-keyboard-shortcuts: VS Code-style keyboard shortcuts for workspace UI; centralized shortcut registry with platform-aware matching (Cmd on macOS, Ctrl on Windows/Linux); useKeyboardShortcuts hook with capture-phase listener; shortcuts for panel toggles (Cmd+Shift+E file browser, Cmd+Shift+G git changes), focus management (Cmd+/ chat, Cmd+` terminal), tab navigation (Ctrl+Tab/Ctrl+Shift+Tab cycle, Cmd+1-9 jump), session creation (Cmd+Shift+N chat, Cmd+Shift+T terminal), help overlay (Cmd+Shift+/); AgentPanel/ChatSession expose focusInput() via forwardRef+useImperativeHandle; MultiTerminal gains focus() on imperative handle; skips dispatch in text inputs without modifiers
