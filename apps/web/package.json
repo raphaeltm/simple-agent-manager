@@ -18,6 +18,9 @@
     "deploy:staging": "pnpm build && wrangler pages deploy dist --env staging"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@simple-agent-manager/acp-client": "workspace:*",
     "@simple-agent-manager/shared": "workspace:*",
     "@simple-agent-manager/terminal": "workspace:*",

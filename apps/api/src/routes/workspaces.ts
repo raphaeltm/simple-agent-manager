@@ -760,6 +760,55 @@ workspacesRoutes.post('/:id/agent-sessions', async (c) => {
   return c.json(toAgentSessionResponse(rows[0]!), 201);
 });
 
+workspacesRoutes.patch('/:id/agent-sessions/:sessionId', async (c) => {
+  const userId = getUserId(c);
+  const workspaceId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  if (!workspace) {
+    throw errors.notFound('Workspace');
+  }
+
+  const body = await c.req.json<{ label?: string }>();
+  const label = body.label?.trim()?.slice(0, 50);
+  if (!label) {
+    throw errors.badRequest('Label is required and must be non-empty');
+  }
+
+  const rows = await db
+    .select()
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.id, sessionId),
+        eq(schema.agentSessions.workspaceId, workspace.id),
+        eq(schema.agentSessions.userId, userId)
+      )
+    )
+    .limit(1);
+
+  const session = rows[0];
+  if (!session) {
+    throw errors.notFound('Agent session');
+  }
+
+  if (session.status !== 'running') {
+    throw errors.badRequest('Cannot rename a session that is not running');
+  }
+
+  await db
+    .update(schema.agentSessions)
+    .set({
+      label,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.agentSessions.id, session.id));
+
+  return c.json(toAgentSessionResponse({ ...session, label, updatedAt: new Date().toISOString() }));
+});
+
 workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop', async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');

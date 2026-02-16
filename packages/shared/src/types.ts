@@ -259,6 +259,10 @@ export interface CreateAgentSessionRequest {
   label?: string;
 }
 
+export interface UpdateAgentSessionRequest {
+  label: string;
+}
+
 // =============================================================================
 // Heartbeat
 // =============================================================================
