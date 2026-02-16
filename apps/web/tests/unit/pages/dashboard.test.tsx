@@ -39,6 +39,7 @@ vi.mock('../../../src/components/ConfirmDialog', () => ({
 }));
 
 import { Dashboard } from '../../../src/pages/Dashboard';
+import { ToastProvider } from '../../../src/hooks/useToast';
 
 describe('Dashboard page', () => {
   beforeEach(() => {
@@ -48,9 +49,11 @@ describe('Dashboard page', () => {
 
   it('does not render UI standards quick action', async () => {
     render(
-      <MemoryRouter>
-        <Dashboard />
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      </ToastProvider>
     );
 
     await waitFor(() => {

@@ -7,3 +7,4 @@ export * from './Select';
 export * from './Skeleton';
 export * from './Spinner';
 export * from './StatusBadge';
+export * from './Toast';

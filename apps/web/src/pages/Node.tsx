@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type { Event, NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Alert, Button, PageLayout, Skeleton, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
+import { useToast } from '../hooks/useToast';
 import { deleteNode, getNode, listNodeEvents, listWorkspaces, stopNode } from '../lib/api';
 
 function formatTimestamp(value: string | null): string {
@@ -19,6 +20,7 @@ function formatTimestamp(value: string | null): string {
 export function Node() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const toast = useToast();
 
   const [node, setNode] = useState<NodeResponse | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
@@ -93,9 +95,10 @@ export function Node() {
     try {
       setStopping(true);
       await stopNode(id);
+      toast.success('Node stopping');
       await loadNode();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to stop node');
+      toast.error(err instanceof Error ? err.message : 'Failed to stop node');
     } finally {
       setStopping(false);
     }
@@ -116,9 +119,10 @@ export function Node() {
     try {
       setDeleting(true);
       await deleteNode(id);
+      toast.success('Node deleted');
       navigate('/nodes');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete node');
+      toast.error(err instanceof Error ? err.message : 'Failed to delete node');
       setDeleting(false);
     }
   };

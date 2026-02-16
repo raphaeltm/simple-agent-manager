@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { createCredential, deleteCredential } from '../lib/api';
+import { useToast } from '../hooks/useToast';
 import { Button, Input, Alert } from '@simple-agent-manager/ui';
 import type { CredentialResponse } from '@simple-agent-manager/shared';
 
@@ -12,6 +13,7 @@ interface HetznerTokenFormProps {
  * Form for adding/updating/deleting Hetzner API token.
  */
 export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps) {
+  const toast = useToast();
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,6 +26,7 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
 
     try {
       await createCredential({ provider: 'hetzner', token });
+      toast.success('Hetzner token saved');
       setToken('');
       setShowForm(false);
       onUpdate();
@@ -44,6 +47,7 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
 
     try {
       await deleteCredential('hetzner');
+      toast.success('Hetzner account disconnected');
       onUpdate();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete token');

@@ -4,6 +4,7 @@ import { useAuth } from '../components/AuthProvider';
 import { UserMenu } from '../components/UserMenu';
 import { WorkspaceCard } from '../components/WorkspaceCard';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { useToast } from '../hooks/useToast';
 import { listWorkspaces, stopWorkspace, restartWorkspace, deleteWorkspace } from '../lib/api';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
 import { PageLayout, Button, Alert, Spinner, SkeletonCard } from '@simple-agent-manager/ui';
@@ -14,6 +15,7 @@ import { PageLayout, Button, Alert, Spinner, SkeletonCard } from '@simple-agent-
 export function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const toast = useToast();
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,18 +64,20 @@ export function Dashboard() {
   const handleStopWorkspace = async (id: string) => {
     try {
       await stopWorkspace(id);
+      toast.success('Workspace stopping');
       await loadWorkspaces();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to stop workspace');
+      toast.error(err instanceof Error ? err.message : 'Failed to stop workspace');
     }
   };
 
   const handleRestartWorkspace = async (id: string) => {
     try {
       await restartWorkspace(id);
+      toast.success('Workspace restarting');
       await loadWorkspaces();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to restart workspace');
+      toast.error(err instanceof Error ? err.message : 'Failed to restart workspace');
     }
   };
 
@@ -90,10 +94,11 @@ export function Dashboard() {
     setDeleteLoading(true);
     try {
       await deleteWorkspace(deleteTarget.id);
+      toast.success('Workspace deleted');
       setDeleteTarget(null);
       await loadWorkspaces();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete workspace');
+      toast.error(err instanceof Error ? err.message : 'Failed to delete workspace');
       setDeleteTarget(null);
     } finally {
       setDeleteLoading(false);

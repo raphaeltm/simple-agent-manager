@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AgentKeyCard } from './AgentKeyCard';
+import { useToast } from '../hooks/useToast';
 import { listAgents, listAgentCredentials, saveAgentCredential, deleteAgentCredential } from '../lib/api';
 import { Alert, Spinner } from '@simple-agent-manager/ui';
 import type { AgentInfo, AgentCredentialInfo, AgentType, SaveAgentCredentialRequest, CredentialKind } from '@simple-agent-manager/shared';
@@ -8,6 +9,7 @@ import type { AgentInfo, AgentCredentialInfo, AgentType, SaveAgentCredentialRequ
  * Section for managing all agent API keys.
  */
 export function AgentKeysSection() {
+  const toast = useToast();
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [credentials, setCredentials] = useState<AgentCredentialInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,6 +37,7 @@ export function AgentKeysSection() {
 
   const handleSave = async (request: SaveAgentCredentialRequest) => {
     const result = await saveAgentCredential(request);
+    toast.success('Agent credential saved');
     setCredentials((prev) => {
       // Remove old credential of the same type and kind
       const filtered = prev.filter((c) =>
@@ -51,6 +54,7 @@ export function AgentKeysSection() {
     // For now, we'll delete all credentials for the agent
     // In Phase 4, we'll implement credential-specific deletion
     await deleteAgentCredential(agentType);
+    toast.success('Agent credential removed');
     setCredentials((prev) => prev.filter((c) =>
       !(c.agentType === agentType && c.credentialKind === credentialKind)
     ));

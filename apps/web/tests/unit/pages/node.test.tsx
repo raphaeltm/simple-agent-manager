@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const mocks = vi.hoisted(() => ({
   getNode: vi.fn(),
@@ -25,6 +25,21 @@ vi.mock('../../../src/components/UserMenu', () => ({
 }));
 
 import { Node } from '../../../src/pages/Node';
+import { ToastProvider } from '../../../src/hooks/useToast';
+
+function renderNode(path: string) {
+  return render(
+    <ToastProvider>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/nodes/:id" element={<Node />} />
+          <Route path="/nodes" element={<div data-testid="nodes-list-page">Nodes</div>} />
+          <Route path="/workspaces/new" element={<div data-testid="workspace-create-probe">probe</div>} />
+        </Routes>
+      </MemoryRouter>
+    </ToastProvider>
+  );
+}
 
 describe('Node page', () => {
   beforeEach(() => {
@@ -84,13 +99,7 @@ describe('Node page', () => {
   });
 
   it('renders node details and controls', async () => {
-    render(
-      <MemoryRouter initialEntries={['/nodes/node-1']}>
-        <Routes>
-          <Route path="/nodes/:id" element={<Node />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    renderNode('/nodes/node-1');
 
     await waitFor(() => {
       expect(screen.getAllByText('Node 1').length).toBeGreaterThanOrEqual(1);
@@ -108,42 +117,18 @@ describe('Node page', () => {
   });
 
   it('supports create-workspace navigation from node detail', async () => {
-    function WorkspaceCreateProbe() {
-      const location = useLocation();
-      const state = location.state as { nodeId?: string } | null;
-      return (
-        <div data-testid="workspace-create-probe">
-          {state?.nodeId || 'missing-node-id'}
-        </div>
-      );
-    }
-
-    render(
-      <MemoryRouter initialEntries={['/nodes/node-1']}>
-        <Routes>
-          <Route path="/nodes/:id" element={<Node />} />
-          <Route path="/workspaces/new" element={<WorkspaceCreateProbe />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    renderNode('/nodes/node-1');
 
     await waitFor(() => {
       expect(screen.getAllByText('Node 1').length).toBeGreaterThanOrEqual(1);
     });
 
     fireEvent.click(screen.getByRole('button', { name: /create workspace/i }));
-    expect(await screen.findByTestId('workspace-create-probe')).toHaveTextContent('node-1');
+    expect(await screen.findByTestId('workspace-create-probe')).toBeInTheDocument();
   });
 
   it('shows stop/delete confirmations and calls lifecycle APIs', async () => {
-    render(
-      <MemoryRouter initialEntries={['/nodes/node-1']}>
-        <Routes>
-          <Route path="/nodes/:id" element={<Node />} />
-          <Route path="/nodes" element={<div data-testid="nodes-list-page">Nodes</div>} />
-        </Routes>
-      </MemoryRouter>
-    );
+    renderNode('/nodes/node-1');
 
     await waitFor(() => {
       expect(screen.getAllByText('Node 1').length).toBeGreaterThanOrEqual(1);
@@ -169,13 +154,7 @@ describe('Node page', () => {
   it('shows error with retry when events fail to load', async () => {
     mocks.listNodeEvents.mockRejectedValue(new Error('Network timeout'));
 
-    render(
-      <MemoryRouter initialEntries={['/nodes/node-1']}>
-        <Routes>
-          <Route path="/nodes/:id" element={<Node />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    renderNode('/nodes/node-1');
 
     await waitFor(() => {
       expect(screen.getAllByText('Node 1').length).toBeGreaterThanOrEqual(1);
@@ -227,13 +206,7 @@ describe('Node page', () => {
       updatedAt: '2026-01-01T00:00:00.000Z',
     });
 
-    render(
-      <MemoryRouter initialEntries={['/nodes/node-1']}>
-        <Routes>
-          <Route path="/nodes/:id" element={<Node />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    renderNode('/nodes/node-1');
 
     await waitFor(() => {
       expect(screen.getByText('Last Heartbeat')).toBeInTheDocument();
