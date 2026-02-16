@@ -879,10 +879,10 @@ func (h *SessionHost) persistAcpSessionID(agentType string) {
 
 // broadcastMessage appends a message to the buffer and sends it to all viewers.
 func (h *SessionHost) broadcastMessage(data []byte) {
-	seq := atomic.AddUint64(&h.seqCounter, 1)
-
-	// Append to buffer
+	// Append to buffer — sequence number assigned under lock to ensure
+	// buffer ordering matches sequence ordering under concurrent writes.
 	h.bufMu.Lock()
+	seq := atomic.AddUint64(&h.seqCounter, 1)
 	h.messageBuf = append(h.messageBuf, BufferedMessage{
 		Data:      data,
 		SeqNum:    seq,
