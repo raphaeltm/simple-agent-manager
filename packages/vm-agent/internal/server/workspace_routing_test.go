@@ -152,6 +152,103 @@ func TestWorkspaceDirForRepo(t *testing.T) {
 	}
 }
 
+func TestCasWorkspaceStatus(t *testing.T) {
+	t.Parallel()
+
+	ptyManager := pty.NewManager(pty.ManagerConfig{
+		DefaultShell: "/bin/sh",
+		DefaultRows:  24,
+		DefaultCols:  80,
+		WorkDir:      "/tmp",
+		BufferSize:   1024,
+	})
+
+	s := &Server{
+		config: &config.Config{
+			NodeID: "node-1",
+		},
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-running": {
+				ID:     "ws-running",
+				Status: "running",
+				PTY:    ptyManager,
+			},
+			"ws-creating": {
+				ID:     "ws-creating",
+				Status: "creating",
+				PTY:    ptyManager,
+			},
+			"ws-stopped": {
+				ID:     "ws-stopped",
+				Status: "stopped",
+				PTY:    ptyManager,
+			},
+		},
+		nodeEvents:      make([]EventRecord, 0),
+		workspaceEvents: map[string][]EventRecord{},
+	}
+
+	// Transition running -> stopped should succeed
+	if !s.casWorkspaceStatus("ws-running", []string{"running", "creating"}, "stopped") {
+		t.Fatal("expected CAS from running to stopped to succeed")
+	}
+	runtime, _ := s.getWorkspaceRuntime("ws-running")
+	if runtime.Status != "stopped" {
+		t.Fatalf("expected stopped, got %s", runtime.Status)
+	}
+
+	// Transition stopped -> stopped should fail (stopped is not in expected list)
+	if s.casWorkspaceStatus("ws-running", []string{"running"}, "error") {
+		t.Fatal("expected CAS from stopped (already transitioned) to fail")
+	}
+
+	// Transition creating -> running should succeed
+	if !s.casWorkspaceStatus("ws-creating", []string{"creating"}, "running") {
+		t.Fatal("expected CAS from creating to running to succeed")
+	}
+	runtime, _ = s.getWorkspaceRuntime("ws-creating")
+	if runtime.Status != "running" {
+		t.Fatalf("expected running, got %s", runtime.Status)
+	}
+
+	// Non-existent workspace should return false
+	if s.casWorkspaceStatus("ws-nonexistent", []string{"running"}, "stopped") {
+		t.Fatal("expected CAS on nonexistent workspace to fail")
+	}
+}
+
+func TestAppendNodeEventRespectsConfigLimits(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		config: &config.Config{
+			NodeID:             "node-1",
+			MaxNodeEvents:      3,
+			MaxWorkspaceEvents: 2,
+		},
+		workspaces:      map[string]*WorkspaceRuntime{},
+		nodeEvents:      make([]EventRecord, 0),
+		workspaceEvents: map[string][]EventRecord{},
+	}
+
+	// Append 5 node events, only 3 should remain
+	for i := 0; i < 5; i++ {
+		s.appendNodeEvent("ws-1", "info", "test.event", "test message", nil)
+	}
+
+	s.eventMu.RLock()
+	nodeLen := len(s.nodeEvents)
+	wsLen := len(s.workspaceEvents["ws-1"])
+	s.eventMu.RUnlock()
+
+	if nodeLen != 3 {
+		t.Fatalf("expected 3 node events, got %d", nodeLen)
+	}
+	if wsLen != 2 {
+		t.Fatalf("expected 2 workspace events, got %d", wsLen)
+	}
+}
+
 func TestNewPTYManagerForWorkspaceSkipsLegacyReuseAfterRuntimeUpdate(t *testing.T) {
 	t.Parallel()
 

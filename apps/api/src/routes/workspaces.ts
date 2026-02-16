@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, count, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { ulid } from '../lib/ulid';
 import type { Env } from '../index';
@@ -229,23 +229,22 @@ workspacesRoutes.get('/', async (c) => {
   const nodeId = c.req.query('nodeId');
   const db = drizzle(c.env.DATABASE, { schema });
 
+  // Build WHERE conditions in SQL instead of filtering in memory (P1 fix).
+  const conditions = [eq(schema.workspaces.userId, userId)];
+  if (status) {
+    conditions.push(eq(schema.workspaces.status, status));
+  }
+  if (nodeId) {
+    conditions.push(eq(schema.workspaces.nodeId, nodeId));
+  }
+
   const rows = await db
     .select()
     .from(schema.workspaces)
-    .where(eq(schema.workspaces.userId, userId))
+    .where(and(...conditions))
     .orderBy(desc(schema.workspaces.createdAt));
 
-  const filtered = rows.filter((workspace) => {
-    if (status && workspace.status !== status) {
-      return false;
-    }
-    if (nodeId && workspace.nodeId !== nodeId) {
-      return false;
-    }
-    return true;
-  });
-
-  return c.json(filtered.map((workspace) => toWorkspaceResponse(workspace, c.env.BASE_DOMAIN)));
+  return c.json(rows.map((workspace) => toWorkspaceResponse(workspace, c.env.BASE_DOMAIN)));
 });
 
 workspacesRoutes.get('/:id', async (c) => {
@@ -309,11 +308,12 @@ workspacesRoutes.post('/', async (c) => {
     throw errors.badRequest('name, repository, and installationId are required');
   }
 
-  const userWorkspaceRows = await db
-    .select({ id: schema.workspaces.id })
+  // Use COUNT instead of fetching all IDs (P1 fix).
+  const [userWorkspaceCount] = await db
+    .select({ count: count() })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.userId, userId));
-  if (userWorkspaceRows.length >= limits.maxWorkspacesPerUser) {
+  if ((userWorkspaceCount?.count ?? 0) >= limits.maxWorkspacesPerUser) {
     throw errors.badRequest(`Maximum ${limits.maxWorkspacesPerUser} workspaces allowed`);
   }
 
@@ -337,10 +337,12 @@ workspacesRoutes.post('/', async (c) => {
 
   let nodeId = body.nodeId;
   let mustProvisionNode = false;
-  const userNodeRows = await db
-    .select({ id: schema.nodes.id })
+  // Use COUNT instead of fetching all node IDs (P1 fix).
+  const [userNodeCount] = await db
+    .select({ count: count() })
     .from(schema.nodes)
     .where(eq(schema.nodes.userId, userId));
+  const userNodeCountVal = userNodeCount?.count ?? 0;
 
   if (nodeId) {
     const node = await getOwnedNode(db, nodeId, userId);
@@ -348,7 +350,7 @@ workspacesRoutes.post('/', async (c) => {
       throw errors.badRequest('Selected node is not ready for workspace creation');
     }
   } else {
-    if (userNodeRows.length >= limits.maxNodesPerUser) {
+    if (userNodeCountVal >= limits.maxNodesPerUser) {
       throw errors.badRequest(`Maximum ${limits.maxNodesPerUser} nodes allowed`);
     }
 
@@ -368,12 +370,14 @@ workspacesRoutes.post('/', async (c) => {
     throw errors.internal('Failed to determine target node');
   }
 
-  const nodeWorkspaceRows = await db
-    .select({ id: schema.workspaces.id })
+  // Use COUNT instead of fetching all workspace IDs per node (P1 fix).
+  const [nodeWorkspaceCount] = await db
+    .select({ count: count() })
     .from(schema.workspaces)
     .where(and(eq(schema.workspaces.userId, userId), eq(schema.workspaces.nodeId, targetNodeId)));
+  const nodeWorkspaceCountVal = nodeWorkspaceCount?.count ?? 0;
 
-  if (nodeWorkspaceRows.length >= limits.maxWorkspacesPerNode) {
+  if (nodeWorkspaceCountVal >= limits.maxWorkspacesPerNode) {
     throw errors.badRequest(`Maximum ${limits.maxWorkspacesPerNode} workspaces allowed per node`);
   }
 
@@ -403,10 +407,10 @@ workspacesRoutes.post('/', async (c) => {
     updatedAt: now,
   });
 
-  const nodeCountForUser = userNodeRows.length + (mustProvisionNode ? 1 : 0);
-  const workspaceCountForUser = userWorkspaceRows.length + 1;
+  const nodeCountForUser = userNodeCountVal + (mustProvisionNode ? 1 : 0);
+  const workspaceCountForUser = (userWorkspaceCount?.count ?? 0) + 1;
   const reusedExistingNode = !mustProvisionNode;
-  const workspaceCountOnNodeBefore = nodeWorkspaceRows.length;
+  const workspaceCountOnNodeBefore = nodeWorkspaceCountVal;
 
   recordNodeRoutingMetric(
     {

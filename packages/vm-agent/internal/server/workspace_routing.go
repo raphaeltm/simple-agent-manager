@@ -229,6 +229,28 @@ func (s *Server) rebuildWorkspacePTYManager(runtime *WorkspaceRuntime) {
 	)
 }
 
+// casWorkspaceStatus performs a compare-and-swap status transition.
+// It only sets the new status if the current status is one of the expected values.
+// Returns true if the transition was applied, false if the current status did not match.
+func (s *Server) casWorkspaceStatus(workspaceID string, expectedStatuses []string, newStatus string) bool {
+	s.workspaceMu.Lock()
+	defer s.workspaceMu.Unlock()
+
+	runtime, ok := s.workspaces[workspaceID]
+	if !ok {
+		return false
+	}
+
+	for _, expected := range expectedStatuses {
+		if runtime.Status == expected {
+			runtime.Status = newStatus
+			runtime.UpdatedAt = nowUTC()
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) removeWorkspaceRuntime(workspaceID string) {
 	s.workspaceMu.Lock()
 	defer s.workspaceMu.Unlock()
@@ -309,15 +331,24 @@ func (s *Server) appendNodeEvent(workspaceID, level, eventType, message string, 
 	s.eventMu.Lock()
 	defer s.eventMu.Unlock()
 
+	maxNode := s.config.MaxNodeEvents
+	if maxNode <= 0 {
+		maxNode = 500
+	}
+	maxWs := s.config.MaxWorkspaceEvents
+	if maxWs <= 0 {
+		maxWs = 500
+	}
+
 	s.nodeEvents = append([]EventRecord{event}, s.nodeEvents...)
-	if len(s.nodeEvents) > 500 {
-		s.nodeEvents = s.nodeEvents[:500]
+	if len(s.nodeEvents) > maxNode {
+		s.nodeEvents = s.nodeEvents[:maxNode]
 	}
 
 	if workspaceID != "" {
 		s.workspaceEvents[workspaceID] = append([]EventRecord{event}, s.workspaceEvents[workspaceID]...)
-		if len(s.workspaceEvents[workspaceID]) > 500 {
-			s.workspaceEvents[workspaceID] = s.workspaceEvents[workspaceID][:500]
+		if len(s.workspaceEvents[workspaceID]) > maxWs {
+			s.workspaceEvents[workspaceID] = s.workspaceEvents[workspaceID][:maxWs]
 		}
 	}
 }

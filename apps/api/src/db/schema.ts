@@ -177,6 +177,9 @@ export const workspaces = sqliteTable('workspaces', {
   nodeDisplayNameUnique: uniqueIndex('idx_workspaces_node_display_name_unique')
     .on(table.nodeId, table.normalizedDisplayName)
     .where(sql`node_id is not null and normalized_display_name is not null`),
+  // Compound indexes for filtered listing queries (P2 fix).
+  userStatusIdx: index('idx_workspaces_user_status').on(table.userId, table.status),
+  nodeStatusIdx: index('idx_workspaces_node_status').on(table.nodeId, table.status),
 }));
 
 // =============================================================================
@@ -195,6 +198,9 @@ export const agentSessions = sqliteTable('agent_sessions', {
 }, (table) => ({
   workspaceIdIdx: index('idx_agent_sessions_workspace_id').on(table.workspaceId),
   userIdIdx: index('idx_agent_sessions_user_id').on(table.userId),
+  // Compound index for filtered session queries (P2 fix).
+  workspaceUserStatusIdx: index('idx_agent_sessions_ws_user_status')
+    .on(table.workspaceId, table.userId, table.status),
 }));
 
 

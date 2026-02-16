@@ -94,6 +94,10 @@ type GatewayConfig struct {
 	ErrorReporter ErrorReporter
 	// EventAppender appends events to the workspace event log (visible in UI).
 	EventAppender EventAppender
+	// PingInterval is the WebSocket ping interval. Zero uses DefaultPingInterval.
+	PingInterval time.Duration
+	// PongTimeout is the pong deadline after sending a ping. Zero uses DefaultPongTimeout.
+	PongTimeout time.Duration
 }
 
 // Gateway is a thin per-WebSocket relay between a browser and a SessionHost.
@@ -135,25 +139,37 @@ func (g *Gateway) Close() {
 	g.conn.Close()
 }
 
-// pingInterval is the interval between WebSocket pings to detect stale connections.
-const pingInterval = 30 * time.Second
+// DefaultPingInterval is the default interval between WebSocket pings to detect stale connections.
+// Override via ACP_PING_INTERVAL env var.
+const DefaultPingInterval = 30 * time.Second
 
-// pongTimeout is the deadline for receiving a pong after sending a ping.
-const pongTimeout = 10 * time.Second
+// DefaultPongTimeout is the default deadline for receiving a pong after sending a ping.
+// Override via ACP_PONG_TIMEOUT env var.
+const DefaultPongTimeout = 10 * time.Second
 
 // Run reads WebSocket messages and routes them to the SessionHost.
 // It blocks until the WebSocket closes or the context is cancelled.
 // When it returns, the caller should call SessionHost.DetachViewer().
 func (g *Gateway) Run(ctx context.Context) error {
+	// Resolve ping/pong intervals from host config, falling back to defaults.
+	pi := g.host.config.PingInterval
+	if pi <= 0 {
+		pi = DefaultPingInterval
+	}
+	pt := g.host.config.PongTimeout
+	if pt <= 0 {
+		pt = DefaultPongTimeout
+	}
+
 	// Configure pong handler to extend the read deadline when pong is received.
-	g.conn.SetReadDeadline(time.Now().Add(pingInterval + pongTimeout))
+	g.conn.SetReadDeadline(time.Now().Add(pi + pt))
 	g.conn.SetPongHandler(func(string) error {
-		g.conn.SetReadDeadline(time.Now().Add(pingInterval + pongTimeout))
+		g.conn.SetReadDeadline(time.Now().Add(pi + pt))
 		return nil
 	})
 
 	// Start ping ticker to detect stale connections
-	pingTicker := time.NewTicker(pingInterval)
+	pingTicker := time.NewTicker(pi)
 	defer pingTicker.Stop()
 
 	// Run ping sender in background
@@ -198,7 +214,7 @@ func (g *Gateway) Run(ctx context.Context) error {
 		}
 
 		// Reset read deadline on any message
-		g.conn.SetReadDeadline(time.Now().Add(pingInterval + pongTimeout))
+		g.conn.SetReadDeadline(time.Now().Add(pi + pt))
 
 		if msgType != websocket.TextMessage {
 			continue
