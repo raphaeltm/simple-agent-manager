@@ -572,7 +572,7 @@ func TestDevcontainerUpArgs(t *testing.T) {
 		found := false
 		for i, a := range args {
 			if a == "--mount" && i+1 < len(args) {
-				if args[i+1] != "source=sam-ws-abc123,target=/workspaces,type=volume" {
+				if args[i+1] != "type=volume,source=sam-ws-abc123,target=/workspaces" {
 					t.Fatalf("unexpected --mount value: %s", args[i+1])
 				}
 				found = true

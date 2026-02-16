@@ -537,7 +537,7 @@ func devcontainerUpArgs(cfg *config.Config, volumeName, overrideConfigPath strin
 			repoDirName = filepath.Base(cfg.WorkspaceDir)
 		}
 		args = append(args,
-			"--mount", fmt.Sprintf("source=%s,target=/workspaces,type=volume", volumeName),
+			"--mount", fmt.Sprintf("type=volume,source=%s,target=/workspaces", volumeName),
 			"--remote-env", fmt.Sprintf("WORKSPACE_FOLDER=/workspaces/%s", repoDirName),
 		)
 	}
