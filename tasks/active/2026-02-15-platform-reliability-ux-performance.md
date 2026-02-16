@@ -143,8 +143,24 @@
 - [x] **R8. Dashboard Polling Fix** — Replaced `setInterval` with `setTimeout` chain so poll rate adapts immediately when workspaces enter/leave transitional states (5s → 30s).
 - [x] **Bonus: Node test flakiness fix** — `node.test.tsx` waited for API mock call instead of rendered content, causing CI-only failures on slow runners.
 
+### Completed (PR #2 — feat/platform-reliability, second batch)
+
+- [x] **R1. VM Agent Event Log Memory Leak** — Circular buffer eviction for node/workspace events; workspace events cleaned up on deletion.
+- [x] **R5. Credential Toggle Race Condition** — Wrapped sequential UPDATE queries in D1 batch for atomic credential toggling.
+- [x] **R6. WebSocket Ping/Pong Timeout Hardcoded** — Made configurable via `ACP_PING_INTERVAL` and `ACP_PONG_TIMEOUT` env vars.
+- [x] **R7. Workspace Status Transition Race** — CAS-style atomic status transitions with `expectedStatus` validation.
+- [x] **P1. N+1 Query Patterns** — Replaced in-memory filtering with Drizzle `where()` and `count()` queries.
+- [x] **P2. Missing Database Compound Indexes** — Added `(userId, status)`, `(nodeId, status)`, `(workspaceId, userId, status)` indexes.
+- [x] **P3. GitHub Repository Listing Serial API Calls** — Parallelized with `Promise.allSettled()`.
+- [x] **R3. WebSocket Token Expiry Without Refresh** — `useTokenRefresh` hook with proactive refresh, exponential backoff, minimum delay floor. 7 tests.
+- [x] **R9. Silent API Failures in UI** — Removed silent error swallowing in `listNodeEvents`, `listWorkspaceEvents`, `getWorkspaceTabs`; added error display with retry in Node page. 1 test.
+- [x] **U1. Loading Skeletons** — `Skeleton`, `SkeletonCard`, `SkeletonList` components in shared UI package; applied to Dashboard, Nodes, Node detail, Settings.
+- [x] **U2. Toast Notifications** — `Toast`/`ToastContainer` primitives, `useToast` hook/provider with auto-dismiss; integrated into Dashboard, Node, Settings, credential management. 6 tests.
+- [x] **U3. Optimistic Updates** — Dashboard stop/restart/delete and Node stop optimistically update local state with revert on failure. 8 tests.
+- [x] **U4. CreateWorkspace Prerequisites** — Independent prerequisite loading with per-item status checklist instead of full-page spinner. 4 tests.
+
 ### Remaining (backlog)
 
-All other items (R1, R3, R5-R7, R9, U1-U5, P1-P4) remain as backlog for future work.
+Items U5 (Onboarding Flow) and P4 (API Response Pagination) remain as backlog for future work.
 
 ---
