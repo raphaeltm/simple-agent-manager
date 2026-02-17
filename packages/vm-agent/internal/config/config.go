@@ -382,31 +382,30 @@ func DeriveRepoDirName(repository string) string {
 	return safe
 }
 
+// DeriveBaseDomain extracts the base domain from a control plane URL by stripping
+// the protocol, path, port, and "api." subdomain prefix.
+// Example: "https://api.example.com/foo" → "example.com"
+func DeriveBaseDomain(controlPlaneURL string) string {
+	host := controlPlaneURL
+	host = strings.TrimPrefix(host, "https://")
+	host = strings.TrimPrefix(host, "http://")
+
+	if idx := strings.Index(host, "/"); idx != -1 {
+		host = host[:idx]
+	}
+	if idx := strings.Index(host, ":"); idx != -1 {
+		host = host[:idx]
+	}
+	if strings.HasPrefix(host, "api.") {
+		return host[4:]
+	}
+	return host
+}
+
 // deriveAllowedOrigins extracts allowed origins from the control plane URL.
 // This allows the control plane domain and workspace subdomains.
 func deriveAllowedOrigins(controlPlaneURL string) []string {
-	// Remove protocol
-	url := controlPlaneURL
-	url = strings.TrimPrefix(url, "https://")
-	url = strings.TrimPrefix(url, "http://")
-
-	// Remove path if any
-	if idx := strings.Index(url, "/"); idx != -1 {
-		url = url[:idx]
-	}
-
-	// Remove port if any
-	if idx := strings.Index(url, ":"); idx != -1 {
-		url = url[:idx]
-	}
-
-	// Get base domain (remove 'api.' prefix if present)
-	baseDomain := url
-	if strings.HasPrefix(baseDomain, "api.") {
-		baseDomain = baseDomain[4:]
-	}
-
-	// Return the control plane origin and workspace subdomain pattern
+	baseDomain := DeriveBaseDomain(controlPlaneURL)
 	return []string{
 		controlPlaneURL,
 		"https://*." + baseDomain, // Allow workspace subdomains

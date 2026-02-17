@@ -178,3 +178,31 @@ func TestPTYOrphanGracePeriodOverride(t *testing.T) {
 		t.Fatalf("PTYOrphanGracePeriod=%v, want %v", cfg.PTYOrphanGracePeriod, 5*time.Minute)
 	}
 }
+
+func TestDeriveBaseDomain(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{name: "api subdomain https", url: "https://api.example.com", want: "example.com"},
+		{name: "api subdomain with path", url: "https://api.example.com/foo/bar", want: "example.com"},
+		{name: "api subdomain with port", url: "https://api.example.com:8080", want: "example.com"},
+		{name: "no api prefix", url: "https://example.com", want: "example.com"},
+		{name: "http scheme", url: "http://api.localhost", want: "localhost"},
+		{name: "bare host", url: "api.example.com", want: "example.com"},
+		{name: "nested subdomain", url: "https://api.staging.example.com", want: "staging.example.com"},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := DeriveBaseDomain(tc.url); got != tc.want {
+				t.Fatalf("DeriveBaseDomain(%q) = %q, want %q", tc.url, got, tc.want)
+			}
+		})
+	}
+}

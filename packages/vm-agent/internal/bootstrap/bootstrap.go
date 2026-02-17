@@ -145,6 +145,14 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	}
 	reporter.Log("git_identity", "completed", "Git identity configured")
 
+	reporter.Log("sam_env", "started", "Configuring SAM environment")
+	if err := ensureSAMEnvironment(ctx, cfg); err != nil {
+		reporter.Log("sam_env", "failed", "SAM environment setup failed", err.Error())
+		log.Printf("Warning: SAM environment setup failed (non-fatal): %v", err)
+	} else {
+		reporter.Log("sam_env", "completed", "SAM environment configured")
+	}
+
 	reporter.Log("workspace_ready", "started", "Marking workspace ready")
 	if err := markWorkspaceReady(ctx, cfg); err != nil {
 		reporter.Log("workspace_ready", "failed", "Failed to mark workspace ready", err.Error())
@@ -195,6 +203,9 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	}
 	if err := ensureGitIdentity(ctx, cfg, bootstrap); err != nil {
 		return usedFallback, err
+	}
+	if err := ensureSAMEnvironment(ctx, cfg); err != nil {
+		log.Printf("Warning: SAM environment setup failed (non-fatal): %v", err)
 	}
 	if err := markWorkspaceReady(ctx, cfg); err != nil {
 		return usedFallback, err
@@ -908,6 +919,11 @@ func resolveGitIdentity(state *bootstrapState) (name string, email string, ok bo
 func ensureGitIdentity(ctx context.Context, cfg *config.Config, state *bootstrapState) error {
 	gitUserName, gitUserEmail, ok := resolveGitIdentity(state)
 	if !ok {
+		if state == nil {
+			log.Printf("Warning: git identity skipped — bootstrap state is nil")
+		} else {
+			log.Printf("Warning: git identity skipped — received name=%q email=%q (email is required)", state.GitUserName, state.GitUserEmail)
+		}
 		return nil
 	}
 
@@ -948,7 +964,61 @@ func ensureGitIdentity(ctx context.Context, cfg *config.Config, state *bootstrap
 		return fmt.Errorf("failed to configure git user.name in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
-	log.Printf("Configured git identity in devcontainer %s", containerID)
+	log.Printf("Configured git identity in devcontainer %s: name=%q email=%q", containerID, gitUserName, gitUserEmail)
+	return nil
+}
+
+// buildSAMEnvScript generates a shell script that exports SAM platform metadata
+// as environment variables. Only non-empty values are included.
+func buildSAMEnvScript(cfg *config.Config) string {
+	baseDomain := config.DeriveBaseDomain(cfg.ControlPlaneURL)
+
+	type envEntry struct {
+		key, value string
+	}
+	entries := []envEntry{
+		{"SAM_API_URL", strings.TrimRight(cfg.ControlPlaneURL, "/")},
+		{"SAM_BRANCH", cfg.Branch},
+		{"SAM_NODE_ID", cfg.NodeID},
+		{"SAM_REPOSITORY", cfg.Repository},
+		{"SAM_WORKSPACE_ID", cfg.WorkspaceID},
+	}
+	if baseDomain != "" && cfg.WorkspaceID != "" {
+		entries = append(entries, envEntry{"SAM_WORKSPACE_URL", fmt.Sprintf("https://ws-%s.%s", cfg.WorkspaceID, baseDomain)})
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# SAM workspace environment variables (auto-generated)\n")
+	for _, e := range entries {
+		if e.value != "" {
+			sb.WriteString(fmt.Sprintf("export %s=%q\n", e.key, e.value))
+		}
+	}
+	return sb.String()
+}
+
+// ensureSAMEnvironment injects SAM platform metadata as environment variables into
+// the devcontainer. Variables are written to /etc/profile.d/sam-env.sh (sourced by
+// login/interactive shells) and /etc/sam/env (for non-shell consumers).
+func ensureSAMEnvironment(ctx context.Context, cfg *config.Config) error {
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to locate devcontainer for SAM environment setup: %w", err)
+	}
+
+	script := buildSAMEnvScript(cfg)
+
+	// Write to /etc/profile.d/sam-env.sh (sourced by login shells) and /etc/sam/env (parseable).
+	writeCmd := exec.CommandContext(
+		ctx, "docker", "exec", "-u", "root", containerID,
+		"sh", "-c", "mkdir -p /etc/sam && cat > /etc/profile.d/sam-env.sh && cp /etc/profile.d/sam-env.sh /etc/sam/env",
+	)
+	writeCmd.Stdin = strings.NewReader(script)
+	if output, err := writeCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to write SAM environment files: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	log.Printf("Configured SAM environment in devcontainer %s", containerID)
 	return nil
 }
 

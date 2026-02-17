@@ -305,6 +305,80 @@ func TestResolveGitIdentity(t *testing.T) {
 	if name != "octo" || email != "octo@example.com" {
 		t.Fatalf("unexpected derived identity: %q <%s>", name, email)
 	}
+
+	// Empty email with non-empty name — should return ok=false
+	_, _, ok = resolveGitIdentity(&bootstrapState{GitUserName: "Octo Cat", GitUserEmail: ""})
+	if ok {
+		t.Fatal("expected no identity for empty email")
+	}
+
+	// Whitespace-only email — should return ok=false
+	_, _, ok = resolveGitIdentity(&bootstrapState{GitUserName: "Octo Cat", GitUserEmail: "   "})
+	if ok {
+		t.Fatal("expected no identity for whitespace-only email")
+	}
+}
+
+func TestBuildSAMEnvScript(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+		NodeID:          "node-456",
+		Repository:      "octo/repo",
+		Branch:          "main",
+	}
+
+	script := buildSAMEnvScript(cfg)
+
+	// Verify all expected variables are present.
+	for _, want := range []string{
+		`export SAM_API_URL="https://api.example.com"`,
+		`export SAM_BRANCH="main"`,
+		`export SAM_NODE_ID="node-456"`,
+		`export SAM_REPOSITORY="octo/repo"`,
+		`export SAM_WORKSPACE_ID="ws-123"`,
+		`export SAM_WORKSPACE_URL="https://ws-ws-123.example.com"`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script missing %q\ngot:\n%s", want, script)
+		}
+	}
+
+	// Verify header comment is present.
+	if !strings.HasPrefix(script, "# SAM workspace") {
+		t.Errorf("script missing header comment, got:\n%s", script)
+	}
+}
+
+func TestBuildSAMEnvScriptOmitsEmptyValues(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+		// NodeID, Repository, Branch left empty
+	}
+
+	script := buildSAMEnvScript(cfg)
+
+	if strings.Contains(script, "SAM_NODE_ID") {
+		t.Errorf("script should not contain SAM_NODE_ID when empty, got:\n%s", script)
+	}
+	if strings.Contains(script, "SAM_REPOSITORY") {
+		t.Errorf("script should not contain SAM_REPOSITORY when empty, got:\n%s", script)
+	}
+	if strings.Contains(script, "SAM_BRANCH") {
+		t.Errorf("script should not contain SAM_BRANCH when empty, got:\n%s", script)
+	}
+	// SAM_API_URL and SAM_WORKSPACE_ID should still be present.
+	if !strings.Contains(script, "SAM_API_URL") {
+		t.Errorf("script missing SAM_API_URL, got:\n%s", script)
+	}
+	if !strings.Contains(script, "SAM_WORKSPACE_ID") {
+		t.Errorf("script missing SAM_WORKSPACE_ID, got:\n%s", script)
+	}
 }
 
 func TestRedactSecret(t *testing.T) {
