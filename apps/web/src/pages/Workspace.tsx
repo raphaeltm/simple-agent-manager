@@ -393,10 +393,29 @@ export function Workspace() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Throttle terminal activity handling to avoid excessive API calls.
+  // Without this, every keystroke in the terminal triggers a full workspace
+  // state reload (API call to getWorkspace + listAgentSessions), which both
+  // wastes bandwidth and creates memory pressure from rapid state updates.
+  const activityThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ACTIVITY_THROTTLE_MS = 10_000;
   const handleTerminalActivity = useCallback(() => {
     if (!id) return;
+    if (activityThrottleRef.current) return; // Already scheduled
+    activityThrottleRef.current = setTimeout(() => {
+      activityThrottleRef.current = null;
+    }, ACTIVITY_THROTTLE_MS);
     void loadWorkspaceState();
   }, [id, loadWorkspaceState]);
+
+  // Clean up throttle timer on unmount
+  useEffect(() => {
+    return () => {
+      if (activityThrottleRef.current) {
+        clearTimeout(activityThrottleRef.current);
+      }
+    };
+  }, []);
 
   const handleUsageChange = useCallback(
     (sessionId: string, usage: TokenUsage) => {
@@ -714,6 +733,8 @@ export function Workspace() {
       await stopAgentSession(id, sessionId);
       const sessions = await listAgentSessions(id);
       setAgentSessions(sessions);
+      // Clean up refs to prevent leaked ChatSession handles
+      chatSessionRefs.current.delete(sessionId);
       setPreferredAgentsBySession((prev) => {
         if (!prev[sessionId]) {
           return prev;
@@ -722,6 +743,8 @@ export function Workspace() {
         delete next[sessionId];
         return next;
       });
+      // Clean up stale token usage entry
+      setSessionTokenUsages((prev) => prev.filter((s) => s.sessionId !== sessionId));
 
       if (sessionIdParam === sessionId) {
         const params = new URLSearchParams(searchParams);

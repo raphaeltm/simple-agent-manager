@@ -365,22 +365,15 @@ describe('useAutoScroll', () => {
     expect(el.scrollTop).toBe(100);
   });
 
-  it('registers new Element children with ResizeObserver via MutationObserver', () => {
+  it('observes the container (not individual children) with ResizeObserver', () => {
     const { result } = renderHook(() => useAutoScroll());
     const el = createMockScrollContainer({ scrollHeight: 1000, clientHeight: 500, scrollTop: 500 }) as ScrollMock;
     attach(result, el);
 
-    const newChild = document.createElement('div');
-
-    act(() => {
-      moInstances[0]?.trigger([{
-        addedNodes: [newChild] as unknown as NodeList,
-        removedNodes: [] as unknown as NodeList,
-      }]);
-    });
-
-    // The new child should be observed by ResizeObserver
-    expect(roInstances[0]?.elements).toContain(newChild);
+    // ResizeObserver should observe the container element itself
+    expect(roInstances[0]?.elements).toContain(el);
+    // Only one element should be observed (the container)
+    expect(roInstances[0]?.elements).toHaveLength(1);
   });
 
   it('ignores non-Element nodes in MutationObserver (text nodes)', () => {
@@ -513,7 +506,7 @@ describe('useAutoScroll', () => {
     expect(disconnectSpy).toHaveBeenCalled();
   });
 
-  it('observes existing children on attach', () => {
+  it('observes the container on attach regardless of child count', () => {
     const { result } = renderHook(() => useAutoScroll());
     const el = createMockScrollContainer({ scrollHeight: 1000, clientHeight: 500, scrollTop: 500 }) as ScrollMock;
     const child1 = document.createElement('div');
@@ -523,9 +516,9 @@ describe('useAutoScroll', () => {
 
     attach(result, el);
 
-    // Both children should be observed by ResizeObserver
-    expect(roInstances[0]?.elements).toContain(child1);
-    expect(roInstances[0]?.elements).toContain(child2);
+    // Only the container should be observed, not individual children
+    expect(roInstances[0]?.elements).toHaveLength(1);
+    expect(roInstances[0]?.elements).toContain(el);
   });
 
   it('defaults to bottom threshold of 50', () => {
