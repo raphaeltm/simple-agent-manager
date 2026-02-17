@@ -3,6 +3,7 @@ import { StatusBadge } from './StatusBadge';
 import { Card } from '@simple-agent-manager/ui';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useIsStandalone } from '../hooks/useIsStandalone';
 
 interface WorkspaceCardProps {
   workspace: WorkspaceResponse;
@@ -28,12 +29,21 @@ const actionButtonStyle: React.CSSProperties = {
 export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: WorkspaceCardProps) {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const isStandalone = useIsStandalone();
 
   const handleOpen = () => {
     // Open the control plane workspace page (not the ws-* subdomain directly).
     // Direct ws-* access requires a terminal token / cookie, so opening it from the
     // dashboard often looks like a 403/unauthorized to users.
     const path = `/workspaces/${workspace.id}`;
+
+    // In PWA standalone mode, navigate in-place to stay within the app.
+    // In a normal browser, open a new tab for multitasking.
+    if (isStandalone) {
+      navigate(path);
+      return;
+    }
+
     const opened = window.open(path, '_blank');
     if (opened) {
       // Best-effort noopener. Some browsers return null when `noopener` is set via

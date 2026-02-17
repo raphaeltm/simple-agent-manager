@@ -4,10 +4,15 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import { WorkspaceCard } from '../../../src/components/WorkspaceCard';
 import { useIsMobile } from '../../../src/hooks/useIsMobile';
+import { useIsStandalone } from '../../../src/hooks/useIsStandalone';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
 
 vi.mock('../../../src/hooks/useIsMobile', () => ({
   useIsMobile: vi.fn(),
+}));
+
+vi.mock('../../../src/hooks/useIsStandalone', () => ({
+  useIsStandalone: vi.fn(),
 }));
 
 const workspace: WorkspaceResponse = {
@@ -28,11 +33,13 @@ const workspace: WorkspaceResponse = {
 };
 
 const mockUseIsMobile = vi.mocked(useIsMobile);
+const mockUseIsStandalone = vi.mocked(useIsStandalone);
 
 describe('WorkspaceCard', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mockUseIsMobile.mockReturnValue(false);
+    mockUseIsStandalone.mockReturnValue(false);
   });
 
   it('opens the control plane workspace page (not the ws-* URL)', async () => {
@@ -87,5 +94,39 @@ describe('WorkspaceCard', () => {
       minHeight: '56px',
       minWidth: '120px',
     });
+  });
+
+  it('navigates in-place in PWA standalone mode instead of opening new tab', () => {
+    mockUseIsStandalone.mockReturnValue(true);
+    const openSpy = vi.spyOn(window, 'open');
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route path="/" element={<WorkspaceCard workspace={workspace} />} />
+          <Route path="/workspaces/:id" element={<div>Workspace page</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(screen.getByText('Workspace page')).toBeInTheDocument();
+  });
+
+  it('opens new tab in normal browser mode', () => {
+    mockUseIsStandalone.mockReturnValue(false);
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue({} as unknown as Window);
+
+    render(
+      <MemoryRouter>
+        <WorkspaceCard workspace={workspace} />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+
+    expect(openSpy).toHaveBeenCalledWith(`/workspaces/${workspace.id}`, '_blank');
   });
 });
