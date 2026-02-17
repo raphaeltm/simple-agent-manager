@@ -5,7 +5,11 @@
 # Go build settings
 BINARY_NAME := vm-agent
 GO := go
-GOFLAGS := -ldflags="-s -w"
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+GO_VERSION ?= $(shell $(GO) version 2>/dev/null | awk '{print $$3}' || echo "unknown")
+LDFLAGS_VERSION := -X github.com/workspace/vm-agent/internal/sysinfo.Version=$(VERSION) -X github.com/workspace/vm-agent/internal/sysinfo.BuildDate=$(BUILD_DATE) -X github.com/workspace/vm-agent/internal/sysinfo.GoVersionBuild=$(GO_VERSION)
+GOFLAGS := -ldflags="-s -w $(LDFLAGS_VERSION)"
 
 # Platforms
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64

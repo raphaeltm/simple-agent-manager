@@ -138,6 +138,11 @@ type Config struct {
 	ErrorReportMaxBatchSize  int           // Immediate flush threshold (default: 10)
 	ErrorReportMaxQueueSize  int           // Max queued entries before dropping (default: 100)
 	ErrorReportHTTPTimeout   time.Duration // HTTP POST timeout (default: 10s)
+
+	// System info collection settings - configurable per constitution principle XI
+	SysInfoDockerTimeout  time.Duration // Timeout for Docker CLI commands in system info (default: 10s)
+	SysInfoVersionTimeout time.Duration // Timeout for version check commands (default: 5s)
+	SysInfoCacheTTL       time.Duration // Cache TTL for system info responses (default: 5s)
 }
 
 // Load reads configuration from environment variables.
@@ -266,6 +271,11 @@ func Load() (*Config, error) {
 		ErrorReportMaxBatchSize:  getEnvInt("ERROR_REPORT_MAX_BATCH_SIZE", 10),
 		ErrorReportMaxQueueSize:  getEnvInt("ERROR_REPORT_MAX_QUEUE_SIZE", 100),
 		ErrorReportHTTPTimeout:   getEnvDuration("ERROR_REPORT_HTTP_TIMEOUT", 10*time.Second),
+
+		// System info settings - configurable per constitution principle XI
+		SysInfoDockerTimeout:  getEnvDuration("SYSINFO_DOCKER_TIMEOUT", 10*time.Second),
+		SysInfoVersionTimeout: getEnvDuration("SYSINFO_VERSION_TIMEOUT", 5*time.Second),
+		SysInfoCacheTTL:       getEnvDuration("SYSINFO_CACHE_TTL", 5*time.Second),
 	}
 
 	// Validate required fields

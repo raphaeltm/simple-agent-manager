@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import type { NodeResponse } from '@simple-agent-manager/shared';
 import { Alert, Button, PageLayout, Skeleton, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
+import { MiniMetricBadge } from '../components/node/MiniMetricBadge';
 import { createNode, listNodes } from '../lib/api';
 
 function formatHeartbeat(value: string | null): string {
@@ -146,15 +147,30 @@ export function Nodes() {
                 gap: 'var(--sam-space-2)',
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
                 <div style={{ fontWeight: 600 }}>{node.name}</div>
-                <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
+                <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
                   <StatusBadge status={node.status} />
                   <StatusBadge status={node.healthStatus || 'stale'} />
                 </div>
               </div>
-              <div style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
-                {formatHeartbeat(node.lastHeartbeatAt)}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+                <div style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
+                  {formatHeartbeat(node.lastHeartbeatAt)}
+                </div>
+                {node.lastMetrics && (
+                  <div style={{ display: 'flex', gap: 'var(--sam-space-1)', flexWrap: 'wrap' }}>
+                    {node.lastMetrics.cpuLoadAvg1 != null && (
+                      <MiniMetricBadge label="LOAD" value={node.lastMetrics.cpuLoadAvg1} suffix="" precision={1} warnAt={2} critAt={4} />
+                    )}
+                    {node.lastMetrics.memoryPercent != null && (
+                      <MiniMetricBadge label="MEM" value={node.lastMetrics.memoryPercent} />
+                    )}
+                    {node.lastMetrics.diskPercent != null && (
+                      <MiniMetricBadge label="DISK" value={node.lastMetrics.diskPercent} />
+                    )}
+                  </div>
+                )}
               </div>
             </button>
           ))}

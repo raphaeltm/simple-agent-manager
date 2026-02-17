@@ -139,6 +139,13 @@ export interface Node {
   updatedAt: string;
 }
 
+/** Lightweight metrics from node heartbeat (stored in D1) */
+export interface NodeMetrics {
+  cpuLoadAvg1?: number;
+  memoryPercent?: number;
+  diskPercent?: number;
+}
+
 export interface NodeResponse {
   id: string;
   name: string;
@@ -149,9 +156,68 @@ export interface NodeResponse {
   ipAddress: string | null;
   lastHeartbeatAt: string | null;
   heartbeatStaleAfterSeconds?: number;
+  lastMetrics?: NodeMetrics | null;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Full system info from on-demand VM Agent endpoint */
+export interface NodeSystemInfo {
+  cpu: {
+    loadAvg1: number;
+    loadAvg5: number;
+    loadAvg15: number;
+    numCpu: number;
+  };
+  memory: {
+    totalBytes: number;
+    usedBytes: number;
+    availableBytes: number;
+    usedPercent: number;
+  };
+  disk: {
+    totalBytes: number;
+    usedBytes: number;
+    availableBytes: number;
+    usedPercent: number;
+    mountPath: string;
+  };
+  network: {
+    interface: string;
+    rxBytes: number;
+    txBytes: number;
+  };
+  uptime: {
+    seconds: number;
+    humanFormat: string;
+  };
+  docker: {
+    version: string;
+    containers: number;
+    containerList: Array<{
+      id: string;
+      name: string;
+      image: string;
+      status: string;
+      cpuPercent: number;
+      memUsage: string;
+      memPercent: number;
+    }>;
+  };
+  software: {
+    goVersion: string;
+    nodeVersion: string;
+    dockerVersion: string;
+    devcontainerCliVersion: string;
+  };
+  agent: {
+    version: string;
+    buildDate: string;
+    goRuntime: string;
+    goroutines: number;
+    heapBytes: number;
+  };
 }
 
 export interface CreateNodeRequest {

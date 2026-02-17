@@ -139,6 +139,7 @@ export const nodes = sqliteTable('nodes', {
   lastHeartbeatAt: text('last_heartbeat_at'),
   healthStatus: text('health_status').notNull().default('unhealthy'),
   heartbeatStaleAfterSeconds: integer('heartbeat_stale_after_seconds').notNull().default(180),
+  lastMetrics: text('last_metrics'),
   errorMessage: text('error_message'),
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),

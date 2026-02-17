@@ -62,6 +62,20 @@ func (s *Server) sendNodeHeartbeat() {
 		"activeWorkspaces": s.activeWorkspaceCount(),
 		"nodeId":           s.config.NodeID,
 	}
+
+	// Enrich heartbeat with lightweight system metrics (procfs only, no exec calls).
+	if s.sysInfoCollector != nil {
+		if quick, err := s.sysInfoCollector.CollectQuick(); err == nil {
+			payload["metrics"] = map[string]interface{}{
+				"cpuLoadAvg1":   quick.CPULoadAvg1,
+				"memoryPercent": quick.MemoryPercent,
+				"diskPercent":   quick.DiskPercent,
+			}
+		} else {
+			log.Printf("Heartbeat metrics collection failed: %v", err)
+		}
+	}
+
 	body, _ := json.Marshal(payload)
 
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))

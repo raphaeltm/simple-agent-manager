@@ -20,6 +20,7 @@ import type {
   WorkspaceTab,
   AgentSettingsResponse,
   SaveAgentSettingsRequest,
+  NodeSystemInfo,
 } from '@simple-agent-manager/shared';
 
 // In production, VITE_API_URL must be explicitly set
@@ -160,6 +161,14 @@ export async function deleteNode(id: string): Promise<{ success: boolean }> {
   });
 }
 
+
+/**
+ * Fetch node system info via the control plane proxy.
+ * Proxied for the same reason as events (vm-* DNS lacks SSL).
+ */
+export async function getNodeSystemInfo(nodeId: string): Promise<NodeSystemInfo> {
+  return request<NodeSystemInfo>(`/api/nodes/${nodeId}/system-info`);
+}
 
 /**
  * Fetch node events via the control plane proxy.

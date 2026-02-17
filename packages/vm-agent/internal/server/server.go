@@ -23,6 +23,7 @@ import (
 	"github.com/workspace/vm-agent/internal/idle"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/pty"
+	"github.com/workspace/vm-agent/internal/sysinfo"
 )
 
 //go:embed static/*
@@ -30,23 +31,24 @@ var staticFiles embed.FS
 
 // Server is the HTTP server for the VM Agent.
 type Server struct {
-	config          *config.Config
-	httpServer      *http.Server
-	jwtValidator    *auth.JWTValidator
-	sessionManager  *auth.SessionManager
-	ptyManager      *pty.Manager
-	idleDetector    *idle.Detector
-	workspaceMu     sync.RWMutex
-	workspaces      map[string]*WorkspaceRuntime
-	eventMu         sync.RWMutex
-	nodeEvents      []EventRecord
-	workspaceEvents map[string][]EventRecord
-	agentSessions   *agentsessions.Manager
-	acpConfig       acp.GatewayConfig
-	sessionHostMu   sync.Mutex
-	sessionHosts    map[string]*acp.SessionHost
-	store           *persistence.Store
-	errorReporter   *errorreport.Reporter
+	config           *config.Config
+	httpServer       *http.Server
+	jwtValidator     *auth.JWTValidator
+	sessionManager   *auth.SessionManager
+	ptyManager       *pty.Manager
+	idleDetector     *idle.Detector
+	sysInfoCollector *sysinfo.Collector
+	workspaceMu      sync.RWMutex
+	workspaces       map[string]*WorkspaceRuntime
+	eventMu          sync.RWMutex
+	nodeEvents       []EventRecord
+	workspaceEvents  map[string][]EventRecord
+	agentSessions    *agentsessions.Manager
+	acpConfig        acp.GatewayConfig
+	sessionHostMu    sync.Mutex
+	sessionHosts     map[string]*acp.SessionHost
+	store            *persistence.Store
+	errorReporter    *errorreport.Reporter
 }
 
 type WorkspaceRuntime struct {
@@ -177,20 +179,28 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("open persistence store: %w", err)
 	}
 
+	// Create system info collector for metrics and version reporting.
+	sysInfoCollector := sysinfo.NewCollector(sysinfo.CollectorConfig{
+		DockerTimeout:  cfg.SysInfoDockerTimeout,
+		VersionTimeout: cfg.SysInfoVersionTimeout,
+		CacheTTL:       cfg.SysInfoCacheTTL,
+	})
+
 	s := &Server{
-		config:          cfg,
-		jwtValidator:    jwtValidator,
-		sessionManager:  sessionManager,
-		ptyManager:      ptyManager,
-		idleDetector:    idleDetector,
-		workspaces:      make(map[string]*WorkspaceRuntime),
-		nodeEvents:      make([]EventRecord, 0, 512),
-		workspaceEvents: make(map[string][]EventRecord),
-		agentSessions:   agentsessions.NewManager(),
-		acpConfig:       acpGatewayConfig,
-		sessionHosts:    make(map[string]*acp.SessionHost),
-		store:           store,
-		errorReporter:   errorReporter,
+		config:           cfg,
+		jwtValidator:     jwtValidator,
+		sessionManager:   sessionManager,
+		ptyManager:       ptyManager,
+		idleDetector:     idleDetector,
+		sysInfoCollector: sysInfoCollector,
+		workspaces:       make(map[string]*WorkspaceRuntime),
+		nodeEvents:       make([]EventRecord, 0, 512),
+		workspaceEvents:  make(map[string][]EventRecord),
+		agentSessions:    agentsessions.NewManager(),
+		acpConfig:        acpGatewayConfig,
+		sessionHosts:     make(map[string]*acp.SessionHost),
+		store:            store,
+		errorReporter:    errorReporter,
 	}
 
 	if cfg.WorkspaceID != "" {
@@ -357,6 +367,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workspaces/{workspaceId}/files/find", s.handleFileFind)
 
 	mux.HandleFunc("GET /events", s.handleListNodeEvents)
+	mux.HandleFunc("GET /system-info", s.handleSystemInfo)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/ports/{port}", s.handleWorkspacePortProxy)
 
 	// ACP Agent WebSocket
