@@ -244,6 +244,22 @@ func RemoveVolume(ctx context.Context, workspaceID string) error {
 	return nil
 }
 
+// writeBuildErrorToVolume writes the devcontainer build error log into the Docker
+// volume so it is visible from inside the fallback container. The host workspace
+// directory is not mounted into the fallback container, so errors written there
+// are invisible to users.
+func writeBuildErrorToVolume(ctx context.Context, volumeName string, output []byte) {
+	cmd := exec.CommandContext(ctx, "docker", "run", "--rm",
+		"-v", volumeName+":/workspaces",
+		"-i", "alpine:latest",
+		"sh", "-c", "cat > /workspaces/.devcontainer-build-error.log",
+	)
+	cmd.Stdin = bytes.NewReader(output)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		log.Printf("Warning: failed to write build error log to volume %s: %v: %s", volumeName, err, strings.TrimSpace(string(out)))
+	}
+}
+
 // populateVolumeFromHost copies the host-cloned repository into a Docker named
 // volume using a lightweight throwaway container. The host clone is needed for
 // devcontainer CLI config discovery (it reads .devcontainer/ from the host), while
@@ -499,10 +515,16 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 			// Repo config failed — log the error and fall back to default image.
 			log.Printf("Devcontainer build failed with repo config, falling back to default image: %v: %s", err, strings.TrimSpace(string(output)))
 
-			// Write build error log to the workspace directory for debugging.
+			// Write build error log to the host workspace directory for debugging.
 			errorLogPath := filepath.Join(cfg.WorkspaceDir, ".devcontainer-build-error.log")
 			if writeErr := os.WriteFile(errorLogPath, output, 0o644); writeErr != nil {
 				log.Printf("Warning: failed to write devcontainer build error log to %s: %v", errorLogPath, writeErr)
+			}
+
+			// Also write into the Docker volume so the log is visible from inside
+			// the fallback container (the host path is not mounted into it).
+			if volumeName != "" {
+				writeBuildErrorToVolume(ctx, volumeName, output)
 			}
 
 			// Remove the stale container left by the failed first attempt.
