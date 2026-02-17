@@ -7,6 +7,7 @@ interface FileBrowserPanelProps {
   workspaceUrl: string;
   workspaceId: string;
   token: string;
+  worktree?: string | null;
   initialPath?: string;
   isMobile: boolean;
   onClose: () => void;
@@ -26,6 +27,7 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
   workspaceUrl,
   workspaceId,
   token,
+  worktree,
   initialPath = '.',
   isMobile,
   onClose,
@@ -37,19 +39,28 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [currentPath, setCurrentPath] = useState(initialPath);
 
-  const fetchListing = useCallback(async (dirPath: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await getFileList(workspaceUrl, workspaceId, token, dirPath);
-      setEntries(result.entries);
-      setCurrentPath(result.path);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to list directory');
-    } finally {
-      setLoading(false);
-    }
-  }, [workspaceUrl, workspaceId, token]);
+  const fetchListing = useCallback(
+    async (dirPath: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await getFileList(
+          workspaceUrl,
+          workspaceId,
+          token,
+          dirPath,
+          worktree ?? undefined
+        );
+        setEntries(result.entries);
+        setCurrentPath(result.path);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to list directory');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [workspaceUrl, workspaceId, token, worktree]
+  );
 
   useEffect(() => {
     fetchListing(initialPath);
@@ -99,18 +110,19 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
     <div style={overlayStyle}>
       {/* Header */}
       <header style={headerStyle}>
-        <button
-          onClick={onClose}
-          aria-label="Close file browser"
-          style={iconButtonStyle(isMobile)}
-        >
+        <button onClick={onClose} aria-label="Close file browser" style={iconButtonStyle(isMobile)}>
           <svg
             style={{ height: isMobile ? 18 : 16, width: isMobile ? 18 : 16 }}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 19l-7-7 7-7"
+            />
           </svg>
         </button>
 
@@ -134,14 +146,13 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
             opacity: loading ? 0.5 : 1,
           }}
         >
-          <RefreshCw size={isMobile ? 16 : 14} style={loading ? { animation: 'spin 1s linear infinite' } : undefined} />
+          <RefreshCw
+            size={isMobile ? 16 : 14}
+            style={loading ? { animation: 'spin 1s linear infinite' } : undefined}
+          />
         </button>
 
-        <button
-          onClick={onClose}
-          aria-label="Close"
-          style={iconButtonStyle(isMobile)}
-        >
+        <button onClick={onClose} aria-label="Close" style={iconButtonStyle(isMobile)}>
           <X size={isMobile ? 18 : 16} />
         </button>
       </header>
@@ -177,9 +188,10 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
                 borderRadius: 4,
                 fontFamily: 'monospace',
                 fontSize: '0.75rem',
-                color: idx === breadcrumbs.length - 1
-                  ? 'var(--sam-color-fg-primary)'
-                  : 'var(--sam-color-fg-muted)',
+                color:
+                  idx === breadcrumbs.length - 1
+                    ? 'var(--sam-color-fg-primary)'
+                    : 'var(--sam-color-fg-muted)',
                 fontWeight: idx === breadcrumbs.length - 1 ? 600 : 400,
                 whiteSpace: 'nowrap',
               }}
@@ -307,7 +319,8 @@ const FileRow: FC<FileRowProps> = ({ entry, onClick, isMobile }) => {
           minWidth: 0,
         }}
       >
-        {entry.name}{isDir ? '/' : ''}
+        {entry.name}
+        {isDir ? '/' : ''}
       </span>
       {!isDir && entry.size > 0 && (
         <span

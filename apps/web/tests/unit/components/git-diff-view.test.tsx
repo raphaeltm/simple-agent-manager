@@ -135,6 +135,8 @@ app.listen(3000);`,
         defaultProps.workspaceId,
         defaultProps.token,
         defaultProps.filePath,
+        undefined,
+        undefined,
       );
     });
   });
@@ -163,6 +165,7 @@ app.listen(3000);`,
         defaultProps.token,
         defaultProps.filePath,
         true,
+        undefined,
       );
     });
   });

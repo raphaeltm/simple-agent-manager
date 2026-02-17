@@ -1,7 +1,11 @@
 package server
 
 import (
+	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 func TestSanitizeFilePath(t *testing.T) {
@@ -263,4 +267,29 @@ func containsStr(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestGitWorktreeQueryResolvesToValidatedWorkDir(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		config: &config.Config{
+			GitExecTimeout:   5 * time.Second,
+			WorktreeCacheTTL: 5 * time.Second,
+		},
+		worktreeCache: map[string]cachedWorktreeList{},
+	}
+	s.setCachedWorktrees("ws-1", []WorktreeInfo{
+		{Path: "/workspaces/repo", IsPrimary: true},
+		{Path: "/workspaces/repo-wt-feature"},
+	})
+
+	req := httptest.NewRequest("GET", "/workspaces/ws-1/git/status?worktree=/workspaces/repo-wt-feature", nil)
+	workDir, err := s.resolveWorktreeWorkDir(req, "ws-1", "container-1", "root", "/workspaces/repo")
+	if err != nil {
+		t.Fatalf("resolveWorktreeWorkDir() unexpected error: %v", err)
+	}
+	if workDir != "/workspaces/repo-wt-feature" {
+		t.Fatalf("resolveWorktreeWorkDir() = %q, want /workspaces/repo-wt-feature", workDir)
+	}
 }

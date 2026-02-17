@@ -73,12 +73,12 @@ func (m *Manager) CreateSession(userID string, rows, cols int) (*Session, error)
 		return nil, fmt.Errorf("failed to generate session ID: %w", err)
 	}
 
-	return m.CreateSessionWithID(sessionID, userID, rows, cols)
+	return m.CreateSessionWithID(sessionID, userID, rows, cols, "")
 }
 
 // CreateSessionWithID creates a new PTY session with a specific ID.
 // This is used for multi-terminal support where the client generates the session ID.
-func (m *Manager) CreateSessionWithID(sessionID, userID string, rows, cols int) (*Session, error) {
+func (m *Manager) CreateSessionWithID(sessionID, userID string, rows, cols int, workDir string) (*Session, error) {
 	// Check if session already exists
 	m.mu.RLock()
 	if _, exists := m.sessions[sessionID]; exists {
@@ -113,12 +113,17 @@ func (m *Manager) CreateSessionWithID(sessionID, userID string, rows, cols int) 
 	}
 
 	session, err := NewSession(SessionConfig{
-		ID:               sessionID,
-		UserID:           userID,
-		Shell:            m.defaultShell,
-		Rows:             rows,
-		Cols:             cols,
-		WorkDir:          m.workDir,
+		ID:     sessionID,
+		UserID: userID,
+		Shell:  m.defaultShell,
+		Rows:   rows,
+		Cols:   cols,
+		WorkDir: func() string {
+			if workDir != "" {
+				return workDir
+			}
+			return m.workDir
+		}(),
 		ContainerID:      containerID,
 		ContainerUser:    m.containerUser,
 		OutputBufferSize: m.bufferSize,

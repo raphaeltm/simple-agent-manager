@@ -58,6 +58,11 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
+	workDir, err = s.resolveWorktreeWorkDir(r, workspaceID, containerID, user, workDir)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadRequest)
+		return
+	}
 
 	// Use find with -maxdepth 1 to list directory contents.
 	// Output format: type\tsize\tmtime_epoch\tname (tab-separated)
@@ -122,6 +127,11 @@ func (s *Server) handleFileFind(w http.ResponseWriter, r *http.Request) {
 	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+	workDir, err = s.resolveWorktreeWorkDir(r, workspaceID, containerID, user, workDir)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadRequest)
 		return
 	}
 

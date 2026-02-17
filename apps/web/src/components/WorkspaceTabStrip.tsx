@@ -10,11 +10,7 @@ import {
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import {
-  SortableContext,
-  horizontalListSortingStrategy,
-  useSortable,
-} from '@dnd-kit/sortable';
+import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
 export interface WorkspaceTabItem {
@@ -23,6 +19,7 @@ export interface WorkspaceTabItem {
   sessionId: string;
   title: string;
   statusColor: string;
+  badge?: string;
 }
 
 interface WorkspaceTabStripProps {
@@ -241,9 +238,7 @@ export function WorkspaceTabStrip({
         </SortableContext>
 
         <DragOverlay>
-          {dragActiveTab ? (
-            <DragOverlayTab tab={dragActiveTab} isMobile={isMobile} />
-          ) : null}
+          {dragActiveTab ? <DragOverlayTab tab={dragActiveTab} isMobile={isMobile} /> : null}
         </DragOverlay>
       </DndContext>
 
@@ -297,14 +292,10 @@ function SortableTabWrapper({
   onEditKeyDown,
   onEditBlur,
 }: SortableTabWrapperProps) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: tab.id, disabled: dragDisabled });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: tab.id,
+    disabled: dragDisabled,
+  });
 
   const sortableStyle = {
     transform: CSS.Transform.toString(transform),
@@ -420,14 +411,39 @@ function SortableTabWrapper({
       ) : (
         <span
           style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
             flex: 1,
             minWidth: 0,
             overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
           }}
         >
-          {tab.title}
+          <span
+            style={{
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {tab.title}
+          </span>
+          {tab.badge && (
+            <span
+              style={{
+                fontSize: 10,
+                lineHeight: 1,
+                border: '1px solid #33467c',
+                borderRadius: 6,
+                padding: '2px 5px',
+                color: '#7aa2f7',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}
+            >
+              {tab.badge}
+            </span>
+          )}
         </span>
       )}
 

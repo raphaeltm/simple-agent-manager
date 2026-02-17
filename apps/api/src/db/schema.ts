@@ -26,331 +26,480 @@ export const users = sqliteTable('users', {
 // =============================================================================
 // Sessions (BetterAuth)
 // =============================================================================
-export const sessions = sqliteTable('sessions', {
-  id: text('id').primaryKey(),
-  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
-  token: text('token').notNull().unique(),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' })
-    .notNull()
-    .default(sql`(cast(unixepoch() * 1000 as integer))`),
-  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
-    .notNull()
-    .default(sql`(cast(unixepoch() * 1000 as integer))`),
-  ipAddress: text('ip_address'),
-  userAgent: text('user_agent'),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-}, (table) => ({
-  userIdIdx: index('idx_sessions_user_id').on(table.userId),
-}));
+export const sessions = sqliteTable(
+  'sessions',
+  {
+    id: text('id').primaryKey(),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+    token: text('token').notNull().unique(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(cast(unixepoch() * 1000 as integer))`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(cast(unixepoch() * 1000 as integer))`),
+    ipAddress: text('ip_address'),
+    userAgent: text('user_agent'),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+  },
+  (table) => ({
+    userIdIdx: index('idx_sessions_user_id').on(table.userId),
+  })
+);
 
 // =============================================================================
 // Accounts (BetterAuth OAuth providers)
 // =============================================================================
-export const accounts = sqliteTable('accounts', {
-  id: text('id').primaryKey(),
-  accountId: text('account_id').notNull(),
-  providerId: text('provider_id').notNull(),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  accessToken: text('access_token'),
-  refreshToken: text('refresh_token'),
-  idToken: text('id_token'),
-  accessTokenExpiresAt: integer('access_token_expires_at', { mode: 'timestamp_ms' }),
-  refreshTokenExpiresAt: integer('refresh_token_expires_at', { mode: 'timestamp_ms' }),
-  scope: text('scope'),
-  password: text('password'),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' })
-    .notNull()
-    .default(sql`(cast(unixepoch() * 1000 as integer))`),
-  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
-    .notNull()
-    .default(sql`(cast(unixepoch() * 1000 as integer))`),
-}, (table) => ({
-  userIdIdx: index('idx_accounts_user_id').on(table.userId),
-}));
+export const accounts = sqliteTable(
+  'accounts',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id').notNull(),
+    providerId: text('provider_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    accessToken: text('access_token'),
+    refreshToken: text('refresh_token'),
+    idToken: text('id_token'),
+    accessTokenExpiresAt: integer('access_token_expires_at', { mode: 'timestamp_ms' }),
+    refreshTokenExpiresAt: integer('refresh_token_expires_at', { mode: 'timestamp_ms' }),
+    scope: text('scope'),
+    password: text('password'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(cast(unixepoch() * 1000 as integer))`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(cast(unixepoch() * 1000 as integer))`),
+  },
+  (table) => ({
+    userIdIdx: index('idx_accounts_user_id').on(table.userId),
+  })
+);
 
 // =============================================================================
 // Verifications (BetterAuth)
 // =============================================================================
-export const verifications = sqliteTable('verifications', {
-  id: text('id').primaryKey(),
-  identifier: text('identifier').notNull(),
-  value: text('value').notNull(),
-  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' })
-    .notNull()
-    .default(sql`(cast(unixepoch() * 1000 as integer))`),
-  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
-    .notNull()
-    .default(sql`(cast(unixepoch() * 1000 as integer))`),
-}, (table) => ({
-  identifierIdx: index('idx_verifications_identifier').on(table.identifier),
-}));
+export const verifications = sqliteTable(
+  'verifications',
+  {
+    id: text('id').primaryKey(),
+    identifier: text('identifier').notNull(),
+    value: text('value').notNull(),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(cast(unixepoch() * 1000 as integer))`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(cast(unixepoch() * 1000 as integer))`),
+  },
+  (table) => ({
+    identifierIdx: index('idx_verifications_identifier').on(table.identifier),
+  })
+);
 
 // =============================================================================
 // Credentials (encrypted cloud provider tokens and agent API keys)
 // =============================================================================
-export const credentials = sqliteTable('credentials', {
-  id: text('id').primaryKey(),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  provider: text('provider').notNull(),
-  credentialType: text('credential_type').notNull().default('cloud-provider'),
-  agentType: text('agent_type'),
-  credentialKind: text('credential_kind').notNull().default('api-key'), // 'api-key' | 'oauth-token'
-  isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
-  encryptedToken: text('encrypted_token').notNull(),
-  iv: text('iv').notNull(),
-  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => ({
-  userAgentKind: uniqueIndex('idx_credentials_user_agent_kind')
-    .on(table.userId, table.agentType, table.credentialKind)
-    .where(sql`credential_type = 'agent-api-key'`),
-  activeCredential: index('idx_credentials_active')
-    .on(table.userId, table.agentType, table.isActive)
-    .where(sql`credential_type = 'agent-api-key' AND is_active = 1`),
-}));
+export const credentials = sqliteTable(
+  'credentials',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    credentialType: text('credential_type').notNull().default('cloud-provider'),
+    agentType: text('agent_type'),
+    credentialKind: text('credential_kind').notNull().default('api-key'), // 'api-key' | 'oauth-token'
+    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+    encryptedToken: text('encrypted_token').notNull(),
+    iv: text('iv').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    userAgentKind: uniqueIndex('idx_credentials_user_agent_kind')
+      .on(table.userId, table.agentType, table.credentialKind)
+      .where(sql`credential_type = 'agent-api-key'`),
+    activeCredential: index('idx_credentials_active')
+      .on(table.userId, table.agentType, table.isActive)
+      .where(sql`credential_type = 'agent-api-key' AND is_active = 1`),
+  })
+);
 
 // =============================================================================
 // GitHub App Installations
 // =============================================================================
 export const githubInstallations = sqliteTable('github_installations', {
   id: text('id').primaryKey(),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
   installationId: text('installation_id').notNull().unique(),
   accountType: text('account_type').notNull(),
   accountName: text('account_name').notNull(),
-  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at')
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
 });
 
 // =============================================================================
 // Nodes
 // =============================================================================
-export const nodes = sqliteTable('nodes', {
-  id: text('id').primaryKey(),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  name: text('name').notNull(),
-  status: text('status').notNull().default('pending'),
-  vmSize: text('vm_size').notNull().default('medium'),
-  vmLocation: text('vm_location').notNull().default('nbg1'),
-  providerInstanceId: text('provider_instance_id'),
-  ipAddress: text('ip_address'),
-  backendDnsRecordId: text('backend_dns_record_id'),
-  lastHeartbeatAt: text('last_heartbeat_at'),
-  healthStatus: text('health_status').notNull().default('unhealthy'),
-  heartbeatStaleAfterSeconds: integer('heartbeat_stale_after_seconds').notNull().default(180),
-  lastMetrics: text('last_metrics'),
-  errorMessage: text('error_message'),
-  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => ({
-  userIdIdx: index('idx_nodes_user_id').on(table.userId),
-}));
+export const nodes = sqliteTable(
+  'nodes',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    status: text('status').notNull().default('pending'),
+    vmSize: text('vm_size').notNull().default('medium'),
+    vmLocation: text('vm_location').notNull().default('nbg1'),
+    providerInstanceId: text('provider_instance_id'),
+    ipAddress: text('ip_address'),
+    backendDnsRecordId: text('backend_dns_record_id'),
+    lastHeartbeatAt: text('last_heartbeat_at'),
+    healthStatus: text('health_status').notNull().default('unhealthy'),
+    heartbeatStaleAfterSeconds: integer('heartbeat_stale_after_seconds').notNull().default(180),
+    lastMetrics: text('last_metrics'),
+    errorMessage: text('error_message'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    userIdIdx: index('idx_nodes_user_id').on(table.userId),
+  })
+);
 
 // =============================================================================
 // Workspaces
 // =============================================================================
-export const workspaces = sqliteTable('workspaces', {
-  id: text('id').primaryKey(),
-  nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  installationId: text('installation_id').references(() => githubInstallations.id),
-  displayName: text('display_name'),
-  normalizedDisplayName: text('normalized_display_name'),
-  name: text('name').notNull(),
-  repository: text('repository').notNull(),
-  branch: text('branch').notNull().default('main'),
-  status: text('status').notNull().default('pending'),
-  vmSize: text('vm_size').notNull(),
-  vmLocation: text('vm_location').notNull(),
-  hetznerServerId: text('hetzner_server_id'),
-  vmIp: text('vm_ip'),
-  dnsRecordId: text('dns_record_id'),
-  lastActivityAt: text('last_activity_at'),
-  errorMessage: text('error_message'),
-  shutdownDeadline: text('shutdown_deadline'),
-  idleTimeoutSeconds: integer('idle_timeout_seconds').notNull().default(1800), // Default 30 minutes
-  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => ({
-  userIdIdx: index('idx_workspaces_user_id').on(table.userId),
-  nodeIdIdx: index('idx_workspaces_node_id').on(table.nodeId),
-  nodeDisplayNameUnique: uniqueIndex('idx_workspaces_node_display_name_unique')
-    .on(table.nodeId, table.normalizedDisplayName)
-    .where(sql`node_id is not null and normalized_display_name is not null`),
-  // Compound indexes for filtered listing queries (P2 fix).
-  userStatusIdx: index('idx_workspaces_user_status').on(table.userId, table.status),
-  nodeStatusIdx: index('idx_workspaces_node_status').on(table.nodeId, table.status),
-}));
+export const workspaces = sqliteTable(
+  'workspaces',
+  {
+    id: text('id').primaryKey(),
+    nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    installationId: text('installation_id').references(() => githubInstallations.id),
+    displayName: text('display_name'),
+    normalizedDisplayName: text('normalized_display_name'),
+    name: text('name').notNull(),
+    repository: text('repository').notNull(),
+    branch: text('branch').notNull().default('main'),
+    status: text('status').notNull().default('pending'),
+    vmSize: text('vm_size').notNull(),
+    vmLocation: text('vm_location').notNull(),
+    hetznerServerId: text('hetzner_server_id'),
+    vmIp: text('vm_ip'),
+    dnsRecordId: text('dns_record_id'),
+    lastActivityAt: text('last_activity_at'),
+    errorMessage: text('error_message'),
+    shutdownDeadline: text('shutdown_deadline'),
+    idleTimeoutSeconds: integer('idle_timeout_seconds').notNull().default(1800), // Default 30 minutes
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    userIdIdx: index('idx_workspaces_user_id').on(table.userId),
+    nodeIdIdx: index('idx_workspaces_node_id').on(table.nodeId),
+    nodeDisplayNameUnique: uniqueIndex('idx_workspaces_node_display_name_unique')
+      .on(table.nodeId, table.normalizedDisplayName)
+      .where(sql`node_id is not null and normalized_display_name is not null`),
+    // Compound indexes for filtered listing queries (P2 fix).
+    userStatusIdx: index('idx_workspaces_user_status').on(table.userId, table.status),
+    nodeStatusIdx: index('idx_workspaces_node_status').on(table.nodeId, table.status),
+  })
+);
 
 // =============================================================================
 // Agent Sessions
 // =============================================================================
-export const agentSessions = sqliteTable('agent_sessions', {
-  id: text('id').primaryKey(),
-  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  status: text('status').notNull().default('running'),
-  label: text('label'),
-  stoppedAt: text('stopped_at'),
-  errorMessage: text('error_message'),
-  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => ({
-  workspaceIdIdx: index('idx_agent_sessions_workspace_id').on(table.workspaceId),
-  userIdIdx: index('idx_agent_sessions_user_id').on(table.userId),
-  // Compound index for filtered session queries (P2 fix).
-  workspaceUserStatusIdx: index('idx_agent_sessions_ws_user_status')
-    .on(table.workspaceId, table.userId, table.status),
-}));
-
+export const agentSessions = sqliteTable(
+  'agent_sessions',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: text('status').notNull().default('running'),
+    label: text('label'),
+    worktreePath: text('worktree_path'),
+    stoppedAt: text('stopped_at'),
+    errorMessage: text('error_message'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    workspaceIdIdx: index('idx_agent_sessions_workspace_id').on(table.workspaceId),
+    userIdIdx: index('idx_agent_sessions_user_id').on(table.userId),
+    // Compound index for filtered session queries (P2 fix).
+    workspaceUserStatusIdx: index('idx_agent_sessions_ws_user_status').on(
+      table.workspaceId,
+      table.userId,
+      table.status
+    ),
+  })
+);
 
 // =============================================================================
 // Agent Settings (per-user, per-agent configuration)
 // =============================================================================
-export const agentSettings = sqliteTable('agent_settings', {
-  id: text('id').primaryKey(),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  agentType: text('agent_type').notNull(),
-  model: text('model'),
-  permissionMode: text('permission_mode'),
-  allowedTools: text('allowed_tools'),
-  deniedTools: text('denied_tools'),
-  additionalEnv: text('additional_env'),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' })
-    .notNull()
-    .default(sql`(cast(unixepoch() * 1000 as integer))`),
-  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
-    .notNull()
-    .default(sql`(cast(unixepoch() * 1000 as integer))`),
-}, (table) => ({
-  userIdIdx: index('idx_agent_settings_user_id').on(table.userId),
-  userAgentTypeUnique: uniqueIndex('idx_agent_settings_user_agent_type')
-    .on(table.userId, table.agentType),
-}));
+export const agentSettings = sqliteTable(
+  'agent_settings',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    agentType: text('agent_type').notNull(),
+    model: text('model'),
+    permissionMode: text('permission_mode'),
+    allowedTools: text('allowed_tools'),
+    deniedTools: text('denied_tools'),
+    additionalEnv: text('additional_env'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(cast(unixepoch() * 1000 as integer))`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(cast(unixepoch() * 1000 as integer))`),
+  },
+  (table) => ({
+    userIdIdx: index('idx_agent_settings_user_id').on(table.userId),
+    userAgentTypeUnique: uniqueIndex('idx_agent_settings_user_agent_type').on(
+      table.userId,
+      table.agentType
+    ),
+  })
+);
 
 // =============================================================================
 // UI Governance
 // =============================================================================
-export const uiStandards = sqliteTable('ui_standards', {
-  id: text('id').primaryKey(),
-  version: text('version').notNull().unique(),
-  status: text('status').notNull(),
-  name: text('name').notNull(),
-  visualDirection: text('visual_direction').notNull(),
-  mobileFirstRulesRef: text('mobile_first_rules_ref').notNull(),
-  accessibilityRulesRef: text('accessibility_rules_ref').notNull(),
-  ownerRole: text('owner_role').notNull(),
-  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => ({
-  statusIdx: index('idx_ui_standards_status').on(table.status),
-}));
+export const uiStandards = sqliteTable(
+  'ui_standards',
+  {
+    id: text('id').primaryKey(),
+    version: text('version').notNull().unique(),
+    status: text('status').notNull(),
+    name: text('name').notNull(),
+    visualDirection: text('visual_direction').notNull(),
+    mobileFirstRulesRef: text('mobile_first_rules_ref').notNull(),
+    accessibilityRulesRef: text('accessibility_rules_ref').notNull(),
+    ownerRole: text('owner_role').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    statusIdx: index('idx_ui_standards_status').on(table.status),
+  })
+);
 
-export const themeTokens = sqliteTable('theme_tokens', {
-  id: text('id').primaryKey(),
-  standardId: text('standard_id').notNull().references(() => uiStandards.id, { onDelete: 'cascade' }),
-  tokenNamespace: text('token_namespace').notNull(),
-  tokenName: text('token_name').notNull(),
-  tokenValue: text('token_value').notNull(),
-  mode: text('mode').notNull().default('default'),
-  isDeprecated: integer('is_deprecated', { mode: 'boolean' }).notNull().default(false),
-  replacementToken: text('replacement_token'),
-  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => ({
-  standardIdIdx: index('idx_theme_tokens_standard_id').on(table.standardId),
-}));
+export const themeTokens = sqliteTable(
+  'theme_tokens',
+  {
+    id: text('id').primaryKey(),
+    standardId: text('standard_id')
+      .notNull()
+      .references(() => uiStandards.id, { onDelete: 'cascade' }),
+    tokenNamespace: text('token_namespace').notNull(),
+    tokenName: text('token_name').notNull(),
+    tokenValue: text('token_value').notNull(),
+    mode: text('mode').notNull().default('default'),
+    isDeprecated: integer('is_deprecated', { mode: 'boolean' }).notNull().default(false),
+    replacementToken: text('replacement_token'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    standardIdIdx: index('idx_theme_tokens_standard_id').on(table.standardId),
+  })
+);
 
-export const componentDefinitions = sqliteTable('component_definitions', {
-  id: text('id').primaryKey(),
-  standardId: text('standard_id').notNull().references(() => uiStandards.id, { onDelete: 'cascade' }),
-  name: text('name').notNull(),
-  category: text('category').notNull(),
-  supportedSurfacesJson: text('supported_surfaces_json').notNull(),
-  requiredStatesJson: text('required_states_json').notNull(),
-  usageGuidance: text('usage_guidance').notNull(),
-  accessibilityNotes: text('accessibility_notes').notNull(),
-  mobileBehavior: text('mobile_behavior').notNull(),
-  desktopBehavior: text('desktop_behavior').notNull(),
-  status: text('status').notNull(),
-  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => ({
-  standardIdIdx: index('idx_component_defs_standard_id').on(table.standardId),
-}));
+export const componentDefinitions = sqliteTable(
+  'component_definitions',
+  {
+    id: text('id').primaryKey(),
+    standardId: text('standard_id')
+      .notNull()
+      .references(() => uiStandards.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    category: text('category').notNull(),
+    supportedSurfacesJson: text('supported_surfaces_json').notNull(),
+    requiredStatesJson: text('required_states_json').notNull(),
+    usageGuidance: text('usage_guidance').notNull(),
+    accessibilityNotes: text('accessibility_notes').notNull(),
+    mobileBehavior: text('mobile_behavior').notNull(),
+    desktopBehavior: text('desktop_behavior').notNull(),
+    status: text('status').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    standardIdIdx: index('idx_component_defs_standard_id').on(table.standardId),
+  })
+);
 
-export const complianceChecklists = sqliteTable('compliance_checklists', {
-  id: text('id').primaryKey(),
-  standardId: text('standard_id').notNull().references(() => uiStandards.id, { onDelete: 'cascade' }),
-  version: text('version').notNull(),
-  itemsJson: text('items_json').notNull(),
-  appliesToJson: text('applies_to_json').notNull(),
-  isActive: integer('is_active', { mode: 'boolean' }).notNull().default(false),
-  publishedAt: text('published_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => ({
-  standardIdIdx: index('idx_checklists_standard_id').on(table.standardId),
-}));
+export const complianceChecklists = sqliteTable(
+  'compliance_checklists',
+  {
+    id: text('id').primaryKey(),
+    standardId: text('standard_id')
+      .notNull()
+      .references(() => uiStandards.id, { onDelete: 'cascade' }),
+    version: text('version').notNull(),
+    itemsJson: text('items_json').notNull(),
+    appliesToJson: text('applies_to_json').notNull(),
+    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(false),
+    publishedAt: text('published_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    standardIdIdx: index('idx_checklists_standard_id').on(table.standardId),
+  })
+);
 
-export const agentInstructionSets = sqliteTable('agent_instruction_sets', {
-  id: text('id').primaryKey(),
-  standardId: text('standard_id').notNull().references(() => uiStandards.id, { onDelete: 'cascade' }),
-  version: text('version').notNull(),
-  instructionBlocksJson: text('instruction_blocks_json').notNull(),
-  examplesRef: text('examples_ref'),
-  requiredChecklistVersion: text('required_checklist_version').notNull(),
-  isActive: integer('is_active', { mode: 'boolean' }).notNull().default(false),
-  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => ({
-  standardIdIdx: index('idx_instruction_sets_standard_id').on(table.standardId),
-}));
+export const agentInstructionSets = sqliteTable(
+  'agent_instruction_sets',
+  {
+    id: text('id').primaryKey(),
+    standardId: text('standard_id')
+      .notNull()
+      .references(() => uiStandards.id, { onDelete: 'cascade' }),
+    version: text('version').notNull(),
+    instructionBlocksJson: text('instruction_blocks_json').notNull(),
+    examplesRef: text('examples_ref'),
+    requiredChecklistVersion: text('required_checklist_version').notNull(),
+    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(false),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    standardIdIdx: index('idx_instruction_sets_standard_id').on(table.standardId),
+  })
+);
 
-export const exceptionRequests = sqliteTable('exception_requests', {
-  id: text('id').primaryKey(),
-  standardId: text('standard_id').notNull().references(() => uiStandards.id, { onDelete: 'cascade' }),
-  requestedBy: text('requested_by').notNull(),
-  rationale: text('rationale').notNull(),
-  scope: text('scope').notNull(),
-  expirationDate: text('expiration_date').notNull(),
-  approver: text('approver'),
-  status: text('status').notNull(),
-  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => ({
-  standardIdIdx: index('idx_exception_requests_standard_id').on(table.standardId),
-}));
+export const exceptionRequests = sqliteTable(
+  'exception_requests',
+  {
+    id: text('id').primaryKey(),
+    standardId: text('standard_id')
+      .notNull()
+      .references(() => uiStandards.id, { onDelete: 'cascade' }),
+    requestedBy: text('requested_by').notNull(),
+    rationale: text('rationale').notNull(),
+    scope: text('scope').notNull(),
+    expirationDate: text('expiration_date').notNull(),
+    approver: text('approver'),
+    status: text('status').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    standardIdIdx: index('idx_exception_requests_standard_id').on(table.standardId),
+  })
+);
 
-export const complianceRuns = sqliteTable('compliance_runs', {
-  id: text('id').primaryKey(),
-  standardId: text('standard_id').notNull().references(() => uiStandards.id, { onDelete: 'cascade' }),
-  checklistVersion: text('checklist_version').notNull(),
-  authorType: text('author_type').notNull(),
-  changeRef: text('change_ref').notNull(),
-  status: text('status').notNull(),
-  findingsJson: text('findings_json'),
-  reviewedBy: text('reviewed_by'),
-  exceptionRequestId: text('exception_request_id').references(() => exceptionRequests.id, { onDelete: 'set null' }),
-  completedAt: text('completed_at'),
-  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => ({
-  standardIdIdx: index('idx_compliance_runs_standard_id').on(table.standardId),
-}));
+export const complianceRuns = sqliteTable(
+  'compliance_runs',
+  {
+    id: text('id').primaryKey(),
+    standardId: text('standard_id')
+      .notNull()
+      .references(() => uiStandards.id, { onDelete: 'cascade' }),
+    checklistVersion: text('checklist_version').notNull(),
+    authorType: text('author_type').notNull(),
+    changeRef: text('change_ref').notNull(),
+    status: text('status').notNull(),
+    findingsJson: text('findings_json'),
+    reviewedBy: text('reviewed_by'),
+    exceptionRequestId: text('exception_request_id').references(() => exceptionRequests.id, {
+      onDelete: 'set null',
+    }),
+    completedAt: text('completed_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    standardIdIdx: index('idx_compliance_runs_standard_id').on(table.standardId),
+  })
+);
 
-export const migrationWorkItems = sqliteTable('migration_work_items', {
-  id: text('id').primaryKey(),
-  standardId: text('standard_id').notNull().references(() => uiStandards.id, { onDelete: 'cascade' }),
-  surface: text('surface').notNull(),
-  targetRef: text('target_ref').notNull(),
-  priority: text('priority').notNull(),
-  status: text('status').notNull(),
-  owner: text('owner').notNull(),
-  dueMilestone: text('due_milestone'),
-  notes: text('notes'),
-  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => ({
-  standardIdIdx: index('idx_migration_items_standard_id').on(table.standardId),
-}));
+export const migrationWorkItems = sqliteTable(
+  'migration_work_items',
+  {
+    id: text('id').primaryKey(),
+    standardId: text('standard_id')
+      .notNull()
+      .references(() => uiStandards.id, { onDelete: 'cascade' }),
+    surface: text('surface').notNull(),
+    targetRef: text('target_ref').notNull(),
+    priority: text('priority').notNull(),
+    status: text('status').notNull(),
+    owner: text('owner').notNull(),
+    dueMilestone: text('due_milestone'),
+    notes: text('notes'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    standardIdIdx: index('idx_migration_items_standard_id').on(table.standardId),
+  })
+);
 
 // Type exports for inference
 export type User = typeof users.$inferSelect;

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  encodeTerminalWsCreateSession,
   encodeTerminalWsListSessions,
   encodeTerminalWsReattachSession,
   isSessionReattachedMessage,
@@ -13,6 +14,29 @@ describe('encodeTerminalWsListSessions', () => {
     const encoded = encodeTerminalWsListSessions();
     const parsed = JSON.parse(encoded);
     expect(parsed).toEqual({ type: 'list_sessions' });
+  });
+});
+
+describe('encodeTerminalWsCreateSession', () => {
+  it('encodes create_session with workDir when provided', () => {
+    const encoded = encodeTerminalWsCreateSession(
+      'session-1',
+      24,
+      80,
+      'Terminal 1',
+      '/workspaces/repo-wt-feature'
+    );
+    const parsed = JSON.parse(encoded);
+    expect(parsed).toEqual({
+      type: 'create_session',
+      data: {
+        sessionId: 'session-1',
+        rows: 24,
+        cols: 80,
+        name: 'Terminal 1',
+        workDir: '/workspaces/repo-wt-feature',
+      },
+    });
   });
 });
 
@@ -63,9 +87,7 @@ describe('isScrollbackMessage', () => {
   });
 
   it('returns false for other message types', () => {
-    const msg = parseTerminalWsServerMessage(
-      JSON.stringify({ type: 'pong' })
-    );
+    const msg = parseTerminalWsServerMessage(JSON.stringify({ type: 'pong' }));
     expect(msg).not.toBeNull();
     expect(isScrollbackMessage(msg!)).toBe(false);
   });

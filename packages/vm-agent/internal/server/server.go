@@ -49,6 +49,13 @@ type Server struct {
 	sessionHosts     map[string]*acp.SessionHost
 	store            *persistence.Store
 	errorReporter    *errorreport.Reporter
+	worktreeCacheMu  sync.RWMutex
+	worktreeCache    map[string]cachedWorktreeList
+}
+
+type cachedWorktreeList struct {
+	worktrees []WorktreeInfo
+	expiresAt time.Time
 }
 
 type WorkspaceRuntime struct {
@@ -201,6 +208,7 @@ func New(cfg *config.Config) (*Server, error) {
 		sessionHosts:     make(map[string]*acp.SessionHost),
 		store:            store,
 		errorReporter:    errorReporter,
+		worktreeCache:    make(map[string]cachedWorktreeList),
 	}
 
 	if cfg.WorkspaceID != "" {
@@ -365,6 +373,9 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// File browser (browser-authenticated via workspace session/token)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/files/list", s.handleFileList)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/files/find", s.handleFileFind)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/worktrees", s.handleListWorktrees)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/worktrees", s.handleCreateWorktree)
+	mux.HandleFunc("DELETE /workspaces/{workspaceId}/worktrees", s.handleRemoveWorktree)
 
 	mux.HandleFunc("GET /events", s.handleListNodeEvents)
 	mux.HandleFunc("GET /system-info", s.handleSystemInfo)

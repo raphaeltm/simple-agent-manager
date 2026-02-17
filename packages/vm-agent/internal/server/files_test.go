@@ -1,7 +1,11 @@
 package server
 
 import (
+	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 func TestParseFileListOutput(t *testing.T) {
@@ -125,5 +129,30 @@ func TestParseFileListOutput(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFileWorktreeQueryResolvesToDefaultWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		config: &config.Config{
+			GitExecTimeout:   5 * time.Second,
+			WorktreeCacheTTL: 5 * time.Second,
+		},
+		worktreeCache: map[string]cachedWorktreeList{},
+	}
+	s.setCachedWorktrees("ws-1", []WorktreeInfo{
+		{Path: "/workspaces/repo", IsPrimary: true},
+		{Path: "/workspaces/repo-wt-feature"},
+	})
+
+	req := httptest.NewRequest("GET", "/workspaces/ws-1/files/list?path=.", nil)
+	workDir, err := s.resolveWorktreeWorkDir(req, "ws-1", "container-1", "root", "/workspaces/repo")
+	if err != nil {
+		t.Fatalf("resolveWorktreeWorkDir() unexpected error: %v", err)
+	}
+	if workDir != "/workspaces/repo" {
+		t.Fatalf("resolveWorktreeWorkDir() = %q, want /workspaces/repo", workDir)
 	}
 }

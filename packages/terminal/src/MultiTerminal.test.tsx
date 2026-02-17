@@ -36,11 +36,7 @@ vi.mock('./components/TabBar', () => ({
   TabBar: vi.fn(({ sessions, onNewTab, onTabActivate, onTabClose }: any) => (
     <div data-testid="tab-bar">
       {sessions.map((s: any) => (
-        <button
-          key={s.id}
-          data-testid={`tab-${s.id}`}
-          onClick={() => onTabActivate(s.id)}
-        >
+        <button key={s.id} data-testid={`tab-${s.id}`} onClick={() => onTabActivate(s.id)}>
           {s.name}
           <button
             data-testid={`close-${s.id}`}
@@ -95,38 +91,44 @@ class MockWebSocket {
     const msg = JSON.parse(data);
     if (msg.type === 'create_session' && this.onmessage) {
       setTimeout(() => {
-        this.onmessage!(new MessageEvent('message', {
-          data: JSON.stringify({
-            type: 'session_created',
-            sessionId: msg.data.sessionId,
-            data: {
+        this.onmessage!(
+          new MessageEvent('message', {
+            data: JSON.stringify({
+              type: 'session_created',
               sessionId: msg.data.sessionId,
-              workingDirectory: '/workspace',
-            },
-          }),
-        }));
+              data: {
+                sessionId: msg.data.sessionId,
+                workingDirectory: '/workspace',
+              },
+            }),
+          })
+        );
       }, 10);
     } else if (msg.type === 'list_sessions' && this.onmessage) {
       setTimeout(() => {
-        this.onmessage!(new MessageEvent('message', {
-          data: JSON.stringify({
-            type: 'session_list',
-            data: { sessions: MockWebSocket.sessionListResponse },
-          }),
-        }));
+        this.onmessage!(
+          new MessageEvent('message', {
+            data: JSON.stringify({
+              type: 'session_list',
+              data: { sessions: MockWebSocket.sessionListResponse },
+            }),
+          })
+        );
       }, 10);
     } else if (msg.type === 'reattach_session' && this.onmessage) {
       setTimeout(() => {
-        this.onmessage!(new MessageEvent('message', {
-          data: JSON.stringify({
-            type: 'session_reattached',
-            sessionId: msg.data.sessionId,
-            data: {
+        this.onmessage!(
+          new MessageEvent('message', {
+            data: JSON.stringify({
+              type: 'session_reattached',
               sessionId: msg.data.sessionId,
-              workingDirectory: '/workspace',
-            },
-          }),
-        }));
+              data: {
+                sessionId: msg.data.sessionId,
+                workingDirectory: '/workspace',
+              },
+            }),
+          })
+        );
       }, 10);
     }
   }
@@ -203,13 +205,16 @@ describe('MultiTerminal', () => {
     render(<MultiTerminal {...defaultProps} />);
 
     // Wait for initial WebSocket connection and session creation
-    await waitFor(() => {
-      const calls = sendSpy.mock.calls;
-      const hasCreateSession = calls.some((call) =>
-        typeof call[0] === 'string' && call[0].includes('create_session')
-      );
-      expect(hasCreateSession).toBe(true);
-    }, { timeout: 2000 });
+    await waitFor(
+      () => {
+        const calls = sendSpy.mock.calls;
+        const hasCreateSession = calls.some(
+          (call) => typeof call[0] === 'string' && call[0].includes('create_session')
+        );
+        expect(hasCreateSession).toBe(true);
+      },
+      { timeout: 2000 }
+    );
 
     // Now click the new tab button
     const newTabButton = screen.queryByTestId('new-tab');
@@ -220,10 +225,23 @@ describe('MultiTerminal', () => {
     // Should have sent another create_session for the new tab
     await waitFor(() => {
       const calls = sendSpy.mock.calls;
-      const createSessionCalls = calls.filter((call) =>
-        typeof call[0] === 'string' && call[0].includes('create_session')
+      const createSessionCalls = calls.filter(
+        (call) => typeof call[0] === 'string' && call[0].includes('create_session')
       );
       expect(createSessionCalls.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it('sends defaultWorkDir in create_session payloads', async () => {
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    render(<MultiTerminal {...defaultProps} defaultWorkDir="/workspaces/repo-wt-feature" />);
+
+    await waitFor(() => {
+      const payload = sendSpy.mock.calls
+        .map((call) => JSON.parse(call[0] as string))
+        .find((data) => data.type === 'create_session');
+      expect(payload).toBeDefined();
+      expect(payload.data.workDir).toBe('/workspaces/repo-wt-feature');
     });
   });
 
@@ -252,10 +270,13 @@ describe('MultiTerminal', () => {
 
   it('should close reattached sessions using server session id', async () => {
     const persistenceKey = 'multi-terminal-persist-test';
-    sessionStorage.setItem(persistenceKey, JSON.stringify({
-      sessions: [{ name: 'Persisted Tab', order: 0, serverSessionId: 'srv-persisted' }],
-      counter: 2,
-    }));
+    sessionStorage.setItem(
+      persistenceKey,
+      JSON.stringify({
+        sessions: [{ name: 'Persisted Tab', order: 0, serverSessionId: 'srv-persisted' }],
+        counter: 2,
+      })
+    );
     MockWebSocket.sessionListResponse = [
       {
         sessionId: 'srv-persisted',
@@ -285,9 +306,7 @@ describe('MultiTerminal', () => {
   });
 
   it('should respect maximum session limit', () => {
-    const { container } = render(
-      <MultiTerminal {...defaultProps} config={{ maxSessions: 2 }} />
-    );
+    const { container } = render(<MultiTerminal {...defaultProps} config={{ maxSessions: 2 }} />);
     expect(container).toBeDefined();
   });
 

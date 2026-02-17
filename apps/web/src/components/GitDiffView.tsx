@@ -7,6 +7,7 @@ interface GitDiffViewProps {
   workspaceUrl: string;
   workspaceId: string;
   token: string;
+  worktree?: string | null;
   filePath: string;
   staged: boolean;
   isMobile: boolean;
@@ -20,6 +21,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
   workspaceUrl,
   workspaceId,
   token,
+  worktree,
   filePath,
   staged,
   isMobile,
@@ -37,20 +39,34 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const result = await getGitDiff(workspaceUrl, workspaceId, token, filePath, staged);
+      const result = await getGitDiff(
+        workspaceUrl,
+        workspaceId,
+        token,
+        filePath,
+        staged,
+        worktree ?? undefined
+      );
       setDiff(result.diff);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch diff');
     } finally {
       setLoading(false);
     }
-  }, [workspaceUrl, workspaceId, token, filePath, staged]);
+  }, [workspaceUrl, workspaceId, token, filePath, staged, worktree]);
 
   const fetchFullFile = useCallback(async () => {
     if (fullContent !== null) return; // already loaded
     setFullLoading(true);
     try {
-      const result = await getGitFile(workspaceUrl, workspaceId, token, filePath);
+      const result = await getGitFile(
+        workspaceUrl,
+        workspaceId,
+        token,
+        filePath,
+        undefined,
+        worktree ?? undefined
+      );
       setFullContent(result.content);
     } catch {
       // Fallback: just show diff if full file fails
@@ -59,7 +75,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
     } finally {
       setFullLoading(false);
     }
-  }, [workspaceUrl, workspaceId, token, filePath, fullContent]);
+  }, [workspaceUrl, workspaceId, token, filePath, fullContent, worktree]);
 
   useEffect(() => {
     fetchDiff();
@@ -106,18 +122,19 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
     <div style={overlayStyle}>
       {/* Header */}
       <header style={headerStyle}>
-        <button
-          onClick={onBack}
-          aria-label="Back to file list"
-          style={iconBtnStyle(isMobile)}
-        >
+        <button onClick={onBack} aria-label="Back to file list" style={iconBtnStyle(isMobile)}>
           <svg
             style={{ height: isMobile ? 18 : 16, width: isMobile ? 18 : 16 }}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 19l-7-7 7-7"
+            />
           </svg>
         </button>
 
@@ -158,11 +175,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
           />
         </div>
 
-        <button
-          onClick={onClose}
-          aria-label="Close"
-          style={iconBtnStyle(isMobile)}
-        >
+        <button onClick={onClose} aria-label="Close" style={iconBtnStyle(isMobile)}>
           <X size={isMobile ? 18 : 16} />
         </button>
       </header>
@@ -204,12 +217,12 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
           </div>
         )}
 
-        {!loading && !error && diff !== '' && viewMode === 'diff' && (
-          <DiffRenderer diff={diff} />
-        )}
+        {!loading && !error && diff !== '' && viewMode === 'diff' && <DiffRenderer diff={diff} />}
 
-        {!loading && !error && viewMode === 'full' && (
-          fullLoading ? (
+        {!loading &&
+          !error &&
+          viewMode === 'full' &&
+          (fullLoading ? (
             <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
               <Spinner size="md" />
             </div>
@@ -217,8 +230,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
             <FullFileRenderer content={fullContent} addedLines={addedLines} />
           ) : (
             <DiffRenderer diff={diff} />
-          )
-        )}
+          ))}
       </div>
     </div>
   );
@@ -269,7 +281,12 @@ function diffLineStyle(line: string): CSSProperties {
       color: '#7aa2f7',
     };
   }
-  if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {
+  if (
+    line.startsWith('diff ') ||
+    line.startsWith('index ') ||
+    line.startsWith('---') ||
+    line.startsWith('+++')
+  ) {
     return {
       ...base,
       color: 'var(--sam-color-fg-muted)',
