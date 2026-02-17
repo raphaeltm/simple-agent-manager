@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import type { WorktreeInfo } from '@simple-agent-manager/shared';
+import { GitBranch } from 'lucide-react';
 
 interface WorktreeSelectorProps {
   worktrees: WorktreeInfo[];
   activeWorktree: string | null;
   loading?: boolean;
+  isMobile?: boolean;
   onSelect: (worktreePath: string | null) => void;
   onCreate: (request: {
     branch: string;
@@ -25,6 +27,7 @@ export function WorktreeSelector({
   worktrees,
   activeWorktree,
   loading = false,
+  isMobile = false,
   onSelect,
   onCreate,
   onRemove,
@@ -79,6 +82,9 @@ export function WorktreeSelector({
     }
   };
 
+  const activeLabel = active ? worktreeLabel(active) : 'primary';
+  const triggerAriaLabel = `Switch worktree (${activeLabel})`;
+
   return (
     <div style={{ position: 'relative' }}>
       <button
@@ -86,37 +92,70 @@ export function WorktreeSelector({
         type="button"
         onClick={() => setOpen((v) => !v)}
         disabled={loading || busy}
+        aria-label={triggerAriaLabel}
         style={{
-          minHeight: 56,
-          borderRadius: 10,
-          border: '1px solid var(--sam-color-border-default)',
-          background: 'var(--sam-color-bg-surface)',
+          minHeight: isMobile ? 44 : 56,
+          minWidth: isMobile ? 44 : undefined,
+          borderRadius: isMobile ? 8 : 10,
+          border: isMobile ? 'none' : '1px solid var(--sam-color-border-default)',
+          background: isMobile ? 'none' : 'var(--sam-color-bg-surface)',
           color: 'var(--sam-color-fg-primary)',
-          padding: '0 14px',
+          padding: isMobile ? '8px' : '0 14px',
           fontSize: 13,
           cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
         }}
       >
-        Worktree: {active ? worktreeLabel(active) : 'primary'}
+        {isMobile ? <GitBranch size={18} /> : `Worktree: ${activeLabel}`}
       </button>
 
       {open && (
         <div
-          style={{
-            position: 'absolute',
-            top: '100%',
-            right: 0,
-            zIndex: 80,
-            width: 320,
-            marginTop: 8,
-            borderRadius: 10,
-            border: '1px solid var(--sam-color-border-default)',
-            background: 'var(--sam-color-bg-surface)',
-            padding: 10,
-            maxHeight: 420,
-            overflow: 'auto',
-          }}
+          style={
+            isMobile
+              ? {
+                  position: 'fixed',
+                  inset: 0,
+                  zIndex: 90,
+                }
+              : undefined
+          }
         >
+          {isMobile && (
+            <button
+              type="button"
+              aria-label="Close worktree menu"
+              onClick={() => setOpen(false)}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                border: 'none',
+                background: 'rgba(0, 0, 0, 0.45)',
+                cursor: 'pointer',
+              }}
+            />
+          )}
+          <div
+            style={{
+              position: isMobile ? 'absolute' : 'absolute',
+              top: isMobile ? undefined : '100%',
+              right: isMobile ? 8 : 0,
+              left: isMobile ? 8 : undefined,
+              bottom: isMobile ? 8 : undefined,
+              zIndex: isMobile ? 91 : 80,
+              width: isMobile ? undefined : 320,
+              marginTop: isMobile ? 0 : 8,
+              borderRadius: 10,
+              border: '1px solid var(--sam-color-border-default)',
+              background: 'var(--sam-color-bg-surface)',
+              padding: 10,
+              maxHeight: isMobile ? '70vh' : 420,
+              overflow: 'auto',
+            }}
+          >
           <div style={{ display: 'grid', gap: 6 }}>
             {worktrees.map((wt) => (
               <div
@@ -130,10 +169,10 @@ export function WorktreeSelector({
               >
                 <button
                   type="button"
-                  onClick={() => {
-                    onSelect(wt.isPrimary ? null : wt.path);
-                    setOpen(false);
-                  }}
+                    onClick={() => {
+                      onSelect(wt.isPrimary ? null : wt.path);
+                      setOpen(false);
+                    }}
                   style={{
                     flex: 1,
                     textAlign: 'left',
@@ -223,6 +262,7 @@ export function WorktreeSelector({
               </button>
             </div>
             {error && <div style={{ marginTop: 8, color: '#f7768e', fontSize: 12 }}>{error}</div>}
+          </div>
           </div>
         </div>
       )}

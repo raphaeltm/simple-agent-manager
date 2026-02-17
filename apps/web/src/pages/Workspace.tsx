@@ -1472,6 +1472,7 @@ export function Workspace() {
             worktrees={worktrees}
             activeWorktree={activeWorktree}
             loading={worktreeLoading}
+            isMobile={isMobile}
             onSelect={handleSelectWorktree}
             onCreate={handleCreateWorktree}
             onRemove={handleRemoveWorktree}

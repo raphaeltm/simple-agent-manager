@@ -37,13 +37,13 @@ describe('WorktreeSelector', () => {
 
   it('renders current active worktree label', () => {
     render(<WorktreeSelector {...props} />);
-    expect(screen.getByRole('button', { name: /Worktree: main/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Switch worktree \(main\)/i })).toBeInTheDocument();
   });
 
   it('calls onSelect with worktree path for non-primary entry', async () => {
     render(<WorktreeSelector {...props} activeWorktree="/workspaces/repo-wt-feature-auth" />);
 
-    fireEvent.click(screen.getByRole('button', { name: /Worktree: feature\/auth/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Switch worktree \(feature\/auth\)/i }));
     fireEvent.click(screen.getByRole('button', { name: /^feature\/auth/i }));
 
     expect(props.onSelect).toHaveBeenCalledWith('/workspaces/repo-wt-feature-auth');
@@ -52,7 +52,7 @@ describe('WorktreeSelector', () => {
   it('calls onCreate with branch and createBranch option', async () => {
     render(<WorktreeSelector {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /Worktree: main/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Switch worktree \(main\)/i }));
     fireEvent.change(screen.getByPlaceholderText('branch name'), {
       target: { value: 'feature/new-panel' },
     });
@@ -70,7 +70,7 @@ describe('WorktreeSelector', () => {
   it('calls onRemove with force=true for dirty non-primary worktree', async () => {
     render(<WorktreeSelector {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /Worktree: main/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Switch worktree \(main\)/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
 
     await waitFor(() => {
@@ -95,6 +95,19 @@ describe('WorktreeSelector', () => {
       />
     );
 
-    expect(screen.getByRole('button', { name: /Worktree: 7f9aa21/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Switch worktree \(7f9aa21\)/i })).toBeInTheDocument();
+  });
+
+  it('uses compact icon trigger and mobile sheet when isMobile=true', () => {
+    render(<WorktreeSelector {...props} isMobile />);
+
+    const trigger = screen.getByRole('button', { name: /Switch worktree \(main\)/i });
+    expect(trigger).toBeInTheDocument();
+    expect(trigger).not.toHaveTextContent('Worktree:');
+
+    fireEvent.click(trigger);
+
+    expect(screen.getByRole('button', { name: 'Close worktree menu' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^feature\/auth/i })).toBeInTheDocument();
   });
 });

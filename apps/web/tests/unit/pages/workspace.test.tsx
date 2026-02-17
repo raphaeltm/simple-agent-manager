@@ -501,7 +501,7 @@ describe('Workspace page', () => {
       );
     });
 
-    expect(screen.getByRole('button', { name: /Worktree: feature\/auth/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Switch worktree \(feature\/auth\)/i })).toBeInTheDocument();
     expect(screen.getByTestId('location-probe').textContent).toContain(
       'worktree=%2Fworkspaces%2Frepo-wt-feature-auth'
     );
@@ -514,10 +514,10 @@ describe('Workspace page', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Worktree: feature\/auth/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Switch worktree \(feature\/auth\)/i })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Worktree: feature\/auth/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Switch worktree \(feature\/auth\)/i }));
     fireEvent.click(screen.getByRole('button', { name: /^main \(primary\)/i }));
 
     await waitFor(() => {
