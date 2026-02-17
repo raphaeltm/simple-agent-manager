@@ -66,6 +66,12 @@ export function useAutoScroll(options: UseAutoScrollOptions = {}): UseAutoScroll
   /**
    * Callback ref: sets up scroll listener + ResizeObserver + MutationObserver
    * when the element mounts, and tears them down when it unmounts.
+   *
+   * Memory optimization: Uses a single ResizeObserver on the scroll container
+   * itself (not individual children). Combined with a MutationObserver for
+   * childList changes, this detects both new messages and streaming content
+   * growth without creating per-child observers that accumulate over hundreds
+   * of conversation items.
    */
   const scrollRef = useCallback(
     (node: HTMLDivElement | null) => {
@@ -79,6 +85,19 @@ export function useAutoScroll(options: UseAutoScrollOptions = {}): UseAutoScroll
 
       if (!node) return;
 
+      // Coalesce rapid scroll-to-bottom requests into a single rAF
+      let rafPending = false;
+      const scheduleScrollToBottom = () => {
+        if (rafPending) return;
+        rafPending = true;
+        requestAnimationFrame(() => {
+          rafPending = false;
+          if (elementRef.current && isAtBottomRef.current) {
+            elementRef.current.scrollTop = elementRef.current.scrollHeight;
+          }
+        });
+      };
+
       // --- Scroll listener ---
       const handleScroll = () => {
         const atBottom = checkIsAtBottom(node);
@@ -88,42 +107,25 @@ export function useAutoScroll(options: UseAutoScrollOptions = {}): UseAutoScroll
 
       node.addEventListener('scroll', handleScroll, { passive: true });
 
-      // --- ResizeObserver for content growth ---
+      // --- ResizeObserver on the container (not individual children) ---
+      // Fires when the container's content dimensions change (streaming
+      // chunks expanding a message, new children added, etc.)
       const resizeObserver = new ResizeObserver(() => {
         if (isAtBottomRef.current) {
-          requestAnimationFrame(() => {
-            if (elementRef.current && isAtBottomRef.current) {
-              elementRef.current.scrollTop = elementRef.current.scrollHeight;
-            }
-          });
+          scheduleScrollToBottom();
         }
       });
 
-      // Observe existing children
-      for (const child of Array.from(node.children)) {
-        resizeObserver.observe(child);
-      }
+      resizeObserver.observe(node);
 
       // --- MutationObserver for new children ---
-      const mutationObserver = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-          for (const addedNode of Array.from(mutation.addedNodes)) {
-            if (addedNode instanceof Element) {
-              resizeObserver.observe(addedNode);
-            }
-          }
-        }
-
+      const mutationObserver = new MutationObserver(() => {
         if (isAtBottomRef.current) {
-          requestAnimationFrame(() => {
-            if (elementRef.current && isAtBottomRef.current) {
-              elementRef.current.scrollTop = elementRef.current.scrollHeight;
-            }
-          });
+          scheduleScrollToBottom();
         }
       });
 
-      mutationObserver.observe(node, { childList: true });
+      mutationObserver.observe(node, { childList: true, subtree: true });
 
       // Store cleanup
       cleanupRef.current = () => {

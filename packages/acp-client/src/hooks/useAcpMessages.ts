@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import type { AcpMessage } from './useAcpSession';
 import type { SlashCommand } from '../types';
 
@@ -107,14 +107,85 @@ export interface AcpMessagesHandle {
 // Hook implementation
 // =============================================================================
 
+/**
+ * Maximum number of conversation items retained. When exceeded, the oldest
+ * items are pruned. This prevents unbounded memory growth during long agent
+ * sessions that generate thousands of tool calls, messages, and thinking
+ * blocks — the primary cause of Chrome tab crashes.
+ */
+const MAX_CONVERSATION_ITEMS = 500;
+
+/**
+ * Maximum text length for a single agent message or thinking block.
+ * Extremely long streaming responses (e.g., dumping a large file) are
+ * truncated to prevent a single item from consuming excessive memory.
+ */
+const MAX_ITEM_TEXT_LENGTH = 512_000; // 512 KB
+
 let itemCounter = 0;
 function nextId(): string {
   return `item-${++itemCounter}-${Date.now()}`;
 }
 
 /**
+ * Enforce the item cap on an array. Drops oldest items when the cap is exceeded.
+ * Returns the same array reference if no pruning is needed.
+ */
+function enforceItemCap(items: ConversationItem[]): ConversationItem[] {
+  if (items.length <= MAX_CONVERSATION_ITEMS) return items;
+  return items.slice(items.length - MAX_CONVERSATION_ITEMS);
+}
+
+/**
+ * Update the last item in the array efficiently. When the last item matches
+ * the predicate, returns a new array with only the last element replaced —
+ * reuses the prefix via slice instead of spreading every element.
+ */
+function updateLastItem(
+  prev: ConversationItem[],
+  predicate: (item: ConversationItem) => boolean,
+  updater: (item: ConversationItem) => ConversationItem,
+  fallback: () => ConversationItem,
+): ConversationItem[] {
+  const last = prev[prev.length - 1];
+  if (last && predicate(last)) {
+    const result = prev.slice(0);
+    result[result.length - 1] = updater(last);
+    return result;
+  }
+  return enforceItemCap([...prev, fallback()]);
+}
+
+/**
+ * Finalize any active streaming items (agent_message.streaming → false,
+ * thinking.active → false). Only creates new objects for items that
+ * actually need updating — skips the rest.
+ */
+function finalizeStreamingItems(prev: ConversationItem[]): ConversationItem[] {
+  let changed = false;
+  const result = prev.map((item) => {
+    if (item.kind === 'agent_message' && item.streaming) {
+      changed = true;
+      return { ...item, streaming: false };
+    }
+    if (item.kind === 'thinking' && item.active) {
+      changed = true;
+      return { ...item, active: false };
+    }
+    return item;
+  });
+  return changed ? result : prev;
+}
+
+/**
  * Hook that processes ACP session update messages into a structured conversation.
  * Maps SessionNotification.Update variants to ConversationItem types.
+ *
+ * Memory safety:
+ * - Items are capped at MAX_CONVERSATION_ITEMS (oldest pruned)
+ * - Individual message text is capped at MAX_ITEM_TEXT_LENGTH
+ * - Streaming chunk updates reuse the array prefix to avoid O(n) copies
+ * - Tool call updates target only the matching item by index
  *
  * No client-side persistence — on reconnect, the ACP agent replays the full
  * conversation via LoadSession, which sends session/update notifications
@@ -124,6 +195,11 @@ export function useAcpMessages(): AcpMessagesHandle {
   const [items, setItems] = useState<ConversationItem[]>([]);
   const [usage, setUsage] = useState<TokenUsage>({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   const [availableCommands, setAvailableCommands] = useState<SlashCommand[]>([]);
+
+  // Track the last tool call index for efficient tool_call_update lookups.
+  // Most updates target the most recently added tool call, so searching
+  // backward from here avoids scanning the entire array.
+  const lastToolCallIndexRef = useRef(-1);
 
   const processMessage = useCallback((msg: AcpMessage) => {
     // Handle session notifications (method === 'session/update')
@@ -138,26 +214,40 @@ export function useAcpMessages(): AcpMessagesHandle {
         case 'agent_message_chunk': {
           const content = update as { content?: { type: string; text?: string } };
           const text = content.content?.type === 'text' ? (content.content.text ?? '') : '';
-          setItems((prev) => {
-            const last = prev[prev.length - 1];
-            if (last?.kind === 'agent_message' && last.streaming) {
-              return [...prev.slice(0, -1), { ...last, text: last.text + text }];
-            }
-            return [...prev, { kind: 'agent_message', id: nextId(), text, streaming: true, timestamp: now }];
-          });
+          setItems((prev) =>
+            updateLastItem(
+              prev,
+              (item) => item.kind === 'agent_message' && (item as AgentMessage).streaming,
+              (item) => {
+                const am = item as AgentMessage;
+                const newText = am.text.length + text.length > MAX_ITEM_TEXT_LENGTH
+                  ? am.text // Silently stop appending when cap reached
+                  : am.text + text;
+                return { ...am, text: newText };
+              },
+              () => ({ kind: 'agent_message' as const, id: nextId(), text, streaming: true, timestamp: now }),
+            ),
+          );
           break;
         }
 
         case 'agent_thought_chunk': {
           const content = update as { content?: { type: string; text?: string } };
           const text = content.content?.type === 'text' ? (content.content.text ?? '') : '';
-          setItems((prev) => {
-            const last = prev[prev.length - 1];
-            if (last?.kind === 'thinking' && last.active) {
-              return [...prev.slice(0, -1), { ...last, text: last.text + text }];
-            }
-            return [...prev, { kind: 'thinking', id: nextId(), text, active: true, timestamp: now }];
-          });
+          setItems((prev) =>
+            updateLastItem(
+              prev,
+              (item) => item.kind === 'thinking' && (item as ThinkingItem).active,
+              (item) => {
+                const ti = item as ThinkingItem;
+                const newText = ti.text.length + text.length > MAX_ITEM_TEXT_LENGTH
+                  ? ti.text
+                  : ti.text + text;
+                return { ...ti, text: newText };
+              },
+              () => ({ kind: 'thinking' as const, id: nextId(), text, active: true, timestamp: now }),
+            ),
+          );
           break;
         }
 
@@ -166,10 +256,9 @@ export function useAcpMessages(): AcpMessagesHandle {
           const content = update as { content?: { type: string; text?: string } };
           const text = content.content?.type === 'text' ? (content.content.text ?? '') : '';
           if (text) {
-            setItems((prev) => [
-              ...prev,
-              { kind: 'user_message', id: nextId(), text, timestamp: now },
-            ]);
+            setItems((prev) =>
+              enforceItemCap([...prev, { kind: 'user_message', id: nextId(), text, timestamp: now }]),
+            );
           }
           break;
         }
@@ -185,11 +274,7 @@ export function useAcpMessages(): AcpMessagesHandle {
           };
           // Finalize any streaming agent message or thinking block
           setItems((prev) => {
-            const finalized = prev.map((item) => {
-              if (item.kind === 'agent_message' && item.streaming) return { ...item, streaming: false };
-              if (item.kind === 'thinking' && item.active) return { ...item, active: false };
-              return item;
-            });
+            const finalized = finalizeStreamingItems(prev);
             const newItem: ToolCallItem = {
               kind: 'tool_call',
               id: nextId(),
@@ -201,7 +286,9 @@ export function useAcpMessages(): AcpMessagesHandle {
               locations: tc.locations ?? [],
               timestamp: now,
             };
-            return [...finalized, newItem];
+            const result = enforceItemCap([...finalized, newItem]);
+            lastToolCallIndexRef.current = result.length - 1;
+            return result;
           });
           break;
         }
@@ -213,19 +300,41 @@ export function useAcpMessages(): AcpMessagesHandle {
             content?: Array<{ type: string } & Record<string, unknown>> | null;
             title?: string | null;
           };
-          setItems((prev) =>
-            prev.map((item) => {
+          setItems((prev) => {
+            // Search backward from the last known tool call index for efficiency.
+            // Most tool_call_updates target the most recent tool call.
+            let targetIdx = -1;
+            const startIdx = Math.min(lastToolCallIndexRef.current, prev.length - 1);
+            for (let i = startIdx; i >= 0; i--) {
+              const item = prev[i]!;
               if (item.kind === 'tool_call' && item.toolCallId === tcu.toolCallId) {
-                return {
-                  ...item,
-                  status: (tcu.status as ToolCallItem['status']) ?? item.status,
-                  title: tcu.title ?? item.title,
-                  content: tcu.content ? tcu.content.map(mapToolCallContent) : item.content,
-                };
+                targetIdx = i;
+                break;
               }
-              return item;
-            })
-          );
+            }
+            // Fallback: search forward from startIdx+1 in case of pruning
+            if (targetIdx < 0) {
+              for (let i = startIdx + 1; i < prev.length; i++) {
+                const item = prev[i]!;
+                if (item.kind === 'tool_call' && item.toolCallId === tcu.toolCallId) {
+                  targetIdx = i;
+                  break;
+                }
+              }
+            }
+            if (targetIdx < 0) return prev; // Not found — skip
+
+            const target = prev[targetIdx] as ToolCallItem;
+            const updated: ToolCallItem = {
+              ...target,
+              status: (tcu.status as ToolCallItem['status']) ?? target.status,
+              title: tcu.title ?? target.title,
+              content: tcu.content ? tcu.content.map(mapToolCallContent) : target.content,
+            };
+            const result = prev.slice(0);
+            result[targetIdx] = updated;
+            return result;
+          });
           break;
         }
 
@@ -244,9 +353,11 @@ export function useAcpMessages(): AcpMessagesHandle {
               timestamp: now,
             };
             if (existing >= 0) {
-              return [...prev.slice(0, existing), planItem, ...prev.slice(existing + 1)];
+              const result = prev.slice(0);
+              result[existing] = planItem;
+              return result;
             }
-            return [...prev, planItem];
+            return enforceItemCap([...prev, planItem]);
           });
           break;
         }
@@ -274,10 +385,9 @@ export function useAcpMessages(): AcpMessagesHandle {
 
         default: {
           // Unknown/unsupported update type — render as raw fallback
-          setItems((prev) => [
-            ...prev,
-            { kind: 'raw_fallback', id: nextId(), data: update, timestamp: now },
-          ]);
+          setItems((prev) =>
+            enforceItemCap([...prev, { kind: 'raw_fallback', id: nextId(), data: update, timestamp: now }]),
+          );
           break;
         }
       }
@@ -289,13 +399,7 @@ export function useAcpMessages(): AcpMessagesHandle {
       const result = msg.result as { stopReason?: string; usage?: TokenUsage };
       if (result.stopReason) {
         // Finalize any streaming items
-        setItems((prev) =>
-          prev.map((item) => {
-            if (item.kind === 'agent_message' && item.streaming) return { ...item, streaming: false };
-            if (item.kind === 'thinking' && item.active) return { ...item, active: false };
-            return item;
-          })
-        );
+        setItems(finalizeStreamingItems);
         // Update token usage
         if (result.usage) {
           setUsage((prev) => ({
@@ -309,23 +413,25 @@ export function useAcpMessages(): AcpMessagesHandle {
   }, []);
 
   const addUserMessage = useCallback((text: string) => {
-    setItems((prev) => [...prev, {
+    setItems((prev) => enforceItemCap([...prev, {
       kind: 'user_message',
       id: nextId(),
       text,
       timestamp: Date.now(),
-    }]);
+    }]));
   }, []);
 
   const clear = useCallback(() => {
     setItems([]);
     setUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    lastToolCallIndexRef.current = -1;
   }, []);
 
   const prepareForReplay = useCallback(() => {
     setItems([]);
     setUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
     setAvailableCommands([]);
+    lastToolCallIndexRef.current = -1;
   }, []);
 
   return { items, usage, availableCommands, processMessage, addUserMessage, clear, prepareForReplay };
