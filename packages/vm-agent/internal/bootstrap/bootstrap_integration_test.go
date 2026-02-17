@@ -1314,20 +1314,21 @@ func TestIntegration_FullBootstrapFlow(t *testing.T) {
 	prepopulateVolume(t, workspaceID, repoDir, repoDirName)
 
 	cfg := &config.Config{
-		BootstrapToken:      bootstrapToken,
-		ControlPlaneURL:     server.URL,
-		WorkspaceID:         workspaceID,
-		Branch:              "main",
-		Repository:          "https://github.com/test/repo", // Needed for git credential helper
-		WorkspaceDir:        repoDir,
-		BootstrapStatePath:  filepath.Join(t.TempDir(), "bootstrap-state.json"),
-		BootstrapMaxWait:    30 * time.Second,
-		ContainerMode:       true,
-		ContainerLabelKey:   "devcontainer.local_folder",
-		ContainerLabelValue: repoDir,
-		ContainerUser:       "",
-		Port:                8080,
-		AdditionalFeatures:  config.DefaultAdditionalFeatures,
+		BootstrapToken:                bootstrapToken,
+		ControlPlaneURL:               server.URL,
+		WorkspaceID:                   workspaceID,
+		Branch:                        "main",
+		Repository:                    "https://github.com/test/repo", // Needed for git credential helper
+		WorkspaceDir:                  repoDir,
+		BootstrapStatePath:            filepath.Join(t.TempDir(), "bootstrap-state.json"),
+		BootstrapMaxWait:              30 * time.Second,
+		ContainerMode:                 true,
+		ContainerLabelKey:             "devcontainer.local_folder",
+		ContainerLabelValue:           repoDir,
+		ContainerUser:                 "",
+		Port:                          8080,
+		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
+		AdditionalFeatures:            config.DefaultAdditionalFeatures,
 	}
 
 	// Create a boot log reporter pointing at the mock control plane
