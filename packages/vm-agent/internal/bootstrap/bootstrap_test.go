@@ -369,7 +369,7 @@ func TestWriteDefaultDevcontainerConfig(t *testing.T) {
 		DefaultDevcontainerConfigPath: configPath,
 	}
 
-	gotPath, err := writeDefaultDevcontainerConfig(cfg)
+	gotPath, err := writeDefaultDevcontainerConfig(cfg, "")
 	if err != nil {
 		t.Fatalf("writeDefaultDevcontainerConfig returned error: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestWriteDefaultDevcontainerConfigWithRemoteUser(t *testing.T) {
 		DefaultDevcontainerRemoteUser: "vscode",
 	}
 
-	_, err := writeDefaultDevcontainerConfig(cfg)
+	_, err := writeDefaultDevcontainerConfig(cfg, "")
 	if err != nil {
 		t.Fatalf("writeDefaultDevcontainerConfig returned error: %v", err)
 	}
@@ -439,7 +439,7 @@ func TestWriteDefaultDevcontainerConfigCustomImage(t *testing.T) {
 		DefaultDevcontainerConfigPath: configPath,
 	}
 
-	_, err := writeDefaultDevcontainerConfig(cfg)
+	_, err := writeDefaultDevcontainerConfig(cfg, "")
 	if err != nil {
 		t.Fatalf("writeDefaultDevcontainerConfig returned error: %v", err)
 	}
@@ -466,7 +466,7 @@ func TestWriteDefaultDevcontainerConfigFallbackDefaults(t *testing.T) {
 		DefaultDevcontainerConfigPath: configPath,
 	}
 
-	_, err := writeDefaultDevcontainerConfig(cfg)
+	_, err := writeDefaultDevcontainerConfig(cfg, "")
 	if err != nil {
 		t.Fatalf("writeDefaultDevcontainerConfig returned error: %v", err)
 	}
@@ -478,6 +478,38 @@ func TestWriteDefaultDevcontainerConfigFallbackDefaults(t *testing.T) {
 
 	if !strings.Contains(string(data), config.DefaultDevcontainerImage) {
 		t.Fatalf("expected fallback to default image %q, got:\n%s", config.DefaultDevcontainerImage, string(data))
+	}
+}
+
+func TestWriteDefaultDevcontainerConfigWithVolume(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "volume-config.json")
+
+	cfg := &config.Config{
+		DefaultDevcontainerImage:      "mcr.microsoft.com/devcontainers/base:ubuntu",
+		DefaultDevcontainerConfigPath: configPath,
+		WorkspaceDir:                  "/workspace/my-repo",
+		Repository:                    "owner/my-repo",
+	}
+
+	_, err := writeDefaultDevcontainerConfig(cfg, "sam-ws-abc123")
+	if err != nil {
+		t.Fatalf("writeDefaultDevcontainerConfig returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read written config: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, `"workspaceMount": "source=sam-ws-abc123,target=/workspaces,type=volume"`) {
+		t.Fatalf("expected workspaceMount in config, got:\n%s", content)
+	}
+	if !strings.Contains(content, `"workspaceFolder": "/workspaces/my-repo"`) {
+		t.Fatalf("expected workspaceFolder in config, got:\n%s", content)
 	}
 }
 
@@ -547,39 +579,18 @@ func TestVolumeNameForWorkspace(t *testing.T) {
 func TestDevcontainerUpArgs(t *testing.T) {
 	t.Parallel()
 
-	t.Run("no volume no override", func(t *testing.T) {
+	t.Run("no override", func(t *testing.T) {
 		t.Parallel()
 		cfg := &config.Config{
 			WorkspaceDir: "/workspace/my-repo",
 			Repository:   "owner/my-repo",
 		}
-		args := devcontainerUpArgs(cfg, "", "")
+		args := devcontainerUpArgs(cfg, "")
 		if len(args) != 3 {
 			t.Fatalf("expected 3 args, got %d: %v", len(args), args)
 		}
 		if args[0] != "up" || args[1] != "--workspace-folder" || args[2] != "/workspace/my-repo" {
 			t.Fatalf("unexpected args: %v", args)
-		}
-	})
-
-	t.Run("with volume", func(t *testing.T) {
-		t.Parallel()
-		cfg := &config.Config{
-			WorkspaceDir: "/workspace/my-repo",
-			Repository:   "owner/my-repo",
-		}
-		args := devcontainerUpArgs(cfg, "sam-ws-abc123", "")
-		found := false
-		for i, a := range args {
-			if a == "--mount" && i+1 < len(args) {
-				if args[i+1] != "type=volume,source=sam-ws-abc123,target=/workspaces" {
-					t.Fatalf("unexpected --mount value: %s", args[i+1])
-				}
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("expected --mount flag in args: %v", args)
 		}
 	})
 
@@ -589,7 +600,7 @@ func TestDevcontainerUpArgs(t *testing.T) {
 			WorkspaceDir: "/workspace/my-repo",
 			Repository:   "owner/my-repo",
 		}
-		args := devcontainerUpArgs(cfg, "", "/etc/sam/default-devcontainer.json")
+		args := devcontainerUpArgs(cfg, "/etc/sam/default-devcontainer.json")
 		found := false
 		for i, a := range args {
 			if a == "--override-config" && i+1 < len(args) {
@@ -604,27 +615,49 @@ func TestDevcontainerUpArgs(t *testing.T) {
 		}
 	})
 
-	t.Run("with volume and override config", func(t *testing.T) {
+	t.Run("no --mount flag used", func(t *testing.T) {
+		// Volume mount settings should be in the override config via workspaceMount,
+		// NOT as a --mount CLI flag (which only adds supplementary mounts).
 		t.Parallel()
 		cfg := &config.Config{
 			WorkspaceDir: "/workspace/my-repo",
 			Repository:   "owner/my-repo",
 		}
-		args := devcontainerUpArgs(cfg, "sam-ws-abc123", "/etc/sam/default.json")
-		hasMount := false
-		hasOverride := false
+		args := devcontainerUpArgs(cfg, "/etc/sam/override.json")
 		for _, a := range args {
 			if a == "--mount" {
-				hasMount = true
+				t.Fatalf("devcontainerUpArgs should not generate --mount flag; use workspaceMount in config instead. Args: %v", args)
 			}
-			if a == "--override-config" {
-				hasOverride = true
-			}
-		}
-		if !hasMount || !hasOverride {
-			t.Fatalf("expected both --mount and --override-config in args: %v", args)
 		}
 	})
+}
+
+func TestWriteMountOverrideConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		WorkspaceDir: "/workspace/my-repo",
+		Repository:   "owner/my-repo",
+	}
+
+	path, err := writeMountOverrideConfig(cfg, "sam-ws-abc123")
+	if err != nil {
+		t.Fatalf("writeMountOverrideConfig returned error: %v", err)
+	}
+	defer os.Remove(path)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read mount override config: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, `"workspaceMount": "source=sam-ws-abc123,target=/workspaces,type=volume"`) {
+		t.Fatalf("expected workspaceMount in config, got:\n%s", content)
+	}
+	if !strings.Contains(content, `"workspaceFolder": "/workspaces/my-repo"`) {
+		t.Fatalf("expected workspaceFolder in config, got:\n%s", content)
+	}
 }
 
 func TestPrepareWorkspaceMarksReady(t *testing.T) {
