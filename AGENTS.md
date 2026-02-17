@@ -455,6 +455,7 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 - `POST /api/nodes/:id/stop` — Stop node
 - `DELETE /api/nodes/:id` — Delete node
 - `GET /api/nodes/:id/events` — List node events (proxied from VM Agent; vm-* DNS lacks SSL)
+- `GET /api/nodes/:id/system-info` — Full system info (proxied from VM Agent; CPU, memory, disk, Docker, versions)
 - `POST /api/nodes/:id/token` — Get node-scoped token for direct VM Agent access
 
 ### Workspace Management
@@ -693,6 +694,9 @@ See `apps/api/.env.example`:
 - `HETZNER_API_TIMEOUT_MS` - Timeout for Hetzner Cloud API calls in milliseconds (default: 30000)
 - `CF_API_TIMEOUT_MS` - Timeout for Cloudflare DNS API calls in milliseconds (default: 30000)
 - `NODE_AGENT_REQUEST_TIMEOUT_MS` - Timeout for Node Agent HTTP requests in milliseconds (default: 30000)
+- `SYSINFO_DOCKER_TIMEOUT` - VM Agent: timeout for Docker CLI commands during system info collection (default: 10s)
+- `SYSINFO_VERSION_TIMEOUT` - VM Agent: timeout for version-check commands (node, devcontainer) (default: 5s)
+- `SYSINFO_CACHE_TTL` - VM Agent: cache duration for system info results to avoid redundant collection (default: 5s)
 
 ## Testing
 
@@ -728,6 +732,7 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 - **Infra**: Pulumi, Wrangler, @devcontainers/cli, pnpm 9.0+, Cloudflare Pages
 
 ## Recent Changes
+- node-system-info: VM Agent sysinfo package collects system metrics from Linux procfs (`/proc/loadavg`, `/proc/meminfo`, `/proc/uptime`, `/proc/net/dev`) and Docker CLI (`docker stats`, `docker version`); two-tier collection: `CollectQuick()` (procfs only, microseconds) enriches heartbeat with `metrics: { cpuLoadAvg1, memoryPercent, diskPercent }`, `Collect()` (full, including Docker/versions) powers new `GET /system-info` endpoint; control plane stores heartbeat metrics in D1 `last_metrics` column, proxies full system info via `GET /api/nodes/:id/system-info`; Node detail page redesigned with composed section components (NodeOverviewSection, SystemResourcesSection, DockerSection, SoftwareSection, NodeWorkspacesSection, NodeEventsSection) replacing monolithic inline JSX; ResourceBar gauge with color-coded thresholds and `role="meter"` accessibility; Nodes list page enriched with MiniMetricBadge pills (load/mem/disk) and workspace count; configurable `SYSINFO_DOCKER_TIMEOUT`, `SYSINFO_VERSION_TIMEOUT`, `SYSINFO_CACHE_TTL`; build-time ldflags inject version/build date/Go version into agent binary
 - devcontainer-named-volumes: Replaced bind-mount devcontainer storage with named Docker volumes (`sam-ws-<workspaceId>`); host clone preserved for devcontainer CLI config discovery, then populated into volume via throwaway `alpine` container; `workspaceMount` property in override config replaces default bind-mount (NOT `--mount` CLI flag which only adds supplementary mounts); repos with own devcontainer config get mount-only override, repos without config get full default config with volume mount; eliminated permission normalization dance (`ensureWorkspaceWritablePreDevcontainer`, `ensureWorkspaceWritable`, `getContainerUserIDs`, `getContainerCurrentUserIDs` removed); workspace deletion now removes container and volume; `config.DeriveRepoDirName` exported for cross-package use
 - command-palette-search: Enhanced command palette (Cmd+K) with fuzzy file search and tab switching; VS Code-style camelCase-aware fuzzy matching (fuzzy-match.ts) with word boundary scoring, consecutive bonuses, and space-skipping; categorized results (Tabs, Files, Commands) with HighlightedText match visualization; lazy file index loading via new VM Agent `GET /files/find` endpoint (recursive flat file list with noise exclusion); filename-vs-path best-score matching; file results capped at 20; configurable FILE_FIND_TIMEOUT and FILE_FIND_MAX_ENTRIES
 - tab-reorder-rename: Unified tab ordering, rename, and drag-and-drop reordering for workspace tab strip; useTabOrder hook with localStorage persistence replaces hardcoded terminal-first/chat-second ordering; new tabs always appear rightmost; extracted WorkspaceTabStrip component from Workspace.tsx inline JSX; double-click to rename (desktop), long-press to rename (mobile); PATCH /api/workspaces/:id/agent-sessions/:sessionId endpoint for chat tab rename; @dnd-kit/core + @dnd-kit/sortable for drag-and-drop with PointerSensor (distance:5) and KeyboardSensor; DragOverlay ghost tab; full accessibility with custom screen reader announcements; UpdateAgentSessionRequest shared type

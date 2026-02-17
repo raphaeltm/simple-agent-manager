@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   listNodeEvents: vi.fn(),
   stopNode: vi.fn(),
   deleteNode: vi.fn(),
+  getNodeSystemInfo: vi.fn(),
 }));
 
 let confirmSpy: ReturnType<typeof vi.spyOn>;
@@ -18,6 +19,11 @@ vi.mock('../../../src/lib/api', () => ({
   listNodeEvents: mocks.listNodeEvents,
   stopNode: mocks.stopNode,
   deleteNode: mocks.deleteNode,
+  getNodeSystemInfo: mocks.getNodeSystemInfo,
+}));
+
+vi.mock('../../../src/hooks/useNodeSystemInfo', () => ({
+  useNodeSystemInfo: () => ({ systemInfo: null, loading: false, error: null }),
 }));
 
 vi.mock('../../../src/components/UserMenu', () => ({
@@ -162,7 +168,7 @@ describe('Node page', () => {
 
     // Should show the events error with retry button
     await waitFor(() => {
-      expect(screen.getByText('Failed to load events')).toBeInTheDocument();
+      expect(screen.getByText(/Failed to load events/)).toBeInTheDocument();
     });
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
 
@@ -187,7 +193,7 @@ describe('Node page', () => {
     await waitFor(() => {
       expect(screen.getByText('Node started')).toBeInTheDocument();
     });
-    expect(screen.queryByText('Failed to load events')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Failed to load events/)).not.toBeInTheDocument();
   });
 
   it('optimistically shows node as stopping when stop is clicked', async () => {
@@ -201,9 +207,9 @@ describe('Node page', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /stop node/i }));
 
-    // Optimistic: node status should change to stopping, button should be disabled
+    // Optimistic: stop button should show "Stopping..." text
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /stopping/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^stopping\.\.\.$/i })).toBeInTheDocument();
     });
   });
 

@@ -15,6 +15,7 @@ import { signCallbackToken, signNodeManagementToken, verifyCallbackToken } from 
 import { recordNodeRoutingMetric } from '../services/telemetry';
 import {
   createWorkspaceOnNode,
+  getNodeSystemInfoFromNode,
   listNodeEventsOnNode,
   stopWorkspaceOnNode,
 } from '../services/node-agent';
@@ -56,6 +57,15 @@ function deriveHealthStatus(node: schema.Node, now: number): NodeHealthStatus {
 }
 
 function toNodeResponse(node: schema.Node): NodeResponse {
+  let lastMetrics: NodeResponse['lastMetrics'] = null;
+  if (node.lastMetrics) {
+    try {
+      lastMetrics = JSON.parse(node.lastMetrics);
+    } catch {
+      // Ignore malformed JSON in lastMetrics
+    }
+  }
+
   return {
     id: node.id,
     name: node.name,
@@ -66,6 +76,7 @@ function toNodeResponse(node: schema.Node): NodeResponse {
     ipAddress: node.ipAddress,
     lastHeartbeatAt: node.lastHeartbeatAt,
     heartbeatStaleAfterSeconds: node.heartbeatStaleAfterSeconds,
+    lastMetrics,
     errorMessage: node.errorMessage,
     createdAt: node.createdAt,
     updatedAt: node.updatedAt,
@@ -304,6 +315,33 @@ nodesRoutes.get('/:id/events', async (c) => {
 });
 
 /**
+ * GET /:id/system-info — Proxy system info from the VM Agent.
+ * Returns CPU, memory, disk, Docker, software versions, and agent info.
+ * Only available when the node is running.
+ */
+nodesRoutes.get('/:id/system-info', async (c) => {
+  const nodeId = c.req.param('id');
+  const userId = getUserId(c);
+  const node = await requireNodeOwnership(c, nodeId);
+
+  if (!node) {
+    throw errors.notFound('Node');
+  }
+
+  if (node.status !== 'running') {
+    return c.json({ error: 'NODE_NOT_RUNNING', message: 'System info unavailable when node is not running' }, 400);
+  }
+
+  try {
+    const result = await getNodeSystemInfoFromNode(nodeId, c.env, userId);
+    return c.json(result);
+  } catch {
+    // Node agent may be unreachable — return 503
+    return c.json({ error: 'UNAVAILABLE', message: 'Could not reach node agent' }, 503);
+  }
+});
+
+/**
  * POST /:id/token — Issue a node-scoped management token for direct VM Agent access.
  * The browser uses this token to call the VM Agent directly for node-level data
  * (events, health, etc.) without proxying through the control plane.
@@ -394,13 +432,29 @@ nodesRoutes.post('/:id/heartbeat', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date().toISOString();
 
+  const body = await c.req.json<{
+    activeWorkspaces?: number;
+    nodeId?: string;
+    metrics?: {
+      cpuLoadAvg1?: number;
+      memoryPercent?: number;
+      diskPercent?: number;
+    };
+  }>();
+
+  const updatePayload: Record<string, unknown> = {
+    lastHeartbeatAt: now,
+    healthStatus: 'healthy',
+    updatedAt: now,
+  };
+
+  if (body.metrics) {
+    updatePayload.lastMetrics = JSON.stringify(body.metrics);
+  }
+
   await db
     .update(schema.nodes)
-    .set({
-      lastHeartbeatAt: now,
-      healthStatus: 'healthy',
-      updatedAt: now,
-    })
+    .set(updatePayload)
     .where(eq(schema.nodes.id, nodeId));
 
   const rows = await db

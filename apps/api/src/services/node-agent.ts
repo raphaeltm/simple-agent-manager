@@ -283,6 +283,17 @@ export async function listNodeEventsOnNode(
   });
 }
 
+export async function getNodeSystemInfoFromNode(
+  nodeId: string,
+  env: Env,
+  userId: string
+): Promise<unknown> {
+  return nodeAgentRequest(nodeId, env, '/system-info', {
+    method: 'GET',
+    userId,
+  });
+}
+
 export async function rebuildWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,
