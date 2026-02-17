@@ -100,6 +100,11 @@ type SessionHost struct {
 
 	// Prompt serialization — only one prompt at a time
 	promptMu sync.Mutex
+	// promptCancelMu guards promptCancel independently from promptMu so that
+	// CancelPrompt() can read it without waiting for Prompt() to finish.
+	promptCancelMu sync.Mutex
+	// promptCancel cancels the in-flight Prompt() context. Protected by promptCancelMu.
+	promptCancel context.CancelFunc
 
 	// Stderr collection
 	stderrMu  sync.Mutex
@@ -384,7 +389,13 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 
 	// Serialize prompts — only one at a time
 	h.promptMu.Lock()
-	defer h.promptMu.Unlock()
+
+	// Create a cancellable context for this prompt. CancelPrompt() can
+	// invoke promptCancel to abort the blocking Prompt() call.
+	promptCtx, promptCancel := context.WithCancel(ctx)
+	h.promptCancelMu.Lock()
+	h.promptCancel = promptCancel
+	h.promptCancelMu.Unlock()
 
 	// Update status to prompting
 	h.setStatus(HostPrompting, "")
@@ -399,10 +410,17 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 	})
 
 	// Prompt() is blocking — session/update notifications flow via sessionHostClient.SessionUpdate()
-	resp, err := acpConn.Prompt(ctx, acpsdk.PromptRequest{
+	resp, err := acpConn.Prompt(promptCtx, acpsdk.PromptRequest{
 		SessionId: sessionID,
 		Prompt:    blocks,
 	})
+
+	// Clean up cancel state and release the prompt lock
+	h.promptCancelMu.Lock()
+	h.promptCancel = nil
+	h.promptCancelMu.Unlock()
+	promptCancel() // release context resources
+	h.promptMu.Unlock()
 
 	// Update status back to ready
 	h.setStatus(HostReady, "")
@@ -435,6 +453,25 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 	}
 	data, _ := json.Marshal(response)
 	h.broadcastMessage(data)
+}
+
+// CancelPrompt cancels the currently running Prompt() call, if any.
+// This is safe to call from any goroutine. If no prompt is in flight,
+// it's a no-op. The cancel function is guarded by promptCancelMu
+// (separate from promptMu) so we never deadlock with HandlePrompt.
+func (h *SessionHost) CancelPrompt() {
+	h.promptCancelMu.Lock()
+	cancelFn := h.promptCancel
+	h.promptCancelMu.Unlock()
+
+	if cancelFn == nil {
+		log.Printf("CancelPrompt: no prompt in flight")
+		return
+	}
+
+	log.Printf("CancelPrompt: cancelling in-flight prompt")
+	h.reportLifecycle("info", "Prompt cancel requested", nil)
+	cancelFn()
 }
 
 // ForwardToAgent sends a raw message to the agent's stdin.

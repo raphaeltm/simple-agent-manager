@@ -218,6 +218,149 @@ describe('useAcpSession visibilitychange reconnection', () => {
   });
 });
 
+describe('useAcpSession onPrepareForReplay callback', () => {
+  it('calls onPrepareForReplay synchronously when session_state has replayCount > 0', async () => {
+    const onPrepareForReplay = vi.fn();
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+      onPrepareForReplay,
+    }));
+
+    const ws = MockWebSocket.instances[0]!;
+    act(() => {
+      ws.emitOpen();
+      ws.emitMessage({
+        type: 'session_state',
+        status: 'ready',
+        agentType: 'claude-code',
+        replayCount: 5,
+      });
+    });
+
+    expect(onPrepareForReplay).toHaveBeenCalledTimes(1);
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('replaying');
+      expect(result.current.replaying).toBe(true);
+    });
+  });
+
+  it('does NOT call onPrepareForReplay when replayCount is 0', async () => {
+    const onPrepareForReplay = vi.fn();
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+      onPrepareForReplay,
+    }));
+
+    const ws = MockWebSocket.instances[0]!;
+    act(() => {
+      ws.emitOpen();
+      ws.emitMessage({
+        type: 'session_state',
+        status: 'ready',
+        agentType: 'claude-code',
+        replayCount: 0,
+      });
+    });
+
+    expect(onPrepareForReplay).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('ready');
+    });
+  });
+});
+
+describe('useAcpSession prompt state restoration after replay', () => {
+  it('transitions to prompting after replay when server status was prompting', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws = MockWebSocket.instances[0]!;
+
+    // Server reports status=prompting with replay messages
+    act(() => {
+      ws.emitOpen();
+      ws.emitMessage({
+        type: 'session_state',
+        status: 'prompting',
+        agentType: 'claude-code',
+        replayCount: 3,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('replaying');
+    });
+
+    // Simulate replay messages (just ACP JSON-RPC, not tested here)
+    // Then replay_complete arrives
+    act(() => {
+      ws.emitMessage({ type: 'session_replay_complete' });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('prompting');
+      expect(result.current.replaying).toBe(false);
+    });
+  });
+
+  it('transitions to ready after replay when server status was ready', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws = MockWebSocket.instances[0]!;
+
+    act(() => {
+      ws.emitOpen();
+      ws.emitMessage({
+        type: 'session_state',
+        status: 'ready',
+        agentType: 'claude-code',
+        replayCount: 2,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('replaying');
+    });
+
+    act(() => {
+      ws.emitMessage({ type: 'session_replay_complete' });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('ready');
+      expect(result.current.replaying).toBe(false);
+    });
+  });
+
+  it('enters prompting directly when server reports prompting with no replay', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws = MockWebSocket.instances[0]!;
+
+    act(() => {
+      ws.emitOpen();
+      ws.emitMessage({
+        type: 'session_state',
+        status: 'prompting',
+        agentType: 'claude-code',
+        replayCount: 0,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('prompting');
+      expect(result.current.replaying).toBe(false);
+    });
+  });
+});
+
 describe('useAcpSession agentType reset on reconnect', () => {
   it('clears agentType to null when WebSocket opens (Phase 1 hang fix)', async () => {
     const { result } = renderHook(() => useAcpSession({
