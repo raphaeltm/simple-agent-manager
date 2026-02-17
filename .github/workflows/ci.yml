@@ -223,3 +223,96 @@ jobs:
       - name: Run VM Agent integration tests
         working-directory: packages/vm-agent
         run: go test -v -tags integration -timeout 15m ./internal/bootstrap/ ./internal/acp/
+
+  devcontainer:
+    name: Devcontainer Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install devcontainer CLI
+        run: npm install -g @devcontainers/cli
+
+      - name: Validate devcontainer.json syntax
+        run: |
+          # devcontainer.json supports JSONC (comments + trailing commas)
+          # Use node to parse it since JSON.parse doesn't handle comments
+          node -e "
+            const fs = require('fs');
+            const raw = fs.readFileSync('.devcontainer/devcontainer.json', 'utf8');
+            // Strip single-line comments and trailing commas before closing braces/brackets
+            const stripped = raw
+              .replace(/\/\/.*$/gm, '')
+              .replace(/,(\s*[}\]])/g, '\$1');
+            JSON.parse(stripped);
+            console.log('devcontainer.json syntax: OK');
+          "
+
+      - name: Build devcontainer image
+        run: devcontainer build --workspace-folder .
+
+      - name: Start devcontainer and verify tools
+        run: |
+          # Start the container (skip postCreateCommand to avoid installing
+          # external tools like Claude Code that aren't needed for validation)
+          set -e
+
+          echo "=== Starting devcontainer ==="
+          OUTPUT=$(devcontainer up \
+            --workspace-folder . \
+            --skip-post-create)
+          echo "$OUTPUT"
+
+          # Extract container ID from JSON output
+          CONTAINER_ID=$(echo "$OUTPUT" | jq -r '.containerId // empty' 2>/dev/null || true)
+          if [ -z "$CONTAINER_ID" ]; then
+            echo "Error: Could not extract container ID from devcontainer up output"
+            exit 1
+          fi
+          echo "Container ID: $CONTAINER_ID"
+
+          echo ""
+          echo "=== Verifying required tools ==="
+
+          # Run verification inside the container
+          devcontainer exec --workspace-folder . bash -c '
+            set -e
+            FAIL=0
+
+            check() {
+              local name="$1"
+              shift
+              if "$@" > /dev/null 2>&1; then
+                echo "OK: $name"
+              else
+                echo "FAIL: $name"
+                FAIL=1
+              fi
+            }
+
+            check "Node.js"     node --version
+            check "npm"         npm --version
+            check "Go"          go version
+            check "Docker"      docker --version
+            check "GitHub CLI"  gh --version
+            check "git"         git --version
+            check "curl"        curl --version
+            check "jq"          jq --version
+
+            echo ""
+            echo "--- Versions ---"
+            echo "Node.js: $(node --version)"
+            echo "Go:      $(go version | cut -d" " -f3)"
+            echo "Docker:  $(docker --version | cut -d" " -f3 | tr -d ",")"
+            echo "gh:      $(gh --version | head -1 | cut -d" " -f3)"
+
+            exit $FAIL
+          '
+
+          echo ""
+          echo "=== Devcontainer validation passed ==="
