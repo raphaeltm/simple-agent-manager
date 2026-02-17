@@ -7,7 +7,7 @@ import (
 
 func TestCreate(t *testing.T) {
 	m := NewManager()
-	s, idem, err := m.Create("ws1", "s1", "Chat 1", "")
+	s, idem, err := m.Create("ws1", "s1", "Chat 1", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -21,11 +21,11 @@ func TestCreate(t *testing.T) {
 
 func TestCreateIdempotency(t *testing.T) {
 	m := NewManager()
-	s1, _, err := m.Create("ws1", "s1", "Chat 1", "key1")
+	s1, _, err := m.Create("ws1", "s1", "Chat 1", "key1", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	s2, idem, err := m.Create("ws1", "s2", "Chat 2", "key1")
+	s2, idem, err := m.Create("ws1", "s2", "Chat 2", "key1", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -39,11 +39,11 @@ func TestCreateIdempotency(t *testing.T) {
 
 func TestCreateDuplicate(t *testing.T) {
 	m := NewManager()
-	_, _, err := m.Create("ws1", "s1", "Chat 1", "")
+	_, _, err := m.Create("ws1", "s1", "Chat 1", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	_, _, err = m.Create("ws1", "s1", "Chat 2", "")
+	_, _, err = m.Create("ws1", "s1", "Chat 2", "", "")
 	if err == nil {
 		t.Fatal("expected error for duplicate session")
 	}
@@ -53,7 +53,7 @@ func TestListSortedOldestFirst(t *testing.T) {
 	m := NewManager()
 
 	// Create sessions with explicit time gaps
-	s1, _, _ := m.Create("ws1", "s1", "Chat 1", "")
+	s1, _, _ := m.Create("ws1", "s1", "Chat 1", "", "")
 	_ = s1
 
 	// Manually set creation times to ensure deterministic ordering
@@ -66,14 +66,14 @@ func TestListSortedOldestFirst(t *testing.T) {
 	ws["s1"] = sess1
 	m.mu.Unlock()
 
-	m.Create("ws1", "s2", "Chat 2", "")
+	m.Create("ws1", "s2", "Chat 2", "", "")
 	m.mu.Lock()
 	sess2 := m.workspaceSessions["ws1"]["s2"]
 	sess2.CreatedAt = now.Add(-1 * time.Second)
 	m.workspaceSessions["ws1"]["s2"] = sess2
 	m.mu.Unlock()
 
-	m.Create("ws1", "s3", "Chat 3", "")
+	m.Create("ws1", "s3", "Chat 3", "", "")
 	m.mu.Lock()
 	sess3 := m.workspaceSessions["ws1"]["s3"]
 	sess3.CreatedAt = now
@@ -107,7 +107,7 @@ func TestListEmptyWorkspace(t *testing.T) {
 
 func TestStop(t *testing.T) {
 	m := NewManager()
-	m.Create("ws1", "s1", "Chat 1", "")
+	m.Create("ws1", "s1", "Chat 1", "", "")
 
 	stopped, err := m.Stop("ws1", "s1")
 	if err != nil {
@@ -123,7 +123,7 @@ func TestStop(t *testing.T) {
 
 func TestStopIdempotent(t *testing.T) {
 	m := NewManager()
-	m.Create("ws1", "s1", "Chat 1", "")
+	m.Create("ws1", "s1", "Chat 1", "", "")
 	m.Stop("ws1", "s1")
 
 	// Stopping again should return same result without error
@@ -138,7 +138,7 @@ func TestStopIdempotent(t *testing.T) {
 
 func TestUpdateAcpSessionID(t *testing.T) {
 	m := NewManager()
-	m.Create("ws1", "s1", "Chat 1", "")
+	m.Create("ws1", "s1", "Chat 1", "", "")
 
 	err := m.UpdateAcpSessionID("ws1", "s1", "acp-session-abc123", "claude-code")
 	if err != nil {
@@ -167,7 +167,7 @@ func TestUpdateAcpSessionIDNotFound(t *testing.T) {
 	}
 
 	// Non-existent session
-	m.Create("ws1", "s1", "Chat 1", "")
+	m.Create("ws1", "s1", "Chat 1", "", "")
 	err = m.UpdateAcpSessionID("ws1", "s-nonexistent", "acp-123", "claude-code")
 	if err == nil {
 		t.Fatal("expected error for non-existent session")
@@ -176,7 +176,7 @@ func TestUpdateAcpSessionIDNotFound(t *testing.T) {
 
 func TestRemoveWorkspace(t *testing.T) {
 	m := NewManager()
-	m.Create("ws1", "s1", "Chat 1", "")
+	m.Create("ws1", "s1", "Chat 1", "", "")
 	m.RemoveWorkspace("ws1")
 
 	sessions := m.List("ws1")

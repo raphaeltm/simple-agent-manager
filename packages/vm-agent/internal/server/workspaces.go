@@ -482,7 +482,7 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	}
 
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	session, idempotentHit, err := s.agentSessions.Create(workspaceID, strings.TrimSpace(body.SessionID), strings.TrimSpace(body.Label), idempotencyKey)
+	session, idempotentHit, err := s.agentSessions.Create(workspaceID, strings.TrimSpace(body.SessionID), strings.TrimSpace(body.Label), idempotencyKey, "")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

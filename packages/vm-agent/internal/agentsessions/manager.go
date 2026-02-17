@@ -22,6 +22,7 @@ type Session struct {
 	Label        string     `json:"label,omitempty"`
 	AgentType    string     `json:"agentType,omitempty"`
 	AcpSessionID string     `json:"acpSessionId,omitempty"`
+	WorktreePath string     `json:"worktreePath,omitempty"`
 	CreatedAt    time.Time  `json:"createdAt"`
 	UpdatedAt    time.Time  `json:"updatedAt"`
 	StoppedAt    *time.Time `json:"stoppedAt,omitempty"`
@@ -41,7 +42,7 @@ func NewManager() *Manager {
 	}
 }
 
-func (m *Manager) Create(workspaceID, sessionID, label, idempotencyKey string) (Session, bool, error) {
+func (m *Manager) Create(workspaceID, sessionID, label, idempotencyKey, worktreePath string) (Session, bool, error) {
 	if workspaceID == "" {
 		return Session{}, false, fmt.Errorf("workspace ID is required")
 	}
@@ -72,12 +73,13 @@ func (m *Manager) Create(workspaceID, sessionID, label, idempotencyKey string) (
 
 	now := time.Now().UTC()
 	session := Session{
-		ID:          sessionID,
-		WorkspaceID: workspaceID,
-		Status:      StatusRunning,
-		Label:       label,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:           sessionID,
+		WorkspaceID:  workspaceID,
+		Status:       StatusRunning,
+		Label:        label,
+		WorktreePath: worktreePath,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 	m.workspaceSessions[workspaceID][sessionID] = session
 	if idempotencyKey != "" {

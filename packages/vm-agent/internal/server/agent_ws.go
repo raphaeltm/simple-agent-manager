@@ -57,7 +57,8 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 
 	session, exists := s.agentSessions.Get(workspaceID, requestedSessionID)
 	if !exists {
-		created, _, err := s.agentSessions.Create(workspaceID, requestedSessionID, "", idempotencyKey)
+		worktreePath := strings.TrimSpace(r.URL.Query().Get("worktree"))
+		created, _, err := s.agentSessions.Create(workspaceID, requestedSessionID, "", idempotencyKey, worktreePath)
 		if err != nil {
 			writeSessionError(w, http.StatusConflict, "session_create_failed", err.Error())
 			return

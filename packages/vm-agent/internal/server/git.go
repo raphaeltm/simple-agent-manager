@@ -54,7 +54,7 @@ func (s *Server) handleGitStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
+	containerID, primaryWorkDir, user, err := s.resolveContainerForWorkspace(workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -62,6 +62,11 @@ func (s *Server) handleGitStatus(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), s.config.GitExecTimeout)
 	defer cancel()
+
+	workDir, ok := s.resolveWorktreeWorkDir(ctx, r, w, workspaceID, containerID, user, primaryWorkDir)
+	if !ok {
+		return
+	}
 
 	stdout, _, err := s.execInContainer(ctx, containerID, user, workDir, "git", "status", "--porcelain=v1")
 	if err != nil {
@@ -102,7 +107,7 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 
 	staged := r.URL.Query().Get("staged") == "true"
 
-	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
+	containerID, primaryWorkDir, user, err := s.resolveContainerForWorkspace(workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -110,6 +115,11 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), s.config.GitExecTimeout)
 	defer cancel()
+
+	workDir, ok := s.resolveWorktreeWorkDir(ctx, r, w, workspaceID, containerID, user, primaryWorkDir)
+	if !ok {
+		return
+	}
 
 	var diff string
 	if staged {
@@ -161,7 +171,7 @@ func (s *Server) handleGitFile(w http.ResponseWriter, r *http.Request) {
 
 	ref := r.URL.Query().Get("ref")
 
-	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
+	containerID, primaryWorkDir, user, err := s.resolveContainerForWorkspace(workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -169,6 +179,11 @@ func (s *Server) handleGitFile(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), s.config.GitExecTimeout)
 	defer cancel()
+
+	workDir, ok := s.resolveWorktreeWorkDir(ctx, r, w, workspaceID, containerID, user, primaryWorkDir)
+	if !ok {
+		return
+	}
 
 	var content string
 	if ref != "" {

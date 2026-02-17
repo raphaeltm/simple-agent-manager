@@ -253,10 +253,12 @@ export interface AgentSession {
   stoppedAt?: string | null;
   errorMessage?: string | null;
   label?: string | null;
+  worktreePath?: string | null;
 }
 
 export interface CreateAgentSessionRequest {
   label?: string;
+  worktreePath?: string;
 }
 
 export interface UpdateAgentSessionRequest {
@@ -385,4 +387,41 @@ export interface SaveAgentSettingsRequest {
   allowedTools?: string[] | null;
   deniedTools?: string[] | null;
   additionalEnv?: Record<string, string> | null;
+}
+
+// =============================================================================
+// Worktree
+// =============================================================================
+
+/** Git worktree information */
+export interface WorktreeInfo {
+  path: string;
+  branch: string | null;
+  headCommit: string;
+  isPrimary: boolean;
+  isDirty: boolean;
+  dirtyFileCount: number;
+}
+
+/** Request to create a new worktree */
+export interface WorktreeCreateRequest {
+  branch: string;
+  baseBranch?: string;
+  createBranch?: boolean;
+}
+
+/** Response from list worktrees */
+export interface WorktreeListResponse {
+  worktrees: WorktreeInfo[];
+}
+
+/** Response from create worktree */
+export interface WorktreeCreateResponse {
+  worktree: WorktreeInfo;
+}
+
+/** Response from remove worktree */
+export interface WorktreeRemoveResponse {
+  removed: string;
+  stoppedSessions: string[];
 }

@@ -66,6 +66,9 @@ export const DEFAULT_MAX_WORKSPACES_PER_NODE = 10;
 /** Default max agent sessions per workspace. Override via MAX_AGENT_SESSIONS_PER_WORKSPACE env var. */
 export const DEFAULT_MAX_AGENT_SESSIONS_PER_WORKSPACE = 10;
 
+/** Default max worktrees per workspace. Override via MAX_WORKTREES_PER_WORKSPACE env var. */
+export const DEFAULT_MAX_WORKTREES_PER_WORKSPACE = 10;
+
 /** Default node heartbeat staleness threshold in seconds. Override via NODE_HEARTBEAT_STALE_SECONDS env var. */
 export const DEFAULT_NODE_HEARTBEAT_STALE_SECONDS = 180;
 

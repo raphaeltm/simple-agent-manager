@@ -53,9 +53,15 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve container
-	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
+	containerID, primaryWorkDir, user, err := s.resolveContainerForWorkspace(workspaceID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	ctx := r.Context()
+	workDir, ok := s.resolveWorktreeWorkDir(ctx, r, w, workspaceID, containerID, user, primaryWorkDir)
+	if !ok {
 		return
 	}
 
@@ -119,9 +125,15 @@ func (s *Server) handleFileFind(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
+	containerID, primaryWorkDir, user, err := s.resolveContainerForWorkspace(workspaceID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	ctx := r.Context()
+	workDir, ok := s.resolveWorktreeWorkDir(ctx, r, w, workspaceID, containerID, user, primaryWorkDir)
+	if !ok {
 		return
 	}
 

@@ -138,6 +138,11 @@ type Config struct {
 	ErrorReportMaxBatchSize  int           // Immediate flush threshold (default: 10)
 	ErrorReportMaxQueueSize  int           // Max queued entries before dropping (default: 100)
 	ErrorReportHTTPTimeout   time.Duration // HTTP POST timeout (default: 10s)
+
+	// Worktree settings - configurable per constitution principle XI
+	MaxWorktreesPerWorkspace int           // Max worktrees per workspace (default: 10)
+	WorktreeCacheTTL         time.Duration // Cache TTL for worktree list validation (default: 30s)
+	WorktreeExecTimeout      time.Duration // Timeout for git worktree commands (default: 30s)
 }
 
 // Load reads configuration from environment variables.
@@ -266,6 +271,11 @@ func Load() (*Config, error) {
 		ErrorReportMaxBatchSize:  getEnvInt("ERROR_REPORT_MAX_BATCH_SIZE", 10),
 		ErrorReportMaxQueueSize:  getEnvInt("ERROR_REPORT_MAX_QUEUE_SIZE", 100),
 		ErrorReportHTTPTimeout:   getEnvDuration("ERROR_REPORT_HTTP_TIMEOUT", 10*time.Second),
+
+		// Worktree settings - configurable per constitution principle XI
+		MaxWorktreesPerWorkspace: getEnvInt("MAX_WORKTREES_PER_WORKSPACE", 10),
+		WorktreeCacheTTL:         getEnvDuration("WORKTREE_CACHE_TTL", 30*time.Second),
+		WorktreeExecTimeout:      getEnvDuration("WORKTREE_EXEC_TIMEOUT", 30*time.Second),
 	}
 
 	// Validate required fields

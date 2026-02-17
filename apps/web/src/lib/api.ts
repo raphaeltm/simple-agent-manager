@@ -20,6 +20,11 @@ import type {
   WorkspaceTab,
   AgentSettingsResponse,
   SaveAgentSettingsRequest,
+  WorktreeInfo,
+  WorktreeCreateRequest,
+  WorktreeListResponse,
+  WorktreeCreateResponse,
+  WorktreeRemoveResponse,
 } from '@simple-agent-manager/shared';
 
 // In production, VITE_API_URL must be explicitly set
@@ -542,4 +547,82 @@ export async function getFileIndex(
   }
   const data = (await res.json()) as { files: string[] };
   return data.files;
+}
+
+// =============================================================================
+// Worktree Management (direct VM Agent calls via ws-{id} subdomain)
+// =============================================================================
+
+/**
+ * List all git worktrees for a workspace.
+ */
+export async function listWorktrees(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string
+): Promise<WorktreeInfo[]> {
+  const params = new URLSearchParams({ token });
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/worktrees?${params.toString()}`;
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`List worktrees failed: ${text}`);
+  }
+  const data = (await res.json()) as WorktreeListResponse;
+  return data.worktrees;
+}
+
+/**
+ * Create a new worktree for a workspace.
+ */
+export async function createWorktree(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string,
+  req: WorktreeCreateRequest
+): Promise<WorktreeCreateResponse> {
+  const params = new URLSearchParams({ token });
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/worktrees?${params.toString()}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as Record<string, string>;
+    throw new ApiClientError(
+      data.error || 'WORKTREE_CREATE_FAILED',
+      data.message || 'Failed to create worktree',
+      res.status
+    );
+  }
+  return res.json() as Promise<WorktreeCreateResponse>;
+}
+
+/**
+ * Remove a worktree from a workspace.
+ */
+export async function removeWorktree(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string,
+  path: string,
+  force = false
+): Promise<WorktreeRemoveResponse> {
+  const params = new URLSearchParams({ token, path, force: String(force) });
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/worktrees?${params.toString()}`;
+  const res = await fetch(url, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as Record<string, string>;
+    throw new ApiClientError(
+      data.error || 'WORKTREE_REMOVE_FAILED',
+      data.message || 'Failed to remove worktree',
+      res.status
+    );
+  }
+  return res.json() as Promise<WorktreeRemoveResponse>;
 }

@@ -47,7 +47,7 @@ func TestStopAllWorkspacesAndSessions(t *testing.T) {
 	})
 
 	sessionManager := agentsessions.NewManager()
-	if _, _, err := sessionManager.Create("ws-1", "sess-1", "Session 1", ""); err != nil {
+	if _, _, err := sessionManager.Create("ws-1", "sess-1", "Session 1", "", ""); err != nil {
 		t.Fatalf("create agent session: %v", err)
 	}
 

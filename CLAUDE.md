@@ -726,6 +726,8 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 - **VM Agent**: Go 1.22+, creack/pty, gorilla/websocket, golang-jwt, modernc.org/sqlite
 - **Storage**: Cloudflare D1 (SQLite), KV (sessions/tokens/boot logs), R2 (binaries/Pulumi state)
 - **Infra**: Pulumi, Wrangler, @devcontainers/cli, pnpm 9.0+, Cloudflare Pages
+- TypeScript 5.x (API, Web, Shared), Go 1.22+ (VM Agent) + Hono (API), React 18 + Vite (Web), gorilla/websocket + creack/pty (VM Agent), @dnd-kit (tab reorder), xterm.js (terminal) (015-worktree-context)
+- Cloudflare D1 (SQLite) for agent session metadata, localStorage for tab ordering and active worktree, SQLite (VM Agent local) for tab persistence (015-worktree-context)
 
 ## Recent Changes
 - devcontainer-named-volumes: Replaced bind-mount devcontainer storage with named Docker volumes (`sam-ws-<workspaceId>`); host clone preserved for devcontainer CLI config discovery, then populated into volume via throwaway `alpine` container; `workspaceMount` property in override config replaces default bind-mount (NOT `--mount` CLI flag which only adds supplementary mounts); repos with own devcontainer config get mount-only override, repos without config get full default config with volume mount; eliminated permission normalization dance (`ensureWorkspaceWritablePreDevcontainer`, `ensureWorkspaceWritable`, `getContainerUserIDs`, `getContainerCurrentUserIDs` removed); workspace deletion now removes container and volume; `config.DeriveRepoDirName` exported for cross-package use
