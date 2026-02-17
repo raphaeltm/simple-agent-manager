@@ -278,6 +278,74 @@ describe('useAcpMessages starts empty (no persistence)', () => {
   });
 });
 
+describe('useAcpMessages prepareForReplay', () => {
+  it('clears items, usage, and availableCommands', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    // Populate some state
+    act(() => {
+      result.current.addUserMessage('Hello');
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'Hi there' },
+      }));
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'available_commands_update',
+        availableCommands: [{ name: 'compact', description: 'Compress' }],
+      }));
+    });
+
+    expect(result.current.items).toHaveLength(2);
+    expect(result.current.availableCommands).toHaveLength(1);
+
+    act(() => {
+      result.current.prepareForReplay();
+    });
+
+    expect(result.current.items).toHaveLength(0);
+    expect(result.current.availableCommands).toHaveLength(0);
+    expect(result.current.usage).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+    });
+  });
+
+  it('allows new messages to accumulate after prepareForReplay', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    // Add initial messages
+    act(() => {
+      result.current.addUserMessage('Old message');
+    });
+
+    expect(result.current.items).toHaveLength(1);
+
+    // Prepare for replay (simulates reconnect)
+    act(() => {
+      result.current.prepareForReplay();
+    });
+
+    expect(result.current.items).toHaveLength(0);
+
+    // Simulate replayed messages arriving
+    act(() => {
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: 'Replayed user message' },
+      }));
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'Replayed agent message' },
+      }));
+    });
+
+    expect(result.current.items).toHaveLength(2);
+    expect(result.current.items[0]!.kind).toBe('user_message');
+    expect(result.current.items[1]!.kind).toBe('agent_message');
+  });
+});
+
 describe('useAcpMessages user_message_chunk (LoadSession replay)', () => {
   it('renders replayed user messages as user_message items', () => {
     const { result } = renderHook(() => useAcpMessages());

@@ -54,6 +54,12 @@ export interface UseAcpSessionOptions {
   onAcpMessage?: (message: AcpMessage) => void;
   /** Optional callback for lifecycle event logging */
   onLifecycleEvent?: LifecycleEventCallback;
+  /**
+   * Called synchronously when a session_state message with replayCount > 0
+   * arrives, BEFORE any replay messages are delivered. Use this to clear
+   * conversation items so replay doesn't append to stale state.
+   */
+  onPrepareForReplay?: () => void;
   /** Initial reconnect delay in ms (default: 2000) */
   reconnectDelayMs?: number;
   /** Total reconnect timeout before giving up in ms (default: 30000) */
@@ -105,6 +111,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     wsUrl,
     onAcpMessage,
     onLifecycleEvent,
+    onPrepareForReplay,
     reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS,
     reconnectTimeoutMs = DEFAULT_RECONNECT_TIMEOUT_MS,
     reconnectMaxDelayMs = DEFAULT_RECONNECT_MAX_DELAY_MS,
@@ -121,6 +128,14 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
 
   const onLifecycleEventRef = useRef(onLifecycleEvent);
   onLifecycleEventRef.current = onLifecycleEvent;
+
+  const onPrepareForReplayRef = useRef(onPrepareForReplay);
+  onPrepareForReplayRef.current = onPrepareForReplay;
+
+  // Track the server-reported status so we can restore it after replay completes.
+  // Without this, reconnecting during a prompt transitions replaying → ready,
+  // even though the server is still in 'prompting' (deadlocking new prompts).
+  const serverStatusRef = useRef<string>('');
 
   // Reconnection state (refs to avoid re-triggering the effect)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -192,6 +207,10 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
 
     // Map SessionHost status to our state machine
     const status = msg.status;
+    // Remember the server-reported status so handleSessionReplayComplete
+    // can restore it (e.g., 'prompting') instead of defaulting to 'ready'.
+    serverStatusRef.current = status;
+
     // Always sync agentType from server state — clear to null when empty/idle
     setAgentType(msg.agentType || null);
     if (msg.error) {
@@ -210,6 +229,10 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     } else if (status === 'ready' || status === 'prompting') {
       // Agent is running — we'll receive buffered messages, then replay_complete
       if (msg.replayCount > 0) {
+        // Clear conversation items SYNCHRONOUSLY before replay messages arrive.
+        // This avoids the race where useEffect-based clear runs after replay
+        // messages have already been appended (causing jumbled/duplicate text).
+        onPrepareForReplayRef.current?.();
         setState('replaying');
         setReplaying(true);
       } else {
@@ -231,10 +254,19 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
 
   // Handle session_replay_complete — all buffered messages have been delivered
   const handleSessionReplayComplete = useCallback(() => {
-    logLifecycle('info', 'Session replay complete');
+    const serverStatus = serverStatusRef.current;
+    logLifecycle('info', 'Session replay complete', { serverStatus });
     setReplaying(false);
-    // Transition from replaying to ready (unless agent_status updates changed state)
-    setState((prev) => (prev === 'replaying' ? 'ready' : prev));
+    // Restore the server-reported status instead of unconditionally going to
+    // 'ready'. If the agent was 'prompting' when we reconnected, we must stay
+    // in 'prompting' so the input is disabled and the cancel button is shown.
+    // Without this, the user can submit a new prompt that deadlocks on the
+    // server's promptMu (the previous prompt is still blocking).
+    setState((prev) => {
+      if (prev !== 'replaying') return prev;
+      if (serverStatus === 'prompting') return 'prompting';
+      return 'ready';
+    });
   }, [logLifecycle]);
 
   // Handle session prompting state changes

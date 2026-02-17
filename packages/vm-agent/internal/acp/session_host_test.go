@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -573,4 +574,100 @@ func TestSessionHost_ViewerDisconnectDoesNotStopAgent(t *testing.T) {
 	if host.ViewerCount() != 0 {
 		t.Fatalf("viewer count = %d, want 0", host.ViewerCount())
 	}
+}
+
+func TestSessionHost_CancelPrompt_NoPromptInFlight(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	// CancelPrompt when no prompt is running should be a no-op (not panic)
+	host.CancelPrompt()
+
+	// Status should remain idle
+	if host.Status() != HostIdle {
+		t.Fatalf("status = %s, want %s", host.Status(), HostIdle)
+	}
+}
+
+func TestSessionHost_CancelPrompt_CancelsContext(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	// Simulate a prompt in flight by manually setting up the cancel state
+	// (we can't easily start a real ACP prompt without a full agent process,
+	// but we can test the cancel mechanism directly).
+	ctx, cancel := context.WithCancel(context.Background())
+
+	host.promptCancelMu.Lock()
+	host.promptCancel = cancel
+	host.promptCancelMu.Unlock()
+
+	// Verify context is not yet cancelled
+	select {
+	case <-ctx.Done():
+		t.Fatal("context should not be cancelled yet")
+	default:
+		// good
+	}
+
+	// Cancel the prompt
+	host.CancelPrompt()
+
+	// Context should now be cancelled
+	select {
+	case <-ctx.Done():
+		// good — context was cancelled
+	default:
+		t.Fatal("context should be cancelled after CancelPrompt")
+	}
+}
+
+func TestSessionHost_CancelPrompt_ConcurrentSafety(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	// Set up a cancel function
+	_, cancel := context.WithCancel(context.Background())
+	host.promptCancelMu.Lock()
+	host.promptCancel = cancel
+	host.promptCancelMu.Unlock()
+
+	// Call CancelPrompt from many goroutines concurrently — should not race or panic
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			host.CancelPrompt()
+		}()
+	}
+	wg.Wait()
+}
+
+func TestSessionHost_CancelPrompt_ClearedAfterPromptDone(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	// Simulate: promptCancel is set, then cleared (as HandlePrompt does after Prompt() returns)
+	_, cancel := context.WithCancel(context.Background())
+	host.promptCancelMu.Lock()
+	host.promptCancel = cancel
+	host.promptCancelMu.Unlock()
+
+	// Simulate prompt completion clearing the cancel
+	host.promptCancelMu.Lock()
+	host.promptCancel = nil
+	host.promptCancelMu.Unlock()
+
+	// CancelPrompt should now be a no-op
+	host.CancelPrompt()
+	// No panic, no side effects — just verifying safety
 }

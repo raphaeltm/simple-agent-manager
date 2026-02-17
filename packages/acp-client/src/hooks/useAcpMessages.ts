@@ -94,6 +94,13 @@ export interface AcpMessagesHandle {
   processMessage: (msg: AcpMessage) => void;
   addUserMessage: (text: string) => void;
   clear: () => void;
+  /**
+   * Synchronously clear all items, finalize any streaming state, and reset
+   * usage. Called by the session hook BEFORE replay messages arrive — this
+   * avoids the race where useEffect-based clear runs after replay messages
+   * have already been appended.
+   */
+  prepareForReplay: () => void;
 }
 
 // =============================================================================
@@ -315,7 +322,13 @@ export function useAcpMessages(): AcpMessagesHandle {
     setUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   }, []);
 
-  return { items, usage, availableCommands, processMessage, addUserMessage, clear };
+  const prepareForReplay = useCallback(() => {
+    setItems([]);
+    setUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    setAvailableCommands([]);
+  }, []);
+
+  return { items, usage, availableCommands, processMessage, addUserMessage, clear, prepareForReplay };
 }
 
 // =============================================================================

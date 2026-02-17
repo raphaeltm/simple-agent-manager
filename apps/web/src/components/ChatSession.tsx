@@ -141,26 +141,28 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
     wsUrl: resolvedWsUrl,
     onAcpMessage: acpMessages.processMessage,
     onLifecycleEvent: handleLifecycleEvent,
+    onPrepareForReplay: acpMessages.prepareForReplay,
   });
 
-  const { connected, agentType, state, switchAgent, replaying } = acpSession;
+  const { connected, agentType, state, switchAgent } = acpSession;
   const { clear: clearMessages } = acpMessages;
 
-  // Clear messages when we start receiving a replay from the server.
-  // The SessionHost sends session_state with replayCount > 0, which puts
-  // us into 'replaying' state. Clear before the replayed messages arrive
-  // to avoid duplicates. Also clear on 'no_session' (idle SessionHost).
+  // Clear messages when no agent session exists (idle SessionHost).
+  // Replay clearing is now handled synchronously by onPrepareForReplay
+  // (called from useAcpSession when session_state arrives with replayCount > 0)
+  // which avoids the race where this useEffect fires after replay messages
+  // have already been appended.
   useEffect(() => {
-    if (state === 'replaying' || state === 'no_session') {
+    if (state === 'no_session') {
       reportError({
         level: 'info',
-        message: `Clearing messages on ${state} (pre-replay)`,
+        message: 'Clearing messages on no_session',
         source: 'acp-chat',
-        context: { workspaceId, sessionId, replaying },
+        context: { workspaceId, sessionId },
       });
       clearMessages();
     }
-  }, [state, clearMessages, workspaceId, sessionId, replaying]);
+  }, [state, clearMessages, workspaceId, sessionId]);
 
   // Auto-select preferred agent when connected.
   // Skip if the server's session_state already indicates the agent is running

@@ -250,6 +250,11 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 	switch rpcMsg.Method {
 	case "session/prompt":
 		go g.host.HandlePrompt(ctx, rpcMsg.ID, rpcMsg.Params, g.viewerID)
+	case "session/cancel":
+		// Cancel the in-flight prompt context. Also forward to agent stdin
+		// so the agent process itself can react to the cancellation signal.
+		g.host.CancelPrompt()
+		g.host.ForwardToAgent(data)
 	default:
 		g.host.ForwardToAgent(data)
 	}

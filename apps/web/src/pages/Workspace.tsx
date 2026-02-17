@@ -223,13 +223,23 @@ export function Workspace() {
     return () => clearInterval(interval);
   }, [id, workspace?.status, loadWorkspaceState]);
 
-  // Derive WebSocket URL from the proactively-refreshed token (R3 fix).
-  // When the token refreshes, the wsUrl updates automatically.
+  // Derive WebSocket URL from the terminal token.
+  // Only update wsUrl on the INITIAL token fetch or when the workspace URL
+  // changes — NOT on proactive token refreshes. Changing wsUrl tears down
+  // the WebSocket and triggers a full reconnect, which re-triggers replay
+  // and can cause jumbled messages (Bug 5). The refreshed token is still
+  // available via `terminalToken` for the next reconnection attempt.
+  const wsUrlSetRef = useRef(false);
   useEffect(() => {
     if (!workspace?.url || !terminalToken || !isRunning) {
       setWsUrl(null);
+      wsUrlSetRef.current = false;
       return;
     }
+
+    // Skip if we already have a wsUrl — proactive refresh should not
+    // cause a reconnect while the connection is still alive.
+    if (wsUrlSetRef.current) return;
 
     try {
       const url = new URL(workspace.url);
@@ -237,6 +247,7 @@ export function Workspace() {
       const wsPath = featureFlags.multiTerminal ? '/terminal/ws/multi' : '/terminal/ws';
       setWsUrl(`${wsProtocol}//${url.host}${wsPath}?token=${encodeURIComponent(terminalToken)}`);
       setTerminalError(null);
+      wsUrlSetRef.current = true;
     } catch {
       setWsUrl(null);
       setTerminalError('Invalid workspace URL');
