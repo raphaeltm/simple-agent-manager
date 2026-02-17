@@ -17,6 +17,7 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useTabOrder } from '../hooks/useTabOrder';
 import { useTokenRefresh } from '../hooks/useTokenRefresh';
 import { WorkspaceTabStrip, type WorkspaceTabItem } from '../components/WorkspaceTabStrip';
+import { WorktreeSelector } from '../components/WorktreeSelector';
 import { MoreVertical, X } from 'lucide-react';
 import { GitChangesButton } from '../components/GitChangesButton';
 import { GitChangesPanel } from '../components/GitChangesPanel';
@@ -28,14 +29,17 @@ import { WorkspaceSidebar } from '../components/WorkspaceSidebar';
 import type { SessionTokenUsage, SidebarTab } from '../components/WorkspaceSidebar';
 import {
   createAgentSession,
+  createWorktree,
   getFileIndex,
   getGitStatus,
+  getWorktrees,
   getTerminalToken,
   getWorkspace,
   listAgents,
   listAgentSessions,
   listWorkspaceEvents,
   rebuildWorkspace,
+  removeWorktree,
   renameAgentSession,
   restartWorkspace,
   stopAgentSession,
@@ -48,11 +52,11 @@ import type {
   AgentInfo,
   AgentSession,
   Event,
+  WorktreeInfo,
   WorkspaceResponse,
   BootLogEntry,
 } from '@simple-agent-manager/shared';
 import '../styles/acp-chat.css';
-
 
 /** View modes */
 type ViewMode = 'terminal' | 'conversation';
@@ -64,6 +68,7 @@ type WorkspaceTab =
       sessionId: string;
       title: string;
       status: MultiTerminalSessionSnapshot['status'];
+      badge?: string;
     }
   | {
       id: string;
@@ -71,6 +76,7 @@ type WorkspaceTab =
       sessionId: string;
       title: string;
       status: AgentSession['status'];
+      badge?: string;
     };
 
 const DEFAULT_TERMINAL_TAB_ID = '__default-terminal__';
@@ -99,6 +105,19 @@ function workspaceTabStatusColor(tab: WorkspaceTab): string {
   }
 }
 
+function deriveWorktreeBadge(
+  path: string | null | undefined,
+  worktrees: WorktreeInfo[]
+): string | undefined {
+  if (!path) return undefined;
+  const found = worktrees.find((wt) => wt.path === path);
+  if (found?.branch) {
+    return found.branch;
+  }
+  const parts = path.split('/');
+  return parts[parts.length - 1] || undefined;
+}
+
 /**
  * Workspace detail page — unified layout for desktop and mobile.
  * Tab strip at top, terminal/chat content below, sidebar on desktop only.
@@ -122,6 +141,7 @@ export function Workspace() {
   // File browser state (URL-driven, mutually exclusive with git overlay)
   const filesParam = searchParams.get('files'); // 'browse' | 'view' | null
   const filesPathParam = searchParams.get('path');
+  const worktreeParam = searchParams.get('worktree');
 
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -142,6 +162,8 @@ export function Workspace() {
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [terminalTabs, setTerminalTabs] = useState<MultiTerminalSessionSnapshot[]>([]);
   const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<string | null>(null);
+  const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
+  const [worktreeLoading, setWorktreeLoading] = useState(false);
   const [preferredAgentsBySession, setPreferredAgentsBySession] = useState<
     Record<string, AgentInfo['id']>
   >({});
@@ -158,6 +180,7 @@ export function Workspace() {
   const tabOrder = useTabOrder<WorkspaceTab>(id);
 
   const isRunning = workspace?.status === 'running';
+  const activeWorktree = worktreeParam || null;
 
   // Proactive token refresh (R3 fix): fetches token on mount and schedules
   // refresh 5 minutes before expiry. On 401 during reconnection, call refresh().
@@ -301,6 +324,34 @@ export function Workspace() {
     };
   }, [isRunning]);
 
+  const refreshWorktrees = useCallback(async () => {
+    if (!id || !workspace?.url || !terminalToken || !isRunning) return;
+    try {
+      setWorktreeLoading(true);
+      const response = await getWorktrees(workspace.url, id, terminalToken);
+      setWorktrees(response.worktrees ?? []);
+    } catch {
+      setWorktrees([]);
+    } finally {
+      setWorktreeLoading(false);
+    }
+  }, [id, workspace?.url, terminalToken, isRunning]);
+
+  useEffect(() => {
+    void refreshWorktrees();
+  }, [refreshWorktrees]);
+
+  useEffect(() => {
+    if (!id) return;
+    if (!activeWorktree) return;
+    if (worktrees.length === 0) return;
+    if (worktrees.some((wt) => wt.path === activeWorktree)) return;
+
+    const params = new URLSearchParams(searchParams);
+    params.delete('worktree');
+    navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
+  }, [activeWorktree, id, navigate, searchParams, worktrees]);
+
   // Close create menu on outside click
   useEffect(() => {
     if (!createMenuOpen) {
@@ -347,21 +398,24 @@ export function Workspace() {
     void loadWorkspaceState();
   }, [id, loadWorkspaceState]);
 
-  const handleUsageChange = useCallback((sessionId: string, usage: TokenUsage) => {
-    setSessionTokenUsages((prev) => {
-      const idx = prev.findIndex((s) => s.sessionId === sessionId);
-      // Find a label from agentSessions
-      const session = agentSessions.find((s) => s.id === sessionId);
-      const label = session?.label ?? `Chat ${sessionId.slice(-4)}`;
-      const entry: SessionTokenUsage = { sessionId, label, usage };
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = entry;
-        return next;
-      }
-      return [...prev, entry];
-    });
-  }, [agentSessions]);
+  const handleUsageChange = useCallback(
+    (sessionId: string, usage: TokenUsage) => {
+      setSessionTokenUsages((prev) => {
+        const idx = prev.findIndex((s) => s.sessionId === sessionId);
+        // Find a label from agentSessions
+        const session = agentSessions.find((s) => s.id === sessionId);
+        const label = session?.label ?? `Chat ${sessionId.slice(-4)}`;
+        const entry: SessionTokenUsage = { sessionId, label, usage };
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = entry;
+          return next;
+        }
+        return [...prev, entry];
+      });
+    },
+    [agentSessions]
+  );
 
   const handleStop = async () => {
     if (!id) return;
@@ -537,10 +591,50 @@ export function Workspace() {
     [id, navigate, searchParams]
   );
 
+  const handleSelectWorktree = useCallback(
+    (worktreePath: string | null) => {
+      if (!id) return;
+      const params = new URLSearchParams(searchParams);
+      if (worktreePath) params.set('worktree', worktreePath);
+      else params.delete('worktree');
+
+      // Switching worktree resets stale side panels/query context.
+      params.delete('git');
+      params.delete('file');
+      params.delete('staged');
+      params.delete('files');
+      params.delete('path');
+
+      navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
+    },
+    [id, navigate, searchParams]
+  );
+
+  const handleCreateWorktree = useCallback(
+    async (request: { branch: string; createBranch: boolean; baseBranch?: string }) => {
+      if (!id || !workspace?.url || !terminalToken) return;
+      await createWorktree(workspace.url, id, terminalToken, request);
+      await refreshWorktrees();
+    },
+    [id, workspace?.url, terminalToken, refreshWorktrees]
+  );
+
+  const handleRemoveWorktree = useCallback(
+    async (path: string, force: boolean) => {
+      if (!id || !workspace?.url || !terminalToken) return;
+      await removeWorktree(workspace.url, id, terminalToken, path, force);
+      if (activeWorktree === path) {
+        handleSelectWorktree(null);
+      }
+      await refreshWorktrees();
+    },
+    [id, workspace?.url, terminalToken, activeWorktree, handleSelectWorktree, refreshWorktrees]
+  );
+
   // Fetch git change count for the badge (once when terminal is ready)
   useEffect(() => {
     if (!workspace?.url || !terminalToken || !id || !isRunning) return;
-    getGitStatus(workspace.url, id, terminalToken)
+    getGitStatus(workspace.url, id, terminalToken, activeWorktree ?? undefined)
       .then((data) => {
         setGitStatus(data);
         setGitChangeCount(data.staged.length + data.unstaged.length + data.untracked.length);
@@ -548,7 +642,7 @@ export function Workspace() {
       .catch(() => {
         // Silently fail — badge just won't show a count
       });
-  }, [workspace?.url, terminalToken, id, isRunning]);
+  }, [workspace?.url, terminalToken, id, isRunning, activeWorktree]);
 
   const configuredAgents = useMemo(
     () => agentOptions.filter((agent) => agent.configured && agent.supportsAcp),
@@ -579,11 +673,12 @@ export function Workspace() {
       // Generate a numbered label: count existing running sessions + 1
       const runningCount = agentSessions.filter((s) => s.status === 'running').length;
       const nextNumber = runningCount + 1;
-      const label = preferredAgent
-        ? `${preferredAgent.name} ${nextNumber}`
-        : `Chat ${nextNumber}`;
+      const label = preferredAgent ? `${preferredAgent.name} ${nextNumber}` : `Chat ${nextNumber}`;
 
-      const created = await createAgentSession(id, { label });
+      const created = await createAgentSession(id, {
+        label,
+        worktreePath: activeWorktree ?? undefined,
+      });
 
       setAgentSessions((prev) => {
         const remaining = prev.filter((session) => session.id !== created.id);
@@ -698,7 +793,7 @@ export function Workspace() {
   };
 
   const defaultAgentId = configuredAgents.length === 1 ? configuredAgents[0]!.id : null;
-  const defaultAgentName = defaultAgentId ? agentNameById.get(defaultAgentId) ?? null : null;
+  const defaultAgentName = defaultAgentId ? (agentNameById.get(defaultAgentId) ?? null) : null;
 
   const visibleTerminalTabs = useMemo<MultiTerminalSessionSnapshot[]>(() => {
     if (terminalTabs.length > 0) {
@@ -711,17 +806,16 @@ export function Workspace() {
       {
         id: DEFAULT_TERMINAL_TAB_ID,
         name: 'Terminal 1',
-        status: terminalError ? 'error' : terminalLoading ? 'connecting' : wsUrl ? 'connected' : 'disconnected',
+        status: terminalError
+          ? 'error'
+          : terminalLoading
+            ? 'connecting'
+            : wsUrl
+              ? 'connected'
+              : 'disconnected',
       },
     ];
-  }, [
-    featureFlags.multiTerminal,
-    isRunning,
-    terminalError,
-    terminalLoading,
-    terminalTabs,
-    wsUrl,
-  ]);
+  }, [featureFlags.multiTerminal, isRunning, terminalError, terminalLoading, terminalTabs, wsUrl]);
 
   const workspaceTabs = useMemo<WorkspaceTab[]>(() => {
     const terminalSessionTabs: WorkspaceTab[] = visibleTerminalTabs.map((session) => ({
@@ -730,6 +824,7 @@ export function Workspace() {
       sessionId: session.id,
       title: session.name,
       status: session.status,
+      badge: deriveWorktreeBadge(session.workingDirectory, worktrees),
     }));
 
     const chatSessionTabs: WorkspaceTab[] = agentSessions
@@ -747,11 +842,19 @@ export function Workspace() {
           sessionId: session.id,
           title,
           status: session.status,
+          badge: deriveWorktreeBadge(session.worktreePath ?? undefined, worktrees),
         };
       });
 
     return tabOrder.getSortedTabs([...terminalSessionTabs, ...chatSessionTabs]);
-  }, [agentNameById, agentSessions, preferredAgentsBySession, tabOrder, visibleTerminalTabs]);
+  }, [
+    agentNameById,
+    agentSessions,
+    preferredAgentsBySession,
+    tabOrder,
+    visibleTerminalTabs,
+    worktrees,
+  ]);
 
   const handleRenameWorkspaceTab = useCallback(
     (tabItem: WorkspaceTabItem, newName: string) => {
@@ -812,6 +915,7 @@ export function Workspace() {
         sessionId: tab.sessionId,
         title: tab.title,
         statusColor: workspaceTabStatusColor(tab),
+        badge: tab.badge,
       })),
     [workspaceTabs]
   );
@@ -857,6 +961,11 @@ export function Workspace() {
         multiTerminalRef.current?.focus();
       });
     },
+    'switch-worktree': () => {
+      if (!isRunning || worktrees.length === 0) return;
+      const trigger = document.getElementById('worktree-selector-trigger');
+      trigger?.click();
+    },
     'next-tab': () => {
       if (workspaceTabs.length <= 1) return;
       const currentIdx = workspaceTabs.findIndex((t) => t.id === activeTabId);
@@ -866,8 +975,7 @@ export function Workspace() {
     'prev-tab': () => {
       if (workspaceTabs.length <= 1) return;
       const currentIdx = workspaceTabs.findIndex((t) => t.id === activeTabId);
-      const prevIdx =
-        currentIdx <= 0 ? workspaceTabs.length - 1 : currentIdx - 1;
+      const prevIdx = currentIdx <= 0 ? workspaceTabs.length - 1 : currentIdx - 1;
       handleSelectWorkspaceTab(workspaceTabs[prevIdx]!);
     },
     ...Object.fromEntries(
@@ -905,11 +1013,11 @@ export function Workspace() {
 
     paletteFileIndexLoaded.current = true;
     setPaletteFileIndexLoading(true);
-    getFileIndex(workspace.url, id, terminalToken)
+    getFileIndex(workspace.url, id, terminalToken, activeWorktree ?? undefined)
       .then((files) => setPaletteFileIndex(files))
       .catch((err) => console.warn('[palette] Failed to load file index:', err))
       .finally(() => setPaletteFileIndexLoading(false));
-  }, [showCommandPalette, workspace?.url, terminalToken, id, isRunning]);
+  }, [showCommandPalette, workspace?.url, terminalToken, id, isRunning, activeWorktree]);
 
   const handlePaletteSelectTab = useCallback(
     (tab: WorkspaceTabItem) => {
@@ -987,6 +1095,7 @@ export function Workspace() {
           <MultiTerminal
             ref={multiTerminalRef}
             wsUrl={wsUrl}
+            defaultWorkDir={activeWorktree ?? undefined}
             shutdownDeadline={workspace?.shutdownDeadline}
             onActivity={handleTerminalActivity}
             className="h-full"
@@ -1302,7 +1411,15 @@ export function Workspace() {
         </button>
 
         {/* Workspace name + status */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '4px' : '8px', minWidth: 0, flex: isMobile ? 1 : undefined }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: isMobile ? '4px' : '8px',
+            minWidth: 0,
+            flex: isMobile ? 1 : undefined,
+          }}
+        >
           <span
             style={{
               fontWeight: 600,
@@ -1349,6 +1466,18 @@ export function Workspace() {
         {/* Spacer */}
         <div style={{ flex: isMobile ? undefined : 1 }} />
 
+        {/* Worktree selector */}
+        {isRunning && terminalToken && workspace?.url && id && (
+          <WorktreeSelector
+            worktrees={worktrees}
+            activeWorktree={activeWorktree}
+            loading={worktreeLoading}
+            onSelect={handleSelectWorktree}
+            onCreate={handleCreateWorktree}
+            onRemove={handleRemoveWorktree}
+          />
+        )}
+
         {/* Error inline (desktop only — too noisy on mobile) */}
         {!isMobile && error && (
           <span style={{ fontSize: '0.75rem', color: '#f87171', whiteSpace: 'nowrap' }}>
@@ -1371,10 +1500,7 @@ export function Workspace() {
 
         {/* File browser button */}
         {isRunning && terminalToken && (
-          <FileBrowserButton
-            onClick={handleOpenFileBrowser}
-            isMobile={isMobile}
-          />
+          <FileBrowserButton onClick={handleOpenFileBrowser} isMobile={isMobile} />
         )}
 
         {/* Git changes button */}
@@ -1428,7 +1554,9 @@ export function Workspace() {
             flexShrink: 0,
           }}
         >
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{error}</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {error}
+          </span>
           <button
             onClick={() => setError(null)}
             style={{
@@ -1448,35 +1576,48 @@ export function Workspace() {
 
       {/* ── Content area ── */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div
+          style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+        >
           {workspaceTabStrip}
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              position: 'relative',
+            }}
+          >
             {isRunning ? (
               <>
                 {/* Terminal content — always mounted, shown/hidden */}
                 {terminalContent}
 
                 {/* Chat sessions — each has its own independent ACP WebSocket */}
-                {id && workspace?.url && runningChatSessions.map((session) => (
-                  <ChatSession
-                    key={session.id}
-                    ref={(handle) => {
-                      if (handle) chatSessionRefs.current.set(session.id, handle);
-                      else chatSessionRefs.current.delete(session.id);
-                    }}
-                    workspaceId={id}
-                    workspaceUrl={workspace.url!}
-                    sessionId={session.id}
-                    preferredAgentId={
-                      preferredAgentsBySession[session.id] ||
-                      (configuredAgents.length > 0 ? configuredAgents[0]!.id : undefined)
-                    }
-                    configuredAgents={configuredAgents}
-                    active={viewMode === 'conversation' && activeChatSessionId === session.id}
-                    onActivity={handleTerminalActivity}
-                    onUsageChange={handleUsageChange}
-                  />
-                ))}
+                {id &&
+                  workspace?.url &&
+                  runningChatSessions.map((session) => (
+                    <ChatSession
+                      key={session.id}
+                      ref={(handle) => {
+                        if (handle) chatSessionRefs.current.set(session.id, handle);
+                        else chatSessionRefs.current.delete(session.id);
+                      }}
+                      workspaceId={id}
+                      workspaceUrl={workspace.url!}
+                      sessionId={session.id}
+                      worktreePath={session.worktreePath}
+                      preferredAgentId={
+                        preferredAgentsBySession[session.id] ||
+                        (configuredAgents.length > 0 ? configuredAgents[0]!.id : undefined)
+                      }
+                      configuredAgents={configuredAgents}
+                      active={viewMode === 'conversation' && activeChatSessionId === session.id}
+                      onActivity={handleTerminalActivity}
+                      onUsageChange={handleUsageChange}
+                    />
+                  ))}
               </>
             ) : (
               statusContent
@@ -1588,6 +1729,7 @@ export function Workspace() {
           workspaceUrl={workspace.url}
           workspaceId={id}
           token={terminalToken}
+          worktree={activeWorktree}
           isMobile={isMobile}
           onClose={handleCloseGitPanel}
           onSelectFile={handleNavigateToGitDiff}
@@ -1598,6 +1740,7 @@ export function Workspace() {
           workspaceUrl={workspace.url}
           workspaceId={id}
           token={terminalToken}
+          worktree={activeWorktree}
           filePath={gitFileParam}
           staged={gitStagedParam === 'true'}
           isMobile={isMobile}
@@ -1612,6 +1755,7 @@ export function Workspace() {
           workspaceUrl={workspace.url}
           workspaceId={id}
           token={terminalToken}
+          worktree={activeWorktree}
           initialPath={filesPathParam ?? '.'}
           isMobile={isMobile}
           onClose={handleCloseFileBrowser}
@@ -1624,6 +1768,7 @@ export function Workspace() {
           workspaceUrl={workspace.url}
           workspaceId={id}
           token={terminalToken}
+          worktree={activeWorktree}
           filePath={filesPathParam}
           isMobile={isMobile}
           onBack={handleFileViewerBack}
@@ -1633,9 +1778,7 @@ export function Workspace() {
       )}
 
       {/* ── Keyboard shortcuts help overlay ── */}
-      {showShortcutsHelp && (
-        <KeyboardShortcutsHelp onClose={() => setShowShortcutsHelp(false)} />
-      )}
+      {showShortcutsHelp && <KeyboardShortcutsHelp onClose={() => setShowShortcutsHelp(false)} />}
 
       {/* ── Command palette overlay ── */}
       {showCommandPalette && (

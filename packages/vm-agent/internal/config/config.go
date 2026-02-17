@@ -124,8 +124,11 @@ type Config struct {
 	PersistenceDBPath string // SQLite database path for session state persistence
 
 	// Git integration settings - configurable per constitution principle XI
-	GitExecTimeout time.Duration // Timeout for git commands via docker exec (default: 30s)
-	GitFileMaxSize int           // Max file size in bytes for /git/file (default: 1MB)
+	GitExecTimeout           time.Duration // Timeout for git commands via docker exec (default: 30s)
+	GitFileMaxSize           int           // Max file size in bytes for /git/file (default: 1MB)
+	GitWorktreeTimeout       time.Duration // Timeout for git worktree commands (default: 30s)
+	WorktreeCacheTTL         time.Duration // Cache TTL for git worktree list output (default: 5s)
+	MaxWorktreesPerWorkspace int           // Max worktrees per workspace (default: 5)
 
 	// File browser settings - configurable per constitution principle XI
 	FileListTimeout    time.Duration // Timeout for file listing commands (default: 10s)
@@ -226,10 +229,10 @@ func Load() (*Config, error) {
 		ACPReconnectDelayMs:   getEnvInt("ACP_RECONNECT_DELAY_MS", 2000),
 		ACPReconnectTimeoutMs: getEnvInt("ACP_RECONNECT_TIMEOUT_MS", 30000),
 		ACPMaxRestartAttempts: getEnvInt("ACP_MAX_RESTART_ATTEMPTS", 3),
-		ACPMessageBufferSize: getEnvInt("ACP_MESSAGE_BUFFER_SIZE", 5000),
-		ACPViewerSendBuffer:  getEnvInt("ACP_VIEWER_SEND_BUFFER", 256),
-		ACPPingInterval:      getEnvDuration("ACP_PING_INTERVAL", 30*time.Second),
-		ACPPongTimeout:       getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
+		ACPMessageBufferSize:  getEnvInt("ACP_MESSAGE_BUFFER_SIZE", 5000),
+		ACPViewerSendBuffer:   getEnvInt("ACP_VIEWER_SEND_BUFFER", 256),
+		ACPPingInterval:       getEnvDuration("ACP_PING_INTERVAL", 30*time.Second),
+		ACPPongTimeout:        getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
 
 		// Event log settings
 		MaxNodeEvents:      getEnvInt("MAX_NODE_EVENTS", 500),
@@ -257,8 +260,11 @@ func Load() (*Config, error) {
 		PersistenceDBPath: getEnv("PERSISTENCE_DB_PATH", "/var/lib/vm-agent/state.db"),
 
 		// Git integration settings - configurable per constitution principle XI
-		GitExecTimeout: getEnvDuration("GIT_EXEC_TIMEOUT", 30*time.Second),
-		GitFileMaxSize: getEnvInt("GIT_FILE_MAX_SIZE", 1048576), // 1 MB
+		GitExecTimeout:           getEnvDuration("GIT_EXEC_TIMEOUT", 30*time.Second),
+		GitFileMaxSize:           getEnvInt("GIT_FILE_MAX_SIZE", 1048576), // 1 MB
+		GitWorktreeTimeout:       getEnvDuration("GIT_WORKTREE_TIMEOUT", 30*time.Second),
+		WorktreeCacheTTL:         getEnvDuration("WORKTREE_CACHE_TTL", 5*time.Second),
+		MaxWorktreesPerWorkspace: getEnvInt("MAX_WORKTREES_PER_WORKSPACE", 5),
 
 		// File browser settings
 		FileListTimeout:    getEnvDuration("FILE_LIST_TIMEOUT", 10*time.Second),
@@ -302,6 +308,12 @@ func Load() (*Config, error) {
 
 	if cfg.NodeID == "" {
 		return nil, fmt.Errorf("NODE_ID is required")
+	}
+	if cfg.MaxWorktreesPerWorkspace < 1 {
+		cfg.MaxWorktreesPerWorkspace = 1
+	}
+	if cfg.WorktreeCacheTTL <= 0 {
+		cfg.WorktreeCacheTTL = 5 * time.Second
 	}
 
 	return cfg, nil

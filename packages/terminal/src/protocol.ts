@@ -8,11 +8,35 @@ export type TerminalWsServerMessage =
   | { type: 'session'; sessionId?: string; data?: { sessionId?: string } }
   | { type: 'error'; sessionId?: string; data?: unknown }
   | { type: 'pong'; sessionId?: string; data?: unknown }
-  | { type: 'session_created'; sessionId?: string; data?: { sessionId: string; workingDirectory?: string; shell?: string } }
-  | { type: 'session_closed'; sessionId?: string; data?: { sessionId: string; reason: string; exitCode?: number } }
+  | {
+      type: 'session_created';
+      sessionId?: string;
+      data?: { sessionId: string; workingDirectory?: string; shell?: string };
+    }
+  | {
+      type: 'session_closed';
+      sessionId?: string;
+      data?: { sessionId: string; reason: string; exitCode?: number };
+    }
   | { type: 'session_renamed'; sessionId?: string; data?: { sessionId: string; name: string } }
-  | { type: 'session_list'; data?: { sessions: Array<{ sessionId: string; name?: string; status?: string; workingDirectory?: string; createdAt: string; lastActivityAt?: string }> } }
-  | { type: 'session_reattached'; sessionId?: string; data?: { sessionId: string; workingDirectory?: string; shell?: string } }
+  | {
+      type: 'session_list';
+      data?: {
+        sessions: Array<{
+          sessionId: string;
+          name?: string;
+          status?: string;
+          workingDirectory?: string;
+          createdAt: string;
+          lastActivityAt?: string;
+        }>;
+      };
+    }
+  | {
+      type: 'session_reattached';
+      sessionId?: string;
+      data?: { sessionId: string; workingDirectory?: string; shell?: string };
+    }
   | { type: 'scrollback'; sessionId?: string; data?: { data: string } }
   | { type: string; sessionId?: string; data?: unknown };
 
@@ -20,7 +44,10 @@ export type TerminalWsClientMessage =
   | { type: 'input'; sessionId?: string; data: { data: string } }
   | { type: 'resize'; sessionId?: string; data: { rows: number; cols: number } }
   | { type: 'ping'; sessionId?: string }
-  | { type: 'create_session'; data: { sessionId: string; rows: number; cols: number; name?: string } }
+  | {
+      type: 'create_session';
+      data: { sessionId: string; rows: number; cols: number; name?: string; workDir?: string };
+    }
   | { type: 'close_session'; data: { sessionId: string } }
   | { type: 'rename_session'; data: { sessionId: string; name: string } }
   | { type: 'list_sessions' }
@@ -38,7 +65,7 @@ export function parseTerminalWsServerMessage(text: string): TerminalWsServerMess
     return {
       type: msg.type,
       sessionId: typeof msg.sessionId === 'string' ? msg.sessionId : undefined,
-      data: msg.data
+      data: msg.data,
     } as TerminalWsServerMessage;
   } catch {
     return null;
@@ -53,7 +80,7 @@ export function encodeTerminalWsInput(data: string, sessionId?: string): string 
   return JSON.stringify({
     type: 'input',
     ...(sessionId && { sessionId }),
-    data: { data }
+    data: { data },
   });
 }
 
@@ -61,14 +88,14 @@ export function encodeTerminalWsResize(rows: number, cols: number, sessionId?: s
   return JSON.stringify({
     type: 'resize',
     ...(sessionId && { sessionId }),
-    data: { rows, cols }
+    data: { rows, cols },
   });
 }
 
 export function encodeTerminalWsPing(sessionId?: string): string {
   return JSON.stringify({
     type: 'ping',
-    ...(sessionId && { sessionId })
+    ...(sessionId && { sessionId }),
   });
 }
 
@@ -76,24 +103,30 @@ export function encodeTerminalWsPing(sessionId?: string): string {
  * New message encoders for multi-terminal operations
  */
 
-export function encodeTerminalWsCreateSession(sessionId: string, rows: number, cols: number, name?: string): string {
+export function encodeTerminalWsCreateSession(
+  sessionId: string,
+  rows: number,
+  cols: number,
+  name?: string,
+  workDir?: string
+): string {
   return JSON.stringify({
     type: 'create_session',
-    data: { sessionId, rows, cols, ...(name && { name }) }
+    data: { sessionId, rows, cols, ...(name && { name }), ...(workDir && { workDir }) },
   });
 }
 
 export function encodeTerminalWsCloseSession(sessionId: string): string {
   return JSON.stringify({
     type: 'close_session',
-    data: { sessionId }
+    data: { sessionId },
   });
 }
 
 export function encodeTerminalWsRenameSession(sessionId: string, name: string): string {
   return JSON.stringify({
     type: 'rename_session',
-    data: { sessionId, name }
+    data: { sessionId, name },
   });
 }
 
@@ -112,31 +145,69 @@ export function isMessageForSession(msg: TerminalWsServerMessage, sessionId: str
 /**
  * Type guards for specific message types
  */
-export function isOutputMessage(msg: TerminalWsServerMessage): msg is { type: 'output'; sessionId?: string; data?: { data?: string } } {
+export function isOutputMessage(
+  msg: TerminalWsServerMessage
+): msg is { type: 'output'; sessionId?: string; data?: { data?: string } } {
   return msg.type === 'output';
 }
 
-export function isSessionCreatedMessage(msg: TerminalWsServerMessage): msg is { type: 'session_created'; sessionId?: string; data?: { sessionId: string; workingDirectory?: string; shell?: string } } {
+export function isSessionCreatedMessage(
+  msg: TerminalWsServerMessage
+): msg is {
+  type: 'session_created';
+  sessionId?: string;
+  data?: { sessionId: string; workingDirectory?: string; shell?: string };
+} {
   return msg.type === 'session_created';
 }
 
-export function isSessionClosedMessage(msg: TerminalWsServerMessage): msg is { type: 'session_closed'; sessionId?: string; data?: { sessionId: string; reason: string; exitCode?: number } } {
+export function isSessionClosedMessage(
+  msg: TerminalWsServerMessage
+): msg is {
+  type: 'session_closed';
+  sessionId?: string;
+  data?: { sessionId: string; reason: string; exitCode?: number };
+} {
   return msg.type === 'session_closed';
 }
 
-export function isErrorMessage(msg: TerminalWsServerMessage): msg is { type: 'error'; sessionId?: string; data?: unknown } {
+export function isErrorMessage(
+  msg: TerminalWsServerMessage
+): msg is { type: 'error'; sessionId?: string; data?: unknown } {
   return msg.type === 'error';
 }
 
-export function isSessionReattachedMessage(msg: TerminalWsServerMessage): msg is { type: 'session_reattached'; sessionId?: string; data?: { sessionId: string; workingDirectory?: string; shell?: string } } {
+export function isSessionReattachedMessage(
+  msg: TerminalWsServerMessage
+): msg is {
+  type: 'session_reattached';
+  sessionId?: string;
+  data?: { sessionId: string; workingDirectory?: string; shell?: string };
+} {
   return msg.type === 'session_reattached';
 }
 
-export function isScrollbackMessage(msg: TerminalWsServerMessage): msg is { type: 'scrollback'; sessionId?: string; data?: { data: string } } {
+export function isScrollbackMessage(
+  msg: TerminalWsServerMessage
+): msg is { type: 'scrollback'; sessionId?: string; data?: { data: string } } {
   return msg.type === 'scrollback';
 }
 
-export function isSessionListMessage(msg: TerminalWsServerMessage): msg is { type: 'session_list'; data?: { sessions: Array<{ sessionId: string; name?: string; status?: string; workingDirectory?: string; createdAt: string; lastActivityAt?: string }> } } {
+export function isSessionListMessage(
+  msg: TerminalWsServerMessage
+): msg is {
+  type: 'session_list';
+  data?: {
+    sessions: Array<{
+      sessionId: string;
+      name?: string;
+      status?: string;
+      workingDirectory?: string;
+      createdAt: string;
+      lastActivityAt?: string;
+    }>;
+  };
+} {
   return msg.type === 'session_list';
 }
 
@@ -148,10 +219,13 @@ export function encodeTerminalWsListSessions(): string {
   return JSON.stringify({ type: 'list_sessions' });
 }
 
-export function encodeTerminalWsReattachSession(sessionId: string, rows: number, cols: number): string {
+export function encodeTerminalWsReattachSession(
+  sessionId: string,
+  rows: number,
+  cols: number
+): string {
   return JSON.stringify({
     type: 'reattach_session',
-    data: { sessionId, rows, cols }
+    data: { sessionId, rows, cols },
   });
 }
-

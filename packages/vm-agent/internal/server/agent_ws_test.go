@@ -17,6 +17,7 @@ func TestAgentWebSocketSourceContract(t *testing.T) {
 
 	for _, needle := range []string{
 		"sessionId",
+		"worktree",
 		"hostKey",
 		"agentSessions",
 		"idempotencyKey",

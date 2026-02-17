@@ -99,7 +99,8 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	// Get or create SessionHost for this session.
 	// The SessionHost persists independently of any WebSocket connection.
 	hostKey := workspaceID + ":" + requestedSessionID
-	host := s.getOrCreateSessionHost(hostKey, workspaceID, requestedSessionID, session, runtime)
+	requestedWorktree := strings.TrimSpace(r.URL.Query().Get("worktree"))
+	host := s.getOrCreateSessionHost(hostKey, workspaceID, requestedSessionID, session, runtime, requestedWorktree)
 
 	upgrader := s.createUpgrader()
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -164,7 +165,7 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 }
 
 // getOrCreateSessionHost returns an existing SessionHost or creates a new one.
-func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, session agentsessions.Session, runtime *WorkspaceRuntime) *acp.SessionHost {
+func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, session agentsessions.Session, runtime *WorkspaceRuntime, requestedWorktree string) *acp.SessionHost {
 	s.sessionHostMu.Lock()
 	defer s.sessionHostMu.Unlock()
 
@@ -199,6 +200,14 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 		}
 		if workDir := strings.TrimSpace(runtime.ContainerWorkDir); workDir != "" {
 			cfg.ContainerWorkDir = workDir
+		}
+		if requestedWorktree != "" {
+			containerID, defaultWorkDir, user, resolveErr := s.resolveContainerForWorkspace(workspaceID)
+			if resolveErr == nil {
+				if effectiveWorkDir, err := s.resolveExplicitWorktreeWorkDir(context.Background(), workspaceID, containerID, user, defaultWorkDir, requestedWorktree); err == nil {
+					cfg.ContainerWorkDir = effectiveWorkDir
+				}
+			}
 		}
 		if resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue); resolver != nil {
 			cfg.ContainerResolver = resolver

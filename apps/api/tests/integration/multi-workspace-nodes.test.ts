@@ -18,4 +18,9 @@ describe('multi-workspace nodes integration wiring', () => {
     expect(workspacesRoute).toContain('stopWorkspaceOnNode');
     expect(nodesRoute).toContain('stopWorkspaceOnNode');
   });
+
+  it('includes worktreePath handling for agent sessions', () => {
+    expect(workspacesRoute).toContain('worktreePath: body.worktreePath?.trim() || null');
+    expect(workspacesRoute).toContain('worktreePath: session.worktreePath');
+  });
 });

@@ -358,7 +358,7 @@ func TestMultiTerminalWS_ListSessionsIsUserScoped(t *testing.T) {
 	s, ts, authSessionID := newTestServer(t)
 
 	// Create a session for another user directly in the manager.
-	_, err := s.ptyManager.CreateSessionWithID("sess-other-user", "other-user", 24, 80)
+	_, err := s.ptyManager.CreateSessionWithID("sess-other-user", "other-user", 24, 80, "")
 	if err != nil {
 		t.Fatalf("failed to create other-user session: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestMultiTerminalWS_CloseSessionRejectsOtherUserSession(t *testing.T) {
 	s, ts, authSessionID := newTestServer(t)
 
 	// Create a session for another user directly in the manager.
-	_, err := s.ptyManager.CreateSessionWithID("sess-other-user", "other-user", 24, 80)
+	_, err := s.ptyManager.CreateSessionWithID("sess-other-user", "other-user", 24, 80, "")
 	if err != nil {
 		t.Fatalf("failed to create other-user session: %v", err)
 	}

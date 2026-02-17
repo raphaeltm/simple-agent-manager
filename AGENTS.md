@@ -15,6 +15,7 @@ However, this does NOT excuse stale documentation. The following rule exists to 
 **After writing or modifying ANY code, you MUST update ALL documentation that references the changed behavior IN THE SAME COMMIT.** There are NO exceptions and NO deferrals.
 
 This includes but is not limited to:
+
 - `docs/guides/self-hosting.md` — setup instructions, permissions, configuration
 - `docs/architecture/` — architecture decisions, credential models
 - `specs/` — feature specifications, data models
@@ -70,6 +71,7 @@ This prevents scope drift and ensures the user gets exactly what they asked for.
 ### Quick Testing Gate
 
 Before marking feature work complete:
+
 - [ ] Unit tests added/updated for all changed behavior
 - [ ] Integration tests added where cross-layer behavior exists
 - [ ] E2E coverage added or explicitly justified as not applicable
@@ -94,6 +96,7 @@ Before marking feature work complete:
 ### Quick Compliance Check
 
 Before committing any business logic changes, verify:
+
 - [ ] All URLs derived from `BASE_DOMAIN` or similar env vars
 - [ ] All timeouts have `DEFAULT_*` constants and env var overrides
 - [ ] All limits are configurable via environment
@@ -127,6 +130,7 @@ This workflow avoids deploy-fix-deploy cycles and catches mobile layout bugs tha
 ### Quick Mobile Check
 
 Before deploying any UI changes:
+
 - [ ] Login button visible and large (min 56px height)
 - [ ] Text readable without zooming (responsive sizing)
 - [ ] Grid layouts collapse to single column on mobile
@@ -141,10 +145,10 @@ Before deploying any UI changes:
 
 ### The Two Naming Conventions
 
-| Context | Prefix | Example | Where Used |
-|---------|--------|---------|------------|
-| **GitHub Environment** | `GH_` | `GH_CLIENT_ID` | GitHub Settings -> Environments -> production |
-| **Cloudflare Worker** | `GITHUB_` | `GITHUB_CLIENT_ID` | Worker runtime, local `.env` files |
+| Context                | Prefix    | Example            | Where Used                                    |
+| ---------------------- | --------- | ------------------ | --------------------------------------------- |
+| **GitHub Environment** | `GH_`     | `GH_CLIENT_ID`     | GitHub Settings -> Environments -> production |
+| **Cloudflare Worker**  | `GITHUB_` | `GITHUB_CLIENT_ID` | Worker runtime, local `.env` files            |
 
 ### Why Different Names?
 
@@ -164,6 +168,7 @@ GH_APP_SLUG            ->  GITHUB_APP_SLUG
 ### Documentation Rules
 
 When documenting environment variables:
+
 1. **GitHub Environment config** -> Use `GH_*` prefix
 2. **Cloudflare Worker secrets** -> Use `GITHUB_*` prefix
 3. **Local `.env` files** -> Use `GITHUB_*` prefix (same as Worker)
@@ -182,11 +187,11 @@ When documenting environment variables:
 
 **When constructing URLs using `BASE_DOMAIN`, you MUST use the correct subdomain prefix.** The root domain does NOT serve any application.
 
-| Destination | URL Pattern | Example |
-|-------------|-------------|---------|
-| **Web UI** | `https://app.${BASE_DOMAIN}/...` | `https://app.simple-agent-manager.org/settings` |
-| **API** | `https://api.${BASE_DOMAIN}/...` | `https://api.simple-agent-manager.org/health` |
-| **Workspace** | `https://ws-${id}.${BASE_DOMAIN}` | `https://ws-abc123.simple-agent-manager.org` |
+| Destination   | URL Pattern                       | Example                                         |
+| ------------- | --------------------------------- | ----------------------------------------------- |
+| **Web UI**    | `https://app.${BASE_DOMAIN}/...`  | `https://app.simple-agent-manager.org/settings` |
+| **API**       | `https://api.${BASE_DOMAIN}/...`  | `https://api.simple-agent-manager.org/health`   |
+| **Workspace** | `https://ws-${id}.${BASE_DOMAIN}` | `https://ws-abc123.simple-agent-manager.org`    |
 
 **NEVER** use `https://${BASE_DOMAIN}/...` (bare root domain) for redirects or links. This is always a bug.
 
@@ -219,12 +224,12 @@ When documenting environment variables:
 
 ### Key Architecture Documents
 
-| Document | Contents |
-|----------|----------|
+| Document                                   | Contents                                 |
+| ------------------------------------------ | ---------------------------------------- |
 | `docs/architecture/credential-security.md` | BYOC model, encryption, user credentials |
-| `docs/architecture/secrets-taxonomy.md` | Platform secrets vs user credentials |
-| `docs/adr/002-stateless-architecture.md` | Stateless design principles |
-| `.specify/memory/constitution.md` | Core principles and rules |
+| `docs/architecture/secrets-taxonomy.md`    | Platform secrets vs user credentials     |
+| `docs/adr/002-stateless-architecture.md`   | Stateless design principles              |
+| `.specify/memory/constitution.md`          | Core principles and rules                |
 
 ### Architecture Principles (Quick Reference)
 
@@ -254,12 +259,12 @@ When documenting environment variables:
 
 ### Key Business Logic Documents
 
-| Document | Contents |
-|----------|----------|
-| `specs/003-browser-terminal-saas/spec.md` | Core SaaS features, user stories |
-| `specs/003-browser-terminal-saas/data-model.md` | Entity relationships, state machines |
-| `specs/004-mvp-hardening/spec.md` | Security hardening, access control |
-| `specs/004-mvp-hardening/data-model.md` | Bootstrap tokens, ownership validation |
+| Document                                        | Contents                               |
+| ----------------------------------------------- | -------------------------------------- |
+| `specs/003-browser-terminal-saas/spec.md`       | Core SaaS features, user stories       |
+| `specs/003-browser-terminal-saas/data-model.md` | Entity relationships, state machines   |
+| `specs/004-mvp-hardening/spec.md`               | Security hardening, access control     |
+| `specs/004-mvp-hardening/data-model.md`         | Bootstrap tokens, ownership validation |
 
 ### Business Logic Principles (Quick Reference)
 
@@ -373,6 +378,7 @@ Task file template and conventions are defined in `tasks/README.md`.
 ### Local Dev Limitations (NOT Recommended for Testing)
 
 Running `pnpm dev` starts local emulators but has significant limitations:
+
 - No real GitHub OAuth (callbacks won't work)
 - No real DNS (workspace URLs won't resolve)
 - No real VMs (workspaces can't be created)
@@ -387,6 +393,7 @@ Store all Playwright screenshots from development and verification runs in `.cod
 ### Live Test Resource Cleanup (Required)
 
 When Playwright or manual live-app verification creates test workspaces or nodes:
+
 - Use only newly created test resources for that verification run
 - Do not mutate long-lived/legacy resources
 - Delete test workspaces and test nodes after verification is complete
@@ -411,25 +418,25 @@ pnpm format           # Format
 
 All configuration lives in **GitHub Settings -> Environments -> production**:
 
-| Type | Name | Required |
-|------|------|----------|
-| Variable | `BASE_DOMAIN` | Yes |
-| Variable | `RESOURCE_PREFIX` | No (default: `sam`) |
-| Variable | `PULUMI_STATE_BUCKET` | No (default: `sam-pulumi-state`) |
-| Secret | `CF_API_TOKEN` | Yes |
-| Secret | `CF_ACCOUNT_ID` | Yes |
-| Secret | `CF_ZONE_ID` | Yes |
-| Secret | `R2_ACCESS_KEY_ID` | Yes |
-| Secret | `R2_SECRET_ACCESS_KEY` | Yes |
-| Secret | `PULUMI_CONFIG_PASSPHRASE` | Yes |
-| Secret | `GH_CLIENT_ID` | Yes |
-| Secret | `GH_CLIENT_SECRET` | Yes |
-| Secret | `GH_APP_ID` | Yes |
-| Secret | `GH_APP_PRIVATE_KEY` | Yes |
-| Secret | `GH_APP_SLUG` | Yes |
-| Secret | `ENCRYPTION_KEY` | No (auto-generated) |
-| Secret | `JWT_PRIVATE_KEY` | No (auto-generated) |
-| Secret | `JWT_PUBLIC_KEY` | No (auto-generated) |
+| Type     | Name                       | Required                         |
+| -------- | -------------------------- | -------------------------------- |
+| Variable | `BASE_DOMAIN`              | Yes                              |
+| Variable | `RESOURCE_PREFIX`          | No (default: `sam`)              |
+| Variable | `PULUMI_STATE_BUCKET`      | No (default: `sam-pulumi-state`) |
+| Secret   | `CF_API_TOKEN`             | Yes                              |
+| Secret   | `CF_ACCOUNT_ID`            | Yes                              |
+| Secret   | `CF_ZONE_ID`               | Yes                              |
+| Secret   | `R2_ACCESS_KEY_ID`         | Yes                              |
+| Secret   | `R2_SECRET_ACCESS_KEY`     | Yes                              |
+| Secret   | `PULUMI_CONFIG_PASSPHRASE` | Yes                              |
+| Secret   | `GH_CLIENT_ID`             | Yes                              |
+| Secret   | `GH_CLIENT_SECRET`         | Yes                              |
+| Secret   | `GH_APP_ID`                | Yes                              |
+| Secret   | `GH_APP_PRIVATE_KEY`       | Yes                              |
+| Secret   | `GH_APP_SLUG`              | Yes                              |
+| Secret   | `ENCRYPTION_KEY`           | No (auto-generated)              |
+| Secret   | `JWT_PRIVATE_KEY`          | No (auto-generated)              |
+| Secret   | `JWT_PUBLIC_KEY`           | No (auto-generated)              |
 
 ### GitHub Actions Workflows
 
@@ -449,16 +456,18 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 ## API Endpoints
 
 ### Node Management
+
 - `POST /api/nodes` — Create node
 - `GET /api/nodes` — List user's nodes
 - `GET /api/nodes/:id` — Get node details
 - `POST /api/nodes/:id/stop` — Stop node
 - `DELETE /api/nodes/:id` — Delete node
-- `GET /api/nodes/:id/events` — List node events (proxied from VM Agent; vm-* DNS lacks SSL)
+- `GET /api/nodes/:id/events` — List node events (proxied from VM Agent; vm-\* DNS lacks SSL)
 - `GET /api/nodes/:id/system-info` — Full system info (proxied from VM Agent; CPU, memory, disk, Docker, versions)
 - `POST /api/nodes/:id/token` — Get node-scoped token for direct VM Agent access
 
 ### Workspace Management
+
 - `POST /api/workspaces` — Create workspace
 - `GET /api/workspaces` — List user's workspaces
 - `GET /api/workspaces/:id` — Get workspace details
@@ -468,17 +477,20 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 - `DELETE /api/workspaces/:id` — Delete a workspace
 
 ### Agent Sessions
+
 - `GET /api/workspaces/:id/agent-sessions` — List workspace agent sessions
-- `POST /api/workspaces/:id/agent-sessions` — Create agent session
+- `POST /api/workspaces/:id/agent-sessions` — Create agent session (optional `worktreePath` binds session to a worktree)
 - `PATCH /api/workspaces/:id/agent-sessions/:sessionId` — Rename agent session label
 - `POST /api/workspaces/:id/agent-sessions/:sessionId/stop` — Stop agent session
 
 ### Agent Settings
+
 - `GET /api/agent-settings/:agentType` — Get user's agent settings
 - `PUT /api/agent-settings/:agentType` — Upsert agent settings (model, permissionMode)
 - `DELETE /api/agent-settings/:agentType` — Reset agent settings to defaults
 
 ### VM Communication
+
 - `POST /api/nodes/:id/ready` — Node Agent ready callback
 - `POST /api/nodes/:id/heartbeat` — Node Agent heartbeat callback
 - `POST /api/nodes/:id/errors` — VM agent error report (batch, logged to CF Workers observability)
@@ -493,34 +505,45 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 - `POST /api/agent/activity` — VM agent activity report
 
 ### Terminal Access
+
 - `POST /api/terminal/token` — Get terminal WebSocket token
 
 ### Git Integration (VM Agent direct — browser calls via ws-{id} subdomain)
-- `GET /workspaces/:id/git/status` — Git status (staged, unstaged, untracked files)
-- `GET /workspaces/:id/git/diff?path=...&staged=true|false` — Unified diff for a single file
-- `GET /workspaces/:id/git/file?path=...&ref=HEAD` — Full file content (optional ref for committed version)
+
+- `GET /workspaces/:id/worktrees` — List git worktrees for the workspace
+- `POST /workspaces/:id/worktrees` — Create a git worktree
+- `DELETE /workspaces/:id/worktrees?path=...&force=true|false` — Remove a git worktree
+- `GET /workspaces/:id/git/status?worktree=...` — Git status (staged, unstaged, untracked files) scoped to optional worktree path
+- `GET /workspaces/:id/git/diff?path=...&staged=true|false&worktree=...` — Unified diff for a single file in optional worktree
+- `GET /workspaces/:id/git/file?path=...&ref=HEAD&worktree=...` — Full file content (optional ref + optional worktree)
 
 ### File Browser (VM Agent direct — browser calls via ws-{id} subdomain)
-- `GET /workspaces/:id/files/list?path=.` — Directory listing (type, size, modifiedAt per entry)
-- `GET /workspaces/:id/files/find` — Recursive flat file index (all file paths, excludes node_modules/.git/dist etc.)
+
+- `GET /workspaces/:id/files/list?path=.&worktree=...` — Directory listing (type, size, modifiedAt per entry) scoped to optional worktree
+- `GET /workspaces/:id/files/find?worktree=...` — Recursive flat file index (all file paths, excludes node_modules/.git/dist etc.) scoped to optional worktree
 
 ### Voice Transcription
+
 - `POST /api/transcribe` — Transcribe audio via Workers AI (Whisper)
 
 ### Client Error Reporting
+
 - `POST /api/client-errors` — Receive batched client-side errors for Workers observability logging
 
 ### Authentication (BetterAuth)
+
 - `POST /api/auth/sign-in/social` — GitHub OAuth login
 - `GET /api/auth/session` — Get current session
 - `POST /api/auth/sign-out` — Sign out
 
 ### Credentials
+
 - `GET /api/credentials` — Get user's cloud provider credentials
 - `POST /api/credentials` — Save cloud provider credentials
 - `DELETE /api/credentials/:provider` — Delete stored cloud provider credential
 
 ### GitHub Integration
+
 - `GET /api/github/installations` — List user's GitHub App installations
 - `GET /api/github/repositories` — List accessible repositories
 - `GET /api/github/branches?repository=owner/repo` — List branches for a repository
@@ -528,7 +551,9 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 ## Troubleshooting
 
 ### Build Errors
+
 Run builds in dependency order:
+
 ```bash
 pnpm --filter @simple-agent-manager/shared build
 pnpm --filter @simple-agent-manager/providers build
@@ -536,9 +561,11 @@ pnpm --filter @simple-agent-manager/api build
 ```
 
 ### Test Failures
+
 Check if Miniflare bindings are configured in `vitest.config.ts`.
 
 ### Type Errors
+
 Run `pnpm typecheck` from root to see all issues.
 
 ## Agent Authentication
@@ -636,7 +663,11 @@ app.onError((err, c) => {
 
 // WRONG — subrouter errors silently bypass this
 app.use('*', async (c, next) => {
-  try { await next(); } catch (err) { /* NEVER REACHED for subrouter errors */ }
+  try {
+    await next();
+  } catch (err) {
+    /* NEVER REACHED for subrouter errors */
+  }
 });
 ```
 
@@ -657,6 +688,7 @@ Local development uses `.dev.vars`.
 ### Development Environment Variables
 
 See `apps/api/.env.example`:
+
 - `WRANGLER_PORT` - Local dev port (default: 8787)
 - `BASE_DOMAIN` - Set automatically by sync scripts
 - `MAX_NODES_PER_USER` - Optional runtime node cap
@@ -674,6 +706,9 @@ See `apps/api/.env.example`:
 - `MAX_CLIENT_ERROR_BATCH_SIZE` - Max errors per client error report request (default: 25)
 - `MAX_CLIENT_ERROR_BODY_BYTES` - Max request body size for client error reports in bytes (default: 65536)
 - `GIT_EXEC_TIMEOUT` - VM Agent: timeout for git commands via docker exec (default: 30s)
+- `GIT_WORKTREE_TIMEOUT` - VM Agent: timeout for git worktree create/remove commands (default: 30s)
+- `WORKTREE_CACHE_TTL` - VM Agent: cache duration for parsed `git worktree list` results (default: 5s)
+- `MAX_WORKTREES_PER_WORKSPACE` - VM Agent: max worktrees allowed per workspace (default: 5)
 - `GIT_FILE_MAX_SIZE` - VM Agent: max file size in bytes for git/file endpoint (default: 1048576)
 - `FILE_LIST_TIMEOUT` - VM Agent: timeout for file listing commands (default: 10s)
 - `FILE_LIST_MAX_ENTRIES` - VM Agent: max entries returned per directory listing (default: 1000)
@@ -725,13 +760,18 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
    - document a temporary exception with rationale and expiration.
 
 ## Active Technologies
+
 - **API**: TypeScript 5.x, Hono, Drizzle ORM, BetterAuth, jose, Cloudflare Workers
 - **Web**: TypeScript 5.x, React 18, Vite 5, TailwindCSS, xterm.js 5.3, Radix UI, lucide-react, @dnd-kit
 - **VM Agent**: Go 1.22+, creack/pty, gorilla/websocket, golang-jwt, modernc.org/sqlite
 - **Storage**: Cloudflare D1 (SQLite), KV (sessions/tokens/boot logs), R2 (binaries/Pulumi state)
 - **Infra**: Pulumi, Wrangler, @devcontainers/cli, pnpm 9.0+, Cloudflare Pages
+- TypeScript 5.x (API + Web), Go 1.22+ (VM Agent) + Hono (API), React 18 + Vite 5 (Web), creack/pty + gorilla/websocket (VM Agent), ACP SDK (agent sessions) (015-worktree-context)
+- Cloudflare D1 (agent session worktree metadata), SQLite on VM (terminal session metadata), Docker named volumes (worktree directories) (015-worktree-context)
 
 ## Recent Changes
+
+- worktree-context: Added deep git worktree integration across VM agent, API, shared types, terminal package, and workspace UI; new VM agent worktree endpoints (`GET/POST/DELETE /workspaces/:id/worktrees`), optional `worktree` scoping for git/file endpoints, and worktree-aware terminal/chat session creation (`workDir`/`worktree` path propagation); agent sessions now persist optional `worktreePath` in D1 via `0010_agent_sessions_worktree_path.sql`; new `WorktreeSelector` UI supports list/create/remove/switch with URL persistence and tab badges; added env vars `GIT_WORKTREE_TIMEOUT`, `WORKTREE_CACHE_TTL`, `MAX_WORKTREES_PER_WORKSPACE`
 - node-system-info: VM Agent sysinfo package collects system metrics from Linux procfs (`/proc/loadavg`, `/proc/meminfo`, `/proc/uptime`, `/proc/net/dev`) and Docker CLI (`docker stats`, `docker version`); two-tier collection: `CollectQuick()` (procfs only, microseconds) enriches heartbeat with `metrics: { cpuLoadAvg1, memoryPercent, diskPercent }`, `Collect()` (full, including Docker/versions) powers new `GET /system-info` endpoint; control plane stores heartbeat metrics in D1 `last_metrics` column, proxies full system info via `GET /api/nodes/:id/system-info`; Node detail page redesigned with composed section components (NodeOverviewSection, SystemResourcesSection, DockerSection, SoftwareSection, NodeWorkspacesSection, NodeEventsSection) replacing monolithic inline JSX; ResourceBar gauge with color-coded thresholds and `role="meter"` accessibility; Nodes list page enriched with MiniMetricBadge pills (load/mem/disk) and workspace count; configurable `SYSINFO_DOCKER_TIMEOUT`, `SYSINFO_VERSION_TIMEOUT`, `SYSINFO_CACHE_TTL`; build-time ldflags inject version/build date/Go version into agent binary
 - devcontainer-named-volumes: Replaced bind-mount devcontainer storage with named Docker volumes (`sam-ws-<workspaceId>`); host clone preserved for devcontainer CLI config discovery, then populated into volume via throwaway `alpine` container; `workspaceMount` property in override config replaces default bind-mount (NOT `--mount` CLI flag which only adds supplementary mounts); repos with own devcontainer config get mount-only override, repos without config get full default config with volume mount; eliminated permission normalization dance (`ensureWorkspaceWritablePreDevcontainer`, `ensureWorkspaceWritable`, `getContainerUserIDs`, `getContainerCurrentUserIDs` removed); workspace deletion now removes container and volume; `config.DeriveRepoDirName` exported for cross-package use
 - command-palette-search: Enhanced command palette (Cmd+K) with fuzzy file search and tab switching; VS Code-style camelCase-aware fuzzy matching (fuzzy-match.ts) with word boundary scoring, consecutive bonuses, and space-skipping; categorized results (Tabs, Files, Commands) with HighlightedText match visualization; lazy file index loading via new VM Agent `GET /files/find` endpoint (recursive flat file list with noise exclusion); filename-vs-path best-score matching; file results capped at 20; configurable FILE_FIND_TIMEOUT and FILE_FIND_MAX_ENTRIES
@@ -748,7 +788,7 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 - file-browser: File browser with directory listing and syntax-highlighted file viewer; VM Agent endpoint `GET /files/list` via docker exec `find -printf`; breadcrumb navigation, mobile-first full-screen overlays, cross-link to git diff viewer; configurable FILE_LIST_TIMEOUT and FILE_LIST_MAX_ENTRIES
 - git-changes-viewer: GitHub PR-style git changes viewer accessible via nav bar icon; VM Agent endpoints for git status/diff/file via docker exec; full-screen overlay with staged/unstaged/untracked sections, unified diff view with green/red coloring, Diff/Full toggle; URL search params for browser back/forward navigation
 - voice-to-text: Voice input button for agent chat with Workers AI Whisper transcription, VoiceButton component in acp-client, POST /api/transcribe endpoint, configurable model/limits
-- node-data-ownership: Workspace events fetched directly from VM Agent (browser -> VM Agent via ws-{id} proxy); node events proxied through control plane (vm-* DNS records lack SSL termination); new `POST /api/nodes/:id/token` for node-scoped auth tokens; VM Agent event handlers accept browser workspace/session auth
+- node-data-ownership: Workspace events fetched directly from VM Agent (browser -> VM Agent via ws-{id} proxy); node events proxied through control plane (vm-\* DNS records lack SSL termination); new `POST /api/nodes/:id/token` for node-scoped auth tokens; VM Agent event handlers accept browser workspace/session auth
 - 014-multi-workspace-nodes: First-class Nodes with multi-workspace hosting, async provisioning (callback-driven `/ready` + `/provisioning-failed`), workspace recovery on attach, session tab UX with `+` dropdown, node-scoped routing/auth, explicit lifecycle control
 - 014-multi-workspace-nodes: Default fallback devcontainer image changed to `mcr.microsoft.com/devcontainers/base:ubuntu`; fresh-node readiness probing with hard timeouts
 - 014-auth-profile-sync: GitHub primary email resolved at login, propagated into workspace bootstrap for git commit identity

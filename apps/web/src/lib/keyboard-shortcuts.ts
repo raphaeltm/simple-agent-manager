@@ -24,8 +24,7 @@ export interface ShortcutDefinition {
 
 /** Detect macOS once at module load */
 const IS_MAC =
-  typeof navigator !== 'undefined' &&
-  /mac/i.test(navigator.platform ?? navigator.userAgent ?? '');
+  typeof navigator !== 'undefined' && /mac/i.test(navigator.platform ?? navigator.userAgent ?? '');
 
 /**
  * Returns the platform-appropriate modifier symbol.
@@ -115,6 +114,13 @@ export const SHORTCUTS: ShortcutDefinition[] = [
     key: '`',
     modifiers: { meta: true },
     description: 'Focus terminal',
+    category: 'Navigation',
+  },
+  {
+    id: 'switch-worktree',
+    key: 'w',
+    modifiers: { meta: true, shift: true },
+    description: 'Switch worktree',
     category: 'Navigation',
   },
 
