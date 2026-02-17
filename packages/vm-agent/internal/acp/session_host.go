@@ -23,12 +23,12 @@ import (
 type SessionHostStatus string
 
 const (
-	HostIdle     SessionHostStatus = "idle"      // No agent selected yet
-	HostStarting SessionHostStatus = "starting"  // Agent being initialized
-	HostReady    SessionHostStatus = "ready"      // Agent ready for prompts
+	HostIdle      SessionHostStatus = "idle"      // No agent selected yet
+	HostStarting  SessionHostStatus = "starting"  // Agent being initialized
+	HostReady     SessionHostStatus = "ready"     // Agent ready for prompts
 	HostPrompting SessionHostStatus = "prompting" // Prompt in progress
-	HostError    SessionHostStatus = "error"      // Agent in error state
-	HostStopped  SessionHostStatus = "stopped"    // Explicitly stopped
+	HostError     SessionHostStatus = "error"     // Agent in error state
+	HostStopped   SessionHostStatus = "stopped"   // Explicitly stopped
 )
 
 // DefaultMessageBufferSize is the default maximum number of messages buffered
@@ -149,6 +149,11 @@ func (h *SessionHost) AgentType() string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.agentType
+}
+
+// ContainerWorkDir returns the configured working directory for this session host.
+func (h *SessionHost) ContainerWorkDir() string {
+	return h.config.ContainerWorkDir
 }
 
 // ViewerCount returns the number of active viewers.

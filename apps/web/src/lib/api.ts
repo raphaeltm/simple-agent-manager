@@ -18,6 +18,10 @@ import type {
   AgentCredentialInfo,
   SaveAgentCredentialRequest,
   WorkspaceTab,
+  WorktreeInfo,
+  WorktreeListResponse,
+  CreateWorktreeRequest,
+  RemoveWorktreeResponse,
   AgentSettingsResponse,
   SaveAgentSettingsRequest,
   NodeSystemInfo,
@@ -43,10 +47,7 @@ export class ApiClientError extends Error {
   }
 }
 
-async function request<T>(
-  endpoint: string,
-  options: RequestInit = {}
-): Promise<T> {
+async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,
     credentials: 'include', // Include cookies for session auth
@@ -60,7 +61,11 @@ async function request<T>(
   const contentType = response.headers.get('content-type');
   if (!contentType?.includes('application/json')) {
     if (!response.ok) {
-      throw new ApiClientError('UNKNOWN_ERROR', 'Server returned non-JSON response', response.status);
+      throw new ApiClientError(
+        'UNKNOWN_ERROR',
+        'Server returned non-JSON response',
+        response.status
+      );
     }
     return {} as T;
   }
@@ -161,7 +166,6 @@ export async function deleteNode(id: string): Promise<{ success: boolean }> {
   });
 }
 
-
 /**
  * Fetch node system info via the control plane proxy.
  * Proxied for the same reason as events (vm-* DNS lacks SSL).
@@ -177,7 +181,7 @@ export async function getNodeSystemInfo(nodeId: string): Promise<NodeSystemInfo>
  */
 export async function listNodeEvents(
   nodeId: string,
-  limit = 100,
+  limit = 100
 ): Promise<{ events: Event[]; nextCursor?: string | null }> {
   const params = new URLSearchParams();
   params.set('limit', String(limit));
@@ -190,7 +194,10 @@ export async function listNodeEvents(
 // =============================================================================
 // Workspaces
 // =============================================================================
-export async function listWorkspaces(status?: string, nodeId?: string): Promise<WorkspaceResponse[]> {
+export async function listWorkspaces(
+  status?: string,
+  nodeId?: string
+): Promise<WorkspaceResponse[]> {
   const params = new URLSearchParams();
   if (status) params.set('status', status);
   if (nodeId) params.set('nodeId', nodeId);
@@ -209,7 +216,10 @@ export async function createWorkspace(data: CreateWorkspaceRequest): Promise<Wor
   });
 }
 
-export async function updateWorkspace(id: string, data: UpdateWorkspaceRequest): Promise<WorkspaceResponse> {
+export async function updateWorkspace(
+  id: string,
+  data: UpdateWorkspaceRequest
+): Promise<WorkspaceResponse> {
   return request<WorkspaceResponse>(`/api/workspaces/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(data),
@@ -263,7 +273,7 @@ export async function listWorkspaceEvents(
     const text = await res.text().catch(() => 'Unknown error');
     throw new Error(`Failed to load workspace events: ${text}`);
   }
-  const data = await res.json() as { events: Event[]; nextCursor?: string | null };
+  const data = (await res.json()) as { events: Event[]; nextCursor?: string | null };
   return { events: data.events ?? [], nextCursor: data.nextCursor ?? null };
 }
 
@@ -295,10 +305,16 @@ export async function renameAgentSession(
   });
 }
 
-export async function stopAgentSession(workspaceId: string, sessionId: string): Promise<{ status: string }> {
-  return request<{ status: string }>(`/api/workspaces/${workspaceId}/agent-sessions/${sessionId}/stop`, {
-    method: 'POST',
-  });
+export async function stopAgentSession(
+  workspaceId: string,
+  sessionId: string
+): Promise<{ status: string }> {
+  return request<{ status: string }>(
+    `/api/workspaces/${workspaceId}/agent-sessions/${sessionId}/stop`,
+    {
+      method: 'POST',
+    }
+  );
 }
 
 // =============================================================================
@@ -345,21 +361,29 @@ export async function listAgentCredentials(): Promise<{ credentials: AgentCreden
   return request<{ credentials: AgentCredentialInfo[] }>('/api/credentials/agent');
 }
 
-export async function saveAgentCredential(data: SaveAgentCredentialRequest): Promise<AgentCredentialInfo> {
+export async function saveAgentCredential(
+  data: SaveAgentCredentialRequest
+): Promise<AgentCredentialInfo> {
   return request<AgentCredentialInfo>('/api/credentials/agent', {
     method: 'PUT',
     body: JSON.stringify(data),
   });
 }
 
-export async function toggleAgentCredential(agentType: string, credentialKind: string): Promise<void> {
+export async function toggleAgentCredential(
+  agentType: string,
+  credentialKind: string
+): Promise<void> {
   return request<void>(`/api/credentials/agent/${agentType}/toggle`, {
     method: 'POST',
     body: JSON.stringify({ credentialKind }),
   });
 }
 
-export async function deleteAgentCredentialByKind(agentType: string, credentialKind: string): Promise<void> {
+export async function deleteAgentCredentialByKind(
+  agentType: string,
+  credentialKind: string
+): Promise<void> {
   return request<void>(`/api/credentials/agent/${agentType}/${credentialKind}`, {
     method: 'DELETE',
   });
@@ -443,9 +467,11 @@ export interface GitFileData {
 export async function getGitStatus(
   workspaceUrl: string,
   workspaceId: string,
-  token: string
+  token: string,
+  worktree?: string
 ): Promise<GitStatusData> {
   const params = new URLSearchParams({ token });
+  if (worktree) params.set('worktree', worktree);
   const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/git/status?${params.toString()}`;
   const res = await fetch(url, { credentials: 'include' });
   if (!res.ok) {
@@ -463,13 +489,15 @@ export async function getGitDiff(
   workspaceId: string,
   token: string,
   filePath: string,
-  staged = false
+  staged = false,
+  worktree?: string
 ): Promise<GitDiffData> {
   const params = new URLSearchParams({
     token,
     path: filePath,
     staged: String(staged),
   });
+  if (worktree) params.set('worktree', worktree);
   const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/git/diff?${params.toString()}`;
   const res = await fetch(url, { credentials: 'include' });
   if (!res.ok) {
@@ -487,10 +515,12 @@ export async function getGitFile(
   workspaceId: string,
   token: string,
   filePath: string,
-  ref?: string
+  ref?: string,
+  worktree?: string
 ): Promise<GitFileData> {
   const params = new URLSearchParams({ token, path: filePath });
   if (ref) params.set('ref', ref);
+  if (worktree) params.set('worktree', worktree);
   const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/git/file?${params.toString()}`;
   const res = await fetch(url, { credentials: 'include' });
   if (!res.ok) {
@@ -521,9 +551,11 @@ export async function getFileList(
   workspaceUrl: string,
   workspaceId: string,
   token: string,
-  path = '.'
+  path = '.',
+  worktree?: string
 ): Promise<FileListData> {
   const params = new URLSearchParams({ token, path });
+  if (worktree) params.set('worktree', worktree);
   const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/list?${params.toString()}`;
   const res = await fetch(url, { credentials: 'include' });
   if (!res.ok) {
@@ -540,9 +572,11 @@ export async function getFileList(
 export async function getFileIndex(
   workspaceUrl: string,
   workspaceId: string,
-  token: string
+  token: string,
+  worktree?: string
 ): Promise<string[]> {
   const params = new URLSearchParams({ token });
+  if (worktree) params.set('worktree', worktree);
   const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/find?${params.toString()}`;
   const res = await fetch(url, { credentials: 'include' });
   if (!res.ok) {
@@ -551,4 +585,60 @@ export async function getFileIndex(
   }
   const data = (await res.json()) as { files: string[] };
   return data.files;
+}
+
+export async function getWorktrees(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string
+): Promise<WorktreeListResponse> {
+  const params = new URLSearchParams({ token });
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/worktrees?${params.toString()}`;
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Worktree list failed: ${text}`);
+  }
+  return res.json() as Promise<WorktreeListResponse>;
+}
+
+export async function createWorktree(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string,
+  request: CreateWorktreeRequest
+): Promise<WorktreeInfo> {
+  const params = new URLSearchParams({ token });
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/worktrees?${params.toString()}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Worktree create failed: ${text}`);
+  }
+  return res.json() as Promise<WorktreeInfo>;
+}
+
+export async function removeWorktree(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string,
+  path: string,
+  force = false
+): Promise<RemoveWorktreeResponse> {
+  const params = new URLSearchParams({ token, path, force: String(force) });
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/worktrees?${params.toString()}`;
+  const res = await fetch(url, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Worktree remove failed: ${text}`);
+  }
+  return res.json() as Promise<RemoveWorktreeResponse>;
 }

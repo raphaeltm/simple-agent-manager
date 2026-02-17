@@ -7,6 +7,7 @@ interface GitChangesPanelProps {
   workspaceUrl: string;
   workspaceId: string;
   token: string;
+  worktree?: string | null;
   isMobile: boolean;
   onClose: () => void;
   onSelectFile: (filePath: string, staged: boolean) => void;
@@ -44,6 +45,7 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
   workspaceUrl,
   workspaceId,
   token,
+  worktree,
   isMobile,
   onClose,
   onSelectFile,
@@ -61,14 +63,14 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const result = await getGitStatus(workspaceUrl, workspaceId, token);
+      const result = await getGitStatus(workspaceUrl, workspaceId, token, worktree ?? undefined);
       setData(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch git status');
     } finally {
       setLoading(false);
     }
-  }, [workspaceUrl, workspaceId, token]);
+  }, [workspaceUrl, workspaceId, token, worktree]);
 
   useEffect(() => {
     fetchStatus();
@@ -86,9 +88,7 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
 
-  const totalChanges = data
-    ? data.staged.length + data.unstaged.length + data.untracked.length
-    : 0;
+  const totalChanges = data ? data.staged.length + data.unstaged.length + data.untracked.length : 0;
 
   const overlayStyle: CSSProperties = {
     position: 'fixed',
@@ -114,18 +114,19 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
     <div style={overlayStyle}>
       {/* Header */}
       <header style={headerStyle}>
-        <button
-          onClick={onClose}
-          aria-label="Close git changes"
-          style={iconButtonStyle(isMobile)}
-        >
+        <button onClick={onClose} aria-label="Close git changes" style={iconButtonStyle(isMobile)}>
           <svg
             style={{ height: isMobile ? 18 : 16, width: isMobile ? 18 : 16 }}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 19l-7-7 7-7"
+            />
           </svg>
         </button>
 
@@ -154,14 +155,13 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
             opacity: loading ? 0.5 : 1,
           }}
         >
-          <RefreshCw size={isMobile ? 16 : 14} style={loading ? { animation: 'spin 1s linear infinite' } : undefined} />
+          <RefreshCw
+            size={isMobile ? 16 : 14}
+            style={loading ? { animation: 'spin 1s linear infinite' } : undefined}
+          />
         </button>
 
-        <button
-          onClick={onClose}
-          aria-label="Close"
-          style={iconButtonStyle(isMobile)}
-        >
+        <button onClick={onClose} aria-label="Close" style={iconButtonStyle(isMobile)}>
           <X size={isMobile ? 18 : 16} />
         </button>
       </header>
@@ -409,9 +409,7 @@ const FileRow: FC<FileRowProps> = ({ file, onClick, isMobile }) => {
           minWidth: 0,
         }}
       >
-        {dir && (
-          <span style={{ color: 'var(--sam-color-fg-muted)' }}>{dir}</span>
-        )}
+        {dir && <span style={{ color: 'var(--sam-color-fg-muted)' }}>{dir}</span>}
         {name}
       </span>
       {file.oldPath && (

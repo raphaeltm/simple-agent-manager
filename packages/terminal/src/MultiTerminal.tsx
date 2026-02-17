@@ -49,6 +49,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
   (props, ref) => {
     const {
       wsUrl,
+      defaultWorkDir,
       onActivity,
       className = '',
       config,
@@ -197,7 +198,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       createTerminalInstance(sessionId);
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(encodeTerminalWsCreateSession(sessionId, 24, 80));
+        ws.send(encodeTerminalWsCreateSession(sessionId, 24, 80, undefined, defaultWorkDir));
       }
       return sessionId;
     }, [createTerminalInstance]);
@@ -322,7 +323,9 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
               if (pendingLocalSessions.length === 0 && serverSessions.length === 0) {
                 const sessionId = latestRef.current.createSession();
                 createTerminalInstance(sessionId);
-                ws.send(encodeTerminalWsCreateSession(sessionId, 24, 80));
+                ws.send(
+                  encodeTerminalWsCreateSession(sessionId, 24, 80, undefined, defaultWorkDir)
+                );
               } else {
                 for (const localSession of pendingLocalSessions) {
                   const serverId = localSession.serverSessionId;
@@ -343,7 +346,13 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
                     serverMap.delete(serverId);
                   } else {
                     ws.send(
-                      encodeTerminalWsCreateSession(localSession.localId, 24, 80, localSession.name)
+                      encodeTerminalWsCreateSession(
+                        localSession.localId,
+                        24,
+                        80,
+                        localSession.name,
+                        defaultWorkDir
+                      )
                     );
                   }
                 }
@@ -560,7 +569,14 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
           }
         },
       }),
-      [activeSessionId, activateSession, canCreateSession, handleCloseTab, handleNewTab, handleRenameTab]
+      [
+        activeSessionId,
+        activateSession,
+        canCreateSession,
+        handleCloseTab,
+        handleNewTab,
+        handleRenameTab,
+      ]
     );
 
     useEffect(() => {

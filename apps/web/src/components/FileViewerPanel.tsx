@@ -8,6 +8,7 @@ interface FileViewerPanelProps {
   workspaceUrl: string;
   workspaceId: string;
   token: string;
+  worktree?: string | null;
   filePath: string;
   isMobile: boolean;
   /** If the file has git changes, show a "View Diff" button */
@@ -74,6 +75,7 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
   workspaceUrl,
   workspaceId,
   token,
+  worktree,
   filePath,
   isMobile,
   hasGitChanges,
@@ -90,14 +92,21 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const result = await getGitFile(workspaceUrl, workspaceId, token, filePath);
+      const result = await getGitFile(
+        workspaceUrl,
+        workspaceId,
+        token,
+        filePath,
+        undefined,
+        worktree ?? undefined
+      );
       setContent(result.content);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load file');
     } finally {
       setLoading(false);
     }
-  }, [workspaceUrl, workspaceId, token, filePath]);
+  }, [workspaceUrl, workspaceId, token, filePath, worktree]);
 
   useEffect(() => {
     fetchFile();
@@ -139,18 +148,19 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
     <div style={overlayStyle}>
       {/* Header */}
       <header style={headerStyle}>
-        <button
-          onClick={onBack}
-          aria-label="Back to file list"
-          style={iconBtnStyle(isMobile)}
-        >
+        <button onClick={onBack} aria-label="Back to file list" style={iconBtnStyle(isMobile)}>
           <svg
             style={{ height: isMobile ? 18 : 16, width: isMobile ? 18 : 16 }}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 19l-7-7 7-7"
+            />
           </svg>
         </button>
 
@@ -189,11 +199,7 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
           </button>
         )}
 
-        <button
-          onClick={onClose}
-          aria-label="Close"
-          style={iconBtnStyle(isMobile)}
-        >
+        <button onClick={onClose} aria-label="Close" style={iconBtnStyle(isMobile)}>
           <X size={isMobile ? 18 : 16} />
         </button>
       </header>
@@ -250,11 +256,7 @@ const SyntaxHighlightedCode: FC<{ content: string; language: string }> = ({
   language,
 }) => {
   return (
-    <Highlight
-      theme={themes.nightOwl}
-      code={content}
-      language={language || 'text'}
-    >
+    <Highlight theme={themes.nightOwl} code={content} language={language || 'text'}>
       {({ tokens, getLineProps, getTokenProps }) => (
         <pre
           style={{

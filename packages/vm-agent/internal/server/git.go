@@ -16,8 +16,8 @@ import (
 // GitFileStatus represents a single file in git status output.
 type GitFileStatus struct {
 	Path    string `json:"path"`
-	Status  string `json:"status"`             // "M", "A", "D", "R", "??" etc.
-	OldPath string `json:"oldPath,omitempty"`   // populated for renames
+	Status  string `json:"status"`            // "M", "A", "D", "R", "??" etc.
+	OldPath string `json:"oldPath,omitempty"` // populated for renames
 }
 
 // GitStatusResponse groups files by their git staging state.
@@ -57,6 +57,11 @@ func (s *Server) handleGitStatus(w http.ResponseWriter, r *http.Request) {
 	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	workDir, err = s.resolveWorktreeWorkDir(r, workspaceID, containerID, user, workDir)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -105,6 +110,11 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	workDir, err = s.resolveWorktreeWorkDir(r, workspaceID, containerID, user, workDir)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -164,6 +174,11 @@ func (s *Server) handleGitFile(w http.ResponseWriter, r *http.Request) {
 	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	workDir, err = s.resolveWorktreeWorkDir(r, workspaceID, containerID, user, workDir)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 

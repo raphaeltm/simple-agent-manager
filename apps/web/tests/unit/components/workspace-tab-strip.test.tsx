@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { WorkspaceTabStrip, type WorkspaceTabItem } from '../../../src/components/WorkspaceTabStrip';
+import {
+  WorkspaceTabStrip,
+  type WorkspaceTabItem,
+} from '../../../src/components/WorkspaceTabStrip';
 
 function makeTabs(...specs: Array<[string, string, 'terminal' | 'chat']>): WorkspaceTabItem[] {
   return specs.map(([id, title, kind]) => ({
@@ -64,9 +67,7 @@ describe('WorkspaceTabStrip', () => {
     fireEvent.click(screen.getByText('Claude Code 1'));
 
     expect(defaultProps.onSelect).toHaveBeenCalledTimes(1);
-    expect(defaultProps.onSelect).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'chat:c1' })
-    );
+    expect(defaultProps.onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat:c1' }));
   });
 
   it('calls onSelect when Enter is pressed on a tab', () => {
@@ -88,9 +89,7 @@ describe('WorkspaceTabStrip', () => {
   });
 
   it('does not render close button for unclosable tab', () => {
-    render(
-      <WorkspaceTabStrip {...defaultProps} unclosableTabId="terminal:t1" />
-    );
+    render(<WorkspaceTabStrip {...defaultProps} unclosableTabId="terminal:t1" />);
 
     // The terminal tab should not have a close button
     const closeButtons = screen.queryAllByRole('button', { name: /Close Terminal 1/ });
@@ -210,6 +209,19 @@ describe('WorkspaceTabStrip', () => {
     // Each tab should have a status dot (●)
     const dots = screen.getAllByText('●');
     expect(dots).toHaveLength(3);
+  });
+
+  it('renders worktree badges when provided', () => {
+    const tabsWithBadges: WorkspaceTabItem[] = [
+      { ...defaultTabs[0]!, badge: 'main' },
+      { ...defaultTabs[1]!, badge: 'feature-auth' },
+      defaultTabs[2]!,
+    ];
+
+    render(<WorkspaceTabStrip {...defaultProps} tabs={tabsWithBadges} />);
+
+    expect(screen.getByText('main')).toBeInTheDocument();
+    expect(screen.getByText('feature-auth')).toBeInTheDocument();
   });
 
   it('has correct tablist role on the container', () => {

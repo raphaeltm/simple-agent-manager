@@ -100,23 +100,11 @@ export interface GitHubConnection {
 // =============================================================================
 // Workspace
 // =============================================================================
-export type NodeStatus =
-  | 'pending'
-  | 'creating'
-  | 'running'
-  | 'stopping'
-  | 'stopped'
-  | 'error';
+export type NodeStatus = 'pending' | 'creating' | 'running' | 'stopping' | 'stopped' | 'error';
 
 export type NodeHealthStatus = 'healthy' | 'stale' | 'unhealthy';
 
-export type WorkspaceStatus =
-  | 'pending'
-  | 'creating'
-  | 'running'
-  | 'stopping'
-  | 'stopped'
-  | 'error';
+export type WorkspaceStatus = 'pending' | 'creating' | 'running' | 'stopping' | 'stopped' | 'error';
 
 export type VMSize = 'small' | 'medium' | 'large';
 
@@ -310,6 +298,30 @@ export interface Event {
 
 export type AgentSessionStatus = 'running' | 'stopped' | 'error';
 
+export interface WorktreeInfo {
+  path: string;
+  branch: string;
+  headCommit: string;
+  isPrimary: boolean;
+  isDirty: boolean;
+  dirtyFileCount: number;
+  isPrunable?: boolean;
+}
+
+export interface WorktreeListResponse {
+  worktrees: WorktreeInfo[];
+}
+
+export interface CreateWorktreeRequest {
+  branch: string;
+  createBranch?: boolean;
+  baseBranch?: string;
+}
+
+export interface RemoveWorktreeResponse {
+  removed: string;
+}
+
 export interface AgentSession {
   id: string;
   workspaceId: string;
@@ -319,10 +331,12 @@ export interface AgentSession {
   stoppedAt?: string | null;
   errorMessage?: string | null;
   label?: string | null;
+  worktreePath?: string | null;
 }
 
 export interface CreateAgentSessionRequest {
   label?: string;
+  worktreePath?: string;
 }
 
 export interface UpdateAgentSessionRequest {
@@ -417,7 +431,12 @@ export interface ApiError {
 // =============================================================================
 
 /** Valid permission modes for agent sessions */
-export type AgentPermissionMode = 'default' | 'acceptEdits' | 'plan' | 'dontAsk' | 'bypassPermissions';
+export type AgentPermissionMode =
+  | 'default'
+  | 'acceptEdits'
+  | 'plan'
+  | 'dontAsk'
+  | 'bypassPermissions';
 
 /** Agent settings stored per-user, per-agent in D1 */
 export interface AgentSettings {

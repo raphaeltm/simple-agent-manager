@@ -375,3 +375,28 @@ func TestGetActiveSessionsForUser(t *testing.T) {
 		t.Fatalf("expected 1 session for user2, got %d", len(user2Sessions))
 	}
 }
+
+func TestCreateSessionWithID_UsesProvidedWorkDir(t *testing.T) {
+	customDir := t.TempDir()
+	m := NewManager(ManagerConfig{
+		DefaultShell: "/bin/sh",
+		DefaultRows:  24,
+		DefaultCols:  80,
+		WorkDir:      "/workspaces/default",
+		GracePeriod:  1 * time.Minute,
+		BufferSize:   1024,
+	})
+
+	session, err := m.CreateSessionWithID("sess-workdir", "user1", 24, 80, customDir)
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+	defer m.CloseAllSessions()
+
+	if session.Cmd == nil {
+		t.Fatalf("expected session command to be initialized")
+	}
+	if session.Cmd.Dir != customDir {
+		t.Fatalf("expected custom workdir, got %q", session.Cmd.Dir)
+	}
+}

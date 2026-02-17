@@ -11,9 +11,15 @@ const mocks = vi.hoisted(() => ({
   listAgentSessions: vi.fn(),
   createAgentSession: vi.fn(),
   stopAgentSession: vi.fn(),
+  renameAgentSession: vi.fn(),
   updateWorkspace: vi.fn(),
+  rebuildWorkspace: vi.fn(),
   listAgents: vi.fn(),
   getGitStatus: vi.fn(),
+  getFileIndex: vi.fn(),
+  getWorktrees: vi.fn(),
+  createWorktree: vi.fn(),
+  removeWorktree: vi.fn(),
   getAgentSettings: vi.fn(),
   saveAgentSettings: vi.fn(),
   useAcpSession: vi.fn(),
@@ -39,9 +45,15 @@ vi.mock('../../../src/lib/api', () => ({
   listAgentSessions: mocks.listAgentSessions,
   createAgentSession: mocks.createAgentSession,
   stopAgentSession: mocks.stopAgentSession,
+  renameAgentSession: mocks.renameAgentSession,
   updateWorkspace: mocks.updateWorkspace,
+  rebuildWorkspace: mocks.rebuildWorkspace,
   listAgents: mocks.listAgents,
   getGitStatus: mocks.getGitStatus,
+  getFileIndex: mocks.getFileIndex,
+  getWorktrees: mocks.getWorktrees,
+  createWorktree: mocks.createWorktree,
+  removeWorktree: mocks.removeWorktree,
   getAgentSettings: mocks.getAgentSettings,
   saveAgentSettings: mocks.saveAgentSettings,
   getTranscribeApiUrl: () => 'https://api.example.com/api/transcribe',
@@ -54,7 +66,14 @@ vi.mock('@simple-agent-manager/terminal', () => ({
 }));
 
 vi.mock('@simple-agent-manager/acp-client', () => ({
-  useAcpMessages: () => ({ processMessage: vi.fn(), items: [], usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }, availableCommands: [], addUserMessage: vi.fn(), clear: vi.fn() }),
+  useAcpMessages: () => ({
+    processMessage: vi.fn(),
+    items: [],
+    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    availableCommands: [],
+    addUserMessage: vi.fn(),
+    clear: vi.fn(),
+  }),
   useAcpSession: mocks.useAcpSession,
   AgentPanel: () => <div data-testid="agent-panel">agent-panel</div>,
 }));
@@ -181,6 +200,35 @@ describe('Workspace page', () => {
       url: 'https://ws-ws-123.example.com',
     });
     mocks.getGitStatus.mockResolvedValue({ staged: [], unstaged: [], untracked: [] });
+    mocks.getFileIndex.mockResolvedValue({ files: [] });
+    mocks.getWorktrees.mockResolvedValue({
+      worktrees: [
+        {
+          path: '/workspaces/repo',
+          branch: 'main',
+          headCommit: 'abc1234',
+          isPrimary: true,
+          isDirty: false,
+          dirtyFileCount: 0,
+        },
+        {
+          path: '/workspaces/repo-wt-feature-auth',
+          branch: 'feature/auth',
+          headCommit: 'def5678',
+          isPrimary: false,
+          isDirty: false,
+          dirtyFileCount: 0,
+        },
+      ],
+    });
+    mocks.createWorktree.mockResolvedValue(undefined);
+    mocks.removeWorktree.mockResolvedValue({ removed: '/workspaces/repo-wt-old' });
+    mocks.renameAgentSession.mockResolvedValue(undefined);
+    mocks.rebuildWorkspace.mockResolvedValue({
+      workspaceId: 'ws-123',
+      status: 'pending',
+      message: 'Workspace rebuild started',
+    });
     mocks.getAgentSettings.mockResolvedValue({ model: null, permissionMode: 'default' });
     mocks.listAgents.mockResolvedValue({
       agents: [
@@ -321,9 +369,7 @@ describe('Workspace page', () => {
 
     expect(await screen.findByText('Connection Failed')).toBeInTheDocument();
     // With R3 useTokenRefresh, the raw error message is shown directly
-    expect(
-      screen.getByText('Workspace not found or has no VM IP')
-    ).toBeInTheDocument();
+    expect(screen.getByText('Workspace not found or has no VM IP')).toBeInTheDocument();
 
     const callsBeforeRetry = mocks.getTerminalToken.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: 'Retry Connection' }));
@@ -394,10 +440,7 @@ describe('Workspace page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Claude Code' }));
 
     await waitFor(() => {
-      expect(mocks.createAgentSession).toHaveBeenCalledWith(
-        'ws-123',
-        { label: 'Claude Code 1' },
-      );
+      expect(mocks.createAgentSession).toHaveBeenCalledWith('ws-123', { label: 'Claude Code 1' });
     });
   });
 
@@ -443,10 +486,45 @@ describe('Workspace page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Codex' }));
 
     await waitFor(() => {
-      expect(mocks.createAgentSession).toHaveBeenCalledWith(
+      expect(mocks.createAgentSession).toHaveBeenCalledWith('ws-123', { label: 'Codex 1' });
+    });
+  });
+
+  it('restores active worktree from URL search params', async () => {
+    renderWorkspace('/workspaces/ws-123?worktree=%2Fworkspaces%2Frepo-wt-feature-auth', true);
+
+    await waitFor(() => {
+      expect(mocks.getWorktrees).toHaveBeenCalledWith(
+        'https://ws-ws-123.example.com',
         'ws-123',
-        { label: 'Codex 1' },
+        'tok_123'
       );
+    });
+
+    expect(screen.getByRole('button', { name: /Worktree: feature\/auth/i })).toBeInTheDocument();
+    expect(screen.getByTestId('location-probe').textContent).toContain(
+      'worktree=%2Fworkspaces%2Frepo-wt-feature-auth'
+    );
+  });
+
+  it('clears stale files and git params when switching worktrees', async () => {
+    renderWorkspace(
+      '/workspaces/ws-123?worktree=%2Fworkspaces%2Frepo-wt-feature-auth&files=src%2Findex.ts&git=README.md',
+      true
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Worktree: feature\/auth/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Worktree: feature\/auth/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^main \(primary\)/i }));
+
+    await waitFor(() => {
+      const probe = screen.getByTestId('location-probe').textContent ?? '';
+      expect(probe).not.toContain('files=');
+      expect(probe).not.toContain('git=');
+      expect(probe).not.toContain('worktree=');
     });
   });
 

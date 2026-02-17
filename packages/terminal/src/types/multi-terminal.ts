@@ -112,6 +112,7 @@ export interface CreateSessionData {
   rows: number;
   cols: number;
   name?: string;
+  workDir?: string;
 }
 
 export interface SessionCreatedData {
@@ -271,6 +272,9 @@ export interface MultiTerminalProps {
 
   /** Callback when user activity is detected */
   onActivity?: () => void;
+
+  /** Default working directory for new sessions. */
+  defaultWorkDir?: string;
 
   /** Optional CSS class name */
   className?: string;

@@ -72,6 +72,7 @@ type wsCreateSessionData struct {
 	Rows      int    `json:"rows"`
 	Cols      int    `json:"cols"`
 	Name      string `json:"name,omitempty"`
+	WorkDir   string `json:"workDir,omitempty"`
 }
 
 type wsCloseSessionData struct {
@@ -422,13 +423,28 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(msg.Data, &data); err != nil {
 				continue
 			}
-			ptySession, err := runtime.PTY.CreateSessionWithID(data.SessionID, userID, data.Rows, data.Cols)
+			requestedWorkDir := strings.TrimSpace(data.WorkDir)
+			if requestedWorkDir != "" {
+				containerID, defaultWorkDir, user, resolveErr := s.resolveContainerForWorkspace(workspaceID)
+				if resolveErr != nil {
+					sendSessionError(data.SessionID, resolveErr.Error())
+					continue
+				}
+				effectiveWorkDir, resolveErr := s.resolveExplicitWorktreeWorkDir(r.Context(), workspaceID, containerID, user, defaultWorkDir, requestedWorkDir)
+				if resolveErr != nil {
+					sendSessionError(data.SessionID, resolveErr.Error())
+					continue
+				}
+				requestedWorkDir = effectiveWorkDir
+			}
+
+			ptySession, err := runtime.PTY.CreateSessionWithID(data.SessionID, userID, data.Rows, data.Cols, requestedWorkDir)
 			if err != nil && isContainerUnavailableError(err) {
 				log.Printf("Workspace %s: multi-terminal session create failed due to unavailable container, attempting recovery: %v", workspaceID, err)
 				if recoverErr := s.recoverWorkspaceRuntime(r.Context(), runtime); recoverErr != nil {
 					log.Printf("Workspace %s: multi-terminal recovery failed: %v", workspaceID, recoverErr)
 				} else {
-					ptySession, err = runtime.PTY.CreateSessionWithID(data.SessionID, userID, data.Rows, data.Cols)
+					ptySession, err = runtime.PTY.CreateSessionWithID(data.SessionID, userID, data.Rows, data.Cols, requestedWorkDir)
 				}
 			}
 			if err != nil {

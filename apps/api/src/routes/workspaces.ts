@@ -90,6 +90,7 @@ function toAgentSessionResponse(session: schema.AgentSession): AgentSession {
     stoppedAt: session.stoppedAt,
     errorMessage: session.errorMessage,
     label: session.label,
+    worktreePath: session.worktreePath,
   };
 }
 
@@ -605,7 +606,9 @@ workspacesRoutes.post('/:id/rebuild', async (c) => {
     throw errors.badRequest('Workspace is not attached to a node');
   }
   if (workspace.status !== 'running' && workspace.status !== 'error') {
-    throw errors.badRequest(`Workspace must be running or in error state to rebuild, currently ${workspace.status}`);
+    throw errors.badRequest(
+      `Workspace must be running or in error state to rebuild, currently ${workspace.status}`
+    );
   }
 
   const node = await getOwnedNode(db, workspace.nodeId, userId);
@@ -729,6 +732,7 @@ workspacesRoutes.post('/:id/agent-sessions', async (c) => {
     userId,
     status: 'running',
     label: body.label?.trim() || null,
+    worktreePath: body.worktreePath?.trim() || null,
     createdAt: now,
     updatedAt: now,
   });
@@ -903,8 +907,7 @@ workspacesRoutes.post('/:id/provisioning-failed', async (c) => {
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
   const body = await c.req.json<{ errorMessage?: string }>().catch(() => null);
-  const providedMessage =
-    typeof body?.errorMessage === 'string' ? body.errorMessage.trim() : '';
+  const providedMessage = typeof body?.errorMessage === 'string' ? body.errorMessage.trim() : '';
   const errorMessage = providedMessage || 'Workspace provisioning failed';
 
   const rows = await db
@@ -1002,7 +1005,6 @@ workspacesRoutes.post('/:id/agent-key', async (c) => {
     credentialKind: credentialData.credentialKind,
   });
 });
-
 
 /**
  * POST /:id/agent-settings — VM agent callback to fetch user's agent settings.
