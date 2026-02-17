@@ -1202,6 +1202,8 @@ func TestIntegration_FullBootstrapWithRemoteUser(t *testing.T) {
 		ContainerUser:       "vscode",
 		Port:                8080,
 		AdditionalFeatures:  config.DefaultAdditionalFeatures,
+		// Integration tests run without root privileges; use a writable fallback path.
+		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
 	}
 
 	reporter := bootlog.New(server.URL, workspaceID)
