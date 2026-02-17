@@ -245,6 +245,42 @@ describe('MultiTerminal', () => {
     });
   });
 
+  it('uses updated defaultWorkDir after prop change', async () => {
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    const { rerender } = render(
+      <MultiTerminal {...defaultProps} defaultWorkDir="/workspaces/repo" />
+    );
+
+    // Wait for initial session to be created with original workDir
+    await waitFor(() => {
+      const payload = sendSpy.mock.calls
+        .map((call) => JSON.parse(call[0] as string))
+        .find((data) => data.type === 'create_session');
+      expect(payload).toBeDefined();
+      expect(payload.data.workDir).toBe('/workspaces/repo');
+    });
+
+    // Change the worktree prop
+    rerender(<MultiTerminal {...defaultProps} defaultWorkDir="/workspaces/repo-wt-feature" />);
+
+    // Clear previous calls so we can isolate the new tab creation
+    sendSpy.mockClear();
+
+    // Click new tab — should use updated workDir
+    const newTabButton = screen.queryByTestId('new-tab');
+    if (newTabButton) {
+      fireEvent.click(newTabButton);
+    }
+
+    await waitFor(() => {
+      const payload = sendSpy.mock.calls
+        .map((call) => JSON.parse(call[0] as string))
+        .find((data) => data.type === 'create_session');
+      expect(payload).toBeDefined();
+      expect(payload.data.workDir).toBe('/workspaces/repo-wt-feature');
+    });
+  });
+
   it('should handle tab closing', async () => {
     const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
     render(<MultiTerminal {...defaultProps} />);

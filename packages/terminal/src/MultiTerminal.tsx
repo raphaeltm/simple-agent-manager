@@ -103,6 +103,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       onActivity,
       sessions,
       getPersistedSessions,
+      defaultWorkDir,
     });
     latestRef.current = {
       createSession,
@@ -113,6 +114,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       onActivity,
       sessions,
       getPersistedSessions,
+      defaultWorkDir,
     };
 
     const resolveLocalSessionId = useCallback((sessionId?: string): string | null => {
@@ -198,7 +200,15 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       createTerminalInstance(sessionId);
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(encodeTerminalWsCreateSession(sessionId, 24, 80, undefined, defaultWorkDir));
+        ws.send(
+          encodeTerminalWsCreateSession(
+            sessionId,
+            24,
+            80,
+            undefined,
+            latestRef.current.defaultWorkDir
+          )
+        );
       }
       return sessionId;
     }, [createTerminalInstance]);
@@ -324,7 +334,13 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
                 const sessionId = latestRef.current.createSession();
                 createTerminalInstance(sessionId);
                 ws.send(
-                  encodeTerminalWsCreateSession(sessionId, 24, 80, undefined, defaultWorkDir)
+                  encodeTerminalWsCreateSession(
+                    sessionId,
+                    24,
+                    80,
+                    undefined,
+                    latestRef.current.defaultWorkDir
+                  )
                 );
               } else {
                 for (const localSession of pendingLocalSessions) {
@@ -351,7 +367,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
                         24,
                         80,
                         localSession.name,
-                        defaultWorkDir
+                        latestRef.current.defaultWorkDir
                       )
                     );
                   }
