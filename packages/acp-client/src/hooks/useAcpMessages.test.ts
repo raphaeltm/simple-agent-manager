@@ -346,6 +346,250 @@ describe('useAcpMessages prepareForReplay', () => {
   });
 });
 
+// =============================================================================
+// Memory safety tests
+// =============================================================================
+
+describe('useAcpMessages memory safety: item cap', () => {
+  it('enforces a maximum item count, pruning oldest items', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    // Add 600 user messages (cap is 500)
+    act(() => {
+      for (let i = 0; i < 600; i++) {
+        result.current.addUserMessage(`Message ${i}`);
+      }
+    });
+
+    expect(result.current.items.length).toBeLessThanOrEqual(500);
+    // Oldest messages should have been pruned — the first item should NOT be "Message 0"
+    const firstItem = result.current.items[0];
+    expect(firstItem?.kind).toBe('user_message');
+    if (firstItem?.kind === 'user_message') {
+      expect(firstItem.text).not.toBe('Message 0');
+    }
+    // Last item should be the most recent
+    const lastItem = result.current.items[result.current.items.length - 1];
+    if (lastItem?.kind === 'user_message') {
+      expect(lastItem.text).toBe('Message 599');
+    }
+  });
+
+  it('enforces cap on user_message_chunk (replay)', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    act(() => {
+      for (let i = 0; i < 600; i++) {
+        result.current.processMessage(sessionUpdateMessage({
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: `Replayed ${i}` },
+        }));
+      }
+    });
+
+    expect(result.current.items.length).toBeLessThanOrEqual(500);
+  });
+
+  it('enforces cap on tool_call additions', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    act(() => {
+      for (let i = 0; i < 600; i++) {
+        result.current.processMessage(sessionUpdateMessage({
+          sessionUpdate: 'tool_call',
+          toolCallId: `tc-${i}`,
+          title: `Tool ${i}`,
+          status: 'completed',
+        }));
+      }
+    });
+
+    expect(result.current.items.length).toBeLessThanOrEqual(500);
+  });
+});
+
+describe('useAcpMessages memory safety: text length cap', () => {
+  it('stops appending to agent_message_chunk when text exceeds cap', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    // Each chunk is 10KB, send 60 chunks = 600KB > 512KB cap
+    const chunk = 'x'.repeat(10_000);
+    act(() => {
+      for (let i = 0; i < 60; i++) {
+        result.current.processMessage(sessionUpdateMessage({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: chunk },
+        }));
+      }
+    });
+
+    expect(result.current.items).toHaveLength(1);
+    const item = result.current.items[0]!;
+    expect(item.kind).toBe('agent_message');
+    if (item.kind === 'agent_message') {
+      // Should be capped — not all 600KB
+      expect(item.text.length).toBeLessThanOrEqual(520_000); // Some tolerance for the last accepted chunk
+      expect(item.text.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('stops appending to agent_thought_chunk when text exceeds cap', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    const chunk = 'y'.repeat(10_000);
+    act(() => {
+      for (let i = 0; i < 60; i++) {
+        result.current.processMessage(sessionUpdateMessage({
+          sessionUpdate: 'agent_thought_chunk',
+          content: { type: 'text', text: chunk },
+        }));
+      }
+    });
+
+    expect(result.current.items).toHaveLength(1);
+    const item = result.current.items[0]!;
+    expect(item.kind).toBe('thinking');
+    if (item.kind === 'thinking') {
+      expect(item.text.length).toBeLessThanOrEqual(520_000);
+    }
+  });
+});
+
+describe('useAcpMessages efficient updates', () => {
+  it('streaming chunks update only the last item (not full array copy)', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    // Add a user message first, then start streaming
+    act(() => {
+      result.current.addUserMessage('Hello');
+    });
+
+    const itemsAfterUser = result.current.items;
+    const userMessage = itemsAfterUser[0];
+
+    act(() => {
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'First ' },
+      }));
+    });
+
+    act(() => {
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'Second' },
+      }));
+    });
+
+    // Should have 2 items: user message + streaming agent message
+    expect(result.current.items).toHaveLength(2);
+    // The user message object should be the same reference (not recreated)
+    expect(result.current.items[0]).toBe(userMessage);
+    // The agent message should have concatenated text
+    const agentMsg = result.current.items[1]!;
+    if (agentMsg.kind === 'agent_message') {
+      expect(agentMsg.text).toBe('First Second');
+      expect(agentMsg.streaming).toBe(true);
+    }
+  });
+
+  it('tool_call_update targets specific item by index', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    // Add multiple tool calls
+    act(() => {
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tc-1',
+        title: 'First Tool',
+        status: 'in_progress',
+      }));
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tc-2',
+        title: 'Second Tool',
+        status: 'in_progress',
+      }));
+    });
+
+    // Update the first tool call
+    act(() => {
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tc-1',
+        status: 'completed',
+      }));
+    });
+
+    const tc1 = result.current.items.find(
+      (i) => i.kind === 'tool_call' && i.toolCallId === 'tc-1'
+    );
+    const tc2 = result.current.items.find(
+      (i) => i.kind === 'tool_call' && i.toolCallId === 'tc-2'
+    );
+    expect(tc1?.kind === 'tool_call' && tc1.status).toBe('completed');
+    expect(tc2?.kind === 'tool_call' && tc2.status).toBe('in_progress');
+  });
+
+  it('tool_call_update for pruned item is silently ignored', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    // Add a tool call, then flood with enough messages to prune it
+    act(() => {
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tc-old',
+        title: 'Old Tool',
+        status: 'in_progress',
+      }));
+      for (let i = 0; i < 600; i++) {
+        result.current.addUserMessage(`Flood ${i}`);
+      }
+    });
+
+    // The old tool call should have been pruned
+    const oldTool = result.current.items.find(
+      (i) => i.kind === 'tool_call' && i.toolCallId === 'tc-old'
+    );
+    expect(oldTool).toBeUndefined();
+
+    // Updating the pruned tool call should not throw or add items
+    const countBefore = result.current.items.length;
+    act(() => {
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tc-old',
+        status: 'completed',
+      }));
+    });
+    expect(result.current.items.length).toBe(countBefore);
+  });
+
+  it('finalizeStreamingItems returns same reference when nothing to finalize', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    // Add a non-streaming item
+    act(() => {
+      result.current.addUserMessage('Hello');
+    });
+
+    const itemsBefore = result.current.items;
+
+    // Process a prompt response with no streaming items to finalize
+    act(() => {
+      result.current.processMessage({
+        jsonrpc: '2.0',
+        result: { stopReason: 'end', usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 } },
+      });
+    });
+
+    // Items array should be the same reference (no unnecessary re-render)
+    expect(result.current.items).toBe(itemsBefore);
+    // But usage should be updated
+    expect(result.current.usage.totalTokens).toBe(30);
+  });
+});
+
 describe('useAcpMessages user_message_chunk (LoadSession replay)', () => {
   it('renders replayed user messages as user_message items', () => {
     const { result } = renderHook(() => useAcpMessages());
