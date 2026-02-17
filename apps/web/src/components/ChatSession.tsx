@@ -144,7 +144,7 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
     onPrepareForReplay: acpMessages.prepareForReplay,
   });
 
-  const { connected, agentType, state, switchAgent, replaying } = acpSession;
+  const { connected, agentType, state, switchAgent } = acpSession;
   const { clear: clearMessages } = acpMessages;
 
   // Clear messages when no agent session exists (idle SessionHost).

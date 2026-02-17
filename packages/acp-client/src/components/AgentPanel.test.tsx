@@ -26,6 +26,7 @@ function createMockMessages(overrides: Partial<AcpMessagesHandle> = {}): AcpMess
     processMessage: vi.fn(),
     addUserMessage: vi.fn(),
     clear: vi.fn(),
+    prepareForReplay: vi.fn(),
     ...overrides,
   };
 }
