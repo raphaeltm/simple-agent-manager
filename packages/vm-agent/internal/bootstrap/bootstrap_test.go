@@ -712,7 +712,21 @@ func TestWriteMountOverrideConfig(t *testing.T) {
 	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
 	mockScript := `#!/bin/sh
 if [ "$1" = "read-configuration" ]; then
-  echo '{"outcome":"success","mergedConfiguration":{"name":"Repo Config","image":"mcr.microsoft.com/devcontainers/typescript-node:24-bookworm","features":{"ghcr.io/devcontainers/features/go:1":{"version":"1.22"}}}}'
+  echo '[trace] resolving features...'
+  cat <<'EOF'
+{
+  "outcome": "success",
+  "mergedConfiguration": {
+    "name": "Repo Config",
+    "image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm",
+    "features": {
+      "ghcr.io/devcontainers/features/go:1": {
+        "version": "1.22"
+      }
+    }
+  }
+}
+EOF
   exit 0
 fi
 echo "unexpected devcontainer command: $@" >&2
@@ -755,6 +769,37 @@ exit 1
 	}
 }
 
+func TestWriteMountOverrideConfigRequiresRuntimeSource(t *testing.T) {
+	mockBinDir := t.TempDir()
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	mockScript := `#!/bin/sh
+if [ "$1" = "read-configuration" ]; then
+  echo '{"outcome":"success","mergedConfiguration":{"name":"Repo Config"}}'
+  exit 0
+fi
+echo "unexpected devcontainer command: $@" >&2
+exit 1
+`
+	if err := os.WriteFile(mockDevcontainer, []byte(mockScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+
+	cfg := &config.Config{
+		WorkspaceDir: "/workspace/my-repo",
+		Repository:   "owner/my-repo",
+	}
+
+	_, err := writeMountOverrideConfig(context.Background(), cfg, "sam-ws-abc123")
+	if err == nil {
+		t.Fatal("expected writeMountOverrideConfig to fail when runtime source is missing")
+	}
+	if !strings.Contains(err.Error(), "missing image/dockerFile/dockerComposeFile") {
+		t.Fatalf("expected runtime source validation error, got: %v", err)
+	}
+}
+
 func TestParseDevcontainerReadConfigurationOutput(t *testing.T) {
 	t.Parallel()
 
@@ -772,6 +817,54 @@ func TestParseDevcontainerReadConfigurationOutput(t *testing.T) {
 	}
 	if parsed.MergedConfiguration["image"] != "node:20" {
 		t.Fatalf("expected mergedConfiguration.image=node:20, got %#v", parsed.MergedConfiguration["image"])
+	}
+}
+
+func TestParseDevcontainerReadConfigurationOutputIgnoresUnrelatedJSONLogs(t *testing.T) {
+	t.Parallel()
+
+	output := strings.Join([]string{
+		`{"level":"info","msg":"feature dependency resolved"}`,
+		`{"outcome":"error","message":"stale internal state"}`,
+		`{"outcome":"success","mergedConfiguration":{"image":"node:20"}}`,
+		`{"level":"debug","msg":"cleanup complete"}`,
+	}, "\n")
+
+	parsed, err := parseDevcontainerReadConfigurationOutput(output)
+	if err != nil {
+		t.Fatalf("parseDevcontainerReadConfigurationOutput returned error: %v", err)
+	}
+	if parsed.Outcome != "success" {
+		t.Fatalf("expected outcome success, got %q", parsed.Outcome)
+	}
+	if parsed.MergedConfiguration["image"] != "node:20" {
+		t.Fatalf("expected mergedConfiguration.image=node:20, got %#v", parsed.MergedConfiguration["image"])
+	}
+}
+
+func TestParseDevcontainerReadConfigurationOutputParsesMultilinePayload(t *testing.T) {
+	t.Parallel()
+
+	output := strings.Join([]string{
+		`[2026-02-18T11:14:21.753Z] @devcontainers/cli 0.83.1`,
+		`{`,
+		`  "outcome": "success",`,
+		`  "mergedConfiguration": {`,
+		`    "dockerComposeFile": ["docker-compose.yml"]`,
+		`  }`,
+		`}`,
+	}, "\n")
+
+	parsed, err := parseDevcontainerReadConfigurationOutput(output)
+	if err != nil {
+		t.Fatalf("parseDevcontainerReadConfigurationOutput returned error: %v", err)
+	}
+	if parsed.Outcome != "success" {
+		t.Fatalf("expected outcome success, got %q", parsed.Outcome)
+	}
+	value, ok := parsed.MergedConfiguration["dockerComposeFile"].([]interface{})
+	if !ok || len(value) != 1 || value[0] != "docker-compose.yml" {
+		t.Fatalf("expected mergedConfiguration.dockerComposeFile to contain docker-compose.yml, got %#v", parsed.MergedConfiguration["dockerComposeFile"])
 	}
 }
 

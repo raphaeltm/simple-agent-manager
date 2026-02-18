@@ -122,33 +122,106 @@ echo "=== Step 4: Resolve merged config and inject mount override ==="
 READ_CONFIG_JSON="/tmp/sam-test-devcontainer-read-config.json"
 OVERRIDE_CONFIG="/tmp/sam-test-devcontainer-override.json"
 
+set +e
 READ_OUTPUT=$(devcontainer read-configuration \
   --workspace-folder "$HOST_CLONE" \
-  --include-merged-configuration)
+  --include-merged-configuration 2>&1)
+READ_EXIT=$?
+set -e
 echo "$READ_OUTPUT" > "$READ_CONFIG_JSON"
+
+if [ $READ_EXIT -ne 0 ]; then
+  echo "FAIL: devcontainer read-configuration exited with code $READ_EXIT"
+  echo "Raw output:"
+  cat "$READ_CONFIG_JSON"
+  exit 1
+fi
 
 node -e "
   const fs = require('fs');
-  const raw = fs.readFileSync(process.argv[1], 'utf8').trim();
-  const lines = raw.split(/\n+/).map((line) => line.trim()).filter(Boolean);
-  let payload = null;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      payload = JSON.parse(lines[i]);
-      break;
-    } catch {}
+
+  function isRelevantPayload(value) {
+    return Boolean(value) &&
+      typeof value === 'object' &&
+      (
+        (value.mergedConfiguration && typeof value.mergedConfiguration === 'object') ||
+        typeof value.outcome === 'string' ||
+        typeof value.message === 'string' ||
+        typeof value.description === 'string'
+      );
   }
+
+  function parsePayload(raw) {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+
+    // Best case: output is a single JSON payload.
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (isRelevantPayload(parsed)) return parsed;
+    } catch {}
+
+    let fallback = null;
+    for (let i = trimmed.length - 1; i >= 0; i--) {
+      if (trimmed[i] !== '{') continue;
+      let parsed = null;
+      try {
+        parsed = JSON.parse(trimmed.slice(i));
+      } catch {
+        continue;
+      }
+      if (!isRelevantPayload(parsed)) {
+        continue;
+      }
+      if (parsed.mergedConfiguration && typeof parsed.mergedConfiguration === 'object') {
+        return parsed;
+      }
+      if (!fallback) {
+        fallback = parsed;
+      }
+    }
+
+    const lines = trimmed.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      let parsed = null;
+      try {
+        parsed = JSON.parse(lines[i]);
+      } catch {
+        continue;
+      }
+      if (!isRelevantPayload(parsed)) {
+        continue;
+      }
+      if (parsed.mergedConfiguration && typeof parsed.mergedConfiguration === 'object') {
+        return parsed;
+      }
+      if (!fallback) {
+        fallback = parsed;
+      }
+    }
+    return fallback;
+  }
+
+  const raw = fs.readFileSync(process.argv[1], 'utf8').trim();
+  const payload = parsePayload(raw);
   if (!payload) {
     throw new Error('read-configuration output did not contain JSON payload');
   }
-  if (payload.outcome !== 'success') {
+
+  if (typeof payload.outcome === 'string' && payload.outcome !== 'success') {
     throw new Error('read-configuration failed: ' + (payload.message || payload.description || 'unknown error'));
   }
+
   const merged = payload.mergedConfiguration;
   if (!merged || typeof merged !== 'object') {
     throw new Error('mergedConfiguration missing from read-configuration output');
   }
-  const hasRuntimeSource = Boolean(merged.image || merged.dockerFile || merged.dockerComposeFile);
+  const hasRuntimeSource = (
+    (typeof merged.image === 'string' && merged.image.trim()) ||
+    (typeof merged.dockerFile === 'string' && merged.dockerFile.trim()) ||
+    (Array.isArray(merged.dockerComposeFile) && merged.dockerComposeFile.length > 0) ||
+    (typeof merged.dockerComposeFile === 'string' && merged.dockerComposeFile.trim())
+  );
   if (!hasRuntimeSource) {
     throw new Error('mergedConfiguration missing image/dockerFile/dockerComposeFile');
   }

@@ -670,26 +670,87 @@ type devcontainerReadConfigurationResult struct {
 	MergedConfiguration map[string]interface{} `json:"mergedConfiguration"`
 }
 
+func hasReadConfigurationPayloadData(payload *devcontainerReadConfigurationResult) bool {
+	if payload == nil {
+		return false
+	}
+
+	return payload.Outcome != "" ||
+		payload.Message != "" ||
+		payload.Description != "" ||
+		len(payload.MergedConfiguration) > 0
+}
+
+func parseReadConfigurationCandidate(candidate string) (*devcontainerReadConfigurationResult, bool) {
+	var payload devcontainerReadConfigurationResult
+	decoder := json.NewDecoder(strings.NewReader(candidate))
+	if err := decoder.Decode(&payload); err != nil {
+		return nil, false
+	}
+
+	if !hasReadConfigurationPayloadData(&payload) {
+		return nil, false
+	}
+
+	return &payload, true
+}
+
 func parseDevcontainerReadConfigurationOutput(output string) (*devcontainerReadConfigurationResult, error) {
 	trimmed := strings.TrimSpace(output)
 	if trimmed == "" {
 		return nil, errors.New("empty read-configuration output")
 	}
 
-	lines := strings.Split(trimmed, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
-		if line == "" {
+	// read-configuration output can include mixed logs + JSON payload and may
+	// include JSON log lines that are not the final result. Scan from the end
+	// and pick the latest payload that includes mergedConfiguration when possible.
+	var fallback *devcontainerReadConfigurationResult
+	for i := len(trimmed) - 1; i >= 0; i-- {
+		if trimmed[i] != '{' {
 			continue
 		}
 
-		var payload devcontainerReadConfigurationResult
-		if err := json.Unmarshal([]byte(line), &payload); err == nil {
-			return &payload, nil
+		payload, ok := parseReadConfigurationCandidate(trimmed[i:])
+		if !ok {
+			continue
 		}
+		if len(payload.MergedConfiguration) > 0 {
+			return payload, nil
+		}
+		if fallback == nil {
+			fallback = payload
+		}
+	}
+	if fallback != nil {
+		return fallback, nil
 	}
 
 	return nil, fmt.Errorf("unable to parse read-configuration JSON output: %s", trimmed)
+}
+
+func hasMergedRuntimeSource(merged map[string]interface{}) bool {
+	if len(merged) == 0 {
+		return false
+	}
+
+	for _, key := range []string{"image", "dockerFile", "dockerComposeFile"} {
+		value, ok := merged[key]
+		if !ok {
+			continue
+		}
+		switch v := value.(type) {
+		case string:
+			if strings.TrimSpace(v) != "" {
+				return true
+			}
+		case []interface{}:
+			if len(v) > 0 {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // writeMountOverrideConfig resolves the repo devcontainer configuration via
@@ -707,24 +768,23 @@ func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeNam
 		"--include-merged-configuration",
 	}
 	cmd := exec.CommandContext(ctx, "devcontainer", args...)
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("devcontainer read-configuration failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("devcontainer read-configuration failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
-	readResult, err := parseDevcontainerReadConfigurationOutput(stdout.String())
+	readResult, err := parseDevcontainerReadConfigurationOutput(string(output))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to parse devcontainer read-configuration output: %w", err)
 	}
 	if strings.TrimSpace(readResult.Outcome) != "" && readResult.Outcome != "success" {
 		return "", fmt.Errorf("devcontainer read-configuration returned %q: %s %s", readResult.Outcome, readResult.Message, readResult.Description)
 	}
 	if len(readResult.MergedConfiguration) == 0 {
 		return "", errors.New("devcontainer read-configuration returned empty mergedConfiguration")
+	}
+	if !hasMergedRuntimeSource(readResult.MergedConfiguration) {
+		return "", errors.New("devcontainer read-configuration mergedConfiguration missing image/dockerFile/dockerComposeFile")
 	}
 
 	readResult.MergedConfiguration["workspaceMount"] = fmt.Sprintf("source=%s,target=/workspaces,type=volume", volumeName)
