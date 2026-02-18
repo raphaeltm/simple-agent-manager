@@ -148,12 +148,18 @@ echo "=== Step 5: devcontainer up (with volume mount override) ==="
 echo "  Command: devcontainer up --workspace-folder $HOST_CLONE --override-config $OVERRIDE_CONFIG"
 echo ""
 
-UP_OUTPUT=$(devcontainer up \
+# Temporarily disable set -e so we can capture the exit code and output
+# even when devcontainer up fails (which is the whole point of this test).
+UP_LOG="/tmp/sam-test-devcontainer-up.log"
+set +e
+devcontainer up \
   --workspace-folder "$HOST_CLONE" \
   --override-config "$OVERRIDE_CONFIG" \
-  2>&1)
+  > "$UP_LOG" 2>&1
 UP_EXIT=$?
+set -e
 
+UP_OUTPUT=$(cat "$UP_LOG")
 echo "$UP_OUTPUT"
 echo ""
 
@@ -167,10 +173,18 @@ fi
 
 echo "  OK: devcontainer up succeeded"
 
-# Extract container ID
-CONTAINER_ID=$(echo "$UP_OUTPUT" | jq -r '.containerId // empty' 2>/dev/null || true)
+# Extract container ID — devcontainer up outputs JSON on the last line
+CONTAINER_ID=$(echo "$UP_OUTPUT" | grep -o '"containerId":"[^"]*"' | head -1 | cut -d'"' -f4)
+if [ -z "$CONTAINER_ID" ]; then
+  # Fallback: try jq on each line
+  CONTAINER_ID=$(echo "$UP_OUTPUT" | while IFS= read -r line; do
+    echo "$line" | jq -r '.containerId // empty' 2>/dev/null
+  done | grep -v '^$' | head -1)
+fi
 if [ -z "$CONTAINER_ID" ]; then
   echo "  FAIL: Could not extract container ID from output"
+  echo "  Raw output:"
+  cat "$UP_LOG"
   exit 1
 fi
 echo "  Container ID: $CONTAINER_ID"
@@ -220,6 +234,7 @@ echo ""
 echo "=== Step 8: Verify devcontainer features ==="
 # These are installed by the features in our devcontainer.json — if the build
 # fell back to the default image, these would be missing.
+set +e
 docker exec "$CONTAINER_ID" bash -c '
   FAIL=0
 
@@ -245,12 +260,14 @@ docker exec "$CONTAINER_ID" bash -c '
 if [ $? -ne 0 ]; then
   FAIL=$((FAIL + 1))
 fi
+set -e
 
 # ── Step 9: Verify lifecycle hooks ran ────────────────────────────────
 echo ""
 echo "=== Step 9: Verify post-create hook artifacts ==="
 
 # Check for node_modules (installed by post-create.sh via pnpm install)
+set +e
 docker exec "$CONTAINER_ID" bash -c '
   FAIL=0
 
@@ -305,6 +322,7 @@ docker exec "$CONTAINER_ID" bash -c '
 if [ $? -ne 0 ]; then
   FAIL=$((FAIL + 1))
 fi
+set -e
 
 # ── Summary ───────────────────────────────────────────────────────────
 echo ""
