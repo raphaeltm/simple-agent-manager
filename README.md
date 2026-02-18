@@ -53,6 +53,7 @@ Think **GitHub Codespaces, but built for AI-assisted development** with explicit
 - **Multiple VM Sizes** — Small (2 vCPU/4GB), Medium (4 vCPU/8GB), Large (8 vCPU/16GB)
 - **Explicit Lifecycle Controls** — Stop, restart, and delete workspaces/nodes on demand
 - **GitHub Integration** — Works with both public and private repositories
+- **Project Runtime Config** — Save project-scoped runtime env vars/files (plain or secret) and launch workspaces directly from projects
 - **Keyboard-Safe Mobile Layout** — Viewport-aware sizing keeps core controls visible as browser UI and mobile keyboard appear/disappear
 - **Keyboard Shortcuts** — VS Code-style shortcuts for panel navigation, tab switching, and session management (press `Cmd+Shift+/` or `Ctrl+Shift+/` to see all)
 

@@ -63,6 +63,16 @@ func TestRecoverWorkspaceRuntimeUsesRuntimeConfig(t *testing.T) {
 		return false, nil
 	}
 
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/WS_TEST/runtime-assets":
+			_, _ = w.Write([]byte(`{"workspaceId":"WS_TEST","envVars":[{"key":"API_TOKEN","value":"token-value","isSecret":true}],"files":[{"path":".env.local","content":"FOO=bar\n","isSecret":false}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer controlPlane.Close()
+
 	runtime := &WorkspaceRuntime{
 		ID:                  "WS_TEST",
 		Repository:          "",
@@ -76,9 +86,10 @@ func TestRecoverWorkspaceRuntimeUsesRuntimeConfig(t *testing.T) {
 
 	s := &Server{
 		config: &config.Config{
-			ContainerMode: true,
-			WorkspaceDir:  "/workspace",
-			CallbackToken: "node-callback-token",
+			ContainerMode:   true,
+			WorkspaceDir:    "/workspace",
+			CallbackToken:   "node-callback-token",
+			ControlPlaneURL: controlPlane.URL,
 		},
 		workspaces: map[string]*WorkspaceRuntime{runtime.ID: runtime},
 	}
@@ -110,6 +121,18 @@ func TestRecoverWorkspaceRuntimeUsesRuntimeConfig(t *testing.T) {
 	}
 	if capturedState.GitHubToken != "" {
 		t.Fatalf("expected empty recovery git token for empty repository, got %q", capturedState.GitHubToken)
+	}
+	if len(capturedState.ProjectEnvVars) != 1 {
+		t.Fatalf("expected 1 runtime env var, got %d", len(capturedState.ProjectEnvVars))
+	}
+	if capturedState.ProjectEnvVars[0].Key != "API_TOKEN" || capturedState.ProjectEnvVars[0].Value != "token-value" {
+		t.Fatalf("unexpected runtime env vars: %+v", capturedState.ProjectEnvVars)
+	}
+	if len(capturedState.ProjectFiles) != 1 {
+		t.Fatalf("expected 1 runtime file, got %d", len(capturedState.ProjectFiles))
+	}
+	if capturedState.ProjectFiles[0].Path != ".env.local" {
+		t.Fatalf("unexpected runtime file path: %+v", capturedState.ProjectFiles)
 	}
 }
 
@@ -207,6 +230,8 @@ func TestRecoverWorkspaceRuntimeHydratesMetadataAndAdoptsLegacyLayout(t *testing
 			_, _ = w.Write([]byte(`{"workspaceId":"WS_TEST","repository":"octo/repo-one","branch":"main"}`))
 		case "/api/workspaces/WS_TEST/git-token":
 			_, _ = w.Write([]byte(`{"token":"ghs_recovery_token","expiresAt":"2026-02-12T00:00:00Z"}`))
+		case "/api/workspaces/WS_TEST/runtime-assets":
+			_, _ = w.Write([]byte(`{"workspaceId":"WS_TEST","envVars":[],"files":[]}`))
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -284,6 +309,8 @@ func TestRecoverWorkspaceRuntimeAdoptsLegacyLayoutFromBaseWorkspaceDir(t *testin
 			_, _ = w.Write([]byte(`{"workspaceId":"WS_BASE","repository":"octo/repo-one","branch":"main"}`))
 		case "/api/workspaces/WS_BASE/git-token":
 			_, _ = w.Write([]byte(`{"token":"ghs_recovery_token","expiresAt":"2026-02-12T00:00:00Z"}`))
+		case "/api/workspaces/WS_BASE/runtime-assets":
+			_, _ = w.Write([]byte(`{"workspaceId":"WS_BASE","envVars":[],"files":[]}`))
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -408,6 +435,16 @@ func TestRecoverWorkspaceRuntimePropagatesFallbackFlag(t *testing.T) {
 		return true, nil
 	}
 
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/WS_FALLBACK/runtime-assets":
+			_, _ = w.Write([]byte(`{"workspaceId":"WS_FALLBACK","envVars":[],"files":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer controlPlane.Close()
+
 	runtime := &WorkspaceRuntime{
 		ID:                  "WS_FALLBACK",
 		Repository:          "",
@@ -420,9 +457,10 @@ func TestRecoverWorkspaceRuntimePropagatesFallbackFlag(t *testing.T) {
 
 	s := &Server{
 		config: &config.Config{
-			ContainerMode: true,
-			WorkspaceDir:  "/workspace",
-			CallbackToken: "node-callback-token",
+			ContainerMode:   true,
+			WorkspaceDir:    "/workspace",
+			CallbackToken:   "node-callback-token",
+			ControlPlaneURL: controlPlane.URL,
 		},
 		workspaces: map[string]*WorkspaceRuntime{runtime.ID: runtime},
 	}

@@ -10,6 +10,12 @@ const mocks = vi.hoisted(() => ({
   listTaskEvents: vi.fn(),
   listGitHubInstallations: vi.fn(),
   listWorkspaces: vi.fn(),
+  getProjectRuntimeConfig: vi.fn(),
+  upsertProjectRuntimeEnvVar: vi.fn(),
+  deleteProjectRuntimeEnvVar: vi.fn(),
+  upsertProjectRuntimeFile: vi.fn(),
+  deleteProjectRuntimeFile: vi.fn(),
+  createWorkspace: vi.fn(),
   updateProject: vi.fn(),
   createProjectTask: vi.fn(),
   updateProjectTask: vi.fn(),
@@ -28,6 +34,12 @@ vi.mock('../../../src/lib/api', () => ({
   listTaskEvents: mocks.listTaskEvents,
   listGitHubInstallations: mocks.listGitHubInstallations,
   listWorkspaces: mocks.listWorkspaces,
+  getProjectRuntimeConfig: mocks.getProjectRuntimeConfig,
+  upsertProjectRuntimeEnvVar: mocks.upsertProjectRuntimeEnvVar,
+  deleteProjectRuntimeEnvVar: mocks.deleteProjectRuntimeEnvVar,
+  upsertProjectRuntimeFile: mocks.upsertProjectRuntimeFile,
+  deleteProjectRuntimeFile: mocks.deleteProjectRuntimeFile,
+  createWorkspace: mocks.createWorkspace,
   updateProject: mocks.updateProject,
   createProjectTask: mocks.createProjectTask,
   updateProjectTask: mocks.updateProjectTask,
@@ -141,6 +153,27 @@ describe('Project page', () => {
       },
     ]);
     mocks.listWorkspaces.mockResolvedValue([]);
+    mocks.getProjectRuntimeConfig.mockResolvedValue({
+      envVars: [],
+      files: [],
+    });
+    mocks.upsertProjectRuntimeEnvVar.mockResolvedValue({
+      envVars: [],
+      files: [],
+    });
+    mocks.deleteProjectRuntimeEnvVar.mockResolvedValue({
+      envVars: [],
+      files: [],
+    });
+    mocks.upsertProjectRuntimeFile.mockResolvedValue({
+      envVars: [],
+      files: [],
+    });
+    mocks.deleteProjectRuntimeFile.mockResolvedValue({
+      envVars: [],
+      files: [],
+    });
+    mocks.createWorkspace.mockResolvedValue({ id: 'ws-1' });
 
     mocks.updateProject.mockResolvedValue({});
     mocks.createProjectTask.mockResolvedValue({});
@@ -256,5 +289,43 @@ describe('Project page', () => {
     expect(await screen.findByText('Recent activity')).toBeInTheDocument();
     const activityLink = await screen.findByRole('link', { name: 'Draft task' });
     expect(activityLink).toHaveAttribute('href', '/projects/proj-1/tasks/task-1');
+  });
+
+  it('saves runtime env vars from project runtime config panel', async () => {
+    mocks.upsertProjectRuntimeEnvVar.mockResolvedValue({
+      envVars: [{ key: 'API_TOKEN', value: null, isSecret: true, hasValue: true }],
+      files: [],
+    });
+
+    renderProjectPage();
+
+    fireEvent.change(await screen.findByLabelText('Runtime env key'), {
+      target: { value: 'API_TOKEN' },
+    });
+    fireEvent.change(screen.getByLabelText('Runtime env value'), {
+      target: { value: 'secret-value' },
+    });
+    fireEvent.click(screen.getByLabelText('Secret'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(mocks.upsertProjectRuntimeEnvVar).toHaveBeenCalledWith('proj-1', {
+        key: 'API_TOKEN',
+        value: 'secret-value',
+        isSecret: true,
+      });
+    });
+  });
+
+  it('launches a workspace directly from project context', async () => {
+    renderProjectPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Launch Workspace' }));
+
+    await waitFor(() => {
+      expect(mocks.createWorkspace).toHaveBeenCalledWith({
+        name: 'Project One Workspace',
+        projectId: 'proj-1',
+      });
+    });
   });
 });

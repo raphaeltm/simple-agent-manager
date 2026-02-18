@@ -198,6 +198,63 @@ export const projects = sqliteTable(
   })
 );
 
+export const projectRuntimeEnvVars = sqliteTable(
+  'project_runtime_env_vars',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    envKey: text('env_key').notNull(),
+    storedValue: text('stored_value').notNull(),
+    valueIv: text('value_iv'),
+    isSecret: integer('is_secret', { mode: 'boolean' }).notNull().default(false),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectKeyUnique: uniqueIndex('idx_project_runtime_env_project_key').on(table.projectId, table.envKey),
+    userProjectIdx: index('idx_project_runtime_env_user_project').on(table.userId, table.projectId),
+  })
+);
+
+export const projectRuntimeFiles = sqliteTable(
+  'project_runtime_files',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    filePath: text('file_path').notNull(),
+    storedContent: text('stored_content').notNull(),
+    contentIv: text('content_iv'),
+    isSecret: integer('is_secret', { mode: 'boolean' }).notNull().default(false),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectPathUnique: uniqueIndex('idx_project_runtime_files_project_path').on(
+      table.projectId,
+      table.filePath
+    ),
+    userProjectIdx: index('idx_project_runtime_files_user_project').on(table.userId, table.projectId),
+  })
+);
+
 // =============================================================================
 // Tasks
 // =============================================================================
@@ -331,6 +388,7 @@ export const workspaces = sqliteTable(
   {
     id: text('id').primaryKey(),
     nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'set null' }),
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -360,11 +418,17 @@ export const workspaces = sqliteTable(
   (table) => ({
     userIdIdx: index('idx_workspaces_user_id').on(table.userId),
     nodeIdIdx: index('idx_workspaces_node_id').on(table.nodeId),
+    projectIdIdx: index('idx_workspaces_project_id').on(table.projectId),
     nodeDisplayNameUnique: uniqueIndex('idx_workspaces_node_display_name_unique')
       .on(table.nodeId, table.normalizedDisplayName)
       .where(sql`node_id is not null and normalized_display_name is not null`),
     // Compound indexes for filtered listing queries (P2 fix).
     userStatusIdx: index('idx_workspaces_user_status').on(table.userId, table.status),
+    userProjectStatusIdx: index('idx_workspaces_user_project_status').on(
+      table.userId,
+      table.projectId,
+      table.status
+    ),
     nodeStatusIdx: index('idx_workspaces_node_status').on(table.nodeId, table.status),
   })
 );
@@ -644,6 +708,10 @@ export type GitHubInstallation = typeof githubInstallations.$inferSelect;
 export type NewGitHubInstallation = typeof githubInstallations.$inferInsert;
 export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
+export type ProjectRuntimeEnvVar = typeof projectRuntimeEnvVars.$inferSelect;
+export type NewProjectRuntimeEnvVar = typeof projectRuntimeEnvVars.$inferInsert;
+export type ProjectRuntimeFile = typeof projectRuntimeFiles.$inferSelect;
+export type NewProjectRuntimeFile = typeof projectRuntimeFiles.$inferInsert;
 export type Task = typeof tasks.$inferSelect;
 export type NewTask = typeof tasks.$inferInsert;
 export type TaskDependency = typeof taskDependencies.$inferSelect;

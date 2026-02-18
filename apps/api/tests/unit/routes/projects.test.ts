@@ -10,6 +10,11 @@ describe('projects routes source contract', () => {
     expect(file).toContain("projectsRoutes.post('/',");
     expect(file).toContain("projectsRoutes.get('/',");
     expect(file).toContain("projectsRoutes.get('/:id',");
+    expect(file).toContain("projectsRoutes.get('/:id/runtime-config'");
+    expect(file).toContain("projectsRoutes.post('/:id/runtime/env-vars'");
+    expect(file).toContain("projectsRoutes.delete('/:id/runtime/env-vars/:envKey'");
+    expect(file).toContain("projectsRoutes.post('/:id/runtime/files'");
+    expect(file).toContain("projectsRoutes.delete('/:id/runtime/files'");
     expect(file).toContain("projectsRoutes.patch('/:id',");
     expect(file).toContain("projectsRoutes.delete('/:id',");
   });
@@ -36,5 +41,13 @@ describe('projects routes source contract', () => {
     expect(file).toContain("const cursor = c.req.query('cursor')");
     expect(file).toContain('nextCursor');
     expect(file).toContain('limit + 1');
+  });
+
+  it('stores project runtime secrets encrypted and masks them in responses', () => {
+    expect(file).toContain('buildProjectRuntimeConfigResponse');
+    expect(file).toContain('await encrypt(');
+    expect(file).toContain('if (row.isSecret)');
+    expect(file).toContain('value = null');
+    expect(file).toContain('content = null');
   });
 });

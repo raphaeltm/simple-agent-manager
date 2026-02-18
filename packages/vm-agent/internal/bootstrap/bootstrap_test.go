@@ -444,6 +444,73 @@ func TestBuildSAMEnvScriptWhitespaceOnlyTokenOmitted(t *testing.T) {
 	}
 }
 
+func TestBuildProjectRuntimeEnvScript(t *testing.T) {
+	t.Parallel()
+
+	script, err := buildProjectRuntimeEnvScript([]ProjectRuntimeEnvVar{
+		{Key: "API_KEY", Value: "secret"},
+		{Key: "FOO_BAR", Value: "baz"},
+	})
+	if err != nil {
+		t.Fatalf("buildProjectRuntimeEnvScript returned error: %v", err)
+	}
+
+	if !strings.Contains(script, `export API_KEY="secret"`) {
+		t.Fatalf("expected script to contain API_KEY export, got:\n%s", script)
+	}
+	if !strings.Contains(script, `export FOO_BAR="baz"`) {
+		t.Fatalf("expected script to contain FOO_BAR export, got:\n%s", script)
+	}
+}
+
+func TestBuildProjectRuntimeEnvScriptRejectsInvalidKey(t *testing.T) {
+	t.Parallel()
+
+	_, err := buildProjectRuntimeEnvScript([]ProjectRuntimeEnvVar{
+		{Key: "NOT-VALID", Value: "secret"},
+	})
+	if err == nil {
+		t.Fatal("expected invalid env key to return error")
+	}
+}
+
+func TestNormalizeProjectRuntimeFilePath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{name: "relative path", input: ".env.local", want: ".env.local"},
+		{name: "nested path", input: "config/app/env.txt", want: "config/app/env.txt"},
+		{name: "reject absolute", input: "/etc/passwd", wantErr: true},
+		{name: "reject traversal", input: "../secret.txt", wantErr: true},
+		{name: "reject empty", input: "  ", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := normalizeProjectRuntimeFilePath(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("normalizeProjectRuntimeFilePath(%q) expected error", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeProjectRuntimeFilePath(%q) error = %v", tt.input, err)
+			}
+			if got != tt.want {
+				t.Fatalf("normalizeProjectRuntimeFilePath(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRedactSecret(t *testing.T) {
 	t.Parallel()
 

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type {
   GitHubInstallation,
   ProjectDetailResponse,
+  ProjectRuntimeConfigResponse,
   Task,
   TaskSortOrder,
   TaskStatus,
@@ -11,16 +12,24 @@ import type {
 import { Alert, Button, PageLayout, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import {
+  addTaskDependency,
   createProjectTask,
+  createWorkspace,
   deleteProject,
+  deleteProjectRuntimeEnvVar,
+  deleteProjectRuntimeFile,
   deleteProjectTask,
   delegateTask,
   getProject,
+  getProjectRuntimeConfig,
   listGitHubInstallations,
   listProjectTasks,
   listWorkspaces,
+  removeTaskDependency,
   updateProject,
   updateProjectTaskStatus,
+  upsertProjectRuntimeEnvVar,
+  upsertProjectRuntimeFile,
 } from '../lib/api';
 import { useToast } from '../hooks/useToast';
 import { ProjectForm, type ProjectFormValues } from '../components/project/ProjectForm';
@@ -70,8 +79,10 @@ export function Project() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
+  const [runtimeConfig, setRuntimeConfig] = useState<ProjectRuntimeConfigResponse>({ envVars: [], files: [] });
   const [projectLoading, setProjectLoading] = useState(true);
   const [tasksLoading, setTasksLoading] = useState(true);
+  const [runtimeConfigLoading, setRuntimeConfigLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [showProjectEdit, setShowProjectEdit] = useState(false);
@@ -81,6 +92,15 @@ export function Project() {
   const [savingProject, setSavingProject] = useState(false);
   const [savingTask, setSavingTask] = useState(false);
   const [delegating, setDelegating] = useState(false);
+  const [savingRuntimeConfig, setSavingRuntimeConfig] = useState(false);
+  const [launchingWorkspace, setLaunchingWorkspace] = useState(false);
+
+  const [envKeyInput, setEnvKeyInput] = useState('');
+  const [envValueInput, setEnvValueInput] = useState('');
+  const [envSecretInput, setEnvSecretInput] = useState(false);
+  const [filePathInput, setFilePathInput] = useState('');
+  const [fileContentInput, setFileContentInput] = useState('');
+  const [fileSecretInput, setFileSecretInput] = useState(false);
 
   const recentActivity = useMemo(() => {
     return [...tasks]
@@ -139,8 +159,22 @@ export function Project() {
     }
   }, [projectId, filters.status, filters.minPriority, filters.sort]);
 
+  const loadRuntimeConfig = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      setRuntimeConfigLoading(true);
+      const config = await getProjectRuntimeConfig(projectId);
+      setRuntimeConfig(config);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load runtime config');
+    } finally {
+      setRuntimeConfigLoading(false);
+    }
+  }, [projectId]);
+
   useEffect(() => { void loadProject(); }, [loadProject]);
   useEffect(() => { void loadTasks(); }, [loadTasks]);
+  useEffect(() => { void loadRuntimeConfig(); }, [loadRuntimeConfig]);
 
   useEffect(() => {
     void listGitHubInstallations()
@@ -233,6 +267,101 @@ export function Project() {
     }
   };
 
+  const handleUpsertEnvVar = async () => {
+    if (!projectId) return;
+    if (!envKeyInput.trim()) {
+      toast.error('Env key is required');
+      return;
+    }
+    try {
+      setSavingRuntimeConfig(true);
+      const response = await upsertProjectRuntimeEnvVar(projectId, {
+        key: envKeyInput.trim(),
+        value: envValueInput,
+        isSecret: envSecretInput,
+      });
+      setRuntimeConfig(response);
+      setEnvKeyInput('');
+      setEnvValueInput('');
+      setEnvSecretInput(false);
+      toast.success('Runtime env var saved');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save env var');
+    } finally {
+      setSavingRuntimeConfig(false);
+    }
+  };
+
+  const handleDeleteEnvVar = async (envKey: string) => {
+    if (!projectId) return;
+    try {
+      setSavingRuntimeConfig(true);
+      const response = await deleteProjectRuntimeEnvVar(projectId, envKey);
+      setRuntimeConfig(response);
+      toast.success(`Removed ${envKey}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove env var');
+    } finally {
+      setSavingRuntimeConfig(false);
+    }
+  };
+
+  const handleUpsertFile = async () => {
+    if (!projectId) return;
+    if (!filePathInput.trim()) {
+      toast.error('File path is required');
+      return;
+    }
+    try {
+      setSavingRuntimeConfig(true);
+      const response = await upsertProjectRuntimeFile(projectId, {
+        path: filePathInput.trim(),
+        content: fileContentInput,
+        isSecret: fileSecretInput,
+      });
+      setRuntimeConfig(response);
+      setFilePathInput('');
+      setFileContentInput('');
+      setFileSecretInput(false);
+      toast.success('Runtime file saved');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save runtime file');
+    } finally {
+      setSavingRuntimeConfig(false);
+    }
+  };
+
+  const handleDeleteFile = async (path: string) => {
+    if (!projectId) return;
+    try {
+      setSavingRuntimeConfig(true);
+      const response = await deleteProjectRuntimeFile(projectId, path);
+      setRuntimeConfig(response);
+      toast.success(`Removed ${path}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove runtime file');
+    } finally {
+      setSavingRuntimeConfig(false);
+    }
+  };
+
+  const handleLaunchWorkspace = async () => {
+    if (!project) return;
+    try {
+      setLaunchingWorkspace(true);
+      const workspace = await createWorkspace({
+        name: `${project.name} Workspace`,
+        projectId: project.id,
+      });
+      toast.success('Workspace launch started');
+      navigate(`/workspaces/${workspace.id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to launch workspace');
+    } finally {
+      setLaunchingWorkspace(false);
+    }
+  };
+
   if (!projectId) {
     return (
       <PageLayout title="Project" maxWidth="xl" headerRight={<UserMenu />}>
@@ -297,6 +426,9 @@ export function Project() {
               )}
             </div>
             <div style={{ display: 'flex', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+              <Button onClick={handleLaunchWorkspace} loading={launchingWorkspace} disabled={launchingWorkspace}>
+                Launch Workspace
+              </Button>
               <Button variant="secondary" onClick={() => setShowProjectEdit((v) => !v)}>
                 {showProjectEdit ? 'Close edit' : 'Edit project'}
               </Button>
@@ -406,6 +538,172 @@ export function Project() {
                   />
                 </section>
               )}
+
+              {/* Runtime Config */}
+              <section
+                style={{
+                  border: '1px solid var(--sam-color-border-default)',
+                  borderRadius: 'var(--sam-radius-md)',
+                  background: 'var(--sam-color-bg-surface)',
+                  padding: 'var(--sam-space-4)',
+                  display: 'grid',
+                  gap: 'var(--sam-space-3)',
+                }}
+              >
+                <h2 style={{ margin: 0, fontSize: '1.125rem', color: 'var(--sam-color-fg-primary)' }}>
+                  Runtime Config
+                </h2>
+
+                {runtimeConfigLoading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
+                    <Spinner size="sm" />
+                    <span>Loading runtime config...</span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gap: 'var(--sam-space-4)' }}>
+                    <div style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
+                      <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--sam-color-fg-primary)' }}>Environment Variables</h3>
+                      <div style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
+                        <input
+                          aria-label="Runtime env key"
+                          placeholder="API_TOKEN"
+                          value={envKeyInput}
+                          onChange={(event) => setEnvKeyInput(event.currentTarget.value)}
+                        />
+                        <input
+                          aria-label="Runtime env value"
+                          placeholder="Value"
+                          value={envValueInput}
+                          onChange={(event) => setEnvValueInput(event.currentTarget.value)}
+                        />
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.8125rem' }}>
+                          <input
+                            type="checkbox"
+                            checked={envSecretInput}
+                            onChange={(event) => setEnvSecretInput(event.currentTarget.checked)}
+                          />
+                          Secret
+                        </label>
+                        <Button
+                          variant="secondary"
+                          onClick={handleUpsertEnvVar}
+                          loading={savingRuntimeConfig}
+                          disabled={savingRuntimeConfig}
+                        >
+                          Save
+                        </Button>
+                      </div>
+                      {runtimeConfig.envVars.length === 0 ? (
+                        <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.8125rem' }}>
+                          No runtime env vars configured.
+                        </div>
+                      ) : (
+                        <div style={{ display: 'grid', gap: '0.5rem' }}>
+                          {runtimeConfig.envVars.map((item) => (
+                            <div
+                              key={item.key}
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                gap: 'var(--sam-space-2)',
+                                alignItems: 'center',
+                                fontSize: '0.8125rem',
+                              }}
+                            >
+                              <div>
+                                <strong>{item.key}</strong>{' '}
+                                <span style={{ color: 'var(--sam-color-fg-muted)' }}>
+                                  {item.isSecret ? '••••••' : item.value}
+                                </span>
+                              </div>
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                onClick={() => void handleDeleteEnvVar(item.key)}
+                                disabled={savingRuntimeConfig}
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
+                      <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--sam-color-fg-primary)' }}>Runtime Files</h3>
+                      <div style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
+                        <input
+                          aria-label="Runtime file path"
+                          placeholder=".env.local"
+                          value={filePathInput}
+                          onChange={(event) => setFilePathInput(event.currentTarget.value)}
+                        />
+                        <textarea
+                          aria-label="Runtime file content"
+                          placeholder="FOO=bar"
+                          rows={4}
+                          value={fileContentInput}
+                          onChange={(event) => setFileContentInput(event.currentTarget.value)}
+                        />
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.8125rem' }}>
+                            <input
+                              type="checkbox"
+                              checked={fileSecretInput}
+                              onChange={(event) => setFileSecretInput(event.currentTarget.checked)}
+                            />
+                            Secret file content
+                          </label>
+                          <Button
+                            variant="secondary"
+                            onClick={handleUpsertFile}
+                            loading={savingRuntimeConfig}
+                            disabled={savingRuntimeConfig}
+                          >
+                            Save file
+                          </Button>
+                        </div>
+                      </div>
+                      {runtimeConfig.files.length === 0 ? (
+                        <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.8125rem' }}>
+                          No runtime files configured.
+                        </div>
+                      ) : (
+                        <div style={{ display: 'grid', gap: '0.5rem' }}>
+                          {runtimeConfig.files.map((item) => (
+                            <div
+                              key={item.path}
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                gap: 'var(--sam-space-2)',
+                                alignItems: 'center',
+                                fontSize: '0.8125rem',
+                              }}
+                            >
+                              <div>
+                                <strong>{item.path}</strong>{' '}
+                                <span style={{ color: 'var(--sam-color-fg-muted)' }}>
+                                  {item.isSecret ? '••••••' : 'stored'}
+                                </span>
+                              </div>
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                onClick={() => void handleDeleteFile(item.path)}
+                                disabled={savingRuntimeConfig}
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </section>
 
               {/* Recent activity */}
               <section

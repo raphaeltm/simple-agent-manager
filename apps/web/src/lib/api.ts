@@ -13,11 +13,14 @@ import type {
   ListTasksResponse,
   Project,
   ProjectDetailResponse,
+  ProjectRuntimeConfigResponse,
   Task,
   TaskDependency,
   TaskDetailResponse,
   TaskSortOrder,
   TaskStatus,
+  UpsertProjectRuntimeEnvVarRequest,
+  UpsertProjectRuntimeFileRequest,
   UpdateProjectRequest,
   UpdateTaskRequest,
   UpdateTaskStatusRequest,
@@ -191,6 +194,57 @@ export async function deleteProject(id: string): Promise<{ success: boolean }> {
   return request<{ success: boolean }>(`/api/projects/${id}`, {
     method: 'DELETE',
   });
+}
+
+export async function getProjectRuntimeConfig(
+  projectId: string
+): Promise<ProjectRuntimeConfigResponse> {
+  return request<ProjectRuntimeConfigResponse>(`/api/projects/${projectId}/runtime-config`);
+}
+
+export async function upsertProjectRuntimeEnvVar(
+  projectId: string,
+  data: UpsertProjectRuntimeEnvVarRequest
+): Promise<ProjectRuntimeConfigResponse> {
+  return request<ProjectRuntimeConfigResponse>(`/api/projects/${projectId}/runtime/env-vars`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteProjectRuntimeEnvVar(
+  projectId: string,
+  envKey: string
+): Promise<ProjectRuntimeConfigResponse> {
+  return request<ProjectRuntimeConfigResponse>(
+    `/api/projects/${projectId}/runtime/env-vars/${encodeURIComponent(envKey)}`,
+    {
+      method: 'DELETE',
+    }
+  );
+}
+
+export async function upsertProjectRuntimeFile(
+  projectId: string,
+  data: UpsertProjectRuntimeFileRequest
+): Promise<ProjectRuntimeConfigResponse> {
+  return request<ProjectRuntimeConfigResponse>(`/api/projects/${projectId}/runtime/files`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteProjectRuntimeFile(
+  projectId: string,
+  path: string
+): Promise<ProjectRuntimeConfigResponse> {
+  const params = new URLSearchParams({ path });
+  return request<ProjectRuntimeConfigResponse>(
+    `/api/projects/${projectId}/runtime/files?${params.toString()}`,
+    {
+      method: 'DELETE',
+    }
+  );
 }
 
 // =============================================================================
