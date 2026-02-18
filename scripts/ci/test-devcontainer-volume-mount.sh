@@ -28,10 +28,8 @@ HOST_CLONE="/tmp/sam-test-host-clone/$REPO_DIR_NAME"
 # Named volume (matches VM agent's sam-ws-<workspaceId> pattern)
 VOLUME_NAME="sam-test-devcontainer-ci"
 
-# Override config (matches writeMountOverrideConfig in bootstrap.go)
-OVERRIDE_CONFIG="/tmp/sam-test-override-config.json"
-
 FAIL=0
+WARN=0
 
 # Cleanup function
 cleanup() {
@@ -58,24 +56,9 @@ cleanup() {
     rm -rf "$HOST_CLONE"
   fi
 
-  # Remove override config
-  rm -f "$OVERRIDE_CONFIG"
-
   echo "Cleanup complete."
 }
 trap cleanup EXIT
-
-check() {
-  local name="$1"
-  shift
-  if output=$("$@" 2>&1); then
-    echo "  OK: $name — $(echo "$output" | head -1)"
-  else
-    echo "  FAIL: $name (exit $?)"
-    echo "    $output" | head -5
-    FAIL=$((FAIL + 1))
-  fi
-}
 
 echo "=============================================="
 echo "  SAM Devcontainer Volume Mount Test"
@@ -315,12 +298,13 @@ docker exec "$CONTAINER_ID" bash -c '
     fi
   done
 
-  # Check for Claude Code (installed by post-create.sh)
+  # Claude install is optional in post-create.sh (try_run), so missing binary
+  # should not fail this integration test.
   if command -v claude >/dev/null 2>&1; then
     echo "  OK: claude command available — $(claude --version 2>&1 | head -1)"
   else
-    echo "  FAIL: claude command not found (post-create.sh install failed)"
-    FAIL=$((FAIL + 1))
+    echo "  WARN: claude command not found (optional install may have failed)"
+    echo "        Workspace remains valid; post-create.sh treats this as non-fatal."
   fi
 
   exit $FAIL
@@ -342,11 +326,14 @@ docker exec "$CONTAINER_ID" bash -c '
       echo "  INFO: happy daemon not running (non-fatal in CI)"
     fi
   else
-    echo "  FAIL: happy binary not found (post-create.sh install failed)"
-    exit 1
+    echo "  WARN: happy binary not found (optional install may have failed)"
+    exit 10
   fi
 '
-if [ $? -ne 0 ]; then
+POST_START_EXIT=$?
+if [ $POST_START_EXIT -eq 10 ]; then
+  WARN=$((WARN + 1))
+elif [ $POST_START_EXIT -ne 0 ]; then
   FAIL=$((FAIL + 1))
 fi
 set -e
@@ -359,7 +346,10 @@ if [ $FAIL -eq 0 ]; then
   echo "  Devcontainer volume mount flow works correctly."
 else
   echo "  $FAIL CHECK(S) FAILED"
-  echo "  The volume mount override is breaking the devcontainer build."
+  echo "  Devcontainer volume mount flow has regressions."
+fi
+if [ $WARN -gt 0 ]; then
+  echo "  $WARN warning(s): optional tooling install did not fully complete."
 fi
 echo "=============================================="
 
