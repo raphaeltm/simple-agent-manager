@@ -105,6 +105,23 @@ else
   exit 1
 fi
 
+# Strip JSONC comments from devcontainer.json on the host clone.
+# devcontainer CLI v0.83.1 fails to parse JSONC (// comments) when
+# --override-config is used, even though it handles JSONC fine without it.
+# This matches what the VM agent bootstrap must do before calling devcontainer up.
+echo "  Stripping JSONC comments from host clone devcontainer.json..."
+DEVCONTAINER_JSON="$HOST_CLONE/.devcontainer/devcontainer.json"
+node -e "
+  const fs = require('fs');
+  const raw = fs.readFileSync(process.argv[1], 'utf8');
+  const stripped = raw
+    .replace(/\/\/.*$/gm, '')
+    .replace(/,(\s*[}\]])/g, '\$1');
+  const parsed = JSON.parse(stripped);
+  fs.writeFileSync(process.argv[1], JSON.stringify(parsed, null, 2) + '\n');
+  console.log('  OK: JSONC comments stripped, image=' + parsed.image);
+" "$DEVCONTAINER_JSON"
+
 # ── Step 2: Create named Docker volume ────────────────────────────────
 echo ""
 echo "=== Step 2: Create named Docker volume ==="
