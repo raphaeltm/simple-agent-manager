@@ -12,7 +12,6 @@ import type {
 import { Alert, Button, PageLayout, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import {
-  addTaskDependency,
   createProjectTask,
   createWorkspace,
   deleteProject,
@@ -25,7 +24,6 @@ import {
   listGitHubInstallations,
   listProjectTasks,
   listWorkspaces,
-  removeTaskDependency,
   updateProject,
   updateProjectTaskStatus,
   upsertProjectRuntimeEnvVar,
