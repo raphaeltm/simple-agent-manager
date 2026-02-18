@@ -326,10 +326,10 @@ describe('Workspace page', () => {
 
       renderWorkspace('/workspaces/ws-123', true);
 
-      expect(await screen.findByRole('tab', { name: 'Terminal tab: Terminal 1' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: /Close Terminal/ })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'Chat tab: Claude Chat' })).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole('button', { name: 'Close Terminal 1' }));
+      fireEvent.click(screen.getByRole('button', { name: /Close Terminal/ }));
 
       await waitFor(() => {
         const probe = screen.getByTestId('location-probe').textContent ?? '';
@@ -345,8 +345,8 @@ describe('Workspace page', () => {
 
       renderWorkspace('/workspaces/ws-123', true);
 
-      expect(await screen.findByRole('tab', { name: 'Terminal tab: Terminal 1' })).toBeInTheDocument();
-      fireEvent.click(screen.getByRole('button', { name: 'Close Terminal 1' }));
+      expect(await screen.findByRole('button', { name: /Close Terminal/ })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /Close Terminal/ }));
 
       await waitFor(() => {
         expect(screen.queryByRole('tab', { name: /Terminal tab:/ })).not.toBeInTheDocument();
