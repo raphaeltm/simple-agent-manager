@@ -160,20 +160,22 @@ func New(cfg *config.Config) (*Server, error) {
 
 	// Build ACP gateway configuration
 	acpGatewayConfig := acp.GatewayConfig{
-		InitTimeoutMs:      cfg.ACPInitTimeoutMs,
-		MaxRestartAttempts: cfg.ACPMaxRestartAttempts,
-		ControlPlaneURL:    cfg.ControlPlaneURL,
-		WorkspaceID:        defaultWorkspaceScope(cfg.WorkspaceID, cfg.NodeID),
-		CallbackToken:      cfg.CallbackToken,
-		ContainerResolver:  containerResolver,
-		ContainerUser:      containerUser,
-		ContainerWorkDir:   containerWorkDir,
-		OnActivity:         idleDetector.RecordActivity,
-		FileExecTimeout:    cfg.GitExecTimeout,
-		FileMaxSize:        cfg.GitFileMaxSize,
-		ErrorReporter:      errorReporter,
-		PingInterval:       cfg.ACPPingInterval,
-		PongTimeout:        cfg.ACPPongTimeout,
+		InitTimeoutMs:           cfg.ACPInitTimeoutMs,
+		MaxRestartAttempts:      cfg.ACPMaxRestartAttempts,
+		ControlPlaneURL:         cfg.ControlPlaneURL,
+		WorkspaceID:             defaultWorkspaceScope(cfg.WorkspaceID, cfg.NodeID),
+		CallbackToken:           cfg.CallbackToken,
+		ContainerResolver:       containerResolver,
+		ContainerUser:           containerUser,
+		ContainerWorkDir:        containerWorkDir,
+		OnActivity:              idleDetector.RecordActivity,
+		FileExecTimeout:         cfg.GitExecTimeout,
+		FileMaxSize:             cfg.GitFileMaxSize,
+		ErrorReporter:           errorReporter,
+		PingInterval:            cfg.ACPPingInterval,
+		PongTimeout:             cfg.ACPPongTimeout,
+		PromptTimeout:           cfg.ACPPromptTimeout,
+		PromptCancelGracePeriod: cfg.ACPPromptCancelGrace,
 	}
 
 	// Open persistence store for cross-device session state.

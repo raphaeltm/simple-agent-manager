@@ -97,7 +97,7 @@ func TestSessionHost_AttachDetachViewer(t *testing.T) {
 		t.Fatalf("viewer count = %d, want 1", host.ViewerCount())
 	}
 
-	// The attach sends session_state + session_replay_complete
+	// The attach sends initial session_state + session_replay_complete + post-replay session_state
 	// Read session_state
 	_, msg1, err := clientConn.ReadMessage()
 	if err != nil {
@@ -125,6 +125,19 @@ func TestSessionHost_AttachDetachViewer(t *testing.T) {
 	}
 	if replayDone["type"] != string(MsgSessionReplayDone) {
 		t.Fatalf("second message type = %v, want %s", replayDone["type"], MsgSessionReplayDone)
+	}
+
+	// Read post-replay authoritative session_state
+	_, msg3, err := clientConn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read post-replay session_state: %v", err)
+	}
+	var postStateMsg SessionStateMessage
+	if err := json.Unmarshal(msg3, &postStateMsg); err != nil {
+		t.Fatalf("unmarshal post-replay session_state: %v", err)
+	}
+	if postStateMsg.Type != MsgSessionState {
+		t.Fatalf("third message type = %s, want %s", postStateMsg.Type, MsgSessionState)
 	}
 
 	// Detach viewer
@@ -166,7 +179,7 @@ func TestSessionHost_BroadcastToMultipleViewers(t *testing.T) {
 
 	// Drain the initial session_state + replay_complete messages
 	drainAttachMessages := func(client *websocket.Conn) {
-		for i := 0; i < 2; i++ {
+		for i := 0; i < 3; i++ {
 			client.SetReadDeadline(time.Now().Add(2 * time.Second))
 			_, _, err := client.ReadMessage()
 			if err != nil {
@@ -256,7 +269,8 @@ func TestSessionHost_LateJoinReplay(t *testing.T) {
 		host.broadcastMessage(msg)
 	}
 
-	// Now attach a viewer — it should get session_state, 3 replayed messages, then replay_complete
+	// Now attach a viewer — it should get session_state, 3 replayed messages,
+	// replay_complete, then post-replay session_state.
 	serverConn, clientConn := testWSPair(t)
 	host.AttachViewer("late-v1", serverConn)
 
@@ -296,6 +310,12 @@ func TestSessionHost_LateJoinReplay(t *testing.T) {
 	if done["type"] != string(MsgSessionReplayDone) {
 		t.Fatalf("expected session_replay_complete, got type=%v", done["type"])
 	}
+
+	// 6. post-replay session_state
+	postState := readAndParse("post-replay session_state")
+	if postState["type"] != string(MsgSessionState) {
+		t.Fatalf("expected session_state, got type=%v", postState["type"])
+	}
 }
 
 func TestSessionHost_StopDisconnectsViewers(t *testing.T) {
@@ -307,7 +327,7 @@ func TestSessionHost_StopDisconnectsViewers(t *testing.T) {
 	host.AttachViewer("v1", serverConn)
 
 	// Drain attach messages
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		_, _, _ = clientConn.ReadMessage()
 	}
@@ -556,7 +576,7 @@ func TestSessionHost_ViewerDisconnectDoesNotStopAgent(t *testing.T) {
 	host.AttachViewer("v1", serverConn)
 
 	// Drain attach messages
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		_, _, _ = clientConn.ReadMessage()
 	}
@@ -670,4 +690,104 @@ func TestSessionHost_CancelPrompt_ClearedAfterPromptDone(t *testing.T) {
 	// CancelPrompt should now be a no-op
 	host.CancelPrompt()
 	// No panic, no side effects — just verifying safety
+}
+
+func TestSessionHost_SendToViewerPriority_EvictsQueuedMessage(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	viewer := &Viewer{
+		ID:     "v1",
+		sendCh: make(chan []byte, 1),
+		done:   make(chan struct{}),
+	}
+
+	viewer.sendCh <- []byte(`{"old":true}`)
+	host.sendToViewerPriority(viewer, []byte(`{"priority":true}`))
+
+	select {
+	case msg := <-viewer.sendCh:
+		if string(msg) != `{"priority":true}` {
+			t.Fatalf("priority message not delivered, got %s", string(msg))
+		}
+	default:
+		t.Fatal("expected a priority message in viewer channel")
+	}
+}
+
+func TestSessionHost_CancelPrompt_ForceStopsAfterGracePeriod(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:               "test-session",
+			WorkspaceID:             "test-workspace",
+			PromptCancelGracePeriod: 10 * time.Millisecond,
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	host.mu.Lock()
+	host.status = HostPrompting
+	host.agentType = "claude-code"
+	host.mu.Unlock()
+
+	host.promptMu.Lock()
+	host.promptInFlight = true
+	host.promptMu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	host.promptCancelMu.Lock()
+	host.promptCancel = cancel
+	host.activePromptID = 42
+	host.promptCancelMu.Unlock()
+
+	host.CancelPrompt()
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected prompt context to be cancelled")
+	}
+
+	deadline := time.Now().Add(1 * time.Second)
+	for host.Status() != HostError {
+		if time.Now().After(deadline) {
+			t.Fatal("expected host to transition to error after cancel grace elapsed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	host.mu.RLock()
+	statusErr := host.statusErr
+	host.mu.RUnlock()
+	if !strings.Contains(statusErr, "Prompt cancel grace elapsed") {
+		t.Fatalf("statusErr = %q, expected cancel grace reason", statusErr)
+	}
+
+	host.promptCancelMu.Lock()
+	if host.activePromptID != 0 {
+		t.Fatalf("activePromptID = %d, want 0", host.activePromptID)
+	}
+	if host.promptCancel != nil {
+		t.Fatal("promptCancel should be cleared after force-stop")
+	}
+	host.promptCancelMu.Unlock()
+
+	host.promptMu.Lock()
+	if host.promptInFlight {
+		t.Fatal("promptInFlight should be false after force-stop")
+	}
+	host.promptMu.Unlock()
+
+	host.bufMu.RLock()
+	buffered := len(host.messageBuf)
+	host.bufMu.RUnlock()
+	if buffered < 2 {
+		t.Fatalf("expected prompt_done + error status messages, buffered=%d", buffered)
+	}
 }

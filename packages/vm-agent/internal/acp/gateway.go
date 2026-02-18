@@ -98,6 +98,10 @@ type GatewayConfig struct {
 	PingInterval time.Duration
 	// PongTimeout is the pong deadline after sending a ping. Zero uses DefaultPongTimeout.
 	PongTimeout time.Duration
+	// PromptTimeout bounds how long a prompt can run before force-stop fallback.
+	PromptTimeout time.Duration
+	// PromptCancelGracePeriod waits after cancel before force-stopping unresponsive prompt.
+	PromptCancelGracePeriod time.Duration
 }
 
 // Gateway is a thin per-WebSocket relay between a browser and a SessionHost.

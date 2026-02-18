@@ -361,6 +361,41 @@ describe('useAcpSession prompt state restoration after replay', () => {
   });
 });
 
+describe('useAcpSession replay prompt-done race handling', () => {
+  it('ends replay in ready when session_prompt_done arrives during replay', async () => {
+    const { result } = renderHook(() =>
+      useAcpSession({
+        wsUrl: 'ws://localhost/agent/ws',
+      })
+    );
+
+    const ws = MockWebSocket.instances[0]!;
+    act(() => {
+      ws.emitOpen();
+      ws.emitMessage({
+        type: 'session_state',
+        status: 'prompting',
+        agentType: 'claude-code',
+        replayCount: 2,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('replaying');
+    });
+
+    act(() => {
+      ws.emitMessage({ type: 'session_prompt_done' });
+      ws.emitMessage({ type: 'session_replay_complete' });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('ready');
+      expect(result.current.replaying).toBe(false);
+    });
+  });
+});
+
 describe('useAcpSession agentType reset on reconnect', () => {
   it('clears agentType to null when WebSocket opens (Phase 1 hang fix)', async () => {
     const { result } = renderHook(() => useAcpSession({
@@ -504,5 +539,45 @@ describe('useAcpSession manual reconnect', () => {
     });
 
     expect(MockWebSocket.instances.length).toBe(instanceCountBefore);
+  });
+});
+
+describe('useAcpSession resolver-driven URL refresh', () => {
+  it('uses resolveWsUrl on initial connect and manual reconnect', async () => {
+    const resolveWsUrl = vi
+      .fn()
+      .mockResolvedValueOnce('ws://localhost/agent/ws?token=first')
+      .mockResolvedValueOnce('ws://localhost/agent/ws?token=second');
+
+    const { result } = renderHook(() =>
+      useAcpSession({
+        wsUrl: null,
+        resolveWsUrl,
+      })
+    );
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances.length).toBe(1);
+    });
+    expect(MockWebSocket.instances[0]?.url).toContain('token=first');
+
+    act(() => {
+      MockWebSocket.instances[0]?.emitOpenAndIdle();
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]?.close();
+      result.current.reconnect();
+    });
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances.length).toBe(2);
+    });
+    expect(MockWebSocket.instances[1]?.url).toContain('token=second');
+    expect(resolveWsUrl).toHaveBeenCalledTimes(2);
   });
 });
