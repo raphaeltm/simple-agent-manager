@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, type FC } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from '@simple-agent-manager/ui';
 import { GitBranch, ExternalLink } from 'lucide-react';
 import { CollapsibleSection } from './CollapsibleSection';
@@ -313,6 +314,25 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                 {workspace.vmLocation
                   ? ` \u00B7 ${VM_LOCATION_LABELS[workspace.vmLocation] ?? workspace.vmLocation}`
                   : ''}
+              </InfoRow>
+            )}
+
+            {/* Node */}
+            {workspace?.nodeId && (
+              <InfoRow label="Node">
+                <Link
+                  to={`/nodes/${workspace.nodeId}`}
+                  style={{
+                    color: '#7aa2f7',
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  {workspace.nodeId.slice(0, 8)}
+                  <ExternalLink size={11} />
+                </Link>
               </InfoRow>
             )}
 
