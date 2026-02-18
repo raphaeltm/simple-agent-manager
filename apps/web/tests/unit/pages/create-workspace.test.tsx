@@ -26,19 +26,14 @@ vi.mock('../../../src/components/UserMenu', () => ({
 
 import { CreateWorkspace } from '../../../src/pages/CreateWorkspace';
 
-function renderCreateWorkspace(
-  mode: 'workspace' | 'project' = 'workspace',
-  initialEntry: string = '/create'
-) {
+function renderCreateWorkspace() {
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
+    <MemoryRouter initialEntries={['/create']}>
       <Routes>
-        <Route path="/create" element={<CreateWorkspace mode={mode} />} />
-        <Route path="/projects/new" element={<CreateWorkspace mode={mode} />} />
+        <Route path="/create" element={<CreateWorkspace />} />
         <Route path="/workspaces/:id" element={<div data-testid="workspace-detail" />} />
         <Route path="/settings" element={<div data-testid="settings" />} />
         <Route path="/dashboard" element={<div data-testid="dashboard" />} />
-        <Route path="/projects" element={<div data-testid="projects" />} />
       </Routes>
     </MemoryRouter>
   );
@@ -230,10 +225,4 @@ describe('CreateWorkspace', () => {
     expect(screen.queryByText('Checking prerequisites...')).not.toBeInTheDocument();
   });
 
-  it('uses project copy in project mode', async () => {
-    renderCreateWorkspace('project', '/projects/new');
-
-    expect(await screen.findByLabelText('Project Name')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create Project' })).toBeInTheDocument();
-  });
 });
