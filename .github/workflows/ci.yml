@@ -227,7 +227,7 @@ jobs:
   devcontainer:
     name: Devcontainer Validation
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -256,16 +256,12 @@ jobs:
       - name: Build devcontainer image
         run: devcontainer build --workspace-folder .
 
-      - name: Start devcontainer and verify tools
+      - name: Start devcontainer with full lifecycle hooks
         run: |
-          # Start the container (skip postCreateCommand to avoid installing
-          # external tools like Claude Code that aren't needed for validation)
           set -e
 
-          echo "=== Starting devcontainer ==="
-          OUTPUT=$(devcontainer up \
-            --workspace-folder . \
-            --skip-post-create)
+          echo "=== Starting devcontainer (running postCreateCommand + postStartCommand) ==="
+          OUTPUT=$(devcontainer up --workspace-folder .)
           echo "$OUTPUT"
 
           # Extract container ID from JSON output
@@ -276,10 +272,9 @@ jobs:
           fi
           echo "Container ID: $CONTAINER_ID"
 
-          echo ""
-          echo "=== Verifying required tools ==="
-
-          # Run verification inside the container
+      - name: Verify devcontainer feature tools
+        run: |
+          # Tools installed by devcontainer features (docker-in-docker, github-cli, go)
           devcontainer exec --workspace-folder . bash -c '
             set -e
             FAIL=0
@@ -287,16 +282,18 @@ jobs:
             check() {
               local name="$1"
               shift
-              if "$@" > /dev/null 2>&1; then
-                echo "OK: $name"
+              if output=$("$@" 2>&1); then
+                echo "OK: $name — $output"
               else
                 echo "FAIL: $name"
-                FAIL=1
+                FAIL=$((FAIL + 1))
               fi
             }
 
+            echo "=== Devcontainer Feature Tools ==="
             check "Node.js"     node --version
             check "npm"         npm --version
+            check "pnpm"        pnpm --version
             check "Go"          go version
             check "Docker"      docker --version
             check "GitHub CLI"  gh --version
@@ -304,15 +301,107 @@ jobs:
             check "curl"        curl --version
             check "jq"          jq --version
 
+            exit $FAIL
+          '
+
+      - name: Verify post-create hook tools
+        run: |
+          # Tools installed by .devcontainer/post-create.sh
+          devcontainer exec --workspace-folder . bash -c '
+            set -e
+            FAIL=0
+
+            check() {
+              local name="$1"
+              shift
+              if output=$("$@" 2>&1); then
+                echo "OK: $name — $(echo "$output" | head -1)"
+              else
+                echo "FAIL: $name"
+                FAIL=$((FAIL + 1))
+              fi
+            }
+
+            echo "=== Post-Create Hook Tools ==="
+            check "Claude Code"   claude --version
+            check "OpenAI Codex"  codex --version
+            check "happy-coder"   happy --version
+            check "Playwright"    npx playwright --version
+
             echo ""
-            echo "--- Versions ---"
-            echo "Node.js: $(node --version)"
-            echo "Go:      $(go version | cut -d" " -f3)"
-            echo "Docker:  $(docker --version | cut -d" " -f3 | tr -d ",")"
-            echo "gh:      $(gh --version | head -1 | cut -d" " -f3)"
+            echo "=== Post-Create Hook Build Artifacts ==="
+
+            # Verify pnpm install ran (node_modules exists)
+            if [ -d "node_modules" ]; then
+              echo "OK: node_modules directory exists"
+            else
+              echo "FAIL: node_modules directory missing — pnpm install did not run"
+              FAIL=$((FAIL + 1))
+            fi
+
+            # Verify pnpm build ran (check for built package outputs)
+            BUILD_FAIL=0
+            for pkg in packages/shared packages/ui packages/terminal packages/acp-client; do
+              if [ -d "$pkg/dist" ]; then
+                echo "OK: $pkg/dist exists"
+              else
+                echo "FAIL: $pkg/dist missing — pnpm build did not complete"
+                BUILD_FAIL=1
+              fi
+            done
+            FAIL=$((FAIL + BUILD_FAIL))
+
+            exit $FAIL
+          '
+
+      - name: Verify post-start hook
+        run: |
+          # post-start.sh runs "happy daemon start"
+          devcontainer exec --workspace-folder . bash -c '
+            set -e
+            echo "=== Post-Start Hook Verification ==="
+
+            # The happy daemon should have been started by postStartCommand
+            if happy daemon status 2>&1 | grep -qi "running\|started\|active"; then
+              echo "OK: happy daemon is running"
+            else
+              STATUS=$(happy daemon status 2>&1 || true)
+              echo "WARNING: happy daemon status unclear: $STATUS"
+              # Not a hard failure — daemon may not persist in CI environment
+              echo "Verifying happy binary is at least callable..."
+              happy --version
+              echo "OK: happy binary is functional"
+            fi
+          '
+
+      - name: Verify MCP server configuration
+        run: |
+          devcontainer exec --workspace-folder . bash -c '
+            set -e
+            FAIL=0
+
+            echo "=== MCP Server Configuration ==="
+
+            # Claude MCP servers configured by post-create.sh
+            for server in playwright sequential-thinking context7 cloudflare-observability; do
+              if claude mcp get "$server" >/dev/null 2>&1; then
+                echo "OK: Claude MCP server '$server' configured"
+              else
+                echo "FAIL: Claude MCP server '$server' not found"
+                FAIL=$((FAIL + 1))
+              fi
+            done
+
+            # Codex MCP servers
+            if codex mcp get cloudflare-observability >/dev/null 2>&1; then
+              echo "OK: Codex MCP server 'cloudflare-observability' configured"
+            else
+              echo "FAIL: Codex MCP server 'cloudflare-observability' not found"
+              FAIL=$((FAIL + 1))
+            fi
 
             exit $FAIL
           '
 
           echo ""
-          echo "=== Devcontainer validation passed ==="
+          echo "=== Devcontainer full validation passed ==="
