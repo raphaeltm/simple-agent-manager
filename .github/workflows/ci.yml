@@ -405,3 +405,27 @@ jobs:
 
           echo ""
           echo "=== Devcontainer full validation passed ==="
+
+  devcontainer-volume-mount:
+    name: Devcontainer Volume Mount
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install devcontainer CLI
+        run: npm install -g @devcontainers/cli
+
+      - name: Pull base images
+        run: |
+          docker pull alpine:latest &
+          docker pull mcr.microsoft.com/devcontainers/typescript-node:24-bookworm &
+          docker pull mcr.microsoft.com/devcontainers/base:ubuntu &
+          wait
+
+      - name: Run SAM volume mount devcontainer test
+        run: bash scripts/ci/test-devcontainer-volume-mount.sh .
