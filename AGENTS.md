@@ -78,6 +78,17 @@ Before marking feature work complete:
 - [ ] Local test run passes for impacted packages
 - [ ] CI test checks are expected to pass with the changes
 
+### UI Form Behavior Test Rules (REQUIRED FOR FORM CHANGES)
+
+When changing any UI form or input handling logic, apply all of these rules:
+
+1. **MUST** add/extend tests that simulate realistic typing sequences (single char -> multi-char -> edit) for each changed text field
+2. **MUST** cover all changed input types (text, textarea, number, select, checkbox/radio where applicable), not just one happy-path field
+3. **MUST** include at least one integration-level test that exercises the full user flow (open form -> type -> submit -> assert payload/API call)
+4. **MUST** include assertions that no crash/regression occurs during rapid consecutive changes
+5. **MUST** avoid reading React synthetic event objects inside deferred/functional state updaters; capture `const value = event.currentTarget.value` before async or queued updates
+6. **SHOULD** include edge-case behavior for user edits (clearing fields, trimming, retyping, invalid intermediate numeric input)
+
 ---
 
 ## CRITICAL: Constitution Validation (NON-NEGOTIABLE)

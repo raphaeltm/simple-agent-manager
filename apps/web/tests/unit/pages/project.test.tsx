@@ -215,4 +215,37 @@ describe('Project page', () => {
       });
     });
   });
+
+  it('supports multi-character typing across new-task form fields', async () => {
+    renderProjectPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New task' }));
+
+    const titleInput = screen.getByPlaceholderText('Task title');
+    fireEvent.change(titleInput, { target: { value: 'W' } });
+    fireEvent.change(titleInput, { target: { value: 'Wr' } });
+    fireEvent.change(titleInput, { target: { value: 'Write docs' } });
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+      target: { value: 'Document edge cases for typing flows' },
+    });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Priority' }), {
+      target: { value: '11' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Optional agent profile hint'), {
+      target: { value: 'qa-reviewer' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Task' }));
+
+    await waitFor(() => {
+      expect(mocks.createProjectTask).toHaveBeenCalledWith('proj-1', {
+        title: 'Write docs',
+        description: 'Document edge cases for typing flows',
+        priority: 11,
+        parentTaskId: undefined,
+        agentProfileHint: 'qa-reviewer',
+      });
+    });
+  });
 });
