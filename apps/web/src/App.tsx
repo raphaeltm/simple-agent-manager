@@ -34,14 +34,6 @@ export default function App() {
             }
           />
           <Route
-            path="/projects"
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
             path="/settings"
             element={
               <ProtectedRoute>
@@ -54,14 +46,6 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <CreateWorkspace />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/projects/new"
-            element={
-              <ProtectedRoute>
-                <CreateWorkspace mode="project" />
               </ProtectedRoute>
             }
           />

@@ -6,12 +6,16 @@ import { ToastProvider } from '../../../src/hooks/useToast';
 const mocks = vi.hoisted(() => ({
   listProjects: vi.fn(),
   listGitHubInstallations: vi.fn(),
+  listRepositories: vi.fn(),
+  listBranches: vi.fn(),
   createProject: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
   listProjects: mocks.listProjects,
   listGitHubInstallations: mocks.listGitHubInstallations,
+  listRepositories: mocks.listRepositories,
+  listBranches: mocks.listBranches,
   createProject: mocks.createProject,
 }));
 
@@ -75,6 +79,17 @@ describe('Projects page', () => {
       createdAt: '2026-02-18T00:00:00.000Z',
       updatedAt: '2026-02-18T00:00:00.000Z',
     });
+    mocks.listRepositories.mockResolvedValue([
+      {
+        id: 1,
+        fullName: 'acme/new-repo',
+        name: 'new-repo',
+        private: false,
+        defaultBranch: 'main',
+        installationId: 'inst-1',
+      },
+    ]);
+    mocks.listBranches.mockResolvedValue([{ name: 'main' }, { name: 'develop' }]);
   });
 
   it('loads and renders projects', async () => {
@@ -99,7 +114,16 @@ describe('Projects page', () => {
     });
 
     fireEvent.change(screen.getByPlaceholderText('Project name'), { target: { value: 'New Project' } });
-    fireEvent.change(screen.getByPlaceholderText('owner/repo'), { target: { value: 'acme/new-repo' } });
+    await waitFor(() => {
+      expect(mocks.listRepositories).toHaveBeenCalled();
+    });
+    const repositoryInput = screen.getByLabelText('Repository');
+    fireEvent.focus(repositoryInput);
+    fireEvent.click(await screen.findByText('acme/new-repo'));
+
+    await waitFor(() => {
+      expect(mocks.listBranches).toHaveBeenCalledWith('acme/new-repo', 'inst-1');
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Create Project' }));
 

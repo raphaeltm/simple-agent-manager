@@ -1,6 +1,8 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useMemo, useState, type FormEvent } from 'react';
 import type { GitHubInstallation } from '@simple-agent-manager/shared';
-import { Button, Input } from '@simple-agent-manager/ui';
+import { Button, Input, Spinner } from '@simple-agent-manager/ui';
+import { listBranches } from '../../lib/api';
+import { RepoSelector } from '../RepoSelector';
 
 export interface ProjectFormValues {
   name: string;
@@ -18,6 +20,18 @@ interface ProjectFormProps {
   onSubmit: (values: ProjectFormValues) => Promise<void> | void;
   onCancel?: () => void;
   submitLabel?: string;
+}
+
+function normalizeRepository(value: string): string {
+  let repository = value.trim();
+
+  if (repository.startsWith('https://github.com/')) {
+    repository = repository.replace('https://github.com/', '');
+  } else if (repository.startsWith('git@github.com:')) {
+    repository = repository.replace('git@github.com:', '');
+  }
+
+  return repository.replace(/\.git$/, '');
 }
 
 export function ProjectForm({
@@ -43,12 +57,73 @@ export function ProjectForm({
     repository: initialValues?.repository ?? '',
     defaultBranch: initialValues?.defaultBranch ?? 'main',
   });
+  const [branches, setBranches] = useState<Array<{ name: string }>>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branchesError, setBranchesError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const isEditMode = mode === 'edit';
 
+  const fetchBranches = useCallback(async (repository: string, installationId: string) => {
+    setBranchesLoading(true);
+    setBranches([]);
+    setBranchesError(null);
+
+    try {
+      const result = await listBranches(repository, installationId || undefined);
+      setBranches(result);
+
+      if (result.length === 0) {
+        setBranches([{ name: 'main' }, { name: 'master' }]);
+        setBranchesError('Could not fetch branches, showing common defaults');
+      }
+    } catch {
+      setBranches([{ name: 'main' }, { name: 'master' }, { name: 'develop' }]);
+      setBranchesError('Unable to fetch branches. Common branch names provided.');
+    } finally {
+      setBranchesLoading(false);
+    }
+  }, []);
+
   const handleChange = (field: keyof ProjectFormValues, value: string) => {
     setValues((current) => ({ ...current, [field]: value }));
+  };
+
+  const handleRepositoryChange = (value: string) => {
+    setBranches([]);
+    setBranchesError(null);
+    handleChange('repository', value);
+  };
+
+  const handleRepoSelect = useCallback(
+    (repo: { fullName: string; defaultBranch: string } | null) => {
+      if (!repo) {
+        setBranches([]);
+        setBranchesError(null);
+        return;
+      }
+
+      setValues((current) => ({ ...current, defaultBranch: repo.defaultBranch }));
+      void fetchBranches(repo.fullName, values.installationId);
+    },
+    [fetchBranches, values.installationId]
+  );
+
+  const handleInstallationChange = (installationId: string) => {
+    handleChange('installationId', installationId);
+
+    if (isEditMode) {
+      return;
+    }
+
+    const normalizedRepository = normalizeRepository(values.repository);
+    if (!normalizedRepository || !normalizedRepository.includes('/')) {
+      setBranches([]);
+      setBranchesError(null);
+      return;
+    }
+
+    void fetchBranches(normalizedRepository, installationId);
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -79,9 +154,19 @@ export function ProjectForm({
       name: values.name.trim(),
       description: values.description.trim(),
       installationId: values.installationId,
-      repository: values.repository.trim(),
+      repository: normalizeRepository(values.repository),
       defaultBranch: values.defaultBranch.trim(),
     });
+  };
+
+  const selectStyle = {
+    width: '100%',
+    borderRadius: 'var(--sam-radius-md)',
+    border: '1px solid var(--sam-color-border-default)',
+    background: 'var(--sam-color-bg-surface)',
+    color: 'var(--sam-color-fg-primary)',
+    padding: '0.625rem 0.75rem',
+    minHeight: '2.75rem',
   };
 
   return (
@@ -119,17 +204,9 @@ export function ProjectForm({
         <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Installation</span>
         <select
           value={values.installationId}
-          onChange={(event) => handleChange('installationId', event.currentTarget.value)}
+          onChange={(event) => handleInstallationChange(event.currentTarget.value)}
           disabled={submitting || isEditMode}
-          style={{
-            width: '100%',
-            borderRadius: 'var(--sam-radius-md)',
-            border: '1px solid var(--sam-color-border-default)',
-            background: 'var(--sam-color-bg-surface)',
-            color: 'var(--sam-color-fg-primary)',
-            padding: '0.625rem 0.75rem',
-            minHeight: '2.75rem',
-          }}
+          style={selectStyle}
         >
           {installations.length === 0 ? (
             <option value="">No installations</option>
@@ -143,24 +220,65 @@ export function ProjectForm({
         </select>
       </label>
 
-      <label style={{ display: 'grid', gap: '0.375rem' }}>
+      <label htmlFor="project-repository" style={{ display: 'grid', gap: '0.375rem' }}>
         <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Repository</span>
-        <Input
-          value={values.repository}
-          onChange={(event) => handleChange('repository', event.currentTarget.value)}
-          placeholder="owner/repo"
-          disabled={submitting || isEditMode}
-        />
+        {isEditMode ? (
+          <Input
+            id="project-repository"
+            value={values.repository}
+            onChange={(event) => handleChange('repository', event.currentTarget.value)}
+            placeholder="owner/repo"
+            disabled
+          />
+        ) : (
+          <RepoSelector
+            id="project-repository"
+            value={values.repository}
+            onChange={handleRepositoryChange}
+            onRepoSelect={handleRepoSelect}
+            disabled={submitting}
+            required
+          />
+        )}
       </label>
 
-      <label style={{ display: 'grid', gap: '0.375rem' }}>
+      <label htmlFor="project-default-branch" style={{ display: 'grid', gap: '0.375rem' }}>
         <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Default branch</span>
-        <Input
-          value={values.defaultBranch}
-          onChange={(event) => handleChange('defaultBranch', event.currentTarget.value)}
-          placeholder="main"
-          disabled={submitting}
-        />
+        <div style={{ position: 'relative' }}>
+          {!isEditMode && branches.length > 0 ? (
+            <select
+              id="project-default-branch"
+              value={values.defaultBranch}
+              onChange={(event) => handleChange('defaultBranch', event.currentTarget.value)}
+              disabled={submitting}
+              style={selectStyle}
+            >
+              {branches.map((branch) => (
+                <option key={branch.name} value={branch.name}>
+                  {branch.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <Input
+              id="project-default-branch"
+              value={values.defaultBranch}
+              onChange={(event) => handleChange('defaultBranch', event.currentTarget.value)}
+              placeholder="main"
+              disabled={submitting}
+            />
+          )}
+          {!isEditMode && branchesLoading && (
+            <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }}>
+              <Spinner size="sm" />
+            </div>
+          )}
+        </div>
+        {!isEditMode && branchesError && (
+          <span style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+            {branchesError}
+          </span>
+        )}
       </label>
 
       {error && (

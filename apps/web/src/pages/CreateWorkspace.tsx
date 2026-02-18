@@ -97,17 +97,10 @@ type LocationState = {
   nodeId?: string;
 };
 
-interface CreateWorkspaceProps {
-  mode?: 'workspace' | 'project';
-}
-
-export function CreateWorkspace({ mode = 'workspace' }: CreateWorkspaceProps) {
+export function CreateWorkspace() {
   const navigate = useNavigate();
   const location = useLocation();
   const locationState = (location.state as LocationState | null) ?? null;
-  const entityLabel = mode === 'project' ? 'Project' : 'Workspace';
-  const entityLabelLower = entityLabel.toLowerCase();
-  const listPath = mode === 'project' ? '/projects' : '/dashboard';
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -245,8 +238,8 @@ export function CreateWorkspace({ mode = 'workspace' }: CreateWorkspaceProps) {
 
   return (
     <PageLayout
-      title={`Create ${entityLabel}`}
-      onBack={() => navigate(listPath)}
+      title="Create Workspace"
+      onBack={() => navigate('/dashboard')}
       maxWidth="md"
       headerRight={<UserMenu />}
     >
@@ -258,7 +251,7 @@ export function CreateWorkspace({ mode = 'workspace' }: CreateWorkspaceProps) {
             </h3>
             {!checkingPrereqs && anyMissing && (
               <p style={{ margin: '4px 0 0', fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>
-                Complete the items below before creating a {entityLabelLower}.
+                Complete the items below before creating a workspace.
               </p>
             )}
           </div>
@@ -319,7 +312,7 @@ export function CreateWorkspace({ mode = 'workspace' }: CreateWorkspaceProps) {
 
           <div>
             <label htmlFor="name" style={labelStyle}>
-              {entityLabel} Name
+              Workspace Name
             </label>
             <Input
               id="name"
@@ -482,11 +475,11 @@ export function CreateWorkspace({ mode = 'workspace' }: CreateWorkspaceProps) {
               paddingTop: 'var(--sam-space-4)',
             }}
           >
-            <Button type="button" onClick={() => navigate(listPath)} variant="secondary" size="md">
+            <Button type="button" onClick={() => navigate('/dashboard')} variant="secondary" size="md">
               Cancel
             </Button>
             <Button type="submit" disabled={loading || !name || !repository} size="lg" loading={loading}>
-              Create {entityLabel}
+              Create Workspace
             </Button>
           </div>
         </form>
