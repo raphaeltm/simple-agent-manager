@@ -1,14 +1,14 @@
 import { type CSSProperties, type FC } from 'react';
-import { Folder } from 'lucide-react';
+import { Search } from 'lucide-react';
 
-interface FileBrowserButtonProps {
+interface CommandPaletteButtonProps {
   onClick: () => void;
   disabled?: boolean;
   isMobile: boolean;
   compactMobile?: boolean;
 }
 
-export const FileBrowserButton: FC<FileBrowserButtonProps> = ({
+export const CommandPaletteButton: FC<CommandPaletteButtonProps> = ({
   onClick,
   disabled,
   isMobile,
@@ -16,6 +16,7 @@ export const FileBrowserButton: FC<FileBrowserButtonProps> = ({
 }) => {
   const mobileTargetSize = compactMobile ? 36 : 44;
   const iconSize = isMobile ? (compactMobile ? 16 : 18) : 16;
+
   const buttonStyle: CSSProperties = {
     background: 'none',
     border: 'none',
@@ -35,10 +36,10 @@ export const FileBrowserButton: FC<FileBrowserButtonProps> = ({
     <button
       onClick={onClick}
       disabled={disabled}
-      aria-label="Browse files"
+      aria-label="Open command palette"
       style={buttonStyle}
     >
-      <Folder size={iconSize} />
+      <Search size={iconSize} />
     </button>
   );
 };

@@ -32,8 +32,6 @@ interface WorkspaceTabStripProps {
   onReorder?: (fromIndex: number, toIndex: number) => void;
   /** Slot for the create menu (+) button area */
   createMenuSlot: ReactNode;
-  /** Tab ID that should not show a close button (e.g. default terminal) */
-  unclosableTabId?: string;
 }
 
 const MAX_TAB_NAME_LENGTH = 50;
@@ -48,7 +46,6 @@ export function WorkspaceTabStrip({
   onRename,
   onReorder,
   createMenuSlot,
-  unclosableTabId,
 }: WorkspaceTabStripProps) {
   const [hoveredTabId, setHoveredTabId] = useState<string | null>(null);
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
@@ -212,7 +209,7 @@ export function WorkspaceTabStrip({
                 active={activeTabId === tab.id}
                 hovered={hoveredTabId === tab.id}
                 isEditing={editingTabId === tab.id}
-                canClose={tab.id !== unclosableTabId}
+                canClose
                 isMobile={isMobile}
                 editValue={editValue}
                 editInputRef={editingTabId === tab.id ? editInputRef : undefined}

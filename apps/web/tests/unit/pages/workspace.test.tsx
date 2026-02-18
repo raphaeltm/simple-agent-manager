@@ -23,6 +23,12 @@ const mocks = vi.hoisted(() => ({
   getAgentSettings: vi.fn(),
   saveAgentSettings: vi.fn(),
   useAcpSession: vi.fn(),
+  featureFlags: {
+    multiTerminal: false,
+    conversationView: false,
+    mobileOptimized: true,
+    debugMode: false,
+  },
 }));
 
 vi.mock('../../../src/lib/api', () => ({
@@ -60,10 +66,62 @@ vi.mock('../../../src/lib/api', () => ({
   getClientErrorsApiUrl: () => 'https://api.example.com/api/client-errors',
 }));
 
-vi.mock('@simple-agent-manager/terminal', () => ({
-  Terminal: () => <div data-testid="terminal">terminal</div>,
-  MultiTerminal: () => <div data-testid="multi-terminal">multi-terminal</div>,
-}));
+vi.mock('@simple-agent-manager/terminal', async () => {
+  const React = await import('react');
+  const MultiTerminal = React.forwardRef(({ onSessionsChange }: any, ref: any) => {
+    const [sessions, setSessions] = React.useState([
+      { id: 'term-1', name: 'Terminal 1', status: 'connected' },
+    ]);
+    const [activeSessionId, setActiveSessionId] = React.useState<string | null>('term-1');
+    const counterRef = React.useRef(1);
+
+    React.useEffect(() => {
+      onSessionsChange?.(sessions, activeSessionId);
+    }, [sessions, activeSessionId, onSessionsChange]);
+
+    React.useImperativeHandle(
+      ref,
+      () => ({
+        createSession: () => {
+          counterRef.current += 1;
+          const next = counterRef.current;
+          const sessionId = `term-${next}`;
+          setSessions((prev: any[]) => [
+            ...prev,
+            { id: sessionId, name: `Terminal ${next}`, status: 'connected' },
+          ]);
+          setActiveSessionId(sessionId);
+          return sessionId;
+        },
+        closeSession: (sessionId: string) => {
+          setSessions((prev: any[]) => {
+            const next = prev.filter((session) => session.id !== sessionId);
+            setActiveSessionId(next[0]?.id ?? null);
+            return next;
+          });
+        },
+        activateSession: (sessionId: string) => {
+          setActiveSessionId(sessionId);
+        },
+        renameSession: (sessionId: string, name: string) => {
+          setSessions((prev: any[]) =>
+            prev.map((session) => (session.id === sessionId ? { ...session, name } : session))
+          );
+        },
+        focus: vi.fn(),
+      }),
+      []
+    );
+
+    return <div data-testid="multi-terminal">multi-terminal</div>;
+  });
+  MultiTerminal.displayName = 'MockMultiTerminal';
+
+  return {
+    Terminal: () => <div data-testid="terminal">terminal</div>,
+    MultiTerminal,
+  };
+});
 
 vi.mock('@simple-agent-manager/acp-client', () => ({
   useAcpMessages: () => ({
@@ -80,6 +138,10 @@ vi.mock('@simple-agent-manager/acp-client', () => ({
 
 vi.mock('../../../src/components/UserMenu', () => ({
   UserMenu: () => <div data-testid="user-menu" />,
+}));
+
+vi.mock('../../../src/config/features', () => ({
+  useFeatureFlags: () => mocks.featureFlags,
 }));
 
 import { Workspace } from '../../../src/pages/Workspace';
@@ -127,9 +189,22 @@ function setMobileViewport() {
   });
 }
 
+async function findCloseTerminalButton() {
+  const closeButtons = await screen.findAllByRole(
+    'button',
+    { name: /Close Terminal/ },
+    { timeout: 5_000 }
+  );
+  return closeButtons[0];
+}
+
 describe('Workspace page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.featureFlags.multiTerminal = false;
+    mocks.featureFlags.conversationView = false;
+    mocks.featureFlags.mobileOptimized = true;
+    mocks.featureFlags.debugMode = false;
 
     mocks.useAcpSession.mockReturnValue({
       state: 'no_session',
@@ -200,7 +275,7 @@ describe('Workspace page', () => {
       url: 'https://ws-ws-123.example.com',
     });
     mocks.getGitStatus.mockResolvedValue({ staged: [], unstaged: [], untracked: [] });
-    mocks.getFileIndex.mockResolvedValue({ files: [] });
+    mocks.getFileIndex.mockResolvedValue([]);
     mocks.getWorktrees.mockResolvedValue({
       worktrees: [
         {
@@ -241,6 +316,57 @@ describe('Workspace page', () => {
           credentialHelpUrl: 'https://example.com',
         },
       ],
+    });
+  });
+
+  describe('multi-terminal tab lifecycle', () => {
+    it('closing active terminal tab focuses a running chat tab', async () => {
+      mocks.featureFlags.multiTerminal = true;
+      mocks.listAgentSessions.mockResolvedValue([
+        {
+          id: 'sess-1',
+          workspaceId: 'ws-123',
+          status: 'running',
+          label: 'Claude Chat',
+          createdAt: '2026-02-08T00:10:00.000Z',
+          updatedAt: '2026-02-08T00:10:00.000Z',
+        },
+      ]);
+
+      renderWorkspace('/workspaces/ws-123', true);
+
+      expect(await findCloseTerminalButton()).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Chat tab: Claude Chat' })).toBeInTheDocument();
+
+      fireEvent.click(await findCloseTerminalButton());
+
+      await waitFor(() => {
+        const probe = screen.getByTestId('location-probe').textContent ?? '';
+        expect(probe).toContain('view=conversation');
+        expect(probe).toContain('sessionId=sess-1');
+      });
+      expect(screen.queryByRole('tab', { name: 'Terminal tab: Terminal 1' })).not.toBeInTheDocument();
+    });
+
+    it('allows creating a new terminal from + menu after closing the last terminal tab', async () => {
+      mocks.featureFlags.multiTerminal = true;
+      mocks.listAgentSessions.mockResolvedValue([]);
+
+      renderWorkspace('/workspaces/ws-123', true);
+
+      expect(await findCloseTerminalButton()).toBeInTheDocument();
+      fireEvent.click(await findCloseTerminalButton());
+
+      await waitFor(() => {
+        expect(screen.queryByRole('tab', { name: /Terminal tab:/ })).not.toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Create terminal or chat session' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Terminal' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: /Terminal tab: Terminal/ })).toBeInTheDocument();
+      });
     });
   });
 
@@ -450,6 +576,42 @@ describe('Workspace page', () => {
     expect(await screen.findByDisplayValue('Renamed Workspace')).toBeInTheDocument();
   });
 
+  it('retries initial git status fetch and updates the header badge when retry succeeds', async () => {
+    mocks.getGitStatus
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValueOnce({
+        staged: [{ path: 'src/app.ts', status: 'M' }],
+        unstaged: [],
+        untracked: [],
+      });
+
+    renderWorkspace('/workspaces/ws-123');
+    await screen.findByText('Workspace A');
+
+    await waitFor(() => {
+      expect(mocks.getGitStatus).toHaveBeenCalledTimes(2);
+    });
+
+    const gitButton = screen.getByRole('button', { name: 'View git changes' });
+    expect(gitButton).toHaveTextContent('1');
+  });
+
+  it('marks git status as stale in the header when refresh fails', async () => {
+    mocks.getGitStatus.mockRejectedValue(new Error('still failing'));
+
+    renderWorkspace('/workspaces/ws-123');
+    await screen.findByText('Workspace A');
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getByRole('button', { name: 'View git changes (status may be stale)' })
+        ).toBeInTheDocument();
+      },
+      { timeout: 5000 }
+    );
+  });
+
   it('uses the only configured agent when creating a chat session from the + menu', async () => {
     mocks.createAgentSession.mockResolvedValue({
       id: 'sess-new',
@@ -571,6 +733,23 @@ describe('Workspace page', () => {
       await screen.findByText('Workspace A');
 
       expect(screen.getByRole('button', { name: 'Open workspace menu' })).toBeInTheDocument();
+    });
+
+    it('shows command palette button on mobile viewport', async () => {
+      setMobileViewport();
+      renderWorkspace('/workspaces/ws-123');
+      await screen.findByText('Workspace A');
+
+      expect(screen.getByRole('button', { name: 'Open command palette' })).toBeInTheDocument();
+    });
+
+    it('opens command palette when mobile button is tapped', async () => {
+      setMobileViewport();
+      renderWorkspace('/workspaces/ws-123');
+      await screen.findByText('Workspace A');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open command palette' }));
+      expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeInTheDocument();
     });
 
     it('opens overlay with rename and events sections when menu button is clicked', async () => {

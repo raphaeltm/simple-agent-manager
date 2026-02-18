@@ -6,6 +6,8 @@ interface GitChangesButtonProps {
   changeCount?: number;
   disabled?: boolean;
   isMobile: boolean;
+  compactMobile?: boolean;
+  isStale?: boolean;
 }
 
 export const GitChangesButton: FC<GitChangesButtonProps> = ({
@@ -13,7 +15,11 @@ export const GitChangesButton: FC<GitChangesButtonProps> = ({
   changeCount,
   disabled,
   isMobile,
+  compactMobile = false,
+  isStale = false,
 }) => {
+  const mobileTargetSize = compactMobile ? 36 : 44;
+  const iconSize = isMobile ? (compactMobile ? 16 : 18) : 16;
   const buttonStyle: CSSProperties = {
     position: 'relative',
     background: 'none',
@@ -21,12 +27,12 @@ export const GitChangesButton: FC<GitChangesButtonProps> = ({
     cursor: disabled ? 'default' : 'pointer',
     color: disabled ? 'var(--sam-color-fg-muted)' : 'var(--sam-color-fg-primary)',
     opacity: disabled ? 0.5 : 1,
-    padding: isMobile ? '8px' : '4px',
+    padding: isMobile ? (compactMobile ? '6px' : '8px') : '4px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: isMobile ? 44 : 32,
-    minHeight: isMobile ? 44 : 32,
+    minWidth: isMobile ? mobileTargetSize : 32,
+    minHeight: isMobile ? mobileTargetSize : 32,
     flexShrink: 0,
   };
 
@@ -52,12 +58,27 @@ export const GitChangesButton: FC<GitChangesButtonProps> = ({
     <button
       onClick={onClick}
       disabled={disabled}
-      aria-label="View git changes"
+      aria-label={isStale ? 'View git changes (status may be stale)' : 'View git changes'}
       style={buttonStyle}
     >
-      <GitBranch size={isMobile ? 18 : 16} />
+      <GitBranch size={iconSize} />
       {changeCount != null && changeCount > 0 && (
         <span style={badgeStyle}>{changeCount > 99 ? '99+' : changeCount}</span>
+      )}
+      {isStale && (
+        <span
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            bottom: isMobile ? 4 : 2,
+            right: isMobile ? 4 : 2,
+            width: 7,
+            height: 7,
+            borderRadius: '50%',
+            backgroundColor: '#f59e0b',
+            boxShadow: '0 0 0 1px #1a1b26',
+          }}
+        />
       )}
     </button>
   );
