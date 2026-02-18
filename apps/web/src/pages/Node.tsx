@@ -83,9 +83,13 @@ export function Node() {
     const prevNode = node;
     const prevWorkspaces = workspaces;
     setNode({ ...node, status: 'stopping' });
-    setWorkspaces(ws => ws.map(w =>
-      w.status === 'running' ? { ...w, status: 'stopping' as const } : w
-    ));
+    setWorkspaces((ws) =>
+      ws.map((w) =>
+        w.status === 'running' || w.status === 'recovery'
+          ? { ...w, status: 'stopping' as const }
+          : w
+      )
+    );
     setStopping(true);
     try {
       await stopNode(id);

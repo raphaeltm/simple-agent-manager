@@ -21,4 +21,8 @@ describe('ws proxy source contract', () => {
     expect(file).toContain("headers.set('X-SAM-Node-Id'");
     expect(file).toContain("headers.set('X-SAM-Workspace-Id'");
   });
+
+  it('allows recovery workspaces to proxy traffic', () => {
+    expect(file).toContain("workspace.status !== 'running' && workspace.status !== 'recovery'");
+  });
 });

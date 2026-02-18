@@ -30,6 +30,7 @@ func TestWorkspaceManagementSourceContract(t *testing.T) {
 		"stopSessionHostsForWorkspace",
 		"callbackToken",
 		"provisionWorkspaceRuntime",
+		"recovery",
 	} {
 		if !strings.Contains(content, needle) {
 			t.Fatalf("expected %q in %s", needle, path)
@@ -148,6 +149,13 @@ func TestRebuildHandlerRejectsInvalidStatus(t *testing.T) {
 				UpdatedAt: time.Now().UTC(),
 				PTY:       ptyManager,
 			},
+			"ws-recovery": {
+				ID:        "ws-recovery",
+				Status:    "recovery",
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+				PTY:       ptyManager,
+			},
 		},
 		nodeEvents:      make([]EventRecord, 0),
 		workspaceEvents: map[string][]EventRecord{},
@@ -177,5 +185,11 @@ func TestRebuildHandlerRejectsInvalidStatus(t *testing.T) {
 	runtime, _ = s.getWorkspaceRuntime("ws-error")
 	if runtime.Status != "error" {
 		t.Fatal("expected error status")
+	}
+
+	// "recovery" should be accepted
+	runtime, _ = s.getWorkspaceRuntime("ws-recovery")
+	if runtime.Status != "recovery" {
+		t.Fatal("expected recovery status")
 	}
 }

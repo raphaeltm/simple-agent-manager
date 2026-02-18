@@ -15,7 +15,7 @@ import (
 	"github.com/workspace/vm-agent/internal/bootstrap"
 )
 
-var prepareWorkspaceForRuntime = bootstrap.PrepareWorkspace // returns (usedFallback bool, error)
+var prepareWorkspaceForRuntime = bootstrap.PrepareWorkspace // returns (recoveryMode bool, error)
 
 type workspaceRuntimeMetadataResponse struct {
 	WorkspaceID string `json:"workspaceId"`

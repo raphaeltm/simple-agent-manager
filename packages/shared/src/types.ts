@@ -104,7 +104,14 @@ export type NodeStatus = 'pending' | 'creating' | 'running' | 'stopping' | 'stop
 
 export type NodeHealthStatus = 'healthy' | 'stale' | 'unhealthy';
 
-export type WorkspaceStatus = 'pending' | 'creating' | 'running' | 'stopping' | 'stopped' | 'error';
+export type WorkspaceStatus =
+  | 'pending'
+  | 'creating'
+  | 'running'
+  | 'recovery'
+  | 'stopping'
+  | 'stopped'
+  | 'error';
 
 export type VMSize = 'small' | 'medium' | 'large';
 

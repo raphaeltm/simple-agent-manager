@@ -96,6 +96,22 @@ describe('WorkspaceCard', () => {
     });
   });
 
+  it('treats recovery workspaces as active and shows Open/Stop actions', () => {
+    const onStop = vi.fn();
+    const recoveryWorkspace: WorkspaceResponse = { ...workspace, status: 'recovery' };
+
+    render(
+      <MemoryRouter>
+        <WorkspaceCard workspace={recoveryWorkspace} onStop={onStop} />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText('Recovery')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(onStop).toHaveBeenCalledWith(workspace.id);
+  });
+
   it('navigates in-place in PWA standalone mode instead of opening new tab', () => {
     mockUseIsStandalone.mockReturnValue(true);
     const openSpy = vi.spyOn(window, 'open');

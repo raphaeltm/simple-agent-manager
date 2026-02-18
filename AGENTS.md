@@ -268,7 +268,7 @@ When documenting environment variables:
 
 ### Business Logic Principles (Quick Reference)
 
-1. **Workspace Lifecycle**: pending -> creating -> running -> stopping -> stopped (see data-model.md for state machine)
+1. **Workspace Lifecycle**: pending -> creating -> running/recovery -> stopping -> stopped (see data-model.md for state machine)
 2. **Idle Detection Telemetry**: Idle/activity heartbeats are still recorded (`IDLE_TIMEOUT_SECONDS` remains configurable), but lifecycle transitions are explicit (no automatic idle-triggered stop/delete)
 3. **Ownership Validation**: All workspace operations MUST verify `user_id` matches authenticated user
 4. **Bootstrap Tokens**: One-time use, 5-minute expiry, cryptographically random

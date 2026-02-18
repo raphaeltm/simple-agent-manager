@@ -206,7 +206,7 @@ nodesRoutes.post('/:id/stop', async (c) => {
 
   if (node.status === 'running' && node.healthStatus !== 'unhealthy') {
     for (const workspace of workspaceRows) {
-      if (workspace.status === 'running' || workspace.status === 'creating') {
+      if (workspace.status === 'running' || workspace.status === 'recovery' || workspace.status === 'creating') {
         try {
           await stopWorkspaceOnNode(nodeId, workspace.id, c.env, userId);
         } catch {

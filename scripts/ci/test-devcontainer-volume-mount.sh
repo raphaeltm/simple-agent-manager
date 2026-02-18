@@ -5,13 +5,14 @@
 #   1. Clone the repo to a host directory (simulating the VM's host clone)
 #   2. Create a named Docker volume (simulating sam-ws-<workspaceId>)
 #   3. Populate the volume from the host clone (via Alpine throwaway container)
-#   4. Run devcontainer up with --override-config (volume mount override)
-#   5. Verify container uses repo's image, not fallback
-#   6. Verify lifecycle hooks (postCreateCommand, postStartCommand) executed
-#   7. Verify devcontainer features installed (Go, Docker, GitHub CLI)
+#   4. Resolve merged config + inject workspaceMount/workspaceFolder override
+#   5. Run devcontainer up with --override-config (full merged config)
+#   6. Verify container uses repo's image, not fallback
+#   7. Verify lifecycle hooks (postCreateCommand, postStartCommand) executed
+#   8. Verify devcontainer features installed (Go, Docker, GitHub CLI)
 #
-# This catches the exact failure mode where --override-config causes the
-# devcontainer CLI to lose the "image" property from the repo's config.
+# This catches the exact failure mode where mount overrides accidentally drop
+# required config properties (image/dockerFile/dockerComposeFile).
 #
 # Usage: bash scripts/ci/test-devcontainer-volume-mount.sh [workspace-folder]
 #   workspace-folder: path to repo checkout (default: current directory)
@@ -88,23 +89,6 @@ else
   exit 1
 fi
 
-# Strip JSONC comments from devcontainer.json on the host clone.
-# devcontainer CLI v0.83.1 fails to parse JSONC (// comments) when
-# --override-config is used, even though it handles JSONC fine without it.
-# This matches what the VM agent bootstrap must do before calling devcontainer up.
-echo "  Stripping JSONC comments from host clone devcontainer.json..."
-DEVCONTAINER_JSON="$HOST_CLONE/.devcontainer/devcontainer.json"
-node -e "
-  const fs = require('fs');
-  const raw = fs.readFileSync(process.argv[1], 'utf8');
-  const stripped = raw
-    .replace(/\/\/.*$/gm, '')
-    .replace(/,(\s*[}\]])/g, '\$1');
-  const parsed = JSON.parse(stripped);
-  fs.writeFileSync(process.argv[1], JSON.stringify(parsed, null, 2) + '\n');
-  console.log('  OK: JSONC comments stripped, image=' + parsed.image);
-" "$DEVCONTAINER_JSON"
-
 # ── Step 2: Create named Docker volume ────────────────────────────────
 echo ""
 echo "=== Step 2: Create named Docker volume ==="
@@ -128,35 +112,66 @@ docker run --rm -v "$VOLUME_NAME:/workspaces" alpine:latest \
   test -d "/workspaces/$REPO_DIR_NAME/.devcontainer"
 echo "  OK: .devcontainer/ directory present in volume"
 
-# ── Step 4: Inject volume mount into repo's devcontainer.json ─────────
-# devcontainer CLI v0.83.1's --override-config does NOT merge with the
-# repo's config — it replaces key properties (image, features, lifecycle
-# hooks). Instead of using --override-config, we inject workspaceMount
-# and workspaceFolder directly into the repo's devcontainer.json on the
-# host clone. This is what the VM agent bootstrap should do.
+# ── Step 4: Resolve merged config + inject mount override ─────────────
+# Mirrors VM agent behavior:
+#   devcontainer read-configuration --include-merged-configuration
+#   inject workspaceMount/workspaceFolder into merged config
+#   devcontainer up --override-config <full-merged-override>
 echo ""
-echo "=== Step 4: Inject volume mount into devcontainer.json ==="
+echo "=== Step 4: Resolve merged config and inject mount override ==="
+READ_CONFIG_JSON="/tmp/sam-test-devcontainer-read-config.json"
+OVERRIDE_CONFIG="/tmp/sam-test-devcontainer-override.json"
+
+READ_OUTPUT=$(devcontainer read-configuration \
+  --workspace-folder "$HOST_CLONE" \
+  --include-merged-configuration)
+echo "$READ_OUTPUT" > "$READ_CONFIG_JSON"
+
 node -e "
   const fs = require('fs');
-  const cfg = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
-  cfg.workspaceMount = 'source=' + process.argv[2] + ',target=/workspaces,type=volume';
-  cfg.workspaceFolder = '/workspaces/' + process.argv[3];
-  fs.writeFileSync(process.argv[1], JSON.stringify(cfg, null, 2) + '\n');
-  console.log('  OK: Injected workspaceMount and workspaceFolder');
-  console.log('  image: ' + (cfg.image || 'N/A'));
-  console.log('  features: ' + Object.keys(cfg.features || {}).join(', '));
-  console.log('  postCreateCommand: ' + (cfg.postCreateCommand || 'N/A'));
-" "$DEVCONTAINER_JSON" "$VOLUME_NAME" "$REPO_DIR_NAME"
-echo "  Final devcontainer.json:"
-cat "$DEVCONTAINER_JSON"
+  const raw = fs.readFileSync(process.argv[1], 'utf8').trim();
+  const lines = raw.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  let payload = null;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      payload = JSON.parse(lines[i]);
+      break;
+    } catch {}
+  }
+  if (!payload) {
+    throw new Error('read-configuration output did not contain JSON payload');
+  }
+  if (payload.outcome !== 'success') {
+    throw new Error('read-configuration failed: ' + (payload.message || payload.description || 'unknown error'));
+  }
+  const merged = payload.mergedConfiguration;
+  if (!merged || typeof merged !== 'object') {
+    throw new Error('mergedConfiguration missing from read-configuration output');
+  }
+  const hasRuntimeSource = Boolean(merged.image || merged.dockerFile || merged.dockerComposeFile);
+  if (!hasRuntimeSource) {
+    throw new Error('mergedConfiguration missing image/dockerFile/dockerComposeFile');
+  }
+  merged.workspaceMount = 'source=' + process.argv[3] + ',target=/workspaces,type=volume';
+  merged.workspaceFolder = '/workspaces/' + process.argv[4];
+  fs.writeFileSync(process.argv[2], JSON.stringify(merged, null, 2) + '\n');
+  console.log('  OK: merged override config generated');
+  console.log('  override path: ' + process.argv[2]);
+  console.log('  image: ' + (merged.image || 'N/A'));
+  console.log('  dockerFile: ' + (merged.dockerFile || 'N/A'));
+  console.log('  dockerComposeFile: ' + (merged.dockerComposeFile || 'N/A'));
+  console.log('  features: ' + Object.keys(merged.features || {}).join(', '));
+  console.log('  postCreateCommand: ' + (merged.postCreateCommand || 'N/A'));
+" "$READ_CONFIG_JSON" "$OVERRIDE_CONFIG" "$VOLUME_NAME" "$REPO_DIR_NAME"
+
+echo "  Final override config:"
+cat "$OVERRIDE_CONFIG"
 
 # ── Step 5: Run devcontainer up ───────────────────────────────────────
-# Run devcontainer up using the modified devcontainer.json (which now
-# includes workspaceMount and workspaceFolder for the named volume).
-# No --override-config needed since we injected the mount settings directly.
+# Run devcontainer up using the full merged override config.
 echo ""
-echo "=== Step 5: devcontainer up (with injected volume mount) ==="
-echo "  Command: devcontainer up --workspace-folder $HOST_CLONE"
+echo "=== Step 5: devcontainer up (with merged override config) ==="
+echo "  Command: devcontainer up --workspace-folder $HOST_CLONE --override-config $OVERRIDE_CONFIG"
 echo ""
 
 # Temporarily disable set -e so we can capture the exit code and output
@@ -165,6 +180,7 @@ UP_LOG="/tmp/sam-test-devcontainer-up.log"
 set +e
 devcontainer up \
   --workspace-folder "$HOST_CLONE" \
+  --override-config "$OVERRIDE_CONFIG" \
   > "$UP_LOG" 2>&1
 UP_EXIT=$?
 set -e
@@ -237,6 +253,15 @@ else
   echo "  Full mount info:"
   docker inspect "$CONTAINER_ID" --format '{{json .Mounts}}' | jq .
   FAIL=$((FAIL + 1))
+fi
+
+echo ""
+echo "=== Step 7b: Verify no recovery marker on success ==="
+if docker exec "$CONTAINER_ID" test -f /workspaces/.devcontainer-build-error.log; then
+  echo "  FAIL: Recovery marker exists despite successful repo devcontainer startup"
+  FAIL=$((FAIL + 1))
+else
+  echo "  OK: No recovery marker found"
 fi
 
 # ── Step 8: Verify devcontainer features ──────────────────────────────

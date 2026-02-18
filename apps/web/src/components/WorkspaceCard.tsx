@@ -30,6 +30,7 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const isStandalone = useIsStandalone();
+  const isActive = workspace.status === 'running' || workspace.status === 'recovery';
 
   const handleOpen = () => {
     // Open the control plane workspace page (not the ws-* subdomain directly).
@@ -139,7 +140,7 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', width: isMobile ? '100%' : 'auto' }}>
-          {workspace.status === 'running' && (
+          {isActive && (
             <>
               <button
                 onClick={handleOpen}

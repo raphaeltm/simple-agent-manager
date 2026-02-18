@@ -45,8 +45,8 @@ terminalRoutes.post('/token', async (c) => {
   }
 
   // Check workspace status
-  if (ws.status !== 'running') {
-    throw errors.badRequest(`Workspace is not running (status: ${ws.status})`);
+  if (ws.status !== 'running' && ws.status !== 'recovery') {
+    throw errors.badRequest(`Workspace is not running or recovery (status: ${ws.status})`);
   }
 
   // Generate the terminal token
