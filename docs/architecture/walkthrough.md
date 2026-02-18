@@ -99,7 +99,7 @@ flowchart TD
     HostCheck -->|"api.domain"| APIRoutes["API Route Handler"]
 
     WSProxy --> LookupDB["Lookup workspace in D1<br/>Get nodeId, status"]
-    LookupDB --> StatusCheck{"status == running?"}
+    LookupDB --> StatusCheck{"status in {running,recovery}?"}
     StatusCheck -->|No| Return503["503 Not Ready"]
     StatusCheck -->|Yes| ResolveNode["Resolve backend:<br/><code>vm-{nodeId}.domain:8080</code>"]
     ResolveNode --> ProxyVM["Proxy request to VM Agent<br/>Inject X-SAM-Node-Id,<br/>X-SAM-Workspace-Id headers"]
@@ -325,7 +325,7 @@ erDiagram
         text name
         text repository
         text branch
-        text status "pending|creating|running|stopping|stopped|error"
+        text status "pending|creating|running|recovery|stopping|stopped|error"
         text vm_ip
         text dns_record_id
         int idle_timeout_seconds
@@ -484,13 +484,16 @@ stateDiagram-v2
     [*] --> pending : User creates workspace
 
     pending --> creating : API dispatches to Node Agent
-    creating --> running : VM Agent POST /ready callback
+    creating --> running : VM Agent POST /ready (status=running)
+    creating --> recovery : VM Agent POST /ready (status=recovery)
     creating --> error : VM Agent POST /provisioning-failed<br/>or provisioning timeout (cron)
 
     running --> stopping : User clicks Stop
+    recovery --> stopping : User clicks Stop
     stopping --> stopped : Resources cleaned up
 
     running --> error : Unexpected failure
+    recovery --> error : Unexpected failure
 
     stopped --> creating : User clicks Restart
     error --> creating : User clicks Restart
@@ -529,7 +532,7 @@ sequenceDiagram
     NodeAgent->>NodeAgent: devcontainer up (async)
     NodeAgent->>API: POST /api/workspaces/:id/boot-log
     NodeAgent->>API: POST /api/workspaces/:id/ready
-    API->>D1: UPDATE workspace (status=running)
+    API->>D1: UPDATE workspace (status=running|recovery)
     API->>Browser: 201 Created (workspace)
     Browser->>User: Redirect to workspace view
 ```

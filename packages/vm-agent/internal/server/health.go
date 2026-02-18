@@ -103,7 +103,7 @@ func (s *Server) activeWorkspaceCount() int {
 	defer s.workspaceMu.RUnlock()
 	count := 0
 	for _, runtime := range s.workspaces {
-		if runtime.Status == "running" {
+		if runtime.Status == "running" || runtime.Status == "recovery" {
 			count++
 		}
 	}

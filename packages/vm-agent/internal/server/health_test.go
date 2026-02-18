@@ -24,6 +24,7 @@ func TestHealthSourceContract(t *testing.T) {
 		"activeWorkspaceCount",
 		"activeWorkspaces",
 		"nodeId",
+		"recovery",
 	} {
 		if !strings.Contains(content, needle) {
 			t.Fatalf("expected %q in %s", needle, path)

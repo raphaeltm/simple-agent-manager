@@ -39,6 +39,7 @@ import { getInstallationToken } from '../services/github-app';
 import { appendBootLog, getBootLogs } from '../services/boot-log';
 
 const workspacesRoutes = new Hono<{ Bindings: Env }>();
+const ACTIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery'] as const);
 
 workspacesRoutes.use('/*', async (c, next) => {
   const path = c.req.path;
@@ -101,6 +102,18 @@ function getIdleTimeoutSeconds(env: Env): number {
     return 30 * 60;
   }
   return parsed;
+}
+
+function isActiveWorkspaceStatus(status: string): boolean {
+  return ACTIVE_WORKSPACE_STATUSES.has(status as 'running' | 'recovery');
+}
+
+function normalizeWorkspaceReadyStatus(status: unknown): 'running' | 'recovery' {
+  if (typeof status !== 'string') return 'running';
+  const normalized = status.trim().toLowerCase();
+  if (!normalized || normalized === 'running') return 'running';
+  if (normalized === 'recovery') return 'recovery';
+  throw errors.badRequest('status must be "running" or "recovery"');
 }
 
 async function getOwnedWorkspace(
@@ -512,7 +525,7 @@ workspacesRoutes.post('/:id/stop', async (c) => {
   if (!workspace.nodeId) {
     throw errors.badRequest('Workspace is not attached to a node');
   }
-  if (workspace.status !== 'running') {
+  if (!isActiveWorkspaceStatus(workspace.status)) {
     throw errors.badRequest(`Workspace is ${workspace.status}`);
   }
 
@@ -605,9 +618,9 @@ workspacesRoutes.post('/:id/rebuild', async (c) => {
   if (!workspace.nodeId) {
     throw errors.badRequest('Workspace is not attached to a node');
   }
-  if (workspace.status !== 'running' && workspace.status !== 'error') {
+  if (!isActiveWorkspaceStatus(workspace.status) && workspace.status !== 'error') {
     throw errors.badRequest(
-      `Workspace must be running or in error state to rebuild, currently ${workspace.status}`
+      `Workspace must be running, recovery, or in error state to rebuild, currently ${workspace.status}`
     );
   }
 
@@ -871,6 +884,10 @@ workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop', async (c) => {
 workspacesRoutes.post('/:id/ready', async (c) => {
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
+  const body = await c.req.json<{ status?: string }>().catch(
+    (): { status?: string } => ({})
+  );
+  const nextStatus = normalizeWorkspaceReadyStatus(body.status);
 
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
@@ -892,7 +909,7 @@ workspacesRoutes.post('/:id/ready', async (c) => {
   await db
     .update(schema.workspaces)
     .set({
-      status: 'running',
+      status: nextStatus,
       lastActivityAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })

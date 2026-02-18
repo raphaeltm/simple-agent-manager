@@ -179,7 +179,7 @@ export function Workspace() {
 
   const tabOrder = useTabOrder<WorkspaceTab>(id);
 
-  const isRunning = workspace?.status === 'running';
+  const isRunning = workspace?.status === 'running' || workspace?.status === 'recovery';
   const activeWorktree = worktreeParam || null;
 
   // Proactive token refresh (R3 fix): fetches token on mount and schedules
@@ -237,7 +237,8 @@ export function Workspace() {
       if (
         workspace?.status === 'creating' ||
         workspace?.status === 'stopping' ||
-        workspace?.status === 'running'
+        workspace?.status === 'running' ||
+        workspace?.status === 'recovery'
       ) {
         void loadWorkspaceState();
       }
@@ -279,7 +280,7 @@ export function Workspace() {
 
   // Fetch workspace events directly from the VM Agent (not proxied through control plane)
   useEffect(() => {
-    if (!id || !workspace?.url || !terminalToken || workspace.status !== 'running') {
+    if (!id || !workspace?.url || !terminalToken || !isRunning) {
       return;
     }
 
@@ -296,7 +297,7 @@ export function Workspace() {
     void fetchEvents();
     const interval = setInterval(() => void fetchEvents(), 10000);
     return () => clearInterval(interval);
-  }, [id, workspace?.url, workspace?.status, terminalToken]);
+  }, [id, workspace?.url, isRunning, terminalToken]);
 
   // Load agent options when running
   useEffect(() => {

@@ -259,6 +259,35 @@ describe('Workspace page', () => {
     expect(screen.getByText(/Events/)).toBeInTheDocument();
   });
 
+  it('treats recovery workspace status as active for terminal access', async () => {
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-123',
+      nodeId: 'node-1',
+      name: 'Workspace A',
+      displayName: 'Workspace A',
+      repository: 'octo/repo',
+      branch: 'main',
+      status: 'recovery',
+      vmSize: 'small',
+      vmLocation: 'nbg1',
+      vmIp: null,
+      lastActivityAt: null,
+      errorMessage: null,
+      shutdownDeadline: null,
+      idleTimeoutSeconds: 0,
+      createdAt: '2026-02-08T00:00:00.000Z',
+      updatedAt: '2026-02-08T00:00:00.000Z',
+      url: 'https://ws-ws-123.example.com',
+    });
+
+    renderWorkspace('/workspaces/ws-123');
+
+    expect(await screen.findByText('Recovery')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mocks.getTerminalToken).toHaveBeenCalledWith('ws-123');
+    });
+  });
+
   it('supports chat tab attach flow and updates workspace query string', async () => {
     mocks.listAgentSessions.mockResolvedValue([
       {

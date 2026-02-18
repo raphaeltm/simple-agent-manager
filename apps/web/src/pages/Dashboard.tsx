@@ -117,7 +117,9 @@ export function Dashboard() {
     }
   };
 
-  const activeCount = workspaces.filter(w => w.status === 'running').length;
+  const activeCount = workspaces.filter(
+    (w) => w.status === 'running' || w.status === 'recovery'
+  ).length;
 
   return (
     <PageLayout

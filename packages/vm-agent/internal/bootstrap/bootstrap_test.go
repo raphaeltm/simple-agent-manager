@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -707,14 +708,48 @@ func TestDevcontainerUpArgs(t *testing.T) {
 }
 
 func TestWriteMountOverrideConfig(t *testing.T) {
-	t.Parallel()
+	mockBinDir := t.TempDir()
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	mockScript := `#!/bin/sh
+if [ "$1" = "read-configuration" ]; then
+  echo '[trace] resolving features...'
+  cat <<'EOF'
+{
+  "outcome": "success",
+  "mergedConfiguration": {
+    "name": "Repo Config",
+    "image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm",
+    "postCreateCommands": [
+      "bash .devcontainer/post-create.sh"
+    ],
+    "postStartCommands": [
+      "bash .devcontainer/post-start.sh"
+    ],
+    "features": {
+      "ghcr.io/devcontainers/features/go:1": {
+        "version": "1.22"
+      }
+    }
+  }
+}
+EOF
+  exit 0
+fi
+echo "unexpected devcontainer command: $@" >&2
+exit 1
+`
+	if err := os.WriteFile(mockDevcontainer, []byte(mockScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
 
 	cfg := &config.Config{
 		WorkspaceDir: "/workspace/my-repo",
 		Repository:   "owner/my-repo",
 	}
 
-	path, err := writeMountOverrideConfig(cfg, "sam-ws-abc123")
+	path, err := writeMountOverrideConfig(context.Background(), cfg, "sam-ws-abc123")
 	if err != nil {
 		t.Fatalf("writeMountOverrideConfig returned error: %v", err)
 	}
@@ -731,6 +766,164 @@ func TestWriteMountOverrideConfig(t *testing.T) {
 	}
 	if !strings.Contains(content, `"workspaceFolder": "/workspaces/my-repo"`) {
 		t.Fatalf("expected workspaceFolder in config, got:\n%s", content)
+	}
+	if !strings.Contains(content, `"image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm"`) {
+		t.Fatalf("expected merged config image to be preserved, got:\n%s", content)
+	}
+	if !strings.Contains(content, `"ghcr.io/devcontainers/features/go:1"`) {
+		t.Fatalf("expected merged config features to be preserved, got:\n%s", content)
+	}
+	if !strings.Contains(content, `"postCreateCommand": "bash .devcontainer/post-create.sh"`) {
+		t.Fatalf("expected lifecycle command keys to be normalized, got:\n%s", content)
+	}
+	if strings.Contains(content, `"postCreateCommands":`) {
+		t.Fatalf("expected plural lifecycle command keys to be removed, got:\n%s", content)
+	}
+}
+
+func TestWriteMountOverrideConfigRequiresRuntimeSource(t *testing.T) {
+	mockBinDir := t.TempDir()
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	mockScript := `#!/bin/sh
+if [ "$1" = "read-configuration" ]; then
+  echo '{"outcome":"success","mergedConfiguration":{"name":"Repo Config"}}'
+  exit 0
+fi
+echo "unexpected devcontainer command: $@" >&2
+exit 1
+`
+	if err := os.WriteFile(mockDevcontainer, []byte(mockScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+
+	cfg := &config.Config{
+		WorkspaceDir: "/workspace/my-repo",
+		Repository:   "owner/my-repo",
+	}
+
+	_, err := writeMountOverrideConfig(context.Background(), cfg, "sam-ws-abc123")
+	if err == nil {
+		t.Fatal("expected writeMountOverrideConfig to fail when runtime source is missing")
+	}
+	if !strings.Contains(err.Error(), "missing image/dockerFile/dockerComposeFile") {
+		t.Fatalf("expected runtime source validation error, got: %v", err)
+	}
+}
+
+func TestParseDevcontainerReadConfigurationOutput(t *testing.T) {
+	t.Parallel()
+
+	output := strings.Join([]string{
+		`not-json-line`,
+		`{"outcome":"success","mergedConfiguration":{"image":"node:20"}}`,
+	}, "\n")
+
+	parsed, err := parseDevcontainerReadConfigurationOutput(output)
+	if err != nil {
+		t.Fatalf("parseDevcontainerReadConfigurationOutput returned error: %v", err)
+	}
+	if parsed.Outcome != "success" {
+		t.Fatalf("expected outcome success, got %q", parsed.Outcome)
+	}
+	if parsed.MergedConfiguration["image"] != "node:20" {
+		t.Fatalf("expected mergedConfiguration.image=node:20, got %#v", parsed.MergedConfiguration["image"])
+	}
+}
+
+func TestParseDevcontainerReadConfigurationOutputIgnoresUnrelatedJSONLogs(t *testing.T) {
+	t.Parallel()
+
+	output := strings.Join([]string{
+		`{"level":"info","msg":"feature dependency resolved"}`,
+		`{"outcome":"error","message":"stale internal state"}`,
+		`{"outcome":"success","mergedConfiguration":{"image":"node:20"}}`,
+		`{"level":"debug","msg":"cleanup complete"}`,
+	}, "\n")
+
+	parsed, err := parseDevcontainerReadConfigurationOutput(output)
+	if err != nil {
+		t.Fatalf("parseDevcontainerReadConfigurationOutput returned error: %v", err)
+	}
+	if parsed.Outcome != "success" {
+		t.Fatalf("expected outcome success, got %q", parsed.Outcome)
+	}
+	if parsed.MergedConfiguration["image"] != "node:20" {
+		t.Fatalf("expected mergedConfiguration.image=node:20, got %#v", parsed.MergedConfiguration["image"])
+	}
+}
+
+func TestParseDevcontainerReadConfigurationOutputParsesMultilinePayload(t *testing.T) {
+	t.Parallel()
+
+	output := strings.Join([]string{
+		`[2026-02-18T11:14:21.753Z] @devcontainers/cli 0.83.1`,
+		`{`,
+		`  "outcome": "success",`,
+		`  "mergedConfiguration": {`,
+		`    "dockerComposeFile": ["docker-compose.yml"]`,
+		`  }`,
+		`}`,
+	}, "\n")
+
+	parsed, err := parseDevcontainerReadConfigurationOutput(output)
+	if err != nil {
+		t.Fatalf("parseDevcontainerReadConfigurationOutput returned error: %v", err)
+	}
+	if parsed.Outcome != "success" {
+		t.Fatalf("expected outcome success, got %q", parsed.Outcome)
+	}
+	value, ok := parsed.MergedConfiguration["dockerComposeFile"].([]interface{})
+	if !ok || len(value) != 1 || value[0] != "docker-compose.yml" {
+		t.Fatalf("expected mergedConfiguration.dockerComposeFile to contain docker-compose.yml, got %#v", parsed.MergedConfiguration["dockerComposeFile"])
+	}
+}
+
+func TestNormalizeMergedLifecycleCommands(t *testing.T) {
+	t.Parallel()
+
+	merged := map[string]interface{}{
+		"onCreateCommands":      []interface{}{"echo oncreate"},
+		"updateContentCommands": []interface{}{"echo update"},
+		"postCreateCommands":    []interface{}{"echo postcreate"},
+		"postStartCommands":     []interface{}{"echo poststart"},
+		"postAttachCommands":    []interface{}{"echo postattach"},
+	}
+
+	normalizeMergedLifecycleCommands(merged)
+
+	for plural, singular := range map[string]string{
+		"onCreateCommands":      "onCreateCommand",
+		"updateContentCommands": "updateContentCommand",
+		"postCreateCommands":    "postCreateCommand",
+		"postStartCommands":     "postStartCommand",
+		"postAttachCommands":    "postAttachCommand",
+	} {
+		if _, ok := merged[plural]; ok {
+			t.Fatalf("expected %s to be removed", plural)
+		}
+		if _, ok := merged[singular]; !ok {
+			t.Fatalf("expected %s to be present", singular)
+		}
+	}
+
+	if merged["postCreateCommand"] != "echo postcreate" {
+		t.Fatalf("expected postCreateCommand to normalize to a single shell string, got %#v", merged["postCreateCommand"])
+	}
+}
+
+func TestNormalizeLifecycleCommandValue(t *testing.T) {
+	t.Parallel()
+
+	got := normalizeLifecycleCommandValue([]interface{}{"echo one", "echo two"})
+	if got != "echo one && echo two" {
+		t.Fatalf("expected commands to join with &&, got %#v", got)
+	}
+
+	got = normalizeLifecycleCommandValue([]interface{}{"echo only"})
+	if got != "echo only" {
+		t.Fatalf("expected single command to remain a string, got %#v", got)
 	}
 }
 
@@ -749,6 +942,7 @@ func TestPrepareWorkspaceMarksReady(t *testing.T) {
 	callbackToken := "cb-prepare-ready"
 	readyCalled := false
 	readyAuth := ""
+	readyStatus := ""
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/workspaces/"+workspaceID+"/ready" {
@@ -757,6 +951,13 @@ func TestPrepareWorkspaceMarksReady(t *testing.T) {
 
 		readyCalled = true
 		readyAuth = r.Header.Get("Authorization")
+		var payload struct {
+			Status string `json:"status"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("failed to decode ready payload: %v", err)
+		}
+		readyStatus = payload.Status
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"running"}`))
 	}))
@@ -774,7 +975,8 @@ func TestPrepareWorkspaceMarksReady(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if _, err := PrepareWorkspace(ctx, cfg, ProvisionState{}); err != nil {
+	recoveryMode, err := PrepareWorkspace(ctx, cfg, ProvisionState{})
+	if err != nil {
 		t.Fatalf("PrepareWorkspace returned error: %v", err)
 	}
 
@@ -783,6 +985,87 @@ func TestPrepareWorkspaceMarksReady(t *testing.T) {
 	}
 	if readyAuth != "Bearer "+callbackToken {
 		t.Fatalf("unexpected ready callback auth header: got %q", readyAuth)
+	}
+	if readyStatus != workspaceReadyStatusRunning {
+		t.Fatalf("expected ready status %q, got %q", workspaceReadyStatusRunning, readyStatus)
+	}
+	if recoveryMode {
+		t.Fatal("expected recoveryMode=false when no build error marker exists")
+	}
+}
+
+func TestPrepareWorkspaceMarksReadyAsRecoveryWhenFallbackIsUsed(t *testing.T) {
+	mockBinDir := t.TempDir()
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	mockScript := `#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in
+    --override-config) exit 0 ;;
+  esac
+done
+echo "repo config failed" >&2
+exit 1
+`
+	if err := os.WriteFile(mockDevcontainer, []byte(mockScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+
+	workspaceID := "ws-prepare-recovery"
+	workspaceDir := t.TempDir()
+	devcontainerDir := filepath.Join(workspaceDir, ".devcontainer")
+	if err := os.MkdirAll(devcontainerDir, 0o755); err != nil {
+		t.Fatalf("failed to create devcontainer dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(`{"image":"node:20"}`), 0o644); err != nil {
+		t.Fatalf("failed to write devcontainer config: %v", err)
+	}
+
+	readyStatus := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/workspaces/"+workspaceID+"/ready" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var payload struct {
+			Status string `json:"status"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("failed to decode ready payload: %v", err)
+		}
+		readyStatus = payload.Status
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"recovery"}`))
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		WorkspaceID:                   workspaceID,
+		ControlPlaneURL:               server.URL,
+		CallbackToken:                 "cb-recovery",
+		WorkspaceDir:                  workspaceDir,
+		ContainerMode:                 false,
+		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	recoveryMode, err := PrepareWorkspace(ctx, cfg, ProvisionState{})
+	if err != nil {
+		t.Fatalf("PrepareWorkspace returned error: %v", err)
+	}
+	if !recoveryMode {
+		t.Fatal("expected recoveryMode=true when fallback is used")
+	}
+	if readyStatus != workspaceReadyStatusRecovery {
+		t.Fatalf("expected ready status %q, got %q", workspaceReadyStatusRecovery, readyStatus)
+	}
+
+	errorLogPath := filepath.Join(workspaceDir, buildErrorLogFilename)
+	if _, err := os.Stat(errorLogPath); err != nil {
+		t.Fatalf("expected recovery marker to be present after fallback: %v", err)
 	}
 }
 
@@ -945,6 +1228,111 @@ exit 1
 	}
 	if strings.Contains(string(fallbackConfig), "remoteUser") {
 		t.Fatalf("fallback config should not contain remoteUser, got:\n%s", string(fallbackConfig))
+	}
+}
+
+func TestEnsureDevcontainerReadyAbortsFallbackWhenBuildLogsCannotBePersisted(t *testing.T) {
+	mockBinDir := t.TempDir()
+	devcontainerCalls := filepath.Join(t.TempDir(), "devcontainer-calls.log")
+
+	mockDocker := filepath.Join(mockBinDir, "docker")
+	dockerScript := `#!/bin/sh
+if [ "$1" = "ps" ]; then
+  echo ""
+  exit 0
+fi
+if [ "$1" = "run" ]; then
+  case "$@" in
+    *"cat > /workspaces/.devcontainer-build-error.log"*)
+      echo "failed to persist volume log" >&2
+      exit 1
+      ;;
+  esac
+  exit 0
+fi
+if [ "$1" = "rm" ]; then
+  exit 0
+fi
+exit 0
+`
+	if err := os.WriteFile(mockDocker, []byte(dockerScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock docker command: %v", err)
+	}
+
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	mockScript := fmt.Sprintf(`#!/bin/sh
+echo "$@" >> %s
+if [ "$1" = "read-configuration" ]; then
+  echo '{"outcome":"success","mergedConfiguration":{"image":"node:20"}}'
+  exit 0
+fi
+if [ "$1" = "up" ]; then
+  echo "repo build failed" >&2
+  exit 1
+fi
+exit 0
+`, devcontainerCalls)
+	if err := os.WriteFile(mockDevcontainer, []byte(mockScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+
+	workspaceDir := t.TempDir()
+	devcontainerDir := filepath.Join(workspaceDir, ".devcontainer")
+	if err := os.MkdirAll(devcontainerDir, 0o755); err != nil {
+		t.Fatalf("failed to create devcontainer dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(`{"image":"node:20"}`), 0o644); err != nil {
+		t.Fatalf("failed to write devcontainer config: %v", err)
+	}
+
+	cfg := &config.Config{
+		WorkspaceDir:                  workspaceDir,
+		Repository:                    "owner/repo",
+		ContainerMode:                 true,
+		ContainerLabelKey:             "devcontainer.local_folder",
+		ContainerLabelValue:           workspaceDir,
+		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
+		DefaultDevcontainerImage:      "mcr.microsoft.com/devcontainers/base:ubuntu",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "sam-ws-logfail")
+	if err == nil {
+		t.Fatal("expected ensureDevcontainerReady to fail when build logs cannot be persisted")
+	}
+	if usedFallback {
+		t.Fatal("expected usedFallback=false when fallback is aborted")
+	}
+	if !strings.Contains(err.Error(), "aborting fallback") {
+		t.Fatalf("expected aborting fallback error, got: %v", err)
+	}
+
+	errorLogPath := filepath.Join(workspaceDir, buildErrorLogFilename)
+	logBytes, readErr := os.ReadFile(errorLogPath)
+	if readErr != nil {
+		t.Fatalf("expected host build log artifact to be written: %v", readErr)
+	}
+	if !strings.Contains(string(logBytes), "repo build failed") {
+		t.Fatalf("expected host build log to contain repo build failure output, got:\n%s", string(logBytes))
+	}
+
+	callBytes, callErr := os.ReadFile(devcontainerCalls)
+	if callErr != nil {
+		t.Fatalf("failed to read devcontainer call log: %v", callErr)
+	}
+	upCalls := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(callBytes)), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "up ") {
+			upCalls++
+		}
+	}
+	if upCalls != 1 {
+		t.Fatalf("expected exactly one devcontainer up attempt before fallback abort, got %d calls:\n%s", upCalls, string(callBytes))
 	}
 }
 

@@ -287,8 +287,8 @@ func (s *Server) resolveContainerForWorkspace(workspaceID string) (containerID, 
 	if !ok {
 		return "", "", "", fmt.Errorf("workspace not found")
 	}
-	if runtime.Status != "running" {
-		return "", "", "", fmt.Errorf("workspace is not running (status: %s)", runtime.Status)
+	if runtime.Status != "running" && runtime.Status != "recovery" {
+		return "", "", "", fmt.Errorf("workspace is not running/recovery (status: %s)", runtime.Status)
 	}
 
 	resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue)

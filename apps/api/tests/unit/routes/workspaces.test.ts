@@ -57,6 +57,13 @@ describe('workspaces routes source contract', () => {
     expect(file).toContain("reason: 'workspace_not_creating'");
   });
 
+  it('supports recovery workspace status for ready callbacks and lifecycle actions', () => {
+    expect(file).toContain("const ACTIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery'] as const);");
+    expect(file).toContain('function normalizeWorkspaceReadyStatus');
+    expect(file).toContain('status: nextStatus');
+    expect(file).toContain('Workspace must be running, recovery, or in error state to rebuild');
+  });
+
   it('exposes callback-auth runtime metadata for node recovery', () => {
     expect(file).toContain("path.endsWith('/runtime')");
     expect(file).toContain("workspacesRoutes.get('/:id/runtime'");

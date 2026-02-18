@@ -31,7 +31,7 @@ describe('nodes routes source contract', () => {
 
   it('implements stop/delete semantics for child workspaces and sessions', () => {
     expect(file).toContain('stopWorkspaceOnNode');
-    expect(file).toContain("workspace.status === 'running' || workspace.status === 'creating'");
+    expect(file).toContain("workspace.status === 'running' || workspace.status === 'recovery' || workspace.status === 'creating'");
     expect(file).toContain('.delete(schema.agentSessions)');
     expect(file).toContain('.delete(schema.workspaces)');
     expect(file).toContain('.delete(schema.nodes)');

@@ -26,6 +26,11 @@ const (
 
 	// volumePrefix is prepended to workspace IDs to form Docker named volume names.
 	volumePrefix = "sam-ws-"
+
+	buildErrorLogFilename = ".devcontainer-build-error.log"
+
+	workspaceReadyStatusRunning  = "running"
+	workspaceReadyStatusRecovery = "recovery"
 )
 
 // VolumeNameForWorkspace returns the Docker named volume name for a workspace.
@@ -153,8 +158,18 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 		reporter.Log("sam_env", "completed", "SAM environment configured")
 	}
 
+	readyStatus := workspaceReadyStatusRunning
+	if recovery, recoveryErr := hasBuildErrorMarker(cfg); recoveryErr != nil {
+		log.Printf("Warning: failed to inspect build error marker for workspace %s: %v", cfg.WorkspaceID, recoveryErr)
+	} else if recovery {
+		readyStatus = workspaceReadyStatusRecovery
+	}
+	if usedFallback {
+		readyStatus = workspaceReadyStatusRecovery
+	}
+
 	reporter.Log("workspace_ready", "started", "Marking workspace ready")
-	if err := markWorkspaceReady(ctx, cfg); err != nil {
+	if err := markWorkspaceReady(ctx, cfg, readyStatus); err != nil {
 		reporter.Log("workspace_ready", "failed", "Failed to mark workspace ready", err.Error())
 		return err
 	}
@@ -166,8 +181,9 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 // PrepareWorkspace provisions a workspace repository/devcontainer and configures
 // git credentials/identity using the provided state. This is used by node-mode
 // workspace creation where workspaces are prepared on demand rather than at VM boot.
-// Returns (usedFallback, error) where usedFallback is true if the devcontainer
-// build fell back to the default image.
+// Returns (isRecoveryMode, error) where isRecoveryMode is true when provisioning
+// left a devcontainer build error marker and the workspace should be reported as
+// recovery mode instead of running.
 func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionState) (bool, error) {
 	if cfg == nil {
 		return false, errors.New("config is required")
@@ -198,20 +214,33 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	if err != nil {
 		return false, err
 	}
+
+	recoveryMode := usedFallback
+	if markerFound, markerErr := hasBuildErrorMarker(cfg); markerErr != nil {
+		log.Printf("Warning: failed to inspect build error marker for workspace %s: %v", cfg.WorkspaceID, markerErr)
+	} else if markerFound {
+		recoveryMode = true
+	}
+
 	if err := ensureGitCredentialHelper(ctx, cfg); err != nil {
-		return usedFallback, err
+		return recoveryMode, err
 	}
 	if err := ensureGitIdentity(ctx, cfg, bootstrap); err != nil {
-		return usedFallback, err
+		return recoveryMode, err
 	}
 	if err := ensureSAMEnvironment(ctx, cfg); err != nil {
 		log.Printf("Warning: SAM environment setup failed (non-fatal): %v", err)
 	}
-	if err := markWorkspaceReady(ctx, cfg); err != nil {
-		return usedFallback, err
+
+	readyStatus := workspaceReadyStatusRunning
+	if recoveryMode {
+		readyStatus = workspaceReadyStatusRecovery
+	}
+	if err := markWorkspaceReady(ctx, cfg, readyStatus); err != nil {
+		return recoveryMode, err
 	}
 
-	return usedFallback, nil
+	return recoveryMode, nil
 }
 
 // ensureVolumeReady creates a Docker named volume for the workspace if it doesn't
@@ -244,19 +273,74 @@ func RemoveVolume(ctx context.Context, workspaceID string) error {
 	return nil
 }
 
+func buildErrorLogPath(workspaceDir string) string {
+	return filepath.Join(workspaceDir, buildErrorLogFilename)
+}
+
+func hasBuildErrorMarker(cfg *config.Config) (bool, error) {
+	errorLogPath := buildErrorLogPath(cfg.WorkspaceDir)
+	if _, err := os.Stat(errorLogPath); err == nil {
+		return true, nil
+	} else if !os.IsNotExist(err) {
+		return false, fmt.Errorf("failed to stat build error marker %s: %w", errorLogPath, err)
+	}
+	return false, nil
+}
+
+func writeBuildErrorToHost(workspaceDir string, output []byte) error {
+	errorLogPath := buildErrorLogPath(workspaceDir)
+	if err := os.WriteFile(errorLogPath, output, 0o644); err != nil {
+		return fmt.Errorf("failed to write devcontainer build error log to %s: %w", errorLogPath, err)
+	}
+	return nil
+}
+
 // writeBuildErrorToVolume writes the devcontainer build error log into the Docker
 // volume so it is visible from inside the fallback container. The host workspace
 // directory is not mounted into the fallback container, so errors written there
 // are invisible to users.
-func writeBuildErrorToVolume(ctx context.Context, volumeName string, output []byte) {
+func writeBuildErrorToVolume(ctx context.Context, volumeName string, output []byte) error {
 	cmd := exec.CommandContext(ctx, "docker", "run", "--rm",
 		"-v", volumeName+":/workspaces",
 		"-i", "alpine:latest",
-		"sh", "-c", "cat > /workspaces/.devcontainer-build-error.log",
+		"sh", "-c", "cat > /workspaces/"+buildErrorLogFilename,
 	)
 	cmd.Stdin = bytes.NewReader(output)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Printf("Warning: failed to write build error log to volume %s: %v: %s", volumeName, err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("failed to write devcontainer build error log to volume %s: %w: %s", volumeName, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func persistBuildErrorArtifacts(ctx context.Context, cfg *config.Config, volumeName string, output []byte) error {
+	if err := writeBuildErrorToHost(cfg.WorkspaceDir, output); err != nil {
+		return err
+	}
+	if volumeName != "" {
+		if err := writeBuildErrorToVolume(ctx, volumeName, output); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func clearBuildErrorArtifacts(ctx context.Context, cfg *config.Config, volumeName string) {
+	errorLogPath := buildErrorLogPath(cfg.WorkspaceDir)
+	if err := os.Remove(errorLogPath); err != nil && !os.IsNotExist(err) {
+		log.Printf("Warning: failed to remove build error marker %s: %v", errorLogPath, err)
+	}
+
+	if volumeName == "" {
+		return
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", "run", "--rm",
+		"-v", volumeName+":/workspaces",
+		"alpine:latest",
+		"rm", "-f", "/workspaces/"+buildErrorLogFilename,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		log.Printf("Warning: failed to remove build error marker from volume %s: %v: %s", volumeName, err, strings.TrimSpace(string(out)))
 	}
 }
 
@@ -492,14 +576,18 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 
 	if hasConfig {
 		// Try with repo's own devcontainer config first.
-		// When using a volume, write a mount override config so the devcontainer
-		// CLI replaces the default bind mount with the named volume via workspaceMount.
+		// When using a volume, resolve the repo config through `devcontainer
+		// read-configuration` and inject workspaceMount/workspaceFolder into the
+		// merged config so required fields (image/dockerFile/dockerComposeFile)
+		// remain intact.
 		var overridePath string
 		if volumeName != "" {
 			var mountErr error
-			overridePath, mountErr = writeMountOverrideConfig(cfg, volumeName)
+			overridePath, mountErr = writeMountOverrideConfig(ctx, cfg, volumeName)
 			if mountErr != nil {
-				return false, fmt.Errorf("failed to write mount override config: %w", mountErr)
+				log.Printf("Failed to prepare repo mount override config, falling back to default image: %v", mountErr)
+				fallbackOutput := []byte(fmt.Sprintf("failed to prepare repo devcontainer mount override: %v\n", mountErr))
+				return fallbackToDefaultDevcontainer(ctx, cfg, volumeName, mountErr, fallbackOutput)
 			}
 			defer os.Remove(overridePath)
 		}
@@ -514,35 +602,10 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 		if err != nil {
 			// Repo config failed — log the error and fall back to default image.
 			log.Printf("Devcontainer build failed with repo config, falling back to default image: %v: %s", err, strings.TrimSpace(string(output)))
-
-			// Write build error log to the host workspace directory for debugging.
-			errorLogPath := filepath.Join(cfg.WorkspaceDir, ".devcontainer-build-error.log")
-			if writeErr := os.WriteFile(errorLogPath, output, 0o644); writeErr != nil {
-				log.Printf("Warning: failed to write devcontainer build error log to %s: %v", errorLogPath, writeErr)
-			}
-
-			// Also write into the Docker volume so the log is visible from inside
-			// the fallback container (the host path is not mounted into it).
-			if volumeName != "" {
-				writeBuildErrorToVolume(ctx, volumeName, output)
-			}
-
-			// Remove the stale container left by the failed first attempt.
-			// Without this, devcontainer up --override-config reuses the existing
-			// container (built from the repo's image) instead of creating a new one
-			// from the fallback image.
-			removeStaleContainers(ctx, cfg)
-
-			// Retry with the default config.
-			usedFallback, fallbackErr := runDevcontainerWithDefault(ctx, cfg, volumeName)
-			if fallbackErr != nil {
-				return false, fmt.Errorf("devcontainer fallback also failed: %w (original error: %v)", fallbackErr, err)
-			}
-			_ = usedFallback // always true here
-			log.Printf("Devcontainer fallback succeeded with default image")
-			return true, nil
+			return fallbackToDefaultDevcontainer(ctx, cfg, volumeName, err, output)
 		}
 
+		clearBuildErrorArtifacts(ctx, cfg, volumeName)
 		return false, nil
 	}
 
@@ -551,7 +614,38 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 	if err != nil {
 		return false, err
 	}
+	clearBuildErrorArtifacts(ctx, cfg, volumeName)
 	return false, nil
+}
+
+func fallbackToDefaultDevcontainer(
+	ctx context.Context,
+	cfg *config.Config,
+	volumeName string,
+	originalErr error,
+	output []byte,
+) (bool, error) {
+	if len(bytes.TrimSpace(output)) == 0 {
+		output = []byte(fmt.Sprintf("devcontainer setup failed: %v\n", originalErr))
+	}
+
+	// Never start fallback if we cannot persist error artifacts first.
+	// This guarantees recovery containers always have diagnostics attached.
+	if err := persistBuildErrorArtifacts(ctx, cfg, volumeName, output); err != nil {
+		return false, fmt.Errorf("failed to persist devcontainer build logs; aborting fallback: %w (original error: %v)", err, originalErr)
+	}
+
+	// Remove the stale container left by the failed first attempt.
+	// Without this, devcontainer up --override-config can reuse the existing
+	// broken container instead of creating a new one from the fallback image.
+	removeStaleContainers(ctx, cfg)
+
+	if _, err := runDevcontainerWithDefault(ctx, cfg, volumeName); err != nil {
+		return false, fmt.Errorf("devcontainer fallback also failed: %w (original error: %v)", err, originalErr)
+	}
+
+	log.Printf("Devcontainer fallback succeeded with default image")
+	return true, nil
 }
 
 // devcontainerUpArgs builds the argument slice for `devcontainer up`.
@@ -569,28 +663,202 @@ func devcontainerUpArgs(cfg *config.Config, overrideConfigPath string) []string 
 	return args
 }
 
-// writeMountOverrideConfig writes a minimal devcontainer override config that
-// replaces the default bind mount with a named Docker volume. This is used when
-// the repo has its own devcontainer config — the override only sets workspaceMount
-// and workspaceFolder, and the devcontainer CLI merges them with the repo's config.
-func writeMountOverrideConfig(cfg *config.Config, volumeName string) (string, error) {
+type devcontainerReadConfigurationResult struct {
+	Outcome             string                 `json:"outcome"`
+	Message             string                 `json:"message"`
+	Description         string                 `json:"description"`
+	MergedConfiguration map[string]interface{} `json:"mergedConfiguration"`
+}
+
+func hasReadConfigurationPayloadData(payload *devcontainerReadConfigurationResult) bool {
+	if payload == nil {
+		return false
+	}
+
+	return payload.Outcome != "" ||
+		payload.Message != "" ||
+		payload.Description != "" ||
+		len(payload.MergedConfiguration) > 0
+}
+
+func parseReadConfigurationCandidate(candidate string) (*devcontainerReadConfigurationResult, bool) {
+	var payload devcontainerReadConfigurationResult
+	decoder := json.NewDecoder(strings.NewReader(candidate))
+	if err := decoder.Decode(&payload); err != nil {
+		return nil, false
+	}
+
+	if !hasReadConfigurationPayloadData(&payload) {
+		return nil, false
+	}
+
+	return &payload, true
+}
+
+func parseDevcontainerReadConfigurationOutput(output string) (*devcontainerReadConfigurationResult, error) {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return nil, errors.New("empty read-configuration output")
+	}
+
+	// read-configuration output can include mixed logs + JSON payload and may
+	// include JSON log lines that are not the final result. Scan from the end
+	// and pick the latest payload that includes mergedConfiguration when possible.
+	var fallback *devcontainerReadConfigurationResult
+	for i := len(trimmed) - 1; i >= 0; i-- {
+		if trimmed[i] != '{' {
+			continue
+		}
+
+		payload, ok := parseReadConfigurationCandidate(trimmed[i:])
+		if !ok {
+			continue
+		}
+		if len(payload.MergedConfiguration) > 0 {
+			return payload, nil
+		}
+		if fallback == nil {
+			fallback = payload
+		}
+	}
+	if fallback != nil {
+		return fallback, nil
+	}
+
+	return nil, fmt.Errorf("unable to parse read-configuration JSON output: %s", trimmed)
+}
+
+func hasMergedRuntimeSource(merged map[string]interface{}) bool {
+	if len(merged) == 0 {
+		return false
+	}
+
+	for _, key := range []string{"image", "dockerFile", "dockerComposeFile"} {
+		value, ok := merged[key]
+		if !ok {
+			continue
+		}
+		switch v := value.(type) {
+		case string:
+			if strings.TrimSpace(v) != "" {
+				return true
+			}
+		case []interface{}:
+			if len(v) > 0 {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func normalizeMergedLifecycleCommands(merged map[string]interface{}) {
+	if len(merged) == 0 {
+		return
+	}
+
+	// read-configuration returns normalized lifecycle command arrays under
+	// plural keys. devcontainer up expects the singular schema keys.
+	keyMap := map[string]string{
+		"onCreateCommands":      "onCreateCommand",
+		"updateContentCommands": "updateContentCommand",
+		"postCreateCommands":    "postCreateCommand",
+		"postStartCommands":     "postStartCommand",
+		"postAttachCommands":    "postAttachCommand",
+	}
+
+	for pluralKey, singularKey := range keyMap {
+		value, ok := merged[pluralKey]
+		if !ok {
+			continue
+		}
+		if _, hasSingular := merged[singularKey]; !hasSingular {
+			merged[singularKey] = normalizeLifecycleCommandValue(value)
+		}
+		delete(merged, pluralKey)
+	}
+}
+
+func normalizeLifecycleCommandValue(value interface{}) interface{} {
+	commands, ok := value.([]interface{})
+	if !ok {
+		return value
+	}
+
+	parts := make([]string, 0, len(commands))
+	for _, command := range commands {
+		str, ok := command.(string)
+		if !ok {
+			return value
+		}
+		trimmed := strings.TrimSpace(str)
+		if trimmed == "" {
+			continue
+		}
+		parts = append(parts, trimmed)
+	}
+
+	switch len(parts) {
+	case 0:
+		return ""
+	case 1:
+		return parts[0]
+	default:
+		return strings.Join(parts, " && ")
+	}
+}
+
+// writeMountOverrideConfig resolves the repo devcontainer configuration via
+// `devcontainer read-configuration` and writes a full override config that
+// includes workspaceMount/workspaceFolder for named-volume workspaces.
+func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeName string) (string, error) {
 	repoDirName := config.DeriveRepoDirName(cfg.Repository)
 	if repoDirName == "" {
 		repoDirName = filepath.Base(cfg.WorkspaceDir)
 	}
 
-	configJSON := fmt.Sprintf(`{
-  "workspaceMount": "source=%s,target=/workspaces,type=volume",
-  "workspaceFolder": "/workspaces/%s"
-}
-`, volumeName, repoDirName)
+	args := []string{
+		"read-configuration",
+		"--workspace-folder", cfg.WorkspaceDir,
+		"--include-merged-configuration",
+	}
+	cmd := exec.CommandContext(ctx, "devcontainer", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("devcontainer read-configuration failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	readResult, err := parseDevcontainerReadConfigurationOutput(string(output))
+	if err != nil {
+		return "", fmt.Errorf("failed to parse devcontainer read-configuration output: %w", err)
+	}
+	if strings.TrimSpace(readResult.Outcome) != "" && readResult.Outcome != "success" {
+		return "", fmt.Errorf("devcontainer read-configuration returned %q: %s %s", readResult.Outcome, readResult.Message, readResult.Description)
+	}
+	if len(readResult.MergedConfiguration) == 0 {
+		return "", errors.New("devcontainer read-configuration returned empty mergedConfiguration")
+	}
+	if !hasMergedRuntimeSource(readResult.MergedConfiguration) {
+		return "", errors.New("devcontainer read-configuration mergedConfiguration missing image/dockerFile/dockerComposeFile")
+	}
+
+	normalizeMergedLifecycleCommands(readResult.MergedConfiguration)
+	readResult.MergedConfiguration["workspaceMount"] = fmt.Sprintf("source=%s,target=/workspaces,type=volume", volumeName)
+	readResult.MergedConfiguration["workspaceFolder"] = fmt.Sprintf("/workspaces/%s", repoDirName)
+
+	configJSON, err := json.MarshalIndent(readResult.MergedConfiguration, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal merged mount override config: %w", err)
+	}
+	configJSON = append(configJSON, '\n')
 
 	tmpFile, err := os.CreateTemp("", "devcontainer-mount-override-*.json")
 	if err != nil {
 		return "", fmt.Errorf("failed to create mount override config: %w", err)
 	}
 
-	if _, err := tmpFile.WriteString(configJSON); err != nil {
+	if _, err := tmpFile.Write(configJSON); err != nil {
 		_ = tmpFile.Close()
 		os.Remove(tmpFile.Name())
 		return "", fmt.Errorf("failed to write mount override config: %w", err)
@@ -1044,9 +1312,22 @@ func ensureSAMEnvironment(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
-func markWorkspaceReady(ctx context.Context, cfg *config.Config) error {
+type readyRequestBody struct {
+	Status string `json:"status"`
+}
+
+func markWorkspaceReady(ctx context.Context, cfg *config.Config, status string) error {
+	if status == "" {
+		status = workspaceReadyStatusRunning
+	}
+
+	body, err := json.Marshal(readyRequestBody{Status: status})
+	if err != nil {
+		return fmt.Errorf("failed to encode ready request body: %w", err)
+	}
+
 	endpoint := fmt.Sprintf("%s/api/workspaces/%s/ready", strings.TrimRight(cfg.ControlPlaneURL, "/"), cfg.WorkspaceID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader([]byte("{}")))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("failed to create ready request: %w", err)
 	}
@@ -1064,7 +1345,7 @@ func markWorkspaceReady(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("ready endpoint returned HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	log.Printf("Workspace %s marked ready", cfg.WorkspaceID)
+	log.Printf("Workspace %s marked ready (%s)", cfg.WorkspaceID, status)
 	return nil
 }
 

@@ -168,7 +168,7 @@ app.use('*', async (c, next) => {
     return c.json({ error: 'NOT_FOUND', message: 'Workspace not found' }, 404);
   }
 
-  if (workspace.status !== 'running') {
+  if (workspace.status !== 'running' && workspace.status !== 'recovery') {
     return c.json({ error: 'NOT_READY', message: `Workspace is ${workspace.status}` }, 503);
   }
 

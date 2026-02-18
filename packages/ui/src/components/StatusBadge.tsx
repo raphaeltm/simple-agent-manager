@@ -4,6 +4,7 @@ const statusConfig: Record<string, { label: string; bg: string; fg: string }> = 
   pending: { label: 'Pending', bg: 'rgba(159, 183, 174, 0.15)', fg: '#9fb7ae' },
   creating: { label: 'Creating', bg: 'rgba(59, 130, 246, 0.15)', fg: '#60a5fa' },
   running: { label: 'Running', bg: 'rgba(34, 197, 94, 0.15)', fg: '#4ade80' },
+  recovery: { label: 'Recovery', bg: 'rgba(245, 158, 11, 0.15)', fg: '#fbbf24' },
   stopping: { label: 'Stopping', bg: 'rgba(245, 158, 11, 0.15)', fg: '#fbbf24' },
   stopped: { label: 'Stopped', bg: 'rgba(159, 183, 174, 0.15)', fg: '#9fb7ae' },
   error: { label: 'Error', bg: 'rgba(239, 68, 68, 0.15)', fg: '#f87171' },

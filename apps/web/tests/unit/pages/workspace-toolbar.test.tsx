@@ -129,6 +129,36 @@ describe('Workspace toolbar declutter', () => {
     expect(buttonTexts).toContain('Rebuild');
   });
 
+  it('renders Stop and Rebuild buttons in the sidebar for a recovery workspace', async () => {
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-1',
+      nodeId: 'node-1',
+      name: 'test-workspace',
+      displayName: 'Test Workspace',
+      repository: 'acme/repo',
+      branch: 'main',
+      status: 'recovery',
+      vmSize: 'medium',
+      vmLocation: 'nbg1',
+      vmIp: null,
+      lastActivityAt: null,
+      errorMessage: null,
+      shutdownDeadline: null,
+      idleTimeoutSeconds: 0,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      url: 'https://ws-ws-1.example.com',
+    });
+
+    await renderWorkspace();
+
+    const allButtons = screen.getAllByRole('button');
+    const buttonTexts = allButtons.map((b) => b.textContent?.trim());
+
+    expect(buttonTexts).toContain('Stop');
+    expect(buttonTexts).toContain('Rebuild');
+  });
+
   it('renders Restart button in the sidebar for a stopped workspace', async () => {
     mocks.getWorkspace.mockResolvedValue({
       id: 'ws-1',
