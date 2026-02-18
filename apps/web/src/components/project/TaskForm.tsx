@@ -41,6 +41,9 @@ export function TaskForm({
   const [error, setError] = useState<string | null>(null);
 
   const candidateParents = tasks.filter((task) => task.id !== currentTaskId);
+  const updateField = <K extends keyof TaskFormValues>(field: K, value: TaskFormValues[K]) => {
+    setValues((current) => ({ ...current, [field]: value }));
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -68,7 +71,10 @@ export function TaskForm({
         <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Title</span>
         <Input
           value={values.title}
-          onChange={(event) => setValues((current) => ({ ...current, title: event.currentTarget.value }))}
+          onChange={(event) => {
+            const value = event.currentTarget.value;
+            updateField('title', value);
+          }}
           placeholder="Task title"
           disabled={submitting}
         />
@@ -78,7 +84,10 @@ export function TaskForm({
         <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Description</span>
         <textarea
           value={values.description}
-          onChange={(event) => setValues((current) => ({ ...current, description: event.currentTarget.value }))}
+          onChange={(event) => {
+            const value = event.currentTarget.value;
+            updateField('description', value);
+          }}
           rows={3}
           disabled={submitting}
           style={{
@@ -99,8 +108,9 @@ export function TaskForm({
           type="number"
           value={String(values.priority)}
           onChange={(event) => {
-            const parsed = Number.parseInt(event.currentTarget.value, 10);
-            setValues((current) => ({ ...current, priority: Number.isNaN(parsed) ? 0 : parsed }));
+            const rawValue = event.currentTarget.value;
+            const parsed = Number.parseInt(rawValue, 10);
+            updateField('priority', Number.isNaN(parsed) ? 0 : parsed);
           }}
           disabled={submitting}
         />
@@ -110,7 +120,10 @@ export function TaskForm({
         <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Parent task</span>
         <select
           value={values.parentTaskId}
-          onChange={(event) => setValues((current) => ({ ...current, parentTaskId: event.currentTarget.value }))}
+          onChange={(event) => {
+            const value = event.currentTarget.value;
+            updateField('parentTaskId', value);
+          }}
           disabled={submitting}
           style={{
             width: '100%',
@@ -135,7 +148,10 @@ export function TaskForm({
         <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Agent hint</span>
         <Input
           value={values.agentProfileHint}
-          onChange={(event) => setValues((current) => ({ ...current, agentProfileHint: event.currentTarget.value }))}
+          onChange={(event) => {
+            const value = event.currentTarget.value;
+            updateField('agentProfileHint', value);
+          }}
           placeholder="Optional agent profile hint"
           disabled={submitting}
         />
