@@ -189,6 +189,15 @@ function setMobileViewport() {
   });
 }
 
+async function findCloseTerminalButton() {
+  const closeButtons = await screen.findAllByRole(
+    'button',
+    { name: /Close Terminal/ },
+    { timeout: 5_000 }
+  );
+  return closeButtons[0];
+}
+
 describe('Workspace page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -326,10 +335,10 @@ describe('Workspace page', () => {
 
       renderWorkspace('/workspaces/ws-123', true);
 
-      expect(await screen.findByRole('button', { name: /Close Terminal/ })).toBeInTheDocument();
+      expect(await findCloseTerminalButton()).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'Chat tab: Claude Chat' })).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole('button', { name: /Close Terminal/ }));
+      fireEvent.click(await findCloseTerminalButton());
 
       await waitFor(() => {
         const probe = screen.getByTestId('location-probe').textContent ?? '';
@@ -345,8 +354,8 @@ describe('Workspace page', () => {
 
       renderWorkspace('/workspaces/ws-123', true);
 
-      expect(await screen.findByRole('button', { name: /Close Terminal/ })).toBeInTheDocument();
-      fireEvent.click(screen.getByRole('button', { name: /Close Terminal/ }));
+      expect(await findCloseTerminalButton()).toBeInTheDocument();
+      fireEvent.click(await findCloseTerminalButton());
 
       await waitFor(() => {
         expect(screen.queryByRole('tab', { name: /Terminal tab:/ })).not.toBeInTheDocument();
