@@ -48,7 +48,7 @@ export const DockerSection: FC<DockerSectionProps> = ({ docker, loading }) => {
           <Skeleton width="100%" height={32} style={{ marginBottom: 4 }} />
           <Skeleton width="100%" height={32} />
         </div>
-      ) : !docker || docker.containerList.length === 0 ? (
+      ) : !docker || !docker.containerList || docker.containerList.length === 0 ? (
         <div style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
           {docker ? 'No running containers.' : 'Docker info unavailable.'}
         </div>
