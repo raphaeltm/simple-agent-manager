@@ -145,47 +145,35 @@ docker run --rm -v "$VOLUME_NAME:/workspaces" alpine:latest \
   test -d "/workspaces/$REPO_DIR_NAME/.devcontainer"
 echo "  OK: .devcontainer/ directory present in volume"
 
-# ── Step 4: Write volume mount override config ────────────────────────
-# This replicates writeMountOverrideConfig() in bootstrap.go, but also
-# includes the image from the repo's devcontainer.json. devcontainer CLI
-# v0.83.1 treats --override-config as a replacement for image/dockerFile/
-# dockerComposeFile rather than a merge, so we must include the image.
+# ── Step 4: Inject volume mount into repo's devcontainer.json ─────────
+# devcontainer CLI v0.83.1's --override-config does NOT merge with the
+# repo's config — it replaces key properties (image, features, lifecycle
+# hooks). Instead of using --override-config, we inject workspaceMount
+# and workspaceFolder directly into the repo's devcontainer.json on the
+# host clone. This is what the VM agent bootstrap should do.
 echo ""
-echo "=== Step 4: Write override config ==="
-
-# Extract image from the (already stripped) devcontainer.json
-DEVCONTAINER_IMAGE=$(node -e "
+echo "=== Step 4: Inject volume mount into devcontainer.json ==="
+node -e "
   const fs = require('fs');
   const cfg = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
-  console.log(cfg.image || '');
-" "$DEVCONTAINER_JSON")
+  cfg.workspaceMount = 'source=' + process.argv[2] + ',target=/workspaces,type=volume';
+  cfg.workspaceFolder = '/workspaces/' + process.argv[3];
+  fs.writeFileSync(process.argv[1], JSON.stringify(cfg, null, 2) + '\n');
+  console.log('  OK: Injected workspaceMount and workspaceFolder');
+  console.log('  image: ' + (cfg.image || 'N/A'));
+  console.log('  features: ' + Object.keys(cfg.features || {}).join(', '));
+  console.log('  postCreateCommand: ' + (cfg.postCreateCommand || 'N/A'));
+" "$DEVCONTAINER_JSON" "$VOLUME_NAME" "$REPO_DIR_NAME"
+echo "  Final devcontainer.json:"
+cat "$DEVCONTAINER_JSON"
 
-if [ -n "$DEVCONTAINER_IMAGE" ]; then
-  echo "  Detected image from repo config: $DEVCONTAINER_IMAGE"
-  cat > "$OVERRIDE_CONFIG" <<EOF
-{
-  "image": "$DEVCONTAINER_IMAGE",
-  "workspaceMount": "source=$VOLUME_NAME,target=/workspaces,type=volume",
-  "workspaceFolder": "/workspaces/$REPO_DIR_NAME"
-}
-EOF
-else
-  echo "  No image found in repo config, using mount-only override"
-  cat > "$OVERRIDE_CONFIG" <<EOF
-{
-  "workspaceMount": "source=$VOLUME_NAME,target=/workspaces,type=volume",
-  "workspaceFolder": "/workspaces/$REPO_DIR_NAME"
-}
-EOF
-fi
-echo "  Override config:"
-cat "$OVERRIDE_CONFIG"
-
-# ── Step 5: Run devcontainer up with --override-config ────────────────
-# This replicates: devcontainer up --workspace-folder <host> --override-config <override>
+# ── Step 5: Run devcontainer up ───────────────────────────────────────
+# Run devcontainer up using the modified devcontainer.json (which now
+# includes workspaceMount and workspaceFolder for the named volume).
+# No --override-config needed since we injected the mount settings directly.
 echo ""
-echo "=== Step 5: devcontainer up (with volume mount override) ==="
-echo "  Command: devcontainer up --workspace-folder $HOST_CLONE --override-config $OVERRIDE_CONFIG"
+echo "=== Step 5: devcontainer up (with injected volume mount) ==="
+echo "  Command: devcontainer up --workspace-folder $HOST_CLONE"
 echo ""
 
 # Temporarily disable set -e so we can capture the exit code and output
@@ -194,7 +182,6 @@ UP_LOG="/tmp/sam-test-devcontainer-up.log"
 set +e
 devcontainer up \
   --workspace-folder "$HOST_CLONE" \
-  --override-config "$OVERRIDE_CONFIG" \
   > "$UP_LOG" 2>&1
 UP_EXIT=$?
 set -e
