@@ -146,15 +146,38 @@ docker run --rm -v "$VOLUME_NAME:/workspaces" alpine:latest \
 echo "  OK: .devcontainer/ directory present in volume"
 
 # ── Step 4: Write volume mount override config ────────────────────────
-# This replicates writeMountOverrideConfig() in bootstrap.go
+# This replicates writeMountOverrideConfig() in bootstrap.go, but also
+# includes the image from the repo's devcontainer.json. devcontainer CLI
+# v0.83.1 treats --override-config as a replacement for image/dockerFile/
+# dockerComposeFile rather than a merge, so we must include the image.
 echo ""
 echo "=== Step 4: Write override config ==="
-cat > "$OVERRIDE_CONFIG" <<EOF
+
+# Extract image from the (already stripped) devcontainer.json
+DEVCONTAINER_IMAGE=$(node -e "
+  const fs = require('fs');
+  const cfg = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+  console.log(cfg.image || '');
+" "$DEVCONTAINER_JSON")
+
+if [ -n "$DEVCONTAINER_IMAGE" ]; then
+  echo "  Detected image from repo config: $DEVCONTAINER_IMAGE"
+  cat > "$OVERRIDE_CONFIG" <<EOF
+{
+  "image": "$DEVCONTAINER_IMAGE",
+  "workspaceMount": "source=$VOLUME_NAME,target=/workspaces,type=volume",
+  "workspaceFolder": "/workspaces/$REPO_DIR_NAME"
+}
+EOF
+else
+  echo "  No image found in repo config, using mount-only override"
+  cat > "$OVERRIDE_CONFIG" <<EOF
 {
   "workspaceMount": "source=$VOLUME_NAME,target=/workspaces,type=volume",
   "workspaceFolder": "/workspaces/$REPO_DIR_NAME"
 }
 EOF
+fi
 echo "  Override config:"
 cat "$OVERRIDE_CONFIG"
 
