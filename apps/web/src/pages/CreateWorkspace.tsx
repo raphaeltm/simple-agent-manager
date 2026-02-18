@@ -97,10 +97,17 @@ type LocationState = {
   nodeId?: string;
 };
 
-export function CreateWorkspace() {
+interface CreateWorkspaceProps {
+  mode?: 'workspace' | 'project';
+}
+
+export function CreateWorkspace({ mode = 'workspace' }: CreateWorkspaceProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const locationState = (location.state as LocationState | null) ?? null;
+  const entityLabel = mode === 'project' ? 'Project' : 'Workspace';
+  const entityLabelLower = entityLabel.toLowerCase();
+  const listPath = mode === 'project' ? '/projects' : '/dashboard';
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -238,8 +245,8 @@ export function CreateWorkspace() {
 
   return (
     <PageLayout
-      title="Create Workspace"
-      onBack={() => navigate('/dashboard')}
+      title={`Create ${entityLabel}`}
+      onBack={() => navigate(listPath)}
       maxWidth="md"
       headerRight={<UserMenu />}
     >
@@ -251,7 +258,7 @@ export function CreateWorkspace() {
             </h3>
             {!checkingPrereqs && anyMissing && (
               <p style={{ margin: '4px 0 0', fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>
-                Complete the items below before creating a workspace.
+                Complete the items below before creating a {entityLabelLower}.
               </p>
             )}
           </div>
@@ -312,7 +319,7 @@ export function CreateWorkspace() {
 
           <div>
             <label htmlFor="name" style={labelStyle}>
-              Workspace Name
+              {entityLabel} Name
             </label>
             <Input
               id="name"
@@ -475,11 +482,11 @@ export function CreateWorkspace() {
               paddingTop: 'var(--sam-space-4)',
             }}
           >
-            <Button type="button" onClick={() => navigate('/dashboard')} variant="secondary" size="md">
+            <Button type="button" onClick={() => navigate(listPath)} variant="secondary" size="md">
               Cancel
             </Button>
             <Button type="submit" disabled={loading || !name || !repository} size="lg" loading={loading}>
-              Create Workspace
+              Create {entityLabel}
             </Button>
           </div>
         </form>
