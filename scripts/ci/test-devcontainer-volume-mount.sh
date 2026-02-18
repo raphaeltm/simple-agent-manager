@@ -225,6 +225,23 @@ node -e "
   if (!hasRuntimeSource) {
     throw new Error('mergedConfiguration missing image/dockerFile/dockerComposeFile');
   }
+
+  const lifecycleKeyMap = {
+    onCreateCommands: 'onCreateCommand',
+    updateContentCommands: 'updateContentCommand',
+    postCreateCommands: 'postCreateCommand',
+    postStartCommands: 'postStartCommand',
+    postAttachCommands: 'postAttachCommand'
+  };
+  for (const [pluralKey, singularKey] of Object.entries(lifecycleKeyMap)) {
+    if (Object.prototype.hasOwnProperty.call(merged, pluralKey)) {
+      if (!Object.prototype.hasOwnProperty.call(merged, singularKey)) {
+        merged[singularKey] = merged[pluralKey];
+      }
+      delete merged[pluralKey];
+    }
+  }
+
   merged.workspaceMount = 'source=' + process.argv[3] + ',target=/workspaces,type=volume';
   merged.workspaceFolder = '/workspaces/' + process.argv[4];
   fs.writeFileSync(process.argv[2], JSON.stringify(merged, null, 2) + '\n');

@@ -719,6 +719,12 @@ if [ "$1" = "read-configuration" ]; then
   "mergedConfiguration": {
     "name": "Repo Config",
     "image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm",
+    "postCreateCommands": [
+      "bash .devcontainer/post-create.sh"
+    ],
+    "postStartCommands": [
+      "bash .devcontainer/post-start.sh"
+    ],
     "features": {
       "ghcr.io/devcontainers/features/go:1": {
         "version": "1.22"
@@ -766,6 +772,12 @@ exit 1
 	}
 	if !strings.Contains(content, `"ghcr.io/devcontainers/features/go:1"`) {
 		t.Fatalf("expected merged config features to be preserved, got:\n%s", content)
+	}
+	if !strings.Contains(content, `"postCreateCommand": [`) {
+		t.Fatalf("expected lifecycle command keys to be normalized, got:\n%s", content)
+	}
+	if strings.Contains(content, `"postCreateCommands":`) {
+		t.Fatalf("expected plural lifecycle command keys to be removed, got:\n%s", content)
 	}
 }
 
@@ -865,6 +877,35 @@ func TestParseDevcontainerReadConfigurationOutputParsesMultilinePayload(t *testi
 	value, ok := parsed.MergedConfiguration["dockerComposeFile"].([]interface{})
 	if !ok || len(value) != 1 || value[0] != "docker-compose.yml" {
 		t.Fatalf("expected mergedConfiguration.dockerComposeFile to contain docker-compose.yml, got %#v", parsed.MergedConfiguration["dockerComposeFile"])
+	}
+}
+
+func TestNormalizeMergedLifecycleCommands(t *testing.T) {
+	t.Parallel()
+
+	merged := map[string]interface{}{
+		"onCreateCommands":      []interface{}{"echo oncreate"},
+		"updateContentCommands": []interface{}{"echo update"},
+		"postCreateCommands":    []interface{}{"echo postcreate"},
+		"postStartCommands":     []interface{}{"echo poststart"},
+		"postAttachCommands":    []interface{}{"echo postattach"},
+	}
+
+	normalizeMergedLifecycleCommands(merged)
+
+	for plural, singular := range map[string]string{
+		"onCreateCommands":      "onCreateCommand",
+		"updateContentCommands": "updateContentCommand",
+		"postCreateCommands":    "postCreateCommand",
+		"postStartCommands":     "postStartCommand",
+		"postAttachCommands":    "postAttachCommand",
+	} {
+		if _, ok := merged[plural]; ok {
+			t.Fatalf("expected %s to be removed", plural)
+		}
+		if _, ok := merged[singular]; !ok {
+			t.Fatalf("expected %s to be present", singular)
+		}
 	}
 }
 

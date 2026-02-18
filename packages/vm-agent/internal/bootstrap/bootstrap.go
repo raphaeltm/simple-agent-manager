@@ -753,6 +753,33 @@ func hasMergedRuntimeSource(merged map[string]interface{}) bool {
 	return false
 }
 
+func normalizeMergedLifecycleCommands(merged map[string]interface{}) {
+	if len(merged) == 0 {
+		return
+	}
+
+	// read-configuration returns normalized lifecycle command arrays under
+	// plural keys. devcontainer up expects the singular schema keys.
+	keyMap := map[string]string{
+		"onCreateCommands":      "onCreateCommand",
+		"updateContentCommands": "updateContentCommand",
+		"postCreateCommands":    "postCreateCommand",
+		"postStartCommands":     "postStartCommand",
+		"postAttachCommands":    "postAttachCommand",
+	}
+
+	for pluralKey, singularKey := range keyMap {
+		value, ok := merged[pluralKey]
+		if !ok {
+			continue
+		}
+		if _, hasSingular := merged[singularKey]; !hasSingular {
+			merged[singularKey] = value
+		}
+		delete(merged, pluralKey)
+	}
+}
+
 // writeMountOverrideConfig resolves the repo devcontainer configuration via
 // `devcontainer read-configuration` and writes a full override config that
 // includes workspaceMount/workspaceFolder for named-volume workspaces.
@@ -787,6 +814,7 @@ func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeNam
 		return "", errors.New("devcontainer read-configuration mergedConfiguration missing image/dockerFile/dockerComposeFile")
 	}
 
+	normalizeMergedLifecycleCommands(readResult.MergedConfiguration)
 	readResult.MergedConfiguration["workspaceMount"] = fmt.Sprintf("source=%s,target=/workspaces,type=volume", volumeName)
 	readResult.MergedConfiguration["workspaceFolder"] = fmt.Sprintf("/workspaces/%s", repoDirName)
 
