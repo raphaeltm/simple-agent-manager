@@ -784,10 +784,17 @@ func TestSessionHost_CancelPrompt_ForceStopsAfterGracePeriod(t *testing.T) {
 	}
 	host.promptMu.Unlock()
 
-	host.bufMu.RLock()
-	buffered := len(host.messageBuf)
-	host.bufMu.RUnlock()
-	if buffered < 2 {
-		t.Fatalf("expected prompt_done + error status messages, buffered=%d", buffered)
+	bufferDeadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		host.bufMu.RLock()
+		buffered := len(host.messageBuf)
+		host.bufMu.RUnlock()
+		if buffered >= 2 {
+			break
+		}
+		if time.Now().After(bufferDeadline) {
+			t.Fatalf("expected prompt_done + error status messages, buffered=%d", buffered)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
