@@ -476,6 +476,28 @@ All configuration lives in **GitHub Settings -> Environments -> production**:
 - `POST /api/workspaces/:id/restart` — Restart a workspace
 - `DELETE /api/workspaces/:id` — Delete a workspace
 
+### Project Management
+
+- `POST /api/projects` — Create project
+- `GET /api/projects` — List user's projects (supports `limit` and `cursor`)
+- `GET /api/projects/:id` — Get project detail (includes task status counts and linked workspace count)
+- `PATCH /api/projects/:id` — Update project metadata (`name`, `description`, `defaultBranch`)
+- `DELETE /api/projects/:id` — Delete project (cascades project tasks/dependencies/events)
+
+### Task Management (Project Scoped)
+
+- `POST /api/projects/:projectId/tasks` — Create task
+- `GET /api/projects/:projectId/tasks` — List tasks (supports `status`, `minPriority`, `sort`, `limit`, `cursor`)
+- `GET /api/projects/:projectId/tasks/:taskId` — Get task detail (includes dependencies + blocked state)
+- `PATCH /api/projects/:projectId/tasks/:taskId` — Update task fields (`title`, `description`, `priority`, `parentTaskId`)
+- `DELETE /api/projects/:projectId/tasks/:taskId` — Delete task
+- `POST /api/projects/:projectId/tasks/:taskId/status` — Transition task status
+- `POST /api/projects/:projectId/tasks/:taskId/status/callback` — Trusted callback status update for delegated tasks
+- `POST /api/projects/:projectId/tasks/:taskId/dependencies` — Add dependency edge (`dependsOnTaskId`)
+- `DELETE /api/projects/:projectId/tasks/:taskId/dependencies?dependsOnTaskId=...` — Remove dependency edge
+- `POST /api/projects/:projectId/tasks/:taskId/delegate` — Delegate ready+unblocked task to owned running workspace
+- `GET /api/projects/:projectId/tasks/:taskId/events` — List append-only task status events
+
 ### Agent Sessions
 
 - `GET /api/workspaces/:id/agent-sessions` — List workspace agent sessions
@@ -699,6 +721,13 @@ See `apps/api/.env.example`:
 - `MAX_WORKSPACES_PER_USER` - Optional runtime workspace cap
 - `MAX_WORKSPACES_PER_NODE` - Optional runtime per-node workspace cap
 - `MAX_AGENT_SESSIONS_PER_WORKSPACE` - Optional runtime session cap
+- `MAX_PROJECTS_PER_USER` - Optional runtime project cap
+- `MAX_TASKS_PER_PROJECT` - Optional runtime task cap per project
+- `MAX_TASK_DEPENDENCIES_PER_TASK` - Optional runtime dependency-edge cap per task
+- `TASK_LIST_DEFAULT_PAGE_SIZE` - Optional default task/project list page size
+- `TASK_LIST_MAX_PAGE_SIZE` - Optional maximum task/project list page size
+- `TASK_CALLBACK_TIMEOUT_MS` - Optional timeout budget for delegated-task callback processing
+- `TASK_CALLBACK_RETRY_MAX_ATTEMPTS` - Optional retry budget for delegated-task callback processing
 - `NODE_HEARTBEAT_STALE_SECONDS` - Optional staleness threshold for node health
 - `NODE_AGENT_READY_TIMEOUT_MS` - Optional max wait for freshly provisioned node-agent health before first workspace create
 - `NODE_AGENT_READY_POLL_INTERVAL_MS` - Optional polling interval for fresh-node readiness checks

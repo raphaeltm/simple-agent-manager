@@ -18,6 +18,8 @@ import { uiGovernanceRoutes } from './routes/ui-governance';
 import { transcribeRoutes } from './routes/transcribe';
 import { agentSettingsRoutes } from './routes/agent-settings';
 import { clientErrorsRoutes } from './routes/client-errors';
+import { projectsRoutes } from './routes/projects';
+import { tasksRoutes } from './routes/tasks';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { getRuntimeLimits } from './services/limits';
 import { recordNodeRoutingMetric } from './services/telemetry';
@@ -65,6 +67,13 @@ export interface Env {
   MAX_WORKSPACES_PER_USER?: string;
   MAX_WORKSPACES_PER_NODE?: string;
   MAX_AGENT_SESSIONS_PER_WORKSPACE?: string;
+  MAX_PROJECTS_PER_USER?: string;
+  MAX_TASKS_PER_PROJECT?: string;
+  MAX_TASK_DEPENDENCIES_PER_TASK?: string;
+  TASK_LIST_DEFAULT_PAGE_SIZE?: string;
+  TASK_LIST_MAX_PAGE_SIZE?: string;
+  TASK_CALLBACK_TIMEOUT_MS?: string;
+  TASK_CALLBACK_RETRY_MAX_ATTEMPTS?: string;
   NODE_HEARTBEAT_STALE_SECONDS?: string;
   NODE_AGENT_READY_TIMEOUT_MS?: string;
   NODE_AGENT_READY_POLL_INTERVAL_MS?: string;
@@ -262,6 +271,8 @@ app.route('/api/ui-governance', uiGovernanceRoutes);
 app.route('/api/transcribe', transcribeRoutes);
 app.route('/api/agent-settings', agentSettingsRoutes);
 app.route('/api/client-errors', clientErrorsRoutes);
+app.route('/api/projects', projectsRoutes);
+app.route('/api/projects/:projectId/tasks', tasksRoutes);
 
 // 404 handler
 app.notFound((c) => {

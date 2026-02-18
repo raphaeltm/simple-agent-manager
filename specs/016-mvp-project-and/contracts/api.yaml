@@ -1,0 +1,804 @@
+openapi: 3.0.3
+info:
+  title: Projects and Tasks Foundation MVP API
+  version: 1.0.0
+  description: >-
+    Project-first planning and task management contracts for SAM orchestration Phase 1.
+
+servers:
+  - url: https://api.{baseDomain}
+    variables:
+      baseDomain:
+        default: simple-agent-manager.org
+
+paths:
+  /api/projects:
+    get:
+      summary: List projects for authenticated user
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Project list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [projects]
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Project'
+                  nextCursor:
+                    type: string
+                    nullable: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      summary: Create project
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '201':
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/projects/{projectId}:
+    get:
+      summary: Get project detail
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Project'
+                  - type: object
+                    properties:
+                      summary:
+                        $ref: '#/components/schemas/ProjectSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      summary: Update project metadata
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectRequest'
+      responses:
+        '200':
+          description: Project updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+    delete:
+      summary: Delete project
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/projects/{projectId}/tasks:
+    get:
+      summary: List tasks in a project
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/TaskStatus'
+        - name: minPriority
+          in: query
+          schema:
+            type: integer
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [createdAtDesc, updatedAtDesc, priorityDesc]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Task list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tasks]
+                properties:
+                  tasks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Task'
+                  nextCursor:
+                    type: string
+                    nullable: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    post:
+      summary: Create task in project
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '201':
+          description: Task created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/projects/{projectId}/tasks/{taskId}:
+    get:
+      summary: Get task detail
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Task detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Task'
+                  - type: object
+                    properties:
+                      dependencies:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TaskDependency'
+                      blocked:
+                        type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      summary: Update mutable task fields
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskRequest'
+      responses:
+        '200':
+          description: Task updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      summary: Delete task
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Task deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/projects/{projectId}/tasks/{taskId}/status:
+    post:
+      summary: Transition task status
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toStatus]
+              properties:
+                toStatus:
+                  $ref: '#/components/schemas/TaskStatus'
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Status transitioned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/projects/{projectId}/tasks/{taskId}/status/callback:
+    post:
+      summary: Trusted callback transition for delegated task updates
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toStatus]
+              properties:
+                toStatus:
+                  $ref: '#/components/schemas/TaskStatus'
+                reason:
+                  type: string
+                outputSummary:
+                  type: string
+                outputBranch:
+                  type: string
+                outputPrUrl:
+                  type: string
+                  format: uri
+                errorMessage:
+                  type: string
+      responses:
+        '200':
+          description: Callback status transition accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/projects/{projectId}/tasks/{taskId}/dependencies:
+    post:
+      summary: Add dependency edge to task
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dependsOnTaskId]
+              properties:
+                dependsOnTaskId:
+                  type: string
+      responses:
+        '201':
+          description: Dependency added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDependency'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+    delete:
+      summary: Remove dependency edge from task
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/TaskId'
+        - name: dependsOnTaskId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Dependency removed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/projects/{projectId}/tasks/{taskId}/delegate:
+    post:
+      summary: Manually delegate a task to a workspace
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspaceId]
+              properties:
+                workspaceId:
+                  type: string
+      responses:
+        '200':
+          description: Delegation accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/projects/{projectId}/tasks/{taskId}/events:
+    get:
+      summary: List task status events
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/TaskId'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Task status events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TaskStatusEvent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Project:
+      type: object
+      required:
+        - id
+        - userId
+        - name
+        - repository
+        - defaultBranch
+        - installationId
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        installationId:
+          type: string
+        repository:
+          type: string
+          description: owner/repo
+        defaultBranch:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProjectSummary:
+      type: object
+      properties:
+        taskCountsByStatus:
+          type: object
+          additionalProperties:
+            type: integer
+        linkedWorkspaces:
+          type: integer
+
+    CreateProjectRequest:
+      type: object
+      required:
+        - name
+        - installationId
+        - repository
+        - defaultBranch
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        installationId:
+          type: string
+        repository:
+          type: string
+          description: owner/repo
+        defaultBranch:
+          type: string
+
+    UpdateProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        defaultBranch:
+          type: string
+
+    TaskStatus:
+      type: string
+      enum:
+        - draft
+        - ready
+        - queued
+        - delegated
+        - in_progress
+        - completed
+        - failed
+        - cancelled
+
+    Task:
+      type: object
+      required:
+        - id
+        - projectId
+        - userId
+        - title
+        - status
+        - priority
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        userId:
+          type: string
+        parentTaskId:
+          type: string
+          nullable: true
+        workspaceId:
+          type: string
+          nullable: true
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        priority:
+          type: integer
+        agentProfileHint:
+          type: string
+          nullable: true
+        blocked:
+          type: boolean
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        errorMessage:
+          type: string
+          nullable: true
+        outputSummary:
+          type: string
+          nullable: true
+        outputBranch:
+          type: string
+          nullable: true
+        outputPrUrl:
+          type: string
+          format: uri
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateTaskRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          type: integer
+        parentTaskId:
+          type: string
+        agentProfileHint:
+          type: string
+
+    UpdateTaskRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          type: integer
+        parentTaskId:
+          type: string
+          nullable: true
+
+    TaskDependency:
+      type: object
+      required:
+        - taskId
+        - dependsOnTaskId
+        - createdAt
+      properties:
+        taskId:
+          type: string
+        dependsOnTaskId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    TaskStatusEvent:
+      type: object
+      required:
+        - id
+        - taskId
+        - toStatus
+        - actorType
+        - createdAt
+      properties:
+        id:
+          type: string
+        taskId:
+          type: string
+        fromStatus:
+          $ref: '#/components/schemas/TaskStatus'
+          nullable: true
+        toStatus:
+          $ref: '#/components/schemas/TaskStatus'
+        actorType:
+          type: string
+          enum: [user, system, workspace_callback]
+        actorId:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+        message:
+          type: string

@@ -69,6 +69,27 @@ export const DEFAULT_MAX_AGENT_SESSIONS_PER_WORKSPACE = 10;
 /** Default node heartbeat staleness threshold in seconds. Override via NODE_HEARTBEAT_STALE_SECONDS env var. */
 export const DEFAULT_NODE_HEARTBEAT_STALE_SECONDS = 180;
 
+/** Default max projects per user. Override via MAX_PROJECTS_PER_USER env var. */
+export const DEFAULT_MAX_PROJECTS_PER_USER = 25;
+
+/** Default max tasks per project. Override via MAX_TASKS_PER_PROJECT env var. */
+export const DEFAULT_MAX_TASKS_PER_PROJECT = 500;
+
+/** Default max dependency edges per task. Override via MAX_TASK_DEPENDENCIES_PER_TASK env var. */
+export const DEFAULT_MAX_TASK_DEPENDENCIES_PER_TASK = 25;
+
+/** Default task list page size. Override via TASK_LIST_DEFAULT_PAGE_SIZE env var. */
+export const DEFAULT_TASK_LIST_DEFAULT_PAGE_SIZE = 50;
+
+/** Default max task list page size. Override via TASK_LIST_MAX_PAGE_SIZE env var. */
+export const DEFAULT_TASK_LIST_MAX_PAGE_SIZE = 200;
+
+/** Default callback timeout for delegated task updates in milliseconds. */
+export const DEFAULT_TASK_CALLBACK_TIMEOUT_MS = 10000;
+
+/** Default retry attempts for delegated task callback processing. */
+export const DEFAULT_TASK_CALLBACK_RETRY_MAX_ATTEMPTS = 3;
+
 /** Default idle timeout in seconds (30 minutes). Override via IDLE_TIMEOUT_SECONDS env var. */
 export const DEFAULT_IDLE_TIMEOUT_SECONDS = 30 * 60;
 
