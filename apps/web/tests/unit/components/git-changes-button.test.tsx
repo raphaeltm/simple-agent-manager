@@ -59,4 +59,16 @@ describe('GitChangesButton', () => {
     expect(button.style.minWidth).toBe('32px');
     expect(button.style.minHeight).toBe('32px');
   });
+
+  it('uses compact mobile sizing when compactMobile is enabled', () => {
+    render(<GitChangesButton onClick={() => {}} isMobile compactMobile />);
+    const button = screen.getByLabelText('View git changes');
+    expect(button.style.minWidth).toBe('36px');
+    expect(button.style.minHeight).toBe('36px');
+  });
+
+  it('shows stale status label when git status is stale', () => {
+    render(<GitChangesButton onClick={() => {}} isMobile={false} isStale />);
+    expect(screen.getByLabelText('View git changes (status may be stale)')).toBeInTheDocument();
+  });
 });

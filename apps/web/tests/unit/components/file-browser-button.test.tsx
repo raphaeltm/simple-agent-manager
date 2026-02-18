@@ -33,4 +33,11 @@ describe('FileBrowserButton', () => {
     expect(button.style.minWidth).toBe('32px');
     expect(button.style.minHeight).toBe('32px');
   });
+
+  it('supports compact mobile touch targets', () => {
+    render(<FileBrowserButton onClick={vi.fn()} isMobile compactMobile />);
+    const button = screen.getByRole('button');
+    expect(button.style.minWidth).toBe('36px');
+    expect(button.style.minHeight).toBe('36px');
+  });
 });

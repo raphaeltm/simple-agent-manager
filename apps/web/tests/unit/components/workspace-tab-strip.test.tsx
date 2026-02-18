@@ -30,7 +30,6 @@ describe('WorkspaceTabStrip', () => {
     onClose: vi.fn(),
     onRename: vi.fn(),
     createMenuSlot: <div data-testid="create-menu">+</div>,
-    unclosableTabId: undefined as string | undefined,
   };
 
   beforeEach(() => {
@@ -88,16 +87,11 @@ describe('WorkspaceTabStrip', () => {
     expect(defaultProps.onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('does not render close button for unclosable tab', () => {
-    render(<WorkspaceTabStrip {...defaultProps} unclosableTabId="terminal:t1" />);
+  it('renders close button for terminal tabs', () => {
+    render(<WorkspaceTabStrip {...defaultProps} />);
 
-    // The terminal tab should not have a close button
-    const closeButtons = screen.queryAllByRole('button', { name: /Close Terminal 1/ });
-    expect(closeButtons).toHaveLength(0);
-
-    // But chat tabs should still have close buttons
-    const chatCloseButtons = screen.getAllByRole('button', { name: /Stop/ });
-    expect(chatCloseButtons.length).toBeGreaterThan(0);
+    const closeTerminalButton = screen.getByRole('button', { name: 'Close Terminal 1' });
+    expect(closeTerminalButton).toBeInTheDocument();
   });
 
   // ── Rename tests ──

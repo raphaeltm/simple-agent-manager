@@ -11,6 +11,8 @@ interface GitChangesPanelProps {
   isMobile: boolean;
   onClose: () => void;
   onSelectFile: (filePath: string, staged: boolean) => void;
+  onStatusChange?: (status: GitStatusData) => void;
+  onStatusFetchError?: () => void;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -49,6 +51,8 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
   isMobile,
   onClose,
   onSelectFile,
+  onStatusChange,
+  onStatusFetchError,
 }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,12 +69,14 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
     try {
       const result = await getGitStatus(workspaceUrl, workspaceId, token, worktree ?? undefined);
       setData(result);
+      onStatusChange?.(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch git status');
+      onStatusFetchError?.();
     } finally {
       setLoading(false);
     }
-  }, [workspaceUrl, workspaceId, token, worktree]);
+  }, [workspaceUrl, workspaceId, token, worktree, onStatusChange, onStatusFetchError]);
 
   useEffect(() => {
     fetchStatus();

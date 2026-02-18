@@ -24,6 +24,7 @@ const defaultProps = {
 describe('FileViewerPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   it('shows spinner while loading', () => {
@@ -136,5 +137,45 @@ describe('FileViewerPanel', () => {
     });
     fireEvent.click(screen.getByText('View Diff'));
     expect(onViewDiff).toHaveBeenCalledWith('src/main.ts', false);
+  });
+
+  it('shows markdown render/source toggle for markdown files', async () => {
+    mocks.getGitFile.mockResolvedValue({ content: '# Title\n\nSome text.' });
+    render(<FileViewerPanel {...defaultProps} filePath="README.md" />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Show rendered markdown')).toBeInTheDocument();
+      expect(screen.getByLabelText('Show markdown source')).toBeInTheDocument();
+    });
+  });
+
+  it('renders markdown by default and can switch to source view', async () => {
+    mocks.getGitFile.mockResolvedValue({ content: '# Heading' });
+    render(<FileViewerPanel {...defaultProps} filePath="README.md" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('rendered-markdown')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Heading' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Show markdown source'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('rendered-markdown')).not.toBeInTheDocument();
+      expect(screen.getByText('#')).toBeInTheDocument();
+      expect(screen.getByText('Heading')).toBeInTheDocument();
+    });
+  });
+
+  it('persists markdown mode preference in localStorage', async () => {
+    mocks.getGitFile.mockResolvedValue({ content: '# Heading' });
+    render(<FileViewerPanel {...defaultProps} filePath="README.md" />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Show markdown source')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Show markdown source'));
+    expect(localStorage.getItem('sam:md-render-mode')).toBe('source');
   });
 });
