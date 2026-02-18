@@ -113,6 +113,7 @@ Before committing any business logic changes, verify:
 3. **MUST** start with single-column layouts on mobile
 4. **MUST** visually verify on mobile viewport via Playwright **during development** (before committing)
 5. **MUST** follow `docs/guides/mobile-ux-guidelines.md`
+6. **MUST** test any added or changed navigation elements on mobile viewport and verify there is no overlap or overflow that breaks layout
 
 ### Visual Verification with Playwright (Required During Development)
 
@@ -123,7 +124,8 @@ ALL UI changes MUST be visually verified on a mobile viewport **before committin
 3. Take a screenshot and inspect for: overflow, clipping, touch target size, readability
 4. If the component requires authentication to reach, inject a mock HTML harness via `browser_evaluate` that renders the component's markup with the project's CSS variables
 5. Fix any issues before committing — do NOT defer to post-deployment testing
-6. Save screenshots to `.codex/tmp/playwright-screenshots/` (gitignored)
+6. If fixing navigation overlap/overflow would conflict with the requester's requested UI behavior, ask the requester how to proceed or propose an alternative design that satisfies the request without breaking mobile layout
+7. Save screenshots to `.codex/tmp/playwright-screenshots/` (gitignored)
 
 This workflow avoids deploy-fix-deploy cycles and catches mobile layout bugs that unit tests cannot detect.
 
@@ -136,6 +138,7 @@ Before deploying any UI changes:
 - [ ] Grid layouts collapse to single column on mobile
 - [ ] Visually verified on mobile viewport via Playwright during development
 - [ ] Dialogs/popovers/panels stay within viewport bounds on 320px-wide screens
+- [ ] Navigation additions verified on mobile with no overlap or overflow
 
 ---
 
