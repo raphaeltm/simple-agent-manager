@@ -484,7 +484,7 @@ describe('Workspace page', () => {
     });
   });
 
-  it('includes sessionId in ACP websocket URL when a sessionId is selected', async () => {
+  it('provides session-aware ACP URL resolver when a sessionId is selected', async () => {
     mocks.listAgentSessions.mockResolvedValue([
       {
         id: 'sess-1',
@@ -503,12 +503,26 @@ describe('Workspace page', () => {
     });
 
     await waitFor(() => {
-      const wsUrls = mocks.useAcpSession.mock.calls
-        .map(([options]) => options?.wsUrl)
-        .filter((value): value is string => typeof value === 'string');
-      expect(
-        wsUrls.some((url) => url.includes('sessionId=sess-1') && !url.includes('takeover='))
-      ).toBe(true);
+      const resolvers = mocks.useAcpSession.mock.calls
+        .map(([options]) => options?.resolveWsUrl)
+        .filter((value): value is (() => Promise<string | null>) => typeof value === 'function');
+      expect(resolvers.length).toBeGreaterThan(0);
+    });
+
+    const resolver = mocks.useAcpSession.mock.calls
+      .map(([options]) => options?.resolveWsUrl)
+      .find((value): value is () => Promise<string | null> => typeof value === 'function');
+
+    expect(resolver).toBeDefined();
+    const resolvedUrl = await resolver!();
+    expect(resolvedUrl).toBeTruthy();
+    expect(resolvedUrl!).toContain('sessionId=sess-1');
+    expect(resolvedUrl!).not.toContain('takeover=');
+    expect(mocks.getTerminalToken).toHaveBeenCalledWith('ws-123');
+    await waitFor(() => {
+      // ChatSession uses resolver mode, so wsUrl is intentionally null.
+      const wsUrlValues = mocks.useAcpSession.mock.calls.map(([options]) => options?.wsUrl);
+      expect(wsUrlValues.some((value) => value === null)).toBe(true);
     });
   });
 
