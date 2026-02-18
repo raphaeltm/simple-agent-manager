@@ -604,6 +604,10 @@ Claude Code now supports dual authentication methods:
 - `CLAUDE_AGENT.md` points to the source subagent definition in `.claude/agents/`.
 - Keep `.claude/agents/*/*.md` as the source of truth. Do not add Claude-specific frontmatter keys (e.g. `tools`, `model`) to `SKILL.md` files.
 
+### Fix All Build and Lint Errors (NON-NEGOTIABLE)
+
+If you encounter build, typecheck, or lint errors — even ones unrelated to your current change — you MUST fix them before pushing. Do not ignore pre-existing failures. A green CI pipeline is everyone's responsibility, and letting broken builds persist makes it harder to identify regressions from new changes.
+
 ### No Legacy / Dead Code
 
 - This project is pre-production. Do not keep "legacy" code paths that are not used.
