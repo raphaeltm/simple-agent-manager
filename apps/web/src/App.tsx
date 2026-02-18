@@ -11,6 +11,8 @@ import { Workspace } from './pages/Workspace';
 import { Nodes } from './pages/Nodes';
 import { Node } from './pages/Node';
 import { UiStandards } from './pages/UiStandards';
+import { Projects } from './pages/Projects';
+import { Project } from './pages/Project';
 
 export default function App() {
   return (
@@ -68,6 +70,22 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <Node />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/projects"
+            element={
+              <ProtectedRoute>
+                <Projects />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/projects/:id"
+            element={
+              <ProtectedRoute>
+                <Project />
               </ProtectedRoute>
             }
           />

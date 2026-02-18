@@ -55,8 +55,13 @@ export function RepoSelector({
 
   // Filter repositories based on input
   useEffect(() => {
-    if (!value || value.startsWith('http') || value.startsWith('git@')) {
+    if (value.startsWith('http') || value.startsWith('git@')) {
       setFilteredRepos([]);
+      return;
+    }
+
+    if (!value) {
+      setFilteredRepos(repositories.slice(0, 25));
       return;
     }
 
@@ -155,7 +160,7 @@ export function RepoSelector({
     }
 
     // Show dropdown if we have repos and user is typing a search term
-    if (repositories.length > 0 && newValue && !newValue.startsWith('http') && !newValue.startsWith('git@')) {
+    if (repositories.length > 0 && !newValue.startsWith('http') && !newValue.startsWith('git@')) {
       setShowDropdown(true);
     } else {
       setShowDropdown(false);
@@ -176,7 +181,7 @@ export function RepoSelector({
   };
 
   const handleFocus = () => {
-    if (repositories.length > 0 && value && !value.startsWith('http') && !value.startsWith('git@')) {
+    if (repositories.length > 0 && !value.startsWith('http') && !value.startsWith('git@')) {
       setShowDropdown(true);
     }
   };

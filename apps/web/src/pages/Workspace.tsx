@@ -20,6 +20,7 @@ import { WorkspaceTabStrip, type WorkspaceTabItem } from '../components/Workspac
 import { WorktreeSelector } from '../components/WorktreeSelector';
 import { MoreVertical, X } from 'lucide-react';
 import { GitChangesButton } from '../components/GitChangesButton';
+import { CommandPaletteButton } from '../components/CommandPaletteButton';
 import { GitChangesPanel } from '../components/GitChangesPanel';
 import { GitDiffView } from '../components/GitDiffView';
 import { FileBrowserButton } from '../components/FileBrowserButton';
@@ -79,7 +80,12 @@ type WorkspaceTab =
       badge?: string;
     };
 
-const DEFAULT_TERMINAL_TAB_ID = '__default-terminal__';
+const GIT_STATUS_POLL_INTERVAL_MS = 30_000;
+const GIT_STATUS_RETRY_DELAYS_MS = [750, 1500];
+
+function countGitChanges(status: GitStatusData): number {
+  return status.staged.length + status.unstaged.length + status.untracked.length;
+}
 
 function workspaceTabStatusColor(tab: WorkspaceTab): string {
   if (tab.kind === 'terminal') {
@@ -151,6 +157,7 @@ export function Workspace() {
   const [terminalError, setTerminalError] = useState<string | null>(null);
   const [gitChangeCount, setGitChangeCount] = useState(0);
   const [gitStatus, setGitStatus] = useState<GitStatusData | null>(null);
+  const [gitStatusStale, setGitStatusStale] = useState(false);
   const [sessionTokenUsages, setSessionTokenUsages] = useState<SessionTokenUsage[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>(viewOverride ?? 'terminal');
   const [workspaceEvents, setWorkspaceEvents] = useState<Event[]>([]);
@@ -651,18 +658,71 @@ export function Workspace() {
     [id, workspace?.url, terminalToken, activeWorktree, handleSelectWorktree, refreshWorktrees]
   );
 
-  // Fetch git change count for the badge (once when terminal is ready)
+  const applyGitStatus = useCallback((status: GitStatusData) => {
+    setGitStatus(status);
+    setGitChangeCount(countGitChanges(status));
+    setGitStatusStale(false);
+  }, []);
+
+  const markGitStatusStale = useCallback(() => {
+    setGitStatusStale(true);
+  }, []);
+
+  // Keep git status badge fresh: retry initial load and poll periodically.
   useEffect(() => {
-    if (!workspace?.url || !terminalToken || !id || !isRunning) return;
-    getGitStatus(workspace.url, id, terminalToken, activeWorktree ?? undefined)
-      .then((data) => {
-        setGitStatus(data);
-        setGitChangeCount(data.staged.length + data.unstaged.length + data.untracked.length);
-      })
-      .catch(() => {
-        // Silently fail — badge just won't show a count
-      });
-  }, [workspace?.url, terminalToken, id, isRunning, activeWorktree]);
+    if (!workspace?.url || !terminalToken || !id || !isRunning) {
+      setGitStatus(null);
+      setGitChangeCount(0);
+      setGitStatusStale(false);
+      return;
+    }
+
+    const workspaceId = id;
+    const workspaceUrl = workspace.url;
+    let disposed = false;
+
+    const fetchGitStatus = async (retryOnFailure: boolean) => {
+      const delays = retryOnFailure ? GIT_STATUS_RETRY_DELAYS_MS : [];
+      const attempts = delays.length + 1;
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        try {
+          const status = await getGitStatus(
+            workspaceUrl,
+            workspaceId,
+            terminalToken,
+            activeWorktree ?? undefined
+          );
+          if (!disposed) applyGitStatus(status);
+          return;
+        } catch {
+          if (attempt === attempts - 1) {
+            if (!disposed) markGitStatusStale();
+            return;
+          }
+          const delay = delays[attempt] ?? 0;
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+    };
+
+    void fetchGitStatus(true);
+    const interval = setInterval(() => {
+      void fetchGitStatus(false);
+    }, GIT_STATUS_POLL_INTERVAL_MS);
+
+    return () => {
+      disposed = true;
+      clearInterval(interval);
+    };
+  }, [
+    workspace?.url,
+    terminalToken,
+    id,
+    isRunning,
+    activeWorktree,
+    applyGitStatus,
+    markGitStatusStale,
+  ]);
 
   const configuredAgents = useMemo(
     () => agentOptions.filter((agent) => agent.configured && agent.supportsAcp),
@@ -794,9 +854,7 @@ export function Workspace() {
       params.set('view', 'terminal');
       params.delete('sessionId');
       navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
-      if (tab.sessionId !== DEFAULT_TERMINAL_TAB_ID) {
-        multiTerminalRef.current?.activateSession(tab.sessionId);
-      }
+      multiTerminalRef.current?.activateSession(tab.sessionId);
       return;
     }
 
@@ -804,12 +862,26 @@ export function Workspace() {
   };
 
   const handleCloseWorkspaceTab = (tab: WorkspaceTab) => {
+    if (activeTabId === tab.id) {
+      const closeIndex = workspaceTabs.findIndex((candidate) => candidate.id === tab.id);
+      const remainingTabs = workspaceTabs.filter((candidate) => candidate.id !== tab.id);
+      if (remainingTabs.length > 0) {
+        const fallbackIndex = closeIndex >= 0 ? Math.min(closeIndex, remainingTabs.length - 1) : 0;
+        handleSelectWorkspaceTab(remainingTabs[fallbackIndex]!);
+      } else {
+        setViewMode('terminal');
+        setActiveTerminalSessionId(null);
+        const params = new URLSearchParams(searchParams);
+        params.set('view', 'terminal');
+        params.delete('sessionId');
+        navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
+      }
+    }
+
     tabOrder.removeTab(tab.id);
 
     if (tab.kind === 'terminal') {
-      if (tab.sessionId !== DEFAULT_TERMINAL_TAB_ID) {
-        multiTerminalRef.current?.closeSession(tab.sessionId);
-      }
+      multiTerminalRef.current?.closeSession(tab.sessionId);
       return;
     }
 
@@ -820,26 +892,9 @@ export function Workspace() {
   const defaultAgentName = defaultAgentId ? (agentNameById.get(defaultAgentId) ?? null) : null;
 
   const visibleTerminalTabs = useMemo<MultiTerminalSessionSnapshot[]>(() => {
-    if (terminalTabs.length > 0) {
-      return terminalTabs;
-    }
-    if (!isRunning || !featureFlags.multiTerminal) {
-      return [];
-    }
-    return [
-      {
-        id: DEFAULT_TERMINAL_TAB_ID,
-        name: 'Terminal 1',
-        status: terminalError
-          ? 'error'
-          : terminalLoading
-            ? 'connecting'
-            : wsUrl
-              ? 'connected'
-              : 'disconnected',
-      },
-    ];
-  }, [featureFlags.multiTerminal, isRunning, terminalError, terminalLoading, terminalTabs, wsUrl]);
+    if (!isRunning || !featureFlags.multiTerminal) return [];
+    return terminalTabs;
+  }, [featureFlags.multiTerminal, isRunning, terminalTabs]);
 
   const workspaceTabs = useMemo<WorkspaceTab[]>(() => {
     const terminalSessionTabs: WorkspaceTab[] = visibleTerminalTabs.map((session) => ({
@@ -1345,7 +1400,6 @@ export function Workspace() {
       onRename={handleRenameWorkspaceTab}
       onReorder={tabOrder.reorderTab}
       createMenuSlot={createMenuContent}
-      unclosableTabId={`terminal:${DEFAULT_TERMINAL_TAB_ID}`}
     />
   ) : null;
 
@@ -1394,11 +1448,11 @@ export function Workspace() {
         style={{
           display: 'flex',
           alignItems: 'center',
-          padding: isMobile ? '0 4px 0 4px' : '0 12px',
+          padding: isMobile ? '0 2px' : '0 12px',
           height: isMobile ? '44px' : '40px',
           backgroundColor: 'var(--sam-color-bg-surface)',
           borderBottom: '1px solid var(--sam-color-border-default)',
-          gap: isMobile ? '4px' : '10px',
+          gap: isMobile ? '2px' : '10px',
           flexShrink: 0,
         }}
       >
@@ -1452,7 +1506,7 @@ export function Workspace() {
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
-              maxWidth: isMobile ? '140px' : undefined,
+              maxWidth: isMobile ? '120px' : undefined,
             }}
           >
             {workspace?.displayName || workspace?.name}
@@ -1525,7 +1579,11 @@ export function Workspace() {
 
         {/* File browser button */}
         {isRunning && terminalToken && (
-          <FileBrowserButton onClick={handleOpenFileBrowser} isMobile={isMobile} />
+          <FileBrowserButton
+            onClick={handleOpenFileBrowser}
+            isMobile={isMobile}
+            compactMobile={isMobile}
+          />
         )}
 
         {/* Git changes button */}
@@ -1534,6 +1592,17 @@ export function Workspace() {
             onClick={handleOpenGitChanges}
             changeCount={gitChangeCount}
             isMobile={isMobile}
+            compactMobile={isMobile}
+            isStale={gitStatusStale}
+          />
+        )}
+
+        {/* Mobile command palette access */}
+        {isRunning && terminalToken && isMobile && (
+          <CommandPaletteButton
+            onClick={() => setShowCommandPalette(true)}
+            isMobile
+            compactMobile
           />
         )}
 
@@ -1547,16 +1616,16 @@ export function Workspace() {
               border: 'none',
               cursor: 'pointer',
               color: 'var(--sam-color-fg-muted)',
-              padding: '8px',
+              padding: '6px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              minWidth: 44,
-              minHeight: 44,
+              minWidth: 36,
+              minHeight: 36,
               flexShrink: 0,
             }}
           >
-            <MoreVertical size={18} />
+            <MoreVertical size={16} />
           </button>
         )}
 
@@ -1758,6 +1827,8 @@ export function Workspace() {
           isMobile={isMobile}
           onClose={handleCloseGitPanel}
           onSelectFile={handleNavigateToGitDiff}
+          onStatusChange={applyGitStatus}
+          onStatusFetchError={markGitStatusStale}
         />
       )}
       {gitParam === 'diff' && gitFileParam && terminalToken && workspace?.url && id && (

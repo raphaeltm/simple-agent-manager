@@ -165,4 +165,31 @@ describe('GitChangesPanel', () => {
     fireEvent.click(screen.getByText('Staged'));
     expect(screen.queryByText('a.ts')).not.toBeInTheDocument();
   });
+
+  it('propagates status updates to parent callback on success', async () => {
+    const onStatusChange = vi.fn();
+    const status = {
+      staged: [{ path: 'a.ts', status: 'M' }],
+      unstaged: [],
+      untracked: [],
+    };
+    mocks.getGitStatus.mockResolvedValue(status);
+
+    render(<GitChangesPanel {...defaultProps} onStatusChange={onStatusChange} />);
+
+    await waitFor(() => {
+      expect(onStatusChange).toHaveBeenCalledWith(status);
+    });
+  });
+
+  it('notifies parent when status refresh fails', async () => {
+    const onStatusFetchError = vi.fn();
+    mocks.getGitStatus.mockRejectedValue(new Error('Network error'));
+
+    render(<GitChangesPanel {...defaultProps} onStatusFetchError={onStatusFetchError} />);
+
+    await waitFor(() => {
+      expect(onStatusFetchError).toHaveBeenCalled();
+    });
+  });
 });

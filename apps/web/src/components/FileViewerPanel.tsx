@@ -1,6 +1,16 @@
-import { type CSSProperties, type FC, useCallback, useEffect, useState } from 'react';
+import {
+  type CSSProperties,
+  type FC,
+  type HTMLAttributes,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useState,
+} from 'react';
 import { X } from 'lucide-react';
 import { Highlight, themes } from 'prism-react-renderer';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Spinner } from '@simple-agent-manager/ui';
 import { getGitFile } from '../lib/api';
 
@@ -71,6 +81,21 @@ function isBinaryContent(content: string): boolean {
   return content.includes('\0');
 }
 
+type MarkdownViewMode = 'rendered' | 'source';
+
+const MARKDOWN_MODE_STORAGE_KEY = 'sam:md-render-mode';
+
+function isMarkdownFile(filePath: string): boolean {
+  const lower = filePath.toLowerCase();
+  return lower.endsWith('.md') || lower.endsWith('.mdx');
+}
+
+function readMarkdownViewMode(): MarkdownViewMode {
+  if (typeof window === 'undefined') return 'rendered';
+  const stored = window.localStorage.getItem(MARKDOWN_MODE_STORAGE_KEY);
+  return stored === 'source' ? 'source' : 'rendered';
+}
+
 export const FileViewerPanel: FC<FileViewerPanelProps> = ({
   workspaceUrl,
   workspaceId,
@@ -87,6 +112,7 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [content, setContent] = useState<string | null>(null);
+  const [markdownMode, setMarkdownMode] = useState<MarkdownViewMode>(() => readMarkdownViewMode());
 
   const fetchFile = useCallback(async () => {
     setLoading(true);
@@ -120,7 +146,12 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
+  useEffect(() => {
+    window.localStorage.setItem(MARKDOWN_MODE_STORAGE_KEY, markdownMode);
+  }, [markdownMode]);
+
   const fileName = filePath.split('/').pop() ?? filePath;
+  const markdownFile = isMarkdownFile(filePath);
   const language = detectLanguage(filePath);
   const binary = content !== null && isBinaryContent(content);
 
@@ -178,6 +209,34 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
         >
           {fileName}
         </span>
+
+        {markdownFile && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              border: '1px solid var(--sam-color-border-default)',
+              borderRadius: 6,
+              overflow: 'hidden',
+              flexShrink: 0,
+            }}
+          >
+            <button
+              onClick={() => setMarkdownMode('rendered')}
+              aria-label="Show rendered markdown"
+              style={markdownModeButtonStyle(markdownMode === 'rendered')}
+            >
+              Rendered
+            </button>
+            <button
+              onClick={() => setMarkdownMode('source')}
+              aria-label="Show markdown source"
+              style={markdownModeButtonStyle(markdownMode === 'source')}
+            >
+              Source
+            </button>
+          </div>
+        )}
 
         {hasGitChanges && onViewDiff && (
           <button
@@ -242,7 +301,11 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
         )}
 
         {!loading && !error && content !== null && !binary && (
-          <SyntaxHighlightedCode content={content} language={language} />
+          markdownFile && markdownMode === 'rendered' ? (
+            <RenderedMarkdown content={content} />
+          ) : (
+            <SyntaxHighlightedCode content={content} language={language} />
+          )
         )}
       </div>
     </div>
@@ -312,6 +375,123 @@ const SyntaxHighlightedCode: FC<{ content: string; language: string }> = ({
   );
 };
 
+// ---------- Markdown Rendering ----------
+
+const markdownContainerStyle: CSSProperties = {
+  maxWidth: '100%',
+  overflowX: 'hidden',
+  padding: '16px',
+  color: 'var(--sam-color-fg-primary)',
+  lineHeight: 1.6,
+  fontSize: '0.9rem',
+  wordBreak: 'break-word',
+};
+
+const RenderedMarkdown: FC<{ content: string }> = ({ content }) => {
+  return (
+    <div style={markdownContainerStyle} data-testid="rendered-markdown">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ children }) => (
+            <h1 style={{ fontSize: '1.5rem', margin: '0 0 12px', lineHeight: 1.25 }}>{children}</h1>
+          ),
+          h2: ({ children }) => (
+            <h2 style={{ fontSize: '1.25rem', margin: '18px 0 10px', lineHeight: 1.3 }}>{children}</h2>
+          ),
+          h3: ({ children }) => (
+            <h3 style={{ fontSize: '1.1rem', margin: '16px 0 8px', lineHeight: 1.35 }}>{children}</h3>
+          ),
+          p: ({ children }) => <p style={{ margin: '0 0 12px' }}>{children}</p>,
+          ul: ({ children }) => <ul style={{ margin: '0 0 12px', paddingLeft: 22 }}>{children}</ul>,
+          ol: ({ children }) => <ol style={{ margin: '0 0 12px', paddingLeft: 22 }}>{children}</ol>,
+          li: ({ children }) => <li style={{ marginBottom: 4 }}>{children}</li>,
+          blockquote: ({ children }) => (
+            <blockquote
+              style={{
+                margin: '12px 0',
+                padding: '8px 12px',
+                borderLeft: '3px solid var(--sam-color-border-default)',
+                backgroundColor: 'rgba(122, 162, 247, 0.08)',
+              }}
+            >
+              {children}
+            </blockquote>
+          ),
+          a: ({ href, children }) => (
+            <a href={href} target="_blank" rel="noreferrer" style={{ color: '#7aa2f7' }}>
+              {children}
+            </a>
+          ),
+          table: ({ children }) => (
+            <div style={{ overflowX: 'auto', marginBottom: 12 }}>
+              <table
+                style={{
+                  borderCollapse: 'collapse',
+                  width: '100%',
+                  minWidth: 320,
+                }}
+              >
+                {children}
+              </table>
+            </div>
+          ),
+          th: ({ children }) => (
+            <th
+              style={{
+                border: '1px solid var(--sam-color-border-default)',
+                padding: '6px 8px',
+                textAlign: 'left',
+                backgroundColor: 'rgba(122, 162, 247, 0.08)',
+              }}
+            >
+              {children}
+            </th>
+          ),
+          td: ({ children }) => (
+            <td style={{ border: '1px solid var(--sam-color-border-default)', padding: '6px 8px' }}>
+              {children}
+            </td>
+          ),
+          code: ({
+            className,
+            children,
+            ...props
+          }: HTMLAttributes<HTMLElement> & { children?: ReactNode }) => {
+            const match = /language-(\w+)/.exec(className ?? '');
+            const code = String(children ?? '').replace(/\n$/, '');
+
+            if (match) {
+              return (
+                <div style={{ marginBottom: 12 }}>
+                  <SyntaxHighlightedCode content={code} language={match[1] ?? ''} />
+                </div>
+              );
+            }
+
+            return (
+              <code
+                {...props}
+                style={{
+                  backgroundColor: 'rgba(122, 162, 247, 0.12)',
+                  borderRadius: 4,
+                  padding: '1px 5px',
+                  fontFamily: 'monospace',
+                  fontSize: '0.85em',
+                }}
+              >
+                {children}
+              </code>
+            );
+          },
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+};
+
 // ---------- Shared styles ----------
 
 function iconBtnStyle(isMobile: boolean): CSSProperties {
@@ -327,5 +507,18 @@ function iconBtnStyle(isMobile: boolean): CSSProperties {
     minWidth: isMobile ? 44 : 32,
     minHeight: isMobile ? 44 : 32,
     flexShrink: 0,
+  };
+}
+
+function markdownModeButtonStyle(active: boolean): CSSProperties {
+  return {
+    border: 'none',
+    backgroundColor: active ? 'rgba(122, 162, 247, 0.2)' : 'transparent',
+    color: active ? 'var(--sam-color-fg-primary)' : 'var(--sam-color-fg-muted)',
+    fontSize: '0.6875rem',
+    fontWeight: 600,
+    padding: '4px 8px',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
   };
 }

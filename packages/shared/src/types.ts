@@ -98,6 +98,149 @@ export interface GitHubConnection {
 }
 
 // =============================================================================
+// Projects & Tasks
+// =============================================================================
+
+export interface Project {
+  id: string;
+  userId: string;
+  name: string;
+  description: string | null;
+  installationId: string;
+  repository: string;
+  defaultBranch: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectSummary {
+  taskCountsByStatus: Partial<Record<TaskStatus, number>>;
+  linkedWorkspaces: number;
+}
+
+export interface ProjectDetailResponse extends Project {
+  summary: ProjectSummary;
+}
+
+export interface CreateProjectRequest {
+  name: string;
+  description?: string;
+  installationId: string;
+  repository: string;
+  defaultBranch: string;
+}
+
+export interface UpdateProjectRequest {
+  name?: string;
+  description?: string;
+  defaultBranch?: string;
+}
+
+export type TaskStatus =
+  | 'draft'
+  | 'ready'
+  | 'queued'
+  | 'delegated'
+  | 'in_progress'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export type TaskActorType = 'user' | 'system' | 'workspace_callback';
+
+export type TaskSortOrder = 'createdAtDesc' | 'updatedAtDesc' | 'priorityDesc';
+
+export interface Task {
+  id: string;
+  projectId: string;
+  userId: string;
+  parentTaskId: string | null;
+  workspaceId: string | null;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  priority: number;
+  agentProfileHint: string | null;
+  blocked?: boolean;
+  startedAt: string | null;
+  completedAt: string | null;
+  errorMessage: string | null;
+  outputSummary: string | null;
+  outputBranch: string | null;
+  outputPrUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskDependency {
+  taskId: string;
+  dependsOnTaskId: string;
+  createdAt: string;
+}
+
+export interface TaskStatusEvent {
+  id: string;
+  taskId: string;
+  fromStatus: TaskStatus | null;
+  toStatus: TaskStatus;
+  actorType: TaskActorType;
+  actorId: string | null;
+  reason: string | null;
+  createdAt: string;
+}
+
+export interface TaskDetailResponse extends Task {
+  dependencies: TaskDependency[];
+  blocked: boolean;
+}
+
+export interface CreateTaskRequest {
+  title: string;
+  description?: string;
+  priority?: number;
+  parentTaskId?: string;
+  agentProfileHint?: string;
+}
+
+export interface UpdateTaskRequest {
+  title?: string;
+  description?: string;
+  priority?: number;
+  parentTaskId?: string | null;
+}
+
+export interface UpdateTaskStatusRequest {
+  toStatus: TaskStatus;
+  reason?: string;
+  outputSummary?: string;
+  outputBranch?: string;
+  outputPrUrl?: string;
+  errorMessage?: string;
+}
+
+export interface CreateTaskDependencyRequest {
+  dependsOnTaskId: string;
+}
+
+export interface DelegateTaskRequest {
+  workspaceId: string;
+}
+
+export interface ListProjectsResponse {
+  projects: Project[];
+  nextCursor?: string | null;
+}
+
+export interface ListTasksResponse {
+  tasks: Task[];
+  nextCursor?: string | null;
+}
+
+export interface ListTaskEventsResponse {
+  events: TaskStatusEvent[];
+}
+
+// =============================================================================
 // Workspace
 // =============================================================================
 export type NodeStatus = 'pending' | 'creating' | 'running' | 'stopping' | 'stopped' | 'error';

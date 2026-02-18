@@ -85,10 +85,11 @@ describe('CreateWorkspace', () => {
   it('shows branch dropdown after selecting a repository', async () => {
     renderCreateWorkspace();
     await screen.findByLabelText('Workspace Name');
+    await waitFor(() => {
+      expect(mocks.listRepositories).toHaveBeenCalled();
+    });
 
-    // Type in the repo input to trigger the dropdown
     const repoInput = screen.getByLabelText('Repository');
-    fireEvent.change(repoInput, { target: { value: 'my-repo' } });
     fireEvent.focus(repoInput);
 
     // Select the repo from dropdown
@@ -114,12 +115,24 @@ describe('CreateWorkspace', () => {
     expect(branchOptions).toHaveLength(3);
   });
 
-  it('defaults branch to repository default branch when selected', async () => {
+  it('shows repository dropdown options when the field is focused', async () => {
     renderCreateWorkspace();
     await screen.findByLabelText('Workspace Name');
 
     const repoInput = screen.getByLabelText('Repository');
-    fireEvent.change(repoInput, { target: { value: 'my-repo' } });
+    fireEvent.focus(repoInput);
+
+    expect(await screen.findByText('octo/my-repo')).toBeInTheDocument();
+  });
+
+  it('defaults branch to repository default branch when selected', async () => {
+    renderCreateWorkspace();
+    await screen.findByLabelText('Workspace Name');
+    await waitFor(() => {
+      expect(mocks.listRepositories).toHaveBeenCalled();
+    });
+
+    const repoInput = screen.getByLabelText('Repository');
     fireEvent.focus(repoInput);
 
     const repoOption = await screen.findByText('octo/my-repo');
@@ -211,4 +224,5 @@ describe('CreateWorkspace', () => {
     expect(screen.queryByText('Setup Required')).not.toBeInTheDocument();
     expect(screen.queryByText('Checking prerequisites...')).not.toBeInTheDocument();
   });
+
 });

@@ -2,8 +2,25 @@ import type {
   User,
   NodeResponse,
   CreateNodeRequest,
+  CreateProjectRequest,
+  CreateTaskDependencyRequest,
+  CreateTaskRequest,
   WorkspaceResponse,
   CreateWorkspaceRequest,
+  DelegateTaskRequest,
+  ListProjectsResponse,
+  ListTaskEventsResponse,
+  ListTasksResponse,
+  Project,
+  ProjectDetailResponse,
+  Task,
+  TaskDependency,
+  TaskDetailResponse,
+  TaskSortOrder,
+  TaskStatus,
+  UpdateProjectRequest,
+  UpdateTaskRequest,
+  UpdateTaskStatusRequest,
   UpdateWorkspaceRequest,
   CredentialResponse,
   CreateCredentialRequest,
@@ -134,6 +151,187 @@ export async function listBranches(
     params.set('installation_id', installationId);
   }
   return request<Array<{ name: string }>>(`/api/github/branches?${params.toString()}`);
+}
+
+// =============================================================================
+// Projects
+// =============================================================================
+export async function listProjects(limit?: number, cursor?: string): Promise<ListProjectsResponse> {
+  const params = new URLSearchParams();
+  if (limit !== undefined) {
+    params.set('limit', String(limit));
+  }
+  if (cursor) {
+    params.set('cursor', cursor);
+  }
+
+  const url = params.toString() ? `/api/projects?${params.toString()}` : '/api/projects';
+  return request<ListProjectsResponse>(url);
+}
+
+export async function createProject(data: CreateProjectRequest): Promise<Project> {
+  return request<Project>('/api/projects', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getProject(id: string): Promise<ProjectDetailResponse> {
+  return request<ProjectDetailResponse>(`/api/projects/${id}`);
+}
+
+export async function updateProject(id: string, data: UpdateProjectRequest): Promise<Project> {
+  return request<Project>(`/api/projects/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteProject(id: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/api/projects/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+// =============================================================================
+// Tasks
+// =============================================================================
+export interface ListProjectTasksParams {
+  status?: TaskStatus;
+  minPriority?: number;
+  sort?: TaskSortOrder;
+  limit?: number;
+  cursor?: string;
+}
+
+export async function listProjectTasks(
+  projectId: string,
+  params: ListProjectTasksParams = {}
+): Promise<ListTasksResponse> {
+  const searchParams = new URLSearchParams();
+  if (params.status) {
+    searchParams.set('status', params.status);
+  }
+  if (params.minPriority !== undefined) {
+    searchParams.set('minPriority', String(params.minPriority));
+  }
+  if (params.sort) {
+    searchParams.set('sort', params.sort);
+  }
+  if (params.limit !== undefined) {
+    searchParams.set('limit', String(params.limit));
+  }
+  if (params.cursor) {
+    searchParams.set('cursor', params.cursor);
+  }
+
+  const query = searchParams.toString();
+  const endpoint = query
+    ? `/api/projects/${projectId}/tasks?${query}`
+    : `/api/projects/${projectId}/tasks`;
+
+  return request<ListTasksResponse>(endpoint);
+}
+
+export async function createProjectTask(
+  projectId: string,
+  data: CreateTaskRequest
+): Promise<Task> {
+  return request<Task>(`/api/projects/${projectId}/tasks`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getProjectTask(
+  projectId: string,
+  taskId: string
+): Promise<TaskDetailResponse> {
+  return request<TaskDetailResponse>(`/api/projects/${projectId}/tasks/${taskId}`);
+}
+
+export async function updateProjectTask(
+  projectId: string,
+  taskId: string,
+  data: UpdateTaskRequest
+): Promise<Task> {
+  return request<Task>(`/api/projects/${projectId}/tasks/${taskId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteProjectTask(
+  projectId: string,
+  taskId: string
+): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/api/projects/${projectId}/tasks/${taskId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function updateProjectTaskStatus(
+  projectId: string,
+  taskId: string,
+  data: UpdateTaskStatusRequest
+): Promise<Task> {
+  return request<Task>(`/api/projects/${projectId}/tasks/${taskId}/status`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function addTaskDependency(
+  projectId: string,
+  taskId: string,
+  data: CreateTaskDependencyRequest
+): Promise<TaskDependency> {
+  return request<TaskDependency>(`/api/projects/${projectId}/tasks/${taskId}/dependencies`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function removeTaskDependency(
+  projectId: string,
+  taskId: string,
+  dependsOnTaskId: string
+): Promise<{ success: boolean }> {
+  const query = new URLSearchParams({ dependsOnTaskId });
+  return request<{ success: boolean }>(
+    `/api/projects/${projectId}/tasks/${taskId}/dependencies?${query.toString()}`,
+    {
+      method: 'DELETE',
+    }
+  );
+}
+
+export async function delegateTask(
+  projectId: string,
+  taskId: string,
+  data: DelegateTaskRequest
+): Promise<Task> {
+  return request<Task>(`/api/projects/${projectId}/tasks/${taskId}/delegate`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function listTaskEvents(
+  projectId: string,
+  taskId: string,
+  limit?: number
+): Promise<ListTaskEventsResponse> {
+  const params = new URLSearchParams();
+  if (limit !== undefined) {
+    params.set('limit', String(limit));
+  }
+
+  const endpoint = params.toString()
+    ? `/api/projects/${projectId}/tasks/${taskId}/events?${params.toString()}`
+    : `/api/projects/${projectId}/tasks/${taskId}/events`;
+
+  return request<ListTaskEventsResponse>(endpoint);
 }
 
 // =============================================================================

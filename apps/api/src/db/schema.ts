@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index, uniqueIndex, primaryKey } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 // =============================================================================
@@ -154,6 +154,140 @@ export const githubInstallations = sqliteTable('github_installations', {
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
 });
+
+// =============================================================================
+// Projects
+// =============================================================================
+export const projects = sqliteTable(
+  'projects',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    normalizedName: text('normalized_name').notNull(),
+    description: text('description'),
+    installationId: text('installation_id')
+      .notNull()
+      .references(() => githubInstallations.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    defaultBranch: text('default_branch').notNull().default('main'),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    userIdIdx: index('idx_projects_user_id').on(table.userId),
+    installationIdIdx: index('idx_projects_installation_id').on(table.installationId),
+    userNormalizedNameUnique: uniqueIndex('idx_projects_user_normalized_name').on(
+      table.userId,
+      table.normalizedName
+    ),
+    userInstallationRepoUnique: uniqueIndex('idx_projects_user_installation_repository').on(
+      table.userId,
+      table.installationId,
+      table.repository
+    ),
+  })
+);
+
+// =============================================================================
+// Tasks
+// =============================================================================
+export const tasks = sqliteTable(
+  'tasks',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    parentTaskId: text('parent_task_id'),
+    workspaceId: text('workspace_id'),
+    title: text('title').notNull(),
+    description: text('description'),
+    status: text('status').notNull().default('draft'),
+    priority: integer('priority').notNull().default(0),
+    agentProfileHint: text('agent_profile_hint'),
+    startedAt: text('started_at'),
+    completedAt: text('completed_at'),
+    errorMessage: text('error_message'),
+    outputSummary: text('output_summary'),
+    outputBranch: text('output_branch'),
+    outputPrUrl: text('output_pr_url'),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectStatusPriorityUpdatedIdx: index('idx_tasks_project_status_priority_updated').on(
+      table.projectId,
+      table.status,
+      table.priority,
+      table.updatedAt
+    ),
+    projectCreatedAtIdx: index('idx_tasks_project_created_at').on(table.projectId, table.createdAt),
+    projectUserIdx: index('idx_tasks_project_user').on(table.projectId, table.userId),
+  })
+);
+
+export const taskDependencies = sqliteTable(
+  'task_dependencies',
+  {
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    dependsOnTaskId: text('depends_on_task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.taskId, table.dependsOnTaskId] }),
+    dependsOnIdx: index('idx_task_dependencies_depends_on').on(table.dependsOnTaskId),
+  })
+);
+
+export const taskStatusEvents = sqliteTable(
+  'task_status_events',
+  {
+    id: text('id').primaryKey(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    fromStatus: text('from_status'),
+    toStatus: text('to_status').notNull(),
+    actorType: text('actor_type').notNull(),
+    actorId: text('actor_id'),
+    reason: text('reason'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    taskCreatedAtIdx: index('idx_task_status_events_task_created_at').on(table.taskId, table.createdAt),
+  })
+);
 
 // =============================================================================
 // Nodes
@@ -508,6 +642,14 @@ export type Credential = typeof credentials.$inferSelect;
 export type NewCredential = typeof credentials.$inferInsert;
 export type GitHubInstallation = typeof githubInstallations.$inferSelect;
 export type NewGitHubInstallation = typeof githubInstallations.$inferInsert;
+export type Project = typeof projects.$inferSelect;
+export type NewProject = typeof projects.$inferInsert;
+export type Task = typeof tasks.$inferSelect;
+export type NewTask = typeof tasks.$inferInsert;
+export type TaskDependency = typeof taskDependencies.$inferSelect;
+export type NewTaskDependency = typeof taskDependencies.$inferInsert;
+export type TaskStatusEvent = typeof taskStatusEvents.$inferSelect;
+export type NewTaskStatusEvent = typeof taskStatusEvents.$inferInsert;
 export type Node = typeof nodes.$inferSelect;
 export type NewNode = typeof nodes.$inferInsert;
 export type Workspace = typeof workspaces.$inferSelect;

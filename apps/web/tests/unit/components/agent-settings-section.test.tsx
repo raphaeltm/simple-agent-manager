@@ -130,7 +130,9 @@ describe('AgentSettingsSection', () => {
     const bypassRadio = screen.getByTestId('permission-mode-claude-code-bypassPermissions');
     fireEvent.click(bypassRadio);
 
-    expect(screen.getByText(/disables all safety prompts/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/disables all safety prompts/i)).toBeInTheDocument();
+    });
   });
 
   it('calls saveAgentSettings on save', async () => {
