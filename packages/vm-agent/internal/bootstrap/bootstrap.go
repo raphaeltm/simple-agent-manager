@@ -774,9 +774,38 @@ func normalizeMergedLifecycleCommands(merged map[string]interface{}) {
 			continue
 		}
 		if _, hasSingular := merged[singularKey]; !hasSingular {
-			merged[singularKey] = value
+			merged[singularKey] = normalizeLifecycleCommandValue(value)
 		}
 		delete(merged, pluralKey)
+	}
+}
+
+func normalizeLifecycleCommandValue(value interface{}) interface{} {
+	commands, ok := value.([]interface{})
+	if !ok {
+		return value
+	}
+
+	parts := make([]string, 0, len(commands))
+	for _, command := range commands {
+		str, ok := command.(string)
+		if !ok {
+			return value
+		}
+		trimmed := strings.TrimSpace(str)
+		if trimmed == "" {
+			continue
+		}
+		parts = append(parts, trimmed)
+	}
+
+	switch len(parts) {
+	case 0:
+		return ""
+	case 1:
+		return parts[0]
+	default:
+		return strings.Join(parts, " && ")
 	}
 }
 

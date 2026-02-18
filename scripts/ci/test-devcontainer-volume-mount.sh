@@ -233,10 +233,28 @@ node -e "
     postStartCommands: 'postStartCommand',
     postAttachCommands: 'postAttachCommand'
   };
+
+  function normalizeLifecycleValue(value) {
+    if (!Array.isArray(value)) {
+      return value;
+    }
+    const commands = value
+      .filter((entry) => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    if (commands.length === 0) {
+      return '';
+    }
+    if (commands.length === 1) {
+      return commands[0];
+    }
+    return commands.join(' && ');
+  }
+
   for (const [pluralKey, singularKey] of Object.entries(lifecycleKeyMap)) {
     if (Object.prototype.hasOwnProperty.call(merged, pluralKey)) {
       if (!Object.prototype.hasOwnProperty.call(merged, singularKey)) {
-        merged[singularKey] = merged[pluralKey];
+        merged[singularKey] = normalizeLifecycleValue(merged[pluralKey]);
       }
       delete merged[pluralKey];
     }

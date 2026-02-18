@@ -773,7 +773,7 @@ exit 1
 	if !strings.Contains(content, `"ghcr.io/devcontainers/features/go:1"`) {
 		t.Fatalf("expected merged config features to be preserved, got:\n%s", content)
 	}
-	if !strings.Contains(content, `"postCreateCommand": [`) {
+	if !strings.Contains(content, `"postCreateCommand": "bash .devcontainer/post-create.sh"`) {
 		t.Fatalf("expected lifecycle command keys to be normalized, got:\n%s", content)
 	}
 	if strings.Contains(content, `"postCreateCommands":`) {
@@ -906,6 +906,24 @@ func TestNormalizeMergedLifecycleCommands(t *testing.T) {
 		if _, ok := merged[singular]; !ok {
 			t.Fatalf("expected %s to be present", singular)
 		}
+	}
+
+	if merged["postCreateCommand"] != "echo postcreate" {
+		t.Fatalf("expected postCreateCommand to normalize to a single shell string, got %#v", merged["postCreateCommand"])
+	}
+}
+
+func TestNormalizeLifecycleCommandValue(t *testing.T) {
+	t.Parallel()
+
+	got := normalizeLifecycleCommandValue([]interface{}{"echo one", "echo two"})
+	if got != "echo one && echo two" {
+		t.Fatalf("expected commands to join with &&, got %#v", got)
+	}
+
+	got = normalizeLifecycleCommandValue([]interface{}{"echo only"})
+	if got != "echo only" {
+		t.Fatalf("expected single command to remain a string, got %#v", got)
 	}
 }
 
