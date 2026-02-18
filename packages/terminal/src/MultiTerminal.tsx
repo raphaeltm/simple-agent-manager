@@ -49,6 +49,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
   (props, ref) => {
     const {
       wsUrl,
+      resolveWsUrl,
       defaultWorkDir,
       onActivity,
       className = '',
@@ -86,6 +87,10 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
 
     // Refs that persist across renders
     const wsRef = useRef<WebSocket | null>(null);
+    const wsUrlRef = useRef(wsUrl);
+    wsUrlRef.current = wsUrl;
+    const resolveWsUrlRef = useRef(resolveWsUrl);
+    resolveWsUrlRef.current = resolveWsUrl;
     const terminalsRef = useRef<Map<string, TerminalInstance>>(new Map());
     const [wsConnected, setWsConnected] = useState(false);
     // Guard against duplicate list_sessions requests during rapid reconnect cycles
@@ -240,18 +245,51 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
 
     // ── WebSocket connection lifecycle ──
     // This single effect manages the ENTIRE WebSocket: connect, message routing,
-    // ping heartbeat, and reconnection. It only re-runs when wsUrl changes.
+    // ping heartbeat, and reconnection. It resolves a fresh URL before reconnect.
     useEffect(() => {
       let disposed = false;
       let reconnectTimeout: ReturnType<typeof setTimeout>;
       let pingInterval: ReturnType<typeof setInterval>;
       let currentWs: WebSocket | null = null;
 
-      function connect() {
+      const scheduleReconnect = () => {
+        if (disposed) return;
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = setTimeout(() => {
+          void connect();
+        }, RECONNECT_DELAY_MS);
+      };
+
+      const resolveConnectUrl = async (): Promise<string | null> => {
+        if (resolveWsUrlRef.current) {
+          const resolved = await resolveWsUrlRef.current();
+          if (resolved) {
+            return resolved;
+          }
+        }
+        return wsUrlRef.current;
+      };
+
+      const connect = async () => {
         if (disposed) return;
 
+        let connectUrl: string | null = null;
         try {
-          const ws = new WebSocket(wsUrl);
+          connectUrl = await resolveConnectUrl();
+        } catch {
+          setWsConnected(false);
+          scheduleReconnect();
+          return;
+        }
+
+        if (!connectUrl) {
+          setWsConnected(false);
+          scheduleReconnect();
+          return;
+        }
+
+        try {
+          const ws = new WebSocket(connectUrl);
           currentWs = ws;
 
           ws.onopen = () => {
@@ -457,19 +495,15 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
             wsRef.current = null;
             reconnectingRef.current = false;
             clearInterval(pingInterval);
-            if (!disposed) {
-              reconnectTimeout = setTimeout(connect, RECONNECT_DELAY_MS);
-            }
+            scheduleReconnect();
           };
         } catch {
           setWsConnected(false);
-          if (!disposed) {
-            reconnectTimeout = setTimeout(connect, RECONNECT_DELAY_MS);
-          }
+          scheduleReconnect();
         }
-      }
+      };
 
-      connect();
+      void connect();
 
       return () => {
         disposed = true;

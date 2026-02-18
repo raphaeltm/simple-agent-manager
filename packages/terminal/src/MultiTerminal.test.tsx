@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MultiTerminal } from './MultiTerminal';
 
 // Mock xterm.js
@@ -62,6 +62,7 @@ class MockWebSocket {
   static CLOSED = 3;
   static CONNECTING = 0;
   static CLOSING = 2;
+  static instances: MockWebSocket[] = [];
   static sessionListResponse: Array<{
     sessionId: string;
     name?: string;
@@ -80,6 +81,7 @@ class MockWebSocket {
 
   constructor(url: string) {
     this.url = url;
+    MockWebSocket.instances.push(this);
     setTimeout(() => {
       if (this.onopen) {
         this.onopen(new Event('open'));
@@ -153,9 +155,11 @@ describe('MultiTerminal', () => {
     vi.clearAllMocks();
     sessionStorage.clear();
     MockWebSocket.sessionListResponse = [];
+    MockWebSocket.instances = [];
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
   });
 
@@ -360,5 +364,32 @@ describe('MultiTerminal', () => {
 
     const connectingMsg = container.querySelector('.terminal-status-message');
     expect(connectingMsg || container.querySelector('.terminal-empty-state')).toBeDefined();
+  });
+
+  it('uses resolveWsUrl for reconnect attempts', async () => {
+    const resolveWsUrl = vi
+      .fn()
+      .mockResolvedValueOnce('ws://localhost:8080/terminal/ws/multi?token=first')
+      .mockResolvedValueOnce('ws://localhost:8080/terminal/ws/multi?token=second');
+
+    render(<MultiTerminal {...defaultProps} resolveWsUrl={resolveWsUrl} />);
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances.length).toBe(1);
+    });
+    expect(MockWebSocket.instances[0]?.url).toContain('token=first');
+
+    act(() => {
+      MockWebSocket.instances[0]?.close();
+    });
+
+    await waitFor(
+      () => {
+        expect(MockWebSocket.instances.length).toBe(2);
+      },
+      { timeout: 7000 }
+    );
+    expect(MockWebSocket.instances[1]?.url).toContain('token=second');
+    expect(resolveWsUrl).toHaveBeenCalledTimes(2);
   });
 });

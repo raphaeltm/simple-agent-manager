@@ -183,6 +183,7 @@ export function Workspace() {
   const [paletteFileIndex, setPaletteFileIndex] = useState<string[]>([]);
   const [paletteFileIndexLoading, setPaletteFileIndexLoading] = useState(false);
   const paletteFileIndexLoaded = useRef(false);
+  const terminalWsUrlCacheRef = useRef<{ url: string; resolvedAt: number } | null>(null);
 
   const tabOrder = useTabOrder<WorkspaceTab>(id);
 
@@ -254,12 +255,48 @@ export function Workspace() {
     return () => clearInterval(interval);
   }, [id, workspace?.status, loadWorkspaceState]);
 
+  const buildTerminalWsUrl = useCallback(
+    (token: string): string | null => {
+      if (!workspace?.url) return null;
+      try {
+        const url = new URL(workspace.url);
+        const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsPath = featureFlags.multiTerminal ? '/terminal/ws/multi' : '/terminal/ws';
+        return `${wsProtocol}//${url.host}${wsPath}?token=${encodeURIComponent(token)}`;
+      } catch {
+        return null;
+      }
+    },
+    [workspace?.url, featureFlags.multiTerminal]
+  );
+
+  useEffect(() => {
+    terminalWsUrlCacheRef.current = null;
+  }, [workspace?.url, id, featureFlags.multiTerminal]);
+
+  const resolveTerminalWsUrl = useCallback(async (): Promise<string | null> => {
+    if (!id) return null;
+
+    const cached = terminalWsUrlCacheRef.current;
+    if (cached && Date.now() - cached.resolvedAt < 15_000) {
+      return cached.url;
+    }
+
+    const { token } = await getTerminalToken(id);
+    const resolvedUrl = buildTerminalWsUrl(token);
+    if (!resolvedUrl) {
+      throw new Error('Invalid workspace URL');
+    }
+    terminalWsUrlCacheRef.current = { url: resolvedUrl, resolvedAt: Date.now() };
+    return resolvedUrl;
+  }, [id, buildTerminalWsUrl]);
+
   // Derive WebSocket URL from the terminal token.
   // Only update wsUrl on the INITIAL token fetch or when the workspace URL
   // changes — NOT on proactive token refreshes. Changing wsUrl tears down
   // the WebSocket and triggers a full reconnect, which re-triggers replay
-  // and can cause jumbled messages (Bug 5). The refreshed token is still
-  // available via `terminalToken` for the next reconnection attempt.
+  // and can cause jumbled messages (Bug 5). Reconnect paths resolve a fresh
+  // URL/token via resolveTerminalWsUrl without resetting the live socket.
   const wsUrlSetRef = useRef(false);
   useEffect(() => {
     if (!workspace?.url || !terminalToken || !isRunning) {
@@ -272,18 +309,18 @@ export function Workspace() {
     // cause a reconnect while the connection is still alive.
     if (wsUrlSetRef.current) return;
 
-    try {
-      const url = new URL(workspace.url);
-      const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsPath = featureFlags.multiTerminal ? '/terminal/ws/multi' : '/terminal/ws';
-      setWsUrl(`${wsProtocol}//${url.host}${wsPath}?token=${encodeURIComponent(terminalToken)}`);
-      setTerminalError(null);
-      wsUrlSetRef.current = true;
-    } catch {
+    const nextUrl = buildTerminalWsUrl(terminalToken);
+    if (!nextUrl) {
       setWsUrl(null);
       setTerminalError('Invalid workspace URL');
+      return;
     }
-  }, [workspace?.url, terminalToken, isRunning, featureFlags.multiTerminal]);
+
+    setWsUrl(nextUrl);
+    terminalWsUrlCacheRef.current = { url: nextUrl, resolvedAt: Date.now() };
+    setTerminalError(null);
+    wsUrlSetRef.current = true;
+  }, [workspace?.url, terminalToken, isRunning, buildTerminalWsUrl]);
 
   // Fetch workspace events directly from the VM Agent (not proxied through control plane)
   useEffect(() => {
@@ -1174,6 +1211,7 @@ export function Workspace() {
           <MultiTerminal
             ref={multiTerminalRef}
             wsUrl={wsUrl}
+            resolveWsUrl={resolveTerminalWsUrl}
             defaultWorkDir={activeWorktree ?? undefined}
             shutdownDeadline={workspace?.shutdownDeadline}
             onActivity={handleTerminalActivity}
@@ -1188,6 +1226,7 @@ export function Workspace() {
         ) : (
           <Terminal
             wsUrl={wsUrl}
+            resolveWsUrl={resolveTerminalWsUrl}
             shutdownDeadline={workspace?.shutdownDeadline}
             onActivity={handleTerminalActivity}
             className="h-full"
@@ -1210,6 +1249,7 @@ export function Workspace() {
               variant="secondary"
               size="sm"
               onClick={() => {
+                terminalWsUrlCacheRef.current = null;
                 void refreshTerminalToken();
               }}
               disabled={terminalLoading}

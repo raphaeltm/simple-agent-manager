@@ -50,6 +50,8 @@ function isGatewayErrorMessage(data: unknown): data is GatewayErrorMessage {
 export interface UseAcpSessionOptions {
   /** WebSocket URL for the ACP gateway (e.g., wss://host/agent/ws?token=JWT) */
   wsUrl: string | null;
+  /** Optional resolver to fetch/build a fresh WebSocket URL before connect/reconnect. */
+  resolveWsUrl?: () => Promise<string | null> | string | null;
   /** Called when an ACP message is received from the agent */
   onAcpMessage?: (message: AcpMessage) => void;
   /** Optional callback for lifecycle event logging */
@@ -109,6 +111,7 @@ function safeHost(url: string): string {
 export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
   const {
     wsUrl,
+    resolveWsUrl,
     onAcpMessage,
     onLifecycleEvent,
     onPrepareForReplay,
@@ -131,11 +134,20 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
 
   const onPrepareForReplayRef = useRef(onPrepareForReplay);
   onPrepareForReplayRef.current = onPrepareForReplay;
+  const wsUrlRef = useRef(wsUrl);
+  wsUrlRef.current = wsUrl;
+  const resolveWsUrlRef = useRef(resolveWsUrl);
+  resolveWsUrlRef.current = resolveWsUrl;
 
   // Track the server-reported status so we can restore it after replay completes.
   // Without this, reconnecting during a prompt transitions replaying → ready,
   // even though the server is still in 'prompting' (deadlocking new prompts).
   const serverStatusRef = useRef<string>('');
+  // Track prompt completion observed during replay so replay_complete does not
+  // restore a stale prompting snapshot captured before replay started.
+  const replaySawPromptDoneRef = useRef(false);
+  // Track most recent URL used for connection attempts.
+  const connectUrlRef = useRef<string | null>(wsUrl);
 
   // Reconnection state (refs to avoid re-triggering the effect)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -143,6 +155,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
   const reconnectAttemptRef = useRef<number>(0);
   const intentionalCloseRef = useRef(false);
   const wasConnectedRef = useRef(false);
+  const attemptReconnectRef = useRef<() => void>(() => {});
 
   // Lifecycle logging helper
   const logLifecycle = useCallback((
@@ -233,9 +246,11 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
         // This avoids the race where useEffect-based clear runs after replay
         // messages have already been appended (causing jumbled/duplicate text).
         onPrepareForReplayRef.current?.();
+        replaySawPromptDoneRef.current = false;
         setState('replaying');
         setReplaying(true);
       } else {
+        replaySawPromptDoneRef.current = false;
         setState(status === 'prompting' ? 'prompting' : 'ready');
         setReplaying(false);
       }
@@ -255,7 +270,9 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
   // Handle session_replay_complete — all buffered messages have been delivered
   const handleSessionReplayComplete = useCallback(() => {
     const serverStatus = serverStatusRef.current;
-    logLifecycle('info', 'Session replay complete', { serverStatus });
+    const sawPromptDone = replaySawPromptDoneRef.current;
+    replaySawPromptDoneRef.current = false;
+    logLifecycle('info', 'Session replay complete', { serverStatus, sawPromptDone });
     setReplaying(false);
     // Restore the server-reported status instead of unconditionally going to
     // 'ready'. If the agent was 'prompting' when we reconnected, we must stay
@@ -264,6 +281,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     // server's promptMu (the previous prompt is still blocking).
     setState((prev) => {
       if (prev !== 'replaying') return prev;
+      if (sawPromptDone) return 'ready';
       if (serverStatus === 'prompting') return 'prompting';
       return 'ready';
     });
@@ -275,7 +293,12 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     if (prompting) {
       setState('prompting');
     } else {
-      setState((prev) => (prev === 'prompting' ? 'ready' : prev));
+      // Mark prompt completion immediately so replay_complete in the same
+      // event loop tick can observe it before React flushes state updates.
+      replaySawPromptDoneRef.current = true;
+      setState((prev) => {
+        return prev === 'prompting' ? 'ready' : prev;
+      });
     }
   }, [logLifecycle]);
 
@@ -323,7 +346,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
 
         // Only reconnect if we were previously connected
         if (wasConnectedRef.current) {
-          attemptReconnect(url);
+          attemptReconnectRef.current();
         } else {
           logLifecycle('error', 'WebSocket connection failed (never connected)', { host });
           setState('error');
@@ -352,8 +375,52 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     return transport;
   }, [handleAgentStatus, handleAcpMessage, handleSessionState, handleSessionReplayComplete, handleSessionPrompting, logLifecycle]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const resolveConnectUrl = useCallback((fallbackUrl?: string | null) => {
+    if (resolveWsUrlRef.current) {
+      return resolveWsUrlRef.current();
+    }
+    return fallbackUrl ?? wsUrlRef.current;
+  }, []);
+
+  const connectWithResolvedUrl = useCallback((fallbackUrl?: string | null): Promise<boolean> => {
+    const handleResolved = (resolved: string | null): boolean => {
+      if (!resolved) {
+        setState('error');
+        setError('WebSocket URL unavailable');
+        return false;
+      }
+      connectUrlRef.current = resolved;
+      connect(resolved);
+      return true;
+    };
+
+    const handleError = (err: unknown): boolean => {
+      const message = err instanceof Error ? err.message : 'Failed to resolve WebSocket URL';
+      logLifecycle('warn', 'Failed to resolve WebSocket URL', { error: message });
+      setState('error');
+      setError(message);
+      return false;
+    };
+
+    try {
+      const resolvedOrPromise = resolveConnectUrl(fallbackUrl);
+      if (
+        resolvedOrPromise &&
+        typeof resolvedOrPromise === 'object' &&
+        'then' in resolvedOrPromise
+      ) {
+        return (resolvedOrPromise as Promise<string | null>)
+          .then((resolved) => handleResolved(resolved))
+          .catch((err) => handleError(err));
+      }
+      return Promise.resolve(handleResolved(resolvedOrPromise as string | null));
+    } catch (err) {
+      return Promise.resolve(handleError(err));
+    }
+  }, [connect, logLifecycle, resolveConnectUrl]);
+
   // Attempt reconnection with exponential backoff
-  const attemptReconnect = useCallback((url: string) => {
+  const attemptReconnect = useCallback(() => {
     const now = Date.now();
 
     // Start the reconnect timer on first attempt
@@ -389,13 +456,18 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
 
     reconnectTimerRef.current = setTimeout(() => {
       reconnectTimerRef.current = null;
-      connect(url);
+      void connectWithResolvedUrl(connectUrlRef.current).then((ok) => {
+        if (!ok) {
+          attemptReconnectRef.current();
+        }
+      });
     }, delay);
-  }, [reconnectDelayMs, reconnectTimeoutMs, reconnectMaxDelayMs, connect, logLifecycle]);
+  }, [reconnectDelayMs, reconnectTimeoutMs, reconnectMaxDelayMs, connectWithResolvedUrl, logLifecycle]);
+  attemptReconnectRef.current = attemptReconnect;
 
   // Main connection effect
   useEffect(() => {
-    if (!wsUrl) {
+    if (!wsUrl && !resolveWsUrlRef.current) {
       setState('disconnected');
       return;
     }
@@ -408,9 +480,10 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     setState('connecting');
     setError(null);
 
-    logLifecycle('info', 'Initiating connection', { host: safeHost(wsUrl) });
-
-    const transport = connect(wsUrl);
+    logLifecycle('info', 'Initiating connection', {
+      host: wsUrl ? safeHost(wsUrl) : 'resolver',
+    });
+    void connectWithResolvedUrl(wsUrl);
 
     return () => {
       logLifecycle('info', 'Connection cleanup (intentional close)');
@@ -419,14 +492,16 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
-      transport.close();
+      if (transportRef.current) {
+        transportRef.current.close();
+      }
       transportRef.current = null;
     };
-  }, [wsUrl, connect, logLifecycle]);
+  }, [wsUrl, connectWithResolvedUrl, logLifecycle]);
 
   // Reconnect immediately when tab becomes visible again (mobile background tab fix)
   useEffect(() => {
-    if (!wsUrl) return;
+    if (!wsUrl && !resolveWsUrlRef.current) return;
     if (typeof document === 'undefined') return;
 
     const handleVisibilityChange = () => {
@@ -450,18 +525,18 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       intentionalCloseRef.current = false;
 
       setState('reconnecting');
-      connect(wsUrl);
+      void connectWithResolvedUrl(connectUrlRef.current);
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [wsUrl, connect, logLifecycle]);
+  }, [wsUrl, connectWithResolvedUrl, logLifecycle]);
 
   // Manual reconnect (exposed to UI for "Reconnect" button)
   const reconnect = useCallback(() => {
-    if (!wsUrl) return;
+    if (!wsUrl && !resolveWsUrlRef.current) return;
     if (transportRef.current?.connected) return;
 
     logLifecycle('info', 'Manual reconnect triggered');
@@ -486,8 +561,8 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     wasConnectedRef.current = true; // We want to reconnect
     setError(null);
     setState('reconnecting');
-    connect(wsUrl);
-  }, [wsUrl, connect, logLifecycle]);
+    void connectWithResolvedUrl(connectUrlRef.current);
+  }, [wsUrl, connectWithResolvedUrl, logLifecycle]);
 
   // Switch to a different agent
   const switchAgent = useCallback((newAgentType: string) => {

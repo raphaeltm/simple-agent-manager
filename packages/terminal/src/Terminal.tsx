@@ -23,6 +23,7 @@ const PING_INTERVAL_MS = 30_000;
  */
 export function Terminal({
   wsUrl,
+  resolveWsUrl,
   shutdownDeadline,
   onActivity,
   className = '',
@@ -35,6 +36,7 @@ export function Terminal({
 
   const { socket, state, retryCount, retry } = useWebSocket({
     url: wsUrl,
+    resolveUrl: resolveWsUrl,
     maxRetries: MAX_RETRIES,
   });
 

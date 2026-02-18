@@ -96,6 +96,8 @@ type Config struct {
 	ACPViewerSendBuffer   int           // Per-viewer send channel buffer size
 	ACPPingInterval       time.Duration // WebSocket ping interval (default: 30s)
 	ACPPongTimeout        time.Duration // WebSocket pong deadline after ping (default: 10s)
+	ACPPromptTimeout      time.Duration // Max prompt runtime before force-stop fallback (default: 10m)
+	ACPPromptCancelGrace  time.Duration // Wait after cancel before force-stop fallback (default: 5s)
 
 	// Event log settings - configurable per constitution principle XI
 	MaxNodeEvents      int // Max node-level events retained in memory (default: 500)
@@ -233,6 +235,8 @@ func Load() (*Config, error) {
 		ACPViewerSendBuffer:   getEnvInt("ACP_VIEWER_SEND_BUFFER", 256),
 		ACPPingInterval:       getEnvDuration("ACP_PING_INTERVAL", 30*time.Second),
 		ACPPongTimeout:        getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
+		ACPPromptTimeout:      getEnvDuration("ACP_PROMPT_TIMEOUT", 10*time.Minute),
+		ACPPromptCancelGrace:  getEnvDuration("ACP_PROMPT_CANCEL_GRACE_PERIOD", 5*time.Second),
 
 		// Event log settings
 		MaxNodeEvents:      getEnvInt("MAX_NODE_EVENTS", 500),

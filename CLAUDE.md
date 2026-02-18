@@ -758,6 +758,8 @@ See `apps/api/.env.example`:
 - `ACP_VIEWER_SEND_BUFFER` - VM Agent: per-viewer send channel buffer size (default: 256)
 - `ACP_PING_INTERVAL` - VM Agent: WebSocket ping interval for stale connection detection (default: 30s)
 - `ACP_PONG_TIMEOUT` - VM Agent: WebSocket pong deadline after ping (default: 10s)
+- `ACP_PROMPT_TIMEOUT` - VM Agent: max ACP prompt runtime before timeout/force-stop fallback (default: 10m)
+- `ACP_PROMPT_CANCEL_GRACE_PERIOD` - VM Agent: grace wait after cancel before force-stop fallback (default: 5s)
 - `MAX_NODE_EVENTS` - VM Agent: max node-level events retained in memory (default: 500)
 - `MAX_WORKSPACE_EVENTS` - VM Agent: max workspace-level events retained in memory (default: 500)
 - `MAX_VM_AGENT_ERROR_BODY_BYTES` - API: max VM agent error request body (default: 32768)

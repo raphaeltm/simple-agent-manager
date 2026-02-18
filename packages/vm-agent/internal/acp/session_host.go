@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -29,6 +30,14 @@ const (
 	HostPrompting SessionHostStatus = "prompting" // Prompt in progress
 	HostError     SessionHostStatus = "error"     // Agent in error state
 	HostStopped   SessionHostStatus = "stopped"   // Explicitly stopped
+)
+
+const (
+	// DefaultPromptTimeout bounds how long a single ACP Prompt call can run.
+	DefaultPromptTimeout = 10 * time.Minute
+	// DefaultPromptCancelGracePeriod is how long we wait after cancel before
+	// force-stopping an unresponsive agent process.
+	DefaultPromptCancelGracePeriod = 5 * time.Second
 )
 
 // DefaultMessageBufferSize is the default maximum number of messages buffered
@@ -98,13 +107,19 @@ type SessionHost struct {
 	messageBuf []BufferedMessage
 	seqCounter uint64
 
-	// Prompt serialization — only one prompt at a time
-	promptMu sync.Mutex
+	// Prompt lifecycle state.
+	// promptMu guards promptInFlight (serialization gate only).
+	promptMu       sync.Mutex
+	promptInFlight bool
+	promptSeq      uint64
 	// promptCancelMu guards promptCancel independently from promptMu so that
 	// CancelPrompt() can read it without waiting for Prompt() to finish.
 	promptCancelMu sync.Mutex
 	// promptCancel cancels the in-flight Prompt() context. Protected by promptCancelMu.
 	promptCancel context.CancelFunc
+	// activePromptID identifies the in-flight prompt associated with promptCancel.
+	// Protected by promptCancelMu.
+	activePromptID uint64
 
 	// Stderr collection
 	stderrMu  sync.Mutex
@@ -195,13 +210,19 @@ func (h *SessionHost) AttachViewer(id string, conn *websocket.Conn) *Viewer {
 	log.Printf("SessionHost[%s]: viewer %s attached (total=%d)", h.config.SessionID, id, h.ViewerCount())
 
 	// Send current session state
-	h.sendToViewer(viewer, h.marshalSessionState(currentStatus, currentAgentType, currentErr))
+	h.sendToViewerPriority(viewer, h.marshalSessionState(currentStatus, currentAgentType, currentErr))
 
 	// Replay buffered messages
 	h.replayToViewer(viewer)
 
 	// Signal replay complete
-	h.sendToViewer(viewer, h.marshalControl(MsgSessionReplayDone, nil))
+	h.sendToViewerPriority(viewer, h.marshalControl(MsgSessionReplayDone, nil))
+
+	// Send a post-replay authoritative state snapshot.
+	// This closes the race where prompt status changes during replay and the
+	// initial pre-replay snapshot becomes stale.
+	finalStatus, finalAgentType, finalErr := h.currentSessionState()
+	h.sendToViewerPriority(viewer, h.marshalSessionState(finalStatus, finalAgentType, finalErr))
 
 	return viewer
 }
@@ -392,15 +413,23 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 		return
 	}
 
-	// Serialize prompts — only one at a time
-	h.promptMu.Lock()
+	promptTimeout := h.promptTimeout()
+	promptCtx, promptCancel := context.WithTimeout(ctx, promptTimeout)
+	promptID, ok := h.beginPrompt(promptCancel)
+	if !ok {
+		promptCancel()
+		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, "Prompt already in progress")
+		return
+	}
+	defer func() {
+		h.endPrompt(promptID)
+		promptCancel() // release context resources
+	}()
 
-	// Create a cancellable context for this prompt. CancelPrompt() can
-	// invoke promptCancel to abort the blocking Prompt() call.
-	promptCtx, promptCancel := context.WithCancel(ctx)
-	h.promptCancelMu.Lock()
-	h.promptCancel = promptCancel
-	h.promptCancelMu.Unlock()
+	// Watchdog: if Prompt() ignores deadline/cancel, force-stop the agent.
+	promptDone := make(chan struct{})
+	go h.watchPromptTimeout(promptID, promptCtx, promptDone, viewerID, reqID, promptTimeout)
+	defer close(promptDone)
 
 	// Update status to prompting
 	h.setStatus(HostPrompting, "")
@@ -420,25 +449,27 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 		Prompt:    blocks,
 	})
 
-	// Clean up cancel state and release the prompt lock
-	h.promptCancelMu.Lock()
-	h.promptCancel = nil
-	h.promptCancelMu.Unlock()
-	promptCancel() // release context resources
-	h.promptMu.Unlock()
+	// If the prompt was force-stopped while Prompt() was blocked, ignore late completion.
+	if !h.isPromptActive(promptID) {
+		return
+	}
 
 	// Update status back to ready
 	h.setStatus(HostReady, "")
 	h.broadcastControl(MsgSessionPromptDone, nil)
 
 	if err != nil {
+		errMsg := fmt.Sprintf("Prompt failed: %v", err)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
+			errMsg = fmt.Sprintf("Prompt timed out after %s", promptTimeout)
+		}
 		log.Printf("ACP Prompt failed: %v", err)
 		h.reportLifecycle("warn", "ACP Prompt failed", map[string]interface{}{
-			"error":    err.Error(),
+			"error":    errMsg,
 			"duration": time.Since(promptStart).String(),
 		})
 		// Broadcast error to all viewers so all tabs see it
-		errResp := h.marshalJSONRPCError(reqID, -32603, fmt.Sprintf("Prompt failed: %v", err))
+		errResp := h.marshalJSONRPCError(reqID, -32603, errMsg)
 		h.broadcastMessage(errResp)
 		return
 	}
@@ -467,6 +498,7 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 func (h *SessionHost) CancelPrompt() {
 	h.promptCancelMu.Lock()
 	cancelFn := h.promptCancel
+	promptID := h.activePromptID
 	h.promptCancelMu.Unlock()
 
 	if cancelFn == nil {
@@ -477,6 +509,18 @@ func (h *SessionHost) CancelPrompt() {
 	log.Printf("CancelPrompt: cancelling in-flight prompt")
 	h.reportLifecycle("info", "Prompt cancel requested", nil)
 	cancelFn()
+
+	grace := h.promptCancelGracePeriod()
+	if grace <= 0 {
+		return
+	}
+
+	go func(id uint64, wait time.Duration) {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		<-timer.C
+		h.triggerPromptForceStopIfStuck(id, fmt.Sprintf("Prompt cancel grace elapsed after %s", wait))
+	}(promptID, grace)
 }
 
 // ForwardToAgent sends a raw message to the agent's stdin.
@@ -919,8 +963,8 @@ func (h *SessionHost) persistAcpSessionID(agentType string) {
 
 // --- Internal: message broadcasting ---
 
-// broadcastMessage appends a message to the buffer and sends it to all viewers.
-func (h *SessionHost) broadcastMessage(data []byte) {
+// appendMessage appends a message to the replay buffer.
+func (h *SessionHost) appendMessage(data []byte) {
 	// Append to buffer — sequence number assigned under lock to ensure
 	// buffer ordering matches sequence ordering under concurrent writes.
 	h.bufMu.Lock()
@@ -936,11 +980,23 @@ func (h *SessionHost) broadcastMessage(data []byte) {
 		h.messageBuf = h.messageBuf[excess:]
 	}
 	h.bufMu.Unlock()
+}
 
+// broadcastMessage appends a message to the buffer and sends it to all viewers.
+func (h *SessionHost) broadcastMessage(data []byte) {
+	h.broadcastMessageWithPriority(data, false)
+}
+
+func (h *SessionHost) broadcastMessageWithPriority(data []byte, priority bool) {
+	h.appendMessage(data)
 	// Fan out to all viewers
 	h.viewerMu.RLock()
 	for _, viewer := range h.viewers {
-		h.sendToViewer(viewer, data)
+		if priority {
+			h.sendToViewerPriority(viewer, data)
+		} else {
+			h.sendToViewer(viewer, data)
+		}
 	}
 	h.viewerMu.RUnlock()
 }
@@ -955,13 +1011,13 @@ func (h *SessionHost) broadcastAgentStatus(status AgentStatus, agentType, errMsg
 		Error:     errMsg,
 	}
 	data, _ := json.Marshal(msg)
-	h.broadcastMessage(data)
+	h.broadcastMessageWithPriority(data, true)
 }
 
 // broadcastControl broadcasts a control message to all viewers and buffers it.
 func (h *SessionHost) broadcastControl(msgType ControlMessageType, extra map[string]interface{}) {
 	data := h.marshalControl(msgType, extra)
-	h.broadcastMessage(data)
+	h.broadcastMessageWithPriority(data, true)
 }
 
 // replayToViewer sends all buffered messages to a newly attached viewer.
@@ -985,6 +1041,32 @@ func (h *SessionHost) sendToViewer(viewer *Viewer, data []byte) {
 	default:
 		// Channel full — drop message for this viewer
 		log.Printf("SessionHost[%s]: viewer %s send buffer full, dropping message", h.config.SessionID, viewer.ID)
+	}
+}
+
+// sendToViewerPriority sends a high-priority message.
+// If the channel is full, we evict one queued message and retry once so
+// control/status updates are not silently dropped under replay backpressure.
+func (h *SessionHost) sendToViewerPriority(viewer *Viewer, data []byte) {
+	select {
+	case viewer.sendCh <- data:
+		return
+	case <-viewer.done:
+		return
+	default:
+	}
+
+	// Make room by dropping one queued item for this viewer.
+	select {
+	case <-viewer.sendCh:
+	default:
+	}
+
+	select {
+	case viewer.sendCh <- data:
+	case <-viewer.done:
+	default:
+		log.Printf("SessionHost[%s]: viewer %s priority message dropped (buffer saturated)", h.config.SessionID, viewer.ID)
 	}
 }
 
@@ -1020,7 +1102,7 @@ func (h *SessionHost) sendJSONRPCErrorToViewer(viewerID string, reqID json.RawMe
 	h.viewerMu.RUnlock()
 
 	if ok {
-		h.sendToViewer(viewer, data)
+		h.sendToViewerPriority(viewer, data)
 	}
 }
 
@@ -1069,6 +1151,112 @@ func (h *SessionHost) marshalJSONRPCError(reqID json.RawMessage, code int, messa
 }
 
 // --- Internal: helpers ---
+
+func (h *SessionHost) currentSessionState() (SessionHostStatus, string, string) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.status, h.agentType, h.statusErr
+}
+
+func (h *SessionHost) promptTimeout() time.Duration {
+	if h.config.PromptTimeout > 0 {
+		return h.config.PromptTimeout
+	}
+	return DefaultPromptTimeout
+}
+
+func (h *SessionHost) promptCancelGracePeriod() time.Duration {
+	if h.config.PromptCancelGracePeriod > 0 {
+		return h.config.PromptCancelGracePeriod
+	}
+	return DefaultPromptCancelGracePeriod
+}
+
+func (h *SessionHost) beginPrompt(cancel context.CancelFunc) (uint64, bool) {
+	h.promptMu.Lock()
+	defer h.promptMu.Unlock()
+	if h.promptInFlight {
+		return 0, false
+	}
+	h.promptInFlight = true
+	promptID := atomic.AddUint64(&h.promptSeq, 1)
+
+	h.promptCancelMu.Lock()
+	h.promptCancel = cancel
+	h.activePromptID = promptID
+	h.promptCancelMu.Unlock()
+	return promptID, true
+}
+
+func (h *SessionHost) endPrompt(promptID uint64) {
+	h.promptMu.Lock()
+	h.promptInFlight = false
+	h.promptMu.Unlock()
+
+	h.promptCancelMu.Lock()
+	if h.activePromptID == promptID {
+		h.activePromptID = 0
+		h.promptCancel = nil
+	}
+	h.promptCancelMu.Unlock()
+}
+
+func (h *SessionHost) isPromptActive(promptID uint64) bool {
+	h.promptCancelMu.Lock()
+	defer h.promptCancelMu.Unlock()
+	return h.activePromptID == promptID
+}
+
+func (h *SessionHost) watchPromptTimeout(
+	promptID uint64,
+	promptCtx context.Context,
+	done <-chan struct{},
+	viewerID string,
+	reqID json.RawMessage,
+	timeout time.Duration,
+) {
+	select {
+	case <-done:
+		return
+	case <-promptCtx.Done():
+		if !errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
+			return
+		}
+		msg := fmt.Sprintf("Prompt timed out after %s", timeout)
+		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, msg)
+		h.triggerPromptForceStopIfStuck(promptID, msg)
+	}
+}
+
+func (h *SessionHost) triggerPromptForceStopIfStuck(promptID uint64, reason string) {
+	h.promptCancelMu.Lock()
+	if h.activePromptID != promptID {
+		h.promptCancelMu.Unlock()
+		return
+	}
+	h.activePromptID = 0
+	h.promptCancel = nil
+	h.promptCancelMu.Unlock()
+
+	h.promptMu.Lock()
+	h.promptInFlight = false
+	h.promptMu.Unlock()
+
+	h.mu.Lock()
+	agentType := h.agentType
+	if h.status == HostPrompting {
+		h.status = HostError
+		h.statusErr = reason
+	}
+	h.stopCurrentAgentLocked()
+	h.mu.Unlock()
+
+	h.reportLifecycle("error", "ACP prompt force-stopped", map[string]interface{}{
+		"reason": reason,
+	})
+	h.broadcastControl(MsgSessionPromptDone, nil)
+	h.broadcastAgentStatus(StatusError, agentType, reason)
+}
 
 func (h *SessionHost) setStatus(status SessionHostStatus, errMsg string) {
 	h.mu.Lock()

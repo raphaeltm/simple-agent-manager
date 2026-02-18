@@ -8,6 +8,7 @@ import type { ConnectionState, UseWebSocketOptions, UseWebSocketReturn } from '.
 export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
   const {
     url,
+    resolveUrl,
     maxRetries = 5,
     baseDelay = 1000,
     maxDelay = 30000,
@@ -22,6 +23,11 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
   const socketRef = useRef<WebSocket | null>(null);
   const mountedRef = useRef(true);
+  const connectRef = useRef<() => Promise<void>>(async () => {});
+  const urlRef = useRef(url);
+  const resolveUrlRef = useRef(resolveUrl);
+  urlRef.current = url;
+  resolveUrlRef.current = resolveUrl;
 
   // Update state and notify callback
   const updateState = useCallback(
@@ -41,19 +47,64 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     [baseDelay, maxDelay]
   );
 
-  // Connect to WebSocket
-  const connect = useCallback(() => {
+  const resolveConnectUrl = useCallback(async (): Promise<string | null> => {
+    if (resolveUrlRef.current) {
+      const resolved = await resolveUrlRef.current();
+      if (resolved) {
+        return resolved;
+      }
+    }
+    return urlRef.current;
+  }, []);
+
+  const scheduleReconnect = useCallback(() => {
     if (!mountedRef.current) return;
+
+    if (retriesRef.current < maxRetries) {
+      updateState('reconnecting');
+      const delay = getDelay(retriesRef.current);
+      retriesRef.current++;
+      setRetryCount(retriesRef.current);
+
+      reconnectTimeoutRef.current = setTimeout(() => {
+        if (mountedRef.current) {
+          void connectRef.current();
+        }
+      }, delay);
+    } else {
+      updateState('failed');
+    }
+  }, [maxRetries, getDelay, updateState]);
+
+  // Connect to WebSocket
+  const connect = useCallback(async () => {
+    if (!mountedRef.current) return;
+
+    updateState(retriesRef.current === 0 ? 'connecting' : 'reconnecting');
 
     // Clean up existing socket
     if (socketRef.current) {
       socketRef.current.close(1000);
+      socketRef.current = null;
+      setSocket(null);
     }
 
-    updateState(retriesRef.current === 0 ? 'connecting' : 'reconnecting');
+    let connectUrl: string | null = null;
+    try {
+      connectUrl = await resolveConnectUrl();
+    } catch (error) {
+      console.error('WebSocket URL resolution error:', error);
+      scheduleReconnect();
+      return;
+    }
+
+    if (!connectUrl) {
+      scheduleReconnect();
+      return;
+    }
 
     try {
-      const ws = new WebSocket(url);
+      const ws = new WebSocket(connectUrl);
 
       ws.onopen = () => {
         if (!mountedRef.current) {
@@ -73,21 +124,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
           return;
         }
 
-        // Attempt reconnection
-        if (retriesRef.current < maxRetries) {
-          updateState('reconnecting');
-          const delay = getDelay(retriesRef.current);
-          retriesRef.current++;
-          setRetryCount(retriesRef.current);
-
-          reconnectTimeoutRef.current = setTimeout(() => {
-            if (mountedRef.current) {
-              connect();
-            }
-          }, delay);
-        } else {
-          updateState('failed');
-        }
+        scheduleReconnect();
       };
 
       ws.onerror = () => {
@@ -98,17 +135,18 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
       setSocket(ws);
     } catch (error) {
       console.error('WebSocket connection error:', error);
-      updateState('failed');
+      scheduleReconnect();
     }
-  }, [url, maxRetries, getDelay, updateState]);
+  }, [resolveConnectUrl, scheduleReconnect, updateState]);
+  connectRef.current = connect;
 
   // Manual retry function
   const retry = useCallback(() => {
     retriesRef.current = 0;
     setRetryCount(0);
     clearTimeout(reconnectTimeoutRef.current);
-    connect();
-  }, [connect]);
+    void connectRef.current();
+  }, []);
 
   // Disconnect and cleanup
   const disconnect = useCallback(() => {
@@ -123,7 +161,14 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
   // Initial connection
   useEffect(() => {
     mountedRef.current = true;
-    connect();
+    if (!url && !resolveUrlRef.current) {
+      updateState('failed');
+      return () => {
+        mountedRef.current = false;
+        clearTimeout(reconnectTimeoutRef.current);
+      };
+    }
+    void connectRef.current();
 
     return () => {
       mountedRef.current = false;
@@ -132,7 +177,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
         socketRef.current.close(1000);
       }
     };
-  }, [connect]);
+  }, [url, updateState]);
 
   return {
     socket,

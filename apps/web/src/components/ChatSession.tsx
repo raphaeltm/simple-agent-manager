@@ -71,7 +71,7 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
     useImperativeHandle(ref, () => ({
       focusInput: () => agentPanelRef.current?.focusInput(),
     }));
-    const [resolvedWsUrl, setResolvedWsUrl] = useState<string | null>(null);
+    const wsUrlCacheRef = useRef<{ url: string; resolvedAt: number } | null>(null);
 
     // Resolve transcription API URL once (stable across renders)
     const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
@@ -106,54 +106,41 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
       [workspaceId, sessionId]
     );
 
-    // Fetch token and build full WS URL
     useEffect(() => {
-      if (!wsHostInfo) {
-        setResolvedWsUrl(null);
-        return;
+      wsUrlCacheRef.current = null;
+    }, [wsHostInfo, workspaceId, sessionId, worktreePath]);
+
+    const resolveWsUrl = useCallback(async (): Promise<string | null> => {
+      if (!wsHostInfo) return null;
+
+      const cached = wsUrlCacheRef.current;
+      if (cached && Date.now() - cached.resolvedAt < 15_000) {
+        return cached.url;
       }
 
-      let cancelled = false;
+      reportError({
+        level: 'info',
+        message: 'Resolving ACP WebSocket URL with fresh terminal token',
+        source: 'acp-chat',
+        context: { workspaceId, sessionId },
+      });
 
-      const fetchToken = async () => {
+      try {
+        const { token } = await getTerminalToken(workspaceId);
+        const sessionQuery = `&sessionId=${encodeURIComponent(sessionId)}`;
+        const worktreeQuery = worktreePath ? `&worktree=${encodeURIComponent(worktreePath)}` : '';
+        const url = `${wsHostInfo}/agent/ws?token=${encodeURIComponent(token)}${sessionQuery}${worktreeQuery}`;
+        wsUrlCacheRef.current = { url, resolvedAt: Date.now() };
+        return url;
+      } catch (err) {
         reportError({
-          level: 'info',
-          message: 'Fetching terminal token',
+          level: 'error',
+          message: `Terminal token fetch failed: ${err instanceof Error ? err.message : String(err)}`,
           source: 'acp-chat',
           context: { workspaceId, sessionId },
         });
-
-        try {
-          const { token } = await getTerminalToken(workspaceId);
-          if (cancelled) return;
-
-          reportError({
-            level: 'info',
-            message: 'Terminal token fetched',
-            source: 'acp-chat',
-            context: { workspaceId, sessionId, tokenLength: token.length },
-          });
-
-          const sessionQuery = `&sessionId=${encodeURIComponent(sessionId)}`;
-          const worktreeQuery = worktreePath ? `&worktree=${encodeURIComponent(worktreePath)}` : '';
-          setResolvedWsUrl(
-            `${wsHostInfo}/agent/ws?token=${encodeURIComponent(token)}${sessionQuery}${worktreeQuery}`
-          );
-        } catch (err) {
-          if (cancelled) return;
-          reportError({
-            level: 'error',
-            message: `Terminal token fetch failed: ${err instanceof Error ? err.message : String(err)}`,
-            source: 'acp-chat',
-            context: { workspaceId, sessionId },
-          });
-        }
-      };
-
-      void fetchToken();
-      return () => {
-        cancelled = true;
-      };
+        throw err;
+      }
     }, [wsHostInfo, workspaceId, sessionId, worktreePath]);
 
     // Each chat session gets its own message store.
@@ -163,7 +150,8 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
 
     // Own ACP session hook — separate WebSocket per chat tab
     const acpSession = useAcpSession({
-      wsUrl: resolvedWsUrl,
+      wsUrl: null,
+      resolveWsUrl,
       onAcpMessage: acpMessages.processMessage,
       onLifecycleEvent: handleLifecycleEvent,
       onPrepareForReplay: acpMessages.prepareForReplay,

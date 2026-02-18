@@ -9,6 +9,8 @@ export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'fai
 export interface TerminalProps {
   /** WebSocket URL for terminal connection */
   wsUrl: string;
+  /** Optional resolver used for fresh URL/token retrieval before connect/reconnect. */
+  resolveWsUrl?: () => Promise<string | null> | string | null;
   /** Optional shutdown deadline (ISO 8601 timestamp) */
   shutdownDeadline?: string | null;
   /** Callback when user activity is detected */
@@ -44,7 +46,9 @@ export interface ConnectionOverlayProps {
 /** Options for useWebSocket hook */
 export interface UseWebSocketOptions {
   /** WebSocket URL to connect to */
-  url: string;
+  url: string | null;
+  /** Optional resolver used for fresh URL/token retrieval before connect/reconnect. */
+  resolveUrl?: () => Promise<string | null> | string | null;
   /** Maximum number of reconnection attempts (default: 5) */
   maxRetries?: number;
   /** Base delay for exponential backoff in ms (default: 1000) */

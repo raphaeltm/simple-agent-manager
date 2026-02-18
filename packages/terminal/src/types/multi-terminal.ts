@@ -266,6 +266,8 @@ export interface TabShortcutActions {
 export interface MultiTerminalProps {
   /** WebSocket URL for terminal connections */
   wsUrl: string;
+  /** Optional resolver used for fresh URL/token retrieval before connect/reconnect. */
+  resolveWsUrl?: () => Promise<string | null> | string | null;
 
   /** Optional shutdown deadline */
   shutdownDeadline?: string | null;
