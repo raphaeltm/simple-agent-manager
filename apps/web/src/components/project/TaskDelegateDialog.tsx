@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Task, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { Button, Dialog } from '@simple-agent-manager/ui';
+import { Button, Dialog, StatusBadge } from '@simple-agent-manager/ui';
 
 interface TaskDelegateDialogProps {
   open: boolean;
@@ -25,6 +25,11 @@ export function TaskDelegateDialog({
   );
   const [workspaceId, setWorkspaceId] = useState<string>('');
 
+  const selectedWorkspace = useMemo(
+    () => runningWorkspaces.find((ws) => ws.id === workspaceId) ?? null,
+    [runningWorkspaces, workspaceId]
+  );
+
   // Reset selection when dialog closes
   useEffect(() => {
     if (!open) {
@@ -35,10 +40,35 @@ export function TaskDelegateDialog({
   return (
     <Dialog isOpen={open && !!task} onClose={onClose} maxWidth="md">
       <div style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
-        <strong style={{ color: 'var(--sam-color-fg-primary)' }}>
-          Delegate task: {task?.title}
+        <strong style={{ color: 'var(--sam-color-fg-primary)', fontSize: '1rem' }}>
+          Delegate task
         </strong>
 
+        {/* Intent preview — what the agent will receive */}
+        <section
+          style={{
+            padding: 'var(--sam-space-3)',
+            borderRadius: 'var(--sam-radius-md)',
+            background: 'rgba(99,102,241,0.07)',
+            border: '1px solid rgba(99,102,241,0.2)',
+            display: 'grid',
+            gap: '0.375rem',
+          }}
+        >
+          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--sam-color-fg-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Agent will receive
+          </div>
+          <div style={{ fontWeight: 600, color: 'var(--sam-color-fg-primary)', fontSize: '0.9375rem' }}>
+            {task?.title}
+          </div>
+          {task?.description && (
+            <div style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)', lineHeight: 1.5 }}>
+              {task.description}
+            </div>
+          )}
+        </section>
+
+        {/* Workspace selector */}
         {runningWorkspaces.length === 0 ? (
           <div
             style={{
@@ -55,7 +85,7 @@ export function TaskDelegateDialog({
         ) : (
           <label style={{ display: 'grid', gap: '0.375rem' }}>
             <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
-              Running workspace
+              Target workspace
             </span>
             <select
               value={workspaceId}
@@ -73,11 +103,36 @@ export function TaskDelegateDialog({
               <option value="">Select workspace...</option>
               {runningWorkspaces.map((workspace) => (
                 <option key={workspace.id} value={workspace.id}>
-                  {workspace.displayName ?? workspace.name}
+                  {workspace.displayName ?? workspace.name} — {workspace.repository}@{workspace.branch}
                 </option>
               ))}
             </select>
           </label>
+        )}
+
+        {/* Selected workspace preview */}
+        {selectedWorkspace && (
+          <div
+            style={{
+              padding: 'var(--sam-space-2) var(--sam-space-3)',
+              borderRadius: 'var(--sam-radius-md)',
+              border: '1px solid var(--sam-color-border-default)',
+              background: 'var(--sam-color-bg-surface)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--sam-space-2)',
+              flexWrap: 'wrap',
+              fontSize: '0.875rem',
+            }}
+          >
+            <StatusBadge status={selectedWorkspace.status} />
+            <span style={{ fontWeight: 600, color: 'var(--sam-color-fg-primary)' }}>
+              {selectedWorkspace.displayName ?? selectedWorkspace.name}
+            </span>
+            <span style={{ color: 'var(--sam-color-fg-muted)' }}>
+              {selectedWorkspace.repository}@{selectedWorkspace.branch}
+            </span>
+          </div>
         )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sam-space-2)' }}>
@@ -87,9 +142,7 @@ export function TaskDelegateDialog({
           <Button
             disabled={!workspaceId || loading || runningWorkspaces.length === 0}
             onClick={async () => {
-              if (!workspaceId) {
-                return;
-              }
+              if (!workspaceId) return;
               await onDelegate(workspaceId);
               setWorkspaceId('');
             }}

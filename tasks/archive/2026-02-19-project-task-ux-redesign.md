@@ -137,22 +137,30 @@ At the top of the Tasks tab, show a compact list of tasks in `failed` or `blocke
 
 ## Checklist
 
-- [ ] Add `/projects/:projectId/tasks/:taskId` route in `App.tsx`
-- [ ] Create `TaskDetail` page with two-column layout (desktop) / single-column (mobile)
-  - [ ] Title, status stepper, description, output section, activity log (left)
-  - [ ] Priority, timestamps, workspace link, dependency sidebar widget (right)
-  - [ ] Breadcrumb back to project
-- [ ] Refactor `Project.tsx` to tabbed layout (Overview + Tasks tabs)
-  - [ ] Overview tab: project metadata, badge pill summary, edit form, recent activity
-  - [ ] Tasks tab: filter toolbar, needs-attention section, task list
-- [ ] Update `TaskList.tsx`: click on task title → navigate to task detail page
-- [ ] Add "Needs attention" section to Tasks tab (failed/blocked tasks)
-- [ ] Repurpose `TaskDependencyEditor` as an inline sidebar widget for the task detail page
-- [ ] Improve `TaskDelegateDialog` with intent preview (task description + workspace status)
-- [ ] Remove `TaskDetailPanel` from `Project.tsx` (move to `TaskDetail` page)
-- [ ] Move `TaskFilters` into Tasks tab toolbar
-- [ ] Mobile layout verification (Playwright screenshots)
-- [ ] Update tests for changed components
+- [x] Add `/projects/:projectId/tasks/:taskId` route in `App.tsx`
+- [x] Create `TaskDetail` page with two-column layout (desktop) / single-column (mobile)
+  - [x] Title, status stepper, description, output section, activity log (left)
+  - [x] Priority, timestamps, workspace link, dependency sidebar widget (right)
+  - [x] Breadcrumb back to project
+- [x] Refactor `Project.tsx` to tabbed layout (Overview + Tasks tabs)
+  - [x] Overview tab: project metadata, badge pill summary, edit form, recent activity
+  - [x] Tasks tab: filter toolbar, needs-attention section, task list
+- [x] Update `TaskList.tsx`: click on task title → navigate to task detail page
+- [x] Add "Needs attention" section to Tasks tab (failed/blocked tasks)
+- [x] Repurpose `TaskDependencyEditor` as an inline sidebar widget for the task detail page
+- [x] Improve `TaskDelegateDialog` with intent preview (task description + workspace status)
+- [x] Remove `TaskDetailPanel` from `Project.tsx` (move to `TaskDetail` page)
+- [x] Move `TaskFilters` into Tasks tab toolbar
+- [x] Mobile layout verification (Playwright screenshots)
+- [x] Update tests for changed components
+
+## Completion Notes
+
+- Mobile viewport screenshots captured at:
+  - `.codex/tmp/playwright-screenshots/project-tasks-mobile.png`
+  - `.codex/tmp/playwright-screenshots/task-detail-mobile.png`
+- Local CI-equivalent checks run and passed: `pnpm build`, `pnpm typecheck`, `pnpm test:coverage`, `pnpm lint`, infra typecheck/tests, and vm-agent unit tests.
+- VM-agent integration command `go test -v -tags integration -timeout 15m ./internal/bootstrap/ ./internal/acp/` remains environment-flaky locally (timeout in long-running ACP install integration after completing many bootstrap integration cases).
 
 ## References
 

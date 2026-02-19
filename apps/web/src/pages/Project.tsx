@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type {
   GitHubInstallation,
   ProjectDetailResponse,
@@ -81,6 +81,12 @@ export function Project() {
   const [savingProject, setSavingProject] = useState(false);
   const [savingTask, setSavingTask] = useState(false);
   const [delegating, setDelegating] = useState(false);
+
+  const recentActivity = useMemo(() => {
+    return [...tasks]
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      .slice(0, 5);
+  }, [tasks]);
 
   const filters: TaskFilterState = useMemo(() => {
     const status = searchParams.get('status');
@@ -400,6 +406,57 @@ export function Project() {
                   />
                 </section>
               )}
+
+              {/* Recent activity */}
+              <section
+                style={{
+                  border: '1px solid var(--sam-color-border-default)',
+                  borderRadius: 'var(--sam-radius-md)',
+                  background: 'var(--sam-color-bg-surface)',
+                  padding: 'var(--sam-space-3)',
+                  display: 'grid',
+                  gap: 'var(--sam-space-2)',
+                }}
+              >
+                <strong style={{ color: 'var(--sam-color-fg-primary)', fontSize: '0.9375rem' }}>
+                  Recent activity
+                </strong>
+                {recentActivity.length === 0 ? (
+                  <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.875rem' }}>
+                    No task activity yet.
+                  </div>
+                ) : (
+                  <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: '0.5rem' }}>
+                    {recentActivity.map((task) => (
+                      <li
+                        key={task.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 'var(--sam-space-2)',
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <StatusBadge status={task.status} />
+                        <Link
+                          to={`/projects/${projectId}/tasks/${task.id}`}
+                          style={{
+                            color: 'var(--sam-color-fg-primary)',
+                            textDecoration: 'none',
+                            fontSize: '0.875rem',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {task.title}
+                        </Link>
+                        <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.75rem' }}>
+                          Updated {new Date(task.updatedAt).toLocaleString()}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
             </div>
           )}
 

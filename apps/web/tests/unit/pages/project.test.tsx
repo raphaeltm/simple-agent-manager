@@ -249,4 +249,12 @@ describe('Project page', () => {
       });
     });
   });
+
+  it('renders overview recent activity with links to task detail', async () => {
+    renderProjectPage();
+
+    expect(await screen.findByText('Recent activity')).toBeInTheDocument();
+    const activityLink = await screen.findByRole('link', { name: 'Draft task' });
+    expect(activityLink).toHaveAttribute('href', '/projects/proj-1/tasks/task-1');
+  });
 });
