@@ -116,6 +116,9 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		if runtime.ContainerWorkDir == "" {
 			runtime.ContainerWorkDir = deriveContainerWorkDirForRepo(runtime.WorkspaceDir, runtime.Repository)
 		}
+		if runtime.ContainerUser == "" {
+			runtime.ContainerUser = strings.TrimSpace(s.config.ContainerUser)
+		}
 		runtime.UpdatedAt = time.Now().UTC()
 		return runtime
 	}
@@ -123,8 +126,9 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 	workspaceDir := s.workspaceDirForRepo(workspaceID, repository)
 	containerLabelValue := workspaceDir
 	containerWorkDir := deriveContainerWorkDirForRepo(workspaceDir, repository)
+	containerUser := strings.TrimSpace(s.config.ContainerUser)
 
-	manager := s.newPTYManagerForWorkspace(workspaceID, workspaceDir, containerWorkDir, containerLabelValue)
+	manager := s.newPTYManagerForWorkspace(workspaceID, workspaceDir, containerWorkDir, containerLabelValue, containerUser)
 
 	runtime = &WorkspaceRuntime{
 		ID:                  workspaceID,
@@ -136,6 +140,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		WorkspaceDir:        workspaceDir,
 		ContainerLabelValue: containerLabelValue,
 		ContainerWorkDir:    containerWorkDir,
+		ContainerUser:       containerUser,
 		CallbackToken:       strings.TrimSpace(callbackToken),
 		PTY:                 manager,
 	}
@@ -143,10 +148,20 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 	return runtime
 }
 
-func (s *Server) newPTYManagerForWorkspace(workspaceID, workspaceDir, containerWorkDir, containerLabelValue string) *pty.Manager {
+func (s *Server) newPTYManagerForWorkspace(
+	workspaceID,
+	workspaceDir,
+	containerWorkDir,
+	containerLabelValue,
+	containerUser string,
+) *pty.Manager {
 	workDir := workspaceDir
 	if s.config.ContainerMode {
 		workDir = containerWorkDir
+	}
+	resolvedContainerUser := strings.TrimSpace(containerUser)
+	if resolvedContainerUser == "" {
+		resolvedContainerUser = strings.TrimSpace(s.config.ContainerUser)
 	}
 
 	config := pty.ManagerConfig{
@@ -155,7 +170,7 @@ func (s *Server) newPTYManagerForWorkspace(workspaceID, workspaceDir, containerW
 		DefaultCols:       s.config.DefaultCols,
 		WorkDir:           workDir,
 		ContainerResolver: s.ptyManagerContainerResolverForLabel(containerLabelValue),
-		ContainerUser:     s.config.ContainerUser,
+		ContainerUser:     resolvedContainerUser,
 		GracePeriod:       s.config.PTYOrphanGracePeriod,
 		BufferSize:        s.config.PTYOutputBufferSize,
 	}
@@ -226,6 +241,7 @@ func (s *Server) rebuildWorkspacePTYManager(runtime *WorkspaceRuntime) {
 		strings.TrimSpace(runtime.WorkspaceDir),
 		strings.TrimSpace(runtime.ContainerWorkDir),
 		strings.TrimSpace(runtime.ContainerLabelValue),
+		strings.TrimSpace(runtime.ContainerUser),
 	)
 }
 

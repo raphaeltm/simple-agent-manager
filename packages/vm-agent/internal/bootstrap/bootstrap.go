@@ -560,6 +560,7 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName string) (bool, error) {
 	if _, err := findDevcontainerID(ctx, cfg); err == nil {
 		log.Printf("Devcontainer already running for %s=%s", cfg.ContainerLabelKey, cfg.ContainerLabelValue)
+		ensureContainerUserResolved(ctx, cfg)
 		return false, nil
 	}
 
@@ -573,6 +574,7 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 	log.Printf("Starting devcontainer for workspace at %s", cfg.WorkspaceDir)
 
 	hasConfig := hasDevcontainerConfig(cfg.WorkspaceDir)
+	usedFallback := false
 
 	if hasConfig {
 		// Try with repo's own devcontainer config first.
@@ -587,35 +589,46 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 			if mountErr != nil {
 				log.Printf("Failed to prepare repo mount override config, falling back to default image: %v", mountErr)
 				fallbackOutput := []byte(fmt.Sprintf("failed to prepare repo devcontainer mount override: %v\n", mountErr))
-				return fallbackToDefaultDevcontainer(ctx, cfg, volumeName, mountErr, fallbackOutput)
+				var fallbackErr error
+				usedFallback, fallbackErr = fallbackToDefaultDevcontainer(ctx, cfg, volumeName, mountErr, fallbackOutput)
+				if fallbackErr != nil {
+					return false, fallbackErr
+				}
 			}
 			defer os.Remove(overridePath)
 		}
 
-		args := devcontainerUpArgs(cfg, overridePath)
-		if cfg.AdditionalFeatures != "" {
-			log.Printf("Repo has its own devcontainer config — skipping additional-features injection")
-		}
+		if !usedFallback {
+			args := devcontainerUpArgs(cfg, overridePath)
+			if cfg.AdditionalFeatures != "" {
+				log.Printf("Repo has its own devcontainer config — skipping additional-features injection")
+			}
 
-		cmd := exec.CommandContext(ctx, "devcontainer", args...)
-		output, err := cmd.CombinedOutput()
+			cmd := exec.CommandContext(ctx, "devcontainer", args...)
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				// Repo config failed — log the error and fall back to default image.
+				log.Printf("Devcontainer build failed with repo config, falling back to default image: %v: %s", err, strings.TrimSpace(string(output)))
+				var fallbackErr error
+				usedFallback, fallbackErr = fallbackToDefaultDevcontainer(ctx, cfg, volumeName, err, output)
+				if fallbackErr != nil {
+					return false, fallbackErr
+				}
+			}
+		}
+	} else {
+		// No config — use default.
+		_, err := runDevcontainerWithDefault(ctx, cfg, volumeName)
 		if err != nil {
-			// Repo config failed — log the error and fall back to default image.
-			log.Printf("Devcontainer build failed with repo config, falling back to default image: %v: %s", err, strings.TrimSpace(string(output)))
-			return fallbackToDefaultDevcontainer(ctx, cfg, volumeName, err, output)
+			return false, err
 		}
+	}
 
+	if !usedFallback {
 		clearBuildErrorArtifacts(ctx, cfg, volumeName)
-		return false, nil
 	}
-
-	// No config — use default.
-	_, err := runDevcontainerWithDefault(ctx, cfg, volumeName)
-	if err != nil {
-		return false, err
-	}
-	clearBuildErrorArtifacts(ctx, cfg, volumeName)
-	return false, nil
+	ensureContainerUserResolved(ctx, cfg)
+	return usedFallback, nil
 }
 
 func fallbackToDefaultDevcontainer(
@@ -809,6 +822,175 @@ func normalizeLifecycleCommandValue(value interface{}) interface{} {
 	}
 }
 
+func runReadConfiguration(ctx context.Context, workspaceDir string) (*devcontainerReadConfigurationResult, error) {
+	args := []string{
+		"read-configuration",
+		"--workspace-folder", workspaceDir,
+		"--include-merged-configuration",
+	}
+	cmd := exec.CommandContext(ctx, "devcontainer", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("devcontainer read-configuration failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	readResult, err := parseDevcontainerReadConfigurationOutput(string(output))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse devcontainer read-configuration output: %w", err)
+	}
+	if strings.TrimSpace(readResult.Outcome) != "" && readResult.Outcome != "success" {
+		return nil, fmt.Errorf("devcontainer read-configuration returned %q: %s %s", readResult.Outcome, readResult.Message, readResult.Description)
+	}
+
+	return readResult, nil
+}
+
+func extractContainerUserFromMergedConfiguration(merged map[string]interface{}) string {
+	for _, key := range []string{"remoteUser", "containerUser"} {
+		value, ok := merged[key]
+		if !ok {
+			continue
+		}
+		asString, ok := value.(string)
+		if !ok {
+			continue
+		}
+		if trimmed := strings.TrimSpace(asString); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func extractContainerUserFromMetadataLabel(raw string) string {
+	var entries []map[string]interface{}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &entries); err != nil {
+		return ""
+	}
+
+	resolved := ""
+	for _, entry := range entries {
+		for _, key := range []string{"remoteUser", "containerUser"} {
+			value, ok := entry[key]
+			if !ok {
+				continue
+			}
+			asString, ok := value.(string)
+			if !ok {
+				continue
+			}
+			if trimmed := strings.TrimSpace(asString); trimmed != "" {
+				// Keep the last value in metadata order (later entries are more specific).
+				resolved = trimmed
+			}
+		}
+	}
+	return resolved
+}
+
+func detectContainerUserFromReadConfiguration(ctx context.Context, cfg *config.Config) string {
+	readResult, err := runReadConfiguration(ctx, cfg.WorkspaceDir)
+	if err != nil {
+		log.Printf("Container user detection: read-configuration unavailable: %v", err)
+		return ""
+	}
+
+	user := extractContainerUserFromMergedConfiguration(readResult.MergedConfiguration)
+	if user == "" {
+		log.Printf("Container user detection: read-configuration returned no remote/container user")
+	}
+	return user
+}
+
+func detectContainerUserFromMetadata(ctx context.Context, cfg *config.Config) string {
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		log.Printf("Container user detection: failed to resolve running container for metadata lookup: %v", err)
+		return ""
+	}
+
+	cmd := exec.CommandContext(
+		ctx,
+		"docker",
+		"inspect",
+		"--format",
+		"{{json (index .Config.Labels \"devcontainer.metadata\")}}",
+		containerID,
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Container user detection: docker inspect metadata failed: %v: %s", err, strings.TrimSpace(string(output)))
+		return ""
+	}
+
+	var encoded *string
+	if err := json.Unmarshal(bytes.TrimSpace(output), &encoded); err != nil {
+		log.Printf("Container user detection: failed to decode metadata label payload: %v", err)
+		return ""
+	}
+	if encoded == nil || strings.TrimSpace(*encoded) == "" {
+		return ""
+	}
+
+	return extractContainerUserFromMetadataLabel(*encoded)
+}
+
+func detectContainerUserFromExec(ctx context.Context, cfg *config.Config) string {
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		log.Printf("Container user detection: failed to resolve running container for exec fallback: %v", err)
+		return ""
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", "exec", containerID, "id", "-un")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Container user detection: docker exec id fallback failed: %v: %s", err, strings.TrimSpace(string(output)))
+		return ""
+	}
+
+	return strings.TrimSpace(string(output))
+}
+
+func ensureContainerUserResolved(ctx context.Context, cfg *config.Config) {
+	override := strings.TrimSpace(cfg.ContainerUser)
+	if override != "" {
+		log.Printf("Container user override active via CONTAINER_USER=%q", override)
+		cfg.ContainerUser = override
+		return
+	}
+
+	if detected := detectContainerUserFromReadConfiguration(ctx, cfg); detected != "" {
+		cfg.ContainerUser = detected
+		if detected == "root" {
+			log.Printf("Warning: detected devcontainer user is root (source=read-configuration)")
+		} else {
+			log.Printf("Detected devcontainer user %q via read-configuration", detected)
+		}
+		return
+	}
+	if detected := detectContainerUserFromMetadata(ctx, cfg); detected != "" {
+		cfg.ContainerUser = detected
+		if detected == "root" {
+			log.Printf("Warning: detected devcontainer user is root (source=devcontainer.metadata)")
+		} else {
+			log.Printf("Detected devcontainer user %q via devcontainer.metadata", detected)
+		}
+		return
+	}
+	if detected := detectContainerUserFromExec(ctx, cfg); detected != "" {
+		cfg.ContainerUser = detected
+		if detected == "root" {
+			log.Printf("Warning: detected devcontainer user is root (source=docker exec id -un fallback)")
+		} else {
+			log.Printf("Detected devcontainer user %q via docker exec fallback", detected)
+		}
+		return
+	}
+
+	log.Printf("Warning: unable to detect devcontainer user; docker exec will use container default user")
+}
+
 // writeMountOverrideConfig resolves the repo devcontainer configuration via
 // `devcontainer read-configuration` and writes a full override config that
 // includes workspaceMount/workspaceFolder for named-volume workspaces.
@@ -818,23 +1000,9 @@ func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeNam
 		repoDirName = filepath.Base(cfg.WorkspaceDir)
 	}
 
-	args := []string{
-		"read-configuration",
-		"--workspace-folder", cfg.WorkspaceDir,
-		"--include-merged-configuration",
-	}
-	cmd := exec.CommandContext(ctx, "devcontainer", args...)
-	output, err := cmd.CombinedOutput()
+	readResult, err := runReadConfiguration(ctx, cfg.WorkspaceDir)
 	if err != nil {
-		return "", fmt.Errorf("devcontainer read-configuration failed: %w: %s", err, strings.TrimSpace(string(output)))
-	}
-
-	readResult, err := parseDevcontainerReadConfigurationOutput(string(output))
-	if err != nil {
-		return "", fmt.Errorf("failed to parse devcontainer read-configuration output: %w", err)
-	}
-	if strings.TrimSpace(readResult.Outcome) != "" && readResult.Outcome != "success" {
-		return "", fmt.Errorf("devcontainer read-configuration returned %q: %s %s", readResult.Outcome, readResult.Message, readResult.Description)
+		return "", err
 	}
 	if len(readResult.MergedConfiguration) == 0 {
 		return "", errors.New("devcontainer read-configuration returned empty mergedConfiguration")

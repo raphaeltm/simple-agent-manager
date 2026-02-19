@@ -201,6 +201,9 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 		if workDir := strings.TrimSpace(runtime.ContainerWorkDir); workDir != "" {
 			cfg.ContainerWorkDir = workDir
 		}
+		if user := strings.TrimSpace(runtime.ContainerUser); user != "" {
+			cfg.ContainerUser = user
+		}
 		if requestedWorktree != "" {
 			containerID, defaultWorkDir, user, resolveErr := s.resolveContainerForWorkspace(workspaceID)
 			if resolveErr == nil {

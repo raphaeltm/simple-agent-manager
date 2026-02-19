@@ -2,6 +2,8 @@ package server
 
 import (
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -291,5 +293,55 @@ func TestGitWorktreeQueryResolvesToValidatedWorkDir(t *testing.T) {
 	}
 	if workDir != "/workspaces/repo-wt-feature" {
 		t.Fatalf("resolveWorktreeWorkDir() = %q, want /workspaces/repo-wt-feature", workDir)
+	}
+}
+
+func TestResolveContainerForWorkspaceUsesRuntimeContainerUser(t *testing.T) {
+	mockBinDir := t.TempDir()
+	mockDocker := filepath.Join(mockBinDir, "docker")
+	mockScript := `#!/bin/sh
+if [ "$1" = "ps" ]; then
+  echo "container-123"
+  exit 0
+fi
+exit 1
+`
+	if err := os.WriteFile(mockDocker, []byte(mockScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock docker command: %v", err)
+	}
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+
+	s := &Server{
+		config: &config.Config{
+			ContainerMode:       true,
+			ContainerLabelKey:   "devcontainer.local_folder",
+			ContainerCacheTTL:   time.Second,
+			ContainerUser:       "root",
+			ContainerLabelValue: "/workspace/ws-1",
+		},
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-1": {
+				ID:                  "ws-1",
+				Status:              "running",
+				ContainerLabelValue: "/workspace/ws-1",
+				ContainerWorkDir:    "/workspaces/repo",
+				ContainerUser:       "node",
+			},
+		},
+	}
+
+	containerID, workDir, user, err := s.resolveContainerForWorkspace("ws-1")
+	if err != nil {
+		t.Fatalf("resolveContainerForWorkspace() error = %v", err)
+	}
+	if containerID != "container-123" {
+		t.Fatalf("containerID = %q, want %q", containerID, "container-123")
+	}
+	if workDir != "/workspaces/repo" {
+		t.Fatalf("workDir = %q, want %q", workDir, "/workspaces/repo")
+	}
+	if user != "node" {
+		t.Fatalf("user = %q, want %q", user, "node")
 	}
 }

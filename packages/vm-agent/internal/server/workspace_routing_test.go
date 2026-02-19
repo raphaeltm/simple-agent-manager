@@ -316,6 +316,7 @@ func TestNewPTYManagerForWorkspaceSkipsLegacyReuseAfterRuntimeUpdate(t *testing.
 		"/workspace/repo-one",
 		"/workspaces/repo-one",
 		"/workspace/repo-one",
+		"",
 	)
 	if migratedManager == legacyManager {
 		t.Fatal("expected migrated runtime to receive a workspace-specific PTY manager")

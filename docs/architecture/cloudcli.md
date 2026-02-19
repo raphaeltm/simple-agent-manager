@@ -13,7 +13,11 @@ CloudCLI (`@siteboon/claude-code-ui`) was a third-party terminal UI that proved 
 
 ```
 Browser ──WebSocket──► VM Agent (port 8080) ──docker exec──► devcontainer
-        (xterm.js)         (Go, PTY mgmt)                    (default user)
+        (xterm.js)         (Go, PTY mgmt)                    (resolved user)
 ```
 
-All terminal sessions exec into the devcontainer as the configured user (default: `vscode`), ensuring commands run in the correct environment with the right tools installed.
+All terminal sessions exec into the devcontainer as the resolved workspace user:
+
+- explicit `CONTAINER_USER` override when set
+- otherwise resolved devcontainer user (`remoteUser`/`containerUser`) from devcontainer config/metadata
+- final fallback to container default user when no devcontainer user metadata is available
