@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type {
   GitHubInstallation,
   ProjectDetailResponse,
   Task,
-  TaskDetailResponse,
   TaskSortOrder,
   TaskStatus,
   WorkspaceResponse,
@@ -12,20 +11,15 @@ import type {
 import { Alert, Button, PageLayout, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import {
-  addTaskDependency,
   createProjectTask,
   deleteProject,
   deleteProjectTask,
   delegateTask,
   getProject,
-  getProjectTask,
   listGitHubInstallations,
   listProjectTasks,
-  listTaskEvents,
   listWorkspaces,
-  removeTaskDependency,
   updateProject,
-  updateProjectTask,
   updateProjectTaskStatus,
 } from '../lib/api';
 import { useToast } from '../hooks/useToast';
@@ -33,19 +27,13 @@ import { ProjectForm, type ProjectFormValues } from '../components/project/Proje
 import { TaskFilters, type TaskFilterState } from '../components/project/TaskFilters';
 import { TaskForm, type TaskFormValues } from '../components/project/TaskForm';
 import { TaskList } from '../components/project/TaskList';
-import { TaskDependencyEditor } from '../components/project/TaskDependencyEditor';
 import { TaskDelegateDialog } from '../components/project/TaskDelegateDialog';
-import { TaskDetailPanel } from '../components/project/TaskDetailPanel';
+import { NeedsAttentionSection } from '../components/project/NeedsAttentionSection';
+
+type ProjectTab = 'overview' | 'tasks';
 
 const VALID_STATUSES: TaskStatus[] = [
-  'draft',
-  'ready',
-  'queued',
-  'delegated',
-  'in_progress',
-  'completed',
-  'failed',
-  'cancelled',
+  'draft', 'ready', 'queued', 'delegated', 'in_progress', 'completed', 'failed', 'cancelled',
 ];
 
 function isTaskStatus(value: string | null): value is TaskStatus {
@@ -53,9 +41,7 @@ function isTaskStatus(value: string | null): value is TaskStatus {
 }
 
 function parseTaskSortOrder(value: string | null): TaskSortOrder {
-  if (value === 'updatedAtDesc' || value === 'priorityDesc') {
-    return value;
-  }
+  if (value === 'updatedAtDesc' || value === 'priorityDesc') return value;
   return 'createdAtDesc';
 }
 
@@ -64,6 +50,21 @@ export function Project() {
   const { id: projectId } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const toast = useToast();
+
+  // Active tab — driven by ?tab= search param
+  const activeTab: ProjectTab = searchParams.get('tab') === 'tasks' ? 'tasks' : 'overview';
+
+  const setTab = (tab: ProjectTab) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (tab === 'overview') {
+        next.delete('tab');
+      } else {
+        next.set('tab', tab);
+      }
+      return next;
+    }, { replace: true });
+  };
 
   const [project, setProject] = useState<ProjectDetailResponse | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -75,25 +76,22 @@ export function Project() {
 
   const [showProjectEdit, setShowProjectEdit] = useState(false);
   const [showTaskCreate, setShowTaskCreate] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [dependencyTask, setDependencyTask] = useState<Task | null>(null);
   const [delegateTargetTask, setDelegateTargetTask] = useState<Task | null>(null);
-
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [selectedTaskDetail, setSelectedTaskDetail] = useState<TaskDetailResponse | null>(null);
-  const [taskEvents, setTaskEvents] = useState<Awaited<ReturnType<typeof listTaskEvents>>['events']>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
 
   const [savingProject, setSavingProject] = useState(false);
   const [savingTask, setSavingTask] = useState(false);
-  const [savingDependency, setSavingDependency] = useState(false);
   const [delegating, setDelegating] = useState(false);
+
+  const recentActivity = useMemo(() => {
+    return [...tasks]
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      .slice(0, 5);
+  }, [tasks]);
 
   const filters: TaskFilterState = useMemo(() => {
     const status = searchParams.get('status');
     const minPriorityRaw = searchParams.get('minPriority');
     const minPriority = minPriorityRaw ? Number.parseInt(minPriorityRaw, 10) : undefined;
-
     return {
       status: isTaskStatus(status) ? status : undefined,
       minPriority: Number.isNaN(minPriority) ? undefined : minPriority,
@@ -102,29 +100,21 @@ export function Project() {
   }, [searchParams]);
 
   const setFilters = useCallback((next: TaskFilterState) => {
-    const params = new URLSearchParams();
-    if (next.status) {
-      params.set('status', next.status);
-    }
-    if (next.minPriority !== undefined) {
-      params.set('minPriority', String(next.minPriority));
-    }
-    if (next.sort !== 'createdAtDesc') {
-      params.set('sort', next.sort);
-    }
-    setSearchParams(params, { replace: true });
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      if (next.status) { params.set('status', next.status); } else { params.delete('status'); }
+      if (next.minPriority !== undefined) { params.set('minPriority', String(next.minPriority)); } else { params.delete('minPriority'); }
+      if (next.sort !== 'createdAtDesc') { params.set('sort', next.sort); } else { params.delete('sort'); }
+      return params;
+    }, { replace: true });
   }, [setSearchParams]);
 
   const loadProject = useCallback(async () => {
-    if (!projectId) {
-      return;
-    }
-
+    if (!projectId) return;
     try {
       setError(null);
       setProjectLoading(true);
-      const data = await getProject(projectId);
-      setProject(data);
+      setProject(await getProject(projectId));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load project');
     } finally {
@@ -133,10 +123,7 @@ export function Project() {
   }, [projectId]);
 
   const loadTasks = useCallback(async () => {
-    if (!projectId) {
-      return;
-    }
-
+    if (!projectId) return;
     try {
       setTasksLoading(true);
       const response = await listProjectTasks(projectId, {
@@ -145,71 +132,27 @@ export function Project() {
         sort: filters.sort,
       });
       setTasks(response.tasks);
-      if (selectedTaskId && !response.tasks.some((task) => task.id === selectedTaskId)) {
-        setSelectedTaskId(null);
-        setSelectedTaskDetail(null);
-        setTaskEvents([]);
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load tasks');
     } finally {
       setTasksLoading(false);
     }
-  }, [projectId, filters.status, filters.minPriority, filters.sort, selectedTaskId]);
+  }, [projectId, filters.status, filters.minPriority, filters.sort]);
 
-  const loadTaskDetail = useCallback(async (taskId: string) => {
-    if (!projectId) {
-      return;
-    }
-
-    try {
-      setDetailLoading(true);
-      const [detail, eventsResponse] = await Promise.all([
-        getProjectTask(projectId, taskId),
-        listTaskEvents(projectId, taskId, 25),
-      ]);
-      setSelectedTaskDetail(detail);
-      setTaskEvents(eventsResponse.events);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to load task detail');
-    } finally {
-      setDetailLoading(false);
-    }
-  }, [projectId, toast]);
-
-  useEffect(() => {
-    void loadProject();
-  }, [loadProject]);
-
-  useEffect(() => {
-    void loadTasks();
-  }, [loadTasks]);
+  useEffect(() => { void loadProject(); }, [loadProject]);
+  useEffect(() => { void loadTasks(); }, [loadTasks]);
 
   useEffect(() => {
     void listGitHubInstallations()
       .then((response) => setInstallations(response))
       .catch(() => setInstallations([]));
-
     void listWorkspaces('running')
       .then((response) => setWorkspaces(response))
       .catch(() => setWorkspaces([]));
   }, []);
 
-  useEffect(() => {
-    if (!selectedTaskId) {
-      setSelectedTaskDetail(null);
-      setTaskEvents([]);
-      return;
-    }
-
-    void loadTaskDetail(selectedTaskId);
-  }, [selectedTaskId, loadTaskDetail]);
-
   const handleProjectUpdate = async (values: ProjectFormValues) => {
-    if (!projectId) {
-      return;
-    }
-
+    if (!projectId) return;
     try {
       setSavingProject(true);
       await updateProject(projectId, {
@@ -228,10 +171,7 @@ export function Project() {
   };
 
   const handleTaskCreate = async (values: TaskFormValues) => {
-    if (!projectId) {
-      return;
-    }
-
+    if (!projectId) return;
     try {
       setSavingTask(true);
       await createProjectTask(projectId, {
@@ -252,47 +192,12 @@ export function Project() {
     }
   };
 
-  const handleTaskUpdate = async (values: TaskFormValues) => {
-    if (!projectId || !editingTask) {
-      return;
-    }
-
-    try {
-      setSavingTask(true);
-      await updateProjectTask(projectId, editingTask.id, {
-        title: values.title,
-        description: values.description || undefined,
-        priority: values.priority,
-        parentTaskId: values.parentTaskId || null,
-      });
-      toast.success('Task updated');
-      setEditingTask(null);
-      await loadTasks();
-      if (selectedTaskId === editingTask.id) {
-        await loadTaskDetail(editingTask.id);
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update task');
-    } finally {
-      setSavingTask(false);
-    }
-  };
-
   const handleTaskDelete = async (task: Task) => {
-    if (!projectId) {
-      return;
-    }
-
-    if (!window.confirm(`Delete task "${task.title}"?`)) {
-      return;
-    }
-
+    if (!projectId) return;
+    if (!window.confirm(`Delete task "${task.title}"?`)) return;
     try {
       await deleteProjectTask(projectId, task.id);
       toast.success('Task deleted');
-      if (selectedTaskId === task.id) {
-        setSelectedTaskId(null);
-      }
       await loadTasks();
       await loadProject();
     } catch (err) {
@@ -301,64 +206,19 @@ export function Project() {
   };
 
   const handleTaskTransition = async (task: Task, toStatus: TaskStatus) => {
-    if (!projectId) {
-      return;
-    }
-
+    if (!projectId) return;
     try {
       await updateProjectTaskStatus(projectId, task.id, { toStatus });
-      toast.success(`Task moved to ${toStatus}`);
+      toast.success(`Task moved to ${toStatus.replace('_', ' ')}`);
       await loadTasks();
       await loadProject();
-      if (selectedTaskId === task.id) {
-        await loadTaskDetail(task.id);
-      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update status');
     }
   };
 
-  const handleAddDependency = async (dependsOnTaskId: string) => {
-    if (!projectId || !dependencyTask) {
-      return;
-    }
-
-    try {
-      setSavingDependency(true);
-      await addTaskDependency(projectId, dependencyTask.id, { dependsOnTaskId });
-      toast.success('Dependency added');
-      await loadTasks();
-      await loadTaskDetail(dependencyTask.id);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to add dependency');
-    } finally {
-      setSavingDependency(false);
-    }
-  };
-
-  const handleRemoveDependency = async (dependsOnTaskId: string) => {
-    if (!projectId || !dependencyTask) {
-      return;
-    }
-
-    try {
-      setSavingDependency(true);
-      await removeTaskDependency(projectId, dependencyTask.id, dependsOnTaskId);
-      toast.success('Dependency removed');
-      await loadTasks();
-      await loadTaskDetail(dependencyTask.id);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to remove dependency');
-    } finally {
-      setSavingDependency(false);
-    }
-  };
-
   const handleDelegate = async (workspaceId: string) => {
-    if (!projectId || !delegateTargetTask) {
-      return;
-    }
-
+    if (!projectId || !delegateTargetTask) return;
     try {
       setDelegating(true);
       await delegateTask(projectId, delegateTargetTask.id, { workspaceId });
@@ -366,17 +226,12 @@ export function Project() {
       setDelegateTargetTask(null);
       await loadTasks();
       await loadProject();
-      await loadTaskDetail(delegateTargetTask.id);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delegate task');
     } finally {
       setDelegating(false);
     }
   };
-
-  const selectedTask = selectedTaskId
-    ? tasks.find((task) => task.id === selectedTaskId) ?? null
-    : null;
 
   if (!projectId) {
     return (
@@ -388,200 +243,273 @@ export function Project() {
 
   return (
     <PageLayout title="Project" maxWidth="xl" headerRight={<UserMenu />}>
+      <style>{`
+        .project-tab-btn {
+          background: transparent;
+          border: none;
+          border-bottom: 2px solid transparent;
+          padding: 0.5rem 0.25rem;
+          cursor: pointer;
+          font-size: 0.9375rem;
+          font-weight: 500;
+          color: var(--sam-color-fg-muted);
+          transition: color 0.15s, border-color 0.15s;
+          min-height: 44px;
+        }
+        .project-tab-btn:hover {
+          color: var(--sam-color-fg-primary);
+        }
+        .project-tab-btn[aria-selected="true"] {
+          color: var(--sam-color-fg-primary);
+          border-bottom-color: var(--sam-color-accent-primary);
+        }
+      `}</style>
+
       {error && (
         <div style={{ marginBottom: 'var(--sam-space-3)' }}>
-          <Alert variant="error" onDismiss={() => setError(null)}>
-            {error}
-          </Alert>
+          <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
         </div>
       )}
 
       {projectLoading ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
           <Spinner size="md" />
-          <span>Loading project...</span>
+          <span>Loading project…</span>
         </div>
       ) : !project ? (
         <Alert variant="error">Project not found.</Alert>
       ) : (
         <div style={{ display: 'grid', gap: 'var(--sam-space-4)' }}>
-          <section
-            style={{
-              border: '1px solid var(--sam-color-border-default)',
-              borderRadius: 'var(--sam-radius-md)',
-              background: 'var(--sam-color-bg-surface)',
-              padding: 'var(--sam-space-4)',
-              display: 'grid',
-              gap: 'var(--sam-space-3)',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
-              <div style={{ display: 'grid', gap: '0.25rem' }}>
-                <h1 style={{ margin: 0, color: 'var(--sam-color-fg-primary)', fontSize: '1.25rem' }}>
-                  {project.name}
-                </h1>
-                <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.875rem' }}>
-                  {project.repository}@{project.defaultBranch}
-                </div>
-                {project.description && (
-                  <p style={{ margin: 0, color: 'var(--sam-color-fg-muted)', fontSize: '0.875rem' }}>
-                    {project.description}
-                  </p>
-                )}
-              </div>
 
-              <div style={{ display: 'flex', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
-                <Button variant="secondary" onClick={() => setShowProjectEdit((value) => !value)}>
-                  {showProjectEdit ? 'Close edit' : 'Edit project'}
-                </Button>
-                <Button
-                  variant="danger"
-                  onClick={async () => {
-                    if (!window.confirm(`Delete project "${project.name}"?`)) {
-                      return;
-                    }
-                    try {
-                      await deleteProject(project.id);
-                      toast.success('Project deleted');
-                      navigate('/projects');
-                    } catch (err) {
-                      toast.error(err instanceof Error ? err.message : 'Failed to delete project');
-                    }
-                  }}
-                >
-                  Delete project
-                </Button>
+          {/* ── Project header ── */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+            <div style={{ display: 'grid', gap: '0.25rem' }}>
+              <h1 style={{ margin: 0, color: 'var(--sam-color-fg-primary)', fontSize: '1.25rem' }}>
+                {project.name}
+              </h1>
+              <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.875rem' }}>
+                {project.repository}@{project.defaultBranch}
               </div>
+              {project.description && (
+                <p style={{ margin: 0, color: 'var(--sam-color-fg-muted)', fontSize: '0.875rem' }}>
+                  {project.description}
+                </p>
+              )}
             </div>
-
-            <div style={{ display: 'grid', gap: '0.5rem', fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>
-              <div>Linked workspaces: {project.summary.linkedWorkspaces}</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.375rem' }}>
-                <span>Tasks:</span>
-                {(Object.entries(project.summary.taskCountsByStatus) as [string, number][])
-                  .filter(([, count]) => count > 0)
-                  .map(([status, count]) => (
-                    <StatusBadge
-                      key={status}
-                      status={status}
-                      label={`${status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())} (${count})`}
-                    />
-                  ))}
-                {Object.values(project.summary.taskCountsByStatus).every((c) => c === 0) && (
-                  <span>none</span>
-                )}
-              </div>
-            </div>
-
-            {showProjectEdit && (
-              <ProjectForm
-                mode="edit"
-                installations={installations}
-                initialValues={{
-                  name: project.name,
-                  description: project.description ?? '',
-                  installationId: project.installationId,
-                  repository: project.repository,
-                  defaultBranch: project.defaultBranch,
+            <div style={{ display: 'flex', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+              <Button variant="secondary" onClick={() => setShowProjectEdit((v) => !v)}>
+                {showProjectEdit ? 'Close edit' : 'Edit project'}
+              </Button>
+              <Button
+                variant="danger"
+                onClick={async () => {
+                  if (!window.confirm(`Delete project "${project.name}"?`)) return;
+                  try {
+                    await deleteProject(project.id);
+                    toast.success('Project deleted');
+                    navigate('/projects');
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : 'Failed to delete project');
+                  }
                 }}
-                submitting={savingProject}
-                onSubmit={handleProjectUpdate}
-                onCancel={() => setShowProjectEdit(false)}
-              />
-            )}
-          </section>
-
-          <section style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
-              <h2 style={{ margin: 0, fontSize: '1.125rem', color: 'var(--sam-color-fg-primary)' }}>Backlog</h2>
-              <Button onClick={() => setShowTaskCreate((value) => !value)}>
-                {showTaskCreate ? 'Close task form' : 'New task'}
+              >
+                Delete project
               </Button>
             </div>
+          </div>
 
-            <TaskFilters value={filters} onChange={setFilters} />
+          {/* ── Tab strip ── */}
+          <div
+            role="tablist"
+            style={{
+              display: 'flex',
+              gap: 'var(--sam-space-4)',
+              borderBottom: '1px solid var(--sam-color-border-default)',
+            }}
+          >
+            <button
+              role="tab"
+              aria-selected={activeTab === 'overview'}
+              className="project-tab-btn"
+              onClick={() => setTab('overview')}
+            >
+              Overview
+            </button>
+            <button
+              role="tab"
+              aria-selected={activeTab === 'tasks'}
+              className="project-tab-btn"
+              onClick={() => setTab('tasks')}
+            >
+              Tasks
+            </button>
+          </div>
 
-            {showTaskCreate && (
-              <div
+          {/* ── Overview tab ── */}
+          {activeTab === 'overview' && (
+            <div style={{ display: 'grid', gap: 'var(--sam-space-4)' }}>
+
+              {/* Summary stats */}
+              <section
                 style={{
                   border: '1px solid var(--sam-color-border-default)',
                   borderRadius: 'var(--sam-radius-md)',
                   background: 'var(--sam-color-bg-surface)',
                   padding: 'var(--sam-space-3)',
+                  display: 'grid',
+                  gap: 'var(--sam-space-2)',
                 }}
               >
-                <TaskForm
-                  mode="create"
-                  tasks={tasks}
-                  submitting={savingTask}
-                  onSubmit={handleTaskCreate}
-                  onCancel={() => setShowTaskCreate(false)}
-                />
-              </div>
-            )}
+                <div style={{ fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>
+                  Linked workspaces: {project.summary.linkedWorkspaces}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.375rem' }}>
+                  <span style={{ fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>Tasks:</span>
+                  {(Object.entries(project.summary.taskCountsByStatus) as [string, number][])
+                    .filter(([, count]) => count > 0)
+                    .map(([status, count]) => (
+                      <StatusBadge
+                        key={status}
+                        status={status}
+                        label={`${status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())} (${count})`}
+                      />
+                    ))}
+                  {Object.values(project.summary.taskCountsByStatus).every((c) => c === 0) && (
+                    <span style={{ fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>none</span>
+                  )}
+                </div>
+              </section>
 
-            {editingTask && (
-              <div
-                style={{
-                  border: '1px solid var(--sam-color-border-default)',
-                  borderRadius: 'var(--sam-radius-md)',
-                  background: 'var(--sam-color-bg-surface)',
-                  padding: 'var(--sam-space-3)',
-                }}
-              >
-                <TaskForm
-                  mode="edit"
-                  tasks={tasks}
-                  currentTaskId={editingTask.id}
-                  initialValues={{
-                    title: editingTask.title,
-                    description: editingTask.description ?? '',
-                    priority: editingTask.priority,
-                    parentTaskId: editingTask.parentTaskId ?? '',
+              {/* Edit form */}
+              {showProjectEdit && (
+                <section
+                  style={{
+                    border: '1px solid var(--sam-color-border-default)',
+                    borderRadius: 'var(--sam-radius-md)',
+                    background: 'var(--sam-color-bg-surface)',
+                    padding: 'var(--sam-space-3)',
                   }}
-                  submitting={savingTask}
-                  onSubmit={handleTaskUpdate}
-                  onCancel={() => setEditingTask(null)}
-                />
+                >
+                  <ProjectForm
+                    mode="edit"
+                    installations={installations}
+                    initialValues={{
+                      name: project.name,
+                      description: project.description ?? '',
+                      installationId: project.installationId,
+                      repository: project.repository,
+                      defaultBranch: project.defaultBranch,
+                    }}
+                    submitting={savingProject}
+                    onSubmit={handleProjectUpdate}
+                    onCancel={() => setShowProjectEdit(false)}
+                  />
+                </section>
+              )}
+
+              {/* Recent activity */}
+              <section
+                style={{
+                  border: '1px solid var(--sam-color-border-default)',
+                  borderRadius: 'var(--sam-radius-md)',
+                  background: 'var(--sam-color-bg-surface)',
+                  padding: 'var(--sam-space-3)',
+                  display: 'grid',
+                  gap: 'var(--sam-space-2)',
+                }}
+              >
+                <strong style={{ color: 'var(--sam-color-fg-primary)', fontSize: '0.9375rem' }}>
+                  Recent activity
+                </strong>
+                {recentActivity.length === 0 ? (
+                  <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.875rem' }}>
+                    No task activity yet.
+                  </div>
+                ) : (
+                  <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: '0.5rem' }}>
+                    {recentActivity.map((task) => (
+                      <li
+                        key={task.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 'var(--sam-space-2)',
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <StatusBadge status={task.status} />
+                        <Link
+                          to={`/projects/${projectId}/tasks/${task.id}`}
+                          style={{
+                            color: 'var(--sam-color-fg-primary)',
+                            textDecoration: 'none',
+                            fontSize: '0.875rem',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {task.title}
+                        </Link>
+                        <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.75rem' }}>
+                          Updated {new Date(task.updatedAt).toLocaleString()}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </div>
+          )}
+
+          {/* ── Tasks tab ── */}
+          {activeTab === 'tasks' && (
+            <div style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
+
+              {/* Toolbar */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: 'var(--sam-space-2)',
+                flexWrap: 'wrap',
+              }}>
+                <TaskFilters value={filters} onChange={setFilters} />
+                <Button onClick={() => setShowTaskCreate((v) => !v)}>
+                  {showTaskCreate ? 'Cancel' : 'New task'}
+                </Button>
               </div>
-            )}
 
-            <TaskList
-              tasks={tasks}
-              loading={tasksLoading}
-              selectedTaskId={selectedTaskId ?? undefined}
-              onSelectTask={(taskId) => setSelectedTaskId(taskId)}
-              onEditTask={(task) => setEditingTask(task)}
-              onDeleteTask={handleTaskDelete}
-              onTransitionTask={handleTaskTransition}
-              onManageDependencies={(task) => {
-                setDependencyTask(task);
-                setSelectedTaskId(task.id);
-              }}
-              onDelegateTask={(task) => setDelegateTargetTask(task)}
-            />
+              {/* New task form */}
+              {showTaskCreate && (
+                <div style={{
+                  border: '1px solid var(--sam-color-border-default)',
+                  borderRadius: 'var(--sam-radius-md)',
+                  background: 'var(--sam-color-bg-surface)',
+                  padding: 'var(--sam-space-3)',
+                }}>
+                  <TaskForm
+                    mode="create"
+                    tasks={tasks}
+                    submitting={savingTask}
+                    onSubmit={handleTaskCreate}
+                    onCancel={() => setShowTaskCreate(false)}
+                  />
+                </div>
+              )}
 
-            <TaskDependencyEditor
-              task={dependencyTask}
-              tasks={tasks}
-              dependencies={
-                selectedTaskDetail && dependencyTask && selectedTaskDetail.id === dependencyTask.id
-                  ? selectedTaskDetail.dependencies
-                  : []
-              }
-              loading={savingDependency || detailLoading}
-              onAdd={handleAddDependency}
-              onRemove={handleRemoveDependency}
-              onClose={() => setDependencyTask(null)}
-            />
-          </section>
+              {/* Needs attention */}
+              <NeedsAttentionSection tasks={tasks} projectId={projectId} />
 
-          <TaskDetailPanel
-            task={selectedTask && selectedTaskDetail && selectedTaskDetail.id === selectedTask.id ? selectedTaskDetail : null}
-            events={taskEvents}
-            loading={detailLoading}
-            onClose={() => setSelectedTaskId(null)}
-          />
+              {/* Task list */}
+              <TaskList
+                tasks={tasks}
+                projectId={projectId}
+                loading={tasksLoading}
+                onDeleteTask={handleTaskDelete}
+                onTransitionTask={handleTaskTransition}
+                onDelegateTask={(task) => setDelegateTargetTask(task)}
+              />
+            </div>
+          )}
         </div>
       )}
 

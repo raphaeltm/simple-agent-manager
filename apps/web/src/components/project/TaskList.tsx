@@ -1,15 +1,13 @@
+import { Link } from 'react-router-dom';
 import type { Task, TaskStatus } from '@simple-agent-manager/shared';
-import { Button, StatusBadge } from '@simple-agent-manager/ui';
+import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 
 interface TaskListProps {
   tasks: Task[];
+  projectId: string;
   loading?: boolean;
-  selectedTaskId?: string;
-  onSelectTask: (taskId: string) => void;
-  onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
   onTransitionTask: (task: Task, toStatus: TaskStatus) => void;
-  onManageDependencies: (task: Task) => void;
   onDelegateTask: (task: Task) => void;
 }
 
@@ -30,137 +28,133 @@ function toLabel(status: TaskStatus): string {
 
 export function TaskList({
   tasks,
+  projectId,
   loading = false,
-  selectedTaskId,
-  onSelectTask,
-  onEditTask,
   onDeleteTask,
   onTransitionTask,
-  onManageDependencies,
   onDelegateTask,
 }: TaskListProps) {
   if (loading) {
     return (
-      <div
-        style={{
-          padding: 'var(--sam-space-4)',
-          border: '1px solid var(--sam-color-border-default)',
-          borderRadius: 'var(--sam-radius-md)',
-          background: 'var(--sam-color-bg-surface)',
-        }}
-      >
-        Loading tasks...
+      <div style={{
+        padding: 'var(--sam-space-4)',
+        border: '1px solid var(--sam-color-border-default)',
+        borderRadius: 'var(--sam-radius-md)',
+        background: 'var(--sam-color-bg-surface)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--sam-space-2)',
+      }}>
+        <Spinner size="sm" />
+        <span style={{ color: 'var(--sam-color-fg-muted)' }}>Loading tasks…</span>
       </div>
     );
   }
 
   if (tasks.length === 0) {
     return (
-      <div
-        style={{
-          padding: 'var(--sam-space-4)',
-          border: '1px solid var(--sam-color-border-default)',
-          borderRadius: 'var(--sam-radius-md)',
-          background: 'var(--sam-color-bg-surface)',
-          color: 'var(--sam-color-fg-muted)',
-        }}
-      >
-        No tasks in this project yet.
+      <div style={{
+        padding: 'var(--sam-space-4)',
+        border: '1px solid var(--sam-color-border-default)',
+        borderRadius: 'var(--sam-radius-md)',
+        background: 'var(--sam-color-bg-surface)',
+        color: 'var(--sam-color-fg-muted)',
+        textAlign: 'center',
+      }}>
+        No tasks yet.
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
+    <div style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
       {tasks.map((task) => {
         const options = TRANSITIONS[task.status] ?? [];
-        const selected = selectedTaskId === task.id;
 
         return (
           <article
             key={task.id}
             style={{
-              border: selected
-                ? '1px solid var(--sam-color-accent-primary)'
-                : '1px solid var(--sam-color-border-default)',
+              border: '1px solid var(--sam-color-border-default)',
               borderRadius: 'var(--sam-radius-md)',
               background: 'var(--sam-color-bg-surface)',
               padding: 'var(--sam-space-3)',
               display: 'grid',
-              gap: 'var(--sam-space-3)',
+              gap: 'var(--sam-space-2)',
             }}
           >
-            <button
-              onClick={() => onSelectTask(task.id)}
-              style={{
-                textAlign: 'left',
-                background: 'transparent',
-                border: 'none',
-                padding: 0,
-                cursor: 'pointer',
-                display: 'grid',
-                gap: 'var(--sam-space-2)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
-                <strong style={{ color: 'var(--sam-color-fg-primary)' }}>{task.title}</strong>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
-                  <StatusBadge status={task.status} />
-                  {task.blocked && (
-                    <span style={{ color: 'var(--sam-color-danger)', fontSize: '0.75rem' }}>
-                      Blocked
-                    </span>
-                  )}
-                </div>
-              </div>
-              {task.description && (
-                <p style={{ margin: 0, color: 'var(--sam-color-fg-muted)', fontSize: '0.875rem' }}>
-                  {task.description}
-                </p>
-              )}
-              <div style={{ fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>
-                Priority {task.priority}
-              </div>
-            </button>
-
-            <div style={{ display: 'grid', gap: 'var(--sam-space-2)', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
-              <select
-                aria-label={`Transition ${task.title}`}
-                defaultValue=""
-                onChange={(event) => {
-                  const value = event.currentTarget.value as TaskStatus;
-                  if (value) {
-                    onTransitionTask(task, value);
-                    event.currentTarget.value = '';
-                  }
-                }}
+            {/* Row 1: status + title + priority + blocked */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+              <StatusBadge status={task.status} />
+              <Link
+                to={`/projects/${projectId}/tasks/${task.id}`}
                 style={{
-                  borderRadius: 'var(--sam-radius-md)',
-                  border: '1px solid var(--sam-color-border-default)',
-                  background: 'var(--sam-color-bg-surface)',
+                  flex: 1,
+                  minWidth: 0,
                   color: 'var(--sam-color-fg-primary)',
-                  minHeight: '2.5rem',
-                  padding: '0.5rem 0.625rem',
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                  fontSize: '0.9375rem',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
                 }}
               >
-                <option value="">Change status...</option>
-                {options.map((option) => (
-                  <option key={option} value={option}>
-                    {toLabel(option)}
-                  </option>
-                ))}
-              </select>
+                {task.title}
+              </Link>
+              <span style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', flexShrink: 0 }}>
+                P{task.priority}
+              </span>
+              {task.blocked && (
+                <span style={{
+                  fontSize: '0.75rem',
+                  padding: '2px 7px',
+                  borderRadius: '9999px',
+                  background: 'rgba(239,68,68,0.15)',
+                  color: '#f87171',
+                  fontWeight: 600,
+                  flexShrink: 0,
+                }}>
+                  Blocked
+                </span>
+              )}
+            </div>
 
-              <Button variant="secondary" onClick={() => onEditTask(task)}>
-                Edit
-              </Button>
-              <Button variant="secondary" onClick={() => onManageDependencies(task)}>
-                Dependencies
-              </Button>
-              <Button variant="secondary" onClick={() => onDelegateTask(task)}>
+            {/* Row 2: quick actions */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+              {options.length > 0 && (
+                <select
+                  aria-label={`Transition ${task.title}`}
+                  defaultValue=""
+                  onChange={(event) => {
+                    const value = event.currentTarget.value as TaskStatus;
+                    if (value) {
+                      onTransitionTask(task, value);
+                      event.currentTarget.value = '';
+                    }
+                  }}
+                  style={{
+                    borderRadius: 'var(--sam-radius-md)',
+                    border: '1px solid var(--sam-color-border-default)',
+                    background: 'var(--sam-color-bg-surface)',
+                    color: 'var(--sam-color-fg-primary)',
+                    fontSize: '0.8125rem',
+                    minHeight: '2rem',
+                    padding: '0.25rem 0.5rem',
+                  }}
+                >
+                  <option value="">Move to…</option>
+                  {options.map((option) => (
+                    <option key={option} value={option}>
+                      {toLabel(option)}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <Button size="sm" variant="secondary" onClick={() => onDelegateTask(task)}>
                 Delegate
               </Button>
-              <Button variant="danger" onClick={() => onDeleteTask(task)}>
+              <Button size="sm" variant="danger" onClick={() => onDeleteTask(task)}>
                 Delete
               </Button>
             </div>

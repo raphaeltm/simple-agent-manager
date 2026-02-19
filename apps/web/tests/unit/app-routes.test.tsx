@@ -57,6 +57,10 @@ vi.mock('../../src/pages/Project', () => ({
   Project: () => <div data-testid="project-detail-page" />,
 }));
 
+vi.mock('../../src/pages/TaskDetail', () => ({
+  TaskDetail: () => <div data-testid="task-detail-page" />,
+}));
+
 import App from '../../src/App';
 
 function renderAt(path: string) {
@@ -70,5 +74,12 @@ describe('App routes', () => {
 
     expect(screen.getByTestId('projects-page')).toBeInTheDocument();
     expect(screen.queryByTestId('dashboard-page')).not.toBeInTheDocument();
+  });
+
+  it('routes /projects/:id/tasks/:taskId to the task detail page', () => {
+    renderAt('/projects/proj-1/tasks/task-1');
+
+    expect(screen.getByTestId('task-detail-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('project-detail-page')).not.toBeInTheDocument();
   });
 });

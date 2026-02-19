@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { Task, TaskDetailResponse } from '@simple-agent-manager/shared';
+import type { Task } from '@simple-agent-manager/shared';
 import { TaskDelegateDialog } from '../../../../src/components/project/TaskDelegateDialog';
-import { TaskDetailPanel } from '../../../../src/components/project/TaskDetailPanel';
 
 const task: Task = {
   id: 'task-1',
@@ -11,7 +10,7 @@ const task: Task = {
   parentTaskId: null,
   workspaceId: null,
   title: 'Delegate me',
-  description: null,
+  description: 'Ship polished task UX',
   status: 'ready',
   priority: 1,
   agentProfileHint: null,
@@ -59,46 +58,27 @@ describe('Task delegation UI', () => {
       />
     );
 
-    fireEvent.change(screen.getByLabelText('Running workspace'), { target: { value: 'ws-1' } });
+    fireEvent.change(screen.getByLabelText('Target workspace'), { target: { value: 'ws-1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Delegate' }));
 
     expect(onDelegate).toHaveBeenCalledWith('ws-1');
+    expect(screen.getByText('Agent will receive')).toBeInTheDocument();
+    expect(screen.getByText('Ship polished task UX')).toBeInTheDocument();
+    expect(screen.getByText('Workspace One')).toBeInTheDocument();
   });
 
-  it('renders task output metadata in detail panel', () => {
-    const detail: TaskDetailResponse = {
-      ...task,
-      blocked: false,
-      status: 'completed',
-      workspaceId: 'ws-1',
-      outputSummary: 'Implemented feature',
-      outputBranch: 'feature/task-1',
-      outputPrUrl: 'https://github.com/acme/repo/pull/1',
-      dependencies: [],
-    };
-
+  it('shows an empty state when no running workspaces exist', () => {
     render(
-      <TaskDetailPanel
-        task={detail}
-        events={[
-          {
-            id: 'event-1',
-            taskId: 'task-1',
-            fromStatus: 'in_progress',
-            toStatus: 'completed',
-            actorType: 'workspace_callback',
-            actorId: 'ws-1',
-            reason: null,
-            createdAt: '2026-02-18T00:01:00.000Z',
-          },
-        ]}
+      <TaskDelegateDialog
+        open
+        task={task}
+        workspaces={[]}
         onClose={vi.fn()}
+        onDelegate={vi.fn()}
       />
     );
 
-    expect(screen.getByText('Implemented feature')).toBeInTheDocument();
-    expect(screen.getByText('feature/task-1')).toBeInTheDocument();
-    expect(screen.getByText('https://github.com/acme/repo/pull/1')).toBeInTheDocument();
-    expect(screen.getByText(/in_progress/)).toBeInTheDocument();
+    expect(screen.getByText('No running workspaces. Start a workspace first.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delegate' })).toBeDisabled();
   });
 });

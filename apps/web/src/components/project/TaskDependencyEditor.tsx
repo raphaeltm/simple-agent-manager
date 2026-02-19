@@ -9,7 +9,8 @@ interface TaskDependencyEditorProps {
   loading?: boolean;
   onAdd: (dependsOnTaskId: string) => Promise<void> | void;
   onRemove: (dependsOnTaskId: string) => Promise<void> | void;
-  onClose: () => void;
+  /** When provided, renders a close button (for standalone overlay use). Omit when embedded in a sidebar. */
+  onClose?: () => void;
 }
 
 export function TaskDependencyEditor({
@@ -21,6 +22,7 @@ export function TaskDependencyEditor({
   onRemove,
   onClose,
 }: TaskDependencyEditorProps) {
+
   const [dependsOnTaskId, setDependsOnTaskId] = useState('');
 
   const dependencyMap = useMemo(() => {
@@ -39,21 +41,14 @@ export function TaskDependencyEditor({
   });
 
   return (
-    <section
-      style={{
-        border: '1px solid var(--sam-color-border-default)',
-        borderRadius: 'var(--sam-radius-md)',
-        background: 'var(--sam-color-bg-surface)',
-        padding: 'var(--sam-space-3)',
-        display: 'grid',
-        gap: 'var(--sam-space-3)',
-      }}
-    >
+    <section style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sam-space-2)' }}>
-        <strong style={{ color: 'var(--sam-color-fg-primary)' }}>Dependencies for {task.title}</strong>
-        <Button variant="secondary" onClick={onClose}>
-          Close
-        </Button>
+        <strong style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-primary)' }}>Dependencies</strong>
+        {onClose && (
+          <Button variant="secondary" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        )}
       </div>
 
       <div style={{ display: 'grid', gap: 'var(--sam-space-2)', gridTemplateColumns: '1fr auto' }}>
