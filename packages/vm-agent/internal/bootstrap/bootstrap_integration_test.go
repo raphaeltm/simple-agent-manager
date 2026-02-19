@@ -598,7 +598,7 @@ func TestIntegration_DevcontainerBuildWithConfig(t *testing.T) {
 	}
 
 	// Verify the container is running and findable
-	containerID, err := findDevcontainerID(ctx, cfg)
+	containerID, err = findDevcontainerID(ctx, cfg)
 	if err != nil {
 		t.Fatalf("findDevcontainerID: %v", err)
 	}
