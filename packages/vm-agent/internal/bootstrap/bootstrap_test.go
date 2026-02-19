@@ -880,6 +880,143 @@ func TestParseDevcontainerReadConfigurationOutputParsesMultilinePayload(t *testi
 	}
 }
 
+func TestEnsureContainerUserResolvedHonorsOverride(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{ContainerUser: "custom-user"}
+	ensureContainerUserResolved(context.Background(), cfg)
+	if cfg.ContainerUser != "custom-user" {
+		t.Fatalf("ContainerUser=%q, want %q", cfg.ContainerUser, "custom-user")
+	}
+}
+
+func TestEnsureContainerUserResolvedUsesReadConfiguration(t *testing.T) {
+	mockBinDir := t.TempDir()
+
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	mockScript := `#!/bin/sh
+if [ "$1" = "read-configuration" ]; then
+  cat <<'EOF'
+{"outcome":"success","mergedConfiguration":{"remoteUser":"node"}}
+EOF
+  exit 0
+fi
+echo "unexpected devcontainer command: $@" >&2
+exit 1
+`
+	if err := os.WriteFile(mockDevcontainer, []byte(mockScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+
+	cfg := &config.Config{WorkspaceDir: t.TempDir()}
+	ensureContainerUserResolved(context.Background(), cfg)
+
+	if cfg.ContainerUser != "node" {
+		t.Fatalf("ContainerUser=%q, want %q", cfg.ContainerUser, "node")
+	}
+}
+
+func TestEnsureContainerUserResolvedFallsBackToMetadataLabel(t *testing.T) {
+	mockBinDir := t.TempDir()
+
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	mockDevcontainerScript := `#!/bin/sh
+if [ "$1" = "read-configuration" ]; then
+  echo "read-configuration failed" >&2
+  exit 1
+fi
+exit 1
+`
+	if err := os.WriteFile(mockDevcontainer, []byte(mockDevcontainerScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+
+	mockDocker := filepath.Join(mockBinDir, "docker")
+	mockDockerScript := `#!/bin/sh
+if [ "$1" = "ps" ]; then
+  echo "container-123"
+  exit 0
+fi
+if [ "$1" = "inspect" ]; then
+  echo '"[{\"remoteUser\":\"vscode\"}]"'
+  exit 0
+fi
+exit 1
+`
+	if err := os.WriteFile(mockDocker, []byte(mockDockerScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock docker command: %v", err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+
+	cfg := &config.Config{
+		WorkspaceDir:        t.TempDir(),
+		ContainerLabelKey:   "devcontainer.local_folder",
+		ContainerLabelValue: "/workspace/ws-1",
+	}
+	ensureContainerUserResolved(context.Background(), cfg)
+
+	if cfg.ContainerUser != "vscode" {
+		t.Fatalf("ContainerUser=%q, want %q", cfg.ContainerUser, "vscode")
+	}
+}
+
+func TestEnsureContainerUserResolvedFallsBackToDockerExec(t *testing.T) {
+	mockBinDir := t.TempDir()
+
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	mockDevcontainerScript := `#!/bin/sh
+if [ "$1" = "read-configuration" ]; then
+  echo "read-configuration failed" >&2
+  exit 1
+fi
+exit 1
+`
+	if err := os.WriteFile(mockDevcontainer, []byte(mockDevcontainerScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+
+	mockDocker := filepath.Join(mockBinDir, "docker")
+	mockDockerScript := `#!/bin/sh
+if [ "$1" = "ps" ]; then
+  echo "container-123"
+  exit 0
+fi
+if [ "$1" = "inspect" ]; then
+  echo null
+  exit 0
+fi
+if [ "$1" = "exec" ]; then
+  if [ "$3" = "id" ] && [ "$4" = "-un" ]; then
+    echo "node"
+    exit 0
+  fi
+fi
+exit 1
+`
+	if err := os.WriteFile(mockDocker, []byte(mockDockerScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock docker command: %v", err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+
+	cfg := &config.Config{
+		WorkspaceDir:        t.TempDir(),
+		ContainerLabelKey:   "devcontainer.local_folder",
+		ContainerLabelValue: "/workspace/ws-1",
+	}
+	ensureContainerUserResolved(context.Background(), cfg)
+
+	if cfg.ContainerUser != "node" {
+		t.Fatalf("ContainerUser=%q, want %q", cfg.ContainerUser, "node")
+	}
+}
+
 func TestNormalizeMergedLifecycleCommands(t *testing.T) {
 	t.Parallel()
 

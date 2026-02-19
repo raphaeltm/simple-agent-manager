@@ -68,6 +68,7 @@ type WorkspaceRuntime struct {
 	WorkspaceDir        string
 	ContainerLabelValue string
 	ContainerWorkDir    string
+	ContainerUser       string
 	CallbackToken       string
 	GitUserName         string
 	GitUserEmail        string
@@ -224,6 +225,7 @@ func New(cfg *config.Config) (*Server, error) {
 			WorkspaceDir:        strings.TrimSpace(cfg.WorkspaceDir),
 			ContainerLabelValue: strings.TrimSpace(cfg.ContainerLabelValue),
 			ContainerWorkDir:    strings.TrimSpace(cfg.ContainerWorkDir),
+			ContainerUser:       strings.TrimSpace(cfg.ContainerUser),
 			CallbackToken:       strings.TrimSpace(cfg.CallbackToken),
 			PTY:                 ptyManager,
 		}

@@ -56,39 +56,39 @@ After `devcontainer up` completes, query the devcontainer CLI for the resolved `
 
 ### Implementation Steps
 
-- [ ] **Detect resolved remoteUser** after `devcontainer up` completes
+- [x] **Detect resolved remoteUser** after `devcontainer up` completes
   - **Option A (recommended)**: Run `devcontainer read-configuration --workspace-folder <dir>` which outputs JSON including the fully merged `remoteUser` value (resolves image metadata labels, devcontainer.json, and defaults)
   - Option B: Inspect the container's `devcontainer-metadata` Docker label and parse `remoteUser` from the merged metadata array
   - Option C: Fallback — run `devcontainer exec --workspace-folder <dir> whoami` which automatically runs as `remoteUser`
   - The detection should happen in `ensureDevcontainerReady()` after successful `devcontainer up`, and return the detected user alongside the `usedFallback` bool
 
-- [ ] **Store detected user in workspace state** so it persists across VM agent restarts
+- [x] **Store detected user in workspace state** so it persists across VM agent restarts
   - Add a `containerUser` field to the workspace runtime state in the persistence DB (`state.db`)
   - Populate after successful bootstrap
   - Load on workspace recovery/reattach so the recovery path also gets the correct user
 
-- [ ] **Wire detected user through to all `docker exec` callers**
+- [x] **Wire detected user through to all `docker exec` callers**
   - `pty.ManagerConfig.ContainerUser` — terminal sessions
   - `acp.GatewayConfig.ContainerUser` — agent processes
   - `server.Config.ContainerUser` — git/file operations
   - Currently these all read from `cfg.ContainerUser` (set in `server.go:118-129`) which comes from `CONTAINER_USER` env var; the detected value should be used when the env var is empty
   - The per-workspace PTY manager rebuild in `rebuildWorkspacePTYManager()` must also carry the detected user
 
-- [ ] **Preserve `CONTAINER_USER` env var as manual override**
+- [x] **Preserve `CONTAINER_USER` env var as manual override**
   - If `CONTAINER_USER` is explicitly set, it takes precedence over detection
   - If empty (default), use the detected value from `devcontainer read-configuration`
 
-- [ ] **Add logging** for user detection
+- [x] **Add logging** for user detection
   - Log the detected `remoteUser` after bootstrap
   - Log when `CONTAINER_USER` override is active
   - Warn if detected user is `root` (unexpected for most devcontainer images)
 
-- [ ] **Handle edge cases**
+- [x] **Handle edge cases**
   - Repos with no devcontainer.json (SAM's default config) — detection should still work after `devcontainer up` since the image metadata provides `remoteUser`
   - Repos where `remoteUser` is intentionally `root` — respect it, just log
   - Fallback if `devcontainer read-configuration` is unavailable — try `devcontainer exec whoami` or parse Docker labels
 
-- [ ] **Add tests**
+- [x] **Add tests**
   - Unit test: parsing `read-configuration` JSON output to extract `remoteUser`
   - Integration test: bootstrap with `remoteUser: "vscode"` → verify `ContainerUser` is `vscode`
   - Integration test: bootstrap without explicit `remoteUser` but image default is non-root → verify detection works
@@ -109,3 +109,33 @@ Option 2 is preferred because `devcontainer exec` has higher overhead (CLI start
 - Bootstrap: `bootstrap.go:460+` (`ensureDevcontainerReady`)
 - Recovery path: `workspace_provisioning.go:88+` (`recoverWorkspaceRuntime`) → calls `PrepareWorkspace` → `ensureDevcontainerReady` short-circuits when container exists
 - This repo's `.devcontainer/devcontainer.json` has no `remoteUser`; image `mcr.microsoft.com/devcontainers/typescript-node:24-bookworm` has Dockerfile `USER root` but embeds `remoteUser` in image metadata labels
+
+## Preflight Evidence (2026-02-19)
+
+### Change Classes
+
+- `external-api-change`
+- `cross-component-change`
+- `business-logic-change`
+- `public-surface-change`
+- `docs-sync-change`
+
+### External Research Notes
+
+- `containers.dev` reference confirms `remoteUser` defaults to container runtime user if unspecified and is distinct from `containerUser`.
+- `containers.dev` lifecycle docs define `postCreateCommand` as running after the container has started and "been assigned to a user for the first time".
+- Docker CLI docs confirm `docker exec` runs as default container user unless `--user/-u` is provided.
+- Verified against current `@devcontainers/cli` (`0.83.2`):
+  - `read-configuration --include-merged-configuration` returns resolved `mergedConfiguration.remoteUser`.
+  - `up` returns JSON with `remoteUser` and running container metadata labels include remote-user data.
+
+### Implementation Checklist (Execution)
+
+- [x] Move task from backlog to active and finalize preflight evidence
+- [x] Detect and persist effective workspace container user during bootstrap/recovery
+- [x] Propagate workspace-scoped `ContainerUser` to PTY, ACP, git/file/worktree paths
+- [x] Preserve `CONTAINER_USER` override precedence and add diagnostics logging
+- [x] Add/update unit tests for detection + propagation
+- [x] Update documentation (including `AGENTS.md` + `CLAUDE.md` sync)
+- [x] Run impacted test suites and confirm green
+- [ ] Open PR with preflight evidence, wait for CI green, merge

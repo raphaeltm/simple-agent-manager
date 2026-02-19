@@ -306,7 +306,10 @@ func (s *Server) resolveContainerForWorkspace(workspaceID string) (containerID, 
 		workDir = "/workspaces"
 	}
 
-	user = s.config.ContainerUser
+	user = strings.TrimSpace(runtime.ContainerUser)
+	if user == "" {
+		user = strings.TrimSpace(s.config.ContainerUser)
+	}
 
 	return containerID, workDir, user, nil
 }

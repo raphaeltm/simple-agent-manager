@@ -243,8 +243,9 @@ func Load() (*Config, error) {
 		MaxWorkspaceEvents: getEnvInt("MAX_WORKSPACE_EVENTS", 500),
 
 		ContainerMode: getEnvBool("CONTAINER_MODE", true),
-		// Default to the container's configured user. If you need to force a specific user, set CONTAINER_USER.
-		// Many devcontainer images use "vscode", but not all do (and forcing it can break docker exec).
+		// Optional manual override for docker exec user.
+		// When empty, bootstrap resolves the effective devcontainer user
+		// from devcontainer configuration/metadata at runtime.
 		ContainerUser:       getEnv("CONTAINER_USER", ""),
 		ContainerWorkDir:    containerWorkDir,
 		ContainerLabelKey:   getEnv("CONTAINER_LABEL_KEY", "devcontainer.local_folder"),

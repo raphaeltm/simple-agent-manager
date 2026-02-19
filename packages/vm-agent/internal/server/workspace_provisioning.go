@@ -33,6 +33,23 @@ func (s *Server) callbackTokenForWorkspace(workspaceID string) string {
 	return strings.TrimSpace(s.config.CallbackToken)
 }
 
+func (s *Server) applyDetectedContainerUser(runtime *WorkspaceRuntime, detected string) {
+	if runtime == nil {
+		return
+	}
+
+	nextUser := strings.TrimSpace(detected)
+	if nextUser == "" {
+		return
+	}
+	if strings.TrimSpace(runtime.ContainerUser) == nextUser {
+		return
+	}
+
+	runtime.ContainerUser = nextUser
+	s.rebuildWorkspacePTYManager(runtime)
+}
+
 func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *WorkspaceRuntime) (bool, error) {
 	if runtime == nil {
 		return false, fmt.Errorf("workspace runtime is required")
@@ -50,6 +67,10 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 	cfg.WorkspaceDir = strings.TrimSpace(runtime.WorkspaceDir)
 	cfg.ContainerLabelValue = strings.TrimSpace(runtime.ContainerLabelValue)
 	cfg.ContainerWorkDir = strings.TrimSpace(runtime.ContainerWorkDir)
+	cfg.ContainerUser = strings.TrimSpace(runtime.ContainerUser)
+	if cfg.ContainerUser == "" {
+		cfg.ContainerUser = strings.TrimSpace(s.config.ContainerUser)
+	}
 	cfg.CallbackToken = callbackToken
 
 	provisionCtx := ctx
@@ -64,11 +85,16 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 		log.Printf("Workspace %s: proceeding without git token: %v", runtime.ID, err)
 	}
 
-	return bootstrap.PrepareWorkspace(provisionCtx, &cfg, bootstrap.ProvisionState{
+	recoveryMode, err := prepareWorkspaceForRuntime(provisionCtx, &cfg, bootstrap.ProvisionState{
 		GitHubToken:  gitToken,
 		GitUserName:  runtime.GitUserName,
 		GitUserEmail: runtime.GitUserEmail,
 	})
+	if err != nil {
+		return false, err
+	}
+	s.applyDetectedContainerUser(runtime, cfg.ContainerUser)
+	return recoveryMode, nil
 }
 
 func isContainerUnavailableError(err error) bool {
@@ -105,6 +131,10 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 	cfg.WorkspaceDir = strings.TrimSpace(runtime.WorkspaceDir)
 	cfg.ContainerLabelValue = strings.TrimSpace(runtime.ContainerLabelValue)
 	cfg.ContainerWorkDir = strings.TrimSpace(runtime.ContainerWorkDir)
+	cfg.ContainerUser = strings.TrimSpace(runtime.ContainerUser)
+	if cfg.ContainerUser == "" {
+		cfg.ContainerUser = strings.TrimSpace(s.config.ContainerUser)
+	}
 	cfg.CallbackToken = callbackToken
 
 	state := bootstrap.ProvisionState{}
@@ -118,7 +148,11 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 	}
 
 	_, err := prepareWorkspaceForRuntime(recoveryCtx, &cfg, state)
-	return err
+	if err != nil {
+		return err
+	}
+	s.applyDetectedContainerUser(runtime, cfg.ContainerUser)
+	return nil
 }
 
 func (s *Server) hydrateWorkspaceRuntimeForRecovery(

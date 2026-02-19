@@ -70,6 +70,7 @@ func TestRecoverWorkspaceRuntimeUsesRuntimeConfig(t *testing.T) {
 		WorkspaceDir:        "/workspace/WS_TEST",
 		ContainerLabelValue: "/workspace/WS_TEST",
 		ContainerWorkDir:    "/workspaces/WS_TEST",
+		ContainerUser:       "node",
 		CallbackToken:       "workspace-callback-token",
 	}
 
@@ -101,6 +102,9 @@ func TestRecoverWorkspaceRuntimeUsesRuntimeConfig(t *testing.T) {
 	if capturedCfg.ContainerWorkDir != runtime.ContainerWorkDir {
 		t.Fatalf("ContainerWorkDir = %q, want %q", capturedCfg.ContainerWorkDir, runtime.ContainerWorkDir)
 	}
+	if capturedCfg.ContainerUser != runtime.ContainerUser {
+		t.Fatalf("ContainerUser = %q, want %q", capturedCfg.ContainerUser, runtime.ContainerUser)
+	}
 	if capturedCfg.CallbackToken != runtime.CallbackToken {
 		t.Fatalf("CallbackToken = %q, want %q", capturedCfg.CallbackToken, runtime.CallbackToken)
 	}
@@ -129,6 +133,47 @@ func TestRecoverWorkspaceRuntimeNoopWhenContainerModeDisabled(t *testing.T) {
 	}
 	if called {
 		t.Fatal("expected prepareWorkspaceForRuntime not to be called when container mode is disabled")
+	}
+}
+
+func TestProvisionWorkspaceRuntimeAppliesDetectedContainerUser(t *testing.T) {
+	originalPrepare := prepareWorkspaceForRuntime
+	defer func() { prepareWorkspaceForRuntime = originalPrepare }()
+
+	prepareWorkspaceForRuntime = func(_ context.Context, cfg *config.Config, _ bootstrap.ProvisionState) (bool, error) {
+		cfg.ContainerUser = "vscode"
+		return false, nil
+	}
+
+	runtime := &WorkspaceRuntime{
+		ID:                  "WS_TEST",
+		Status:              "creating",
+		WorkspaceDir:        "/workspace/WS_TEST",
+		ContainerLabelValue: "/workspace/WS_TEST",
+		ContainerWorkDir:    "/workspaces/WS_TEST",
+		PTY:                 nil,
+	}
+
+	s := &Server{
+		config: &config.Config{
+			ContainerMode:       true,
+			WorkspaceDir:        "/workspace",
+			DefaultShell:        "/bin/bash",
+			DefaultRows:         24,
+			DefaultCols:         80,
+			ContainerLabelKey:   "devcontainer.local_folder",
+			PTYOutputBufferSize: 1024,
+		},
+		workspaces:      map[string]*WorkspaceRuntime{runtime.ID: runtime},
+		workspaceEvents: map[string][]EventRecord{},
+	}
+
+	if _, err := s.provisionWorkspaceRuntime(context.Background(), runtime); err != nil {
+		t.Fatalf("provisionWorkspaceRuntime() error = %v", err)
+	}
+
+	if runtime.ContainerUser != "vscode" {
+		t.Fatalf("runtime.ContainerUser = %q, want %q", runtime.ContainerUser, "vscode")
 	}
 }
 
