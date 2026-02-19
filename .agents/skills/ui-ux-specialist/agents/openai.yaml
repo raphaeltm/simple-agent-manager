@@ -1,0 +1,4 @@
+interface:
+  display_name: "UI/UX Specialist"
+  short_description: "Mobile-first UX/UI quality gates"
+  default_prompt: "Use $ui-ux-specialist for this UI task: propose 2-3 variants, pick one with rationale, implement, run mobile+desktop Playwright visual checks, and report rubric scores."

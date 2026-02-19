@@ -49,3 +49,8 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 5. If a shared component is missing, either:
    - add/extend it in `packages/ui`, or
    - document a temporary exception with rationale and expiration.
+6. Invoke `$ui-ux-specialist` for every UI task and follow its workflow/rubric.
+7. Before implementation, create 2-3 layout/interaction variants and select one with explicit tradeoff rationale.
+8. Complete visual verification with Playwright on both mobile (>=375x667) and desktop, then report concrete issues found/fixed.
+9. Provide rubric scores (1-5) for visual hierarchy, interaction clarity, mobile usability, accessibility, and system consistency; each score MUST be >=4 before completion.
+10. Avoid generic default styling for new surfaces unless constrained by an existing design system that the feature already uses.

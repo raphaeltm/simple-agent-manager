@@ -663,6 +663,7 @@ Claude Code now supports dual authentication methods:
 - `SKILL.md` contains Codex-valid frontmatter and brief usage instructions.
 - `CLAUDE_AGENT.md` points to the source subagent definition in `.claude/agents/`.
 - Keep `.claude/agents/*/*.md` as the source of truth. Do not add Claude-specific frontmatter keys (e.g. `tools`, `model`) to `SKILL.md` files.
+- For UI work, agents MUST invoke `$ui-ux-specialist` before editing files and keep it active through implementation and validation.
 
 ### Fix All Build and Lint Errors (NON-NEGOTIABLE)
 
@@ -832,6 +833,11 @@ For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
 5. If a shared component is missing, either:
    - add/extend it in `packages/ui`, or
    - document a temporary exception with rationale and expiration.
+6. Invoke `$ui-ux-specialist` for every UI task and follow its workflow/rubric.
+7. Before implementation, create 2-3 layout/interaction variants and select one with explicit tradeoff rationale.
+8. Complete visual verification with Playwright on both mobile (>=375x667) and desktop, then report concrete issues found/fixed.
+9. Provide rubric scores (1-5) for visual hierarchy, interaction clarity, mobile usability, accessibility, and system consistency; each score MUST be >=4 before completion.
+10. Avoid generic default styling for new surfaces unless constrained by an existing design system that the feature already uses.
 
 ## Active Technologies
 
