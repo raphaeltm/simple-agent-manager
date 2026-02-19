@@ -26,9 +26,10 @@ Today, every subsystem in SAM is hardwired to a single directory per workspace:
 | **Agent (ACP)** | `SessionHost.config.ContainerWorkDir` → `NewSession(Cwd: ...)` | `docker exec -w /workspaces/my-repo claude-code-acp` |
 | **File Read/Write** | Agent sends absolute paths (rooted in its CWD) | `docker exec cat /workspaces/my-repo/...` |
 
-The directory is derived once during workspace creation from the repository name and never changes:
+The host workspace directory is derived from the canonical workspace ID, while
+the default container CWD is repo-oriented:
 ```
-repository "org/my-repo" → host: /workspace/my-repo → container: /workspaces/my-repo
+workspaceId "WS_ABC123", repository "org/my-repo" → host: /workspace/WS_ABC123 → container: /workspaces/my-repo
 ```
 
 **The core insight: "context" in SAM = a directory path.** If we can make that path dynamic and switchable, everything follows.
@@ -86,7 +87,7 @@ type WorktreeInfo struct {
     Path       string // container path, e.g. /workspaces/my-repo-feature-auth
     Branch     string // e.g. feature-auth
     IsPrimary  bool   // true for the original clone directory
-    HostPath   string // host path, e.g. /workspace/my-repo-feature-auth
+    HostPath   string // host path, e.g. /workspace/WS_ABC123-wt-feature-auth
 }
 ```
 
@@ -342,15 +343,10 @@ All worktrees share the same `.git` object store. This means:
 - Worktrees can't check out the same branch simultaneously
 - `git gc` and `git prune` affect all worktrees
 
-### 2. Devcontainer bind mount
-The current setup bind-mounts only `/workspace/my-repo` into the container. Worktrees created via `git worktree add ../my-repo-feature` on the **host** would end up in `/workspace/my-repo-feature`, which is NOT automatically visible inside the container.
+### 2. Host clone path vs container runtime path
+The current setup clones repos on the host under a workspace-ID path (for example `/workspace/WS_ABC123`) and runs the devcontainer from a named volume mounted at `/workspaces`.
 
-**Solution options:**
-- **Option A**: Mount the entire `/workspace/` directory into the container instead of just the repo directory. This requires a devcontainer config change. Simplest.
-- **Option B**: Create worktrees inside the existing repo directory (e.g., `/workspace/my-repo/.worktrees/feature-auth`). Avoids mount changes but pollutes the repo.
-- **Option C**: Add additional bind mounts dynamically when worktrees are created. Complex, may require container restart.
-
-**Recommendation: Option A.** Change the devcontainer workspace mount from `/workspace/my-repo` to `/workspace` and set the default working directory to `/workspace/my-repo`. This makes all sibling worktree directories accessible inside the container. The tradeoff is that the container can see other workspace directories on multi-workspace nodes — but those belong to the same user, so it's not a security issue.
+Worktrees should be managed from inside the container runtime path (for example `/workspaces/my-repo*`) so all operations target the active runtime filesystem. Host clone directories are primarily provisioning inputs and are not the authoritative runtime context.
 
 ### 3. Branch checkout conflicts
 You can't have the same branch checked out in two worktrees. The UI should:
