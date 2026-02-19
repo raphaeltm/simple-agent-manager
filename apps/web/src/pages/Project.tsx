@@ -9,7 +9,7 @@ import type {
   TaskStatus,
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
-import { Alert, Button, PageLayout, Spinner } from '@simple-agent-manager/ui';
+import { Alert, Button, PageLayout, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import {
   addTaskDependency,
@@ -454,10 +454,22 @@ export function Project() {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>
+            <div style={{ display: 'grid', gap: '0.5rem', fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>
               <div>Linked workspaces: {project.summary.linkedWorkspaces}</div>
-              <div>
-                Task counts: {Object.entries(project.summary.taskCountsByStatus).map(([status, count]) => `${status}:${count}`).join(' | ') || 'none'}
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.375rem' }}>
+                <span>Tasks:</span>
+                {(Object.entries(project.summary.taskCountsByStatus) as [string, number][])
+                  .filter(([, count]) => count > 0)
+                  .map(([status, count]) => (
+                    <StatusBadge
+                      key={status}
+                      status={status}
+                      label={`${status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())} (${count})`}
+                    />
+                  ))}
+                {Object.values(project.summary.taskCountsByStatus).every((c) => c === 0) && (
+                  <span>none</span>
+                )}
               </div>
             </div>
 
