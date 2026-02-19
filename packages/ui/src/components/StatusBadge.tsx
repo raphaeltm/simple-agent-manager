@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 
 const statusConfig: Record<string, { label: string; bg: string; fg: string }> = {
+  // Workspace / node statuses
   pending: { label: 'Pending', bg: 'rgba(159, 183, 174, 0.15)', fg: '#9fb7ae' },
   creating: { label: 'Creating', bg: 'rgba(59, 130, 246, 0.15)', fg: '#60a5fa' },
   running: { label: 'Running', bg: 'rgba(34, 197, 94, 0.15)', fg: '#4ade80' },
@@ -13,6 +14,15 @@ const statusConfig: Record<string, { label: string; bg: string; fg: string }> = 
   unhealthy: { label: 'Unhealthy', bg: 'rgba(239, 68, 68, 0.15)', fg: '#f87171' },
   connected: { label: 'Connected', bg: 'rgba(34, 197, 94, 0.15)', fg: '#4ade80' },
   disconnected: { label: 'Disconnected', bg: 'rgba(239, 68, 68, 0.15)', fg: '#f87171' },
+  // Task statuses
+  draft: { label: 'Draft', bg: 'rgba(159, 183, 174, 0.15)', fg: '#9fb7ae' },
+  ready: { label: 'Ready', bg: 'rgba(59, 130, 246, 0.15)', fg: '#60a5fa' },
+  queued: { label: 'Queued', bg: 'rgba(99, 102, 241, 0.15)', fg: '#a5b4fc' },
+  delegated: { label: 'Delegated', bg: 'rgba(139, 92, 246, 0.15)', fg: '#c4b5fd' },
+  in_progress: { label: 'In Progress', bg: 'rgba(34, 197, 94, 0.15)', fg: '#4ade80' },
+  completed: { label: 'Completed', bg: 'rgba(34, 197, 94, 0.2)', fg: '#22c55e' },
+  failed: { label: 'Failed', bg: 'rgba(239, 68, 68, 0.15)', fg: '#f87171' },
+  cancelled: { label: 'Cancelled', bg: 'rgba(159, 183, 174, 0.15)', fg: '#9fb7ae' },
 };
 
 interface StatusBadgeProps {
