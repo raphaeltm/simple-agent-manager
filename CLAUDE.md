@@ -217,6 +217,30 @@ When documenting environment variables:
 
 ---
 
+## CRITICAL: Canonical Identity Keys vs Human Labels (NON-NEGOTIABLE)
+
+**Human-readable labels are for UX/logging only. Canonical IDs are for uniqueness, routing, and state.**
+
+1. **MUST** use canonical IDs (`workspaceId`, `nodeId`, `sessionId`, etc.) for all machine-critical identity:
+   - storage paths
+   - container/volume identifiers
+   - cache keys
+   - routing and lookup filters
+   - lifecycle operations (create/restart/stop/delete)
+2. **MUST NOT** use user-facing or repo-derived labels as uniqueness keys (repo names, display names, branch names, friendly labels).
+3. **MUST** treat labels as mutable and non-unique by default.
+4. **MUST** include canonical IDs in external metadata labels (Docker/cloud provider labels) and perform exact lookup by canonical ID when resolving resources.
+5. **SHOULD** store both:
+   - canonical ID for machine logic
+   - readable label for UI/observability
+6. **MUST** add/maintain tests proving two resources with identical human labels remain fully isolated.
+
+### Why This Matters
+
+Human-readable labels collide by design. Using them as identity keys causes cross-workspace contamination, wrong-resource targeting, and destructive operations against unintended resources.
+
+---
+
 ## CRITICAL: Architecture Research Requirements
 
 **Before making ANY changes related to architecture, secrets, credentials, data models, or security:**
