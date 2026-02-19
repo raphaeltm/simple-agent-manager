@@ -1017,6 +1017,112 @@ exit 1
 	}
 }
 
+func TestEnsureWorkspaceOwnershipChownsWhenMismatch(t *testing.T) {
+	mockBinDir := t.TempDir()
+	chownLog := filepath.Join(t.TempDir(), "chown.log")
+
+	mockDocker := filepath.Join(mockBinDir, "docker")
+	mockDockerScript := `#!/bin/sh
+if [ "$1" = "ps" ]; then
+  echo "container-123"
+  exit 0
+fi
+if [ "$1" = "exec" ]; then
+  if [ "$2" = "-u" ] && [ "$3" = "root" ]; then
+    if [ "$5" = "id" ] && [ "$6" = "-u" ] && [ "$7" = "node" ]; then
+      echo "1000"
+      exit 0
+    fi
+    if [ "$5" = "id" ] && [ "$6" = "-g" ] && [ "$7" = "node" ]; then
+      echo "1000"
+      exit 0
+    fi
+    if [ "$5" = "stat" ] && [ "$6" = "-c" ] && [ "$7" = "%u:%g" ]; then
+      echo "0:0"
+      exit 0
+    fi
+    if [ "$5" = "chown" ] && [ "$6" = "-R" ]; then
+      echo "chown" >> "$MOCK_CHOWN_LOG"
+      exit 0
+    fi
+  fi
+fi
+exit 1
+`
+	if err := os.WriteFile(mockDocker, []byte(mockDockerScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock docker command: %v", err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+	t.Setenv("MOCK_CHOWN_LOG", chownLog)
+
+	cfg := &config.Config{
+		ContainerUser:       "node",
+		ContainerLabelKey:   "devcontainer.local_folder",
+		ContainerLabelValue: "/workspace/ws-1",
+	}
+	if err := ensureWorkspaceOwnership(context.Background(), cfg); err != nil {
+		t.Fatalf("ensureWorkspaceOwnership returned error: %v", err)
+	}
+	if _, err := os.Stat(chownLog); err != nil {
+		t.Fatalf("expected chown to run: %v", err)
+	}
+}
+
+func TestEnsureWorkspaceOwnershipSkipsWhenAlreadyOwned(t *testing.T) {
+	mockBinDir := t.TempDir()
+	chownLog := filepath.Join(t.TempDir(), "chown.log")
+
+	mockDocker := filepath.Join(mockBinDir, "docker")
+	mockDockerScript := `#!/bin/sh
+if [ "$1" = "ps" ]; then
+  echo "container-123"
+  exit 0
+fi
+if [ "$1" = "exec" ]; then
+  if [ "$2" = "-u" ] && [ "$3" = "root" ]; then
+    if [ "$5" = "id" ] && [ "$6" = "-u" ] && [ "$7" = "node" ]; then
+      echo "1000"
+      exit 0
+    fi
+    if [ "$5" = "id" ] && [ "$6" = "-g" ] && [ "$7" = "node" ]; then
+      echo "1000"
+      exit 0
+    fi
+    if [ "$5" = "stat" ] && [ "$6" = "-c" ] && [ "$7" = "%u:%g" ]; then
+      echo "1000:1000"
+      exit 0
+    fi
+    if [ "$5" = "chown" ] && [ "$6" = "-R" ]; then
+      echo "chown" >> "$MOCK_CHOWN_LOG"
+      exit 0
+    fi
+  fi
+fi
+exit 1
+`
+	if err := os.WriteFile(mockDocker, []byte(mockDockerScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock docker command: %v", err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", mockBinDir+":"+origPath)
+	t.Setenv("MOCK_CHOWN_LOG", chownLog)
+
+	cfg := &config.Config{
+		ContainerUser:       "node",
+		ContainerLabelKey:   "devcontainer.local_folder",
+		ContainerLabelValue: "/workspace/ws-1",
+	}
+	if err := ensureWorkspaceOwnership(context.Background(), cfg); err != nil {
+		t.Fatalf("ensureWorkspaceOwnership returned error: %v", err)
+	}
+	if _, err := os.Stat(chownLog); !os.IsNotExist(err) {
+		t.Fatalf("expected chown to be skipped, got %v", err)
+	}
+}
+
 func TestNormalizeMergedLifecycleCommands(t *testing.T) {
 	t.Parallel()
 
