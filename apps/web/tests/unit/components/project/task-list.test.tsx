@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import type { Task } from '@simple-agent-manager/shared';
 import { TaskList } from '../../../../src/components/project/TaskList';
 
@@ -28,58 +29,64 @@ const task: Task = {
 describe('TaskList', () => {
   it('renders tasks and status controls', () => {
     render(
-      <TaskList
-        tasks={[task]}
-        onSelectTask={vi.fn()}
-        onEditTask={vi.fn()}
-        onDeleteTask={vi.fn()}
-        onTransitionTask={vi.fn()}
-        onManageDependencies={vi.fn()}
-        onDelegateTask={vi.fn()}
-      />
+      <MemoryRouter>
+        <TaskList
+          tasks={[task]}
+          projectId="proj-1"
+          onDeleteTask={vi.fn()}
+          onTransitionTask={vi.fn()}
+          onDelegateTask={vi.fn()}
+        />
+      </MemoryRouter>
     );
 
-    expect(screen.getByText('Draft task')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Draft task' })).toBeInTheDocument();
     expect(screen.getByLabelText('Transition Draft task')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Dependencies' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delegate' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
   });
 
-  it('calls callbacks for selection, transition, and actions', () => {
-    const onSelectTask = vi.fn();
-    const onEditTask = vi.fn();
+  it('calls callbacks for transition and actions', () => {
     const onDeleteTask = vi.fn();
     const onTransitionTask = vi.fn();
-    const onManageDependencies = vi.fn();
     const onDelegateTask = vi.fn();
 
     render(
-      <TaskList
-        tasks={[task]}
-        onSelectTask={onSelectTask}
-        onEditTask={onEditTask}
-        onDeleteTask={onDeleteTask}
-        onTransitionTask={onTransitionTask}
-        onManageDependencies={onManageDependencies}
-        onDelegateTask={onDelegateTask}
-      />
+      <MemoryRouter>
+        <TaskList
+          tasks={[task]}
+          projectId="proj-1"
+          onDeleteTask={onDeleteTask}
+          onTransitionTask={onTransitionTask}
+          onDelegateTask={onDelegateTask}
+        />
+      </MemoryRouter>
     );
-
-    fireEvent.click(screen.getByText('Draft task'));
-    expect(onSelectTask).toHaveBeenCalledWith('task-1');
 
     fireEvent.change(screen.getByLabelText('Transition Draft task'), { target: { value: 'ready' } });
     expect(onTransitionTask).toHaveBeenCalledWith(task, 'ready');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    expect(onEditTask).toHaveBeenCalledWith(task);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Dependencies' }));
-    expect(onManageDependencies).toHaveBeenCalledWith(task);
 
     fireEvent.click(screen.getByRole('button', { name: 'Delegate' }));
     expect(onDelegateTask).toHaveBeenCalledWith(task);
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     expect(onDeleteTask).toHaveBeenCalledWith(task);
+  });
+
+  it('links task title to the detail page', () => {
+    render(
+      <MemoryRouter>
+        <TaskList
+          tasks={[task]}
+          projectId="proj-1"
+          onDeleteTask={vi.fn()}
+          onTransitionTask={vi.fn()}
+          onDelegateTask={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    const link = screen.getByRole('link', { name: 'Draft task' });
+    expect(link).toHaveAttribute('href', '/projects/proj-1/tasks/task-1');
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import type { Task } from '@simple-agent-manager/shared';
 import { TaskDependencyEditor } from '../../../../src/components/project/TaskDependencyEditor';
 import { TaskList } from '../../../../src/components/project/TaskList';
@@ -36,15 +37,15 @@ const taskB: Task = {
 describe('Task dependencies UI', () => {
   it('shows blocked badge in task list rows', () => {
     render(
-      <TaskList
-        tasks={[taskA, taskB]}
-        onSelectTask={vi.fn()}
-        onEditTask={vi.fn()}
-        onDeleteTask={vi.fn()}
-        onTransitionTask={vi.fn()}
-        onManageDependencies={vi.fn()}
-        onDelegateTask={vi.fn()}
-      />
+      <MemoryRouter>
+        <TaskList
+          tasks={[taskA, taskB]}
+          projectId="proj-1"
+          onDeleteTask={vi.fn()}
+          onTransitionTask={vi.fn()}
+          onDelegateTask={vi.fn()}
+        />
+      </MemoryRouter>
     );
 
     expect(screen.getByText('Blocked')).toBeInTheDocument();

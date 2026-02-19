@@ -45,10 +45,11 @@ vi.mock('../../../src/components/UserMenu', () => ({
 
 import { Project } from '../../../src/pages/Project';
 
-function renderProjectPage() {
+function renderProjectPage(tab?: 'overview' | 'tasks') {
+  const url = tab === 'tasks' ? '/projects/proj-1?tab=tasks' : '/projects/proj-1';
   return render(
     <ToastProvider>
-      <MemoryRouter initialEntries={['/projects/proj-1']}>
+      <MemoryRouter initialEntries={[url]}>
         <Routes>
           <Route path="/projects/:id" element={<Project />} />
         </Routes>
@@ -153,7 +154,7 @@ describe('Project page', () => {
   });
 
   it('loads project details and renders task backlog', async () => {
-    renderProjectPage();
+    renderProjectPage('tasks');
 
     await waitFor(() => {
       expect(mocks.getProject).toHaveBeenCalledWith('proj-1');
@@ -165,11 +166,11 @@ describe('Project page', () => {
     });
 
     expect(await screen.findByText('Project One')).toBeInTheDocument();
-    expect(screen.getByText('Draft task')).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'Draft task' })).toBeInTheDocument();
   });
 
   it('syncs task filters to list request', async () => {
-    renderProjectPage();
+    renderProjectPage('tasks');
 
     const statusSelect = await screen.findByLabelText('Status');
     fireEvent.change(statusSelect, { target: { value: 'ready' } });
@@ -195,7 +196,7 @@ describe('Project page', () => {
   });
 
   it('creates a task from the new-task form', async () => {
-    renderProjectPage();
+    renderProjectPage('tasks');
 
     fireEvent.click(await screen.findByRole('button', { name: 'New task' }));
 
@@ -217,7 +218,7 @@ describe('Project page', () => {
   });
 
   it('supports multi-character typing across new-task form fields', async () => {
-    renderProjectPage();
+    renderProjectPage('tasks');
 
     fireEvent.click(await screen.findByRole('button', { name: 'New task' }));
 
