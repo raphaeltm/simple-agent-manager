@@ -344,6 +344,28 @@ func clearBuildErrorArtifacts(ctx context.Context, cfg *config.Config, volumeNam
 	}
 }
 
+func ensureVolumeWritable(ctx context.Context, volumeName string) error {
+	if strings.TrimSpace(volumeName) == "" {
+		return nil
+	}
+
+	cmd := exec.CommandContext(
+		ctx,
+		"docker",
+		"run",
+		"--rm",
+		"-v", volumeName+":/workspaces",
+		"alpine:latest",
+		"sh", "-c", "chmod -R a+rwX /workspaces",
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to chmod workspace volume %s: %w: %s", volumeName, err, strings.TrimSpace(string(output)))
+	}
+	log.Printf("Adjusted permissions in volume %s", volumeName)
+	return nil
+}
+
 // populateVolumeFromHost copies the host-cloned repository into a Docker named
 // volume using a lightweight throwaway container. The host clone is needed for
 // devcontainer CLI config discovery (it reads .devcontainer/ from the host), while
@@ -361,7 +383,7 @@ func populateVolumeFromHost(ctx context.Context, hostPath, volumeName, repoDirNa
 	checkCmd := exec.CommandContext(ctx, "docker", checkArgs...)
 	if err := checkCmd.Run(); err == nil {
 		log.Printf("Volume %s already has repository at %s, skipping populate", volumeName, targetPath)
-		return nil
+		return ensureVolumeWritable(ctx, volumeName)
 	}
 
 	// Copy the host clone into the volume. Bind-mount the host path read-only
@@ -378,6 +400,10 @@ func populateVolumeFromHost(ctx context.Context, hostPath, volumeName, repoDirNa
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to populate volume from host clone: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	if err := ensureVolumeWritable(ctx, volumeName); err != nil {
+		return err
 	}
 
 	log.Printf("Volume %s populated at %s", volumeName, targetPath)
@@ -561,6 +587,9 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 	if _, err := findDevcontainerID(ctx, cfg); err == nil {
 		log.Printf("Devcontainer already running for %s=%s", cfg.ContainerLabelKey, cfg.ContainerLabelValue)
 		ensureContainerUserResolved(ctx, cfg)
+		if err := ensureWorkspaceOwnership(ctx, cfg); err != nil {
+			return false, err
+		}
 		return false, nil
 	}
 
@@ -628,6 +657,9 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 		clearBuildErrorArtifacts(ctx, cfg, volumeName)
 	}
 	ensureContainerUserResolved(ctx, cfg)
+	if err := ensureWorkspaceOwnership(ctx, cfg); err != nil {
+		return false, err
+	}
 	return usedFallback, nil
 }
 
@@ -989,6 +1021,92 @@ func ensureContainerUserResolved(ctx context.Context, cfg *config.Config) {
 	}
 
 	log.Printf("Warning: unable to detect devcontainer user; docker exec will use container default user")
+}
+
+func ensureWorkspaceOwnership(ctx context.Context, cfg *config.Config) error {
+	if cfg == nil {
+		return nil
+	}
+
+	user := strings.TrimSpace(cfg.ContainerUser)
+	if user == "" || user == "root" {
+		return nil
+	}
+
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to locate devcontainer for workspace ownership: %w", err)
+	}
+
+	uid, err := resolveContainerUserID(ctx, containerID, user, "-u", "uid")
+	if err != nil {
+		return err
+	}
+	gid, err := resolveContainerUserID(ctx, containerID, user, "-g", "gid")
+	if err != nil {
+		return err
+	}
+
+	ownerUID, ownerGID, err := statContainerPathOwnership(ctx, containerID, "/workspaces")
+	if err != nil {
+		return err
+	}
+	if ownerUID == uid && ownerGID == gid {
+		log.Printf("Workspace ownership already set for %s (uid=%s gid=%s)", user, uid, gid)
+		return nil
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "chown", "-R", uid+":"+gid, "/workspaces")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to chown /workspaces to %s (%s:%s): %w: %s", user, uid, gid, err, strings.TrimSpace(string(output)))
+	}
+	log.Printf("Adjusted /workspaces ownership to %s (%s:%s)", user, uid, gid)
+	return nil
+}
+
+func resolveContainerUserID(ctx context.Context, containerID, user, flag, label string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "id", flag, user)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve %s for user %s: %w: %s", label, user, err, strings.TrimSpace(string(output)))
+	}
+
+	return parseNumericID(fmt.Sprintf("%s for user %s", label, user), string(output))
+}
+
+func parseNumericID(label, value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", fmt.Errorf("%s is empty", label)
+	}
+	for _, ch := range trimmed {
+		if ch < '0' || ch > '9' {
+			return "", fmt.Errorf("%s is not numeric: %q", label, trimmed)
+		}
+	}
+	return trimmed, nil
+}
+
+func statContainerPathOwnership(ctx context.Context, containerID, path string) (string, string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "stat", "-c", "%u:%g", path)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to stat %s ownership: %w: %s", path, err, strings.TrimSpace(string(output)))
+	}
+
+	parts := strings.Split(strings.TrimSpace(string(output)), ":")
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("unexpected stat output for %s: %q", path, strings.TrimSpace(string(output)))
+	}
+	uid, err := parseNumericID("uid for "+path, parts[0])
+	if err != nil {
+		return "", "", err
+	}
+	gid, err := parseNumericID("gid for "+path, parts[1])
+	if err != nil {
+		return "", "", err
+	}
+	return uid, gid, nil
 }
 
 // writeMountOverrideConfig resolves the repo devcontainer configuration via

@@ -1215,6 +1215,32 @@ func TestIntegration_FullBootstrapWithRemoteUser(t *testing.T) {
 		t.Fatalf("Run() with remoteUser failed: %v", err)
 	}
 
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		t.Fatalf("findDevcontainerID: %v", err)
+	}
+
+	uidOut, err := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "id", "-u", "vscode").CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker exec id -u vscode failed: %v\n%s", err, string(uidOut))
+	}
+	gidOut, err := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "id", "-g", "vscode").CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker exec id -g vscode failed: %v\n%s", err, string(gidOut))
+	}
+	ownerOut, err := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "stat", "-c", "%u:%g", "/workspaces").CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker exec stat /workspaces failed: %v\n%s", err, string(ownerOut))
+	}
+
+	expectedOwner := fmt.Sprintf("%s:%s", strings.TrimSpace(string(uidOut)), strings.TrimSpace(string(gidOut)))
+	if strings.TrimSpace(string(ownerOut)) != expectedOwner {
+		t.Fatalf("expected /workspaces owner %s, got %s", expectedOwner, strings.TrimSpace(string(ownerOut)))
+	}
+	if out, err := exec.CommandContext(ctx, "docker", "exec", "-u", "vscode", containerID, "sh", "-c", "touch /workspaces/.ownership-check && rm -f /workspaces/.ownership-check").CombinedOutput(); err != nil {
+		t.Fatalf("vscode write check failed: %v\n%s", err, string(out))
+	}
+
 	t.Cleanup(func() {
 		if containerID, err := findDevcontainerID(context.Background(), cfg); err == nil {
 			_ = exec.Command("docker", "rm", "-f", containerID).Run()
