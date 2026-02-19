@@ -82,25 +82,25 @@ func TestWorkspaceDirForRepo(t *testing.T) {
 		want        string
 	}{
 		{
-			name:        "uses repo name from HTTPS URL",
+			name:        "uses workspace id for HTTPS repo",
 			workspaceID: "WS_ABC",
 			repository:  "https://github.com/octo/my-cool-repo",
 			configWsDir: "/workspace",
-			want:        "/workspace/my-cool-repo",
+			want:        "/workspace/WS_ABC",
 		},
 		{
-			name:        "uses repo name from short form",
+			name:        "uses workspace id for short-form repo",
 			workspaceID: "WS_ABC",
 			repository:  "octo/hello-world",
 			configWsDir: "/workspace",
-			want:        "/workspace/hello-world",
+			want:        "/workspace/WS_ABC",
 		},
 		{
-			name:        "strips .git suffix",
+			name:        "uses workspace id for repo with git suffix",
 			workspaceID: "WS_ABC",
 			repository:  "https://github.com/owner/repo.git",
 			configWsDir: "/workspace",
-			want:        "/workspace/repo",
+			want:        "/workspace/WS_ABC",
 		},
 		{
 			name:        "falls back to workspace ID when no repository",
@@ -118,18 +118,25 @@ func TestWorkspaceDirForRepo(t *testing.T) {
 			want:        "/workspace",
 		},
 		{
-			name:        "sanitizes special characters in repo name",
+			name:        "ignores repo formatting for identity path",
 			workspaceID: "WS_ABC",
 			repository:  "owner/my repo@special!",
 			configWsDir: "/workspace",
-			want:        "/workspace/my-repo-special",
+			want:        "/workspace/WS_ABC",
 		},
 		{
 			name:        "defaults base dir to /workspace when config empty",
 			workspaceID: "WS_ABC",
 			repository:  "octo/test-repo",
 			configWsDir: "",
-			want:        "/workspace/test-repo",
+			want:        "/workspace/WS_ABC",
+		},
+		{
+			name:        "sanitizes workspace id path separators",
+			workspaceID: "WS/ABC",
+			repository:  "octo/test-repo",
+			configWsDir: "/workspace",
+			want:        "/workspace/WS-ABC",
 		},
 	}
 
@@ -149,6 +156,39 @@ func TestWorkspaceDirForRepo(t *testing.T) {
 					tt.workspaceID, tt.repository, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestUpsertWorkspaceRuntimeUsesCanonicalWorkspaceIdentityForPathsAndLabels(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		config: &config.Config{
+			WorkspaceDir: "/workspace",
+		},
+		workspaces:      map[string]*WorkspaceRuntime{},
+		workspaceEvents: map[string][]EventRecord{},
+	}
+
+	first := s.upsertWorkspaceRuntime("WS_ONE", "octo/repo", "main", "creating", "")
+	second := s.upsertWorkspaceRuntime("WS_TWO", "octo/repo", "main", "creating", "")
+
+	if first.WorkspaceDir != "/workspace/WS_ONE" {
+		t.Fatalf("first.WorkspaceDir = %q, want %q", first.WorkspaceDir, "/workspace/WS_ONE")
+	}
+	if second.WorkspaceDir != "/workspace/WS_TWO" {
+		t.Fatalf("second.WorkspaceDir = %q, want %q", second.WorkspaceDir, "/workspace/WS_TWO")
+	}
+
+	if first.ContainerLabelValue != "/workspace/WS_ONE" {
+		t.Fatalf("first.ContainerLabelValue = %q, want %q", first.ContainerLabelValue, "/workspace/WS_ONE")
+	}
+	if second.ContainerLabelValue != "/workspace/WS_TWO" {
+		t.Fatalf("second.ContainerLabelValue = %q, want %q", second.ContainerLabelValue, "/workspace/WS_TWO")
+	}
+
+	if first.ContainerLabelValue == second.ContainerLabelValue {
+		t.Fatal("expected distinct container labels for same-repository workspaces")
 	}
 }
 

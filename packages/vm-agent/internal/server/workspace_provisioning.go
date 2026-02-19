@@ -240,7 +240,7 @@ func (s *Server) adoptLegacyWorkspaceLayout(runtime *WorkspaceRuntime) bool {
 		return false
 	}
 
-	nextContainerWorkDir := deriveContainerWorkDir(legacyDir)
+	nextContainerWorkDir := deriveContainerWorkDirForRepo(legacyDir, runtime.Repository)
 	if cleanCurrentDir == cleanLegacyDir &&
 		strings.TrimSpace(runtime.ContainerLabelValue) == legacyDir &&
 		strings.TrimSpace(runtime.ContainerWorkDir) == nextContainerWorkDir {

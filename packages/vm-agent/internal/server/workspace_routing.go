@@ -114,7 +114,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			runtime.ContainerLabelValue = runtime.WorkspaceDir
 		}
 		if runtime.ContainerWorkDir == "" {
-			runtime.ContainerWorkDir = deriveContainerWorkDir(runtime.WorkspaceDir)
+			runtime.ContainerWorkDir = deriveContainerWorkDirForRepo(runtime.WorkspaceDir, runtime.Repository)
 		}
 		runtime.UpdatedAt = time.Now().UTC()
 		return runtime
@@ -122,7 +122,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 
 	workspaceDir := s.workspaceDirForRepo(workspaceID, repository)
 	containerLabelValue := workspaceDir
-	containerWorkDir := deriveContainerWorkDir(workspaceDir)
+	containerWorkDir := deriveContainerWorkDirForRepo(workspaceDir, repository)
 
 	manager := s.newPTYManagerForWorkspace(workspaceID, workspaceDir, containerWorkDir, containerLabelValue)
 
@@ -205,7 +205,7 @@ func (s *Server) shouldReusePrimaryPTYManager(workspaceID, workspaceDir, contain
 
 	expectedContainerWorkDir := strings.TrimSpace(s.config.ContainerWorkDir)
 	if expectedContainerWorkDir == "" {
-		expectedContainerWorkDir = deriveContainerWorkDir(expectedWorkspaceDir)
+		expectedContainerWorkDir = deriveContainerWorkDirForRepo(expectedWorkspaceDir, s.config.Repository)
 	}
 	if strings.TrimSpace(containerWorkDir) != expectedContainerWorkDir {
 		return false
@@ -275,8 +275,9 @@ func (s *Server) workspaceDirForRuntime(workspaceID string) string {
 	return s.workspaceDirForRepo(workspaceID, "")
 }
 
-// workspaceDirForRepo derives the workspace directory using the repository name
-// when available (e.g., /workspace/my-repo), falling back to workspace ID.
+// workspaceDirForRepo derives the host workspace directory.
+// In multi-workspace mode this MUST be keyed by canonical workspace ID to ensure
+// isolation even when multiple workspaces use the same repository.
 func (s *Server) workspaceDirForRepo(workspaceID, repository string) string {
 	baseDir := strings.TrimSpace(s.config.WorkspaceDir)
 	if baseDir == "" {
@@ -288,19 +289,33 @@ func (s *Server) workspaceDirForRepo(workspaceID, repository string) string {
 		return baseDir
 	}
 
-	// Use repository name when available for human-readable directories
+	if safeWorkspaceID := sanitizeWorkspaceRuntimeID(workspaceID); safeWorkspaceID != "" {
+		return filepath.Join(baseDir, safeWorkspaceID)
+	}
+
+	// Fallback when workspace ID is unavailable (legacy/defensive path).
 	repoDir := repositoryDirName(repository)
 	if repoDir != "" {
 		return filepath.Join(baseDir, repoDir)
 	}
+	return baseDir
+}
 
-	// Fallback to workspace ID
+func sanitizeWorkspaceRuntimeID(workspaceID string) string {
 	safeWorkspaceID := strings.TrimSpace(workspaceID)
 	if safeWorkspaceID == "" {
-		return baseDir
+		return ""
 	}
-	safeWorkspaceID = strings.ReplaceAll(safeWorkspaceID, string(filepath.Separator), "-")
-	return filepath.Join(baseDir, safeWorkspaceID)
+	safeWorkspaceID = strings.ReplaceAll(safeWorkspaceID, "/", "-")
+	safeWorkspaceID = strings.ReplaceAll(safeWorkspaceID, "\\", "-")
+	return safeWorkspaceID
+}
+
+func deriveContainerWorkDirForRepo(workspaceDir, repository string) string {
+	if repoDir := repositoryDirName(repository); repoDir != "" {
+		return filepath.Join("/workspaces", repoDir)
+	}
+	return deriveContainerWorkDir(workspaceDir)
 }
 
 func deriveContainerWorkDir(workspaceDir string) string {
@@ -376,12 +391,19 @@ func (s *Server) ptyManagerContainerResolverForLabel(labelValue string) pty.Cont
 		return nil
 	}
 
-	labelCandidates := containerLabelCandidates(
-		labelValue,
-		s.config.ContainerLabelValue,
-		s.config.WorkspaceDir,
-		"/workspace",
-	)
+	requestedLabel := strings.TrimSpace(labelValue)
+	labelCandidates := []string{}
+	if requestedLabel != "" {
+		// Workspace-scoped lookups must be strict to avoid cross-workspace routing
+		// when multiple containers share repo-derived or legacy label values.
+		labelCandidates = containerLabelCandidates(requestedLabel)
+	} else {
+		labelCandidates = containerLabelCandidates(
+			s.config.ContainerLabelValue,
+			s.config.WorkspaceDir,
+			"/workspace",
+		)
+	}
 	if len(labelCandidates) == 0 {
 		return nil
 	}
