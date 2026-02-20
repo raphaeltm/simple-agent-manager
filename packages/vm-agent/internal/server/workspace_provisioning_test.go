@@ -168,18 +168,34 @@ func TestProvisionWorkspaceRuntimeAppliesDetectedContainerUser(t *testing.T) {
 		return false, nil
 	}
 
+	const callbackToken = "test-callback-token"
+
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/WS_TEST/git-token":
+			_, _ = w.Write([]byte(`{"token":"ghs_test","expiresAt":"2026-12-31T00:00:00Z"}`))
+		case "/api/workspaces/WS_TEST/runtime-assets":
+			_, _ = w.Write([]byte(`{"workspaceId":"WS_TEST","envVars":[],"files":[]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer controlPlane.Close()
+
 	runtime := &WorkspaceRuntime{
 		ID:                  "WS_TEST",
 		Status:              "creating",
 		WorkspaceDir:        "/workspace/WS_TEST",
 		ContainerLabelValue: "/workspace/WS_TEST",
 		ContainerWorkDir:    "/workspaces/WS_TEST",
+		CallbackToken:       callbackToken,
 		PTY:                 nil,
 	}
 
 	s := &Server{
 		config: &config.Config{
 			ContainerMode:       true,
+			ControlPlaneURL:     controlPlane.URL,
 			WorkspaceDir:        "/workspace",
 			DefaultShell:        "/bin/bash",
 			DefaultRows:         24,
