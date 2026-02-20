@@ -235,7 +235,7 @@ func Load() (*Config, error) {
 		ACPViewerSendBuffer:   getEnvInt("ACP_VIEWER_SEND_BUFFER", 256),
 		ACPPingInterval:       getEnvDuration("ACP_PING_INTERVAL", 30*time.Second),
 		ACPPongTimeout:        getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
-		ACPPromptTimeout:      getEnvDuration("ACP_PROMPT_TIMEOUT", 10*time.Minute),
+		ACPPromptTimeout:      getEnvDuration("ACP_PROMPT_TIMEOUT", 60*time.Minute),
 		ACPPromptCancelGrace:  getEnvDuration("ACP_PROMPT_CANCEL_GRACE_PERIOD", 5*time.Second),
 
 		// Event log settings

@@ -34,7 +34,7 @@ const (
 
 const (
 	// DefaultPromptTimeout bounds how long a single ACP Prompt call can run.
-	DefaultPromptTimeout = 10 * time.Minute
+	DefaultPromptTimeout = 60 * time.Minute
 	// DefaultPromptCancelGracePeriod is how long we wait after cancel before
 	// force-stopping an unresponsive agent process.
 	DefaultPromptCancelGracePeriod = 5 * time.Second
