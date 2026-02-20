@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   listAgentSessions: vi.fn(),
   createAgentSession: vi.fn(),
   stopAgentSession: vi.fn(),
+  resumeAgentSession: vi.fn(),
   renameAgentSession: vi.fn(),
   updateWorkspace: vi.fn(),
   rebuildWorkspace: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock('../../../src/lib/api', () => ({
   listAgentSessions: mocks.listAgentSessions,
   createAgentSession: mocks.createAgentSession,
   stopAgentSession: mocks.stopAgentSession,
+  resumeAgentSession: mocks.resumeAgentSession,
   renameAgentSession: mocks.renameAgentSession,
   updateWorkspace: mocks.updateWorkspace,
   rebuildWorkspace: mocks.rebuildWorkspace,
@@ -301,6 +303,7 @@ describe('Workspace page', () => {
     });
     mocks.createWorktree.mockResolvedValue(undefined);
     mocks.removeWorktree.mockResolvedValue({ removed: '/workspaces/repo-wt-old' });
+    mocks.resumeAgentSession.mockResolvedValue(undefined);
     mocks.renameAgentSession.mockResolvedValue(undefined);
     mocks.rebuildWorkspace.mockResolvedValue({
       workspaceId: 'ws-123',
@@ -725,6 +728,62 @@ describe('Workspace page', () => {
       expect(probe).not.toContain('files=');
       expect(probe).not.toContain('git=');
       expect(probe).not.toContain('worktree=');
+    });
+  });
+
+  describe('orphaned session recovery', () => {
+    it('shows orphaned sessions as tabs when hostStatus is alive but status is not running', async () => {
+      // Live endpoint returns a session with status='stopped' but hostStatus='ready'
+      mocks.listAgentSessionsLive.mockResolvedValue([
+        {
+          id: 'sess-orphan',
+          workspaceId: 'ws-123',
+          status: 'stopped',
+          hostStatus: 'ready',
+          label: 'Orphaned Chat',
+          createdAt: '2026-02-08T00:10:00.000Z',
+          updatedAt: '2026-02-08T00:10:00.000Z',
+          stoppedAt: '2026-02-08T00:11:00.000Z',
+        },
+      ]);
+
+      renderWorkspace('/workspaces/ws-123');
+
+      // The orphaned session should appear as a tab
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: 'Chat tab: Orphaned Chat' })).toBeInTheDocument();
+      });
+
+      // Should show the recovery banner
+      expect(screen.getByText(/Recovered 1 hidden session still running on VM/)).toBeInTheDocument();
+
+      // Should auto-resume in DB
+      await waitFor(() => {
+        expect(mocks.resumeAgentSession).toHaveBeenCalledWith('ws-123', 'sess-orphan');
+      });
+    });
+
+    it('dismisses orphaned sessions banner when dismiss is clicked', async () => {
+      mocks.listAgentSessionsLive.mockResolvedValue([
+        {
+          id: 'sess-orphan',
+          workspaceId: 'ws-123',
+          status: 'stopped',
+          hostStatus: 'ready',
+          label: 'Orphaned Chat',
+          createdAt: '2026-02-08T00:10:00.000Z',
+          updatedAt: '2026-02-08T00:10:00.000Z',
+        },
+      ]);
+
+      renderWorkspace('/workspaces/ws-123');
+
+      await waitFor(() => {
+        expect(screen.getByText(/Recovered.*hidden session/)).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss orphaned sessions banner' }));
+      expect(screen.queryByText(/Recovered.*hidden session/)).not.toBeInTheDocument();
     });
   });
 
