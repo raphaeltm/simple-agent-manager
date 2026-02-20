@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback, useImperative
 import type { AcpSessionHandle } from '../hooks/useAcpSession';
 import type { AcpMessagesHandle, ConversationItem } from '../hooks/useAcpMessages';
 import type { SlashCommand } from '../types';
+import { getErrorMeta } from '../errors';
 import { useAutoScroll } from '../hooks/useAutoScroll';
 import { MessageBubble } from './MessageBubble';
 import { ToolCallCard } from './ToolCallCard';
@@ -220,9 +221,13 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
   const placeholderText = useMemo(() => {
     if (session.state === 'ready') return 'Send a message... (type / for commands)';
     if (isReconnecting) return 'Reconnecting...';
+    if (isError && session.errorCode) {
+      const meta = getErrorMeta(session.errorCode);
+      return meta.userMessage;
+    }
     if (isError) return 'Connection lost';
     return 'Waiting for agent...';
-  }, [session.state, isReconnecting, isError]);
+  }, [session.state, session.errorCode, isReconnecting, isError]);
 
   return (
     <div className="flex flex-col h-full bg-gray-50 rounded-lg overflow-hidden">
@@ -232,19 +237,7 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
           Reconnecting to agent...
         </div>
       )}
-      {isError && session.error === 'Reconnection timed out' && (
-        <div className="bg-red-50 border-b border-red-200 px-4 py-2 text-sm text-red-700 text-center flex items-center justify-center gap-2">
-          <span>Connection lost</span>
-          <button
-            type="button"
-            onClick={() => session.reconnect()}
-            className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
-            style={{ minHeight: 32 }}
-          >
-            Reconnect
-          </button>
-        </div>
-      )}
+      {isError && <ErrorBanner session={session} />}
 
       {/* Mode selector toolbar */}
       {modes && modes.length > 0 && onSelectMode && (
@@ -352,6 +345,44 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
     </div>
   );
 });
+
+/** Error banner with structured error code, message, and suggested action */
+function ErrorBanner({ session }: { session: AcpSessionHandle }) {
+  const meta = session.errorCode ? getErrorMeta(session.errorCode) : null;
+  const userMessage = meta?.userMessage ?? session.error ?? 'Connection lost';
+  const suggestedAction = meta?.suggestedAction;
+  const severity = meta?.severity ?? 'recoverable';
+
+  // Color scheme based on severity
+  const colors = severity === 'fatal'
+    ? { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', hint: 'text-red-600' }
+    : severity === 'transient'
+      ? { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-800', hint: 'text-yellow-600' }
+      : { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', hint: 'text-red-600' };
+
+  const showReconnect = severity !== 'fatal' && session.errorCode !== 'NETWORK_OFFLINE';
+
+  return (
+    <div className={`${colors.bg} border-b ${colors.border} px-4 py-2 text-sm text-center`}>
+      <div className={`flex items-center justify-center gap-2 ${colors.text}`}>
+        <span className="font-medium">{userMessage}</span>
+        {showReconnect && (
+          <button
+            type="button"
+            onClick={() => session.reconnect()}
+            className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+            style={{ minHeight: 32 }}
+          >
+            Reconnect
+          </button>
+        )}
+      </div>
+      {suggestedAction && (
+        <p className={`text-xs mt-1 ${colors.hint}`}>{suggestedAction}</p>
+      )}
+    </div>
+  );
+}
 
 /** Routes a ConversationItem to the appropriate component */
 function ConversationItemView({ item }: { item: ConversationItem }) {

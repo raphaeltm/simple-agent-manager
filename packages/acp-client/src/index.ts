@@ -1,6 +1,9 @@
 // Types
 export * from './types';
 
+// Errors
+export * from './errors';
+
 // Transport
 export * from './transport/types';
 export * from './transport/websocket';
