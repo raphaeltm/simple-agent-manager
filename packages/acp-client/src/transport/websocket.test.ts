@@ -7,7 +7,7 @@ function createMockWebSocket(): WebSocket & {
   _listeners: Record<string, Array<(ev: unknown) => void>>;
   _simulateMessage: (data: string) => void;
   _simulateOpen: () => void;
-  _simulateClose: () => void;
+  _simulateClose: (code?: number, reason?: string) => void;
   _simulateError: () => void;
 } {
   const listeners: Record<string, Array<(ev: unknown) => void>> = {};
@@ -36,9 +36,9 @@ function createMockWebSocket(): WebSocket & {
       }
     },
 
-    _simulateClose() {
+    _simulateClose(code = 1006, reason = '') {
       for (const fn of listeners['close'] ?? []) {
-        fn({});
+        fn({ code, reason });
       }
     },
 
@@ -51,7 +51,7 @@ function createMockWebSocket(): WebSocket & {
     _listeners: Record<string, Array<(ev: unknown) => void>>;
     _simulateMessage: (data: string) => void;
     _simulateOpen: () => void;
-    _simulateClose: () => void;
+    _simulateClose: (code?: number, reason?: string) => void;
     _simulateError: () => void;
   };
 
@@ -202,6 +202,21 @@ describe('createAcpWebSocketTransport', () => {
     ws._simulateClose();
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards close code and reason to onClose callback', () => {
+    createAcpWebSocketTransport({
+      ws,
+      onAgentStatus,
+      onAcpMessage,
+      onClose,
+      onLifecycleEvent,
+    });
+
+    ws._simulateClose(1001, 'going_away');
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledWith(1001, 'going_away');
   });
 
   it('routes pong messages as control (not to onAcpMessage)', () => {
