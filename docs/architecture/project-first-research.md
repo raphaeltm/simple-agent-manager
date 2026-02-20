@@ -1,7 +1,7 @@
 # Project-First Architecture: Research & Recommendations
 
 **Date**: 2026-02-20
-**Status**: Research complete, pending spec creation
+**Status**: Research complete
 **Context**: Paused spec-017 (Dashboard Chat Navigation) after identifying that conversation history persistence requires a project-centric D1/DO architecture.
 
 ---
