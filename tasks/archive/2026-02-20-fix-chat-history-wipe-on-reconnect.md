@@ -97,15 +97,15 @@ Implementation approach:
 
 ### Unit Tests
 
-- [ ] **Go**: `session_host_test.go` — verify `AttachViewer` sends post-replay `session_state` with `replayCount: 0`
-- [ ] **Go**: `session_host_test.go` — verify pre-replay `session_state` has correct non-zero `replayCount`
-- [ ] **Go**: `session_host_test.go` — verify `replayToViewer` does not drop messages for buffers up to `ViewerSendBuffer` size
-- [ ] **TS**: `useAcpSession.test.ts` — verify post-replay `session_state` with `replayCount > 0` does NOT trigger `prepareForReplay`
-- [ ] **TS**: `useAcpSession.test.ts` — verify reconnection after a completed replay correctly enters replay mode (guard is reset)
+- [x] **Go**: `session_host_test.go` — verify `AttachViewer` sends post-replay `session_state` with `replayCount: 0`
+- [x] **Go**: `session_host_test.go` — verify pre-replay `session_state` has correct non-zero `replayCount`
+- [x] **Go**: `session_host_test.go` — verify `replayToViewer` does not drop messages for buffers up to `ViewerSendBuffer` size
+- [x] **TS**: `useAcpSession.test.ts` — verify post-replay `session_state` with `replayCount > 0` does NOT trigger `prepareForReplay`
+- [x] **TS**: `useAcpSession.test.ts` — verify reconnection after a completed replay correctly enters replay mode (guard is reset)
 
 ### Integration Tests
 
-- [ ] Full reconnect cycle: attach viewer → receive replay → disconnect → reattach → verify replay shows same messages
+- [ ] Full reconnect cycle: attach viewer → receive replay → disconnect → reattach → verify replay shows same messages (**deferred** — see `tasks/backlog/2026-02-20-acp-reconnect-replay-integration-test.md`)
 
 ## Affected Files
 
@@ -125,9 +125,13 @@ Implementation approach:
 
 ## Acceptance Criteria
 
-- [ ] Leaving a workspace and returning displays the full chat history for all sessions
-- [ ] The post-replay session_state correctly conveys status without triggering a new replay cycle
-- [ ] Long conversations (500+ messages) are replayed without silent message drops
-- [ ] Existing reconnect-during-prompt behavior is preserved (stays in prompting state)
-- [ ] All unit tests pass
-- [ ] CI is green
+- [x] Leaving a workspace and returning displays the full chat history for all sessions
+- [x] The post-replay session_state correctly conveys status without triggering a new replay cycle
+- [x] Long conversations (500+ messages) are replayed without silent message drops
+- [x] Existing reconnect-during-prompt behavior is preserved (stays in prompting state)
+- [x] All unit tests pass
+- [x] CI is green
+
+## Resolution
+
+Completed in PR #124 (merged 2026-02-20). All three fixes implemented with unit tests. Integration test deferred to separate backlog task.
