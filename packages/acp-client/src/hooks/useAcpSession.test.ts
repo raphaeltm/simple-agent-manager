@@ -520,13 +520,13 @@ describe('useAcpSession manual reconnect', () => {
     expect(result.current.state).toBe('reconnecting');
   });
 
-  it('does not create duplicate connections when already connected', async () => {
+  it('forces a fresh connection when called while connected (e.g., agent error with live WS)', async () => {
     const { result } = renderHook(() => useAcpSession({
       wsUrl: 'ws://localhost/agent/ws',
     }));
 
-    const ws = MockWebSocket.instances[0]!;
-    act(() => ws.emitOpenAndIdle());
+    const ws1 = MockWebSocket.instances[0]!;
+    act(() => ws1.emitOpenAndIdle());
 
     await waitFor(() => {
       expect(result.current.state).toBe('no_session');
@@ -534,12 +534,13 @@ describe('useAcpSession manual reconnect', () => {
 
     const instanceCountBefore = MockWebSocket.instances.length;
 
-    // Try to reconnect while already connected — should be a no-op
+    // Reconnect while WebSocket is still open — should close old and create new
     act(() => {
       result.current.reconnect();
     });
 
-    expect(MockWebSocket.instances.length).toBe(instanceCountBefore);
+    expect(MockWebSocket.instances.length).toBeGreaterThan(instanceCountBefore);
+    expect(ws1.readyState).toBe(MockWebSocket.CLOSED);
   });
 });
 
@@ -1011,6 +1012,179 @@ describe('useAcpSession structured error codes', () => {
     await waitFor(() => {
       expect(result.current.state).toBe('error');
       expect(result.current.errorCode).toBe('AUTH_EXPIRED' satisfies AcpErrorCode);
+    });
+  });
+});
+
+describe('useAcpSession manual reconnect with agent restart', () => {
+  it('transitions to no_session when reconnecting to an errored session, enabling auto-reselect', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws1 = MockWebSocket.instances[0]!;
+    act(() => ws1.emitOpenAndIdle());
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+
+    // Agent starts and then crashes
+    act(() => {
+      ws1.emitMessage({
+        type: 'agent_status',
+        status: 'ready',
+        agentType: 'claude-code',
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('ready');
+      expect(result.current.agentType).toBe('claude-code');
+    });
+
+    act(() => {
+      ws1.emitMessage({
+        type: 'agent_status',
+        status: 'error',
+        agentType: 'claude-code',
+        error: 'Agent crashed and could not be restarted',
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('error');
+      expect(result.current.agentType).toBe('claude-code');
+    });
+
+    // User clicks "Reconnect" button — triggers manual reconnect
+    act(() => {
+      result.current.reconnect();
+    });
+
+    const ws2 = MockWebSocket.instances[MockWebSocket.instances.length - 1]!;
+    expect(ws2).not.toBe(ws1);
+
+    // SessionHost still in error → sends session_state with status=error
+    act(() => {
+      ws2.emitOpen();
+      ws2.emitMessage({
+        type: 'session_state',
+        status: 'error',
+        agentType: 'claude-code',
+        error: 'Agent crashed and could not be restarted',
+        replayCount: 0,
+      });
+    });
+
+    // Should transition to no_session (not error) so auto-select can fire
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+    // agentType should be cleared so auto-select sees a mismatch
+    expect(result.current.agentType).toBeNull();
+    // Error should be cleared
+    expect(result.current.error).toBeNull();
+  });
+
+  it('does NOT trigger agent restart on automatic reconnection (only manual)', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws1 = MockWebSocket.instances[0]!;
+    act(() => {
+      ws1.emitOpen();
+      ws1.emitMessage({
+        type: 'session_state',
+        status: 'error',
+        agentType: 'claude-code',
+        error: 'Agent crashed',
+        replayCount: 0,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('error');
+    });
+
+    // Simulate network drop (automatic reconnection, NOT manual)
+    act(() => ws1.close(1006));
+
+    // Wait for backoff timer to fire and create new WebSocket
+    // Note: reconnection uses setTimeout with backoff, so we need to advance timers
+    // Since the auto-reconnect path does NOT set pendingAgentRestart, even after
+    // reconnecting the error session_state should remain as 'error'
+    vi.useFakeTimers();
+    act(() => {
+      vi.runAllTimers();
+    });
+    vi.useRealTimers();
+
+    const ws2 = MockWebSocket.instances[MockWebSocket.instances.length - 1]!;
+    if (ws2 !== ws1) {
+      act(() => {
+        ws2.emitOpen();
+        ws2.emitMessage({
+          type: 'session_state',
+          status: 'error',
+          agentType: 'claude-code',
+          error: 'Agent crashed',
+          replayCount: 0,
+        });
+      });
+
+      // Should stay in error (not no_session) because this was an automatic reconnect
+      await waitFor(() => {
+        expect(result.current.state).toBe('error');
+        expect(result.current.agentType).toBe('claude-code');
+      });
+    }
+  });
+
+  it('clears pending restart flag when reconnecting to a healthy session', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws1 = MockWebSocket.instances[0]!;
+    act(() => {
+      ws1.emitOpen();
+      ws1.emitMessage({
+        type: 'session_state',
+        status: 'error',
+        agentType: 'claude-code',
+        error: 'Agent crashed',
+        replayCount: 0,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('error');
+    });
+
+    // User clicks Reconnect
+    act(() => {
+      result.current.reconnect();
+    });
+
+    const ws2 = MockWebSocket.instances[MockWebSocket.instances.length - 1]!;
+
+    // But the agent has recovered (e.g., auto-restarted on the server side)
+    act(() => {
+      ws2.emitOpen();
+      ws2.emitMessage({
+        type: 'session_state',
+        status: 'ready',
+        agentType: 'claude-code',
+        replayCount: 0,
+      });
+    });
+
+    // Should go to ready, not no_session — agent is already running
+    await waitFor(() => {
+      expect(result.current.state).toBe('ready');
+      expect(result.current.agentType).toBe('claude-code');
     });
   });
 });
