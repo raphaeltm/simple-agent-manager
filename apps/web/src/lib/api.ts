@@ -482,6 +482,27 @@ export async function listAgentSessions(workspaceId: string): Promise<AgentSessi
   return request<AgentSession[]>(`/api/workspaces/${workspaceId}/agent-sessions`);
 }
 
+/**
+ * Fetch agent sessions directly from the VM Agent with live SessionHost state.
+ * Returns enriched sessions with hostStatus and viewerCount fields.
+ * Requires a workspace JWT token for authentication (same as other VM Agent direct calls).
+ */
+export async function listAgentSessionsLive(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string
+): Promise<AgentSession[]> {
+  const params = new URLSearchParams({ token });
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/agent-sessions?${params.toString()}`;
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Unknown error');
+    throw new Error(`Failed to load live agent sessions: ${text}`);
+  }
+  const data = (await res.json()) as { sessions: AgentSession[] };
+  return data.sessions ?? [];
+}
+
 export async function createAgentSession(
   workspaceId: string,
   data: CreateAgentSessionRequest = {}

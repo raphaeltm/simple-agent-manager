@@ -38,6 +38,7 @@ import {
   getWorkspace,
   listAgents,
   listAgentSessions,
+  listAgentSessionsLive,
   listWorkspaceEvents,
   rebuildWorkspace,
   removeWorktree,
@@ -50,6 +51,7 @@ import {
 import type { GitStatusData } from '../lib/api';
 import type { TokenUsage } from '@simple-agent-manager/acp-client';
 import type {
+  AgentHostStatus,
   AgentInfo,
   AgentSession,
   Event,
@@ -77,6 +79,8 @@ type WorkspaceTab =
       sessionId: string;
       title: string;
       status: AgentSession['status'];
+      hostStatus?: AgentHostStatus | null;
+      viewerCount?: number | null;
       badge?: string;
     };
 
@@ -101,6 +105,25 @@ function workspaceTabStatusColor(tab: WorkspaceTab): string {
     }
   }
 
+  // Use live hostStatus when available for finer-grained colors
+  if (tab.hostStatus) {
+    switch (tab.hostStatus) {
+      case 'prompting':
+        return '#bb9af7'; // purple — actively working
+      case 'ready':
+        return '#9ece6a'; // green — ready for prompts
+      case 'starting':
+        return '#e0af68'; // amber — initializing
+      case 'idle':
+        return '#787c99'; // dim — no agent selected
+      case 'stopped':
+        return '#545868'; // dimmer — stopped
+      case 'error':
+        return '#f7768e'; // red
+    }
+  }
+
+  // Fallback to DB status when hostStatus is not available
   switch (tab.status) {
     case 'running':
       return '#9ece6a';
@@ -221,19 +244,31 @@ export function Workspace() {
 
     try {
       setError(null);
-      const [workspaceData, sessionsData] = await Promise.all([
-        getWorkspace(id),
-        listAgentSessions(id),
-      ]);
+      const workspaceData = await getWorkspace(id);
       setWorkspace(workspaceData);
       setDisplayNameInput(workspaceData.displayName || workspaceData.name);
+
+      // Try live session data from VM Agent when workspace is running and token is available
+      const wsRunning =
+        workspaceData.status === 'running' || workspaceData.status === 'recovery';
+      let sessionsData: AgentSession[] = [];
+      if (wsRunning && workspaceData.url && terminalToken) {
+        try {
+          sessionsData = await listAgentSessionsLive(workspaceData.url, id, terminalToken);
+        } catch {
+          // Fall back to control plane API (no live hostStatus/viewerCount)
+          sessionsData = await listAgentSessions(id);
+        }
+      } else {
+        sessionsData = await listAgentSessions(id);
+      }
       setAgentSessions(sessionsData || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load workspace');
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, terminalToken]);
 
   // Load workspace
   useEffect(() => {
@@ -954,10 +989,12 @@ export function Workspace() {
 
         return {
           id: `chat:${session.id}`,
-          kind: 'chat',
+          kind: 'chat' as const,
           sessionId: session.id,
           title,
           status: session.status,
+          hostStatus: session.hostStatus,
+          viewerCount: session.viewerCount,
           badge: deriveWorktreeBadge(session.worktreePath ?? undefined, worktrees),
         };
       });
@@ -1463,6 +1500,7 @@ export function Workspace() {
         const found = workspaceTabs.find((t) => t.id === tab.id);
         if (found) handleSelectWorkspaceTab(found);
       }}
+      onStopSession={handleStopSession}
       gitStatus={gitStatus}
       onOpenGitChanges={handleOpenGitChanges}
       sessionTokenUsages={sessionTokenUsages}
