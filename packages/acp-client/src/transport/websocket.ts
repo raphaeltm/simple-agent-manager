@@ -5,6 +5,11 @@ import type {
 } from './types';
 import { isControlMessage } from './types';
 
+/** Default interval between application-level pings (ms). Override via AcpTransportOptions. */
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
+/** Default pong response deadline (ms). If no pong arrives within this time, the connection is considered dead. */
+const DEFAULT_HEARTBEAT_TIMEOUT_MS = 10_000;
+
 /**
  * Callback for receiving agent status control messages from the VM Agent.
  */
@@ -69,6 +74,10 @@ export interface AcpTransportOptions {
   onSessionReplayComplete?: SessionReplayCompleteCallback;
   /** Callback for session_prompting / session_prompt_done */
   onSessionPrompting?: SessionPromptingCallback;
+  /** Application-level heartbeat ping interval in ms (default: 30000). Set to 0 to disable. */
+  heartbeatIntervalMs?: number;
+  /** Pong response deadline in ms (default: 10000). Connection closed if exceeded. */
+  heartbeatTimeoutMs?: number;
 }
 
 /**
@@ -104,6 +113,49 @@ export function createAcpWebSocketTransport(
 
   const { ws } = opts;
 
+  // --- Application-level heartbeat ---
+  // Sends JSON {"type":"ping"} and expects {"type":"pong"} back.
+  // Works through any proxy (Cloudflare, etc.) because these are regular
+  // data frames, not WebSocket protocol-level control frames.
+  const heartbeatInterval = opts.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+  const heartbeatTimeout = opts.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS;
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  let pongTimer: ReturnType<typeof setTimeout> | null = null;
+  let waitingForPong = false;
+
+  function startHeartbeat() {
+    if (heartbeatInterval <= 0) return;
+    stopHeartbeat();
+    heartbeatTimer = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      waitingForPong = true;
+      ws.send(JSON.stringify({ type: 'ping' }));
+      // Start pong deadline timer
+      pongTimer = setTimeout(() => {
+        if (!waitingForPong) return;
+        opts.onLifecycleEvent?.({
+          source: 'acp-transport',
+          level: 'warn',
+          message: 'Heartbeat pong timeout — closing connection to trigger reconnect',
+          context: { heartbeatTimeoutMs: heartbeatTimeout },
+        });
+        // Force-close to trigger the onClose → reconnect path
+        ws.close(4000, 'heartbeat_timeout');
+      }, heartbeatTimeout);
+    }, heartbeatInterval);
+  }
+
+  function stopHeartbeat() {
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    if (pongTimer) { clearTimeout(pongTimer); pongTimer = null; }
+    waitingForPong = false;
+  }
+
+  function handlePong() {
+    waitingForPong = false;
+    if (pongTimer) { clearTimeout(pongTimer); pongTimer = null; }
+  }
+
   ws.addEventListener('message', (event) => {
     try {
       const data = JSON.parse(event.data as string);
@@ -124,6 +176,15 @@ export function createAcpWebSocketTransport(
           case 'session_prompt_done':
             opts.onSessionPrompting?.(false);
             break;
+          case 'pong':
+            handlePong();
+            break;
+          case 'ping':
+            // Server shouldn't send pings to client, but respond if it does
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'pong' }));
+            }
+            break;
           default:
             break;
         }
@@ -143,9 +204,23 @@ export function createAcpWebSocketTransport(
     }
   });
 
-  if (opts.onClose) {
-    ws.addEventListener('close', opts.onClose);
+  // Start heartbeat once connection is open
+  ws.addEventListener('open', () => {
+    startHeartbeat();
+  });
+
+  // If already open (e.g. passed after open event), start immediately
+  if (ws.readyState === WebSocket.OPEN) {
+    startHeartbeat();
   }
+
+  const wrappedOnClose = () => {
+    stopHeartbeat();
+    opts.onClose?.();
+  };
+
+  ws.addEventListener('close', wrappedOnClose);
+
   if (opts.onError) {
     ws.addEventListener('error', opts.onError);
   }
@@ -178,6 +253,7 @@ export function createAcpWebSocketTransport(
     },
 
     close() {
+      stopHeartbeat();
       ws.close();
     },
 

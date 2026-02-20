@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { AcpLifecycleEvent } from './types';
 import { createAcpWebSocketTransport } from './websocket';
 
@@ -6,6 +6,7 @@ import { createAcpWebSocketTransport } from './websocket';
 function createMockWebSocket(): WebSocket & {
   _listeners: Record<string, Array<(ev: unknown) => void>>;
   _simulateMessage: (data: string) => void;
+  _simulateOpen: () => void;
   _simulateClose: () => void;
   _simulateError: () => void;
 } {
@@ -29,6 +30,12 @@ function createMockWebSocket(): WebSocket & {
       }
     },
 
+    _simulateOpen() {
+      for (const fn of listeners['open'] ?? []) {
+        fn({});
+      }
+    },
+
     _simulateClose() {
       for (const fn of listeners['close'] ?? []) {
         fn({});
@@ -43,6 +50,7 @@ function createMockWebSocket(): WebSocket & {
   } as unknown as WebSocket & {
     _listeners: Record<string, Array<(ev: unknown) => void>>;
     _simulateMessage: (data: string) => void;
+    _simulateOpen: () => void;
     _simulateClose: () => void;
     _simulateError: () => void;
   };
@@ -194,5 +202,176 @@ describe('createAcpWebSocketTransport', () => {
     ws._simulateClose();
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes pong messages as control (not to onAcpMessage)', () => {
+    createAcpWebSocketTransport({
+      ws,
+      onAgentStatus,
+      onAcpMessage,
+      onClose,
+      onError,
+      onLifecycleEvent,
+    });
+
+    ws._simulateMessage(JSON.stringify({ type: 'pong' }));
+
+    expect(onAcpMessage).not.toHaveBeenCalled();
+    expect(onAgentStatus).not.toHaveBeenCalled();
+  });
+
+  it('responds to ping messages with pong', () => {
+    createAcpWebSocketTransport({
+      ws,
+      onAgentStatus,
+      onAcpMessage,
+      onClose,
+      onError,
+      onLifecycleEvent,
+    });
+
+    ws._simulateMessage(JSON.stringify({ type: 'ping' }));
+
+    expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ type: 'pong' }));
+    expect(onAcpMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('heartbeat', () => {
+  let ws: ReturnType<typeof createMockWebSocket>;
+  let onAgentStatus: ReturnType<typeof vi.fn>;
+  let onAcpMessage: ReturnType<typeof vi.fn>;
+  let onClose: ReturnType<typeof vi.fn>;
+  let lifecycleEvents: AcpLifecycleEvent[];
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    ws = createMockWebSocket();
+    onAgentStatus = vi.fn();
+    onAcpMessage = vi.fn();
+    onClose = vi.fn();
+    lifecycleEvents = [];
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('sends ping at configured interval when connection is open', () => {
+    createAcpWebSocketTransport({
+      ws,
+      onAgentStatus,
+      onAcpMessage,
+      onClose,
+      onLifecycleEvent: (e) => lifecycleEvents.push(e),
+      heartbeatIntervalMs: 5000,
+      heartbeatTimeoutMs: 2000,
+    });
+
+    // No ping sent immediately
+    expect(ws.send).not.toHaveBeenCalled();
+
+    // Advance past first interval
+    vi.advanceTimersByTime(5000);
+    expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ type: 'ping' }));
+  });
+
+  it('closes WebSocket if pong not received within timeout', () => {
+    createAcpWebSocketTransport({
+      ws,
+      onAgentStatus,
+      onAcpMessage,
+      onClose,
+      onLifecycleEvent: (e) => lifecycleEvents.push(e),
+      heartbeatIntervalMs: 5000,
+      heartbeatTimeoutMs: 2000,
+    });
+
+    // Trigger ping
+    vi.advanceTimersByTime(5000);
+    expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ type: 'ping' }));
+
+    // No pong received, advance past timeout
+    vi.advanceTimersByTime(2000);
+
+    // Should have closed the WebSocket to trigger reconnect
+    expect(ws.close).toHaveBeenCalledWith(4000, 'heartbeat_timeout');
+
+    // Should have logged a lifecycle event
+    const timeoutEvent = lifecycleEvents.find(e => e.message.includes('pong timeout'));
+    expect(timeoutEvent).toBeDefined();
+    expect(timeoutEvent?.level).toBe('warn');
+  });
+
+  it('does not close WebSocket if pong received in time', () => {
+    createAcpWebSocketTransport({
+      ws,
+      onAgentStatus,
+      onAcpMessage,
+      onClose,
+      onLifecycleEvent: (e) => lifecycleEvents.push(e),
+      heartbeatIntervalMs: 5000,
+      heartbeatTimeoutMs: 2000,
+    });
+
+    // Trigger ping
+    vi.advanceTimersByTime(5000);
+
+    // Pong received within timeout
+    ws._simulateMessage(JSON.stringify({ type: 'pong' }));
+
+    // Advance past what would be the timeout
+    vi.advanceTimersByTime(3000);
+
+    // Should NOT have closed
+    expect(ws.close).not.toHaveBeenCalled();
+  });
+
+  it('does not send pings when heartbeat is disabled (interval = 0)', () => {
+    createAcpWebSocketTransport({
+      ws,
+      onAgentStatus,
+      onAcpMessage,
+      onClose,
+      heartbeatIntervalMs: 0,
+    });
+
+    vi.advanceTimersByTime(60000);
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('stops heartbeat on transport.close()', () => {
+    const transport = createAcpWebSocketTransport({
+      ws,
+      onAgentStatus,
+      onAcpMessage,
+      onClose,
+      heartbeatIntervalMs: 5000,
+      heartbeatTimeoutMs: 2000,
+    });
+
+    transport.close();
+
+    // Advance past interval — no ping should be sent
+    vi.advanceTimersByTime(10000);
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('stops heartbeat on WebSocket close', () => {
+    createAcpWebSocketTransport({
+      ws,
+      onAgentStatus,
+      onAcpMessage,
+      onClose,
+      heartbeatIntervalMs: 5000,
+      heartbeatTimeoutMs: 2000,
+    });
+
+    // Close the WebSocket
+    ws._simulateClose();
+
+    // Advance past interval — no ping should be sent
+    vi.advanceTimersByTime(10000);
+    expect(ws.send).not.toHaveBeenCalled();
   });
 });
