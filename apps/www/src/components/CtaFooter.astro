@@ -1,0 +1,167 @@
+---
+const currentYear = new Date().getFullYear();
+---
+
+<section class="cta-section">
+  <div class="container">
+    <div class="cta-content animate-on-scroll">
+      <h2 class="cta-title">Ready to spin up your first workspace?</h2>
+      <p class="cta-subtitle">
+        Self-host the control plane on Cloudflare's free tier. Bring your own Hetzner token. Start building in minutes.
+      </p>
+      <div class="cta-actions">
+        <a href="https://app.simple-agent-manager.org" class="btn-cta btn-cta-primary">
+          Get Started
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </a>
+        <a href="https://github.com/raphaeltm/simple-agent-manager" class="btn-cta btn-cta-secondary" target="_blank" rel="noopener noreferrer">
+          Star on GitHub
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <svg width="24" height="24" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect width="512" height="512" rx="112" fill="#0b1110"/>
+        <rect x="56" y="56" width="400" height="400" rx="80" fill="#13201d" stroke="#29423b" stroke-width="8"/>
+        <path d="M154 208L226 256L154 304" stroke="#16a34a" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M270 318H360" stroke="#e6f2ee" stroke-width="26" stroke-linecap="round"/>
+      </svg>
+      <span>Simple Agent Manager</span>
+    </div>
+
+    <div class="footer-links">
+      <a href="https://github.com/raphaeltm/simple-agent-manager" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="https://github.com/raphaeltm/simple-agent-manager/blob/main/docs/guides/self-hosting.md" target="_blank" rel="noopener noreferrer">Self-Hosting Guide</a>
+      <a href="https://github.com/raphaeltm/simple-agent-manager/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener noreferrer">Contributing</a>
+      <a href="https://github.com/raphaeltm/simple-agent-manager/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
+    </div>
+
+    <p class="footer-copy">&copy; {currentYear} Simple Agent Manager. Open source under MIT.</p>
+  </div>
+</footer>
+
+<style>
+  .cta-section {
+    padding: 80px 0;
+  }
+
+  @media (min-width: 768px) {
+    .cta-section {
+      padding: 120px 0;
+    }
+  }
+
+  .cta-content {
+    text-align: center;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+
+  .cta-title {
+    font-family: var(--font-display);
+    font-size: clamp(1.5rem, 4vw, 2.25rem);
+    font-weight: 600;
+    color: var(--color-fg-primary);
+    margin-bottom: 16px;
+    line-height: 1.2;
+  }
+
+  .cta-subtitle {
+    font-size: 1.0625rem;
+    color: var(--color-fg-muted);
+    line-height: 1.7;
+    margin-bottom: 32px;
+  }
+
+  .cta-actions {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .btn-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-body);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    padding: 14px 32px;
+    border-radius: var(--radius-md);
+    transition: all 0.2s;
+  }
+
+  .btn-cta-primary {
+    background: var(--color-accent);
+    color: white;
+  }
+
+  .btn-cta-primary:hover {
+    background: var(--color-accent-hover);
+    color: white;
+    transform: translateY(-1px);
+  }
+
+  .btn-cta-secondary {
+    background: var(--color-bg-surface);
+    color: var(--color-fg-primary);
+    border: 1px solid var(--color-border);
+  }
+
+  .btn-cta-secondary:hover {
+    background: var(--color-bg-surface-hover);
+    color: var(--color-fg-primary);
+    border-color: var(--color-fg-dim);
+  }
+
+  /* Footer */
+  .footer {
+    border-top: 1px solid var(--color-border-subtle);
+    padding: 40px 0;
+  }
+
+  .footer-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    text-align: center;
+  }
+
+  .footer-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--font-display);
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-fg-muted);
+  }
+
+  .footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 24px;
+  }
+
+  .footer-links a {
+    font-size: 0.8125rem;
+    color: var(--color-fg-dim);
+  }
+
+  .footer-links a:hover {
+    color: var(--color-fg-muted);
+  }
+
+  .footer-copy {
+    font-size: 0.75rem;
+    color: var(--color-fg-dim);
+  }
+</style>

@@ -1,0 +1,280 @@
+---
+---
+
+<section class="hero">
+  <div class="hero-glow" aria-hidden="true"></div>
+  <div class="container hero-content">
+    <div class="hero-badge animate-on-scroll">
+      <span class="badge-dot"></span>
+      Open Source & Self-Hosted
+    </div>
+
+    <h1 class="hero-title animate-on-scroll">
+      Spin up AI coding<br />environments <span class="gradient-text">on-demand</span>
+    </h1>
+
+    <p class="hero-subtitle animate-on-scroll">
+      Ephemeral cloud workspaces with Claude Code pre-installed.
+      2-3x cheaper than GitHub Codespaces. Your infrastructure, your control.
+    </p>
+
+    <div class="hero-actions animate-on-scroll">
+      <a href="https://app.simple-agent-manager.org" class="btn-hero btn-hero-primary">
+        Get Started
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+      </a>
+      <a href="https://github.com/raphaeltm/simple-agent-manager" class="btn-hero btn-hero-secondary" target="_blank" rel="noopener noreferrer">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        View on GitHub
+      </a>
+    </div>
+
+    <!-- Terminal preview -->
+    <div class="terminal-preview animate-on-scroll">
+      <div class="terminal-chrome">
+        <div class="terminal-dots">
+          <span class="dot dot-red"></span>
+          <span class="dot dot-yellow"></span>
+          <span class="dot dot-green"></span>
+        </div>
+        <span class="terminal-title">workspace — sam-project</span>
+      </div>
+      <div class="terminal-body">
+        <div class="terminal-line">
+          <span class="prompt">$</span>
+          <span class="command">sam workspace create --repo my-org/api-service --size medium</span>
+        </div>
+        <div class="terminal-line output">
+          <span class="accent-text">Creating workspace...</span> cloning repo, building devcontainer
+        </div>
+        <div class="terminal-line output">
+          <span class="success-text">Ready!</span> Workspace running at ws-a7f3c.simple-agent-manager.org
+        </div>
+        <div class="terminal-line output dim">
+          Claude Code is pre-installed and ready. Terminal sessions persist across reconnects.
+        </div>
+        <div class="terminal-line">
+          <span class="prompt">$</span>
+          <span class="cursor">|</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero {
+    position: relative;
+    padding: 160px 0 80px;
+    overflow: hidden;
+  }
+
+  @media (min-width: 768px) {
+    .hero {
+      padding: 180px 0 120px;
+    }
+  }
+
+  .hero-glow {
+    position: absolute;
+    top: -200px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 800px;
+    height: 600px;
+    background: radial-gradient(ellipse at center, var(--color-accent-glow) 0%, transparent 70%);
+    pointer-events: none;
+    animation: glow-pulse 6s ease-in-out infinite;
+  }
+
+  .hero-content {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg-muted);
+    padding: 6px 16px;
+    border: 1px solid var(--color-border);
+    border-radius: 100px;
+    margin-bottom: 32px;
+  }
+
+  .badge-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    animation: glow-pulse 2s ease-in-out infinite;
+  }
+
+  .hero-title {
+    font-family: var(--font-display);
+    font-size: clamp(2.25rem, 6vw, 4rem);
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    color: var(--color-fg-primary);
+    margin-bottom: 24px;
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-success) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero-subtitle {
+    font-size: clamp(1rem, 2vw, 1.25rem);
+    color: var(--color-fg-muted);
+    max-width: 560px;
+    line-height: 1.7;
+    margin-bottom: 40px;
+  }
+
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 64px;
+  }
+
+  .btn-hero {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-body);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    padding: 12px 28px;
+    border-radius: var(--radius-md);
+    transition: all 0.2s;
+    border: none;
+    cursor: pointer;
+  }
+
+  .btn-hero-primary {
+    background: var(--color-accent);
+    color: white;
+  }
+
+  .btn-hero-primary:hover {
+    background: var(--color-accent-hover);
+    color: white;
+    transform: translateY(-1px);
+  }
+
+  .btn-hero-secondary {
+    background: var(--color-bg-surface);
+    color: var(--color-fg-primary);
+    border: 1px solid var(--color-border);
+  }
+
+  .btn-hero-secondary:hover {
+    background: var(--color-bg-surface-hover);
+    color: var(--color-fg-primary);
+    border-color: var(--color-fg-dim);
+  }
+
+  /* Terminal */
+  .terminal-preview {
+    width: 100%;
+    max-width: 720px;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-inset);
+    box-shadow:
+      0 0 0 1px var(--color-border-subtle),
+      0 20px 60px rgba(0, 0, 0, 0.4),
+      0 0 80px var(--color-accent-glow);
+  }
+
+  .terminal-chrome {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--color-bg-surface);
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+
+  .terminal-dots {
+    display: flex;
+    gap: 6px;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .dot-red { background: #ef4444; }
+  .dot-yellow { background: #f59e0b; }
+  .dot-green { background: #22c55e; }
+
+  .terminal-title {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-fg-dim);
+  }
+
+  .terminal-body {
+    padding: 20px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.8;
+  }
+
+  .terminal-line {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .terminal-line.output {
+    color: var(--color-fg-muted);
+  }
+
+  .terminal-line.dim {
+    color: var(--color-fg-dim);
+  }
+
+  .prompt {
+    color: var(--color-accent);
+    user-select: none;
+  }
+
+  .command {
+    color: var(--color-fg-primary);
+  }
+
+  .accent-text {
+    color: var(--color-accent);
+  }
+
+  .success-text {
+    color: var(--color-success);
+  }
+
+  .cursor {
+    color: var(--color-accent);
+    animation: blink 1.2s step-end infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+</style>

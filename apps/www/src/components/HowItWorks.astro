@@ -1,0 +1,134 @@
+---
+const steps = [
+  {
+    number: '01',
+    title: 'Connect Your Cloud',
+    description: 'Add your Hetzner API token in the Settings page. Your credentials are encrypted per-user — SAM never stores provider keys as platform secrets.',
+    detail: 'Bring Your Own Cloud means you control costs, regions, and data residency.',
+  },
+  {
+    number: '02',
+    title: 'Create a Workspace',
+    description: 'Pick a GitHub repo (public or private via GitHub App), choose a VM size, and click Create. SAM provisions a node, builds the devcontainer, and starts Claude Code.',
+    detail: 'DevContainer support means your existing configs just work.',
+  },
+  {
+    number: '03',
+    title: 'Start Building',
+    description: 'Open the browser terminal, interact with Claude Code, and build. Sessions persist across reconnects. Stop, restart, or delete when you\'re done.',
+    detail: 'Multiple workspaces can share a single node to cut costs.',
+  },
+];
+---
+
+<section id="how-it-works" class="section">
+  <div class="container">
+    <div class="hiw-header animate-on-scroll">
+      <span class="section-label">How It Works</span>
+      <h2 class="section-title">From zero to coding in minutes</h2>
+      <p class="section-subtitle">
+        Three steps to a fully configured cloud environment with Claude Code ready to go.
+      </p>
+    </div>
+
+    <div class="steps">
+      {steps.map((step, i) => (
+        <div class="step animate-on-scroll" style={`transition-delay: ${i * 120}ms`}>
+          <div class="step-number-col">
+            <span class="step-number">{step.number}</span>
+            {i < steps.length - 1 && <div class="step-connector" />}
+          </div>
+          <div class="step-content">
+            <h3 class="step-title">{step.title}</h3>
+            <p class="step-desc">{step.description}</p>
+            <p class="step-detail">{step.detail}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .hiw-header {
+    text-align: center;
+    margin-bottom: 64px;
+  }
+
+  .hiw-header .section-subtitle {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .steps {
+    max-width: 640px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .step {
+    display: flex;
+    gap: 24px;
+  }
+
+  .step-number-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .step-number {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--color-accent-glow);
+    border: 1px solid var(--color-border);
+    color: var(--color-accent);
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .step-connector {
+    width: 1px;
+    flex: 1;
+    min-height: 40px;
+    background: linear-gradient(to bottom, var(--color-border), transparent);
+  }
+
+  .step-content {
+    padding-bottom: 48px;
+  }
+
+  .step:last-child .step-content {
+    padding-bottom: 0;
+  }
+
+  .step-title {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--color-fg-primary);
+    margin-bottom: 8px;
+  }
+
+  .step-desc {
+    font-size: 0.9375rem;
+    color: var(--color-fg-muted);
+    line-height: 1.7;
+    margin-bottom: 8px;
+  }
+
+  .step-detail {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg-dim);
+    line-height: 1.5;
+  }
+</style>

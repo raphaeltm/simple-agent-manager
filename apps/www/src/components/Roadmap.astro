@@ -1,0 +1,181 @@
+---
+const phases = [
+  {
+    title: 'MVP',
+    status: 'complete',
+    description: 'Core workspace management, GitHub OAuth, encrypted credential storage',
+  },
+  {
+    title: 'Browser Terminal',
+    status: 'complete',
+    description: 'Web terminal via xterm.js, Go VM agent, JWT auth, WebSocket sessions',
+  },
+  {
+    title: 'Hardening',
+    status: 'complete',
+    description: 'Bootstrap tokens, ownership validation, session persistence, ACP agent protocol',
+  },
+  {
+    title: 'Multi-Workspace Nodes',
+    status: 'complete',
+    description: 'Multiple workspaces per VM, tab persistence, agent sessions, node consolidation',
+  },
+  {
+    title: 'Enhanced UX',
+    status: 'in-progress',
+    description: 'Workspace templates, persistent storage, better error UX, SSH access, cost estimation',
+  },
+  {
+    title: 'Enterprise',
+    status: 'planned',
+    description: 'Teams, usage quotas, billing, SSO, multi-region, custom VM images',
+  },
+];
+---
+
+<section id="roadmap" class="section">
+  <div class="container">
+    <div class="roadmap-header animate-on-scroll">
+      <span class="section-label">Roadmap</span>
+      <h2 class="section-title">Built in the open, shipped fast</h2>
+      <p class="section-subtitle">
+        Four phases complete and shipping. Two more on the way.
+      </p>
+    </div>
+
+    <div class="timeline">
+      {phases.map((phase, i) => (
+        <div class="timeline-item animate-on-scroll" style={`transition-delay: ${i * 80}ms`}>
+          <div class="timeline-marker-col">
+            <div class={`timeline-dot ${phase.status}`} />
+            {i < phases.length - 1 && <div class="timeline-line" />}
+          </div>
+          <div class="timeline-content">
+            <div class="timeline-meta">
+              <h3 class="timeline-title">{phase.title}</h3>
+              <span class={`timeline-badge ${phase.status}`}>
+                {phase.status === 'complete' ? 'Complete' : phase.status === 'in-progress' ? 'In Progress' : 'Planned'}
+              </span>
+            </div>
+            <p class="timeline-desc">{phase.description}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .roadmap-header {
+    text-align: center;
+    margin-bottom: 64px;
+  }
+
+  .roadmap-header .section-subtitle {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .timeline {
+    max-width: 640px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .timeline-item {
+    display: flex;
+    gap: 20px;
+  }
+
+  .timeline-marker-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+    width: 20px;
+  }
+
+  .timeline-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 4px;
+  }
+
+  .timeline-dot.complete {
+    background: var(--color-accent);
+    box-shadow: 0 0 8px var(--color-accent-glow);
+  }
+
+  .timeline-dot.in-progress {
+    background: var(--color-warning);
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
+    animation: glow-pulse 2s ease-in-out infinite;
+  }
+
+  .timeline-dot.planned {
+    background: transparent;
+    border: 2px solid var(--color-fg-dim);
+  }
+
+  .timeline-line {
+    width: 1px;
+    flex: 1;
+    min-height: 20px;
+    background: var(--color-border-subtle);
+  }
+
+  .timeline-content {
+    padding-bottom: 32px;
+  }
+
+  .timeline-item:last-child .timeline-content {
+    padding-bottom: 0;
+  }
+
+  .timeline-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+  }
+
+  .timeline-title {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-fg-primary);
+  }
+
+  .timeline-badge {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    padding: 2px 10px;
+    border-radius: 100px;
+    letter-spacing: 0.02em;
+  }
+
+  .timeline-badge.complete {
+    color: var(--color-accent);
+    background: var(--color-accent-glow);
+  }
+
+  .timeline-badge.in-progress {
+    color: var(--color-warning);
+    background: rgba(245, 158, 11, 0.1);
+  }
+
+  .timeline-badge.planned {
+    color: var(--color-fg-dim);
+    border: 1px solid var(--color-border-subtle);
+  }
+
+  .timeline-desc {
+    font-size: 0.875rem;
+    color: var(--color-fg-muted);
+    line-height: 1.6;
+  }
+</style>
