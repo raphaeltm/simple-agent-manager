@@ -96,6 +96,12 @@ Full env var reference: use the `env-reference` skill or see `apps/api/.env.exam
 3. **Platform secrets** (ENCRYPTION_KEY, JWT keys, CF_API_TOKEN) are Cloudflare Worker secrets set during deployment.
 4. **Canonical IDs for identity** — use `workspaceId`, `nodeId`, `sessionId` for all machine-critical operations (storage, routing, lifecycle). Human-readable labels are for UX/logging only and MUST be treated as mutable and non-unique.
 
+## Git Workflow
+
+- **Always use worktrees and PRs** — never commit directly to main. Create a feature branch in a git worktree and open a PR.
+- **Push early and often** — environments are ephemeral. Unpushed work can be lost at any time.
+- After pushing, check CI and fix any failures before moving on.
+
 ## Development Guidelines
 
 - **Fix all build/lint errors** before pushing — even pre-existing ones
