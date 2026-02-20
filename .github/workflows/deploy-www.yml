@@ -14,6 +14,8 @@ concurrency:
 
 env:
   NODE_VERSION: '22'
+  # Pages project name — must match provision-www.yml
+  PAGES_PROJECT: sam-www
 
 jobs:
   deploy:
@@ -41,9 +43,31 @@ jobs:
 
       - name: Build marketing site
         run: pnpm --filter @simple-agent-manager/www build
+        env:
+          SITE_URL: https://www.${{ vars.BASE_DOMAIN }}
 
       - name: Deploy to Cloudflare Pages
-        run: npx wrangler pages deploy apps/www/dist --project-name=sam-www --commit-dirty=true
+        run: npx wrangler pages deploy apps/www/dist --project-name=${{ env.PAGES_PROJECT }} --commit-dirty=true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      - name: Write Job Summary
+        if: always()
+        run: |
+          WWW_DOMAIN="www.${{ vars.BASE_DOMAIN }}"
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "## Marketing Site Deployed" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**URL:** https://${WWW_DOMAIN}" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Pages URL:** https://${{ env.PAGES_PROJECT }}.pages.dev" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Commit:** \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Marketing Site Deployment Failed" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Check the logs above for error details." >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Troubleshooting" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Ensure infrastructure is provisioned (run the **Provision Marketing Site Infrastructure** workflow)" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Verify \`CF_API_TOKEN\` and \`CF_ACCOUNT_ID\` secrets are set" >> "$GITHUB_STEP_SUMMARY"
+          fi
