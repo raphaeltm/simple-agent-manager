@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthProvider';
 import { signOut } from '../lib/auth';
+import { useIsMobile } from '../hooks/useIsMobile';
+import { MobileNavDrawer } from './MobileNavDrawer';
 
 const PRIMARY_NAV_ITEMS = [
   { label: 'Dashboard', path: '/dashboard' },
@@ -20,12 +22,15 @@ function isNavItemActive(path: string, pathname: string): boolean {
 
 /**
  * User menu with avatar and dropdown.
+ * On mobile (<=767px), hides inline nav links and opens a slide-in drawer instead.
  */
 export function UserMenu() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const isMobile = useIsMobile();
   const [isOpen, setIsOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -49,6 +54,64 @@ export function UserMenu() {
 
   if (!user) return null;
 
+  const avatarElement = user.image ? (
+    <img
+      src={user.image}
+      alt={user.name || user.email}
+      style={{ height: 32, width: 32, borderRadius: '50%' }}
+    />
+  ) : (
+    <div style={{
+      height: 32,
+      width: 32,
+      borderRadius: '50%',
+      backgroundColor: 'var(--sam-color-accent-primary)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: '#fff',
+      fontSize: '0.875rem',
+      fontWeight: 500,
+    }}>
+      {(user.name || user.email).charAt(0).toUpperCase()}
+    </div>
+  );
+
+  // Mobile: avatar-only button that opens a slide-in nav drawer
+  if (isMobile) {
+    return (
+      <>
+        <button
+          onClick={() => setDrawerOpen(true)}
+          aria-label="Open navigation menu"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            color: 'var(--sam-color-fg-muted)',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            padding: '4px',
+          }}
+        >
+          {avatarElement}
+        </button>
+
+        {drawerOpen && (
+          <MobileNavDrawer
+            onClose={() => setDrawerOpen(false)}
+            user={{ name: user.name, email: user.email, image: user.image }}
+            navItems={PRIMARY_NAV_ITEMS}
+            currentPath={location.pathname}
+            onNavigate={(path) => { navigate(path); setDrawerOpen(false); }}
+            onSignOut={handleSignOut}
+          />
+        )}
+      </>
+    );
+  }
+
+  // Desktop: inline nav links + avatar with dropdown (unchanged)
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
       <style>{`
@@ -116,28 +179,7 @@ export function UserMenu() {
             padding: '4px',
           }}
         >
-          {user.image ? (
-            <img
-              src={user.image}
-              alt={user.name || user.email}
-              style={{ height: 32, width: 32, borderRadius: '50%' }}
-            />
-          ) : (
-            <div style={{
-              height: 32,
-              width: 32,
-              borderRadius: '50%',
-              backgroundColor: 'var(--sam-color-accent-primary)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
-              fontSize: '0.875rem',
-              fontWeight: 500,
-            }}>
-              {(user.name || user.email).charAt(0).toUpperCase()}
-            </div>
-          )}
+          {avatarElement}
           <span className="sam-user-name" style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>
             {user.name || user.email}
           </span>
@@ -161,7 +203,7 @@ export function UserMenu() {
             borderRadius: 'var(--sam-radius-md)',
             boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
             border: '1px solid var(--sam-color-border-default)',
-            zIndex: 10,
+            zIndex: 20,
             overflow: 'hidden',
           }}>
             <div style={{ padding: '0.5rem 1rem', borderBottom: '1px solid var(--sam-color-border-default)' }}>
