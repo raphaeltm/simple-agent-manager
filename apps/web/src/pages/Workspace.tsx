@@ -478,6 +478,42 @@ export function Workspace() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Auto-switch to an active chat session on initial load when the URL has
+  // no explicit view preference. Without this, opening a workspace always
+  // lands on the terminal even when chat sessions are already running.
+  const initialViewResolvedRef = useRef(false);
+  useEffect(() => {
+    // Only run once, on the first time sessions are loaded
+    if (initialViewResolvedRef.current) return;
+    // Don't override an explicit URL view preference
+    if (viewOverride) {
+      initialViewResolvedRef.current = true;
+      return;
+    }
+    // Don't override when a specific sessionId is already in the URL
+    if (sessionIdParam) {
+      initialViewResolvedRef.current = true;
+      return;
+    }
+    // Wait until sessions have been loaded at least once
+    if (agentSessions.length === 0) return;
+
+    const firstActive = agentSessions.find(
+      (session) => isSessionActive(session) && !recentlyStopped.has(session.id)
+    );
+    if (firstActive) {
+      initialViewResolvedRef.current = true;
+      const params = new URLSearchParams(searchParams);
+      params.set('view', 'conversation');
+      params.set('sessionId', firstActive.id);
+      navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
+      setViewMode('conversation');
+    } else {
+      // No active chat sessions — terminal is the right default
+      initialViewResolvedRef.current = true;
+    }
+  }, [agentSessions, viewOverride, sessionIdParam, id, navigate, searchParams, recentlyStopped]);
+
   // Throttle terminal activity handling to avoid excessive API calls.
   // Without this, every keystroke in the terminal triggers a full workspace
   // state reload (API call to getWorkspace + listAgentSessions), which both
