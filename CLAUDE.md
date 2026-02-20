@@ -100,6 +100,7 @@ Full env var reference: use the `env-reference` skill or see `apps/api/.env.exam
 
 - **Always use worktrees and PRs** — never commit directly to main. Create a feature branch in a git worktree and open a PR.
 - **Push early and often** — environments are ephemeral. Unpushed work can be lost at any time.
+- **Pull and rebase frequently** — before starting work and before pushing, run `git fetch origin && git rebase origin/main` to stay current and avoid conflicts.
 - After pushing, check CI and fix any failures before moving on.
 
 ## Development Guidelines
