@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://simple-agent-manager.org/sitemap-index.xml
+Sitemap: https://www.simple-agent-manager.org/sitemap-index.xml
