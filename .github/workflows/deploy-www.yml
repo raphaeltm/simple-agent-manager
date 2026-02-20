@@ -1,0 +1,50 @@
+name: Deploy Marketing Site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/www/**'
+      - '.github/workflows/deploy-www.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-www
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build marketing site
+        run: pnpm --filter @simple-agent-manager/www build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: pages deploy apps/www/dist --project-name=sam-www --commit-dirty=true
