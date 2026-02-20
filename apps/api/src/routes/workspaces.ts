@@ -859,6 +859,14 @@ workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop', async (c) => {
   }
 
   if (session.status !== 'running') {
+    // Still attempt VM stop for orphaned sessions whose process may be alive
+    if (workspace.nodeId) {
+      try {
+        await stopAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
+      } catch {
+        // Best effort
+      }
+    }
     return c.json({ status: session.status });
   }
 
@@ -879,6 +887,58 @@ workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop', async (c) => {
     .where(eq(schema.agentSessions.id, session.id));
 
   return c.json({ status: 'stopped' });
+});
+
+workspacesRoutes.post('/:id/agent-sessions/:sessionId/resume', async (c) => {
+  const userId = getUserId(c);
+  const workspaceId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+
+  const rows = await db
+    .select()
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.id, sessionId),
+        eq(schema.agentSessions.workspaceId, workspace.id),
+        eq(schema.agentSessions.userId, userId)
+      )
+    )
+    .limit(1);
+
+  const session = rows[0];
+  if (!session) {
+    throw errors.notFound('Agent session');
+  }
+
+  // Already running -- idempotent
+  if (session.status === 'running') {
+    return c.json(toAgentSessionResponse(session));
+  }
+
+  const now = new Date().toISOString();
+  await db
+    .update(schema.agentSessions)
+    .set({
+      status: 'running',
+      stoppedAt: null,
+      errorMessage: null,
+      updatedAt: now,
+    })
+    .where(eq(schema.agentSessions.id, session.id));
+
+  return c.json(
+    toAgentSessionResponse({
+      ...session,
+      status: 'running',
+      stoppedAt: null,
+      errorMessage: null,
+      updatedAt: now,
+    })
+  );
 });
 
 workspacesRoutes.post('/:id/ready', async (c) => {

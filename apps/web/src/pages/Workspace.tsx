@@ -43,11 +43,14 @@ import {
   rebuildWorkspace,
   removeWorktree,
   renameAgentSession,
+  resumeAgentSession,
   restartWorkspace,
   stopAgentSession,
   stopWorkspace,
   updateWorkspace,
 } from '../lib/api';
+import { isSessionActive, isOrphanedSession } from '../lib/session-utils';
+import { OrphanedSessionsBanner } from '../components/OrphanedSessionsBanner';
 import type { GitStatusData } from '../lib/api';
 import type { TokenUsage } from '@simple-agent-manager/acp-client';
 import type {
@@ -203,6 +206,8 @@ export function Workspace() {
   const chatSessionRefs = useRef<Map<string, ChatSessionHandle>>(new Map());
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [dismissedOrphans, setDismissedOrphans] = useState(false);
+  const [recentlyStopped, setRecentlyStopped] = useState<Set<string>>(new Set());
   const [paletteFileIndex, setPaletteFileIndex] = useState<string[]>([]);
   const [paletteFileIndexLoading, setPaletteFileIndexLoading] = useState(false);
   const paletteFileIndexLoaded = useRef(false);
@@ -808,7 +813,11 @@ export function Workspace() {
 
   const activeChatSessionId =
     viewMode === 'conversation'
-      ? sessionIdParam || agentSessions.find((session) => session.status === 'running')?.id || null
+      ? sessionIdParam ||
+        agentSessions.find(
+          (session) => isSessionActive(session) && !recentlyStopped.has(session.id)
+        )?.id ||
+        null
       : null;
 
   const handleCreateSession = async (preferredAgentId?: AgentInfo['id']) => {
@@ -979,7 +988,7 @@ export function Workspace() {
     }));
 
     const chatSessionTabs: WorkspaceTab[] = agentSessions
-      .filter((session) => session.status === 'running')
+      .filter((session) => isSessionActive(session) && !recentlyStopped.has(session.id))
       .map((session) => {
         const preferredAgent = preferredAgentsBySession[session.id];
         const preferredName = preferredAgent ? agentNameById.get(preferredAgent) : undefined;
@@ -1004,6 +1013,7 @@ export function Workspace() {
     agentNameById,
     agentSessions,
     preferredAgentsBySession,
+    recentlyStopped,
     tabOrder,
     visibleTerminalTabs,
     worktrees,
@@ -1073,11 +1083,58 @@ export function Workspace() {
     [workspaceTabs]
   );
 
-  // Running chat sessions (for rendering ChatSession components)
+  // Active chat sessions (for rendering ChatSession components) — includes orphans
   const runningChatSessions = useMemo(
-    () => agentSessions.filter((s) => s.status === 'running'),
-    [agentSessions]
+    () => agentSessions.filter((s) => isSessionActive(s) && !recentlyStopped.has(s.id)),
+    [agentSessions, recentlyStopped]
   );
+
+  // Orphaned sessions: alive on VM but DB status is not 'running'
+  const orphanedSessions = useMemo(
+    () => agentSessions.filter((s) => isOrphanedSession(s) && !recentlyStopped.has(s.id)),
+    [agentSessions, recentlyStopped]
+  );
+
+  // Auto-resume orphans: sync DB status to 'running' so control plane stays consistent
+  useEffect(() => {
+    if (!id || orphanedSessions.length === 0) return;
+    for (const session of orphanedSessions) {
+      void resumeAgentSession(id, session.id).catch(() => {
+        // Best effort DB sync — UI already shows the session via hostStatus
+      });
+    }
+  }, [id, orphanedSessions]);
+
+  const handleStopAllOrphans = useCallback(async () => {
+    if (!id) return;
+    const orphanIds = orphanedSessions.map((s) => s.id);
+    setRecentlyStopped((prev) => new Set([...prev, ...orphanIds]));
+
+    for (const session of orphanedSessions) {
+      try {
+        await stopAgentSession(id, session.id);
+      } catch {
+        // Best effort
+      }
+    }
+
+    void loadWorkspaceState();
+
+    setTimeout(() => {
+      setRecentlyStopped((prev) => {
+        const next = new Set(prev);
+        for (const oid of orphanIds) next.delete(oid);
+        return next;
+      });
+    }, 10_000);
+  }, [id, orphanedSessions, loadWorkspaceState]);
+
+  // Reset dismissed state when orphan count drops to zero
+  useEffect(() => {
+    if (orphanedSessions.length === 0) {
+      setDismissedOrphans(false);
+    }
+  }, [orphanedSessions.length]);
 
   // ── Keyboard shortcuts ──
   // The hook stores handlers via a ref internally, so it's safe to pass an
@@ -1744,6 +1801,15 @@ export function Workspace() {
             ×
           </button>
         </div>
+      )}
+
+      {/* ── Orphaned sessions banner ── */}
+      {isRunning && orphanedSessions.length > 0 && !dismissedOrphans && (
+        <OrphanedSessionsBanner
+          orphanedSessions={orphanedSessions}
+          onStopAll={handleStopAllOrphans}
+          onDismiss={() => setDismissedOrphans(true)}
+        />
       )}
 
       {/* ── Content area ── */}

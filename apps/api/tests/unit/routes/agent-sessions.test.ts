@@ -7,10 +7,11 @@ describe('agent sessions source contract', () => {
   const nodeAgentFile = readFileSync(resolve(process.cwd(), 'src/services/node-agent.ts'), 'utf8');
   const agentWsFile = readFileSync(resolve(process.cwd(), '../../packages/vm-agent/internal/server/agent_ws.go'), 'utf8');
 
-  it('defines session list/create/stop endpoints in control plane', () => {
+  it('defines session list/create/stop/resume endpoints in control plane', () => {
     expect(workspacesFile).toContain("workspacesRoutes.get('/:id/agent-sessions'");
     expect(workspacesFile).toContain("workspacesRoutes.post('/:id/agent-sessions'");
     expect(workspacesFile).toContain("workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop'");
+    expect(workspacesFile).toContain("workspacesRoutes.post('/:id/agent-sessions/:sessionId/resume'");
   });
 
   it('supports session lifecycle operations on node agent client', () => {
@@ -20,6 +21,17 @@ describe('agent sessions source contract', () => {
 
   it('contains concurrency guards for create-session requests', () => {
     expect(workspacesFile).toContain('existingRunning.length >= limits.maxAgentSessionsPerWorkspace');
+  });
+
+  it('stop endpoint attempts VM stop for non-running sessions (orphan cleanup)', () => {
+    // The stop handler should still call stopAgentSessionOnNode even when
+    // session.status !== 'running', to kill orphaned processes on the VM.
+    const stopBlock = workspacesFile.slice(
+      workspacesFile.indexOf("agent-sessions/:sessionId/stop'"),
+      workspacesFile.indexOf("agent-sessions/:sessionId/resume'")
+    );
+    expect(stopBlock).toContain("if (session.status !== 'running')");
+    expect(stopBlock).toContain('stopAgentSessionOnNode');
   });
 
   it('includes race handling and multi-viewer hooks in ACP websocket layer', () => {

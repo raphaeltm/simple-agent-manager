@@ -536,6 +536,18 @@ export async function stopAgentSession(
   );
 }
 
+export async function resumeAgentSession(
+  workspaceId: string,
+  sessionId: string
+): Promise<AgentSession> {
+  return request<AgentSession>(
+    `/api/workspaces/${workspaceId}/agent-sessions/${sessionId}/resume`,
+    {
+      method: 'POST',
+    }
+  );
+}
+
 // =============================================================================
 // Terminal
 // =============================================================================
