@@ -224,6 +224,10 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
   const replayCompletedRef = useRef(false);
   // Track most recent URL used for connection attempts.
   const connectUrlRef = useRef<string | null>(wsUrl);
+  // When true, the next session_state with status=error should be treated as
+  // no_session so the auto-select logic in ChatSession triggers agent restart.
+  // Set in reconnect(), consumed in handleSessionState.
+  const pendingAgentRestartRef = useRef(false);
 
   // Reconnection state (refs to avoid re-triggering the effect)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -312,6 +316,12 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       clearError();
     }
 
+    // Clear the pending-restart flag for non-error states — the agent is
+    // already running (or idle), so no restart is needed.
+    if (status !== 'error') {
+      pendingAgentRestartRef.current = false;
+    }
+
     if (status === 'idle') {
       // No agent selected yet — equivalent to no_session
       setState('no_session');
@@ -338,7 +348,21 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
         setReplaying(false);
       }
     } else if (status === 'error') {
-      setState('error');
+      if (pendingAgentRestartRef.current) {
+        // Manual reconnect landed on an errored session — treat as no_session
+        // so the auto-select logic in ChatSession re-selects the agent, which
+        // triggers SelectAgent on the SessionHost and restarts the process.
+        pendingAgentRestartRef.current = false;
+        logLifecycle('info', 'Pending agent restart: treating error as no_session for re-selection', {
+          agentType: msg.agentType,
+          error: msg.error,
+        });
+        setAgentType(null);
+        clearError();
+        setState('no_session');
+      } else {
+        setState('error');
+      }
       setReplaying(false);
     } else if (status === 'stopped') {
       setState('disconnected');
@@ -709,7 +733,6 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
   // Manual reconnect (exposed to UI for "Reconnect" button)
   const reconnect = useCallback(() => {
     if (!wsUrl && !resolveWsUrlRef.current) return;
-    if (transportRef.current?.connected) return;
 
     logLifecycle('info', 'Manual reconnect triggered');
 
@@ -725,6 +748,11 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
+
+    // If we're in an error state, signal that the next session_state with
+    // status=error should trigger agent re-selection instead of staying stuck.
+    // This lets the "Reconnect" button actually restart a crashed agent.
+    pendingAgentRestartRef.current = true;
 
     // Reset state and reconnect
     reconnectAttemptRef.current = 0;
