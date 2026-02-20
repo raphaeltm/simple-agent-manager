@@ -1,3 +1,10 @@
+---
+paths:
+  - "apps/web/**"
+  - "packages/ui/**"
+  - "packages/vm-agent/ui/**"
+---
+
 # UI Standards
 
 ## Mobile-First Requirements

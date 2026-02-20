@@ -1,370 +1,6 @@
-# Simple Agent Manager (SAM) — Agent Instructions
-
-> **SYNC DIRECTIVE**: `CLAUDE.md` and `AGENTS.md` MUST be kept identical. Any edit to one file MUST be applied to the other in the same commit. No exceptions.
-
----
-
-## CRITICAL: Code Is The Source Of Truth (NON-NEGOTIABLE)
-
-**When code and documentation conflict, the CODE is always correct. Documentation drifts; code does not lie.**
-
-However, this does NOT excuse stale documentation. The following rule exists to prevent drift:
-
-### Mandatory Documentation Sync (ENFORCED ON EVERY CHANGE)
-
-**After writing or modifying ANY code, you MUST update ALL documentation that references the changed behavior IN THE SAME COMMIT.** There are NO exceptions and NO deferrals.
-
-This includes but is not limited to:
-
-- `docs/guides/self-hosting.md` — setup instructions, permissions, configuration
-- `docs/architecture/` — architecture decisions, credential models
-- `specs/` — feature specifications, data models
-- `AGENTS.md` — development guidelines, API endpoints, environment variables
-- `CLAUDE.md` — active technologies, recent changes
-- `README.md` — if user-facing behavior changed
-
-### How To Comply
-
-1. **Before committing**: Search all docs for references to what you changed (`Grep` for function names, endpoint paths, permission names, env vars, etc.)
-2. **Update every match**: If a doc says "Read-only" but the code now does "Read and write", fix the doc
-3. **Include doc changes in the same commit**: Do NOT create separate "docs update" commits after the fact
-4. **If unsure whether a doc is affected**: Read it. It takes seconds. The cost of stale docs is much higher.
-
-### CRITICAL: Spec Documentation Edit Scope (NON-NEGOTIABLE)
-
-Spec files are historical records tied to a specific feature context. Apply these scope rules on every task:
-
-1. **Working within a specific spec**: You MAY update docs under that active spec directory (for example, `specs/014-multi-workspace-nodes/*`) when needed.
-2. **Working within a specific spec**: You MUST NOT edit docs under any other spec directory.
-3. **Working outside spec context**: You MUST NOT edit `specs/` documentation at all.
-
-### Why This Matters
-
-Stale documentation causes real user-facing failures. Users follow setup guides that reference incorrect permissions, wrong URLs, or outdated configuration — and then things break in ways that are hard to debug. Every code change without a corresponding doc update is technical debt that compounds.
-
----
-
-## CRITICAL: Request Validation (NON-NEGOTIABLE)
-
-**After completing ANY task, you MUST re-read the user's original request and verify your work fully addresses it.**
-
-1. **MUST** scroll back to the user's last message that initiated the task
-2. **MUST** compare what was requested vs. what was delivered
-3. **MUST** explicitly confirm each requested item was addressed
-4. **MUST** acknowledge any items that were deferred or handled differently than requested
-5. **MUST NOT** mark work as complete until this validation passes
-
-This prevents scope drift and ensures the user gets exactly what they asked for.
-
----
-
-## CRITICAL: Feature Testing Requirements (NON-NEGOTIABLE)
-
-**If you build or modify a feature, you MUST add tests that prove it works before calling the task complete.**
-
-1. **MUST** add unit tests for new and changed logic/components
-2. **MUST** add integration tests when multiple layers interact (API routes/services/DB, UI + API data loading, auth flows)
-3. **SHOULD** add end-to-end tests for user-critical flows (login, workspace lifecycle, settings, primary CTAs), when applicable
-4. **MUST** run relevant test suites and confirm they pass before completion
-5. **MUST NOT** treat manual QA alone as sufficient coverage for feature delivery
-
-### Quick Testing Gate
-
-Before marking feature work complete:
-
-- [ ] Unit tests added/updated for all changed behavior
-- [ ] Integration tests added where cross-layer behavior exists
-- [ ] E2E coverage added or explicitly justified as not applicable
-- [ ] Local test run passes for impacted packages
-- [ ] CI test checks are expected to pass with the changes
-
-### UI Form Behavior Test Rules (REQUIRED FOR FORM CHANGES)
-
-When changing any UI form or input handling logic, apply all of these rules:
-
-1. **MUST** add/extend tests that simulate realistic typing sequences (single char -> multi-char -> edit) for each changed text field
-2. **MUST** cover all changed input types (text, textarea, number, select, checkbox/radio where applicable), not just one happy-path field
-3. **MUST** include at least one integration-level test that exercises the full user flow (open form -> type -> submit -> assert payload/API call)
-4. **MUST** include assertions that no crash/regression occurs during rapid consecutive changes
-5. **MUST** avoid reading React synthetic event objects inside deferred/functional state updaters; capture `const value = event.currentTarget.value` before async or queued updates
-6. **SHOULD** include edge-case behavior for user edits (clearing fields, trimming, retyping, invalid intermediate numeric input)
-
----
-
-## CRITICAL: Constitution Validation (NON-NEGOTIABLE)
-
-**ALL changes MUST be validated against the project constitution (`.specify/memory/constitution.md`) before completion.**
-
-1. **MUST** read and understand all constitution principles before making changes
-2. **MUST** validate EVERY change against Principle XI (No Hardcoded Values):
-   - NO hardcoded URLs - derive from environment variables (e.g., `BASE_DOMAIN`)
-   - NO hardcoded timeouts - use configurable env vars with defaults
-   - NO hardcoded limits - all limits must be configurable
-   - NO hardcoded identifiers - issuers, audiences, key IDs must be dynamic
-3. **MUST** fix any violations before marking work as complete
-4. **MUST** use sequential thinking to verify compliance
-
-### Quick Compliance Check
-
-Before committing any business logic changes, verify:
-
-- [ ] All URLs derived from `BASE_DOMAIN` or similar env vars
-- [ ] All timeouts have `DEFAULT_*` constants and env var overrides
-- [ ] All limits are configurable via environment
-- [ ] No magic strings that should be configuration
-
----
-
-## CRITICAL: Mobile-First UI Requirements (NON-NEGOTIABLE)
-
-**ALL UI changes MUST be tested for mobile usability before deployment.**
-
-1. **MUST** ensure login/primary CTAs are prominent and have min 56px touch targets
-2. **MUST** use responsive text sizes (mobile -> tablet -> desktop)
-3. **MUST** start with single-column layouts on mobile
-4. **MUST** visually verify on mobile viewport via Playwright **during development** (before committing)
-5. **MUST** follow `docs/guides/mobile-ux-guidelines.md`
-6. **MUST** test any added or changed navigation elements on mobile viewport and verify there is no overlap or overflow that breaks layout
-
-### Visual Verification with Playwright (Required During Development)
-
-ALL UI changes MUST be visually verified on a mobile viewport **before committing**, not just after deployment. This catches overflow, clipping, and layout issues early.
-
-1. Start a local Vite dev server (`pnpm --filter @simple-agent-manager/web dev` or `npx vite`)
-2. Use Playwright to set a mobile viewport (375x667 minimum) and navigate to the page
-3. Take a screenshot and inspect for: overflow, clipping, touch target size, readability
-4. If the component requires authentication to reach, inject a mock HTML harness via `browser_evaluate` that renders the component's markup with the project's CSS variables
-5. Fix any issues before committing — do NOT defer to post-deployment testing
-6. If fixing navigation overlap/overflow would conflict with the requester's requested UI behavior, ask the requester how to proceed or propose an alternative design that satisfies the request without breaking mobile layout
-7. Save screenshots to `.codex/tmp/playwright-screenshots/` (gitignored)
-
-This workflow avoids deploy-fix-deploy cycles and catches mobile layout bugs that unit tests cannot detect.
-
-### Quick Mobile Check
-
-Before deploying any UI changes:
-
-- [ ] Login button visible and large (min 56px height)
-- [ ] Text readable without zooming (responsive sizing)
-- [ ] Grid layouts collapse to single column on mobile
-- [ ] Visually verified on mobile viewport via Playwright during development
-- [ ] Dialogs/popovers/panels stay within viewport bounds on 320px-wide screens
-- [ ] Navigation additions verified on mobile with no overlap or overflow
-
----
-
-## CRITICAL: Environment Variable Naming (NON-NEGOTIABLE)
-
-**GitHub secrets and Cloudflare Worker secrets use DIFFERENT naming conventions. Confusing them causes deployment failures.**
-
-### The Two Naming Conventions
-
-| Context                | Prefix    | Example            | Where Used                                    |
-| ---------------------- | --------- | ------------------ | --------------------------------------------- |
-| **GitHub Environment** | `GH_`     | `GH_CLIENT_ID`     | GitHub Settings -> Environments -> production |
-| **Cloudflare Worker**  | `GITHUB_` | `GITHUB_CLIENT_ID` | Worker runtime, local `.env` files            |
-
-### Why Different Names?
-
-GitHub Actions reserves `GITHUB_*` environment variables for its own use. Using `GITHUB_CLIENT_ID` as a GitHub secret would conflict. So we use `GH_*` in GitHub, and the deployment script maps them to `GITHUB_*` Worker secrets.
-
-### The Mapping (done by `configure-secrets.sh`)
-
-```
-GitHub Secret          ->  Cloudflare Worker Secret
-GH_CLIENT_ID           ->  GITHUB_CLIENT_ID
-GH_CLIENT_SECRET       ->  GITHUB_CLIENT_SECRET
-GH_APP_ID              ->  GITHUB_APP_ID
-GH_APP_PRIVATE_KEY     ->  GITHUB_APP_PRIVATE_KEY
-GH_APP_SLUG            ->  GITHUB_APP_SLUG
-```
-
-### Documentation Rules
-
-When documenting environment variables:
-
-1. **GitHub Environment config** -> Use `GH_*` prefix
-2. **Cloudflare Worker secrets** -> Use `GITHUB_*` prefix
-3. **Local `.env` files** -> Use `GITHUB_*` prefix (same as Worker)
-4. **ALWAYS** specify which context you're documenting
-5. **NEVER** mix prefixes in the same table without explanation
-
-### Quick Reference
-
-- **User configuring GitHub**: Tell them to use `GH_CLIENT_ID`
-- **Code reading from env**: Use `env.GITHUB_CLIENT_ID`
-- **Local development**: Use `GITHUB_CLIENT_ID` in `.env`
-
----
-
-## CRITICAL: URL Construction Rules (NON-NEGOTIABLE)
-
-**When constructing URLs using `BASE_DOMAIN`, you MUST use the correct subdomain prefix.** The root domain does NOT serve any application.
-
-| Destination   | URL Pattern                       | Example                                         |
-| ------------- | --------------------------------- | ----------------------------------------------- |
-| **Web UI**    | `https://app.${BASE_DOMAIN}/...`  | `https://app.simple-agent-manager.org/settings` |
-| **API**       | `https://api.${BASE_DOMAIN}/...`  | `https://api.simple-agent-manager.org/health`   |
-| **Workspace** | `https://ws-${id}.${BASE_DOMAIN}` | `https://ws-abc123.simple-agent-manager.org`    |
-
-**NEVER** use `https://${BASE_DOMAIN}/...` (bare root domain) for redirects or links. This is always a bug.
-
-### Redirect Rules
-
-- All user-facing redirects (e.g., after GitHub App installation, after login) MUST go to `app.${BASE_DOMAIN}`
-- All API-to-API references MUST use `api.${BASE_DOMAIN}`
-- Relative redirects (e.g., `c.redirect('/settings')`) are WRONG in the API worker — they resolve to the API subdomain, not the app subdomain
-
----
-
-## CRITICAL: Canonical Identity Keys vs Human Labels (NON-NEGOTIABLE)
-
-**Human-readable labels are for UX/logging only. Canonical IDs are for uniqueness, routing, and state.**
-
-1. **MUST** use canonical IDs (`workspaceId`, `nodeId`, `sessionId`, etc.) for all machine-critical identity:
-   - storage paths
-   - container/volume identifiers
-   - cache keys
-   - routing and lookup filters
-   - lifecycle operations (create/restart/stop/delete)
-2. **MUST NOT** use user-facing or repo-derived labels as uniqueness keys (repo names, display names, branch names, friendly labels).
-3. **MUST** treat labels as mutable and non-unique by default.
-4. **MUST** include canonical IDs in external metadata labels (Docker/cloud provider labels) and perform exact lookup by canonical ID when resolving resources.
-5. **SHOULD** store both:
-   - canonical ID for machine logic
-   - readable label for UI/observability
-6. **MUST** add/maintain tests proving two resources with identical human labels remain fully isolated.
-
-### Why This Matters
-
-Human-readable labels collide by design. Using them as identity keys causes cross-workspace contamination, wrong-resource targeting, and destructive operations against unintended resources.
-
----
-
-## CRITICAL: Architecture Research Requirements
-
-**Before making ANY changes related to architecture, secrets, credentials, data models, or security:**
-
-1. **MUST** research relevant architecture documentation:
-   - `docs/architecture/` - Core architecture decisions
-   - `docs/adr/` - Architecture Decision Records
-   - `specs/` - Feature specifications with data models
-   - `.specify/memory/constitution.md` - Project principles (especially Principle XI)
-
-2. **MUST** use sequential thinking to:
-   - Understand the existing architecture
-   - Identify how your change fits (or conflicts)
-   - Consider security implications
-   - **Validate against constitution principles**
-   - Document your reasoning
-
-3. **MUST** provide explicit justification for any architecture-related changes
-
-### Key Architecture Documents
-
-| Document                                   | Contents                                 |
-| ------------------------------------------ | ---------------------------------------- |
-| `docs/architecture/credential-security.md` | BYOC model, encryption, user credentials |
-| `docs/architecture/secrets-taxonomy.md`    | Platform secrets vs user credentials     |
-| `docs/adr/002-stateless-architecture.md`   | Stateless design principles              |
-| `.specify/memory/constitution.md`          | Core principles and rules                |
-
-### Architecture Principles (Quick Reference)
-
-1. **Bring-Your-Own-Cloud (BYOC)**: Users provide their own Hetzner tokens. The platform does NOT have cloud provider credentials.
-2. **User credentials are encrypted per-user** in the database, NOT stored as environment variables or Worker secrets.
-3. **Platform secrets** (ENCRYPTION_KEY, JWT keys, CF_API_TOKEN) are Cloudflare Worker secrets set during deployment.
-
----
-
-## CRITICAL: Business Logic Research Requirements
-
-**Before making ANY changes related to features, workflows, state machines, validation rules, or user-facing behavior:**
-
-1. **MUST** research relevant feature specifications:
-   - `specs/` - Feature specs with user stories, requirements, acceptance criteria
-   - `specs/*/data-model.md` - State machines, entity relationships, constraints
-   - `apps/api/src/db/schema.ts` - Current database schema and constraints
-   - `apps/api/src/routes/` - Existing API behavior and validation
-
-2. **MUST** use sequential thinking to:
-   - Understand existing business rules and why they exist
-   - Identify edge cases and error scenarios
-   - Consider impact on existing features
-   - Document your reasoning
-
-3. **MUST** provide explicit justification for any business logic changes
-
-### Key Business Logic Documents
-
-| Document                                        | Contents                               |
-| ----------------------------------------------- | -------------------------------------- |
-| `specs/003-browser-terminal-saas/spec.md`       | Core SaaS features, user stories       |
-| `specs/003-browser-terminal-saas/data-model.md` | Entity relationships, state machines   |
-| `specs/004-mvp-hardening/spec.md`               | Security hardening, access control     |
-| `specs/004-mvp-hardening/data-model.md`         | Bootstrap tokens, ownership validation |
-
-### Business Logic Principles (Quick Reference)
-
-1. **Workspace Lifecycle**: pending -> creating -> running/recovery -> stopping -> stopped (see data-model.md for state machine)
-2. **Idle Detection Telemetry**: Idle/activity heartbeats are still recorded (`IDLE_TIMEOUT_SECONDS` remains configurable), but lifecycle transitions are explicit (no automatic idle-triggered stop/delete)
-3. **Ownership Validation**: All workspace operations MUST verify `user_id` matches authenticated user
-4. **Bootstrap Tokens**: One-time use, 5-minute expiry, cryptographically random
-
----
-
-## CRITICAL: Agent Preflight Behavior (NON-NEGOTIABLE)
-
-**Before writing ANY code, agents MUST complete preflight behavior checks.**
-
-This policy is defined in `docs/guides/agent-preflight-behavior.md` and enforced through PR evidence checks in CI.
-
-### Mandatory Preflight Steps (Before Code Edits)
-
-1. **MUST** classify the change using one or more classes:
-   - `external-api-change`, `cross-component-change`, `business-logic-change`, `public-surface-change`
-   - `docs-sync-change`, `security-sensitive-change`, `ui-change`, `infra-change`
-2. **MUST** gather class-required context before editing files
-3. **MUST** record assumptions and impact analysis before implementation
-4. **MUST** plan documentation/spec updates when interfaces or behavior change
-5. **MUST** run constitution alignment checks relevant to the change
-
-### Required Behavioral Rules
-
-- **Up-to-date docs first**: For `external-api-change`, use Context7 when available. If unavailable, use official primary documentation and record what was used.
-- **Cross-component impact first**: For `cross-component-change`, map dependencies and affected components before edits.
-- **Code usage analysis first**: For business logic/contract changes, inspect existing usage and edge cases before implementation.
-- **Docs sync by default**: If behavior or interfaces change, update docs/specs in the same PR or explicitly justify deferral.
-
-### Speckit and Non-Speckit Enforcement
-
-- **Non-Speckit tasks**: Complete full preflight at task start before any code edits.
-- **Speckit tasks**: Complete preflight before `/speckit.plan`, and re-run preflight before `/speckit.implement`.
-
-### PR Evidence Requirement
-
-All AI-authored PRs MUST include preflight evidence using the block in `.github/pull_request_template.md`.
-CI validates this evidence on pull requests.
-
----
-
 # Simple Agent Manager (SAM)
 
-A serverless platform to spin up AI coding agent environments on-demand with zero ongoing cost.
-
-## Project Overview
-
-This is a monorepo containing a Cloudflare-based platform for managing ephemeral Claude Code workspaces. Users can create cloud VMs with Claude Code pre-installed from any git repository, access them via a web-based interface, and have them automatically terminate when idle.
-
-## Tech Stack
-
-- **Runtime**: Cloudflare Workers (API), Cloudflare Pages (UI)
-- **Language**: TypeScript 5.x
-- **Framework**: Hono (API), React + Vite (UI)
-- **Cloud Provider**: Hetzner Cloud (VMs)
-- **DNS**: Cloudflare DNS API
-- **Testing**: Vitest + Miniflare
-- **Monorepo**: pnpm workspaces + Turborepo
+A serverless monorepo platform for ephemeral AI coding agent environments on Cloudflare Workers + Hetzner Cloud VMs.
 
 ## Repository Structure
 
@@ -372,247 +8,31 @@ This is a monorepo containing a Cloudflare-based platform for managing ephemeral
 apps/
 ├── api/          # Cloudflare Worker API (Hono)
 └── web/          # Control plane UI (React + Vite)
-
 packages/
 ├── shared/       # Shared types and utilities
 ├── providers/    # Cloud provider abstraction (Hetzner)
-├── terminal/     # Shared terminal component (@simple-agent-manager/terminal)
+├── terminal/     # Shared terminal component
 ├── cloud-init/   # Cloud-init template generator
 └── vm-agent/     # Go VM agent (PTY, WebSocket, idle detection)
-
-scripts/
-└── vm/           # VM-side scripts (cloud-init, idle detection)
-
 tasks/            # Task tracking (backlog -> active -> archive)
 specs/            # Feature specifications
 docs/             # Documentation
 ```
 
-## Task Tracking
-
-Tasks are tracked as markdown files in `tasks/`. See `tasks/README.md` for the full system.
-
-- **`tasks/backlog/`** — Tasks waiting to be worked on
-- **`tasks/active/`** — Tasks currently in progress (with checklists, implementation notes)
-- **`tasks/archive/`** — Completed tasks (moved here when both human and agent agree work is done)
-
-Task files use the naming convention: `YYYY-MM-DD-descriptive-name.md`
-
-Task file template and conventions are defined in `tasks/README.md`.
-
-## Development Approach
-
-**This project uses a Cloudflare-first development approach.** Per the constitution:
-
-> "No complex local testing setups. Iterate directly on Cloudflare infrastructure."
-
-### Recommended Workflow
-
-1. **Make changes locally** — Use your IDE, run lint/typecheck
-2. **Deploy to staging** — Via GitHub Actions or `pnpm deploy:setup --environment staging`
-3. **Test on Cloudflare** — Real D1, real KV, real Workers
-4. **Merge to main** — Triggers production deployment
-
-### Local Dev Limitations (NOT Recommended for Testing)
-
-Running `pnpm dev` starts local emulators but has significant limitations:
-
-- No real GitHub OAuth (callbacks won't work)
-- No real DNS (workspace URLs won't resolve)
-- No real VMs (workspaces can't be created)
-- D1/KV emulation may differ from production
-
-**For any meaningful testing, deploy to staging.** See `docs/guides/local-development.md`.
-
-### Playwright Artifacts (Development)
-
-Store all Playwright screenshots from development and verification runs in `.codex/tmp/playwright-screenshots/` (gitignored). Do not save screenshots in tracked directories.
-
-### Live Test Resource Cleanup (Required)
-
-When Playwright or manual live-app verification creates test workspaces or nodes:
-
-- Use only newly created test resources for that verification run
-- Do not mutate long-lived/legacy resources
-- Delete test workspaces and test nodes after verification is complete
-
 ## Common Commands
 
 ```bash
 pnpm install          # Install dependencies
-pnpm dev              # Run development servers (LIMITED - see above)
-pnpm test             # Run tests
 pnpm build            # Build all packages
+pnpm test             # Run tests
 pnpm typecheck        # Type check
 pnpm lint             # Lint
 pnpm format           # Format
 ```
 
-## Deployment
+## Build Order
 
-**Continuous Deployment:** Merge to `main` automatically deploys to production.
-
-### Configuration (GitHub Environment)
-
-All configuration lives in **GitHub Settings -> Environments -> production**:
-
-| Type     | Name                       | Required                         |
-| -------- | -------------------------- | -------------------------------- |
-| Variable | `BASE_DOMAIN`              | Yes                              |
-| Variable | `RESOURCE_PREFIX`          | No (default: `sam`)              |
-| Variable | `PULUMI_STATE_BUCKET`      | No (default: `sam-pulumi-state`) |
-| Secret   | `CF_API_TOKEN`             | Yes                              |
-| Secret   | `CF_ACCOUNT_ID`            | Yes                              |
-| Secret   | `CF_ZONE_ID`               | Yes                              |
-| Secret   | `R2_ACCESS_KEY_ID`         | Yes                              |
-| Secret   | `R2_SECRET_ACCESS_KEY`     | Yes                              |
-| Secret   | `PULUMI_CONFIG_PASSPHRASE` | Yes                              |
-| Secret   | `GH_CLIENT_ID`             | Yes                              |
-| Secret   | `GH_CLIENT_SECRET`         | Yes                              |
-| Secret   | `GH_APP_ID`                | Yes                              |
-| Secret   | `GH_APP_PRIVATE_KEY`       | Yes                              |
-| Secret   | `GH_APP_SLUG`              | Yes                              |
-| Secret   | `ENCRYPTION_KEY`           | No (auto-generated)              |
-| Secret   | `JWT_PRIVATE_KEY`          | No (auto-generated)              |
-| Secret   | `JWT_PUBLIC_KEY`           | No (auto-generated)              |
-
-### GitHub Actions Workflows
-
-- **CI** (`ci.yml`): Runs on all pushes/PRs — lint, typecheck, test, build
-- **Deploy** (`deploy.yml`): Runs on push to main — full Pulumi + Wrangler deployment
-- **Teardown** (`teardown.yml`): Manual only — destroys all resources (type "DELETE" to confirm)
-
-## Key Concepts
-
-- **Workspace**: An AI coding environment (VM + devcontainer + Claude Code)
-- **Node**: A VM host that can run multiple workspaces
-- **Provider**: Cloud infrastructure abstraction (currently Hetzner only)
-- **CloudCLI**: Web-based Claude Code interface (file explorer + terminal)
-- **Lifecycle Control**: Workspaces/nodes are stopped, restarted, or deleted explicitly via API/UI actions
-- **OAuth Authentication**: Claude Code supports both API keys and OAuth tokens from Claude Max/Pro subscriptions
-
-## API Endpoints
-
-### Node Management
-
-- `POST /api/nodes` — Create node
-- `GET /api/nodes` — List user's nodes
-- `GET /api/nodes/:id` — Get node details
-- `POST /api/nodes/:id/stop` — Stop node
-- `DELETE /api/nodes/:id` — Delete node
-- `GET /api/nodes/:id/events` — List node events (proxied from VM Agent; vm-\* DNS lacks SSL)
-- `GET /api/nodes/:id/system-info` — Full system info (proxied from VM Agent; CPU, memory, disk, Docker, versions)
-- `POST /api/nodes/:id/token` — Get node-scoped token for direct VM Agent access
-
-### Workspace Management
-
-- `POST /api/workspaces` — Create workspace
-- `GET /api/workspaces` — List user's workspaces
-- `GET /api/workspaces/:id` — Get workspace details
-- `PATCH /api/workspaces/:id` — Rename workspace display name
-- `POST /api/workspaces/:id/stop` — Stop a running workspace
-- `POST /api/workspaces/:id/restart` — Restart a workspace
-- `DELETE /api/workspaces/:id` — Delete a workspace
-
-### Project Management
-
-- `POST /api/projects` — Create project
-- `GET /api/projects` — List user's projects (supports `limit` and `cursor`)
-- `GET /api/projects/:id` — Get project detail (includes task status counts and linked workspace count)
-- `PATCH /api/projects/:id` — Update project metadata (`name`, `description`, `defaultBranch`)
-- `DELETE /api/projects/:id` — Delete project (cascades project tasks/dependencies/events)
-
-### Task Management (Project Scoped)
-
-- `POST /api/projects/:projectId/tasks` — Create task
-- `GET /api/projects/:projectId/tasks` — List tasks (supports `status`, `minPriority`, `sort`, `limit`, `cursor`)
-- `GET /api/projects/:projectId/tasks/:taskId` — Get task detail (includes dependencies + blocked state)
-- `PATCH /api/projects/:projectId/tasks/:taskId` — Update task fields (`title`, `description`, `priority`, `parentTaskId`)
-- `DELETE /api/projects/:projectId/tasks/:taskId` — Delete task
-- `POST /api/projects/:projectId/tasks/:taskId/status` — Transition task status
-- `POST /api/projects/:projectId/tasks/:taskId/status/callback` — Trusted callback status update for delegated tasks
-- `POST /api/projects/:projectId/tasks/:taskId/dependencies` — Add dependency edge (`dependsOnTaskId`)
-- `DELETE /api/projects/:projectId/tasks/:taskId/dependencies?dependsOnTaskId=...` — Remove dependency edge
-- `POST /api/projects/:projectId/tasks/:taskId/delegate` — Delegate ready+unblocked task to owned running workspace
-- `GET /api/projects/:projectId/tasks/:taskId/events` — List append-only task status events
-
-### Agent Sessions
-
-- `GET /api/workspaces/:id/agent-sessions` — List workspace agent sessions
-- `POST /api/workspaces/:id/agent-sessions` — Create agent session (optional `worktreePath` binds session to a worktree)
-- `PATCH /api/workspaces/:id/agent-sessions/:sessionId` — Rename agent session label
-- `POST /api/workspaces/:id/agent-sessions/:sessionId/stop` — Stop agent session
-
-### Agent Settings
-
-- `GET /api/agent-settings/:agentType` — Get user's agent settings
-- `PUT /api/agent-settings/:agentType` — Upsert agent settings (model, permissionMode)
-- `DELETE /api/agent-settings/:agentType` — Reset agent settings to defaults
-
-### VM Communication
-
-- `POST /api/nodes/:id/ready` — Node Agent ready callback
-- `POST /api/nodes/:id/heartbeat` — Node Agent heartbeat callback
-- `POST /api/nodes/:id/errors` — VM agent error report (batch, logged to CF Workers observability)
-- `POST /api/workspaces/:id/ready` — Workspace ready callback
-- `POST /api/workspaces/:id/provisioning-failed` — Workspace provisioning failure callback (sets workspace to `error`)
-- `POST /api/workspaces/:id/heartbeat` — Workspace activity heartbeat callback
-- `GET /api/workspaces/:id/runtime` — Workspace runtime metadata callback (repository/branch for recovery)
-- `POST /api/workspaces/:id/boot-log` — Workspace boot progress log callback
-- `POST /api/workspaces/:id/agent-settings` — Workspace agent settings callback (model, permissionMode)
-- `POST /api/bootstrap/:token` — Redeem one-time bootstrap token (credentials + git identity)
-- `POST /api/agent/ready` — VM agent ready callback
-- `POST /api/agent/activity` — VM agent activity report
-
-### Terminal Access
-
-- `POST /api/terminal/token` — Get terminal WebSocket token
-
-### Git Integration (VM Agent direct — browser calls via ws-{id} subdomain)
-
-- `GET /workspaces/:id/worktrees` — List git worktrees for the workspace
-- `POST /workspaces/:id/worktrees` — Create a git worktree
-- `DELETE /workspaces/:id/worktrees?path=...&force=true|false` — Remove a git worktree
-- `GET /workspaces/:id/git/status?worktree=...` — Git status (staged, unstaged, untracked files) scoped to optional worktree path
-- `GET /workspaces/:id/git/diff?path=...&staged=true|false&worktree=...` — Unified diff for a single file in optional worktree
-- `GET /workspaces/:id/git/file?path=...&ref=HEAD&worktree=...` — Full file content (optional ref + optional worktree)
-
-### File Browser (VM Agent direct — browser calls via ws-{id} subdomain)
-
-- `GET /workspaces/:id/files/list?path=.&worktree=...` — Directory listing (type, size, modifiedAt per entry) scoped to optional worktree
-- `GET /workspaces/:id/files/find?worktree=...` — Recursive flat file index (all file paths, excludes node_modules/.git/dist etc.) scoped to optional worktree
-
-### Voice Transcription
-
-- `POST /api/transcribe` — Transcribe audio via Workers AI (Whisper)
-
-### Client Error Reporting
-
-- `POST /api/client-errors` — Receive batched client-side errors for Workers observability logging
-
-### Authentication (BetterAuth)
-
-- `POST /api/auth/sign-in/social` — GitHub OAuth login
-- `GET /api/auth/session` — Get current session
-- `POST /api/auth/sign-out` — Sign out
-
-### Credentials
-
-- `GET /api/credentials` — Get user's cloud provider credentials
-- `POST /api/credentials` — Save cloud provider credentials
-- `DELETE /api/credentials/:provider` — Delete stored cloud provider credential
-
-### GitHub Integration
-
-- `GET /api/github/installations` — List user's GitHub App installations
-- `GET /api/github/repositories` — List accessible repositories
-- `GET /api/github/branches?repository=owner/repo` — List branches for a repository
-
-## Troubleshooting
-
-### Build Errors
-
-Run builds in dependency order:
+Build packages in dependency order: `shared` -> `providers` -> `cloud-init` -> `api` / `web`
 
 ```bash
 pnpm --filter @simple-agent-manager/shared build
@@ -620,260 +40,92 @@ pnpm --filter @simple-agent-manager/providers build
 pnpm --filter @simple-agent-manager/api build
 ```
 
-### Test Failures
+## Development Approach
 
-Check if Miniflare bindings are configured in `vitest.config.ts`.
+**Cloudflare-first.** Local dev (`pnpm dev`) has significant limitations — no real OAuth, DNS, or VMs. For meaningful testing, deploy to staging. See `docs/guides/local-development.md`.
 
-### Type Errors
+1. Make changes locally — lint, typecheck
+2. Deploy to staging via GitHub Actions or `pnpm deploy:setup --environment staging`
+3. Test on Cloudflare — real D1, KV, Workers
+4. Merge to main — triggers production deployment
 
-Run `pnpm typecheck` from root to see all issues.
+## Deployment
 
-## Agent Authentication
+Merge to `main` automatically deploys to production via GitHub Actions.
 
-### Claude Code OAuth Support
+- **CI** (`ci.yml`): lint, typecheck, test, build on all pushes/PRs
+- **Deploy** (`deploy.yml`): full Pulumi + Wrangler deployment on push to main
+- **Teardown** (`teardown.yml`): manual only — destroys all resources
 
-Claude Code now supports dual authentication methods:
+## Key Concepts
 
-1. **API Keys**: Traditional pay-per-use API keys from Anthropic Console
-2. **OAuth Tokens**: Tokens from Claude Max/Pro subscriptions via `claude setup-token`
+- **Workspace**: AI coding environment (VM + devcontainer + Claude Code)
+- **Node**: VM host that runs multiple workspaces
+- **Provider**: Cloud infrastructure abstraction (currently Hetzner only)
+- **Lifecycle Control**: Workspaces/nodes stopped, restarted, or deleted explicitly via API/UI
 
-#### Using OAuth Tokens
+## URL Construction Rules
 
-1. Generate a token on your local machine: `claude setup-token`
-2. In SAM Settings, select "OAuth Token (Pro/Max)" for Claude Code
-3. Paste the token and save
-4. The system automatically injects `CLAUDE_CODE_OAUTH_TOKEN` instead of `ANTHROPIC_API_KEY`
+The root domain does NOT serve any application. Always use subdomains:
 
-#### Credential Switching
+| Destination   | URL Pattern                       |
+| ------------- | --------------------------------- |
+| **Web UI**    | `https://app.${BASE_DOMAIN}/...`  |
+| **API**       | `https://api.${BASE_DOMAIN}/...`  |
+| **Workspace** | `https://ws-${id}.${BASE_DOMAIN}` |
 
-- Users can store both an API key and OAuth token
-- Toggle between them in Settings
-- New credentials auto-activate by default
-- Delete specific credential types via the API
+- User-facing redirects -> `app.${BASE_DOMAIN}` (NEVER bare `${BASE_DOMAIN}`)
+- API-to-API references -> `api.${BASE_DOMAIN}`
+- Relative redirects in API worker are WRONG — they resolve to the API subdomain
 
----
+## Env Var Naming: GH_ vs GITHUB_
+
+GitHub Actions reserves `GITHUB_*`, so GitHub secrets use `GH_*` prefix. The deployment script (`configure-secrets.sh`) maps them to `GITHUB_*` Worker secrets.
+
+| Context              | Prefix     | Example             |
+| -------------------- | ---------- | ------------------- |
+| GitHub Environment   | `GH_`     | `GH_CLIENT_ID`      |
+| Worker runtime / .env | `GITHUB_` | `GITHUB_CLIENT_ID`  |
+
+Full env var reference: use the `env-reference` skill or see `apps/api/.env.example`.
+
+## Architecture Principles
+
+1. **BYOC (Bring-Your-Own-Cloud)**: Users provide their own Hetzner tokens. The platform does NOT have cloud provider credentials.
+2. **User credentials encrypted per-user** in the database — NOT stored as env vars or Worker secrets. See `docs/architecture/credential-security.md`.
+3. **Platform secrets** (ENCRYPTION_KEY, JWT keys, CF_API_TOKEN) are Cloudflare Worker secrets set during deployment.
+4. **Canonical IDs for identity** — use `workspaceId`, `nodeId`, `sessionId` for all machine-critical operations (storage, routing, lifecycle). Human-readable labels are for UX/logging only and MUST be treated as mutable and non-unique.
+
+## Git Workflow
+
+- **Always use worktrees and PRs** — never commit directly to main. Create a feature branch in a git worktree and open a PR.
+- **Push early and often** — environments are ephemeral. Unpushed work can be lost at any time.
+- **Pull and rebase frequently** — before starting work and before pushing, run `git fetch origin && git rebase origin/main` to stay current and avoid conflicts.
+- After pushing, check CI and fix any failures before moving on.
 
 ## Development Guidelines
 
-### Claude Subagents and Codex Skills
+- **Fix all build/lint errors** before pushing — even pre-existing ones
+- **No dead code** — if code is no longer referenced, remove it in the same change
+- **Subagents** live in `.claude/agents/`; Codex skills in `.agents/skills/`
+- **Playwright screenshots** go in `.codex/tmp/playwright-screenshots/` (gitignored)
 
-- Claude Code subagents live in `.claude/agents/`.
-- Codex discovers repo-local skills in `.agents/skills/<skill-name>/SKILL.md`.
-- This repo exposes the Claude subagents to Codex via wrapper skills in `.agents/skills/`.
-- `SKILL.md` contains Codex-valid frontmatter and brief usage instructions.
-- `CLAUDE_AGENT.md` points to the source subagent definition in `.claude/agents/`.
-- Keep `.claude/agents/*/*.md` as the source of truth. Do not add Claude-specific frontmatter keys (e.g. `tools`, `model`) to `SKILL.md` files.
-- For UI work, agents MUST invoke `$ui-ux-specialist` before editing files and keep it active through implementation and validation.
+## Agent Authentication
 
-### Fix All Build and Lint Errors (NON-NEGOTIABLE)
-
-If you encounter build, typecheck, or lint errors — even ones unrelated to your current change — you MUST fix them before pushing. Do not ignore pre-existing failures. A green CI pipeline is everyone's responsibility, and letting broken builds persist makes it harder to identify regressions from new changes.
-
-### No Legacy / Dead Code
-
-- This project is pre-production. Do not keep "legacy" code paths that are not used.
-- If code, files, routes, scripts, or configs are no longer referenced by the active architecture, remove them in the same change.
-- When replacing an implementation, update all related docs and instructions to point only to the current path.
-
-### Adding New Features
-
-1. Check if types need to be added to `packages/shared`
-2. If provider-related, add to `packages/providers`
-3. API endpoints go in `apps/api/src/routes/`
-4. UI components go in `apps/web/src/components/`
-
-### Post-Push CI Procedure (Required)
-
-- After every push, check GitHub Actions runs for the pushed commit/branch.
-- If any workflow fails, inspect the failing job logs immediately and implement fixes.
-- Push follow-up commits and repeat until all required workflows are green.
-- For pull requests, keep the PR template filled (including Agent Preflight block) so quality gates can pass.
-
-### Post-Deployment Playwright Testing (Required)
-
-**After ANY deployment to production (push to main or merged PR), you MUST verify the deployed feature works using Playwright against the live app.**
-
-1. Wait for the Deploy workflow to complete successfully in GitHub Actions.
-2. Use Playwright to navigate to `app.simple-agent-manager.org` and test the deployed feature end-to-end.
-3. Use the test credentials stored at `/workspaces/.tmp/secure/demo-credentials.md` to authenticate. If the file is missing, ask the human for credentials and write them to that path before testing.
-4. If the feature cannot be tested via Playwright (e.g., requires external service interaction), document why and what was verified manually.
-5. Report results to the user — do not assume deployment success just because CI passed.
-6. During development Playwright runs, store screenshots in `.codex/tmp/playwright-screenshots/` (gitignored). Do not write screenshots to tracked directories.
-7. For Playwright verification that needs live resources, create fresh test workspaces/nodes and clean them up when testing is complete (delete test workspaces, then delete test nodes if empty).
-8. Do not repurpose or modify old/long-lived workspaces or nodes for validation; only use newly created test resources for the current run.
-
-### Error Handling
-
-All API errors should follow this format:
-
-```typescript
-{
-  error: "error_code",
-  message: "Human-readable description"
-}
-```
-
-**CRITICAL: Hono Error Handler Pattern**
-
-Use `app.onError()` for error handling — **NEVER** use middleware try/catch. Hono's `app.route()` subrouter errors do NOT propagate to parent middleware try/catch blocks, causing unhandled errors to return plain text "Internal Server Error" from the Workers runtime instead of JSON.
-
-```typescript
-// CORRECT — catches errors from ALL routes including subrouters
-app.onError((err, c) => {
-  if (err instanceof AppError) {
-    return c.json(err.toJSON(), err.statusCode);
-  }
-  return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
-});
-
-// WRONG — subrouter errors silently bypass this
-app.use('*', async (c, next) => {
-  try {
-    await next();
-  } catch (err) {
-    /* NEVER REACHED for subrouter errors */
-  }
-});
-```
-
-Throw `AppError` (from `middleware/error.ts`) in route handlers — the global `app.onError()` handler catches them.
-
-### Environment Variables
-
-Workers secrets are set via:
-
-```bash
-wrangler secret put SECRET_NAME
-```
-
-Local development uses `.dev.vars`.
-
-**Note**: Hetzner tokens are NOT platform secrets. Users provide their own tokens through the Settings UI, stored encrypted per-user in the database. See `docs/architecture/credential-security.md`.
-
-### Development Environment Variables
-
-See `apps/api/.env.example`:
-
-- `WRANGLER_PORT` - Local dev port (default: 8787)
-- `BASE_DOMAIN` - Set automatically by sync scripts
-- `MAX_NODES_PER_USER` - Optional runtime node cap
-- `MAX_WORKSPACES_PER_USER` - Optional runtime workspace cap
-- `MAX_WORKSPACES_PER_NODE` - Optional runtime per-node workspace cap
-- `MAX_AGENT_SESSIONS_PER_WORKSPACE` - Optional runtime session cap
-- `MAX_PROJECTS_PER_USER` - Optional runtime project cap
-- `MAX_TASKS_PER_PROJECT` - Optional runtime task cap per project
-- `MAX_TASK_DEPENDENCIES_PER_TASK` - Optional runtime dependency-edge cap per task
-- `TASK_LIST_DEFAULT_PAGE_SIZE` - Optional default task/project list page size
-- `TASK_LIST_MAX_PAGE_SIZE` - Optional maximum task/project list page size
-- `TASK_CALLBACK_TIMEOUT_MS` - Optional timeout budget for delegated-task callback processing
-- `TASK_CALLBACK_RETRY_MAX_ATTEMPTS` - Optional retry budget for delegated-task callback processing
-- `NODE_HEARTBEAT_STALE_SECONDS` - Optional staleness threshold for node health
-- `NODE_AGENT_READY_TIMEOUT_MS` - Optional max wait for freshly provisioned node-agent health before first workspace create
-- `NODE_AGENT_READY_POLL_INTERVAL_MS` - Optional polling interval for fresh-node readiness checks
-- `WHISPER_MODEL_ID` - Workers AI model for transcription (default: `@cf/openai/whisper-large-v3-turbo`)
-- `MAX_AUDIO_SIZE_BYTES` - Maximum audio upload size in bytes (default: 10485760)
-- `MAX_AUDIO_DURATION_SECONDS` - Maximum recording duration in seconds (default: 60)
-- `RATE_LIMIT_TRANSCRIBE` - Optional rate limit for transcription requests
-- `RATE_LIMIT_CLIENT_ERRORS` - Rate limit for client error reporting per hour per IP (default: 200)
-- `MAX_CLIENT_ERROR_BATCH_SIZE` - Max errors per client error report request (default: 25)
-- `MAX_CLIENT_ERROR_BODY_BYTES` - Max request body size for client error reports in bytes (default: 65536)
-- `CONTAINER_USER` - VM Agent: optional `docker exec -u` override for terminal/ACP/git/file commands; when unset, VM Agent auto-detects effective devcontainer user (`remoteUser`/`containerUser`) from `devcontainer read-configuration`, then `devcontainer.metadata`, then `docker exec id -un` fallback
-- `GIT_EXEC_TIMEOUT` - VM Agent: timeout for git commands via docker exec (default: 30s)
-- `GIT_WORKTREE_TIMEOUT` - VM Agent: timeout for git worktree create/remove commands (default: 30s)
-- `WORKTREE_CACHE_TTL` - VM Agent: cache duration for parsed `git worktree list` results (default: 5s)
-- `MAX_WORKTREES_PER_WORKSPACE` - VM Agent: max worktrees allowed per workspace (default: 5)
-- `GIT_FILE_MAX_SIZE` - VM Agent: max file size in bytes for git/file endpoint (default: 1048576)
-- `FILE_LIST_TIMEOUT` - VM Agent: timeout for file listing commands (default: 10s)
-- `FILE_LIST_MAX_ENTRIES` - VM Agent: max entries returned per directory listing (default: 1000)
-- `FILE_FIND_TIMEOUT` - VM Agent: timeout for recursive file index commands (default: 15s)
-- `FILE_FIND_MAX_ENTRIES` - VM Agent: max entries returned by file index (default: 5000)
-- `ERROR_REPORT_FLUSH_INTERVAL` - VM Agent: background error flush interval (default: 30s)
-- `ERROR_REPORT_MAX_BATCH_SIZE` - VM Agent: immediate flush threshold (default: 10)
-- `ERROR_REPORT_MAX_QUEUE_SIZE` - VM Agent: max queued error entries (default: 100)
-- `ERROR_REPORT_HTTP_TIMEOUT` - VM Agent: HTTP POST timeout for error reports (default: 10s)
-- `ACP_MESSAGE_BUFFER_SIZE` - VM Agent: max buffered messages per SessionHost for late-join replay (default: 5000)
-- `ACP_VIEWER_SEND_BUFFER` - VM Agent: per-viewer send channel buffer size (default: 256)
-- `ACP_PING_INTERVAL` - VM Agent: WebSocket ping interval for stale connection detection (default: 30s)
-- `ACP_PONG_TIMEOUT` - VM Agent: WebSocket pong deadline after ping (default: 10s)
-- `ACP_PROMPT_TIMEOUT` - VM Agent: max ACP prompt runtime before timeout/force-stop fallback (default: 10m)
-- `ACP_PROMPT_CANCEL_GRACE_PERIOD` - VM Agent: grace wait after cancel before force-stop fallback (default: 5s)
-- `MAX_NODE_EVENTS` - VM Agent: max node-level events retained in memory (default: 500)
-- `MAX_WORKSPACE_EVENTS` - VM Agent: max workspace-level events retained in memory (default: 500)
-- `MAX_VM_AGENT_ERROR_BODY_BYTES` - API: max VM agent error request body (default: 32768)
-- `MAX_VM_AGENT_ERROR_BATCH_SIZE` - API: max VM agent errors per request (default: 10)
-- `HETZNER_API_TIMEOUT_MS` - Timeout for Hetzner Cloud API calls in milliseconds (default: 30000)
-- `CF_API_TIMEOUT_MS` - Timeout for Cloudflare DNS API calls in milliseconds (default: 30000)
-- `NODE_AGENT_REQUEST_TIMEOUT_MS` - Timeout for Node Agent HTTP requests in milliseconds (default: 30000)
-- `SYSINFO_DOCKER_TIMEOUT` - VM Agent: timeout for Docker CLI commands during system info collection (default: 10s)
-- `SYSINFO_VERSION_TIMEOUT` - VM Agent: timeout for version-check commands (node, devcontainer) (default: 5s)
-- `SYSINFO_CACHE_TTL` - VM Agent: cache duration for system info results to avoid redundant collection (default: 5s)
+Claude Code supports dual authentication: **API keys** (pay-per-use from Anthropic Console) and **OAuth tokens** (from Claude Max/Pro subscriptions via `claude setup-token`). Users toggle between them in Settings. The system injects `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` based on active credential type.
 
 ## Testing
 
-**Test credentials** for the live app (`app.simple-agent-manager.org`) are stored at `/workspaces/.tmp/secure/demo-credentials.md` (outside this git repository). This path is intentionally outside the repo so credentials cannot be committed. If the file is missing or outdated, ask the human for the latest credentials, update that file, and then continue Playwright testing.
+- **Test credentials** for the live app are at `/workspaces/.tmp/secure/demo-credentials.md` (outside repo)
+- **Live test cleanup required**: delete test workspaces/nodes after verification
+- See `.claude/rules/02-quality-gates.md` for full testing requirements
 
-**Playwright screenshots (development):** Save all screenshots to `.codex/tmp/playwright-screenshots/` only. This path is gitignored via `.codex/tmp/`.
+## Troubleshooting
 
-**Live test cleanup (required):** When automated/manual verification creates test nodes or workspaces, delete those test resources before marking the task complete. Do not alter pre-existing legacy resources during validation.
+- **Build errors**: Run builds in dependency order (see Build Order above)
+- **Test failures**: Check Miniflare bindings are configured in `vitest.config.ts`
+- **Type errors**: Run `pnpm typecheck` from root to see all issues
 
-## UI Agent Rules
+## Task Tracking
 
-For UI changes in `apps/web`, `packages/vm-agent/ui`, or `packages/ui`:
-
-1. Prefer shared components from `@simple-agent-manager/ui` when available.
-2. Use semantic tokens from `packages/ui/src/tokens/semantic-tokens.ts` and CSS vars from `packages/ui/src/tokens/theme.css`.
-3. Maintain mobile-first behavior:
-   - single-column baseline at small widths
-   - primary action target minimum 56px on mobile
-   - no required horizontal scrolling at 320px for core flows
-4. Preserve accessibility:
-   - keyboard-accessible interactions
-   - visible focus states
-   - clear non-color-only status communication
-5. If a shared component is missing, either:
-   - add/extend it in `packages/ui`, or
-   - document a temporary exception with rationale and expiration.
-6. Invoke `$ui-ux-specialist` for every UI task and follow its workflow/rubric.
-7. Before implementation, create 2-3 layout/interaction variants and select one with explicit tradeoff rationale.
-8. Complete visual verification with Playwright on both mobile (>=375x667) and desktop, then report concrete issues found/fixed.
-9. Provide rubric scores (1-5) for visual hierarchy, interaction clarity, mobile usability, accessibility, and system consistency; each score MUST be >=4 before completion.
-10. Avoid generic default styling for new surfaces unless constrained by an existing design system that the feature already uses.
-
-## Active Technologies
-
-- **API**: TypeScript 5.x, Hono, Drizzle ORM, BetterAuth, jose, Cloudflare Workers
-- **Web**: TypeScript 5.x, React 18, Vite 5, TailwindCSS, xterm.js 5.3, Radix UI, lucide-react, @dnd-kit
-- **VM Agent**: Go 1.22+, creack/pty, gorilla/websocket, golang-jwt, modernc.org/sqlite
-- **Storage**: Cloudflare D1 (SQLite), KV (sessions/tokens/boot logs), R2 (binaries/Pulumi state)
-- **Infra**: Pulumi, Wrangler, @devcontainers/cli, pnpm 9.0+, Cloudflare Pages
-- TypeScript 5.x (API + Web), Go 1.22+ (VM Agent) + Hono (API), React 18 + Vite 5 (Web), creack/pty + gorilla/websocket (VM Agent), ACP SDK (agent sessions) (015-worktree-context)
-- Cloudflare D1 (agent session worktree metadata), SQLite on VM (terminal session metadata), Docker named volumes (worktree directories) (015-worktree-context)
-
-## Recent Changes
-- session-visibility: VM Agent `handleListAgentSessions` now enriches session responses with live `hostStatus` (idle/starting/ready/prompting/error/stopped from SessionHost) and `viewerCount` (connected browser viewers); new `enrichedSession` Go struct embeds `agentsessions.Session` with optional pointer fields; shared `AgentHostStatus` type and optional `hostStatus`/`viewerCount` fields added to `AgentSession` interface; new `listAgentSessionsLive()` browser API calls VM Agent directly (ws-{id} subdomain) with workspace token, falls back to control plane API; Workspace page uses live session data with enhanced status colors (purple=prompting, green=ready, amber=starting); WorkspaceSidebar shows host status labels, viewer count badges, and per-session stop buttons
-- devcontainer-runtime-user-consistency: VM Agent now resolves effective devcontainer execution user when `CONTAINER_USER` is unset and applies it consistently to PTY terminals, ACP sessions, and git/file/worktree docker exec paths; detection order is `devcontainer read-configuration` merged `remoteUser`/`containerUser`, then running container `devcontainer.metadata` label, then `docker exec id -un` fallback; explicit `CONTAINER_USER` remains highest-priority override; workspace runtime now stores per-workspace `ContainerUser` so recovery and session creation reuse the detected user instead of defaulting to container `USER`
-- workspace-runtime-identity: VM Agent now derives host workspace runtime identity from canonical `workspaceId` (for example `/workspace/<workspaceId>`) instead of repo-derived names; container discovery for workspace-scoped operations now uses strict workspace label matching to prevent cross-workspace routing when multiple same-repo workspaces run on one node; container working directory remains repo-oriented for developer ergonomics, but labels/lookup keys are canonical-ID based
-- sam-workspace-env: SAM platform metadata injected as environment variables into devcontainers during bootstrap; `/etc/profile.d/sam-env.sh` (sourced by login shells) and `/etc/sam/env` (parseable by scripts) provide `SAM_WORKSPACE_ID`, `SAM_NODE_ID`, `SAM_WORKSPACE_URL`, `SAM_API_URL`, `SAM_REPOSITORY`, `SAM_BRANCH`; `config.DeriveBaseDomain()` exported for cross-package URL derivation; `ensureGitIdentity()` now logs a warning when git identity is skipped due to empty email (previously silent); non-fatal — workspace creation continues if env injection fails
-- worktree-context: Added deep git worktree integration across VM agent, API, shared types, terminal package, and workspace UI; new VM agent worktree endpoints (`GET/POST/DELETE /workspaces/:id/worktrees`), optional `worktree` scoping for git/file endpoints, and worktree-aware terminal/chat session creation (`workDir`/`worktree` path propagation); agent sessions now persist optional `worktreePath` in D1 via `0010_agent_sessions_worktree_path.sql`; new `WorktreeSelector` UI supports list/create/remove/switch with URL persistence and tab badges; added env vars `GIT_WORKTREE_TIMEOUT`, `WORKTREE_CACHE_TTL`, `MAX_WORKTREES_PER_WORKSPACE`
-- node-system-info: VM Agent sysinfo package collects system metrics from Linux procfs (`/proc/loadavg`, `/proc/meminfo`, `/proc/uptime`, `/proc/net/dev`) and Docker CLI (`docker stats`, `docker version`); two-tier collection: `CollectQuick()` (procfs only, microseconds) enriches heartbeat with `metrics: { cpuLoadAvg1, memoryPercent, diskPercent }`, `Collect()` (full, including Docker/versions) powers new `GET /system-info` endpoint; control plane stores heartbeat metrics in D1 `last_metrics` column, proxies full system info via `GET /api/nodes/:id/system-info`; Node detail page redesigned with composed section components (NodeOverviewSection, SystemResourcesSection, DockerSection, SoftwareSection, NodeWorkspacesSection, NodeEventsSection) replacing monolithic inline JSX; ResourceBar gauge with color-coded thresholds and `role="meter"` accessibility; Nodes list page enriched with MiniMetricBadge pills (load/mem/disk) and workspace count; configurable `SYSINFO_DOCKER_TIMEOUT`, `SYSINFO_VERSION_TIMEOUT`, `SYSINFO_CACHE_TTL`; build-time ldflags inject version/build date/Go version into agent binary
-- devcontainer-named-volumes: Replaced bind-mount devcontainer storage with named Docker volumes (`sam-ws-<workspaceId>`); host clone preserved for devcontainer CLI config discovery, then populated into volume via throwaway `alpine` container; `workspaceMount` property in override config replaces default bind-mount (NOT `--mount` CLI flag which only adds supplementary mounts); repos with own devcontainer config get mount-only override, repos without config get full default config with volume mount; eliminated permission normalization dance (`ensureWorkspaceWritablePreDevcontainer`, `ensureWorkspaceWritable`, `getContainerUserIDs`, `getContainerCurrentUserIDs` removed); workspace deletion now removes container and volume; `config.DeriveRepoDirName` exported for cross-package use
-- command-palette-search: Enhanced command palette (Cmd+K) with fuzzy file search and tab switching; VS Code-style camelCase-aware fuzzy matching (fuzzy-match.ts) with word boundary scoring, consecutive bonuses, and space-skipping; categorized results (Tabs, Files, Commands) with HighlightedText match visualization; lazy file index loading via new VM Agent `GET /files/find` endpoint (recursive flat file list with noise exclusion); filename-vs-path best-score matching; file results capped at 20; configurable FILE_FIND_TIMEOUT and FILE_FIND_MAX_ENTRIES
-- tab-reorder-rename: Unified tab ordering, rename, and drag-and-drop reordering for workspace tab strip; useTabOrder hook with localStorage persistence replaces hardcoded terminal-first/chat-second ordering; new tabs always appear rightmost; extracted WorkspaceTabStrip component from Workspace.tsx inline JSX; double-click to rename (desktop), long-press to rename (mobile); PATCH /api/workspaces/:id/agent-sessions/:sessionId endpoint for chat tab rename; @dnd-kit/core + @dnd-kit/sortable for drag-and-drop with PointerSensor (distance:5) and KeyboardSensor; DragOverlay ghost tab; full accessibility with custom screen reader announcements; UpdateAgentSessionRequest shared type
-- command-palette: VS Code-style command palette (Cmd+K / Ctrl+K) for workspace UI; searchable list of all shortcut-backed actions with keyboard shortcut display; substring filtering, arrow key navigation, Enter to execute; extends ShortcutDefinition with paletteHidden field; getPaletteShortcuts() helper
-- persistent-agent-sessions: Agent processes now survive browser disconnects; new SessionHost struct owns agent lifecycle independently of WebSocket connections; multiple browser tabs/devices can connect simultaneously as viewers with fan-out message broadcasting; bounded message ring buffer (configurable via ACP_MESSAGE_BUFFER_SIZE, default 5000) enables late-join replay; per-viewer buffered send channels (ACP_VIEWER_SEND_BUFFER, default 256) protect against slow clients; Gateway simplified to thin per-WebSocket relay; new control messages session_state/session_replay_complete/session_prompting/session_prompt_done; browser state machine extended with replaying state; takeover semantics removed
-- workspace-keyboard-shortcuts: VS Code-style keyboard shortcuts for workspace UI; centralized shortcut registry with platform-aware matching (Cmd on macOS, Ctrl on Windows/Linux); useKeyboardShortcuts hook with capture-phase listener; shortcuts for panel toggles (Cmd+Shift+E file browser, Cmd+Shift+G git changes), focus management (Cmd+/ chat, Cmd+` terminal), tab navigation (Ctrl+Tab/Ctrl+Shift+Tab cycle, Cmd+1-9 jump), session creation (Cmd+Shift+N chat, Cmd+Shift+T terminal), help overlay (Cmd+Shift+/); AgentPanel/ChatSession expose focusInput() via forwardRef+useImperativeHandle; MultiTerminal gains focus() on imperative handle; skips dispatch in text inputs without modifiers
-- agent-settings-acp-protocol: Wire agent settings through ACP protocol; `applySessionSettings()` calls `SetSessionModel()` and `SetSessionMode()` after NewSession/LoadSession; model env var alone only adds to available list, explicit ACP call required to select; added `plan` and `dontAsk` permission modes to shared constants/types (all 5 agent-supported modes now exposed); non-fatal error handling consistent with graceful degradation pattern
-- comprehensive-lifecycle-logging: End-to-end ACP/WebSocket lifecycle observability; client-side AcpLifecycleEvent callback from transport/session/chat layers piped to CF Workers observability via error reporter; VM agent ErrorReporter extended with ReportInfo/ReportWarn; gateway reports Initialize/LoadSession/NewSession/Prompt lifecycle; EventAppender interface for gateway-to-UI event log; WebSocket connect/disconnect events in agent_ws; rate limit for client errors increased to 200/hr to accommodate lifecycle info-level logging
-- vm-agent-error-reporting: VM agent error reporting to CF Workers observability; Go errorreport package with thread-safe batching and periodic flushing; POST /api/nodes/:id/errors endpoint with callback JWT auth; ACP gateway reports agent crashes, install failures, rapid exits, and prompt failures; configurable flush interval, batch size, queue size, HTTP timeout
-- client-error-reporting: Client-side error reporting pipeline; browser batches errors and sends to POST /api/client-errors which logs to Workers observability via console.error; global window.onerror and unhandledrejection handlers; VoiceButton/AgentPanel onError callback; sendBeacon on page close; configurable rate limit, batch size, body size
-- voice-transcribe-logging: Added comprehensive server-side logging to POST /api/transcribe for debugging voice input issues; logs request receipt, audio file metadata, base64 conversion, Workers AI call timing, response details, and errors with full context
-- agent-file-ops: Implement ACP ReadTextFile and WriteTextFile handlers in gateway; agent can now read/write files via docker exec instead of falling back to Bash cat/echo; supports partial reads (Line/Limit params); reuses GIT_EXEC_TIMEOUT and GIT_FILE_MAX_SIZE config
-- file-browser: File browser with directory listing and syntax-highlighted file viewer; VM Agent endpoint `GET /files/list` via docker exec `find -printf`; breadcrumb navigation, mobile-first full-screen overlays, cross-link to git diff viewer; configurable FILE_LIST_TIMEOUT and FILE_LIST_MAX_ENTRIES
-- git-changes-viewer: GitHub PR-style git changes viewer accessible via nav bar icon; VM Agent endpoints for git status/diff/file via docker exec; full-screen overlay with staged/unstaged/untracked sections, unified diff view with green/red coloring, Diff/Full toggle; URL search params for browser back/forward navigation
-- voice-to-text: Voice input button for agent chat with Workers AI Whisper transcription, VoiceButton component in acp-client, POST /api/transcribe endpoint, configurable model/limits
-- node-data-ownership: Workspace events fetched directly from VM Agent (browser -> VM Agent via ws-{id} proxy); node events proxied through control plane (vm-\* DNS records lack SSL termination); new `POST /api/nodes/:id/token` for node-scoped auth tokens; VM Agent event handlers accept browser workspace/session auth
-- 014-multi-workspace-nodes: First-class Nodes with multi-workspace hosting, async provisioning (callback-driven `/ready` + `/provisioning-failed`), workspace recovery on attach, session tab UX with `+` dropdown, node-scoped routing/auth, explicit lifecycle control
-- 014-multi-workspace-nodes: Default fallback devcontainer image changed to `mcr.microsoft.com/devcontainers/base:ubuntu`; fresh-node readiness probing with hard timeouts
-- 014-auth-profile-sync: GitHub primary email resolved at login, propagated into workspace bootstrap for git commit identity
-- 013-agent-oauth-support: Dual credential support for Claude Code (API key + OAuth token), credential switching, auto-activation
-- 012-pty-session-persistence: PTY sessions survive page refresh with ring buffer replay and session reattach
+Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks/README.md` for conventions.

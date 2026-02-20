@@ -14,8 +14,8 @@ This includes but is not limited to:
 - `docs/guides/self-hosting.md` — setup instructions, permissions, configuration
 - `docs/architecture/` — architecture decisions, credential models
 - `specs/` — feature specifications, data models
-- `AGENTS.md` — development guidelines, API endpoints, environment variables
-- `CLAUDE.md` — active technologies, recent changes
+- `AGENTS.md` — agent configuration pointers
+- `CLAUDE.md` — project instructions for Claude Code
 - `README.md` — if user-facing behavior changed
 
 ### How To Comply
@@ -28,6 +28,14 @@ This includes but is not limited to:
 ### Why This Matters
 
 Stale documentation causes real user-facing failures. Users follow setup guides that reference incorrect permissions, wrong URLs, or outdated configuration — and then things break in ways that are hard to debug.
+
+## Spec Documentation Edit Scope
+
+Spec files are historical records tied to a specific feature context. Apply these scope rules on every task:
+
+1. **Working within a specific spec**: You MAY update docs under that active spec directory (e.g., `specs/014-multi-workspace-nodes/*`).
+2. **Working within a specific spec**: You MUST NOT edit docs under any other spec directory.
+3. **Working outside spec context**: You MUST NOT edit `specs/` documentation at all.
 
 ## No Legacy / Dead Code
 
