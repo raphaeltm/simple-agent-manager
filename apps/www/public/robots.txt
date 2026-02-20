@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://simple-agent-manager.org/sitemap-index.xml

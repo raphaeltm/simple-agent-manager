@@ -1,0 +1,188 @@
+---
+const rows = [
+  { label: 'Hourly Cost', sam: '~$0.07–0.15', codespaces: '$0.18–0.36', samWins: true },
+  { label: 'Claude Code', sam: 'Pre-installed', codespaces: 'Manual setup', samWins: true },
+  { label: 'Lifecycle Control', sam: 'Explicit stop/restart/delete', codespaces: 'Manual or 30min timeout', samWins: true },
+  { label: 'Node Consolidation', sam: 'Multiple workspaces per VM', codespaces: '1:1 mapping', samWins: true },
+  { label: 'Private Repos', sam: 'GitHub App integration', codespaces: 'Native GitHub support', samWins: false },
+  { label: 'Infrastructure', sam: 'Self-hosted (BYOC)', codespaces: 'Managed', samWins: false },
+  { label: 'Control Plane', sam: 'Free (self-hosted on CF)', codespaces: 'Included', samWins: true },
+];
+---
+
+<section id="pricing" class="section">
+  <div class="container">
+    <div class="comparison-header animate-on-scroll">
+      <span class="section-label">Pricing</span>
+      <h2 class="section-title">Cut your cloud dev costs in half</h2>
+      <p class="section-subtitle">
+        SAM runs on Hetzner Cloud VMs — significantly cheaper than managed alternatives, with no feature trade-offs.
+      </p>
+    </div>
+
+    <div class="table-wrapper animate-on-scroll">
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th class="col-label"></th>
+            <th class="col-sam">
+              <div class="col-header-content">
+                <svg width="20" height="20" viewBox="0 0 512 512" fill="none" aria-hidden="true">
+                  <rect width="512" height="512" rx="112" fill="#0b1110"/>
+                  <rect x="56" y="56" width="400" height="400" rx="80" fill="#13201d" stroke="#29423b" stroke-width="8"/>
+                  <path d="M154 208L226 256L154 304" stroke="#16a34a" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M270 318H360" stroke="#e6f2ee" stroke-width="26" stroke-linecap="round"/>
+                </svg>
+                SAM
+              </div>
+            </th>
+            <th class="col-other">
+              <div class="col-header-content">
+                Codespaces
+              </div>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr>
+              <td class="col-label">{row.label}</td>
+              <td class={`col-sam ${row.samWins ? 'highlight' : ''}`}>{row.sam}</td>
+              <td class="col-other">{row.codespaces}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="cost-callout animate-on-scroll">
+      <div class="callout-inner">
+        <div class="callout-text">
+          <span class="callout-number">~50%</span>
+          <span class="callout-label">lower cost per hour on average</span>
+        </div>
+        <p class="callout-detail">
+          A medium workspace (4 vCPU / 8 GB) runs at roughly $0.11/hr on Hetzner vs $0.26/hr on Codespaces.
+          Node consolidation can push savings even further.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .comparison-header {
+    text-align: center;
+    margin-bottom: 48px;
+  }
+
+  .comparison-header .section-subtitle {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin-bottom: 48px;
+  }
+
+  .comparison-table {
+    width: 100%;
+    max-width: 720px;
+    margin: 0 auto;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
+  }
+
+  .comparison-table th,
+  .comparison-table td {
+    padding: 14px 20px;
+    text-align: left;
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+
+  .comparison-table thead th {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 0.9375rem;
+    color: var(--color-fg-primary);
+    border-bottom: 1px solid var(--color-border);
+    padding-bottom: 16px;
+  }
+
+  .col-header-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .col-label {
+    color: var(--color-fg-muted);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .col-sam {
+    color: var(--color-fg-primary);
+  }
+
+  .col-sam.highlight {
+    color: var(--color-accent);
+    font-weight: 500;
+  }
+
+  .col-other {
+    color: var(--color-fg-dim);
+  }
+
+  /* Cost callout */
+  .cost-callout {
+    max-width: 720px;
+    margin: 0 auto;
+  }
+
+  .callout-inner {
+    padding: 32px;
+    background: var(--color-accent-glow);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    text-align: center;
+  }
+
+  .callout-text {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .callout-number {
+    font-family: var(--font-display);
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--color-accent);
+    letter-spacing: -0.02em;
+  }
+
+  .callout-label {
+    font-size: 1.125rem;
+    color: var(--color-fg-muted);
+  }
+
+  .callout-detail {
+    font-size: 0.875rem;
+    color: var(--color-fg-dim);
+    max-width: 480px;
+    margin: 0 auto;
+    line-height: 1.6;
+  }
+
+  @media (max-width: 640px) {
+    .callout-text {
+      flex-direction: column;
+      gap: 4px;
+    }
+  }
+</style>

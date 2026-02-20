@@ -1,0 +1,109 @@
+---
+---
+
+<section class="social-proof">
+  <div class="container">
+    <div class="proof-content animate-on-scroll">
+      <span class="proof-label">Built on</span>
+      <div class="proof-logos">
+        <div class="proof-item">
+          <svg width="28" height="28" viewBox="0 0 128 128" fill="none" aria-hidden="true">
+            <path d="M64 128C99.3462 128 128 99.3462 128 64C128 28.6538 99.3462 0 64 0C28.6538 0 0 28.6538 0 64C0 99.3462 28.6538 128 64 128Z" fill="#F38020"/>
+            <path d="M89.5 85.9H38.5C37.8 85.9 37.3 85.3 37.4 84.6L47.3 44.1C47.4 43.5 47.9 43.1 48.5 43.1H99.5C100.2 43.1 100.7 43.7 100.6 44.4L90.7 84.9C90.6 85.5 90.1 85.9 89.5 85.9Z" fill="white"/>
+            <path d="M77.3 85.9L84.9 43.1H73.4L65.8 85.9H77.3Z" fill="#FAAE40"/>
+            <path d="M48.9 61.5L27.5 61.5C26.8 61.5 26.3 62.1 26.4 62.8L30.2 84.6C30.3 85.2 30.8 85.6 31.4 85.6L52.8 85.6L48.9 61.5Z" fill="#FAAE40"/>
+          </svg>
+          <span>Cloudflare</span>
+        </div>
+        <span class="proof-divider">+</span>
+        <div class="proof-item">
+          <svg width="28" height="28" viewBox="0 0 128 128" fill="none" aria-hidden="true">
+            <rect width="128" height="128" rx="16" fill="#D50C2D"/>
+            <path d="M64 24L24 104H44L64 64L84 104H104L64 24Z" fill="white"/>
+          </svg>
+          <span>Hetzner Cloud</span>
+        </div>
+        <span class="proof-divider">+</span>
+        <div class="proof-item">
+          <svg width="28" height="28" viewBox="0 0 128 128" fill="none" aria-hidden="true">
+            <rect width="128" height="128" rx="16" fill="#CC785C"/>
+            <path d="M34 64C34 47.4 47.4 34 64 34C80.6 34 94 47.4 94 64C94 80.6 80.6 94 64 94C47.4 94 34 80.6 34 64Z" fill="white"/>
+            <path d="M48 64C48 55.2 55.2 48 64 48V80C55.2 80 48 72.8 48 64Z" fill="#CC785C"/>
+          </svg>
+          <span>Claude Code</span>
+        </div>
+      </div>
+      <div class="proof-badges">
+        <span class="badge">MIT Licensed</span>
+        <span class="badge">Self-Hosted</span>
+        <span class="badge">BYOC</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .social-proof {
+    padding: 40px 0;
+    border-top: 1px solid var(--color-border-subtle);
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+
+  .proof-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+  }
+
+  @media (min-width: 768px) {
+    .proof-content {
+      flex-direction: row;
+      justify-content: center;
+      gap: 40px;
+    }
+  }
+
+  .proof-label {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--color-fg-dim);
+  }
+
+  .proof-logos {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .proof-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.875rem;
+    color: var(--color-fg-muted);
+    font-weight: 500;
+  }
+
+  .proof-divider {
+    color: var(--color-fg-dim);
+    font-size: 0.875rem;
+  }
+
+  .proof-badges {
+    display: flex;
+    gap: 8px;
+  }
+
+  .badge {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--color-accent);
+    border: 1px solid var(--color-border);
+    padding: 4px 12px;
+    border-radius: 100px;
+    letter-spacing: 0.02em;
+  }
+</style>
