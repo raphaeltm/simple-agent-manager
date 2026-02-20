@@ -62,8 +62,8 @@ export interface AcpTransportOptions {
   onAgentStatus: AgentStatusCallback;
   /** Callback for ACP JSON-RPC messages from the agent */
   onAcpMessage: AcpMessageCallback;
-  /** Callback when the WebSocket closes */
-  onClose?: () => void;
+  /** Callback when the WebSocket closes. Receives the close code and reason for smarter reconnection. */
+  onClose?: (code?: number, reason?: string) => void;
   /** Callback when a WebSocket error occurs */
   onError?: (error: Event) => void;
   /** Optional callback for lifecycle observability logging */
@@ -90,7 +90,7 @@ export function createAcpWebSocketTransport(
   wsOrOptions: WebSocket | AcpTransportOptions,
   onAgentStatus?: AgentStatusCallback,
   onAcpMessage?: AcpMessageCallback,
-  onClose?: () => void,
+  onClose?: (code?: number, reason?: string) => void,
   onError?: (error: Event) => void,
   onLifecycleEvent?: LifecycleEventCallback
 ): AcpTransport {
@@ -214,12 +214,12 @@ export function createAcpWebSocketTransport(
     startHeartbeat();
   }
 
-  const wrappedOnClose = () => {
+  const wrappedOnClose = (event: CloseEvent) => {
     stopHeartbeat();
-    opts.onClose?.();
+    opts.onClose?.(event.code, event.reason);
   };
 
-  ws.addEventListener('close', wrappedOnClose);
+  ws.addEventListener('close', wrappedOnClose as EventListener);
 
   if (opts.onError) {
     ws.addEventListener('error', opts.onError);

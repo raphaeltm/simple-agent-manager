@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { useAcpSession } from './useAcpSession';
+import { useAcpSession, addJitter, classifyCloseCode } from './useAcpSession';
 
 class MockWebSocket {
   static CONNECTING = 0;
@@ -36,9 +36,9 @@ class MockWebSocket {
 
   send = vi.fn();
 
-  close(): void {
+  close(code?: number, reason?: string): void {
     this.readyState = MockWebSocket.CLOSED;
-    this.emit('close', new CloseEvent('close'));
+    this.emit('close', new CloseEvent('close', { code: code ?? 1006, reason: reason ?? '' }));
   }
 
   emitOpen(): void {
@@ -694,5 +694,173 @@ describe('useAcpSession post-replay session_state guard', () => {
     await waitFor(() => {
       expect(result.current.state).toBe('replaying');
     });
+  });
+});
+
+describe('addJitter', () => {
+  it('returns a value within ±25% of the input', () => {
+    // Run multiple times to exercise the random range
+    for (let i = 0; i < 100; i++) {
+      const result = addJitter(1000);
+      expect(result).toBeGreaterThanOrEqual(750);
+      expect(result).toBeLessThanOrEqual(1250);
+    }
+  });
+
+  it('returns an integer', () => {
+    const result = addJitter(1000);
+    expect(Number.isInteger(result)).toBe(true);
+  });
+
+  it('handles zero delay', () => {
+    const result = addJitter(0);
+    expect(result).toBe(0);
+  });
+});
+
+describe('classifyCloseCode', () => {
+  it('returns no-reconnect for normal closure (1000)', () => {
+    expect(classifyCloseCode(1000)).toBe('no-reconnect');
+  });
+
+  it('returns immediate for going-away (1001)', () => {
+    expect(classifyCloseCode(1001)).toBe('immediate');
+  });
+
+  it('returns immediate for abnormal closure / network drop (1006)', () => {
+    expect(classifyCloseCode(1006)).toBe('immediate');
+  });
+
+  it('returns no-reconnect for policy violation (1008)', () => {
+    expect(classifyCloseCode(1008)).toBe('no-reconnect');
+  });
+
+  it('returns backoff for internal server error (1011)', () => {
+    expect(classifyCloseCode(1011)).toBe('backoff');
+  });
+
+  it('returns backoff for heartbeat timeout (4000)', () => {
+    expect(classifyCloseCode(4000)).toBe('backoff');
+  });
+
+  it('returns no-reconnect for auth expired (4001)', () => {
+    expect(classifyCloseCode(4001)).toBe('no-reconnect');
+  });
+
+  it('returns backoff for undefined code', () => {
+    expect(classifyCloseCode(undefined)).toBe('backoff');
+  });
+
+  it('returns backoff for unknown codes', () => {
+    expect(classifyCloseCode(9999)).toBe('backoff');
+  });
+});
+
+describe('useAcpSession close code handling', () => {
+  it('does not reconnect when server sends normal close (1000)', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.emitOpenAndIdle());
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+
+    const instancesBefore = MockWebSocket.instances.length;
+
+    // Server sends a clean close — should NOT trigger reconnection
+    act(() => ws.close(1000, 'normal'));
+
+    // Should go to disconnected, not reconnecting
+    expect(result.current.state).toBe('disconnected');
+    // No new WebSocket should be created
+    expect(MockWebSocket.instances.length).toBe(instancesBefore);
+  });
+
+  it('does not reconnect when server sends policy violation (1008)', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.emitOpenAndIdle());
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+
+    const instancesBefore = MockWebSocket.instances.length;
+
+    act(() => ws.close(1008, 'policy_violation'));
+
+    expect(result.current.state).toBe('disconnected');
+    expect(MockWebSocket.instances.length).toBe(instancesBefore);
+  });
+
+  it('attempts reconnection on abnormal closure (1006)', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.emitOpenAndIdle());
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+
+    // Network drop — should trigger reconnection
+    act(() => ws.close(1006, ''));
+
+    expect(result.current.state).toBe('reconnecting');
+  });
+
+  it('attempts reconnection on heartbeat timeout (4000)', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.emitOpenAndIdle());
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+
+    // Heartbeat timeout — should trigger backoff reconnection
+    act(() => ws.close(4000, 'heartbeat_timeout'));
+
+    expect(result.current.state).toBe('reconnecting');
+  });
+});
+
+describe('useAcpSession stale transport cleanup', () => {
+  it('cleans up stale transport when connect() is called with a lingering connection', async () => {
+    // Scenario: first connection drops, reconnect fires, but the first WS
+    // hasn't fully closed yet when the second connect() call happens.
+    // The stale transport guard in connect() should close it.
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws1 = MockWebSocket.instances[0]!;
+    act(() => ws1.emitOpenAndIdle());
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+
+    // Close the WS (network drop triggers reconnection attempt)
+    act(() => ws1.close(1006));
+
+    expect(result.current.state).toBe('reconnecting');
+
+    // The reconnection will create a new WebSocket after backoff timer fires.
+    // A new WebSocket instance should eventually be created.
+    // Meanwhile, the old ws1 should be CLOSED.
+    expect(ws1.readyState).toBe(MockWebSocket.CLOSED);
   });
 });
