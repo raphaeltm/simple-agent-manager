@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -32,6 +33,8 @@ const (
 	workspaceReadyStatusRunning  = "running"
 	workspaceReadyStatusRecovery = "recovery"
 )
+
+var projectEnvKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // VolumeNameForWorkspace returns the Docker named volume name for a workspace.
 // Exported so that workspace deletion can also remove the volume.
@@ -56,12 +59,24 @@ type bootstrapState struct {
 	GitUserEmail  string `json:"gitUserEmail,omitempty"`
 }
 
+type ProjectRuntimeEnvVar struct {
+	Key   string
+	Value string
+}
+
+type ProjectRuntimeFile struct {
+	Path    string
+	Content string
+}
+
 // ProvisionState carries optional credential and git identity data used when
 // preparing a workspace environment outside the bootstrap-token flow.
 type ProvisionState struct {
-	GitHubToken  string
-	GitUserName  string
-	GitUserEmail string
+	GitHubToken    string
+	GitUserName    string
+	GitUserEmail   string
+	ProjectEnvVars []ProjectRuntimeEnvVar
+	ProjectFiles   []ProjectRuntimeFile
 }
 
 // Run redeems bootstrap credentials (if configured), prepares the workspace, and signals ready.
@@ -230,6 +245,9 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	}
 	if err := ensureSAMEnvironment(ctx, cfg, bootstrap.GitHubToken); err != nil {
 		log.Printf("Warning: SAM environment setup failed (non-fatal): %v", err)
+	}
+	if err := ensureProjectRuntimeAssets(ctx, cfg, state.ProjectEnvVars, state.ProjectFiles); err != nil {
+		return recoveryMode, err
 	}
 
 	readyStatus := workspaceReadyStatusRunning
@@ -1599,6 +1617,106 @@ func ensureSAMEnvironment(ctx context.Context, cfg *config.Config, githubToken s
 	}
 
 	log.Printf("Configured SAM environment in devcontainer %s", containerID)
+	return nil
+}
+
+func buildProjectRuntimeEnvScript(envVars []ProjectRuntimeEnvVar) (string, error) {
+	var sb strings.Builder
+	sb.WriteString("# Project runtime environment variables (auto-generated)\n")
+
+	for _, envVar := range envVars {
+		key := strings.TrimSpace(envVar.Key)
+		if !projectEnvKeyPattern.MatchString(key) {
+			return "", fmt.Errorf("invalid project env var key %q", envVar.Key)
+		}
+		sb.WriteString(fmt.Sprintf("export %s=%q\n", key, envVar.Value))
+	}
+
+	return sb.String(), nil
+}
+
+func normalizeProjectRuntimeFilePath(rawPath string) (string, error) {
+	trimmed := strings.TrimSpace(rawPath)
+	if trimmed == "" {
+		return "", fmt.Errorf("project file path is required")
+	}
+	if strings.HasPrefix(trimmed, "/") {
+		return "", fmt.Errorf("project file path must be relative")
+	}
+
+	normalized := filepath.ToSlash(filepath.Clean(trimmed))
+	if normalized == "." {
+		return "", fmt.Errorf("project file path must not be current directory")
+	}
+	if strings.HasPrefix(normalized, "../") || normalized == ".." {
+		return "", fmt.Errorf("project file path must not escape workspace")
+	}
+
+	return normalized, nil
+}
+
+func shellSingleQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func ensureProjectRuntimeAssets(
+	ctx context.Context,
+	cfg *config.Config,
+	envVars []ProjectRuntimeEnvVar,
+	files []ProjectRuntimeFile,
+) error {
+	if len(envVars) == 0 && len(files) == 0 {
+		return nil
+	}
+
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to locate devcontainer for project runtime injection: %w", err)
+	}
+
+	if len(envVars) > 0 {
+		script, scriptErr := buildProjectRuntimeEnvScript(envVars)
+		if scriptErr != nil {
+			return scriptErr
+		}
+
+		writeCmd := exec.CommandContext(
+			ctx, "docker", "exec", "-u", "root", containerID,
+			"sh", "-c", "mkdir -p /etc/sam && cat > /etc/profile.d/sam-project-env.sh && cp /etc/profile.d/sam-project-env.sh /etc/sam/project-env",
+		)
+		writeCmd.Stdin = strings.NewReader(script)
+		if output, writeErr := writeCmd.CombinedOutput(); writeErr != nil {
+			return fmt.Errorf("failed to write project runtime env script: %w: %s", writeErr, strings.TrimSpace(string(output)))
+		}
+	}
+
+	if len(files) > 0 {
+		baseDir := strings.TrimSpace(cfg.ContainerWorkDir)
+		if baseDir == "" {
+			return fmt.Errorf("container workdir is required to inject project runtime files")
+		}
+
+		for _, file := range files {
+			normalizedPath, normalizeErr := normalizeProjectRuntimeFilePath(file.Path)
+			if normalizeErr != nil {
+				return normalizeErr
+			}
+
+			targetPath := filepath.ToSlash(filepath.Join(baseDir, normalizedPath))
+			targetDir := filepath.ToSlash(filepath.Dir(targetPath))
+
+			writeCmd := exec.CommandContext(
+				ctx, "docker", "exec", "-u", "root", "-i", containerID,
+				"sh", "-c", fmt.Sprintf("mkdir -p %s && cat > %s", shellSingleQuote(targetDir), shellSingleQuote(targetPath)),
+			)
+			writeCmd.Stdin = strings.NewReader(file.Content)
+			if output, writeErr := writeCmd.CombinedOutput(); writeErr != nil {
+				return fmt.Errorf("failed to write project runtime file %s: %w: %s", normalizedPath, writeErr, strings.TrimSpace(string(output)))
+			}
+		}
+	}
+
+	log.Printf("Injected project runtime assets in devcontainer %s (env=%d files=%d)", containerID, len(envVars), len(files))
 	return nil
 }
 

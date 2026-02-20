@@ -136,6 +136,41 @@ export interface UpdateProjectRequest {
   defaultBranch?: string;
 }
 
+export interface ProjectRuntimeEnvVarResponse {
+  key: string;
+  value: string | null;
+  isSecret: boolean;
+  hasValue: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertProjectRuntimeEnvVarRequest {
+  key: string;
+  value: string;
+  isSecret?: boolean;
+}
+
+export interface ProjectRuntimeFileResponse {
+  path: string;
+  content: string | null;
+  isSecret: boolean;
+  hasValue: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertProjectRuntimeFileRequest {
+  path: string;
+  content: string;
+  isSecret?: boolean;
+}
+
+export interface ProjectRuntimeConfigResponse {
+  envVars: ProjectRuntimeEnvVarResponse[];
+  files: ProjectRuntimeFileResponse[];
+}
+
 export type TaskStatus =
   | 'draft'
   | 'ready'
@@ -368,6 +403,7 @@ export interface Workspace {
   id: string;
   nodeId?: string;
   userId: string;
+  projectId?: string | null;
   installationId: string | null;
   name: string;
   displayName?: string;
@@ -400,6 +436,7 @@ export interface BootLogEntry {
 export interface WorkspaceResponse {
   id: string;
   nodeId?: string;
+  projectId?: string | null;
   name: string;
   displayName?: string;
   repository: string;
@@ -420,12 +457,13 @@ export interface WorkspaceResponse {
 
 export interface CreateWorkspaceRequest {
   name: string;
+  projectId?: string;
   nodeId?: string;
-  repository: string;
+  repository?: string;
   branch?: string;
   vmSize?: VMSize;
   vmLocation?: VMLocation;
-  installationId: string;
+  installationId?: string;
   idleTimeoutSeconds?: number;
 }
 
@@ -572,6 +610,24 @@ export interface BootstrapResponse {
   gitUserName?: string | null;
   gitUserEmail?: string | null;
   controlPlaneUrl: string;
+}
+
+export interface WorkspaceRuntimeEnvVar {
+  key: string;
+  value: string;
+  isSecret: boolean;
+}
+
+export interface WorkspaceRuntimeFile {
+  path: string;
+  content: string;
+  isSecret: boolean;
+}
+
+export interface WorkspaceRuntimeAssetsResponse {
+  workspaceId: string;
+  envVars: WorkspaceRuntimeEnvVar[];
+  files: WorkspaceRuntimeFile[];
 }
 
 // =============================================================================

@@ -104,6 +104,18 @@ const decrypted = await crypto.subtle.decrypt(
 const hetznerClient = new HetznerClient(decryptedToken);
 ```
 
+### Decryption (project runtime assets for workspace injection)
+
+Project runtime env vars/files can be marked secret per entry. Secret entries are encrypted at rest in D1 and only decrypted when a workspace requests runtime assets via callback-authenticated API.
+
+Runtime flow:
+
+1. VM agent calls `GET /api/workspaces/:id/runtime-assets` with workspace callback token
+2. Control plane loads workspace `project_id`
+3. Control plane loads `project_runtime_env_vars` and `project_runtime_files`
+4. Secret rows are decrypted in-memory using `ENCRYPTION_KEY`
+5. Decrypted payload is returned over HTTPS for immediate VM injection
+
 ## What This Means
 
 ### Platform Secrets (Cloudflare Worker Secrets)
@@ -127,6 +139,17 @@ These are provided by each user through the Settings UI:
 |------------|---------|-----------------|
 | Hetzner API Token | Provision VMs | Each user |
 | (Future: AWS, GCP, etc.) | Provision resources | Each user |
+
+### Project Runtime Secrets (Encrypted in Database)
+
+Projects support runtime env vars and runtime files as plaintext or secret values:
+
+| Data | Storage | Encryption Behavior |
+|------|---------|---------------------|
+| Runtime env vars | `project_runtime_env_vars` | Secret rows use AES-GCM (`stored_value` + `value_iv`) |
+| Runtime files | `project_runtime_files` | Secret rows use AES-GCM (`stored_content` + `content_iv`) |
+
+Secret values are masked in project runtime-config list responses and only decrypted in callback-authenticated runtime asset responses for workspace provisioning.
 
 ## Security Considerations
 

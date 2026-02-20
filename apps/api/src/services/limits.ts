@@ -2,6 +2,11 @@ import {
   DEFAULT_MAX_AGENT_SESSIONS_PER_WORKSPACE,
   DEFAULT_MAX_NODES_PER_USER,
   DEFAULT_MAX_PROJECTS_PER_USER,
+  DEFAULT_MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES,
+  DEFAULT_MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT,
+  DEFAULT_MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES,
+  DEFAULT_MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH,
+  DEFAULT_MAX_PROJECT_RUNTIME_FILES_PER_PROJECT,
   DEFAULT_MAX_TASK_DEPENDENCIES_PER_TASK,
   DEFAULT_MAX_TASKS_PER_PROJECT,
   DEFAULT_MAX_WORKSPACES_PER_NODE,
@@ -24,6 +29,11 @@ export interface RuntimeLimits {
   maxTaskDependenciesPerTask: number;
   taskListDefaultPageSize: number;
   taskListMaxPageSize: number;
+  maxProjectRuntimeEnvVarsPerProject: number;
+  maxProjectRuntimeFilesPerProject: number;
+  maxProjectRuntimeEnvValueBytes: number;
+  maxProjectRuntimeFileContentBytes: number;
+  maxProjectRuntimeFilePathLength: number;
   taskCallbackTimeoutMs: number;
   taskCallbackRetryMaxAttempts: number;
 }
@@ -48,6 +58,11 @@ export function getRuntimeLimits(env: {
   MAX_TASK_DEPENDENCIES_PER_TASK?: string;
   TASK_LIST_DEFAULT_PAGE_SIZE?: string;
   TASK_LIST_MAX_PAGE_SIZE?: string;
+  MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT?: string;
+  MAX_PROJECT_RUNTIME_FILES_PER_PROJECT?: string;
+  MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES?: string;
+  MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES?: string;
+  MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH?: string;
   TASK_CALLBACK_TIMEOUT_MS?: string;
   TASK_CALLBACK_RETRY_MAX_ATTEMPTS?: string;
 }): RuntimeLimits {
@@ -76,6 +91,26 @@ export function getRuntimeLimits(env: {
     taskListMaxPageSize: parsePositiveInt(
       env.TASK_LIST_MAX_PAGE_SIZE,
       DEFAULT_TASK_LIST_MAX_PAGE_SIZE
+    ),
+    maxProjectRuntimeEnvVarsPerProject: parsePositiveInt(
+      env.MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT,
+      DEFAULT_MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT
+    ),
+    maxProjectRuntimeFilesPerProject: parsePositiveInt(
+      env.MAX_PROJECT_RUNTIME_FILES_PER_PROJECT,
+      DEFAULT_MAX_PROJECT_RUNTIME_FILES_PER_PROJECT
+    ),
+    maxProjectRuntimeEnvValueBytes: parsePositiveInt(
+      env.MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES,
+      DEFAULT_MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES
+    ),
+    maxProjectRuntimeFileContentBytes: parsePositiveInt(
+      env.MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES,
+      DEFAULT_MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES
+    ),
+    maxProjectRuntimeFilePathLength: parsePositiveInt(
+      env.MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH,
+      DEFAULT_MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH
     ),
     taskCallbackTimeoutMs: parsePositiveInt(
       env.TASK_CALLBACK_TIMEOUT_MS,

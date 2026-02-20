@@ -45,6 +45,16 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | `RESOURCE_PREFIX` | Prefix for Cloudflare resources (optional) | `sam` |
 | `PULUMI_STATE_BUCKET` | R2 bucket for Pulumi state (optional) | `sam-pulumi-state` |
 
+**Optional runtime-config limit variables** (GitHub Environment variables):
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT` | Max runtime env vars saved per project | `150` |
+| `MAX_PROJECT_RUNTIME_FILES_PER_PROJECT` | Max runtime files saved per project | `50` |
+| `MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES` | Max bytes per runtime env var value | `8192` |
+| `MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES` | Max bytes per runtime file content | `131072` |
+| `MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH` | Max runtime file path length (chars) | `256` |
+
 **Add environment secrets** (hidden):
 
 | Secret | Description |

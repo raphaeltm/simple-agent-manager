@@ -16,6 +16,7 @@ import type {
   HeartbeatRequest,
   HeartbeatResponse,
   UpdateWorkspaceRequest,
+  WorkspaceRuntimeAssetsResponse,
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
 import { getWorkspaceUrl } from '../services/dns';
@@ -37,6 +38,8 @@ import { recordNodeRoutingMetric } from '../services/telemetry';
 import { getDecryptedAgentKey } from './credentials';
 import { getInstallationToken } from '../services/github-app';
 import { appendBootLog, getBootLogs } from '../services/boot-log';
+import { requireOwnedProject } from '../middleware/project-auth';
+import { decrypt } from '../services/encryption';
 
 const workspacesRoutes = new Hono<{ Bindings: Env }>();
 const ACTIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery'] as const);
@@ -49,6 +52,7 @@ workspacesRoutes.use('/*', async (c, next) => {
     path.endsWith('/agent-key') ||
     path.endsWith('/agent-settings') ||
     path.endsWith('/runtime') ||
+    path.endsWith('/runtime-assets') ||
     path.endsWith('/git-token') ||
     path.endsWith('/boot-log') ||
     path.endsWith('/provisioning-failed')
@@ -63,6 +67,7 @@ function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): Workspac
   return {
     id: ws.id,
     nodeId: ws.nodeId ?? undefined,
+    projectId: ws.projectId,
     displayName: ws.displayName ?? ws.name,
     name: ws.name,
     repository: ws.repository,
@@ -152,6 +157,92 @@ async function getOwnedNode(
   }
 
   return node;
+}
+
+async function getWorkspaceRuntimeAssets(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspaceId: string,
+  encryptionKey: string
+): Promise<WorkspaceRuntimeAssetsResponse> {
+  const workspaceRows = await db
+    .select({ id: schema.workspaces.id, userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+
+  const workspace = workspaceRows[0];
+  if (!workspace) {
+    throw errors.notFound('Workspace');
+  }
+
+  if (!workspace.projectId) {
+    return {
+      workspaceId: workspace.id,
+      envVars: [],
+      files: [],
+    };
+  }
+
+  const [envRows, fileRows] = await Promise.all([
+    db
+      .select({
+        key: schema.projectRuntimeEnvVars.envKey,
+        storedValue: schema.projectRuntimeEnvVars.storedValue,
+        valueIv: schema.projectRuntimeEnvVars.valueIv,
+        isSecret: schema.projectRuntimeEnvVars.isSecret,
+      })
+      .from(schema.projectRuntimeEnvVars)
+      .where(
+        and(
+          eq(schema.projectRuntimeEnvVars.projectId, workspace.projectId),
+          eq(schema.projectRuntimeEnvVars.userId, workspace.userId)
+        )
+      ),
+    db
+      .select({
+        path: schema.projectRuntimeFiles.filePath,
+        storedContent: schema.projectRuntimeFiles.storedContent,
+        contentIv: schema.projectRuntimeFiles.contentIv,
+        isSecret: schema.projectRuntimeFiles.isSecret,
+      })
+      .from(schema.projectRuntimeFiles)
+      .where(
+        and(
+          eq(schema.projectRuntimeFiles.projectId, workspace.projectId),
+          eq(schema.projectRuntimeFiles.userId, workspace.userId)
+        )
+      ),
+  ]);
+
+  const envVars: WorkspaceRuntimeAssetsResponse['envVars'] = [];
+  for (const row of envRows) {
+    const value = row.isSecret
+      ? await decrypt(row.storedValue, row.valueIv ?? '', encryptionKey)
+      : row.storedValue;
+    envVars.push({
+      key: row.key,
+      value,
+      isSecret: row.isSecret,
+    });
+  }
+
+  const files: WorkspaceRuntimeAssetsResponse['files'] = [];
+  for (const row of fileRows) {
+    const content = row.isSecret
+      ? await decrypt(row.storedContent, row.contentIv ?? '', encryptionKey)
+      : row.storedContent;
+    files.push({
+      path: row.path,
+      content,
+      isSecret: row.isSecret,
+    });
+  }
+
+  return {
+    workspaceId: workspace.id,
+    envVars,
+    files,
+  };
 }
 
 function assertNodeOperational(node: schema.Node, action: string): void {
@@ -316,11 +407,31 @@ workspacesRoutes.post('/', async (c) => {
   const body = await c.req.json<CreateWorkspaceRequest>();
   const now = new Date().toISOString();
   const limits = getRuntimeLimits(c.env);
-  const normalizedRepository = body.repository?.trim().toLowerCase() || null;
+  const projectId = body.projectId?.trim() || null;
+  const workspaceName = body.name?.trim();
 
-  if (!body.name?.trim() || !body.repository?.trim() || !body.installationId) {
-    throw errors.badRequest('name, repository, and installationId are required');
+  if (!workspaceName) {
+    throw errors.badRequest('name is required');
   }
+
+  let resolvedInstallationId = body.installationId?.trim() || '';
+  let resolvedRepository = body.repository?.trim() || '';
+  let resolvedBranch = body.branch?.trim() || 'main';
+  let linkedProject: schema.Project | null = null;
+
+  if (projectId) {
+    linkedProject = await requireOwnedProject(db, projectId, userId);
+    resolvedInstallationId = linkedProject.installationId;
+    resolvedRepository = linkedProject.repository;
+    if (!body.branch?.trim()) {
+      resolvedBranch = linkedProject.defaultBranch;
+    }
+  }
+
+  if (!resolvedRepository || !resolvedInstallationId) {
+    throw errors.badRequest('repository and installationId are required');
+  }
+  const normalizedRepository = resolvedRepository.toLowerCase();
 
   // Use COUNT instead of fetching all IDs (P1 fix).
   const [userWorkspaceCount] = await db
@@ -336,7 +447,7 @@ workspacesRoutes.post('/', async (c) => {
     .from(schema.githubInstallations)
     .where(
       and(
-        eq(schema.githubInstallations.id, body.installationId),
+        eq(schema.githubInstallations.id, resolvedInstallationId),
         eq(schema.githubInstallations.userId, userId)
       )
     )
@@ -347,7 +458,7 @@ workspacesRoutes.post('/', async (c) => {
 
   const vmSize = body.vmSize ?? 'medium';
   const vmLocation = body.vmLocation ?? 'nbg1';
-  const branch = body.branch?.trim() || 'main';
+  const branch = resolvedBranch;
 
   let nodeId = body.nodeId;
   let mustProvisionNode = false;
@@ -370,7 +481,7 @@ workspacesRoutes.post('/', async (c) => {
 
     const createdNode = await createNodeRecord(c.env, {
       userId,
-      name: `${body.name.trim()} Node`,
+      name: `${workspaceName} Node`,
       vmSize,
       vmLocation,
       heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
@@ -395,7 +506,7 @@ workspacesRoutes.post('/', async (c) => {
     throw errors.badRequest(`Maximum ${limits.maxWorkspacesPerNode} workspaces allowed per node`);
   }
 
-  const uniqueName = await resolveUniqueWorkspaceDisplayName(db, targetNodeId, body.name);
+  const uniqueName = await resolveUniqueWorkspaceDisplayName(db, targetNodeId, workspaceName);
   const idleTimeoutSeconds = body.idleTimeoutSeconds ?? getIdleTimeoutSeconds(c.env);
   if (idleTimeoutSeconds < 0 || idleTimeoutSeconds > 86400) {
     throw errors.badRequest('idleTimeoutSeconds must be between 0 and 86400');
@@ -406,12 +517,13 @@ workspacesRoutes.post('/', async (c) => {
   await db.insert(schema.workspaces).values({
     id: workspaceId,
     nodeId: targetNodeId,
+    projectId: linkedProject?.id ?? null,
     userId,
-    installationId: body.installationId,
-    name: body.name,
+    installationId: resolvedInstallationId,
+    name: workspaceName,
     displayName: uniqueName.displayName,
     normalizedDisplayName: uniqueName.normalizedDisplayName,
-    repository: body.repository,
+    repository: resolvedRepository,
     branch,
     status: 'creating',
     vmSize,
@@ -504,7 +616,7 @@ workspacesRoutes.post('/', async (c) => {
         workspaceId,
         targetNodeId,
         userId,
-        body.repository,
+        resolvedRepository,
         branch,
         auth.user.name,
         auth.user.email
@@ -1144,6 +1256,7 @@ workspacesRoutes.get('/:id/runtime', async (c) => {
       id: schema.workspaces.id,
       repository: schema.workspaces.repository,
       branch: schema.workspaces.branch,
+      projectId: schema.workspaces.projectId,
       status: schema.workspaces.status,
       nodeId: schema.workspaces.nodeId,
     })
@@ -1160,9 +1273,18 @@ workspacesRoutes.get('/:id/runtime', async (c) => {
     workspaceId: workspace.id,
     repository: workspace.repository,
     branch: workspace.branch,
+    projectId: workspace.projectId,
     status: workspace.status,
     nodeId: workspace.nodeId,
   });
+});
+
+workspacesRoutes.get('/:id/runtime-assets', async (c) => {
+  const workspaceId = c.req.param('id');
+  await verifyWorkspaceCallbackAuth(c, workspaceId);
+  const db = drizzle(c.env.DATABASE, { schema });
+  const assets = await getWorkspaceRuntimeAssets(db, workspaceId, c.env.ENCRYPTION_KEY);
+  return c.json(assets);
 });
 
 workspacesRoutes.post('/:id/git-token', async (c) => {

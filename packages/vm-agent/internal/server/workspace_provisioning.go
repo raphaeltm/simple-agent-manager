@@ -85,10 +85,17 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 		log.Printf("Workspace %s: proceeding without git token: %v", runtime.ID, err)
 	}
 
+	runtimeAssets, err := s.fetchProjectRuntimeAssetsForWorkspace(provisionCtx, runtime.ID, callbackToken)
+	if err != nil {
+		return false, fmt.Errorf("failed to fetch project runtime assets: %w", err)
+	}
+
 	recoveryMode, err := prepareWorkspaceForRuntime(provisionCtx, &cfg, bootstrap.ProvisionState{
-		GitHubToken:  gitToken,
-		GitUserName:  runtime.GitUserName,
-		GitUserEmail: runtime.GitUserEmail,
+		GitHubToken:    gitToken,
+		GitUserName:    runtime.GitUserName,
+		GitUserEmail:   runtime.GitUserEmail,
+		ProjectEnvVars: runtimeAssets.EnvVars,
+		ProjectFiles:   runtimeAssets.Files,
 	})
 	if err != nil {
 		return false, err
@@ -146,6 +153,13 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 			state.GitHubToken = gitToken
 		}
 	}
+
+	runtimeAssets, assetsErr := s.fetchProjectRuntimeAssetsForWorkspace(recoveryCtx, runtime.ID, callbackToken)
+	if assetsErr != nil {
+		return fmt.Errorf("failed to fetch project runtime assets: %w", assetsErr)
+	}
+	state.ProjectEnvVars = runtimeAssets.EnvVars
+	state.ProjectFiles = runtimeAssets.Files
 
 	_, err := prepareWorkspaceForRuntime(recoveryCtx, &cfg, state)
 	if err != nil {

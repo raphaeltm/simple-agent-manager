@@ -90,6 +90,21 @@ export const DEFAULT_TASK_CALLBACK_TIMEOUT_MS = 10000;
 /** Default retry attempts for delegated task callback processing. */
 export const DEFAULT_TASK_CALLBACK_RETRY_MAX_ATTEMPTS = 3;
 
+/** Default max runtime env vars per project. Override via MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT env var. */
+export const DEFAULT_MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT = 150;
+
+/** Default max runtime files per project. Override via MAX_PROJECT_RUNTIME_FILES_PER_PROJECT env var. */
+export const DEFAULT_MAX_PROJECT_RUNTIME_FILES_PER_PROJECT = 50;
+
+/** Default max runtime env var value size in bytes. Override via MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES env var. */
+export const DEFAULT_MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES = 8 * 1024;
+
+/** Default max runtime file content size in bytes. Override via MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES env var. */
+export const DEFAULT_MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES = 128 * 1024;
+
+/** Default max runtime file path length. Override via MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH env var. */
+export const DEFAULT_MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH = 256;
+
 /** Default idle timeout in seconds (30 minutes). Override via IDLE_TIMEOUT_SECONDS env var. */
 export const DEFAULT_IDLE_TIMEOUT_SECONDS = 30 * 60;
 

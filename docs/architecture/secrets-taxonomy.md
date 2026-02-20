@@ -74,6 +74,8 @@ These are provided by individual users through the application UI.
 | Credential | Purpose | Storage |
 |------------|---------|---------|
 | Hetzner API Token | Provision VMs for workspaces | `credentials` table, encrypted |
+| Project runtime env var values (secret entries) | Inject runtime env vars into project-launched workspaces | `project_runtime_env_vars`, encrypted |
+| Project runtime file content (secret entries) | Inject runtime files into project-launched workspaces | `project_runtime_files`, encrypted |
 
 ### How User Credentials Are Stored
 
@@ -81,6 +83,10 @@ These are provided by individual users through the application UI.
 -- Each user has their own encrypted credentials
 INSERT INTO credentials (id, user_id, provider, encrypted_token, iv, ...)
 VALUES ('cred_123', 'user_456', 'hetzner', '<encrypted>', '<iv>', ...);
+
+-- Project runtime env/file secret entries use the same AES-GCM pattern
+-- project_runtime_env_vars(stored_value, value_iv, is_secret)
+-- project_runtime_files(stored_content, content_iv, is_secret)
 ```
 
 ### Access Pattern
@@ -150,6 +156,7 @@ Set via `wrangler secret put` or deployment workflow:
 
 - Store platform secrets in Cloudflare Worker Secrets
 - Encrypt user credentials with AES-GCM before storing in D1
+- Encrypt project runtime secret values with AES-GCM before storing in D1
 - Always filter user credentials by `user_id`
 - Use unique IV for each encrypted credential
 - Rotate keys when compromised

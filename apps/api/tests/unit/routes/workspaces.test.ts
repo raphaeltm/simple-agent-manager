@@ -28,9 +28,7 @@ describe('workspaces routes source contract', () => {
   });
 
   it('uses DB-backed node-scoped unique display names for create and rename', () => {
-    expect(file).toContain(
-      'const uniqueName = await resolveUniqueWorkspaceDisplayName(db, targetNodeId, body.name)'
-    );
+    expect(file).toContain('const uniqueName = await resolveUniqueWorkspaceDisplayName(db, targetNodeId, workspaceName)');
     expect(file).toContain('resolveUniqueWorkspaceDisplayName(');
     expect(file).toContain('nodeScopeId');
     expect(schemaFile).toContain('idx_workspaces_node_display_name_unique');
@@ -66,7 +64,9 @@ describe('workspaces routes source contract', () => {
 
   it('exposes callback-auth runtime metadata for node recovery', () => {
     expect(file).toContain("path.endsWith('/runtime')");
+    expect(file).toContain("path.endsWith('/runtime-assets')");
     expect(file).toContain("workspacesRoutes.get('/:id/runtime'");
+    expect(file).toContain("workspacesRoutes.get('/:id/runtime-assets'");
     expect(file).toContain('repository: schema.workspaces.repository');
     expect(file).toContain('branch: schema.workspaces.branch');
   });
@@ -75,5 +75,11 @@ describe('workspaces routes source contract', () => {
     expect(file).toContain('waitForNodeAgentReady');
     expect(file).toContain("provisionedNode.status !== 'running'");
     expect(file).toContain('Node agent not reachable after provisioning');
+  });
+
+  it('supports launching workspaces directly from project context', () => {
+    expect(file).toContain('const projectId = body.projectId?.trim() || null');
+    expect(file).toContain('requireOwnedProject');
+    expect(file).toContain('projectId: linkedProject?.id ?? null');
   });
 });
