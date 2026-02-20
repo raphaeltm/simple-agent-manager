@@ -140,7 +140,7 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create thin Gateway relay (reads WebSocket messages, routes to SessionHost)
-	gateway := acp.NewGateway(host, conn, viewerID)
+	gateway := acp.NewGateway(host, conn, viewerID, viewer.Done())
 
 	s.appendNodeEvent(workspaceID, "info", "agent.websocket_connected", "Agent WebSocket connected", map[string]interface{}{
 		"sessionId":          requestedSessionID,

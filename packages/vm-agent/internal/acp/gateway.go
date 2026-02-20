@@ -114,17 +114,22 @@ type Gateway struct {
 	host     *SessionHost
 	viewerID string
 	conn     *websocket.Conn
+	// viewerDone is closed when the viewer's write pump exits (write failure).
+	// The read loop selects on this to exit immediately instead of waiting for
+	// the read deadline (40s) to expire.
+	viewerDone <-chan struct{}
 
 	mu     sync.Mutex
 	closed bool
 }
 
 // NewGateway creates a new Gateway that relays WebSocket messages to a SessionHost.
-func NewGateway(host *SessionHost, conn *websocket.Conn, viewerID string) *Gateway {
+func NewGateway(host *SessionHost, conn *websocket.Conn, viewerID string, viewerDone <-chan struct{}) *Gateway {
 	return &Gateway{
-		host:     host,
-		viewerID: viewerID,
-		conn:     conn,
+		host:       host,
+		viewerID:   viewerID,
+		conn:       conn,
+		viewerDone: viewerDone,
 	}
 }
 
@@ -198,43 +203,76 @@ func (g *Gateway) Run(ctx context.Context) error {
 		}
 	}()
 
-	// Read WebSocket messages and route to SessionHost
+	// Read WebSocket messages and route to SessionHost.
+	// We use a goroutine for reading because ReadMessage() is blocking and
+	// we need to also select on viewerDone (write pump failure) and ctx.Done().
+	type readResult struct {
+		msgType int
+		data    []byte
+		err     error
+	}
+	readCh := make(chan readResult, 1)
+
+	go func() {
+		for {
+			msgType, data, err := g.conn.ReadMessage()
+			readCh <- readResult{msgType, data, err}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		default:
-		}
-
-		msgType, data, err := g.conn.ReadMessage()
-		if err != nil {
-			g.mu.Lock()
-			wasClosed := g.closed
-			g.mu.Unlock()
-			if wasClosed || websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				return nil
+		case <-g.viewerDone:
+			// Write pump died — connection is broken, exit immediately
+			return fmt.Errorf("viewer write pump closed")
+		case msg := <-readCh:
+			if msg.err != nil {
+				g.mu.Lock()
+				wasClosed := g.closed
+				g.mu.Unlock()
+				if wasClosed || websocket.IsCloseError(msg.err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					return nil
+				}
+				return fmt.Errorf("WebSocket read error: %w", msg.err)
 			}
-			return fmt.Errorf("WebSocket read error: %w", err)
+
+			// Reset read deadline on any message
+			g.conn.SetReadDeadline(time.Now().Add(pi + pt))
+
+			if msg.msgType != websocket.TextMessage {
+				continue
+			}
+
+			g.handleMessage(ctx, msg.data)
 		}
-
-		// Reset read deadline on any message
-		g.conn.SetReadDeadline(time.Now().Add(pi + pt))
-
-		if msgType != websocket.TextMessage {
-			continue
-		}
-
-		g.handleMessage(ctx, data)
 	}
 }
 
 // handleMessage parses a WebSocket message and routes it to the SessionHost.
 func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
-	// Check for select_agent control message
-	var control SelectAgentMessage
+	// Check for control messages (select_agent, ping)
+	var control struct {
+		Type string `json:"type"`
+	}
 	if err := json.Unmarshal(data, &control); err == nil {
-		if control.Type == MsgSelectAgent {
-			go g.host.SelectAgent(ctx, control.AgentType)
+		switch ControlMessageType(control.Type) {
+		case MsgSelectAgent:
+			var selectMsg SelectAgentMessage
+			if err := json.Unmarshal(data, &selectMsg); err == nil {
+				go g.host.SelectAgent(ctx, selectMsg.AgentType)
+			}
+			return
+		case MsgPing:
+			// Application-level keepalive: respond with pong via the viewer's
+			// send channel so the message flows through the same write path as
+			// all other data. This works through any proxy (Cloudflare, etc.)
+			// because it is a regular data frame, not a WebSocket control frame.
+			g.host.SendPongToViewer(g.viewerID)
 			return
 		}
 	}

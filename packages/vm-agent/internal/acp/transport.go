@@ -23,6 +23,12 @@ const (
 	MsgSessionPrompting ControlMessageType = "session_prompting"
 	// MsgSessionPromptDone is broadcast to all viewers when a prompt completes.
 	MsgSessionPromptDone ControlMessageType = "session_prompt_done"
+	// MsgPing is an application-level keepalive sent by the browser.
+	// The server responds with MsgPong. This works through any proxy
+	// (Cloudflare, etc.) because it uses regular data frames.
+	MsgPing ControlMessageType = "ping"
+	// MsgPong is the server's response to MsgPing.
+	MsgPong ControlMessageType = "pong"
 )
 
 // AgentStatus represents the lifecycle state of an agent session.
@@ -94,6 +100,10 @@ func ParseWebSocketMessage(data []byte) (isControl bool, controlType ControlMess
 		return true, MsgSessionPrompting
 	case MsgSessionPromptDone:
 		return true, MsgSessionPromptDone
+	case MsgPing:
+		return true, MsgPing
+	case MsgPong:
+		return true, MsgPong
 	default:
 		// Not a control message — treat as ACP JSON-RPC
 		return false, ""

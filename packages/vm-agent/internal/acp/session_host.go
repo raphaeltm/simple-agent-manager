@@ -78,6 +78,12 @@ type Viewer struct {
 	once   sync.Once
 }
 
+// Done returns a channel that is closed when the viewer's write pump exits.
+// Used by the Gateway to detect write failures and exit its read loop promptly.
+func (v *Viewer) Done() <-chan struct{} {
+	return v.done
+}
+
 // SessionHost manages a single ACP agent session independently of any
 // browser WebSocket connection. It owns the agent process, the ACP SDK
 // connection, and a message buffer for late-join replay.
@@ -1101,8 +1107,16 @@ func (h *SessionHost) sendToViewerPriority(viewer *Viewer, data []byte) {
 }
 
 // viewerWritePump drains the viewer's send channel and writes to its WebSocket.
+// On write failure, it signals done so the Gateway read loop exits immediately
+// instead of waiting for a read deadline timeout.
 func (h *SessionHost) viewerWritePump(viewer *Viewer) {
-	defer viewer.conn.Close()
+	defer func() {
+		// Signal done BEFORE closing the connection so the Gateway read loop
+		// can detect the failure immediately via the done channel select case,
+		// rather than waiting for the read deadline (40s) to expire.
+		viewer.once.Do(func() { close(viewer.done) })
+		viewer.conn.Close()
+	}()
 
 	for {
 		select {
@@ -1120,6 +1134,18 @@ func (h *SessionHost) viewerWritePump(viewer *Viewer) {
 		case <-h.ctx.Done():
 			return
 		}
+	}
+}
+
+// SendPongToViewer sends an application-level pong response to a specific viewer.
+// This does NOT go through the message buffer — keepalive messages are transient.
+func (h *SessionHost) SendPongToViewer(viewerID string) {
+	data, _ := json.Marshal(map[string]string{"type": string(MsgPong)})
+	h.viewerMu.RLock()
+	viewer, ok := h.viewers[viewerID]
+	h.viewerMu.RUnlock()
+	if ok {
+		h.sendToViewerPriority(viewer, data)
 	}
 }
 

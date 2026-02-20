@@ -45,6 +45,16 @@ export interface SessionPromptDoneMessage {
   type: 'session_prompt_done';
 }
 
+/** Application-level ping sent by browser to VM Agent */
+export interface PingMessage {
+  type: 'ping';
+}
+
+/** Application-level pong sent by VM Agent in response to ping */
+export interface PongMessage {
+  type: 'pong';
+}
+
 /** Union of all control messages (non-ACP) */
 export type ControlMessage =
   | AgentStatusMessage
@@ -52,7 +62,9 @@ export type ControlMessage =
   | SessionStateMessage
   | SessionReplayCompleteMessage
   | SessionPromptingMessage
-  | SessionPromptDoneMessage;
+  | SessionPromptDoneMessage
+  | PingMessage
+  | PongMessage;
 
 /** All known control message type strings */
 const CONTROL_MESSAGE_TYPES = new Set([
@@ -62,6 +74,8 @@ const CONTROL_MESSAGE_TYPES = new Set([
   'session_replay_complete',
   'session_prompting',
   'session_prompt_done',
+  'ping',
+  'pong',
 ]);
 
 /** Check if a parsed message is a control message (vs ACP JSON-RPC) */

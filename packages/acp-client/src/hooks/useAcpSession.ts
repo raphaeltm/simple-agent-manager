@@ -4,9 +4,9 @@ import { createAcpWebSocketTransport } from '../transport/websocket';
 import type { AcpTransport } from '../transport/websocket';
 
 /** Default reconnection delay in ms */
-const DEFAULT_RECONNECT_DELAY_MS = 2000;
+const DEFAULT_RECONNECT_DELAY_MS = 1000;
 /** Default total reconnection timeout in ms */
-const DEFAULT_RECONNECT_TIMEOUT_MS = 30000;
+const DEFAULT_RECONNECT_TIMEOUT_MS = 60000;
 /** Default maximum reconnection delay cap in ms */
 const DEFAULT_RECONNECT_MAX_DELAY_MS = 16000;
 
