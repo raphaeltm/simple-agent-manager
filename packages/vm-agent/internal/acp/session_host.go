@@ -218,11 +218,14 @@ func (h *SessionHost) AttachViewer(id string, conn *websocket.Conn) *Viewer {
 	// Signal replay complete
 	h.sendToViewerPriority(viewer, h.marshalControl(MsgSessionReplayDone, nil))
 
-	// Send a post-replay authoritative state snapshot.
+	// Send a post-replay authoritative state snapshot with replayCount=0.
 	// This closes the race where prompt status changes during replay and the
-	// initial pre-replay snapshot becomes stale.
+	// initial pre-replay snapshot becomes stale. replayCount MUST be 0 because
+	// the replay has already been delivered — a non-zero value would cause the
+	// browser to re-enter replay mode, calling prepareForReplay() which wipes
+	// all just-replayed messages.
 	finalStatus, finalAgentType, finalErr := h.currentSessionState()
-	h.sendToViewerPriority(viewer, h.marshalSessionState(finalStatus, finalAgentType, finalErr))
+	h.sendToViewerPriority(viewer, h.marshalSessionStateWithReplayCount(finalStatus, finalAgentType, finalErr, 0))
 
 	return viewer
 }
@@ -1021,14 +1024,41 @@ func (h *SessionHost) broadcastControl(msgType ControlMessageType, extra map[str
 }
 
 // replayToViewer sends all buffered messages to a newly attached viewer.
+// Uses a blocking send with timeout to avoid silently dropping messages when
+// the viewer's send channel fills faster than the write pump can drain it.
 func (h *SessionHost) replayToViewer(viewer *Viewer) {
 	h.bufMu.RLock()
 	messages := make([]BufferedMessage, len(h.messageBuf))
 	copy(messages, h.messageBuf)
 	h.bufMu.RUnlock()
 
+	dropped := 0
 	for _, msg := range messages {
-		h.sendToViewer(viewer, msg.Data)
+		if !h.sendToViewerWithTimeout(viewer, msg.Data, 5*time.Second) {
+			dropped++
+			break // viewer gone or persistently blocked — stop replay
+		}
+	}
+	if dropped > 0 {
+		log.Printf("SessionHost[%s]: viewer %s replay aborted (%d/%d messages delivered)",
+			h.config.SessionID, viewer.ID, len(messages)-dropped, len(messages))
+	}
+}
+
+// sendToViewerWithTimeout sends a message with a blocking timeout.
+// Returns true if sent, false if the viewer is gone or the timeout expired.
+func (h *SessionHost) sendToViewerWithTimeout(viewer *Viewer, data []byte, timeout time.Duration) bool {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case viewer.sendCh <- data:
+		return true
+	case <-viewer.done:
+		return false
+	case <-timer.C:
+		log.Printf("SessionHost[%s]: viewer %s replay send timed out after %s",
+			h.config.SessionID, viewer.ID, timeout)
+		return false
 	}
 }
 
@@ -1109,9 +1139,18 @@ func (h *SessionHost) sendJSONRPCErrorToViewer(viewerID string, reqID json.RawMe
 // --- Internal: message marshaling ---
 
 func (h *SessionHost) marshalSessionState(status SessionHostStatus, agentType, errMsg string) []byte {
-	h.bufMu.RLock()
-	replayCount := len(h.messageBuf)
-	h.bufMu.RUnlock()
+	return h.marshalSessionStateWithReplayCount(status, agentType, errMsg, -1)
+}
+
+// marshalSessionStateWithReplayCount marshals a session_state message.
+// If replayCountOverride >= 0, it is used as-is; otherwise the actual buffer length is used.
+func (h *SessionHost) marshalSessionStateWithReplayCount(status SessionHostStatus, agentType, errMsg string, replayCountOverride int) []byte {
+	replayCount := replayCountOverride
+	if replayCount < 0 {
+		h.bufMu.RLock()
+		replayCount = len(h.messageBuf)
+		h.bufMu.RUnlock()
+	}
 
 	msg := SessionStateMessage{
 		Type:        MsgSessionState,

@@ -146,6 +146,11 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
   // Track prompt completion observed during replay so replay_complete does not
   // restore a stale prompting snapshot captured before replay started.
   const replaySawPromptDoneRef = useRef(false);
+  // Guard against re-entering replay mode after a replay has just completed.
+  // Set to true in handleSessionReplayComplete, cleared on new WebSocket connection.
+  // Prevents a post-replay session_state with stale replayCount > 0 from
+  // triggering prepareForReplay() and wiping all just-replayed messages.
+  const replayCompletedRef = useRef(false);
   // Track most recent URL used for connection attempts.
   const connectUrlRef = useRef<string | null>(wsUrl);
 
@@ -241,10 +246,13 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       setReplaying(false);
     } else if (status === 'ready' || status === 'prompting') {
       // Agent is running — we'll receive buffered messages, then replay_complete
-      if (msg.replayCount > 0) {
+      if (msg.replayCount > 0 && !replayCompletedRef.current) {
         // Clear conversation items SYNCHRONOUSLY before replay messages arrive.
         // This avoids the race where useEffect-based clear runs after replay
         // messages have already been appended (causing jumbled/duplicate text).
+        // The replayCompletedRef guard prevents the post-replay authoritative
+        // session_state snapshot (which has stale replayCount > 0) from
+        // triggering a second clear that would wipe all just-replayed messages.
         onPrepareForReplayRef.current?.();
         replaySawPromptDoneRef.current = false;
         setState('replaying');
@@ -272,6 +280,10 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     const serverStatus = serverStatusRef.current;
     const sawPromptDone = replaySawPromptDoneRef.current;
     replaySawPromptDoneRef.current = false;
+    // Mark replay as completed so subsequent session_state messages with stale
+    // replayCount > 0 (e.g., the post-replay authoritative snapshot) do not
+    // trigger another prepareForReplay cycle that would wipe all messages.
+    replayCompletedRef.current = true;
     logLifecycle('info', 'Session replay complete', { serverStatus, sawPromptDone });
     setReplaying(false);
     // Restore the server-reported status instead of unconditionally going to
@@ -313,6 +325,9 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       reconnectAttemptRef.current = 0;
       reconnectStartRef.current = 0;
       wasConnectedRef.current = true;
+      // Reset the replay-completed guard so the new connection's first
+      // session_state with replayCount > 0 correctly enters replay mode.
+      replayCompletedRef.current = false;
       // Stay in 'connecting' until we receive session_state from the server.
       // The server will send session_state immediately after the viewer
       // attaches, telling us whether an agent is already running.

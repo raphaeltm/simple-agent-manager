@@ -127,7 +127,7 @@ func TestSessionHost_AttachDetachViewer(t *testing.T) {
 		t.Fatalf("second message type = %v, want %s", replayDone["type"], MsgSessionReplayDone)
 	}
 
-	// Read post-replay authoritative session_state
+	// Read post-replay authoritative session_state — must have replayCount=0
 	_, msg3, err := clientConn.ReadMessage()
 	if err != nil {
 		t.Fatalf("read post-replay session_state: %v", err)
@@ -138,6 +138,9 @@ func TestSessionHost_AttachDetachViewer(t *testing.T) {
 	}
 	if postStateMsg.Type != MsgSessionState {
 		t.Fatalf("third message type = %s, want %s", postStateMsg.Type, MsgSessionState)
+	}
+	if postStateMsg.ReplayCount != 0 {
+		t.Fatalf("post-replay session_state replayCount = %d, want 0", postStateMsg.ReplayCount)
 	}
 
 	// Detach viewer
@@ -311,10 +314,83 @@ func TestSessionHost_LateJoinReplay(t *testing.T) {
 		t.Fatalf("expected session_replay_complete, got type=%v", done["type"])
 	}
 
-	// 6. post-replay session_state
+	// 6. post-replay session_state — must have replayCount=0
 	postState := readAndParse("post-replay session_state")
 	if postState["type"] != string(MsgSessionState) {
 		t.Fatalf("expected session_state, got type=%v", postState["type"])
+	}
+	postReplayCount := int(postState["replayCount"].(float64))
+	if postReplayCount != 0 {
+		t.Fatalf("post-replay session_state replayCount = %d, want 0 (non-zero would trigger double-clear on browser)", postReplayCount)
+	}
+}
+
+// TestSessionHost_ReplayDoesNotDropMessages verifies that replay delivers all
+// buffered messages even when the buffer exceeds the viewer's send channel
+// capacity (previously messages were silently dropped by non-blocking sends).
+func TestSessionHost_ReplayDoesNotDropMessages(t *testing.T) {
+	t.Parallel()
+
+	// Use a small send buffer to test the blocking replay path
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:   "test-session",
+			WorkspaceID: "test-workspace",
+		},
+		MessageBufferSize: 500,
+		ViewerSendBuffer:  8, // Much smaller than message count
+	})
+	defer host.Stop()
+
+	// Fill buffer with more messages than the send channel capacity
+	const messageCount = 50
+	for i := 0; i < messageCount; i++ {
+		msg, _ := json.Marshal(map[string]int{"seq": i})
+		host.broadcastMessage(msg)
+	}
+
+	serverConn, clientConn := testWSPair(t)
+	host.AttachViewer("replay-v1", serverConn)
+
+	clientConn.SetReadDeadline(time.Now().Add(10 * time.Second))
+
+	// Read session_state (pre-replay)
+	_, raw, err := clientConn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read session_state: %v", err)
+	}
+	var stateMsg SessionStateMessage
+	if err := json.Unmarshal(raw, &stateMsg); err != nil {
+		t.Fatalf("unmarshal session_state: %v", err)
+	}
+	if stateMsg.ReplayCount != messageCount {
+		t.Fatalf("pre-replay replayCount = %d, want %d", stateMsg.ReplayCount, messageCount)
+	}
+
+	// Read all replay messages
+	receivedCount := 0
+	for {
+		_, raw, err = clientConn.ReadMessage()
+		if err != nil {
+			t.Fatalf("read replay message: %v", err)
+		}
+		var parsed map[string]interface{}
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			t.Fatalf("parse message: %v", err)
+		}
+		// Check if this is the replay_complete control message
+		if parsed["type"] == string(MsgSessionReplayDone) {
+			break
+		}
+		// Check if this is a control message (session_state, etc.) — skip
+		if _, isType := parsed["type"]; isType {
+			continue
+		}
+		receivedCount++
+	}
+
+	if receivedCount != messageCount {
+		t.Fatalf("received %d replay messages, want %d (messages were dropped)", receivedCount, messageCount)
 	}
 }
 

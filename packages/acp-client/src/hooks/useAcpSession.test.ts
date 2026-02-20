@@ -581,3 +581,118 @@ describe('useAcpSession resolver-driven URL refresh', () => {
     expect(resolveWsUrl).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('useAcpSession post-replay session_state guard', () => {
+  it('does NOT re-enter replay when post-replay session_state has replayCount > 0', async () => {
+    const onPrepareForReplay = vi.fn();
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+      onPrepareForReplay,
+    }));
+
+    const ws = MockWebSocket.instances[0]!;
+
+    // 1. Connect and receive pre-replay session_state
+    act(() => {
+      ws.emitOpen();
+      ws.emitMessage({
+        type: 'session_state',
+        status: 'ready',
+        agentType: 'claude-code',
+        replayCount: 10,
+      });
+    });
+
+    expect(onPrepareForReplay).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(result.current.state).toBe('replaying');
+    });
+
+    // 2. Replay complete
+    act(() => {
+      ws.emitMessage({ type: 'session_replay_complete' });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('ready');
+      expect(result.current.replaying).toBe(false);
+    });
+
+    // 3. Post-replay session_state arrives with stale replayCount > 0
+    //    This MUST NOT trigger prepareForReplay or re-enter replaying
+    act(() => {
+      ws.emitMessage({
+        type: 'session_state',
+        status: 'ready',
+        agentType: 'claude-code',
+        replayCount: 10,
+      });
+    });
+
+    // Should NOT have called prepareForReplay again
+    expect(onPrepareForReplay).toHaveBeenCalledTimes(1);
+    // Should still be in ready state
+    expect(result.current.state).toBe('ready');
+    expect(result.current.replaying).toBe(false);
+  });
+
+  it('allows replay on a new connection after a previous replay completed', async () => {
+    const onPrepareForReplay = vi.fn();
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+      onPrepareForReplay,
+    }));
+
+    const ws1 = MockWebSocket.instances[0]!;
+
+    // First connection: full replay cycle
+    act(() => {
+      ws1.emitOpen();
+      ws1.emitMessage({
+        type: 'session_state',
+        status: 'ready',
+        agentType: 'claude-code',
+        replayCount: 5,
+      });
+    });
+
+    expect(onPrepareForReplay).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      ws1.emitMessage({ type: 'session_replay_complete' });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('ready');
+    });
+
+    // Disconnect
+    act(() => ws1.close());
+
+    // Simulate reconnect via visibilitychange
+    act(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', writable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    const ws2 = MockWebSocket.instances[MockWebSocket.instances.length - 1]!;
+    expect(ws2).not.toBe(ws1);
+
+    // Second connection: replay guard should be reset, allowing fresh replay
+    act(() => {
+      ws2.emitOpen();
+      ws2.emitMessage({
+        type: 'session_state',
+        status: 'ready',
+        agentType: 'claude-code',
+        replayCount: 5,
+      });
+    });
+
+    // Should have called prepareForReplay again for the new connection
+    expect(onPrepareForReplay).toHaveBeenCalledTimes(2);
+    await waitFor(() => {
+      expect(result.current.state).toBe('replaying');
+    });
+  });
+});
