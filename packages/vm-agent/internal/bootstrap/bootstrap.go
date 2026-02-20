@@ -151,7 +151,7 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	reporter.Log("git_identity", "completed", "Git identity configured")
 
 	reporter.Log("sam_env", "started", "Configuring SAM environment")
-	if err := ensureSAMEnvironment(ctx, cfg); err != nil {
+	if err := ensureSAMEnvironment(ctx, cfg, state.GitHubToken); err != nil {
 		reporter.Log("sam_env", "failed", "SAM environment setup failed", err.Error())
 		log.Printf("Warning: SAM environment setup failed (non-fatal): %v", err)
 	} else {
@@ -228,7 +228,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	if err := ensureGitIdentity(ctx, cfg, bootstrap); err != nil {
 		return recoveryMode, err
 	}
-	if err := ensureSAMEnvironment(ctx, cfg); err != nil {
+	if err := ensureSAMEnvironment(ctx, cfg, bootstrap.GitHubToken); err != nil {
 		log.Printf("Warning: SAM environment setup failed (non-fatal): %v", err)
 	}
 
@@ -1546,13 +1546,16 @@ func ensureGitIdentity(ctx context.Context, cfg *config.Config, state *bootstrap
 
 // buildSAMEnvScript generates a shell script that exports SAM platform metadata
 // as environment variables. Only non-empty values are included.
-func buildSAMEnvScript(cfg *config.Config) string {
+// When githubToken is non-empty, it is exported as GITHUB_TOKEN so that the
+// gh CLI and other GitHub API consumers work out of the box.
+func buildSAMEnvScript(cfg *config.Config, githubToken string) string {
 	baseDomain := config.DeriveBaseDomain(cfg.ControlPlaneURL)
 
 	type envEntry struct {
 		key, value string
 	}
 	entries := []envEntry{
+		{"GITHUB_TOKEN", strings.TrimSpace(githubToken)},
 		{"SAM_API_URL", strings.TrimRight(cfg.ControlPlaneURL, "/")},
 		{"SAM_BRANCH", cfg.Branch},
 		{"SAM_NODE_ID", cfg.NodeID},
@@ -1576,13 +1579,14 @@ func buildSAMEnvScript(cfg *config.Config) string {
 // ensureSAMEnvironment injects SAM platform metadata as environment variables into
 // the devcontainer. Variables are written to /etc/profile.d/sam-env.sh (sourced by
 // login/interactive shells) and /etc/sam/env (for non-shell consumers).
-func ensureSAMEnvironment(ctx context.Context, cfg *config.Config) error {
+// When githubToken is non-empty, it is exported as GITHUB_TOKEN for gh CLI usage.
+func ensureSAMEnvironment(ctx context.Context, cfg *config.Config, githubToken string) error {
 	containerID, err := findDevcontainerID(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to locate devcontainer for SAM environment setup: %w", err)
 	}
 
-	script := buildSAMEnvScript(cfg)
+	script := buildSAMEnvScript(cfg, githubToken)
 
 	// Write to /etc/profile.d/sam-env.sh (sourced by login shells) and /etc/sam/env (parseable).
 	writeCmd := exec.CommandContext(

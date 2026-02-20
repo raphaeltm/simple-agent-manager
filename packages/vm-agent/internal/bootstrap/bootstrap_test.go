@@ -331,7 +331,7 @@ func TestBuildSAMEnvScript(t *testing.T) {
 		Branch:          "main",
 	}
 
-	script := buildSAMEnvScript(cfg)
+	script := buildSAMEnvScript(cfg, "")
 
 	// Verify all expected variables are present.
 	for _, want := range []string{
@@ -345,6 +345,11 @@ func TestBuildSAMEnvScript(t *testing.T) {
 		if !strings.Contains(script, want) {
 			t.Errorf("script missing %q\ngot:\n%s", want, script)
 		}
+	}
+
+	// GITHUB_TOKEN should NOT be present when empty.
+	if strings.Contains(script, "GITHUB_TOKEN") {
+		t.Errorf("script should not contain GITHUB_TOKEN when empty, got:\n%s", script)
 	}
 
 	// Verify header comment is present.
@@ -362,7 +367,7 @@ func TestBuildSAMEnvScriptOmitsEmptyValues(t *testing.T) {
 		// NodeID, Repository, Branch left empty
 	}
 
-	script := buildSAMEnvScript(cfg)
+	script := buildSAMEnvScript(cfg, "")
 
 	if strings.Contains(script, "SAM_NODE_ID") {
 		t.Errorf("script should not contain SAM_NODE_ID when empty, got:\n%s", script)
@@ -373,12 +378,69 @@ func TestBuildSAMEnvScriptOmitsEmptyValues(t *testing.T) {
 	if strings.Contains(script, "SAM_BRANCH") {
 		t.Errorf("script should not contain SAM_BRANCH when empty, got:\n%s", script)
 	}
+	if strings.Contains(script, "GITHUB_TOKEN") {
+		t.Errorf("script should not contain GITHUB_TOKEN when empty, got:\n%s", script)
+	}
 	// SAM_API_URL and SAM_WORKSPACE_ID should still be present.
 	if !strings.Contains(script, "SAM_API_URL") {
 		t.Errorf("script missing SAM_API_URL, got:\n%s", script)
 	}
 	if !strings.Contains(script, "SAM_WORKSPACE_ID") {
 		t.Errorf("script missing SAM_WORKSPACE_ID, got:\n%s", script)
+	}
+}
+
+func TestBuildSAMEnvScriptIncludesGitHubToken(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+		Repository:      "octo/repo",
+		Branch:          "main",
+	}
+
+	script := buildSAMEnvScript(cfg, "ghs_test_token_abc123")
+
+	want := `export GITHUB_TOKEN="ghs_test_token_abc123"`
+	if !strings.Contains(script, want) {
+		t.Errorf("script missing %q\ngot:\n%s", want, script)
+	}
+
+	// Other SAM vars should still be present.
+	if !strings.Contains(script, "SAM_WORKSPACE_ID") {
+		t.Errorf("script missing SAM_WORKSPACE_ID, got:\n%s", script)
+	}
+}
+
+func TestBuildSAMEnvScriptTrimsGitHubTokenWhitespace(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+	}
+
+	script := buildSAMEnvScript(cfg, "  ghs_token  ")
+
+	want := `export GITHUB_TOKEN="ghs_token"`
+	if !strings.Contains(script, want) {
+		t.Errorf("expected trimmed token in script, got:\n%s", script)
+	}
+}
+
+func TestBuildSAMEnvScriptWhitespaceOnlyTokenOmitted(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+	}
+
+	script := buildSAMEnvScript(cfg, "   ")
+
+	if strings.Contains(script, "GITHUB_TOKEN") {
+		t.Errorf("script should not contain GITHUB_TOKEN for whitespace-only token, got:\n%s", script)
 	}
 }
 
