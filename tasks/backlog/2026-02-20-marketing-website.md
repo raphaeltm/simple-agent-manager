@@ -56,20 +56,20 @@ Build a beautiful, performant marketing website that highlights SAM's value prop
 ## Implementation Checklist
 
 - [x] Create git worktree and feature branch
-- [ ] Scaffold Astro project in `apps/www/`
-- [ ] Configure brand fonts, colors, and favicon
-- [ ] Build layout component (nav + footer)
-- [ ] Build hero section
-- [ ] Build social proof section
-- [ ] Build features grid
-- [ ] Build "how it works" section
-- [ ] Build comparison table
-- [ ] Build cost/pricing section
-- [ ] Build roadmap timeline
-- [ ] Build CTA footer
-- [ ] Add responsive design for mobile
-- [ ] Add scroll animations (CSS)
-- [ ] Create GitHub Actions workflow for deployment
-- [ ] Update pnpm-workspace.yaml
-- [ ] Test build locally
+- [x] Scaffold Astro project in `apps/www/`
+- [x] Configure brand fonts, colors, and favicon
+- [x] Build layout component (nav + footer)
+- [x] Build hero section
+- [x] Build social proof section
+- [x] Build features grid
+- [x] Build "how it works" section
+- [x] Build comparison table
+- [x] Build cost/pricing section
+- [x] Build roadmap timeline
+- [x] Build CTA footer
+- [x] Add responsive design for mobile
+- [x] Add scroll animations (CSS + IntersectionObserver)
+- [x] Create GitHub Actions workflow for deployment
+- [x] pnpm-workspace.yaml already includes `apps/*`
+- [x] Test build locally (build, lint, typecheck, tests all pass)
 - [ ] Push and open PR
