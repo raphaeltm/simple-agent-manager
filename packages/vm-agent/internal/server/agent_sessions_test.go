@@ -20,6 +20,12 @@ func TestAgentSessionsSourceContract(t *testing.T) {
 		"handleCreateAgentSession",
 		"handleStopAgentSession",
 		"Idempotency-Key",
+		// Session visibility enrichment
+		"enrichedSession",
+		"HostStatus",
+		"ViewerCount",
+		"host.Status()",
+		"host.ViewerCount()",
 	} {
 		if !strings.Contains(content, needle) {
 			t.Fatalf("expected %q in %s", needle, path)

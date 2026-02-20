@@ -448,6 +448,9 @@ export interface Event {
 
 export type AgentSessionStatus = 'running' | 'stopped' | 'error';
 
+/** Live host status from the VM Agent's SessionHost (more granular than AgentSessionStatus). */
+export type AgentHostStatus = 'idle' | 'starting' | 'ready' | 'prompting' | 'error' | 'stopped';
+
 export interface WorktreeInfo {
   path: string;
   branch: string;
@@ -482,6 +485,10 @@ export interface AgentSession {
   errorMessage?: string | null;
   label?: string | null;
   worktreePath?: string | null;
+  /** Live host status from the VM Agent SessionHost (only present in live/enriched responses). */
+  hostStatus?: AgentHostStatus | null;
+  /** Number of connected browser viewers (only present in live/enriched responses). */
+  viewerCount?: number | null;
 }
 
 export interface CreateAgentSessionRequest {

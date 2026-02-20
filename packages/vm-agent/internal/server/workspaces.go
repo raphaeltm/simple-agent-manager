@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/persistence"
 )
@@ -449,18 +450,47 @@ func (s *Server) handleListTabs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"tabs": tabs})
 }
 
+// enrichedSession extends agentsessions.Session with live SessionHost state.
+type enrichedSession struct {
+	agentsessions.Session
+	HostStatus  *string `json:"hostStatus,omitempty"`
+	ViewerCount *int    `json:"viewerCount,omitempty"`
+}
+
 func (s *Server) handleListAgentSessions(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
 		writeError(w, http.StatusBadRequest, "workspaceId is required")
 		return
 	}
-	if !s.requireNodeManagementAuth(w, r, workspaceID) {
-		return
+	// Accept both workspace session cookies (browser) and management tokens (control plane).
+	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
+		if !s.requireNodeManagementAuth(w, r, workspaceID) {
+			return
+		}
+	}
+
+	sessions := s.agentSessions.List(workspaceID)
+	enriched := make([]enrichedSession, len(sessions))
+
+	for i, session := range sessions {
+		enriched[i] = enrichedSession{Session: session}
+
+		hostKey := workspaceID + ":" + session.ID
+		s.sessionHostMu.Lock()
+		host := s.sessionHosts[hostKey]
+		s.sessionHostMu.Unlock()
+
+		if host != nil {
+			status := string(host.Status())
+			viewers := host.ViewerCount()
+			enriched[i].HostStatus = &status
+			enriched[i].ViewerCount = &viewers
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"sessions": s.agentSessions.List(workspaceID),
+		"sessions": enriched,
 	})
 }
 

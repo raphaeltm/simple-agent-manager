@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   removeWorktree: vi.fn(),
   getAgentSettings: vi.fn(),
   saveAgentSettings: vi.fn(),
+  listAgentSessionsLive: vi.fn(),
   useAcpSession: vi.fn(),
   featureFlags: {
     multiTerminal: false,
@@ -62,6 +63,7 @@ vi.mock('../../../src/lib/api', () => ({
   removeWorktree: mocks.removeWorktree,
   getAgentSettings: mocks.getAgentSettings,
   saveAgentSettings: mocks.saveAgentSettings,
+  listAgentSessionsLive: mocks.listAgentSessionsLive,
   getTranscribeApiUrl: () => 'https://api.example.com/api/transcribe',
   getClientErrorsApiUrl: () => 'https://api.example.com/api/client-errors',
 }));
@@ -255,6 +257,7 @@ describe('Workspace page', () => {
     });
     mocks.listWorkspaceEvents.mockResolvedValue({ events: [], nextCursor: null });
     mocks.listAgentSessions.mockResolvedValue([]);
+    mocks.listAgentSessionsLive.mockRejectedValue(new Error('not mocked'));
     mocks.updateWorkspace.mockResolvedValue({
       id: 'ws-123',
       nodeId: 'node-1',
@@ -444,33 +447,25 @@ describe('Workspace page', () => {
 
   it('stops active chat session when closing the chat tab', async () => {
     mocks.stopAgentSession.mockResolvedValue(undefined);
-    mocks.listAgentSessions.mockResolvedValueOnce([
-      {
-        id: 'sess-tab',
-        workspaceId: 'ws-123',
-        status: 'running',
-        label: 'Claude Code Chat',
-        createdAt: '2026-02-08T00:10:00.000Z',
-        updatedAt: '2026-02-08T00:10:00.000Z',
-      },
-    ]);
-    mocks.listAgentSessions.mockResolvedValueOnce([
-      {
-        id: 'sess-tab',
-        workspaceId: 'ws-123',
-        status: 'running',
-        label: 'Claude Code Chat',
-        createdAt: '2026-02-08T00:10:00.000Z',
-        updatedAt: '2026-02-08T00:10:00.000Z',
-      },
-    ]);
+    const sessionData = {
+      id: 'sess-tab',
+      workspaceId: 'ws-123',
+      status: 'running',
+      label: 'Claude Code Chat',
+      createdAt: '2026-02-08T00:10:00.000Z',
+      updatedAt: '2026-02-08T00:10:00.000Z',
+    };
+    // Multiple mocks needed: loadWorkspaceState re-runs when workspace.status
+    // changes and when terminalToken becomes available (live session fallback).
+    mocks.listAgentSessions.mockResolvedValueOnce([sessionData]);
+    mocks.listAgentSessions.mockResolvedValueOnce([sessionData]);
+    mocks.listAgentSessions.mockResolvedValueOnce([sessionData]);
     mocks.listAgentSessions.mockResolvedValueOnce([]);
 
     renderWorkspace('/workspaces/ws-123?view=conversation&sessionId=sess-tab', true);
 
-    expect(await screen.findByRole('tablist', { name: 'Workspace sessions' })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Stop Claude Code Chat' }));
+    const stopBtn = await screen.findByRole('button', { name: 'Stop Claude Code Chat' });
+    fireEvent.click(stopBtn);
 
     await waitFor(() => {
       expect(mocks.stopAgentSession).toHaveBeenCalledWith('ws-123', 'sess-tab');

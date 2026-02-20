@@ -21,6 +21,8 @@ export interface SidebarTab {
   sessionId: string;
   title: string;
   status: string;
+  hostStatus?: string | null;
+  viewerCount?: number | null;
 }
 
 interface WorkspaceSidebarProps {
@@ -44,6 +46,7 @@ interface WorkspaceSidebarProps {
   workspaceTabs: SidebarTab[];
   activeTabId: string | null;
   onSelectTab: (tab: SidebarTab) => void;
+  onStopSession?: (sessionId: string) => void;
 
   // Git
   gitStatus: GitStatusData | null;
@@ -117,7 +120,25 @@ function useCountdown(deadline: string | null | undefined): string {
   return `${minutes}m ${seconds % 60}s`;
 }
 
-function sessionStatusColor(status: string): string {
+function sessionStatusColor(status: string, hostStatus?: string | null): string {
+  // Use live hostStatus for finer-grained colors when available
+  if (hostStatus) {
+    switch (hostStatus) {
+      case 'prompting':
+        return '#bb9af7'; // purple — actively working
+      case 'ready':
+        return '#9ece6a'; // green — ready for prompts
+      case 'starting':
+        return '#e0af68'; // amber — initializing
+      case 'idle':
+        return '#787c99'; // dim — no agent selected
+      case 'stopped':
+        return '#545868'; // dimmer — stopped
+      case 'error':
+        return '#f7768e'; // red
+    }
+  }
+
   switch (status) {
     case 'connected':
     case 'running':
@@ -129,6 +150,26 @@ function sessionStatusColor(status: string): string {
       return '#f7768e';
     default:
       return '#787c99';
+  }
+}
+
+/** Human-readable label for agent host status */
+function hostStatusLabel(hostStatus: string): string {
+  switch (hostStatus) {
+    case 'prompting':
+      return 'working';
+    case 'ready':
+      return 'ready';
+    case 'starting':
+      return 'starting';
+    case 'idle':
+      return 'idle';
+    case 'stopped':
+      return 'stopped';
+    case 'error':
+      return 'error';
+    default:
+      return hostStatus;
   }
 }
 
@@ -149,6 +190,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
   workspaceTabs,
   activeTabId,
   onSelectTab,
+  onStopSession,
   gitStatus,
   onOpenGitChanges,
   sessionTokenUsages,
@@ -364,63 +406,135 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {workspaceTabs.map((tab) => {
                 const active = activeTabId === tab.id;
+                const isChat = tab.kind === 'chat';
+                const canStop = isChat && onStopSession && tab.status === 'running';
                 return (
-                  <button
+                  <div
                     key={tab.id}
-                    onClick={() => onSelectTab(tab)}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 8,
-                      padding: isMobile ? '8px 6px' : '5px 6px',
-                      minHeight: isMobile ? 44 : undefined,
+                      gap: 0,
                       borderRadius: 'var(--sam-radius-sm)',
-                      border: 'none',
                       background: active
                         ? 'rgba(122, 162, 247, 0.1)'
                         : 'transparent',
-                      cursor: 'pointer',
-                      width: '100%',
-                      textAlign: 'left',
-                      fontSize: '0.8125rem',
-                      color: active
-                        ? 'var(--sam-color-fg-primary)'
-                        : 'var(--sam-color-fg-muted)',
                     }}
                   >
-                    <span
+                    <button
+                      onClick={() => onSelectTab(tab)}
                       style={{
-                        display: 'inline-block',
-                        width: 7,
-                        height: 7,
-                        borderRadius: '50%',
-                        backgroundColor: sessionStatusColor(tab.status),
-                        flexShrink: 0,
-                      }}
-                    />
-                    <span
-                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: isMobile ? '8px 6px' : '5px 6px',
+                        minHeight: isMobile ? 44 : undefined,
+                        borderRadius: 'var(--sam-radius-sm)',
+                        border: 'none',
+                        background: 'transparent',
+                        cursor: 'pointer',
                         flex: 1,
                         minWidth: 0,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
+                        textAlign: 'left',
+                        fontSize: '0.8125rem',
+                        color: active
+                          ? 'var(--sam-color-fg-primary)'
+                          : 'var(--sam-color-fg-muted)',
                       }}
                     >
-                      {tab.title}
-                    </span>
-                    {active && (
                       <span
                         style={{
-                          fontSize: '0.6875rem',
-                          color: '#7aa2f7',
+                          display: 'inline-block',
+                          width: 7,
+                          height: 7,
+                          borderRadius: '50%',
+                          backgroundColor: sessionStatusColor(tab.status, tab.hostStatus),
                           flexShrink: 0,
                         }}
+                      />
+                      <span
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
                       >
-                        active
+                        {tab.title}
                       </span>
+                      {/* Viewer count badge */}
+                      {tab.viewerCount != null && tab.viewerCount > 0 && (
+                        <span
+                          style={{
+                            fontSize: '0.625rem',
+                            color: 'var(--sam-color-fg-muted)',
+                            backgroundColor: 'rgba(122, 162, 247, 0.15)',
+                            borderRadius: 'var(--sam-radius-sm)',
+                            padding: '1px 4px',
+                            flexShrink: 0,
+                          }}
+                          title={`${tab.viewerCount} viewer${tab.viewerCount === 1 ? '' : 's'} connected`}
+                        >
+                          {tab.viewerCount}
+                        </span>
+                      )}
+                      {/* Host status label */}
+                      {isChat && tab.hostStatus && (
+                        <span
+                          style={{
+                            fontSize: '0.6875rem',
+                            color: sessionStatusColor(tab.status, tab.hostStatus),
+                            flexShrink: 0,
+                          }}
+                        >
+                          {hostStatusLabel(tab.hostStatus)}
+                        </span>
+                      )}
+                      {/* Active label for non-chat or when no hostStatus */}
+                      {active && !(isChat && tab.hostStatus) && (
+                        <span
+                          style={{
+                            fontSize: '0.6875rem',
+                            color: '#7aa2f7',
+                            flexShrink: 0,
+                          }}
+                        >
+                          active
+                        </span>
+                      )}
+                    </button>
+                    {/* Stop button for chat sessions */}
+                    {canStop && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onStopSession!(tab.sessionId);
+                        }}
+                        title="Stop session"
+                        aria-label={`Stop session ${tab.title}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: isMobile ? 36 : 24,
+                          height: isMobile ? 36 : 24,
+                          padding: 0,
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'var(--sam-color-fg-muted)',
+                          cursor: 'pointer',
+                          borderRadius: 'var(--sam-radius-sm)',
+                          flexShrink: 0,
+                          marginRight: 2,
+                        }}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                          <rect x="2" y="2" width="8" height="8" rx="1" />
+                        </svg>
+                      </button>
                     )}
-                  </button>
+                  </div>
                 );
               })}
             </div>
