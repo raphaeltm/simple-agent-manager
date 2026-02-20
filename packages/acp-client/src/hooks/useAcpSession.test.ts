@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useAcpSession, addJitter, classifyCloseCode } from './useAcpSession';
+import type { AcpErrorCode } from '../errors';
 
 class MockWebSocket {
   static CONNECTING = 0;
@@ -774,8 +775,9 @@ describe('useAcpSession close code handling', () => {
     // Server sends a clean close — should NOT trigger reconnection
     act(() => ws.close(1000, 'normal'));
 
-    // Should go to disconnected, not reconnecting
-    expect(result.current.state).toBe('disconnected');
+    // Should go to error with structured code, not reconnecting
+    expect(result.current.state).toBe('error');
+    expect(result.current.errorCode).toBe('UNKNOWN' satisfies AcpErrorCode);
     // No new WebSocket should be created
     expect(MockWebSocket.instances.length).toBe(instancesBefore);
   });
@@ -796,7 +798,8 @@ describe('useAcpSession close code handling', () => {
 
     act(() => ws.close(1008, 'policy_violation'));
 
-    expect(result.current.state).toBe('disconnected');
+    expect(result.current.state).toBe('error');
+    expect(result.current.errorCode).toBe('AUTH_REJECTED' satisfies AcpErrorCode);
     expect(MockWebSocket.instances.length).toBe(instancesBefore);
   });
 
@@ -862,5 +865,225 @@ describe('useAcpSession stale transport cleanup', () => {
     // A new WebSocket instance should eventually be created.
     // Meanwhile, the old ws1 should be CLOSED.
     expect(ws1.readyState).toBe(MockWebSocket.CLOSED);
+  });
+});
+
+describe('useAcpSession structured error codes', () => {
+  it('sets errorCode on gateway error messages', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.emitOpenAndIdle());
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+
+    act(() => {
+      ws.emitMessage({
+        error: 'agent_crash',
+        message: 'Agent process crashed with signal SIGKILL',
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('error');
+      expect(result.current.errorCode).toBe('AGENT_CRASH' satisfies AcpErrorCode);
+      expect(result.current.error).toBe('Agent process crashed with signal SIGKILL');
+    });
+  });
+
+  it('sets errorCode from agent_status error messages', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.emitOpenAndIdle());
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+
+    act(() => {
+      ws.emitMessage({
+        type: 'agent_status',
+        status: 'error',
+        agentType: 'claude-code',
+        error: 'Agent install failed: npm error',
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('error');
+      expect(result.current.errorCode).toBe('AGENT_INSTALL_FAILED' satisfies AcpErrorCode);
+    });
+  });
+
+  it('clears errorCode when error is resolved', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.emitOpenAndIdle());
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+
+    // Trigger error
+    act(() => {
+      ws.emitMessage({
+        type: 'agent_status',
+        status: 'error',
+        agentType: 'claude-code',
+        error: 'Something crashed',
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.errorCode).not.toBeNull();
+    });
+
+    // Resolve error via new agent status
+    act(() => {
+      ws.emitMessage({
+        type: 'agent_status',
+        status: 'ready',
+        agentType: 'claude-code',
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('ready');
+      expect(result.current.errorCode).toBeNull();
+      expect(result.current.error).toBeNull();
+    });
+  });
+
+  it('sets CONNECTION_FAILED errorCode when initial connection fails', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws = MockWebSocket.instances[0]!;
+
+    // Simulate connection failure (close without ever opening)
+    act(() => ws.close(1006));
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('error');
+      expect(result.current.errorCode).toBe('CONNECTION_FAILED' satisfies AcpErrorCode);
+    });
+  });
+
+  it('sets URL_UNAVAILABLE when resolver returns null', async () => {
+    const resolveWsUrl = vi.fn().mockResolvedValue(null);
+
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: null,
+      resolveWsUrl,
+    }));
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('error');
+      expect(result.current.errorCode).toBe('URL_UNAVAILABLE' satisfies AcpErrorCode);
+    });
+  });
+
+  it('sets AUTH_EXPIRED errorCode on close code 4001', async () => {
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.emitOpenAndIdle());
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+
+    act(() => ws.close(4001, 'auth_expired'));
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('error');
+      expect(result.current.errorCode).toBe('AUTH_EXPIRED' satisfies AcpErrorCode);
+    });
+  });
+});
+
+describe('useAcpSession online/offline awareness', () => {
+  it('sets NETWORK_OFFLINE when connection drops while browser is offline', async () => {
+    Object.defineProperty(navigator, 'onLine', { value: true, writable: true, configurable: true });
+
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.emitOpenAndIdle());
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+
+    // Connection drops (e.g., network loss) — this triggers reconnection
+    act(() => ws.close(1006));
+
+    // Normally would be 'reconnecting', but goes offline before reconnect attempt
+    // Go offline and fire the event
+    Object.defineProperty(navigator, 'onLine', { value: false, writable: true, configurable: true });
+    act(() => {
+      window.dispatchEvent(new Event('offline'));
+    });
+
+    // Should set NETWORK_OFFLINE since the connection was lost and we're offline
+    await waitFor(() => {
+      expect(result.current.state).toBe('error');
+      expect(result.current.errorCode).toBe('NETWORK_OFFLINE' satisfies AcpErrorCode);
+    });
+  });
+
+  it('resumes reconnection when browser comes back online after offline', async () => {
+    Object.defineProperty(navigator, 'onLine', { value: true, writable: true, configurable: true });
+
+    const { result } = renderHook(() => useAcpSession({
+      wsUrl: 'ws://localhost/agent/ws',
+    }));
+
+    const ws1 = MockWebSocket.instances[0]!;
+    act(() => ws1.emitOpenAndIdle());
+
+    await waitFor(() => {
+      expect(result.current.state).toBe('no_session');
+    });
+
+    // Connection drops, then browser goes offline
+    act(() => ws1.close(1006));
+    Object.defineProperty(navigator, 'onLine', { value: false, writable: true, configurable: true });
+    act(() => {
+      window.dispatchEvent(new Event('offline'));
+    });
+
+    await waitFor(() => {
+      expect(result.current.errorCode).toBe('NETWORK_OFFLINE' satisfies AcpErrorCode);
+    });
+
+    // Come back online
+    Object.defineProperty(navigator, 'onLine', { value: true, writable: true, configurable: true });
+    const instancesBefore = MockWebSocket.instances.length;
+
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+    });
+
+    // Should have triggered a new WebSocket connection
+    await waitFor(() => {
+      expect(MockWebSocket.instances.length).toBeGreaterThan(instancesBefore);
+    });
+    expect(result.current.state).toBe('reconnecting');
   });
 });

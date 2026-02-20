@@ -63,10 +63,10 @@ This makes it impossible to:
 
 ### Phase 1: Error Taxonomy & Structured Logging
 
-- [ ] Define an `AcpErrorCode` enum/union covering all known failure modes (network drop, heartbeat timeout, auth expired, agent crash, agent install failed, prompt timeout, container not found, buffer overflow, replay timeout, etc.)
-- [ ] Map each error code to a user-facing message and a suggested action (e.g., "Agent crashed — try switching agents or restarting the workspace")
-- [ ] Update SessionHost, Gateway, and transport to use structured error codes instead of free-form strings
-- [ ] Add error codes to lifecycle events and error reporter payloads
+- [x] Define an `AcpErrorCode` enum/union covering all known failure modes (network drop, heartbeat timeout, auth expired, agent crash, agent install failed, prompt timeout, container not found, buffer overflow, replay timeout, etc.)
+- [x] Map each error code to a user-facing message and a suggested action (e.g., "Agent crashed — try switching agents or restarting the workspace")
+- [x] Update SessionHost, Gateway, and transport to use structured error codes instead of free-form strings
+- [ ] Add error codes to lifecycle events and error reporter payloads (deferred — server-side Go changes needed)
 
 ### Phase 2: Per-Session Event Log
 
@@ -77,15 +77,15 @@ This makes it impossible to:
 
 ### Phase 3: Enhanced Error UX
 
-- [ ] Replace generic "Connection lost" with error-code-specific messages and suggested actions
+- [x] Replace generic "Connection lost" with error-code-specific messages and suggested actions
 - [ ] Show a "Session Log" button/link when session enters error state, opening the per-session event timeline
 - [ ] Add a toast/banner for silent failures (LoadSession fallback, buffer overflow, replay timeout)
 - [ ] Show reconnection progress (attempt count, time elapsed, next retry in X seconds)
 
 ### Phase 4: Reconnection Improvements
 
-- [ ] Implement `navigator.onLine` check before reconnect attempts (fail fast when offline)
-- [ ] Add online/offline event listeners to pause/resume reconnect timer
+- [x] Implement `navigator.onLine` check before reconnect attempts (fail fast when offline)
+- [x] Add online/offline event listeners to pause/resume reconnect timer
 - [ ] Extend reconnect timeout for `1001` (server going away) — server maintenance can take longer than 60s
 - [ ] Refresh WebSocket URL/token on each reconnect attempt (avoid stale cached tokens)
 - [ ] Consider infinite retry with increasing backoff caps for certain close codes

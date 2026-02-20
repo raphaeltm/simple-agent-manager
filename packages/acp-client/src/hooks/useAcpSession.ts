@@ -2,6 +2,8 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import type { AgentStatusMessage, AgentSessionStatus, SessionStateMessage, LifecycleEventCallback } from '../transport/types';
 import { createAcpWebSocketTransport } from '../transport/websocket';
 import type { AcpTransport } from '../transport/websocket';
+import type { AcpErrorCode } from '../errors';
+import { errorCodeFromCloseCode, errorCodeFromMessage, getErrorMeta } from '../errors';
 
 /** Default reconnection delay in ms */
 const DEFAULT_RECONNECT_DELAY_MS = 1000;
@@ -131,6 +133,8 @@ export interface AcpSessionHandle {
   agentType: string | null;
   /** Error message if state is 'error' */
   error: string | null;
+  /** Structured error code if state is 'error' (null otherwise) */
+  errorCode: AcpErrorCode | null;
   /** Whether the session is replaying buffered messages from a late join */
   replaying: boolean;
   /** Switch to a different agent */
@@ -176,7 +180,21 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
   const [state, setState] = useState<AcpSessionState>('disconnected');
   const [agentType, setAgentType] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<AcpErrorCode | null>(null);
   const [replaying, setReplaying] = useState(false);
+
+  /** Set both error message and structured code together. Uses error metadata for the message when not provided. */
+  const setStructuredError = useCallback((code: AcpErrorCode, message?: string) => {
+    const meta = getErrorMeta(code);
+    setErrorCode(code);
+    setError(message ?? meta.userMessage);
+  }, []);
+
+  /** Clear both error and errorCode */
+  const clearError = useCallback(() => {
+    setError(null);
+    setErrorCode(null);
+  }, []);
 
   const transportRef = useRef<AcpTransport | null>(null);
   const onAcpMessageRef = useRef(onAcpMessage);
@@ -214,6 +232,8 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
   const intentionalCloseRef = useRef(false);
   const wasConnectedRef = useRef(false);
   const attemptReconnectRef = useRef<() => void>(() => {});
+  // Last close-code-derived error code — used to enrich RECONNECT_TIMEOUT
+  const lastCloseErrorCodeRef = useRef<AcpErrorCode | null>(null);
 
   // Lifecycle logging helper
   const logLifecycle = useCallback((
@@ -246,11 +266,12 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     });
 
     if (msg.error) {
-      setError(msg.error);
+      const code = errorCodeFromMessage(msg.error);
+      setStructuredError(code, msg.error);
     } else if (newState !== 'error') {
-      setError(null);
+      clearError();
     }
-  }, [logLifecycle]);
+  }, [logLifecycle, setStructuredError, clearError]);
 
   // Handle incoming ACP messages
   const handleAcpMessage = useCallback((data: unknown) => {
@@ -260,11 +281,12 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
         message: data.message,
       });
       setState('error');
-      setError(data.message || data.error);
+      const errMsg = data.message || data.error;
+      setStructuredError(errorCodeFromMessage(errMsg), errMsg);
       return;
     }
     onAcpMessageRef.current?.(data as AcpMessage);
-  }, [logLifecycle]);
+  }, [logLifecycle, setStructuredError]);
 
   // Handle session_state control message from SessionHost on viewer attach.
   // This tells us the current server-side state of the agent session.
@@ -285,9 +307,9 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     // Always sync agentType from server state — clear to null when empty/idle
     setAgentType(msg.agentType || null);
     if (msg.error) {
-      setError(msg.error);
+      setStructuredError(errorCodeFromMessage(msg.error), msg.error);
     } else {
-      setError(null);
+      clearError();
     }
 
     if (status === 'idle') {
@@ -326,7 +348,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       setState('no_session');
       setReplaying(false);
     }
-  }, [logLifecycle]);
+  }, [logLifecycle, setStructuredError, clearError]);
 
   // Handle session_replay_complete — all buffered messages have been delivered
   const handleSessionReplayComplete = useCallback(() => {
@@ -395,7 +417,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       // The server will send session_state immediately after the viewer
       // attaches, telling us whether an agent is already running.
       setState('connecting');
-      setError(null);
+      clearError();
 
       logLifecycle('info', 'WebSocket connected, awaiting session_state', { host, wasReconnect });
     });
@@ -429,18 +451,23 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
 
         // Server explicitly rejected us (auth failure, policy) — don't reconnect
         if (strategy === 'no-reconnect') {
-          logLifecycle('warn', 'Server closed connection cleanly — not reconnecting', { code, reason });
-          setState('disconnected');
+          const errCode = errorCodeFromCloseCode(code);
+          logLifecycle('warn', 'Server closed connection cleanly — not reconnecting', { code, reason, errorCode: errCode });
+          setState('error');
+          setStructuredError(errCode);
           return;
         }
 
         // Only reconnect if we were previously connected
         if (wasConnectedRef.current) {
+          // Stash the close-code-derived error code so the UI can show it
+          // during reconnection if it eventually times out.
+          lastCloseErrorCodeRef.current = errorCodeFromCloseCode(code);
           attemptReconnectRef.current();
         } else {
           logLifecycle('error', 'WebSocket connection failed (never connected)', { host, code, reason });
           setState('error');
-          setError('WebSocket connection failed');
+          setStructuredError('CONNECTION_FAILED');
         }
       },
       onError() {
@@ -456,14 +483,14 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
           return;
         }
         setState('error');
-        setError('WebSocket connection error');
+        setStructuredError('CONNECTION_FAILED');
       },
       onLifecycleEvent: onLifecycleEventRef.current,
     });
 
     transportRef.current = transport;
     return transport;
-  }, [handleAgentStatus, handleAcpMessage, handleSessionState, handleSessionReplayComplete, handleSessionPrompting, logLifecycle]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [handleAgentStatus, handleAcpMessage, handleSessionState, handleSessionReplayComplete, handleSessionPrompting, logLifecycle, clearError, setStructuredError]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const resolveConnectUrl = useCallback((fallbackUrl?: string | null) => {
     if (resolveWsUrlRef.current) {
@@ -476,7 +503,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     const handleResolved = (resolved: string | null): boolean => {
       if (!resolved) {
         setState('error');
-        setError('WebSocket URL unavailable');
+        setStructuredError('URL_UNAVAILABLE');
         return false;
       }
       connectUrlRef.current = resolved;
@@ -488,7 +515,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       const message = err instanceof Error ? err.message : 'Failed to resolve WebSocket URL';
       logLifecycle('warn', 'Failed to resolve WebSocket URL', { error: message });
       setState('error');
-      setError(message);
+      setStructuredError('URL_UNAVAILABLE', message);
       return false;
     };
 
@@ -507,10 +534,19 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     } catch (err) {
       return Promise.resolve(handleError(err));
     }
-  }, [connect, logLifecycle, resolveConnectUrl]);
+  }, [connect, logLifecycle, resolveConnectUrl, setStructuredError]);
 
   // Attempt reconnection with exponential backoff
   const attemptReconnect = useCallback(() => {
+    // Check if browser is offline — pause reconnection until online
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      logLifecycle('info', 'Browser is offline — waiting for network before reconnecting');
+      setState('error');
+      setStructuredError('NETWORK_OFFLINE');
+      // The online event listener (registered below) will resume reconnection
+      return;
+    }
+
     const now = Date.now();
 
     // Start the reconnect timer on first attempt
@@ -525,11 +561,13 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
         elapsedMs: elapsed,
         timeoutMs: reconnectTimeoutMs,
         totalAttempts: reconnectAttemptRef.current,
+        lastCloseErrorCode: lastCloseErrorCodeRef.current,
       });
       setState('error');
-      setError('Reconnection timed out');
+      setStructuredError('RECONNECT_TIMEOUT');
       reconnectStartRef.current = 0;
       reconnectAttemptRef.current = 0;
+      lastCloseErrorCodeRef.current = null;
       return;
     }
 
@@ -555,7 +593,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
         }
       });
     }, delay);
-  }, [reconnectDelayMs, reconnectTimeoutMs, reconnectMaxDelayMs, connectWithResolvedUrl, logLifecycle]);
+  }, [reconnectDelayMs, reconnectTimeoutMs, reconnectMaxDelayMs, connectWithResolvedUrl, logLifecycle, setStructuredError]);
   attemptReconnectRef.current = attemptReconnect;
 
   // Main connection effect
@@ -571,7 +609,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     reconnectStartRef.current = 0;
 
     setState('connecting');
-    setError(null);
+    clearError();
 
     logLifecycle('info', 'Initiating connection', {
       host: wsUrl ? safeHost(wsUrl) : 'resolver',
@@ -627,6 +665,47 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     };
   }, [wsUrl, connectWithResolvedUrl, logLifecycle]);
 
+  // Resume reconnection when browser comes back online
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleOnline = () => {
+      logLifecycle('info', 'Browser came online');
+      // Only auto-reconnect if we were in the NETWORK_OFFLINE error state
+      if (!wasConnectedRef.current) return;
+      if (transportRef.current?.connected) return;
+
+      // Reset backoff and try immediately
+      reconnectAttemptRef.current = 0;
+      reconnectStartRef.current = 0;
+      intentionalCloseRef.current = false;
+      clearError();
+      setState('reconnecting');
+      void connectWithResolvedUrl(connectUrlRef.current);
+    };
+
+    const handleOffline = () => {
+      logLifecycle('warn', 'Browser went offline');
+      // If we're currently trying to reconnect, stop wasting attempts
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      // Only set offline error if we lost an active connection
+      if (wasConnectedRef.current && !transportRef.current?.connected) {
+        setState('error');
+        setStructuredError('NETWORK_OFFLINE');
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [connectWithResolvedUrl, logLifecycle, clearError, setStructuredError]);
+
   // Manual reconnect (exposed to UI for "Reconnect" button)
   const reconnect = useCallback(() => {
     if (!wsUrl && !resolveWsUrlRef.current) return;
@@ -652,10 +731,10 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     reconnectStartRef.current = 0;
     intentionalCloseRef.current = false;
     wasConnectedRef.current = true; // We want to reconnect
-    setError(null);
+    clearError();
     setState('reconnecting');
     void connectWithResolvedUrl(connectUrlRef.current);
-  }, [wsUrl, connectWithResolvedUrl, logLifecycle]);
+  }, [wsUrl, connectWithResolvedUrl, logLifecycle, clearError]);
 
   // Switch to a different agent
   const switchAgent = useCallback((newAgentType: string) => {
@@ -664,9 +743,9 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       transportRef.current.sendSelectAgent(newAgentType);
       setState('initializing');
       setAgentType(newAgentType);
-      setError(null);
+      clearError();
     }
-  }, [logLifecycle]);
+  }, [logLifecycle, clearError]);
 
   // Send a raw ACP message
   const sendMessage = useCallback((message: unknown) => {
@@ -679,6 +758,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     state,
     agentType,
     error,
+    errorCode,
     replaying,
     switchAgent,
     sendMessage,
