@@ -51,7 +51,7 @@ type Server struct {
 	errorReporter       *errorreport.Reporter
 	worktreeCacheMu     sync.RWMutex
 	worktreeCache       map[string]cachedWorktreeList
-	bootLogBroadcaster  *BootLogBroadcaster
+	bootLogBroadcasters *BootLogBroadcasterManager
 	bootstrapComplete   bool
 }
 
@@ -214,7 +214,7 @@ func New(cfg *config.Config) (*Server, error) {
 		store:              store,
 		errorReporter:      errorReporter,
 		worktreeCache:      make(map[string]cachedWorktreeList),
-		bootLogBroadcaster: NewBootLogBroadcaster(),
+		bootLogBroadcasters: NewBootLogBroadcasterManager(),
 	}
 
 	if cfg.WorkspaceID != "" {
@@ -259,11 +259,24 @@ func (s *Server) SetBootLog(reporter acp.BootLogReporter) {
 	s.acpConfig.BootLog = reporter
 }
 
-// GetBootLogBroadcaster returns the broadcaster that streams boot log entries
-// to WebSocket clients. Wire this into the bootlog.Reporter via SetBroadcaster()
-// to enable real-time log delivery during bootstrap.
+// GetBootLogBroadcaster returns the broadcaster for a specific workspace.
+// For the boot-time bootstrap path, use the server's configured WorkspaceID.
+// Wire this into the bootlog.Reporter via SetBroadcaster() to enable real-time
+// log delivery during bootstrap/provisioning.
 func (s *Server) GetBootLogBroadcaster() *BootLogBroadcaster {
-	return s.bootLogBroadcaster
+	if s.config.WorkspaceID == "" || s.bootLogBroadcasters == nil {
+		return nil
+	}
+	return s.bootLogBroadcasters.GetOrCreate(s.config.WorkspaceID)
+}
+
+// GetBootLogBroadcasterForWorkspace returns the broadcaster for a specific workspace ID.
+// Used by on-demand workspace provisioning to get a workspace-specific broadcaster.
+func (s *Server) GetBootLogBroadcasterForWorkspace(workspaceID string) *BootLogBroadcaster {
+	if workspaceID == "" || s.bootLogBroadcasters == nil {
+		return nil
+	}
+	return s.bootLogBroadcasters.GetOrCreate(workspaceID)
 }
 
 // UpdateAfterBootstrap propagates the callback token (obtained during bootstrap)
@@ -287,8 +300,10 @@ func (s *Server) UpdateAfterBootstrap(cfg *config.Config) {
 	s.bootstrapComplete = true
 
 	// Notify WebSocket clients that bootstrap is complete.
-	if s.bootLogBroadcaster != nil {
-		s.bootLogBroadcaster.MarkComplete()
+	if s.config.WorkspaceID != "" {
+		if broadcaster := s.bootLogBroadcasters.Get(s.config.WorkspaceID); broadcaster != nil {
+			broadcaster.MarkComplete()
+		}
 	}
 }
 

@@ -199,7 +199,10 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 // Returns (isRecoveryMode, error) where isRecoveryMode is true when provisioning
 // left a devcontainer build error marker and the workspace should be reported as
 // recovery mode instead of running.
-func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionState) (bool, error) {
+//
+// The reporter is used to send structured boot log entries for real-time UI display.
+// It is safe to pass a nil reporter.
+func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionState, reporter *bootlog.Reporter) (bool, error) {
 	if cfg == nil {
 		return false, errors.New("config is required")
 	}
@@ -215,19 +218,33 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	// Create a named Docker volume for container-mode workspaces.
 	volumeName := ""
 	if cfg.ContainerMode {
+		reporter.Log("volume_create", "started", "Creating workspace volume")
 		var volErr error
 		volumeName, volErr = ensureVolumeReady(ctx, cfg.WorkspaceID)
 		if volErr != nil {
+			reporter.Log("volume_create", "failed", "Volume creation failed", volErr.Error())
 			return false, volErr
 		}
+		reporter.Log("volume_create", "completed", "Workspace volume ready")
 	}
 
+	reporter.Log("git_clone", "started", "Cloning repository")
 	if err := ensureRepositoryReady(ctx, cfg, bootstrap, volumeName); err != nil {
+		reporter.Log("git_clone", "failed", "Repository clone failed", err.Error())
 		return false, err
 	}
+	reporter.Log("git_clone", "completed", "Repository cloned")
+
+	reporter.Log("devcontainer_up", "started", "Building devcontainer")
 	usedFallback, err := ensureDevcontainerReady(ctx, cfg, volumeName)
 	if err != nil {
+		reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", err.Error())
 		return false, err
+	}
+	if usedFallback {
+		reporter.Log("devcontainer_up", "completed", "Devcontainer ready (fallback to default image)")
+	} else {
+		reporter.Log("devcontainer_up", "completed", "Devcontainer ready")
 	}
 
 	recoveryMode := usedFallback
@@ -237,26 +254,41 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 		recoveryMode = true
 	}
 
+	reporter.Log("git_creds", "started", "Configuring git credentials")
 	if err := ensureGitCredentialHelper(ctx, cfg); err != nil {
+		reporter.Log("git_creds", "failed", "Git credential setup failed", err.Error())
 		return recoveryMode, err
 	}
+	reporter.Log("git_creds", "completed", "Git credentials configured")
+
+	reporter.Log("git_identity", "started", "Configuring git identity")
 	if err := ensureGitIdentity(ctx, cfg, bootstrap); err != nil {
+		reporter.Log("git_identity", "failed", "Git identity setup failed", err.Error())
 		return recoveryMode, err
 	}
+	reporter.Log("git_identity", "completed", "Git identity configured")
+
+	reporter.Log("sam_env", "started", "Configuring SAM environment")
 	if err := ensureSAMEnvironment(ctx, cfg, bootstrap.GitHubToken); err != nil {
+		reporter.Log("sam_env", "failed", "SAM environment setup failed", err.Error())
 		log.Printf("Warning: SAM environment setup failed (non-fatal): %v", err)
+	} else {
+		reporter.Log("sam_env", "completed", "SAM environment configured")
 	}
 	if err := ensureProjectRuntimeAssets(ctx, cfg, state.ProjectEnvVars, state.ProjectFiles); err != nil {
 		return recoveryMode, err
 	}
 
+	reporter.Log("workspace_ready", "started", "Marking workspace ready")
 	readyStatus := workspaceReadyStatusRunning
 	if recoveryMode {
 		readyStatus = workspaceReadyStatusRecovery
 	}
 	if err := markWorkspaceReady(ctx, cfg, readyStatus); err != nil {
+		reporter.Log("workspace_ready", "failed", "Failed to mark workspace ready", err.Error())
 		return recoveryMode, err
 	}
+	reporter.Log("workspace_ready", "completed", "Workspace is ready")
 
 	return recoveryMode, nil
 }

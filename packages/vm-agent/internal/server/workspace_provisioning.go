@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/workspace/vm-agent/internal/bootlog"
 	"github.com/workspace/vm-agent/internal/bootstrap"
 )
 
@@ -90,13 +91,21 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 		return false, fmt.Errorf("failed to fetch project runtime assets: %w", err)
 	}
 
+	// Create a per-workspace reporter for real-time boot log streaming.
+	// Wire it to the workspace-specific broadcaster so WebSocket clients see logs.
+	reporter := bootlog.New(s.config.ControlPlaneURL, runtime.ID)
+	reporter.SetToken(callbackToken)
+	if broadcaster := s.GetBootLogBroadcasterForWorkspace(runtime.ID); broadcaster != nil {
+		reporter.SetBroadcaster(broadcaster)
+	}
+
 	recoveryMode, err := prepareWorkspaceForRuntime(provisionCtx, &cfg, bootstrap.ProvisionState{
 		GitHubToken:    gitToken,
 		GitUserName:    runtime.GitUserName,
 		GitUserEmail:   runtime.GitUserEmail,
 		ProjectEnvVars: runtimeAssets.EnvVars,
 		ProjectFiles:   runtimeAssets.Files,
-	})
+	}, reporter)
 	if err != nil {
 		return false, err
 	}
@@ -161,7 +170,7 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 	state.ProjectEnvVars = runtimeAssets.EnvVars
 	state.ProjectFiles = runtimeAssets.Files
 
-	_, err := prepareWorkspaceForRuntime(recoveryCtx, &cfg, state)
+	_, err := prepareWorkspaceForRuntime(recoveryCtx, &cfg, state, nil)
 	if err != nil {
 		return err
 	}

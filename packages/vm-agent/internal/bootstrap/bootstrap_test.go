@@ -1347,7 +1347,7 @@ func TestPrepareWorkspaceMarksReady(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	recoveryMode, err := PrepareWorkspace(ctx, cfg, ProvisionState{})
+	recoveryMode, err := PrepareWorkspace(ctx, cfg, ProvisionState{}, nil)
 	if err != nil {
 		t.Fatalf("PrepareWorkspace returned error: %v", err)
 	}
@@ -1424,7 +1424,7 @@ exit 1
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	recoveryMode, err := PrepareWorkspace(ctx, cfg, ProvisionState{})
+	recoveryMode, err := PrepareWorkspace(ctx, cfg, ProvisionState{}, nil)
 	if err != nil {
 		t.Fatalf("PrepareWorkspace returned error: %v", err)
 	}
@@ -1475,7 +1475,7 @@ func TestPrepareWorkspaceReturnsReadyEndpointError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := PrepareWorkspace(ctx, cfg, ProvisionState{})
+	_, err := PrepareWorkspace(ctx, cfg, ProvisionState{}, nil)
 	if err == nil {
 		t.Fatal("expected PrepareWorkspace to fail when /ready returns non-2xx")
 	}
@@ -1516,7 +1516,7 @@ func TestPrepareWorkspaceReturnsFallbackFlag(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	usedFallback, err := PrepareWorkspace(ctx, cfg, ProvisionState{})
+	usedFallback, err := PrepareWorkspace(ctx, cfg, ProvisionState{}, nil)
 	if err != nil {
 		t.Fatalf("PrepareWorkspace returned error: %v", err)
 	}
