@@ -15,7 +15,6 @@ import { KeyboardShortcutsHelp } from '../components/KeyboardShortcutsHelp';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useTabOrder } from '../hooks/useTabOrder';
-import { useBootLogStream } from '../hooks/useBootLogStream';
 import { useTokenRefresh } from '../hooks/useTokenRefresh';
 import { WorkspaceTabStrip, type WorkspaceTabItem } from '../components/WorkspaceTabStrip';
 import { WorktreeSelector } from '../components/WorktreeSelector';
@@ -218,10 +217,6 @@ export function Workspace() {
 
   const isRunning = workspace?.status === 'running' || workspace?.status === 'recovery';
   const activeWorktree = worktreeParam || null;
-
-  // Real-time boot log streaming via WebSocket during workspace creation.
-  // Falls back to polled KV logs (workspace.bootLogs) if WebSocket is unavailable.
-  const { logs: streamedBootLogs } = useBootLogStream(id, workspace?.url, workspace?.status);
 
   // Proactive token refresh (R3 fix): fetches token on mount and schedules
   // refresh 5 minutes before expiry. On 401 during reconnection, call refresh().
@@ -1400,7 +1395,7 @@ export function Workspace() {
   // ── Non-running states content ──
   const statusContent = !isRunning ? (
     workspace?.status === 'creating' ? (
-      <BootProgress logs={streamedBootLogs.length > 0 ? streamedBootLogs : workspace.bootLogs} />
+      <BootProgress logs={workspace.bootLogs} />
     ) : workspace?.status === 'stopping' ? (
       <CenteredStatus color="#fbbf24" title="Stopping Workspace" loading />
     ) : workspace?.status === 'stopped' ? (

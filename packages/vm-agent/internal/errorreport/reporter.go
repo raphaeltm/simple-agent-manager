@@ -75,18 +75,6 @@ func New(apiBaseURL, nodeID, authToken string, cfg Config) *Reporter {
 	}
 }
 
-// SetToken updates the auth token used for sending error reports.
-// This is used when the token is not available at construction time
-// (e.g., when the server starts before bootstrap completes).
-func (r *Reporter) SetToken(token string) {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.authToken = token
-}
-
 // Start launches the background flush goroutine.
 func (r *Reporter) Start() {
 	if r == nil {

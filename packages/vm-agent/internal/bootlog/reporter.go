@@ -12,14 +12,6 @@ import (
 	"time"
 )
 
-// Broadcaster receives boot log entries for local distribution (e.g., WebSocket clients).
-// Unlike the HTTP-based control plane relay, broadcasts happen immediately and do not
-// require a callback token. This allows early bootstrap steps to be visible to connected
-// clients before the token is available.
-type Broadcaster interface {
-	Broadcast(step, status, message string, detail ...string)
-}
-
 // Reporter sends structured log entries to the control plane boot-log endpoint.
 // It is safe to call methods on a nil *Reporter — they simply no-op.
 type Reporter struct {
@@ -27,7 +19,6 @@ type Reporter struct {
 	workspaceID     string
 	callbackToken   string
 	client          *http.Client
-	broadcaster     Broadcaster
 }
 
 type logEntry struct {
@@ -56,32 +47,11 @@ func (r *Reporter) SetToken(token string) {
 	r.callbackToken = token
 }
 
-// SetBroadcaster sets a local broadcaster for real-time log distribution.
-// The broadcaster receives log entries immediately, even before the callback
-// token is available for HTTP relay to the control plane.
-func (r *Reporter) SetBroadcaster(b Broadcaster) {
-	if r == nil {
-		return
-	}
-	r.broadcaster = b
-}
-
-// Log sends a boot log entry to the control plane. It also broadcasts to any
-// local broadcaster (e.g., WebSocket clients) regardless of token availability.
+// Log sends a boot log entry to the control plane. It runs synchronously but
+// is designed to be fast (fire-and-forget from the caller's perspective).
 // Failures are logged locally but never block bootstrap.
 func (r *Reporter) Log(step, status, message string, detail ...string) {
-	if r == nil {
-		return
-	}
-
-	// Broadcast locally first — this works even before token redemption,
-	// so connected WebSocket clients see early bootstrap steps.
-	if r.broadcaster != nil {
-		r.broadcaster.Broadcast(step, status, message, detail...)
-	}
-
-	// HTTP relay to control plane requires a token.
-	if r.callbackToken == "" {
+	if r == nil || r.callbackToken == "" {
 		return
 	}
 
@@ -127,53 +97,8 @@ func (r *Reporter) Log(step, status, message string, detail ...string) {
 // devcontainer build process. This is designed to be called periodically (every few
 // seconds) with batched output rather than per-line.
 func (r *Reporter) LogBuildOutput(lines string) {
-	if r == nil || lines == "" {
+	if r == nil || r.callbackToken == "" || lines == "" {
 		return
 	}
-	// Always broadcast locally (even without token).
-	if r.broadcaster != nil {
-		r.broadcaster.Broadcast("build_output", "streaming", lines)
-	}
-	// HTTP relay requires token.
-	if r.callbackToken == "" {
-		return
-	}
-	r.logHTTP("build_output", "streaming", lines)
-}
-
-// logHTTP sends a log entry to the control plane via HTTP POST.
-// This is the HTTP-only path, used by LogBuildOutput to avoid double-broadcasting.
-func (r *Reporter) logHTTP(step, status, message string) {
-	entry := logEntry{
-		Step:      step,
-		Status:    status,
-		Message:   message,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}
-
-	body, err := json.Marshal(entry)
-	if err != nil {
-		log.Printf("bootlog: failed to marshal entry: %v", err)
-		return
-	}
-
-	url := fmt.Sprintf("%s/api/workspaces/%s/boot-log", r.controlPlaneURL, r.workspaceID)
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		log.Printf("bootlog: failed to create request: %v", err)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+r.callbackToken)
-
-	resp, err := r.client.Do(req)
-	if err != nil {
-		log.Printf("bootlog: failed to send log entry (step=%s): %v", step, err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		log.Printf("bootlog: control plane returned HTTP %d for step=%s", resp.StatusCode, step)
-	}
+	r.Log("build_output", "streaming", lines)
 }

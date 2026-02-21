@@ -44,10 +44,9 @@ terminalRoutes.post('/token', async (c) => {
     throw errors.notFound('Workspace');
   }
 
-  // Check workspace status — allow 'creating' so the UI can authenticate
-  // to the VM agent's boot-log WebSocket for real-time build log streaming.
-  if (ws.status !== 'running' && ws.status !== 'recovery' && ws.status !== 'creating') {
-    throw errors.badRequest(`Workspace is not accessible (status: ${ws.status})`);
+  // Check workspace status
+  if (ws.status !== 'running' && ws.status !== 'recovery') {
+    throw errors.badRequest(`Workspace is not running or recovery (status: ${ws.status})`);
   }
 
   // Generate the terminal token

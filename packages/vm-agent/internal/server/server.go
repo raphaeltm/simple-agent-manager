@@ -31,13 +31,12 @@ var staticFiles embed.FS
 
 // Server is the HTTP server for the VM Agent.
 type Server struct {
-	config              *config.Config
-	httpServer          *http.Server
-	jwtValidator        *auth.JWTValidator
-	sessionManager      *auth.SessionManager
-	ptyManager          *pty.Manager
-	idleDetector        *idle.Detector
-	bootLogBroadcaster  *BootLogBroadcaster
+	config           *config.Config
+	httpServer       *http.Server
+	jwtValidator     *auth.JWTValidator
+	sessionManager   *auth.SessionManager
+	ptyManager       *pty.Manager
+	idleDetector     *idle.Detector
 	sysInfoCollector *sysinfo.Collector
 	workspaceMu      sync.RWMutex
 	workspaces       map[string]*WorkspaceRuntime
@@ -198,22 +197,21 @@ func New(cfg *config.Config) (*Server, error) {
 	})
 
 	s := &Server{
-		config:             cfg,
-		jwtValidator:       jwtValidator,
-		sessionManager:     sessionManager,
-		ptyManager:         ptyManager,
-		idleDetector:       idleDetector,
-		bootLogBroadcaster: NewBootLogBroadcaster(),
-		sysInfoCollector:   sysInfoCollector,
-		workspaces:         make(map[string]*WorkspaceRuntime),
-		nodeEvents:         make([]EventRecord, 0, 512),
-		workspaceEvents:    make(map[string][]EventRecord),
-		agentSessions:      agentsessions.NewManager(),
-		acpConfig:          acpGatewayConfig,
-		sessionHosts:       make(map[string]*acp.SessionHost),
-		store:              store,
-		errorReporter:      errorReporter,
-		worktreeCache:      make(map[string]cachedWorktreeList),
+		config:           cfg,
+		jwtValidator:     jwtValidator,
+		sessionManager:   sessionManager,
+		ptyManager:       ptyManager,
+		idleDetector:     idleDetector,
+		sysInfoCollector: sysInfoCollector,
+		workspaces:       make(map[string]*WorkspaceRuntime),
+		nodeEvents:       make([]EventRecord, 0, 512),
+		workspaceEvents:  make(map[string][]EventRecord),
+		agentSessions:    agentsessions.NewManager(),
+		acpConfig:        acpGatewayConfig,
+		sessionHosts:     make(map[string]*acp.SessionHost),
+		store:            store,
+		errorReporter:    errorReporter,
+		worktreeCache:    make(map[string]cachedWorktreeList),
 	}
 
 	if cfg.WorkspaceID != "" {
@@ -258,50 +256,17 @@ func (s *Server) SetBootLog(reporter acp.BootLogReporter) {
 	s.acpConfig.BootLog = reporter
 }
 
-// GetBootLogBroadcaster returns the boot log broadcaster for wiring into the
-// bootlog reporter. This allows the reporter to broadcast log entries to
-// connected WebSocket clients in real time.
-func (s *Server) GetBootLogBroadcaster() *BootLogBroadcaster {
-	return s.bootLogBroadcaster
-}
-
-// Start starts the HTTP server. The idle detector and health reporter are NOT
-// started here because they require a callback token, which is only available
-// after bootstrap completes. Call UpdateAfterBootstrap() to start them.
+// Start starts the HTTP server.
 func (s *Server) Start() error {
-	// Start error reporter background flush (handles empty token gracefully)
+	// Start idle detector
+	go s.idleDetector.Start()
+	s.startNodeHealthReporter()
+
+	// Start error reporter background flush
 	s.errorReporter.Start()
 
 	log.Printf("Starting VM Agent on %s", s.httpServer.Addr)
 	return s.httpServer.ListenAndServe()
-}
-
-// UpdateAfterBootstrap propagates the callback token (obtained during bootstrap)
-// to components that need it, starts background services that depend on it, and
-// signals boot log clients that bootstrap is complete.
-func (s *Server) UpdateAfterBootstrap(cfg *config.Config) {
-	// Update callback token on components that were created with an empty token.
-	s.idleDetector.SetCallbackToken(cfg.CallbackToken)
-	s.errorReporter.SetToken(cfg.CallbackToken)
-	s.acpConfig.CallbackToken = cfg.CallbackToken
-
-	// Update workspace runtime with callback token.
-	s.workspaceMu.Lock()
-	if runtime, ok := s.workspaces[cfg.WorkspaceID]; ok {
-		runtime.CallbackToken = cfg.CallbackToken
-	}
-	s.workspaceMu.Unlock()
-
-	// Start services that require the callback token.
-	go s.idleDetector.Start()
-	s.startNodeHealthReporter()
-
-	// Signal boot log clients that bootstrap is complete.
-	if s.bootLogBroadcaster != nil {
-		s.bootLogBroadcaster.MarkComplete()
-	}
-
-	log.Printf("Server updated after bootstrap (callbackToken available)")
 }
 
 // GetIdleShutdownChannel returns the channel that's closed when idle shutdown is requested.
@@ -419,9 +384,6 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /events", s.handleListNodeEvents)
 	mux.HandleFunc("GET /system-info", s.handleSystemInfo)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/ports/{port}", s.handleWorkspacePortProxy)
-
-	// Boot log WebSocket (available during bootstrap for real-time log streaming)
-	mux.HandleFunc("GET /boot-log/ws", s.handleBootLogWS)
 
 	// ACP Agent WebSocket
 	mux.HandleFunc("GET /agent/ws", s.handleAgentWS)
