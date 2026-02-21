@@ -2,6 +2,7 @@
 package bootstrap
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/workspace/vm-agent/internal/bootlog"
@@ -140,7 +142,7 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 
 	reporter.Log("devcontainer_wait", "started", "Waiting for devcontainer CLI")
 	reporter.Log("devcontainer_up", "started", "Building devcontainer")
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg, volumeName)
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, volumeName, reporter)
 	if err != nil {
 		reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", err.Error())
 		return err
@@ -225,7 +227,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	if err := ensureRepositoryReady(ctx, cfg, bootstrap, volumeName); err != nil {
 		return false, err
 	}
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg, volumeName)
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, volumeName, nil)
 	if err != nil {
 		return false, err
 	}
@@ -593,6 +595,96 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 	return nil
 }
 
+// runDevcontainerWithStreaming runs a command and streams its stdout/stderr output
+// to the boot log reporter in batches. It returns the full combined output (for
+// error handling) and any error from the command. If reporter is nil, it falls back
+// to exec.CommandContext.CombinedOutput().
+func runDevcontainerWithStreaming(ctx context.Context, reporter *bootlog.Reporter, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+
+	// Fall back to simple CombinedOutput when no reporter is available.
+	if reporter == nil {
+		return cmd.CombinedOutput()
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start command: %w", err)
+	}
+
+	// Merge stdout and stderr into a single stream, collecting full output for
+	// error reporting while batching lines to the boot log reporter every few seconds.
+	var allOutput bytes.Buffer
+	var mu sync.Mutex
+	var pending []string
+
+	const flushInterval = 3 * time.Second
+
+	// Flush accumulated lines to the reporter.
+	flush := func() {
+		mu.Lock()
+		if len(pending) == 0 {
+			mu.Unlock()
+			return
+		}
+		batch := strings.Join(pending, "\n")
+		pending = pending[:0]
+		mu.Unlock()
+		reporter.LogBuildOutput(batch)
+	}
+
+	// Periodic flush ticker — sends batched output every flushInterval.
+	ticker := time.NewTicker(flushInterval)
+	done := make(chan struct{})
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				flush()
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	// scanLines reads from a reader line-by-line and appends to the shared buffers.
+	scanLines := func(r io.Reader) {
+		scanner := bufio.NewScanner(r)
+		scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			mu.Lock()
+			allOutput.WriteString(line)
+			allOutput.WriteByte('\n')
+			pending = append(pending, line)
+			mu.Unlock()
+		}
+	}
+
+	// Read stdout and stderr concurrently.
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); scanLines(stdout) }()
+	go func() { defer wg.Done(); scanLines(stderr) }()
+	wg.Wait()
+
+	// Stop the ticker and flush any remaining lines.
+	close(done)
+	flush()
+
+	cmdErr := cmd.Wait()
+	return allOutput.Bytes(), cmdErr
+}
+
 // ensureDevcontainerReady builds and starts the devcontainer for the workspace.
 // It returns (usedFallback, error) where usedFallback is true if the repo's own
 // devcontainer config failed and the default image was used instead.
@@ -601,7 +693,7 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 // volume mounted at /workspaces instead of the default bind mount. This eliminates
 // host/container permission mismatches because the container user owns everything
 // inside the volume.
-func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName string) (bool, error) {
+func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName string, reporter *bootlog.Reporter) (bool, error) {
 	if _, err := findDevcontainerID(ctx, cfg); err == nil {
 		log.Printf("Devcontainer already running for %s=%s", cfg.ContainerLabelKey, cfg.ContainerLabelValue)
 		ensureContainerUserResolved(ctx, cfg)
@@ -637,7 +729,7 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 				log.Printf("Failed to prepare repo mount override config, falling back to default image: %v", mountErr)
 				fallbackOutput := []byte(fmt.Sprintf("failed to prepare repo devcontainer mount override: %v\n", mountErr))
 				var fallbackErr error
-				usedFallback, fallbackErr = fallbackToDefaultDevcontainer(ctx, cfg, volumeName, mountErr, fallbackOutput)
+				usedFallback, fallbackErr = fallbackToDefaultDevcontainer(ctx, cfg, volumeName, mountErr, fallbackOutput, reporter)
 				if fallbackErr != nil {
 					return false, fallbackErr
 				}
@@ -651,13 +743,12 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 				log.Printf("Repo has its own devcontainer config — skipping additional-features injection")
 			}
 
-			cmd := exec.CommandContext(ctx, "devcontainer", args...)
-			output, err := cmd.CombinedOutput()
+			output, err := runDevcontainerWithStreaming(ctx, reporter, "devcontainer", args...)
 			if err != nil {
 				// Repo config failed — log the error and fall back to default image.
 				log.Printf("Devcontainer build failed with repo config, falling back to default image: %v: %s", err, strings.TrimSpace(string(output)))
 				var fallbackErr error
-				usedFallback, fallbackErr = fallbackToDefaultDevcontainer(ctx, cfg, volumeName, err, output)
+				usedFallback, fallbackErr = fallbackToDefaultDevcontainer(ctx, cfg, volumeName, err, output, reporter)
 				if fallbackErr != nil {
 					return false, fallbackErr
 				}
@@ -665,7 +756,7 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 		}
 	} else {
 		// No config — use default.
-		_, err := runDevcontainerWithDefault(ctx, cfg, volumeName)
+		_, err := runDevcontainerWithDefault(ctx, cfg, volumeName, reporter)
 		if err != nil {
 			return false, err
 		}
@@ -687,6 +778,7 @@ func fallbackToDefaultDevcontainer(
 	volumeName string,
 	originalErr error,
 	output []byte,
+	reporter *bootlog.Reporter,
 ) (bool, error) {
 	if len(bytes.TrimSpace(output)) == 0 {
 		output = []byte(fmt.Sprintf("devcontainer setup failed: %v\n", originalErr))
@@ -703,7 +795,7 @@ func fallbackToDefaultDevcontainer(
 	// broken container instead of creating a new one from the fallback image.
 	removeStaleContainers(ctx, cfg)
 
-	if _, err := runDevcontainerWithDefault(ctx, cfg, volumeName); err != nil {
+	if _, err := runDevcontainerWithDefault(ctx, cfg, volumeName, reporter); err != nil {
 		return false, fmt.Errorf("devcontainer fallback also failed: %w (original error: %v)", err, originalErr)
 	}
 
@@ -1178,7 +1270,7 @@ func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeNam
 
 // runDevcontainerWithDefault writes a default devcontainer config and runs devcontainer up
 // with --override-config and optional --additional-features.
-func runDevcontainerWithDefault(ctx context.Context, cfg *config.Config, volumeName string) (bool, error) {
+func runDevcontainerWithDefault(ctx context.Context, cfg *config.Config, volumeName string, reporter *bootlog.Reporter) (bool, error) {
 	configPath, err := writeDefaultDevcontainerConfig(cfg, volumeName)
 	if err != nil {
 		return false, fmt.Errorf("failed to write default devcontainer config: %w", err)
@@ -1191,8 +1283,7 @@ func runDevcontainerWithDefault(ctx context.Context, cfg *config.Config, volumeN
 		args = append(args, "--additional-features", cfg.AdditionalFeatures)
 	}
 
-	cmd := exec.CommandContext(ctx, "devcontainer", args...)
-	output, err := cmd.CombinedOutput()
+	output, err := runDevcontainerWithStreaming(ctx, reporter, "devcontainer", args...)
 	if err != nil {
 		return false, fmt.Errorf("devcontainer up failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
