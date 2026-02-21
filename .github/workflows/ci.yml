@@ -224,6 +224,31 @@ jobs:
         working-directory: packages/vm-agent
         run: go test -v -tags integration -timeout 15m ./internal/bootstrap/ ./internal/acp/
 
+  vm-agent-e2e:
+    name: VM Agent E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: packages/vm-agent/go.sum
+
+      - name: Install devcontainers CLI
+        run: npm install -g @devcontainers/cli
+
+      - name: Pull test images
+        run: |
+          docker pull mcr.microsoft.com/devcontainers/base:debian &
+          wait
+
+      - name: Run VM Agent E2E tests
+        working-directory: packages/vm-agent
+        run: go test -v -tags e2e -timeout 15m ./internal/e2e/
+
   devcontainer:
     name: Devcontainer Validation
     runs-on: ubuntu-latest

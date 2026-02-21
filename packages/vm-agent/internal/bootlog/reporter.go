@@ -12,6 +12,13 @@ import (
 	"time"
 )
 
+// Broadcaster is an interface for local real-time delivery of boot log entries.
+// The server's WebSocket broadcaster implements this to stream logs to connected
+// clients without the latency of the HTTP/KV relay path.
+type Broadcaster interface {
+	Broadcast(step, status, message string, detail ...string)
+}
+
 // Reporter sends structured log entries to the control plane boot-log endpoint.
 // It is safe to call methods on a nil *Reporter — they simply no-op.
 type Reporter struct {
@@ -19,6 +26,7 @@ type Reporter struct {
 	workspaceID     string
 	callbackToken   string
 	client          *http.Client
+	broadcaster     Broadcaster
 }
 
 type logEntry struct {
@@ -47,14 +55,43 @@ func (r *Reporter) SetToken(token string) {
 	r.callbackToken = token
 }
 
-// Log sends a boot log entry to the control plane. It runs synchronously but
-// is designed to be fast (fire-and-forget from the caller's perspective).
+// SetBroadcaster wires a local broadcaster for real-time WebSocket delivery.
+// The broadcaster receives log entries BEFORE the token check, so early bootstrap
+// steps (before token redemption) are visible to local WebSocket clients.
+func (r *Reporter) SetBroadcaster(b Broadcaster) {
+	if r == nil {
+		return
+	}
+	r.broadcaster = b
+}
+
+// Log sends a boot log entry to the control plane. It also broadcasts locally
+// to any connected WebSocket clients via the broadcaster (if set).
+//
+// The local broadcast happens BEFORE the token check so that early bootstrap
+// steps (before token redemption) are visible to WebSocket clients.
+//
 // Failures are logged locally but never block bootstrap.
 func (r *Reporter) Log(step, status, message string, detail ...string) {
-	if r == nil || r.callbackToken == "" {
+	if r == nil {
 		return
 	}
 
+	// Broadcast locally first — works even before token redemption.
+	if r.broadcaster != nil {
+		r.broadcaster.Broadcast(step, status, message, detail...)
+	}
+
+	// HTTP relay requires the callback token.
+	if r.callbackToken == "" {
+		return
+	}
+
+	r.logHTTP(step, status, message, detail...)
+}
+
+// logHTTP sends a boot log entry to the control plane via HTTP POST.
+func (r *Reporter) logHTTP(step, status, message string, detail ...string) {
 	entry := logEntry{
 		Step:      step,
 		Status:    status,

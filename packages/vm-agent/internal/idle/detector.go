@@ -87,6 +87,15 @@ func (d *Detector) Start() {
 	}
 }
 
+// SetCallbackToken updates the callback token used for heartbeat authentication.
+// This allows the detector to be created before the token is available (e.g. before
+// bootstrap) and activated later.
+func (d *Detector) SetCallbackToken(token string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.callbackToken = token
+}
+
 // Stop stops the idle detector.
 func (d *Detector) Stop() {
 	select {
