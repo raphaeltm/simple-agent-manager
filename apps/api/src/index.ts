@@ -20,6 +20,7 @@ import { agentSettingsRoutes } from './routes/agent-settings';
 import { clientErrorsRoutes } from './routes/client-errors';
 import { projectsRoutes } from './routes/projects';
 import { tasksRoutes } from './routes/tasks';
+import { taskRunsRoutes } from './routes/task-runs';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { getRuntimeLimits } from './services/limits';
 import { recordNodeRoutingMetric } from './services/telemetry';
@@ -82,6 +83,12 @@ export interface Env {
   NODE_HEARTBEAT_STALE_SECONDS?: string;
   NODE_AGENT_READY_TIMEOUT_MS?: string;
   NODE_AGENT_READY_POLL_INTERVAL_MS?: string;
+  // Task run configuration (autonomous execution)
+  TASK_RUN_NODE_CPU_THRESHOLD_PERCENT?: string;
+  TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;
+  TASK_RUN_WORKSPACE_IDLE_TIMEOUT_SECONDS?: string;
+  TASK_RUN_CLEANUP_DELAY_MS?: string;
+  WORKSPACE_READY_TIMEOUT_MS?: string;
   // ACP configuration (passed to VMs via environment)
   ACP_INIT_TIMEOUT_MS?: string;
   ACP_RECONNECT_DELAY_MS?: string;
@@ -283,6 +290,7 @@ app.route('/api/agent-settings', agentSettingsRoutes);
 app.route('/api/client-errors', clientErrorsRoutes);
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
+app.route('/api/projects/:projectId/tasks', taskRunsRoutes);
 
 // 404 handler
 app.notFound((c) => {
