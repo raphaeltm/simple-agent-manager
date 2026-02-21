@@ -289,6 +289,9 @@ export const tasks = sqliteTable(
     outputSummary: text('output_summary'),
     outputBranch: text('output_branch'),
     outputPrUrl: text('output_pr_url'),
+    autoProvisionedNodeId: text('auto_provisioned_node_id').references(() => nodes.id, {
+      onDelete: 'set null',
+    }),
     createdBy: text('created_by')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -300,6 +303,9 @@ export const tasks = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
+    autoProvisionedNodeIdx: index('idx_tasks_auto_provisioned_node')
+      .on(table.autoProvisionedNodeId)
+      .where(sql`auto_provisioned_node_id is not null`),
     projectStatusPriorityUpdatedIdx: index('idx_tasks_project_status_priority_updated').on(
       table.projectId,
       table.status,
