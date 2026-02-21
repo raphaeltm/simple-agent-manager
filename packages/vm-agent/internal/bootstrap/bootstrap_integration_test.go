@@ -420,7 +420,7 @@ echo '{"outcome":"success","containerId":"mock-container-id"}'
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		_, _ = ensureDevcontainerReady(ctx, cfg, "")
+		_, _ = ensureDevcontainerReady(ctx, cfg, "", nil)
 
 		args, err := os.ReadFile(argsFile)
 		if err != nil {
@@ -449,7 +449,7 @@ echo '{"outcome":"success","containerId":"mock-container-id"}'
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		_, _ = ensureDevcontainerReady(ctx, cfg, "")
+		_, _ = ensureDevcontainerReady(ctx, cfg, "", nil)
 
 		args, err := os.ReadFile(argsFile)
 		if err != nil {
@@ -593,7 +593,7 @@ func TestIntegration_DevcontainerBuildWithConfig(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if _, err := ensureDevcontainerReady(ctx, cfg, ""); err != nil {
+	if _, err := ensureDevcontainerReady(ctx, cfg, "", nil); err != nil {
 		t.Fatalf("ensureDevcontainerReady: %v", err)
 	}
 
@@ -699,7 +699,7 @@ func TestIntegration_DevcontainerWithRemoteUser(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if _, err := ensureDevcontainerReady(ctx, cfg, ""); err != nil {
+	if _, err := ensureDevcontainerReady(ctx, cfg, "", nil); err != nil {
 		t.Fatalf("ensureDevcontainerReady: %v", err)
 	}
 
@@ -835,7 +835,7 @@ RUN echo "dockerfile-build-marker" > /tmp/dockerfile-marker
 		t.Fatal("hasDevcontainerConfig() should return true for Dockerfile-based config")
 	}
 
-	if _, err := ensureDevcontainerReady(ctx, cfg, ""); err != nil {
+	if _, err := ensureDevcontainerReady(ctx, cfg, "", nil); err != nil {
 		t.Fatalf("ensureDevcontainerReady with Dockerfile: %v", err)
 	}
 
@@ -917,7 +917,7 @@ func TestIntegration_DevcontainerWithFeatures(t *testing.T) {
 		t.Fatal("hasDevcontainerConfig() should return true for config with features")
 	}
 
-	if _, err := ensureDevcontainerReady(ctx, cfg, ""); err != nil {
+	if _, err := ensureDevcontainerReady(ctx, cfg, "", nil); err != nil {
 		t.Fatalf("ensureDevcontainerReady: %v", err)
 	}
 
@@ -966,7 +966,7 @@ func TestIntegration_DevcontainerWithPostCreateCommand(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if _, err := ensureDevcontainerReady(ctx, cfg, ""); err != nil {
+	if _, err := ensureDevcontainerReady(ctx, cfg, "", nil); err != nil {
 		t.Fatalf("ensureDevcontainerReady: %v", err)
 	}
 
@@ -1015,7 +1015,7 @@ func TestIntegration_DevcontainerWithMultipleLifecycleHooks(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if _, err := ensureDevcontainerReady(ctx, cfg, ""); err != nil {
+	if _, err := ensureDevcontainerReady(ctx, cfg, "", nil); err != nil {
 		t.Fatalf("ensureDevcontainerReady: %v", err)
 	}
 
@@ -1073,7 +1073,7 @@ func TestIntegration_DevcontainerWithRemoteEnv(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if _, err := ensureDevcontainerReady(ctx, cfg, ""); err != nil {
+	if _, err := ensureDevcontainerReady(ctx, cfg, "", nil); err != nil {
 		t.Fatalf("ensureDevcontainerReady: %v", err)
 	}
 
@@ -1147,7 +1147,7 @@ func TestIntegration_DevcontainerRootDevcontainerJson(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if _, err := ensureDevcontainerReady(ctx, cfg, ""); err != nil {
+	if _, err := ensureDevcontainerReady(ctx, cfg, "", nil); err != nil {
 		t.Fatalf("ensureDevcontainerReady with root .devcontainer.json: %v", err)
 	}
 
