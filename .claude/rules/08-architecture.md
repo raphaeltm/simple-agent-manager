@@ -61,6 +61,7 @@ Before making ANY changes related to architecture, secrets, credentials, data mo
 1. **Bring-Your-Own-Cloud (BYOC)**: Users provide their own Hetzner tokens. The platform does NOT have cloud provider credentials.
 2. **User credentials are encrypted per-user** in the database, NOT stored as environment variables or Worker secrets.
 3. **Platform secrets** (ENCRYPTION_KEY, JWT keys, CF_API_TOKEN) are Cloudflare Worker secrets set during deployment.
+4. **Observability First**: Every system must be designed with monitoring and visibility as a top priority, not an afterthought. If a process is running (builds, bootstraps, provisioning), the user and operators MUST be able to observe its progress in real time. Design data flows and server startup sequences so that monitoring endpoints (health checks, log streams, metrics) are available from the earliest possible moment — before the primary workload begins, not after it completes.
 
 ## Business Logic Research Requirements
 
