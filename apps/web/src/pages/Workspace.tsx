@@ -16,6 +16,7 @@ import { useIsMobile } from '../hooks/useIsMobile';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useTabOrder } from '../hooks/useTabOrder';
 import { useTokenRefresh } from '../hooks/useTokenRefresh';
+import { useBootLogStream } from '../hooks/useBootLogStream';
 import { WorkspaceTabStrip, type WorkspaceTabItem } from '../components/WorkspaceTabStrip';
 import { WorktreeSelector } from '../components/WorktreeSelector';
 import { MoreVertical, X } from 'lucide-react';
@@ -241,6 +242,13 @@ export function Workspace() {
       setTerminalError(tokenRefreshError);
     }
   }, [tokenRefreshError]);
+
+  // Real-time boot log streaming via WebSocket during workspace creation
+  const { logs: streamedBootLogs } = useBootLogStream(
+    id,
+    workspace?.url,
+    workspace?.status
+  );
 
   const loadWorkspaceState = useCallback(async () => {
     if (!id) {
@@ -1395,7 +1403,7 @@ export function Workspace() {
   // ── Non-running states content ──
   const statusContent = !isRunning ? (
     workspace?.status === 'creating' ? (
-      <BootProgress logs={workspace.bootLogs} />
+      <BootProgress logs={streamedBootLogs.length > 0 ? streamedBootLogs : workspace.bootLogs} />
     ) : workspace?.status === 'stopping' ? (
       <CenteredStatus color="#fbbf24" title="Stopping Workspace" loading />
     ) : workspace?.status === 'stopped' ? (
