@@ -31,26 +31,28 @@ var staticFiles embed.FS
 
 // Server is the HTTP server for the VM Agent.
 type Server struct {
-	config           *config.Config
-	httpServer       *http.Server
-	jwtValidator     *auth.JWTValidator
-	sessionManager   *auth.SessionManager
-	ptyManager       *pty.Manager
-	idleDetector     *idle.Detector
-	sysInfoCollector *sysinfo.Collector
-	workspaceMu      sync.RWMutex
-	workspaces       map[string]*WorkspaceRuntime
-	eventMu          sync.RWMutex
-	nodeEvents       []EventRecord
-	workspaceEvents  map[string][]EventRecord
-	agentSessions    *agentsessions.Manager
-	acpConfig        acp.GatewayConfig
-	sessionHostMu    sync.Mutex
-	sessionHosts     map[string]*acp.SessionHost
-	store            *persistence.Store
-	errorReporter    *errorreport.Reporter
-	worktreeCacheMu  sync.RWMutex
-	worktreeCache    map[string]cachedWorktreeList
+	config              *config.Config
+	httpServer          *http.Server
+	jwtValidator        *auth.JWTValidator
+	sessionManager      *auth.SessionManager
+	ptyManager          *pty.Manager
+	idleDetector        *idle.Detector
+	sysInfoCollector    *sysinfo.Collector
+	workspaceMu         sync.RWMutex
+	workspaces          map[string]*WorkspaceRuntime
+	eventMu             sync.RWMutex
+	nodeEvents          []EventRecord
+	workspaceEvents     map[string][]EventRecord
+	agentSessions       *agentsessions.Manager
+	acpConfig           acp.GatewayConfig
+	sessionHostMu       sync.Mutex
+	sessionHosts        map[string]*acp.SessionHost
+	store               *persistence.Store
+	errorReporter       *errorreport.Reporter
+	worktreeCacheMu     sync.RWMutex
+	worktreeCache       map[string]cachedWorktreeList
+	bootLogBroadcaster  *BootLogBroadcaster
+	bootstrapComplete   bool
 }
 
 type cachedWorktreeList struct {
@@ -197,21 +199,22 @@ func New(cfg *config.Config) (*Server, error) {
 	})
 
 	s := &Server{
-		config:           cfg,
-		jwtValidator:     jwtValidator,
-		sessionManager:   sessionManager,
-		ptyManager:       ptyManager,
-		idleDetector:     idleDetector,
-		sysInfoCollector: sysInfoCollector,
-		workspaces:       make(map[string]*WorkspaceRuntime),
-		nodeEvents:       make([]EventRecord, 0, 512),
-		workspaceEvents:  make(map[string][]EventRecord),
-		agentSessions:    agentsessions.NewManager(),
-		acpConfig:        acpGatewayConfig,
-		sessionHosts:     make(map[string]*acp.SessionHost),
-		store:            store,
-		errorReporter:    errorReporter,
-		worktreeCache:    make(map[string]cachedWorktreeList),
+		config:             cfg,
+		jwtValidator:       jwtValidator,
+		sessionManager:     sessionManager,
+		ptyManager:         ptyManager,
+		idleDetector:       idleDetector,
+		sysInfoCollector:   sysInfoCollector,
+		workspaces:         make(map[string]*WorkspaceRuntime),
+		nodeEvents:         make([]EventRecord, 0, 512),
+		workspaceEvents:    make(map[string][]EventRecord),
+		agentSessions:      agentsessions.NewManager(),
+		acpConfig:          acpGatewayConfig,
+		sessionHosts:       make(map[string]*acp.SessionHost),
+		store:              store,
+		errorReporter:      errorReporter,
+		worktreeCache:      make(map[string]cachedWorktreeList),
+		bootLogBroadcaster: NewBootLogBroadcaster(),
 	}
 
 	if cfg.WorkspaceID != "" {
@@ -254,6 +257,39 @@ func New(cfg *config.Config) (*Server, error) {
 // agent errors (crashes, stderr) are reported to the control plane.
 func (s *Server) SetBootLog(reporter acp.BootLogReporter) {
 	s.acpConfig.BootLog = reporter
+}
+
+// GetBootLogBroadcaster returns the broadcaster that streams boot log entries
+// to WebSocket clients. Wire this into the bootlog.Reporter via SetBroadcaster()
+// to enable real-time log delivery during bootstrap.
+func (s *Server) GetBootLogBroadcaster() *BootLogBroadcaster {
+	return s.bootLogBroadcaster
+}
+
+// UpdateAfterBootstrap propagates the callback token (obtained during bootstrap)
+// to subsystems that were created before the token was available, and signals
+// that bootstrap is complete.
+func (s *Server) UpdateAfterBootstrap(cfg *config.Config) {
+	// Propagate callback token to idle detector and error reporter.
+	s.idleDetector.SetCallbackToken(cfg.CallbackToken)
+	s.errorReporter.SetToken(cfg.CallbackToken)
+
+	// Update ACP gateway config with the callback token.
+	s.acpConfig.CallbackToken = cfg.CallbackToken
+
+	// Update workspace runtime with the callback token.
+	s.workspaceMu.Lock()
+	if ws, ok := s.workspaces[cfg.WorkspaceID]; ok {
+		ws.CallbackToken = cfg.CallbackToken
+	}
+	s.workspaceMu.Unlock()
+
+	s.bootstrapComplete = true
+
+	// Notify WebSocket clients that bootstrap is complete.
+	if s.bootLogBroadcaster != nil {
+		s.bootLogBroadcaster.MarkComplete()
+	}
 }
 
 // Start starts the HTTP server.
@@ -384,6 +420,9 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /events", s.handleListNodeEvents)
 	mux.HandleFunc("GET /system-info", s.handleSystemInfo)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/ports/{port}", s.handleWorkspacePortProxy)
+
+	// Boot log WebSocket (available during bootstrap for real-time streaming)
+	mux.HandleFunc("GET /boot-log/ws", s.handleBootLogWS)
 
 	// ACP Agent WebSocket
 	mux.HandleFunc("GET /agent/ws", s.handleAgentWS)

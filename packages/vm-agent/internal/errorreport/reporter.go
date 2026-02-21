@@ -75,6 +75,18 @@ func New(apiBaseURL, nodeID, authToken string, cfg Config) *Reporter {
 	}
 }
 
+// SetToken updates the auth token used for error reporting. This allows the
+// reporter to be created before the token is available (e.g. before bootstrap)
+// and activated later.
+func (r *Reporter) SetToken(token string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.authToken = token
+}
+
 // Start launches the background flush goroutine.
 func (r *Reporter) Start() {
 	if r == nil {

@@ -61,7 +61,6 @@ func freePort(t *testing.T) int {
 	return port
 }
 
-// testKeyPair generates an Ed25519 key pair and returns (privateKey, publicKeyBase64, keyID).
 func testKeyPair(t *testing.T) (ed25519.PrivateKey, string, string) {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -93,6 +92,87 @@ func signTestJWT(t *testing.T, privateKey ed25519.PrivateKey, keyID, issuer, aud
 	return signed
 }
 
+// buildTestConfig creates a config.Config with all required fields populated.
+// This avoids zero-value panics from subsystems like SessionManager that need
+// positive durations for tickers.
+func buildTestConfig(t *testing.T, port int, mockServerURL, workspaceID, bootstrapToken, repo string) *config.Config {
+	t.Helper()
+	return &config.Config{
+		Port:                          port,
+		Host:                          "127.0.0.1",
+		ControlPlaneURL:               mockServerURL,
+		JWKSEndpoint:                  mockServerURL + "/.well-known/jwks.json",
+		JWTIssuer:                     mockServerURL,
+		JWTAudience:                   "workspace-terminal",
+		NodeID:                        workspaceID,
+		WorkspaceID:                   workspaceID,
+		BootstrapToken:                bootstrapToken,
+		Repository:                    repo,
+		Branch:                        "main",
+		WorkspaceDir:                  repo,
+		BootstrapStatePath:            filepath.Join(t.TempDir(), "bootstrap-state.json"),
+		BootstrapMaxWait:              30 * time.Second,
+		BootstrapTimeout:              5 * time.Minute,
+		ContainerMode:                 true,
+		ContainerLabelKey:             "devcontainer.local_folder",
+		ContainerLabelValue:           repo,
+		AdditionalFeatures:            config.DefaultAdditionalFeatures,
+		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
+		PersistenceDBPath:             filepath.Join(t.TempDir(), "state.db"),
+
+		// Session management
+		SessionTTL:             24 * time.Hour,
+		SessionCleanupInterval: 1 * time.Minute,
+		SessionMaxCount:        100,
+		CookieName:             "sam_session",
+
+		// Idle detection
+		IdleTimeout:       30 * time.Minute,
+		HeartbeatInterval: 60 * time.Second,
+		IdleCheckInterval: 10 * time.Second,
+
+		// HTTP
+		HTTPReadTimeout: 30 * time.Second,
+		HTTPIdleTimeout: 120 * time.Second,
+
+		// WebSocket
+		WSReadBufferSize:  4096,
+		WSWriteBufferSize: 4096,
+		AllowedOrigins:    []string{"*"},
+
+		// PTY
+		DefaultShell:    "/bin/sh",
+		DefaultRows:     24,
+		DefaultCols:     80,
+		PTYOutputBufferSize: 262144,
+
+		// ACP
+		ACPInitTimeoutMs:      30000,
+		ACPMaxRestartAttempts: 3,
+		ACPPingInterval:       30 * time.Second,
+		ACPPongTimeout:        10 * time.Second,
+		ACPPromptTimeout:      60 * time.Minute,
+
+		// Error reporting
+		ErrorReportFlushInterval: 30 * time.Second,
+		ErrorReportMaxBatchSize:  10,
+		ErrorReportMaxQueueSize:  100,
+		ErrorReportHTTPTimeout:   10 * time.Second,
+
+		// Container
+		ContainerCacheTTL: 30 * time.Second,
+
+		// Git
+		GitExecTimeout: 30 * time.Second,
+		GitFileMaxSize: 1048576,
+
+		// System info
+		SysInfoDockerTimeout:  10 * time.Second,
+		SysInfoVersionTimeout: 5 * time.Second,
+		SysInfoCacheTTL:       5 * time.Second,
+	}
+}
+
 // controlPlaneState tracks what the mock control plane received.
 type controlPlaneState struct {
 	mu                sync.Mutex
@@ -112,7 +192,7 @@ func startMockControlPlane(
 	t.Helper()
 	state := &controlPlaneState{}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Bootstrap token redemption
 		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/bootstrap/") {
 			token := strings.TrimPrefix(r.URL.Path, "/api/bootstrap/")
@@ -187,14 +267,8 @@ func startMockControlPlane(
 			return
 		}
 
-		// Error reports
-		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/errors") {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		// Node health
-		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/health") {
+		// Error reports / node health — accept silently
+		if r.Method == http.MethodPost {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -203,8 +277,8 @@ func startMockControlPlane(
 		http.Error(w, "not found", http.StatusNotFound)
 	}))
 
-	t.Cleanup(server.Close)
-	return server, state
+	t.Cleanup(srv.Close)
+	return srv, state
 }
 
 func mustCreateTestRepo(t *testing.T, devcontainerJSON string) string {
@@ -222,10 +296,8 @@ func mustCreateTestRepo(t *testing.T, devcontainerJSON string) string {
 		}
 	}
 
-	// Write README
 	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# E2E Test Repo\n"), 0o644)
 
-	// Write devcontainer config
 	if devcontainerJSON != "" {
 		dcDir := filepath.Join(dir, ".devcontainer")
 		os.MkdirAll(dcDir, 0o755)
@@ -241,11 +313,9 @@ func mustCreateTestRepo(t *testing.T, devcontainerJSON string) string {
 			t.Fatalf("%v failed: %v\n%s", args, err, out)
 		}
 	}
-
 	return dir
 }
 
-// waitForHealth polls a /health endpoint until it responds 200 or the context expires.
 func waitForHealth(ctx context.Context, baseURL string) error {
 	client := &http.Client{Timeout: 2 * time.Second}
 	ticker := time.NewTicker(200 * time.Millisecond)
@@ -267,6 +337,19 @@ func waitForHealth(ctx context.Context, baseURL string) error {
 	}
 }
 
+// cleanupDockerResources removes containers matching the label and the workspace volume.
+func cleanupDockerResources(t *testing.T, cfg *config.Config, workspaceID string) {
+	t.Helper()
+	ctx := context.Background()
+	filter := fmt.Sprintf("label=%s=%s", cfg.ContainerLabelKey, cfg.ContainerLabelValue)
+	if out, err := exec.CommandContext(ctx, "docker", "ps", "-aq", "--filter", filter).Output(); err == nil {
+		for _, id := range strings.Fields(string(out)) {
+			exec.Command("docker", "rm", "-f", id).Run()
+		}
+	}
+	bootstrap.RemoveVolume(ctx, workspaceID)
+}
+
 // BootLogWSEntry matches the JSON structure sent over the boot log WebSocket.
 type BootLogWSEntry struct {
 	Type      string `json:"type"`
@@ -283,9 +366,6 @@ type BootLogWSEntry struct {
 
 // TestBootLogStreaming_HealthBeforeBootstrap verifies that the vm-agent HTTP
 // server is reachable (health endpoint responds) BEFORE bootstrap completes.
-// This is the fundamental requirement: the server must start before bootstrap
-// so that waitForNodeAgentReady() in the API can succeed while the workspace
-// is still being created.
 func TestBootLogStreaming_HealthBeforeBootstrap(t *testing.T) {
 	requireDockerAvailable(t)
 	requireDevcontainerCLI(t)
@@ -295,86 +375,32 @@ func TestBootLogStreaming_HealthBeforeBootstrap(t *testing.T) {
 	callbackToken := "test-callback-token-health"
 
 	privateKey, pubKeyB64, keyID := testKeyPair(t)
-
 	repo := mustCreateTestRepo(t, `{"image": "mcr.microsoft.com/devcontainers/base:debian"}`)
-
-	mockServer, cpState := startMockControlPlane(t, workspaceID, bootstrapToken, callbackToken, privateKey, pubKeyB64, keyID)
+	mockCP, cpState := startMockControlPlane(t, workspaceID, bootstrapToken, callbackToken, privateKey, pubKeyB64, keyID)
 
 	port := freePort(t)
-
-	cfg := &config.Config{
-		Port:                          port,
-		Host:                          "127.0.0.1",
-		ControlPlaneURL:               mockServer.URL,
-		JWKSEndpoint:                  mockServer.URL + "/.well-known/jwks.json",
-		JWTIssuer:                     mockServer.URL,
-		JWTAudience:                   "workspace-terminal",
-		NodeID:                        workspaceID,
-		WorkspaceID:                   workspaceID,
-		BootstrapToken:                bootstrapToken,
-		Repository:                    repo,
-		Branch:                        "main",
-		WorkspaceDir:                  repo,
-		BootstrapStatePath:            filepath.Join(t.TempDir(), "bootstrap-state.json"),
-		BootstrapMaxWait:              30 * time.Second,
-		BootstrapTimeout:              5 * time.Minute,
-		ContainerMode:                 true,
-		ContainerLabelKey:             "devcontainer.local_folder",
-		ContainerLabelValue:           repo,
-		AdditionalFeatures:            config.DefaultAdditionalFeatures,
-		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
-		PersistenceDBPath:             filepath.Join(t.TempDir(), "state.db"),
-		IdleTimeout:                   30 * time.Minute,
-		HeartbeatInterval:             60 * time.Second,
-		SessionTTL:                    24 * time.Hour,
-		SessionMaxCount:               100,
-		CookieName:                    "sam_session",
-		HTTPReadTimeout:               30 * time.Second,
-		HTTPIdleTimeout:               120 * time.Second,
-		WSReadBufferSize:              4096,
-		WSWriteBufferSize:             4096,
-		AllowedOrigins:                []string{"*"},
-		DefaultShell:                  "/bin/sh",
-		DefaultRows:                   24,
-		DefaultCols:                   80,
-		PTYOutputBufferSize:           262144,
-		ACPInitTimeoutMs:              30000,
-		ACPMaxRestartAttempts:         3,
-		ACPPingInterval:               30 * time.Second,
-		ACPPongTimeout:                10 * time.Second,
-		ACPPromptTimeout:              60 * time.Minute,
-		ErrorReportFlushInterval:      30 * time.Second,
-		ErrorReportMaxBatchSize:       10,
-		ErrorReportMaxQueueSize:       100,
-		ErrorReportHTTPTimeout:        10 * time.Second,
-	}
+	cfg := buildTestConfig(t, port, mockCP.URL, workspaceID, bootstrapToken, repo)
 
 	reporter := bootlog.New(cfg.ControlPlaneURL, cfg.WorkspaceID)
 
-	// The key assertion: we expect the server to be created and started BEFORE
-	// bootstrap runs. The current code does bootstrap first then creates the
-	// server, so this test validates the restructured startup order.
-	//
-	// We need server.New() to work without a CallbackToken (it's set during
-	// bootstrap). We also need a method to wire the broadcaster and to update
-	// the server after bootstrap completes.
 	srv, err := server.New(cfg)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
 	srv.SetBootLog(reporter)
+	t.Cleanup(func() { cleanupDockerResources(t, cfg, workspaceID) })
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		srv.Stop(ctx)
+	})
 
-	// Start server in background
-	serverErrCh := make(chan error, 1)
-	go func() {
-		serverErrCh <- srv.Start()
-	}()
+	go srv.Start()
 
 	// ASSERTION 1: Health endpoint responds BEFORE bootstrap starts.
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	healthCtx, healthCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer healthCancel()
-
 	if err := waitForHealth(healthCtx, baseURL); err != nil {
 		t.Fatalf("FAIL: Health endpoint not reachable before bootstrap: %v", err)
 	}
@@ -383,7 +409,6 @@ func TestBootLogStreaming_HealthBeforeBootstrap(t *testing.T) {
 	// Now run bootstrap
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer bootstrapCancel()
-
 	if err := bootstrap.Run(bootstrapCtx, cfg, reporter); err != nil {
 		t.Fatalf("bootstrap.Run: %v", err)
 	}
@@ -422,21 +447,6 @@ func TestBootLogStreaming_HealthBeforeBootstrap(t *testing.T) {
 		t.Fatalf("FAIL: Health endpoint not reachable after bootstrap: %v", err)
 	}
 	t.Log("PASS: Health endpoint responds after bootstrap")
-
-	// Clean up: find and remove devcontainer
-	cleanupCtx := context.Background()
-	filter := fmt.Sprintf("label=%s=%s", cfg.ContainerLabelKey, cfg.ContainerLabelValue)
-	if out, err := exec.CommandContext(cleanupCtx, "docker", "ps", "-aq", "--filter", filter).Output(); err == nil {
-		for _, id := range strings.Fields(string(out)) {
-			exec.Command("docker", "rm", "-f", id).Run()
-		}
-	}
-	bootstrap.RemoveVolume(cleanupCtx, workspaceID)
-
-	// Stop server
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer stopCancel()
-	srv.Stop(stopCtx)
 }
 
 // TestBootLogStreaming_WebSocketDuringBootstrap verifies that a WebSocket client
@@ -450,81 +460,35 @@ func TestBootLogStreaming_WebSocketDuringBootstrap(t *testing.T) {
 	callbackToken := "test-callback-token-ws"
 
 	privateKey, pubKeyB64, keyID := testKeyPair(t)
-
 	repo := mustCreateTestRepo(t, `{"image": "mcr.microsoft.com/devcontainers/base:debian"}`)
-
-	mockServer, cpState := startMockControlPlane(t, workspaceID, bootstrapToken, callbackToken, privateKey, pubKeyB64, keyID)
+	mockCP, cpState := startMockControlPlane(t, workspaceID, bootstrapToken, callbackToken, privateKey, pubKeyB64, keyID)
 
 	port := freePort(t)
-
-	cfg := &config.Config{
-		Port:                          port,
-		Host:                          "127.0.0.1",
-		ControlPlaneURL:               mockServer.URL,
-		JWKSEndpoint:                  mockServer.URL + "/.well-known/jwks.json",
-		JWTIssuer:                     mockServer.URL,
-		JWTAudience:                   "workspace-terminal",
-		NodeID:                        workspaceID,
-		WorkspaceID:                   workspaceID,
-		BootstrapToken:                bootstrapToken,
-		Repository:                    repo,
-		Branch:                        "main",
-		WorkspaceDir:                  repo,
-		BootstrapStatePath:            filepath.Join(t.TempDir(), "bootstrap-state.json"),
-		BootstrapMaxWait:              30 * time.Second,
-		BootstrapTimeout:              5 * time.Minute,
-		ContainerMode:                 true,
-		ContainerLabelKey:             "devcontainer.local_folder",
-		ContainerLabelValue:           repo,
-		AdditionalFeatures:            config.DefaultAdditionalFeatures,
-		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
-		PersistenceDBPath:             filepath.Join(t.TempDir(), "state.db"),
-		IdleTimeout:                   30 * time.Minute,
-		HeartbeatInterval:             60 * time.Second,
-		SessionTTL:                    24 * time.Hour,
-		SessionMaxCount:               100,
-		CookieName:                    "sam_session",
-		HTTPReadTimeout:               30 * time.Second,
-		HTTPIdleTimeout:               120 * time.Second,
-		WSReadBufferSize:              4096,
-		WSWriteBufferSize:             4096,
-		AllowedOrigins:                []string{"*"},
-		DefaultShell:                  "/bin/sh",
-		DefaultRows:                   24,
-		DefaultCols:                   80,
-		PTYOutputBufferSize:           262144,
-		ACPInitTimeoutMs:              30000,
-		ACPMaxRestartAttempts:         3,
-		ACPPingInterval:               30 * time.Second,
-		ACPPongTimeout:                10 * time.Second,
-		ACPPromptTimeout:              60 * time.Minute,
-		ErrorReportFlushInterval:      30 * time.Second,
-		ErrorReportMaxBatchSize:       10,
-		ErrorReportMaxQueueSize:       100,
-		ErrorReportHTTPTimeout:        10 * time.Second,
-	}
+	cfg := buildTestConfig(t, port, mockCP.URL, workspaceID, bootstrapToken, repo)
 
 	reporter := bootlog.New(cfg.ControlPlaneURL, cfg.WorkspaceID)
 
-	// Create and start server BEFORE bootstrap
 	srv, err := server.New(cfg)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
 	srv.SetBootLog(reporter)
 
-	// Wire broadcaster: the reporter should broadcast to the server's WebSocket clients.
-	// This tests that GetBootLogBroadcaster() and SetBroadcaster() exist and work.
+	// Wire broadcaster for real-time WebSocket delivery.
 	broadcaster := srv.GetBootLogBroadcaster()
 	if broadcaster == nil {
-		t.Fatal("FAIL: server.GetBootLogBroadcaster() returned nil — /boot-log/ws endpoint not supported")
+		t.Fatal("FAIL: server.GetBootLogBroadcaster() returned nil")
 	}
 	reporter.SetBroadcaster(broadcaster)
 
-	serverErrCh := make(chan error, 1)
-	go func() {
-		serverErrCh <- srv.Start()
-	}()
+	t.Cleanup(func() { cleanupDockerResources(t, cfg, workspaceID) })
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		srv.Stop(ctx)
+	})
+
+	go srv.Start()
 
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	healthCtx, healthCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -534,7 +498,7 @@ func TestBootLogStreaming_WebSocketDuringBootstrap(t *testing.T) {
 	}
 
 	// Sign a JWT for WebSocket auth
-	wsToken := signTestJWT(t, privateKey, keyID, mockServer.URL, "workspace-terminal", workspaceID, workspaceID)
+	wsToken := signTestJWT(t, privateKey, keyID, mockCP.URL, "workspace-terminal", workspaceID, workspaceID)
 
 	// Connect WebSocket to /boot-log/ws BEFORE bootstrap starts
 	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/boot-log/ws?token=%s", port, wsToken)
@@ -546,8 +510,8 @@ func TestBootLogStreaming_WebSocketDuringBootstrap(t *testing.T) {
 	t.Log("PASS: WebSocket connected to /boot-log/ws before bootstrap")
 
 	// Collect WebSocket messages in background
-	wsMessages := make([]BootLogWSEntry, 0)
-	wsMu := sync.Mutex{}
+	var wsMessages []BootLogWSEntry
+	var wsMu sync.Mutex
 	wsDone := make(chan struct{})
 	go func() {
 		defer close(wsDone)
@@ -565,19 +529,17 @@ func TestBootLogStreaming_WebSocketDuringBootstrap(t *testing.T) {
 		}
 	}()
 
-	// Run bootstrap — this should generate log entries that stream to our WebSocket
+	// Run bootstrap
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer bootstrapCancel()
-
-	bootstrapErr := bootstrap.Run(bootstrapCtx, cfg, reporter)
-	if bootstrapErr != nil {
-		t.Fatalf("bootstrap.Run: %v", bootstrapErr)
+	if err := bootstrap.Run(bootstrapCtx, cfg, reporter); err != nil {
+		t.Fatalf("bootstrap.Run: %v", err)
 	}
 
 	// Signal bootstrap complete to WebSocket clients
 	srv.UpdateAfterBootstrap(cfg)
 
-	// Wait for "complete" message or timeout
+	// Wait for "complete" message
 	select {
 	case <-wsDone:
 		t.Log("PASS: WebSocket received complete event")
@@ -585,79 +547,51 @@ func TestBootLogStreaming_WebSocketDuringBootstrap(t *testing.T) {
 		t.Fatal("FAIL: Timed out waiting for WebSocket complete event")
 	}
 
-	// ASSERTION: WebSocket received log entries
 	wsMu.Lock()
-	wsCount := len(wsMessages)
 	wsEntries := make([]BootLogWSEntry, len(wsMessages))
 	copy(wsEntries, wsMessages)
 	wsMu.Unlock()
 
-	if wsCount == 0 {
+	if len(wsEntries) == 0 {
 		t.Fatal("FAIL: No WebSocket messages received during bootstrap")
 	}
-	t.Logf("PASS: %d WebSocket messages received during bootstrap", wsCount)
+	t.Logf("PASS: %d WebSocket messages received during bootstrap", len(wsEntries))
 
-	// ASSERTION: Messages include expected bootstrap steps
+	// Check expected steps
 	stepsSeen := map[string]bool{}
 	for _, entry := range wsEntries {
 		if entry.Step != "" {
 			stepsSeen[entry.Step] = true
 		}
 	}
-
-	expectedSteps := []string{
-		"bootstrap_redeem",
-		"devcontainer_up",
-		"workspace_ready",
-	}
-	for _, step := range expectedSteps {
+	for _, step := range []string{"bootstrap_redeem", "devcontainer_up", "workspace_ready"} {
 		if !stepsSeen[step] {
 			t.Errorf("FAIL: Expected step %q not found in WebSocket messages", step)
 		}
 	}
 	t.Log("PASS: All expected bootstrap steps received via WebSocket")
 
-	// ASSERTION: Last message is "complete" type
-	lastMsg := wsEntries[len(wsEntries)-1]
-	if lastMsg.Type != "complete" {
-		t.Errorf("FAIL: Last WebSocket message type is %q, expected 'complete'", lastMsg.Type)
+	// Last message should be "complete"
+	if last := wsEntries[len(wsEntries)-1]; last.Type != "complete" {
+		t.Errorf("FAIL: Last WebSocket message type is %q, expected 'complete'", last.Type)
 	}
 
-	// ASSERTION: HTTP boot logs were also sent (KV relay still works)
+	// HTTP boot logs were also sent (KV relay still works)
 	cpState.mu.Lock()
 	httpLogCount := len(cpState.bootLogs)
+	readyCalled := cpState.readyCalled
 	cpState.mu.Unlock()
 	if httpLogCount == 0 {
 		t.Fatal("FAIL: No boot logs sent via HTTP (KV relay broken)")
 	}
 	t.Logf("PASS: %d boot log entries also sent via HTTP (KV relay works)", httpLogCount)
-
-	// ASSERTION: Ready was called
-	cpState.mu.Lock()
-	readyCalled := cpState.readyCalled
-	cpState.mu.Unlock()
 	if !readyCalled {
 		t.Fatal("FAIL: Ready callback not called")
 	}
-
-	// Clean up containers and volumes
-	cleanupCtx := context.Background()
-	filter := fmt.Sprintf("label=%s=%s", cfg.ContainerLabelKey, cfg.ContainerLabelValue)
-	if out, err := exec.CommandContext(cleanupCtx, "docker", "ps", "-aq", "--filter", filter).Output(); err == nil {
-		for _, id := range strings.Fields(string(out)) {
-			exec.Command("docker", "rm", "-f", id).Run()
-		}
-	}
-	bootstrap.RemoveVolume(cleanupCtx, workspaceID)
-
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer stopCancel()
-	srv.Stop(stopCtx)
 }
 
 // TestBootLogStreaming_LateJoinCatchUp verifies that a WebSocket client that
-// connects AFTER some bootstrap steps have already completed receives the
-// buffered history (ring buffer catch-up).
+// connects AFTER bootstrap completes receives the buffered history.
 func TestBootLogStreaming_LateJoinCatchUp(t *testing.T) {
 	requireDockerAvailable(t)
 	requireDevcontainerCLI(t)
@@ -667,59 +601,11 @@ func TestBootLogStreaming_LateJoinCatchUp(t *testing.T) {
 	callbackToken := "test-callback-token-late"
 
 	privateKey, pubKeyB64, keyID := testKeyPair(t)
-
 	repo := mustCreateTestRepo(t, `{"image": "mcr.microsoft.com/devcontainers/base:debian"}`)
-
-	mockServer, _ := startMockControlPlane(t, workspaceID, bootstrapToken, callbackToken, privateKey, pubKeyB64, keyID)
+	mockCP, _ := startMockControlPlane(t, workspaceID, bootstrapToken, callbackToken, privateKey, pubKeyB64, keyID)
 
 	port := freePort(t)
-
-	cfg := &config.Config{
-		Port:                          port,
-		Host:                          "127.0.0.1",
-		ControlPlaneURL:               mockServer.URL,
-		JWKSEndpoint:                  mockServer.URL + "/.well-known/jwks.json",
-		JWTIssuer:                     mockServer.URL,
-		JWTAudience:                   "workspace-terminal",
-		NodeID:                        workspaceID,
-		WorkspaceID:                   workspaceID,
-		BootstrapToken:                bootstrapToken,
-		Repository:                    repo,
-		Branch:                        "main",
-		WorkspaceDir:                  repo,
-		BootstrapStatePath:            filepath.Join(t.TempDir(), "bootstrap-state.json"),
-		BootstrapMaxWait:              30 * time.Second,
-		BootstrapTimeout:              5 * time.Minute,
-		ContainerMode:                 true,
-		ContainerLabelKey:             "devcontainer.local_folder",
-		ContainerLabelValue:           repo,
-		AdditionalFeatures:            config.DefaultAdditionalFeatures,
-		DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default-devcontainer.json"),
-		PersistenceDBPath:             filepath.Join(t.TempDir(), "state.db"),
-		IdleTimeout:                   30 * time.Minute,
-		HeartbeatInterval:             60 * time.Second,
-		SessionTTL:                    24 * time.Hour,
-		SessionMaxCount:               100,
-		CookieName:                    "sam_session",
-		HTTPReadTimeout:               30 * time.Second,
-		HTTPIdleTimeout:               120 * time.Second,
-		WSReadBufferSize:              4096,
-		WSWriteBufferSize:             4096,
-		AllowedOrigins:                []string{"*"},
-		DefaultShell:                  "/bin/sh",
-		DefaultRows:                   24,
-		DefaultCols:                   80,
-		PTYOutputBufferSize:           262144,
-		ACPInitTimeoutMs:              30000,
-		ACPMaxRestartAttempts:         3,
-		ACPPingInterval:               30 * time.Second,
-		ACPPongTimeout:                10 * time.Second,
-		ACPPromptTimeout:              60 * time.Minute,
-		ErrorReportFlushInterval:      30 * time.Second,
-		ErrorReportMaxBatchSize:       10,
-		ErrorReportMaxQueueSize:       100,
-		ErrorReportHTTPTimeout:        10 * time.Second,
-	}
+	cfg := buildTestConfig(t, port, mockCP.URL, workspaceID, bootstrapToken, repo)
 
 	reporter := bootlog.New(cfg.ControlPlaneURL, cfg.WorkspaceID)
 
@@ -734,6 +620,13 @@ func TestBootLogStreaming_LateJoinCatchUp(t *testing.T) {
 		t.Fatal("FAIL: server.GetBootLogBroadcaster() returned nil")
 	}
 	reporter.SetBroadcaster(broadcaster)
+
+	t.Cleanup(func() { cleanupDockerResources(t, cfg, workspaceID) })
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		srv.Stop(ctx)
+	})
 
 	go srv.Start()
 
@@ -753,7 +646,7 @@ func TestBootLogStreaming_LateJoinCatchUp(t *testing.T) {
 	srv.UpdateAfterBootstrap(cfg)
 
 	// NOW connect a late-joining WebSocket client
-	wsToken := signTestJWT(t, privateKey, keyID, mockServer.URL, "workspace-terminal", workspaceID, workspaceID)
+	wsToken := signTestJWT(t, privateKey, keyID, mockCP.URL, "workspace-terminal", workspaceID, workspaceID)
 	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/boot-log/ws?token=%s", port, wsToken)
 	wsConn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
@@ -780,7 +673,6 @@ func TestBootLogStreaming_LateJoinCatchUp(t *testing.T) {
 	}
 	t.Logf("PASS: Late-joining client received %d buffered messages", len(lateMessages))
 
-	// Should include bootstrap steps from history
 	stepsSeen := map[string]bool{}
 	for _, entry := range lateMessages {
 		if entry.Step != "" {
@@ -791,23 +683,8 @@ func TestBootLogStreaming_LateJoinCatchUp(t *testing.T) {
 		t.Error("FAIL: Late-join buffer missing bootstrap_redeem step")
 	}
 
-	// Last message should be "complete"
 	if last := lateMessages[len(lateMessages)-1]; last.Type != "complete" {
 		t.Errorf("FAIL: Last late-join message type is %q, expected 'complete'", last.Type)
 	}
 	t.Log("PASS: Late-join catch-up works correctly")
-
-	// Clean up
-	cleanupCtx := context.Background()
-	filter := fmt.Sprintf("label=%s=%s", cfg.ContainerLabelKey, cfg.ContainerLabelValue)
-	if out, err := exec.CommandContext(cleanupCtx, "docker", "ps", "-aq", "--filter", filter).Output(); err == nil {
-		for _, id := range strings.Fields(string(out)) {
-			exec.Command("docker", "rm", "-f", id).Run()
-		}
-	}
-	bootstrap.RemoveVolume(cleanupCtx, workspaceID)
-
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer stopCancel()
-	srv.Stop(stopCtx)
 }

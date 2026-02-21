@@ -27,16 +27,12 @@ func main() {
 
 	reporter := bootlog.New(cfg.ControlPlaneURL, cfg.NodeID)
 
-	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), cfg.BootstrapTimeout)
-	defer bootstrapCancel()
-
-	if err := bootstrap.Run(bootstrapCtx, cfg, reporter); err != nil {
-		log.Fatalf("Bootstrap failed: %v", err)
-	}
-
 	log.Printf("Configuration loaded: node=%s, port=%d", cfg.NodeID, cfg.Port)
 
-	// Create server
+	// Create server BEFORE bootstrap so /health and /boot-log/ws are available
+	// while the workspace is still being provisioned. This allows the API's
+	// waitForNodeAgentReady() to succeed and UI clients to connect for real-time
+	// boot log streaming during the "creating" phase.
 	srv, err := server.New(cfg)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
@@ -45,17 +41,33 @@ func main() {
 	// Wire boot-log reporter into ACP gateway for agent error reporting
 	srv.SetBootLog(reporter)
 
+	// Wire broadcaster for real-time WebSocket delivery of boot logs
+	reporter.SetBroadcaster(srv.GetBootLogBroadcaster())
+
 	// Handle shutdown signals
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start server in goroutine
+	// Start server in goroutine — HTTP is available immediately
 	errCh := make(chan error, 1)
 	go func() {
 		if err := srv.Start(); err != nil {
 			errCh <- err
 		}
 	}()
+
+	// Run bootstrap (blocks until workspace is provisioned).
+	// The server is already serving /health and /boot-log/ws during this time.
+	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), cfg.BootstrapTimeout)
+	defer bootstrapCancel()
+
+	if err := bootstrap.Run(bootstrapCtx, cfg, reporter); err != nil {
+		log.Fatalf("Bootstrap failed: %v", err)
+	}
+
+	// Propagate callback token (obtained during bootstrap) to all subsystems
+	// and notify WebSocket clients that bootstrap is complete.
+	srv.UpdateAfterBootstrap(cfg)
 
 	// Wait for shutdown signal or fatal server error.
 	select {
