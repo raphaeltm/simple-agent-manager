@@ -135,6 +135,15 @@ func (d *Detector) ShutdownChannel() <-chan struct{} {
 	return d.shutdownCh
 }
 
+// SetCallbackToken updates the callback token used for heartbeats.
+// This is used when the token is not available at construction time
+// (e.g., when the server starts before bootstrap completes).
+func (d *Detector) SetCallbackToken(token string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.callbackToken = token
+}
+
 // SendHeartbeat sends a heartbeat to the control plane.
 // This is purely informational - the VM makes its own shutdown decisions.
 func (d *Detector) SendHeartbeat() {

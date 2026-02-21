@@ -183,7 +183,13 @@ app.use('*', async (c, next) => {
   }
 
   if (workspace.status !== 'running' && workspace.status !== 'recovery') {
-    return c.json({ error: 'NOT_READY', message: `Workspace is ${workspace.status}` }, 503);
+    // Allow boot-log WebSocket through during creation for real-time log streaming.
+    // All other paths still get 503 while the workspace is not running.
+    if (workspace.status === 'creating' && url.pathname === '/boot-log/ws') {
+      // Fall through to proxy
+    } else {
+      return c.json({ error: 'NOT_READY', message: `Workspace is ${workspace.status}` }, 503);
+    }
   }
 
   // Proxy to the VM agent via its DNS-only backend hostname.
