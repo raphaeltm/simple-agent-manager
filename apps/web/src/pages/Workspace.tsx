@@ -2162,26 +2162,6 @@ function CenteredStatus({
 }
 
 function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
-  const buildLogRef = useRef<HTMLPreElement>(null);
-
-  // Auto-scroll the build log container when new output arrives.
-  const buildOutputLines = useMemo(() => {
-    if (!logs) return [];
-    return logs
-      .filter((entry) => entry.step === 'build_output')
-      .map((entry) => entry.message);
-  }, [logs]);
-
-  useEffect(() => {
-    const el = buildLogRef.current;
-    if (!el) return;
-    // Only auto-scroll if user is near the bottom (within 80px).
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    if (nearBottom) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [buildOutputLines]);
-
   if (!logs || logs.length === 0) {
     return (
       <CenteredStatus
@@ -2193,12 +2173,10 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
     );
   }
 
-  // Separate step entries from build output entries.
+  // Deduplicate: show latest status per step
   const stepMap = new Map<string, BootLogEntry>();
   for (const log of logs) {
-    if (log.step !== 'build_output') {
-      stepMap.set(log.step, log);
-    }
+    stepMap.set(log.step, log);
   }
   const steps = Array.from(stepMap.values());
 
@@ -2225,23 +2203,17 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
   const lastStep = steps[steps.length - 1];
   const hasFailed = lastStep?.status === 'failed';
 
-  // Determine whether to show the build log panel: show it when devcontainer_up
-  // is active (started) or has finished (completed/failed) and there are output lines.
-  const devcontainerStep = stepMap.get('devcontainer_up');
-  const showBuildLog = buildOutputLines.length > 0 && devcontainerStep != null;
-
   return (
     <div
       style={{
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: showBuildLog ? 'flex-start' : 'center',
+        justifyContent: 'center',
         height: '100%',
         backgroundColor: '#1a1b26',
         color: '#a9b1d6',
         padding: '24px',
-        overflow: 'hidden',
       }}
     >
       <h3
@@ -2250,7 +2222,6 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
           fontWeight: 600,
           color: hasFailed ? '#f87171' : '#60a5fa',
           margin: '0 0 16px 0',
-          flexShrink: 0,
         }}
       >
         {hasFailed ? 'Provisioning Failed' : 'Creating Workspace'}
@@ -2260,9 +2231,8 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
           display: 'flex',
           flexDirection: 'column',
           gap: '6px',
-          maxWidth: showBuildLog ? '700px' : '400px',
+          maxWidth: '400px',
           width: '100%',
-          flexShrink: 0,
         }}
       >
         {steps.map((entry, i) => (
@@ -2294,39 +2264,10 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
             maxWidth: '400px',
             textAlign: 'center',
             wordBreak: 'break-word',
-            flexShrink: 0,
           }}
         >
           {lastStep.detail}
         </p>
-      )}
-      {showBuildLog && (
-        <pre
-          ref={buildLogRef}
-          style={{
-            marginTop: '16px',
-            padding: '12px',
-            backgroundColor: '#13141c',
-            border: '1px solid #2a2d3a',
-            borderRadius: 'var(--sam-radius-md, 6px)',
-            maxWidth: '700px',
-            width: '100%',
-            flex: '1 1 0',
-            minHeight: '120px',
-            maxHeight: '400px',
-            overflowY: 'auto',
-            overflowX: 'auto',
-            fontSize: '0.75rem',
-            fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-            lineHeight: 1.5,
-            color: '#787c99',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-            margin: '16px 0 0 0',
-          }}
-        >
-          {buildOutputLines.join('\n')}
-        </pre>
       )}
     </div>
   );

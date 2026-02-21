@@ -91,14 +91,3 @@ func (r *Reporter) Log(step, status, message string, detail ...string) {
 		log.Printf("bootlog: control plane returned HTTP %d for step=%s", resp.StatusCode, step)
 	}
 }
-
-// LogBuildOutput sends build output lines as a boot-log entry with step="build_output".
-// The lines parameter contains one or more newline-separated output lines from the
-// devcontainer build process. This is designed to be called periodically (every few
-// seconds) with batched output rather than per-line.
-func (r *Reporter) LogBuildOutput(lines string) {
-	if r == nil || r.callbackToken == "" || lines == "" {
-		return
-	}
-	r.Log("build_output", "streaming", lines)
-}

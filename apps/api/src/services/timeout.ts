@@ -9,8 +9,8 @@ import { drizzle } from 'drizzle-orm/d1';
 import { eq, and, lt } from 'drizzle-orm';
 import * as schema from '../db/schema';
 
-/** Default provisioning timeout in milliseconds (15 minutes) */
-const DEFAULT_PROVISIONING_TIMEOUT_MS = 15 * 60 * 1000;
+/** Default provisioning timeout in milliseconds (10 minutes) */
+const DEFAULT_PROVISIONING_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
  * Get provisioning timeout from env or use default (per constitution principle XI).

@@ -2,7 +2,7 @@ import type { BootLogEntry } from '@simple-agent-manager/shared';
 
 const BOOT_LOG_PREFIX = 'bootlog:';
 const DEFAULT_BOOT_LOG_TTL = 1800; // 30 minutes
-const DEFAULT_BOOT_LOG_MAX_ENTRIES = 200;
+const DEFAULT_BOOT_LOG_MAX_ENTRIES = 50;
 
 function getBootLogTTL(env?: { BOOT_LOG_TTL_SECONDS?: string }): number {
   if (env?.BOOT_LOG_TTL_SECONDS) {

@@ -1579,7 +1579,7 @@ exit 1
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "", nil)
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "")
 	if err != nil {
 		t.Fatalf("ensureDevcontainerReady returned error: %v", err)
 	}
@@ -1673,7 +1673,7 @@ exit 0
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "sam-ws-logfail", nil)
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "sam-ws-logfail")
 	if err == nil {
 		t.Fatal("expected ensureDevcontainerReady to fail when build logs cannot be persisted")
 	}
@@ -1785,7 +1785,7 @@ func TestEnsureDevcontainerReadyNoFallbackWhenRepoConfigSucceeds(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "", nil)
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "")
 	if err != nil {
 		t.Fatalf("ensureDevcontainerReady returned error: %v", err)
 	}
