@@ -44,7 +44,7 @@ export const GitChangesButton: FC<GitChangesButtonProps> = ({
     height: 16,
     borderRadius: 8,
     backgroundColor: 'var(--sam-color-accent-primary)',
-    color: '#fff',
+    color: 'var(--sam-color-fg-on-accent)',
     fontSize: '0.625rem',
     fontWeight: 700,
     display: 'flex',
@@ -75,8 +75,8 @@ export const GitChangesButton: FC<GitChangesButtonProps> = ({
             width: 7,
             height: 7,
             borderRadius: '50%',
-            backgroundColor: '#f59e0b',
-            boxShadow: '0 0 0 1px #1a1b26',
+            backgroundColor: 'var(--sam-color-warning)',
+            boxShadow: 'var(--sam-shadow-overlay)',
           }}
         />
       )}

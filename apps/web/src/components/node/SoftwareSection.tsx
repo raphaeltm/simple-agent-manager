@@ -60,7 +60,7 @@ export const SoftwareSection: FC<SoftwareSectionProps> = ({ software, agent, loa
     <Section>
       <SectionHeader
         icon={<Package size={20} color="#fb923c" />}
-        iconBg="rgba(251, 146, 60, 0.15)"
+        iconBg="var(--sam-color-warning-tint)"
         title="Software"
         description="Installed versions and agent runtime"
       />

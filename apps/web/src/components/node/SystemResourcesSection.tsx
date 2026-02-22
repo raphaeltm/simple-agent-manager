@@ -54,8 +54,8 @@ export const SystemResourcesSection: FC<SystemResourcesSectionProps> = ({
   return (
     <Section>
       <SectionHeader
-        icon={<Cpu size={20} color="#4ade80" />}
-        iconBg="rgba(34, 197, 94, 0.15)"
+        icon={<Cpu size={20} color="var(--sam-color-success-fg)" />}
+        iconBg="var(--sam-color-success-tint)"
         title="System Resources"
         description="CPU, memory, and disk usage"
       />

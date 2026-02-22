@@ -19,8 +19,8 @@ export const NodeWorkspacesSection: FC<NodeWorkspacesSectionProps> = ({
   return (
     <Section>
       <SectionHeader
-        icon={<Monitor size={20} color="#38bdf8" />}
-        iconBg="rgba(56, 189, 248, 0.15)"
+        icon={<Monitor size={20} color="var(--sam-color-info-fg, #38bdf8)" />}
+        iconBg="var(--sam-color-info-tint)"
         title="Workspaces"
         description={`${workspaces.length} workspace${workspaces.length !== 1 ? 's' : ''} on this node`}
       />
@@ -42,7 +42,7 @@ export const NodeWorkspacesSection: FC<NodeWorkspacesSectionProps> = ({
             style={{
               padding: 'var(--sam-space-2) var(--sam-space-4)',
               backgroundColor: 'var(--sam-color-accent-primary)',
-              color: '#fff',
+              color: 'var(--sam-color-fg-on-accent)',
               border: 'none',
               borderRadius: 'var(--sam-radius-md)',
               fontSize: 'var(--sam-type-caption-size)',
@@ -59,6 +59,7 @@ export const NodeWorkspacesSection: FC<NodeWorkspacesSectionProps> = ({
             <button
               key={ws.id}
               onClick={() => onNavigate(ws.id)}
+              className="sam-hover-inset"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -70,13 +71,6 @@ export const NodeWorkspacesSection: FC<NodeWorkspacesSectionProps> = ({
                 cursor: 'pointer',
                 textAlign: 'left',
                 width: '100%',
-                transition: 'background-color 0.15s',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = 'var(--sam-color-bg-inset)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent';
               }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>

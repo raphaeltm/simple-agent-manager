@@ -189,7 +189,7 @@ function HighlightedText({ text, matches }: { text: string; matches: number[] })
     <>
       {parts.map((part, i) =>
         part.highlighted ? (
-          <span key={i} style={{ color: '#7aa2f7', fontWeight: 600 }}>
+          <span key={i} style={{ color: 'var(--sam-color-tn-blue)', fontWeight: 600 }}>
             {part.text}
           </span>
         ) : (
@@ -296,8 +296,8 @@ export function CommandPalette({
   const backdropStyle: CSSProperties = {
     position: 'fixed',
     inset: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    zIndex: 61,
+    backgroundColor: 'var(--sam-color-bg-overlay)',
+    zIndex: 'var(--sam-z-dialog-backdrop)' as unknown as number,
   };
 
   const dialogStyle: CSSProperties = {
@@ -307,11 +307,11 @@ export function CommandPalette({
     transform: 'translateX(-50%)',
     width: '90vw',
     maxWidth: 480,
-    backgroundColor: '#1e2030',
-    border: '1px solid #2a2d3a',
+    backgroundColor: 'var(--sam-color-tn-surface)',
+    border: '1px solid var(--sam-color-tn-border)',
     borderRadius: 12,
-    boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
-    zIndex: 62,
+    boxShadow: 'var(--sam-shadow-overlay)',
+    zIndex: 'var(--sam-z-command-palette)' as unknown as number,
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
@@ -322,8 +322,8 @@ export function CommandPalette({
     padding: '12px 16px',
     backgroundColor: 'transparent',
     border: 'none',
-    borderBottom: '1px solid #2a2d3a',
-    color: '#a9b1d6',
+    borderBottom: '1px solid var(--sam-color-tn-border)',
+    color: 'var(--sam-color-tn-fg)',
     fontSize: 'var(--sam-type-secondary-size)',
     outline: 'none',
     fontFamily: 'inherit',
@@ -339,7 +339,7 @@ export function CommandPalette({
     padding: '6px 16px 4px',
     fontSize: 'var(--sam-type-caption-size)',
     fontWeight: 600,
-    color: '#565f89',
+    color: 'var(--sam-color-tn-fg-dim)',
     textTransform: 'uppercase',
     letterSpacing: '0.05em',
     userSelect: 'none',
@@ -369,7 +369,7 @@ export function CommandPalette({
               style={{
                 padding: '16px',
                 textAlign: 'center',
-                color: '#787c99',
+                color: 'var(--sam-color-tn-fg-muted)',
                 fontSize: 'var(--sam-type-caption-size)',
               }}
             >
@@ -382,7 +382,7 @@ export function CommandPalette({
               style={{
                 padding: '16px',
                 textAlign: 'center',
-                color: '#787c99',
+                color: 'var(--sam-color-tn-fg-muted)',
                 fontSize: 'var(--sam-type-caption-size)',
               }}
             >
@@ -404,7 +404,7 @@ export function CommandPalette({
                   alignItems: 'center',
                   padding: '7px 16px',
                   cursor: 'pointer',
-                  backgroundColor: isSelected ? '#292e42' : 'transparent',
+                  backgroundColor: isSelected ? 'var(--sam-color-tn-selected)' : 'transparent',
                   transition: 'background-color 0.1s',
                   gap: 12,
                 };
@@ -426,7 +426,7 @@ export function CommandPalette({
                       <span
                         style={{
                           fontSize: 'var(--sam-type-caption-size)',
-                          color: '#a9b1d6',
+                          color: 'var(--sam-color-tn-fg)',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
@@ -440,9 +440,9 @@ export function CommandPalette({
                         style={{
                           fontFamily: 'monospace',
                           fontSize: 'var(--sam-type-caption-size)',
-                          color: '#c0caf5',
-                          backgroundColor: '#292e42',
-                          border: '1px solid #3b4261',
+                          color: 'var(--sam-color-tn-fg-bright)',
+                          backgroundColor: 'var(--sam-color-tn-selected)',
+                          border: '1px solid var(--sam-color-tn-border-highlight)',
                           borderRadius: 4,
                           padding: '2px 8px',
                           whiteSpace: 'nowrap',
@@ -456,7 +456,7 @@ export function CommandPalette({
                       <span
                         style={{
                           fontSize: 'var(--sam-type-caption-size)',
-                          color: '#565f89',
+                          color: 'var(--sam-color-tn-fg-dim)',
                           flexShrink: 0,
                         }}
                       >

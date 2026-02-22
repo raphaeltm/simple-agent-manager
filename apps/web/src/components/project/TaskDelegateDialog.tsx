@@ -49,7 +49,7 @@ export function TaskDelegateDialog({
           style={{
             padding: 'var(--sam-space-3)',
             borderRadius: 'var(--sam-radius-md)',
-            background: 'rgba(99,102,241,0.07)',
+            background: 'var(--sam-color-info-tint)',
             border: '1px solid rgba(99,102,241,0.2)',
             display: 'grid',
             gap: '0.375rem',
@@ -74,7 +74,7 @@ export function TaskDelegateDialog({
             style={{
               padding: 'var(--sam-space-3)',
               borderRadius: 'var(--sam-radius-md)',
-              background: 'rgba(245, 158, 11, 0.1)',
+              background: 'var(--sam-color-warning-tint)',
               border: '1px solid rgba(245, 158, 11, 0.3)',
               color: 'var(--sam-color-fg-muted)',
               fontSize: 'var(--sam-type-secondary-size)',

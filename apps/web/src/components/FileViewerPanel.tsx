@@ -158,7 +158,7 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
   const overlayStyle: CSSProperties = {
     position: 'fixed',
     inset: 0,
-    zIndex: 60,
+    zIndex: 'var(--sam-z-panel)' as unknown as number,
     backgroundColor: 'var(--sam-color-bg-canvas)',
     display: 'flex',
     flexDirection: 'column',
@@ -276,9 +276,9 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
             style={{
               margin: 16,
               padding: 12,
-              backgroundColor: 'rgba(247, 118, 142, 0.1)',
+              backgroundColor: 'var(--sam-color-danger-tint)',
               borderRadius: 8,
-              color: '#f7768e',
+              color: 'var(--sam-color-tn-red)',
               fontSize: 'var(--sam-type-caption-size)',
             }}
           >
@@ -412,14 +412,14 @@ const RenderedMarkdown: FC<{ content: string }> = ({ content }) => {
                 margin: '12px 0',
                 padding: '8px 12px',
                 borderLeft: '3px solid var(--sam-color-border-default)',
-                backgroundColor: 'rgba(122, 162, 247, 0.08)',
+                backgroundColor: 'var(--sam-color-info-tint)',
               }}
             >
               {children}
             </blockquote>
           ),
           a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noreferrer" style={{ color: '#7aa2f7' }}>
+            <a href={href} target="_blank" rel="noreferrer" style={{ color: 'var(--sam-color-tn-blue)' }}>
               {children}
             </a>
           ),
@@ -442,7 +442,7 @@ const RenderedMarkdown: FC<{ content: string }> = ({ content }) => {
                 border: '1px solid var(--sam-color-border-default)',
                 padding: '6px 8px',
                 textAlign: 'left',
-                backgroundColor: 'rgba(122, 162, 247, 0.08)',
+                backgroundColor: 'var(--sam-color-info-tint)',
               }}
             >
               {children}
@@ -473,7 +473,7 @@ const RenderedMarkdown: FC<{ content: string }> = ({ content }) => {
               <code
                 {...props}
                 style={{
-                  backgroundColor: 'rgba(122, 162, 247, 0.12)',
+                  backgroundColor: 'var(--sam-color-info-tint)',
                   borderRadius: 4,
                   padding: '1px 5px',
                   fontFamily: 'monospace',
@@ -513,7 +513,7 @@ function iconBtnStyle(isMobile: boolean): CSSProperties {
 function markdownModeButtonStyle(active: boolean): CSSProperties {
   return {
     border: 'none',
-    backgroundColor: active ? 'rgba(122, 162, 247, 0.2)' : 'transparent',
+    backgroundColor: active ? 'var(--sam-color-info-tint)' : 'transparent',
     color: active ? 'var(--sam-color-fg-primary)' : 'var(--sam-color-fg-muted)',
     fontSize: '0.6875rem',
     fontWeight: 600,

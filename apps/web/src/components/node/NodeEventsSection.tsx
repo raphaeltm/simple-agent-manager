@@ -19,8 +19,8 @@ function formatEventTime(iso: string): string {
 
 const levelColors: Record<string, string> = {
   info: 'var(--sam-color-fg-muted)',
-  warn: '#fbbf24',
-  error: '#f87171',
+  warn: 'var(--sam-color-warning-fg)',
+  error: 'var(--sam-color-danger-fg)',
 };
 
 export const NodeEventsSection: FC<NodeEventsSectionProps> = ({
@@ -46,7 +46,7 @@ export const NodeEventsSection: FC<NodeEventsSectionProps> = ({
         <div
           style={{
             padding: 'var(--sam-space-3)',
-            backgroundColor: 'rgba(248, 113, 113, 0.1)',
+            backgroundColor: 'var(--sam-color-danger-tint)',
             borderRadius: 'var(--sam-radius-sm)',
             border: '1px solid rgba(248, 113, 113, 0.3)',
             fontSize: 'var(--sam-type-secondary-size)',

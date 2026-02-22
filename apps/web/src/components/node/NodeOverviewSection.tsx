@@ -55,7 +55,7 @@ export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({ node, system
     <Section>
       <SectionHeader
         icon={<Server size={20} color="#60a5fa" />}
-        iconBg="rgba(59, 130, 246, 0.15)"
+        iconBg="var(--sam-color-info-tint)"
         title={node.name}
         description="Node overview and configuration"
       />
@@ -133,7 +133,7 @@ export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({ node, system
           style={{
             marginTop: 'var(--sam-space-4)',
             padding: 'var(--sam-space-3)',
-            backgroundColor: 'rgba(248, 113, 113, 0.1)',
+            backgroundColor: 'var(--sam-color-danger-tint)',
             borderRadius: 'var(--sam-radius-sm)',
             border: '1px solid rgba(248, 113, 113, 0.3)',
             fontSize: 'var(--sam-type-secondary-size)',

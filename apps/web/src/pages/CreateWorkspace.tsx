@@ -486,7 +486,7 @@ export function CreateWorkspace() {
                         cursor: 'pointer',
                         backgroundColor:
                           vmSize === size.value
-                            ? 'rgba(22, 163, 74, 0.1)'
+                            ? 'var(--sam-color-accent-primary-tint)'
                             : 'var(--sam-color-bg-inset)',
                         color: 'var(--sam-color-fg-primary)',
                         transition: 'all 0.15s ease',

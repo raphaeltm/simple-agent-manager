@@ -143,7 +143,7 @@ export function WorktreeSelector({
         <div
           style={
             isMobile
-              ? { position: 'fixed', inset: 0, zIndex: 90 }
+              ? { position: 'fixed', inset: 0, zIndex: 'var(--sam-z-drawer-backdrop)' as unknown as number }
               : undefined
           }
         >
@@ -168,7 +168,7 @@ export function WorktreeSelector({
               right: isMobile ? 8 : 0,
               left: isMobile ? 8 : undefined,
               bottom: isMobile ? 8 : undefined,
-              zIndex: isMobile ? 91 : 80,
+              zIndex: (isMobile ? 'var(--sam-z-drawer)' : 'var(--sam-z-dropdown)') as unknown as number,
               width: isMobile ? undefined : 280,
               marginTop: isMobile ? 0 : 6,
               borderRadius: 'var(--sam-radius-md, 10px)',

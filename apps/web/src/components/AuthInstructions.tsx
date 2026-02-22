@@ -23,14 +23,14 @@ export const AuthInstructions: FC<AuthInstructionsProps> = ({ workspaceUrl }) =>
   return (
     <div style={{
       borderRadius: 'var(--sam-radius-lg)',
-      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+      backgroundColor: 'var(--sam-color-info-tint)',
       border: '1px solid rgba(59, 130, 246, 0.3)',
       padding: 'var(--sam-space-6)',
     }}>
       <h3 style={{
         fontSize: 'var(--sam-type-section-heading-size)',
         fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number,
-        color: '#93c5fd',
+        color: 'var(--sam-color-info-fg)',
         marginBottom: 'var(--sam-space-3)',
       }}>
         Authenticate Claude Code
@@ -78,12 +78,12 @@ export const AuthInstructions: FC<AuthInstructionsProps> = ({ workspaceUrl }) =>
         </div>
 
         <div style={{
-          backgroundColor: 'rgba(245, 158, 11, 0.1)',
+          backgroundColor: 'var(--sam-color-warning-tint)',
           border: '1px solid rgba(245, 158, 11, 0.3)',
           borderRadius: 'var(--sam-radius-md)',
           padding: 'var(--sam-space-3)',
         }}>
-          <p style={{ fontSize: 'var(--sam-type-caption-size)', color: '#fbbf24' }}>
+          <p style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-warning-fg)' }}>
             <strong>Note:</strong> Claude Max subscription is required. The workspace does not include an API key -
             you authenticate directly through your browser using <code style={{ fontFamily: 'monospace' }}>claude login</code>.
           </p>

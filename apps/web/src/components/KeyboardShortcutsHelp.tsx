@@ -43,8 +43,8 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
         style={{
           position: 'fixed',
           inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.6)',
-          zIndex: 60,
+          backgroundColor: 'var(--sam-color-bg-overlay)',
+          zIndex: 'var(--sam-z-dialog-backdrop)' as unknown as number,
         }}
       />
 
@@ -60,11 +60,11 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
           width: '90vw',
           maxWidth: 520,
           maxHeight: '80vh',
-          backgroundColor: '#1e2030',
-          border: '1px solid #2a2d3a',
+          backgroundColor: 'var(--sam-color-tn-surface)',
+          border: '1px solid var(--sam-color-tn-border)',
           borderRadius: 12,
-          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
-          zIndex: 61,
+          boxShadow: 'var(--sam-shadow-overlay)',
+          zIndex: 'var(--sam-z-dialog)' as unknown as number,
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -77,7 +77,7 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '16px 20px',
-            borderBottom: '1px solid #2a2d3a',
+            borderBottom: '1px solid var(--sam-color-tn-border)',
             flexShrink: 0,
           }}
         >
@@ -86,7 +86,7 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
               margin: 0,
               fontSize: 'var(--sam-type-card-title-size)',
               fontWeight: 600,
-              color: '#a9b1d6',
+              color: 'var(--sam-color-tn-fg)',
             }}
           >
             Keyboard Shortcuts
@@ -97,7 +97,7 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
             style={{
               background: 'none',
               border: 'none',
-              color: '#787c99',
+              color: 'var(--sam-color-tn-fg-muted)',
               cursor: 'pointer',
               fontSize: 18,
               padding: '4px 8px',
@@ -123,7 +123,7 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
                     margin: '0 0 8px',
                     fontSize: 'var(--sam-type-caption-size)',
                     fontWeight: 600,
-                    color: '#787c99',
+                    color: 'var(--sam-color-tn-fg-muted)',
                     textTransform: 'uppercase',
                     letterSpacing: '0.05em',
                   }}
@@ -140,7 +140,7 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
                       padding: '6px 0',
                     }}
                   >
-                    <span style={{ fontSize: 'var(--sam-type-caption-size)', color: '#a9b1d6' }}>
+                    <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-tn-fg)' }}>
                       {shortcut.id === 'tab-1'
                         ? 'Switch to tab 1\u20139'
                         : shortcut.description}
@@ -149,9 +149,9 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
                       style={{
                         fontFamily: 'monospace',
                         fontSize: 'var(--sam-type-caption-size)',
-                        color: '#c0caf5',
-                        backgroundColor: '#292e42',
-                        border: '1px solid #3b4261',
+                        color: 'var(--sam-color-tn-fg-bright)',
+                        backgroundColor: 'var(--sam-color-tn-selected)',
+                        border: '1px solid var(--sam-color-tn-border-highlight)',
                         borderRadius: 4,
                         padding: '2px 8px',
                         whiteSpace: 'nowrap',

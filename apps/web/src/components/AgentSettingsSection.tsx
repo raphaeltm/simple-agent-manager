@@ -138,7 +138,7 @@ function AgentSettingsCard({
     borderRadius: 'var(--sam-radius-md)',
     border: variant === 'primary' ? 'none' : '1px solid var(--sam-color-border-default)',
     backgroundColor: variant === 'primary' ? 'var(--sam-color-accent-primary)' : 'transparent',
-    color: variant === 'primary' ? '#fff' : 'var(--sam-color-fg-muted)',
+    color: variant === 'primary' ? 'var(--sam-color-fg-on-accent)' : 'var(--sam-color-fg-muted)',
     fontSize: 'var(--sam-type-secondary-size)',
     fontWeight: 500,
     cursor: 'pointer',
@@ -151,7 +151,7 @@ function AgentSettingsCard({
     color: 'var(--sam-color-status-error)',
     padding: 'var(--sam-space-2) var(--sam-space-3)',
     borderRadius: 'var(--sam-radius-md)',
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    backgroundColor: 'var(--sam-color-danger-tint)',
     marginTop: 'var(--sam-space-1)',
   };
 

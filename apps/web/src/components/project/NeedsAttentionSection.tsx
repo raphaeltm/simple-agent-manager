@@ -19,14 +19,14 @@ export function NeedsAttentionSection({ tasks, projectId }: NeedsAttentionSectio
       style={{
         border: '1px solid rgba(245, 158, 11, 0.4)',
         borderRadius: 'var(--sam-radius-md)',
-        background: 'rgba(245, 158, 11, 0.06)',
+        background: 'var(--sam-color-warning-tint)',
         padding: 'var(--sam-space-3)',
         display: 'grid',
         gap: 'var(--sam-space-2)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
-        <span style={{ fontSize: 'var(--sam-type-secondary-size)', fontWeight: 600, color: '#fbbf24' }}>
+        <span style={{ fontSize: 'var(--sam-type-secondary-size)', fontWeight: 600, color: 'var(--sam-color-warning-fg)' }}>
           Needs attention
         </span>
         <span style={{
@@ -34,8 +34,8 @@ export function NeedsAttentionSection({ tasks, projectId }: NeedsAttentionSectio
           fontWeight: 600,
           padding: '1px 7px',
           borderRadius: '9999px',
-          background: 'rgba(245, 158, 11, 0.2)',
-          color: '#fbbf24',
+          background: 'var(--sam-color-warning-tint)',
+          color: 'var(--sam-color-warning-fg)',
         }}>
           {attention.length}
         </span>
@@ -58,8 +58,8 @@ export function NeedsAttentionSection({ tasks, projectId }: NeedsAttentionSectio
                 fontSize: 'var(--sam-type-caption-size)',
                 padding: '2px 7px',
                 borderRadius: '9999px',
-                background: 'rgba(239,68,68,0.15)',
-                color: '#f87171',
+                background: 'var(--sam-color-danger-tint)',
+                color: 'var(--sam-color-danger-fg)',
                 fontWeight: 600,
               }}>
                 Blocked

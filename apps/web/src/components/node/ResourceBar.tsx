@@ -7,9 +7,9 @@ interface ResourceBarProps {
 }
 
 function getBarColor(percent: number): string {
-  if (percent >= 85) return '#f87171';
-  if (percent >= 60) return '#fbbf24';
-  return '#4ade80';
+  if (percent >= 85) return 'var(--sam-color-danger-fg)';
+  if (percent >= 60) return 'var(--sam-color-warning-fg)';
+  return 'var(--sam-color-success-fg)';
 }
 
 export const ResourceBar: FC<ResourceBarProps> = ({ label, percent, detail }) => {

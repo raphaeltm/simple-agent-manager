@@ -26,13 +26,13 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  M: '#e0af68', // yellow
-  A: '#9ece6a', // green
-  D: '#f7768e', // red
-  R: '#7aa2f7', // blue
-  C: '#7aa2f7', // blue
-  U: '#ff9e64', // orange
-  '??': '#787c99', // grey
+  M: 'var(--sam-color-tn-yellow)',
+  A: 'var(--sam-color-tn-green)',
+  D: 'var(--sam-color-tn-red)',
+  R: 'var(--sam-color-tn-blue)',
+  C: 'var(--sam-color-tn-blue)',
+  U: 'var(--sam-color-tn-orange)',
+  '??': 'var(--sam-color-tn-fg-muted)',
 };
 
 function statusColor(status: string): string {
@@ -99,7 +99,7 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
   const overlayStyle: CSSProperties = {
     position: 'fixed',
     inset: 0,
-    zIndex: 60,
+    zIndex: 'var(--sam-z-panel)' as unknown as number,
     backgroundColor: 'var(--sam-color-bg-canvas)',
     display: 'flex',
     flexDirection: 'column',
@@ -185,9 +185,9 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
             style={{
               margin: 16,
               padding: 12,
-              backgroundColor: 'rgba(247, 118, 142, 0.1)',
+              backgroundColor: 'var(--sam-color-danger-tint)',
               borderRadius: 8,
-              color: '#f7768e',
+              color: 'var(--sam-color-tn-red)',
               fontSize: 'var(--sam-type-caption-size)',
             }}
           >

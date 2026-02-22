@@ -149,8 +149,8 @@ export function WorkspaceTabStrip({
       style={{
         display: 'flex',
         alignItems: 'stretch',
-        backgroundColor: '#16171e',
-        borderBottom: '1px solid #2a2d3a',
+        backgroundColor: 'var(--sam-color-tn-bg-dark)',
+        borderBottom: '1px solid var(--sam-color-tn-border)',
         height: isMobile ? 42 : 38,
         flexShrink: 0,
       }}
@@ -240,6 +240,8 @@ export function WorkspaceTabStrip({
       </DndContext>
 
       {createMenuSlot}
+
+      <style>{`.sam-tab-close-btn:hover { background-color: var(--sam-color-tn-active) !important; color: var(--sam-color-tn-fg) !important; }`}</style>
     </div>
   );
 }
@@ -315,12 +317,12 @@ function SortableTabWrapper({
         fontSize: isMobile ? 12 : 13,
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
         border: 'none',
-        borderRight: '1px solid #2a2d3a',
+        borderRight: '1px solid var(--sam-color-tn-border)',
         position: 'relative',
         flexShrink: 0,
         whiteSpace: 'nowrap',
-        backgroundColor: active ? '#1a1b26' : hovered ? '#1e2030' : 'transparent',
-        color: active || hovered ? '#a9b1d6' : '#787c99',
+        backgroundColor: active ? 'var(--sam-color-tn-bg)' : hovered ? 'var(--sam-color-tn-surface)' : 'transparent',
+        color: active || hovered ? 'var(--sam-color-tn-fg)' : 'var(--sam-color-tn-fg-muted)',
       }}
       onClick={() => {
         if (!isEditing && !isDragging) onSelect();
@@ -359,7 +361,7 @@ function SortableTabWrapper({
             left: 0,
             right: 0,
             height: 2,
-            backgroundColor: '#7aa2f7',
+            backgroundColor: 'var(--sam-color-tn-blue)',
           }}
         />
       )}
@@ -394,13 +396,13 @@ function SortableTabWrapper({
           style={{
             flex: 1,
             minWidth: 0,
-            background: '#1e2030',
-            border: '1px solid #7aa2f7',
+            background: 'var(--sam-color-tn-surface)',
+            border: '1px solid var(--sam-color-tn-blue)',
             borderRadius: 2,
             padding: '1px 4px',
             fontSize: 'inherit',
             fontFamily: 'inherit',
-            color: '#a9b1d6',
+            color: 'var(--sam-color-tn-fg)',
             outline: 'none',
           }}
           aria-label="Rename tab"
@@ -430,10 +432,10 @@ function SortableTabWrapper({
               style={{
                 fontSize: 10,
                 lineHeight: 1,
-                border: '1px solid #33467c',
+                border: '1px solid var(--sam-color-tn-active)',
                 borderRadius: 6,
                 padding: '2px 5px',
-                color: '#7aa2f7',
+                color: 'var(--sam-color-tn-blue)',
                 whiteSpace: 'nowrap',
                 flexShrink: 0,
               }}
@@ -451,6 +453,7 @@ function SortableTabWrapper({
             onClose();
           }}
           onPointerDown={(event) => event.stopPropagation()}
+          className="sam-tab-close-btn"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -460,7 +463,7 @@ function SortableTabWrapper({
             borderRadius: 4,
             border: 'none',
             background: 'none',
-            color: '#787c99',
+            color: 'var(--sam-color-tn-fg-muted)',
             cursor: 'pointer',
             fontSize: 14,
             lineHeight: 1,
@@ -470,14 +473,6 @@ function SortableTabWrapper({
             transition: 'background-color 0.15s, color 0.15s',
           }}
           aria-label={tab.kind === 'terminal' ? `Close ${tab.title}` : `Stop ${tab.title}`}
-          onMouseEnter={(event) => {
-            event.currentTarget.style.backgroundColor = '#33467c';
-            event.currentTarget.style.color = '#a9b1d6';
-          }}
-          onMouseLeave={(event) => {
-            event.currentTarget.style.backgroundColor = 'transparent';
-            event.currentTarget.style.color = '#787c99';
-          }}
         >
           ×
         </button>
@@ -501,10 +496,10 @@ function DragOverlayTab({ tab, isMobile }: { tab: WorkspaceTabItem; isMobile: bo
         height: isMobile ? 42 : 38,
         fontSize: isMobile ? 12 : 13,
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-        backgroundColor: '#1e2030',
-        border: '1px solid #7aa2f7',
+        backgroundColor: 'var(--sam-color-tn-surface)',
+        border: '1px solid var(--sam-color-tn-blue)',
         borderRadius: 4,
-        color: '#a9b1d6',
+        color: 'var(--sam-color-tn-fg)',
         whiteSpace: 'nowrap',
         boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
         cursor: 'grabbing',

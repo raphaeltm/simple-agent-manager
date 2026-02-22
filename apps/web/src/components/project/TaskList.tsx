@@ -104,8 +104,8 @@ export function TaskList({
                   fontSize: 'var(--sam-type-caption-size)',
                   padding: '2px 7px',
                   borderRadius: '9999px',
-                  background: 'rgba(239,68,68,0.15)',
-                  color: '#f87171',
+                  background: 'var(--sam-color-danger-tint)',
+                  color: 'var(--sam-color-danger-fg)',
                   fontWeight: 600,
                   flexShrink: 0,
                 }}>

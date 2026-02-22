@@ -88,7 +88,7 @@ export class ErrorBoundary extends Component<Props, State> {
           {this.state.error && (
             <div
               style={{
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                backgroundColor: 'var(--sam-color-danger-tint)',
                 border: '1px solid rgba(239, 68, 68, 0.3)',
                 borderRadius: '8px',
                 padding: '12px 16px',
@@ -96,7 +96,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 textAlign: 'left',
                 fontSize: '0.8rem',
                 fontFamily: 'monospace',
-                color: '#f87171',
+                color: 'var(--sam-color-danger-fg)',
                 wordBreak: 'break-word',
                 maxHeight: '120px',
                 overflow: 'auto',
@@ -120,7 +120,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 minHeight: '48px',
                 padding: '0 24px',
                 backgroundColor: 'var(--sam-color-accent-primary, #10b981)',
-                color: '#ffffff',
+                color: 'var(--sam-color-fg-on-accent)',
                 border: 'none',
                 borderRadius: '8px',
                 fontSize: 'var(--sam-type-body-size)',

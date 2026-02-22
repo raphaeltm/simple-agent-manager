@@ -50,6 +50,36 @@
   --sam-type-caption-weight: 400;
   --sam-type-caption-line-height: 1.4;
 
+  /* Tokyo Night palette (workspace/terminal UI) */
+  --sam-color-tn-bg: #1a1b26;
+  --sam-color-tn-bg-dark: #16171e;
+  --sam-color-tn-surface: #1e2030;
+  --sam-color-tn-selected: #292e42;
+  --sam-color-tn-active: #33467c;
+  --sam-color-tn-fg: #a9b1d6;
+  --sam-color-tn-fg-bright: #c0caf5;
+  --sam-color-tn-fg-muted: #787c99;
+  --sam-color-tn-fg-dim: #565f89;
+  --sam-color-tn-fg-dimmer: #545868;
+  --sam-color-tn-green: #9ece6a;
+  --sam-color-tn-yellow: #e0af68;
+  --sam-color-tn-red: #f7768e;
+  --sam-color-tn-purple: #bb9af7;
+  --sam-color-tn-blue: #7aa2f7;
+  --sam-color-tn-orange: #ff9e64;
+  --sam-color-tn-border: #2a2d3a;
+  --sam-color-tn-border-highlight: #3b4261;
+
+  /* Additional semantic colors */
+  --sam-color-info: #60a5fa;
+  --sam-color-fg-on-accent: #ffffff;
+  --sam-color-success-fg: #4ade80;
+  --sam-color-danger-fg: #f87171;
+  --sam-color-warning-fg: #fbbf24;
+  --sam-color-info-fg: #93c5fd;
+  --sam-color-purple: #c084fc;
+  --sam-color-warning-surface: #2e2a1f;
+
   /* Color Tints */
   --sam-color-accent-primary-tint: rgba(22, 163, 74, 0.1);
   --sam-color-success-tint: rgba(34, 197, 94, 0.1);
@@ -116,6 +146,21 @@
   font-size: var(--sam-type-caption-size);
   font-weight: var(--sam-type-caption-weight);
   line-height: var(--sam-type-caption-line-height);
+}
+
+/* Hover Utility Classes */
+.sam-hover-surface {
+  transition: background-color 0.1s;
+}
+.sam-hover-surface:hover {
+  background-color: var(--sam-color-bg-surface-hover);
+}
+
+.sam-hover-inset {
+  transition: background-color 0.15s;
+}
+.sam-hover-inset:hover {
+  background-color: var(--sam-color-bg-inset);
 }
 
 @keyframes sam-spin {

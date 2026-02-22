@@ -74,9 +74,9 @@ export function Landing() {
             paddingTop: 'var(--sam-space-6)',
           }}>
             {[
-              { label: 'Cloud VMs', sub: 'Powered by Hetzner', color: '#60a5fa' },
+              { label: 'Cloud VMs', sub: 'Powered by Hetzner', color: 'var(--sam-color-info)' },
               { label: 'Claude Code', sub: 'Pre-installed', color: 'var(--sam-color-success)' },
-              { label: 'Pay as you go', sub: 'Stop when done', color: '#c084fc' },
+              { label: 'Pay as you go', sub: 'Stop when done', color: 'var(--sam-color-purple)' },
             ].map((item) => (
               <div key={item.label} style={{
                 textAlign: 'center',

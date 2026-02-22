@@ -47,7 +47,7 @@ export function UserMenu() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      color: '#fff',
+      color: 'var(--sam-color-fg-on-accent)',
       fontSize: 'var(--sam-type-secondary-size)',
       fontWeight: 500,
     }}>

@@ -102,7 +102,7 @@ export function AppShell({ children }: AppShellProps) {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      color: '#fff',
+      color: 'var(--sam-color-fg-on-accent)',
       fontSize: 'var(--sam-type-caption-size)',
       fontWeight: 500,
     }}>

@@ -82,8 +82,8 @@ export function MobileNavDrawer({
         style={{
           position: 'fixed',
           inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
-          zIndex: 50,
+          backgroundColor: 'var(--sam-color-bg-overlay)',
+          zIndex: 'var(--sam-z-drawer-backdrop)' as unknown as number,
           animation: 'sam-drawer-fade-in 0.15s ease-out',
         }}
       />
@@ -102,7 +102,7 @@ export function MobileNavDrawer({
           maxWidth: 320,
           backgroundColor: 'var(--sam-color-bg-surface)',
           borderLeft: '1px solid var(--sam-color-border-default)',
-          zIndex: 51,
+          zIndex: 'var(--sam-z-drawer)' as unknown as number,
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -135,7 +135,7 @@ export function MobileNavDrawer({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: '#fff',
+                color: 'var(--sam-color-fg-on-accent)',
                 fontSize: 'var(--sam-type-secondary-size)',
                 fontWeight: 500,
                 flexShrink: 0,

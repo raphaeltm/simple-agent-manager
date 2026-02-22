@@ -133,7 +133,7 @@ export function ActivityFeed({ events, hasMore, onLoadMore, loading }: ActivityF
                 height: '28px',
                 borderRadius: '50%',
                 backgroundColor: color,
-                color: '#fff',
+                color: 'var(--sam-color-fg-on-accent)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',

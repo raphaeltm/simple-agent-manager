@@ -29,6 +29,34 @@ export interface SemanticTokenSet {
   shadowDropdown: string;
   shadowOverlay: string;
   shadowTooltip: string;
+  // Tokyo Night palette (workspace/terminal)
+  tnBg: string;
+  tnBgDark: string;
+  tnSurface: string;
+  tnSelected: string;
+  tnActive: string;
+  tnFg: string;
+  tnFgBright: string;
+  tnFgMuted: string;
+  tnFgDim: string;
+  tnFgDimmer: string;
+  tnGreen: string;
+  tnYellow: string;
+  tnRed: string;
+  tnPurple: string;
+  tnBlue: string;
+  tnOrange: string;
+  tnBorder: string;
+  tnBorderHighlight: string;
+  // Additional semantic
+  info: string;
+  fgOnAccent: string;
+  successFg: string;
+  dangerFg: string;
+  warningFg: string;
+  infoFg: string;
+  purple: string;
+  warningSurface: string;
 }
 
 export const typographyScale: Record<string, TypographyTier> = {
@@ -75,6 +103,32 @@ export const samSemanticTokens: Record<SemanticTokenMode, SemanticTokenSet> = {
     shadowDropdown: '0 4px 16px rgba(0, 0, 0, 0.3)',
     shadowOverlay: '0 8px 32px rgba(0, 0, 0, 0.4)',
     shadowTooltip: '0 2px 8px rgba(0, 0, 0, 0.3)',
+    tnBg: '#1a1b26',
+    tnBgDark: '#16171e',
+    tnSurface: '#1e2030',
+    tnSelected: '#292e42',
+    tnActive: '#33467c',
+    tnFg: '#a9b1d6',
+    tnFgBright: '#c0caf5',
+    tnFgMuted: '#787c99',
+    tnFgDim: '#565f89',
+    tnFgDimmer: '#545868',
+    tnGreen: '#9ece6a',
+    tnYellow: '#e0af68',
+    tnRed: '#f7768e',
+    tnPurple: '#bb9af7',
+    tnBlue: '#7aa2f7',
+    tnOrange: '#ff9e64',
+    tnBorder: '#2a2d3a',
+    tnBorderHighlight: '#3b4261',
+    info: '#60a5fa',
+    fgOnAccent: '#ffffff',
+    successFg: '#4ade80',
+    dangerFg: '#f87171',
+    warningFg: '#fbbf24',
+    infoFg: '#93c5fd',
+    purple: '#c084fc',
+    warningSurface: '#2e2a1f',
   },
   'high-contrast': {
     backgroundCanvas: '#050807',
@@ -99,6 +153,32 @@ export const samSemanticTokens: Record<SemanticTokenMode, SemanticTokenSet> = {
     shadowDropdown: '0 4px 16px rgba(0, 0, 0, 0.5)',
     shadowOverlay: '0 8px 32px rgba(0, 0, 0, 0.6)',
     shadowTooltip: '0 2px 8px rgba(0, 0, 0, 0.5)',
+    tnBg: '#1a1b26',
+    tnBgDark: '#16171e',
+    tnSurface: '#1e2030',
+    tnSelected: '#292e42',
+    tnActive: '#33467c',
+    tnFg: '#a9b1d6',
+    tnFgBright: '#c0caf5',
+    tnFgMuted: '#787c99',
+    tnFgDim: '#565f89',
+    tnFgDimmer: '#545868',
+    tnGreen: '#9ece6a',
+    tnYellow: '#e0af68',
+    tnRed: '#f7768e',
+    tnPurple: '#bb9af7',
+    tnBlue: '#7aa2f7',
+    tnOrange: '#ff9e64',
+    tnBorder: '#2a2d3a',
+    tnBorderHighlight: '#3b4261',
+    info: '#60a5fa',
+    fgOnAccent: '#ffffff',
+    successFg: '#4ade80',
+    dangerFg: '#f87171',
+    warningFg: '#fbbf24',
+    infoFg: '#93c5fd',
+    purple: '#c084fc',
+    warningSurface: '#2e2a1f',
   },
   'reduced-motion': {
     backgroundCanvas: '#0b1110',
@@ -123,6 +203,32 @@ export const samSemanticTokens: Record<SemanticTokenMode, SemanticTokenSet> = {
     shadowDropdown: '0 4px 16px rgba(0, 0, 0, 0.3)',
     shadowOverlay: '0 8px 32px rgba(0, 0, 0, 0.4)',
     shadowTooltip: '0 2px 8px rgba(0, 0, 0, 0.3)',
+    tnBg: '#1a1b26',
+    tnBgDark: '#16171e',
+    tnSurface: '#1e2030',
+    tnSelected: '#292e42',
+    tnActive: '#33467c',
+    tnFg: '#a9b1d6',
+    tnFgBright: '#c0caf5',
+    tnFgMuted: '#787c99',
+    tnFgDim: '#565f89',
+    tnFgDimmer: '#545868',
+    tnGreen: '#9ece6a',
+    tnYellow: '#e0af68',
+    tnRed: '#f7768e',
+    tnPurple: '#bb9af7',
+    tnBlue: '#7aa2f7',
+    tnOrange: '#ff9e64',
+    tnBorder: '#2a2d3a',
+    tnBorderHighlight: '#3b4261',
+    info: '#60a5fa',
+    fgOnAccent: '#ffffff',
+    successFg: '#4ade80',
+    dangerFg: '#f87171',
+    warningFg: '#fbbf24',
+    infoFg: '#93c5fd',
+    purple: '#c084fc',
+    warningSurface: '#2e2a1f',
   },
 };
 

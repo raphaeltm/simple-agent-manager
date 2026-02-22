@@ -13,9 +13,9 @@ interface MiniMetricBadgeProps {
 }
 
 function getBadgeColor(value: number, warnAt: number, critAt: number): { bg: string; fg: string } {
-  if (value >= critAt) return { bg: 'rgba(248, 113, 113, 0.15)', fg: '#f87171' };
-  if (value >= warnAt) return { bg: 'rgba(251, 191, 36, 0.15)', fg: '#fbbf24' };
-  return { bg: 'rgba(74, 222, 128, 0.15)', fg: '#4ade80' };
+  if (value >= critAt) return { bg: 'var(--sam-color-danger-tint)', fg: 'var(--sam-color-danger-fg)' };
+  if (value >= warnAt) return { bg: 'var(--sam-color-warning-tint)', fg: 'var(--sam-color-warning-fg)' };
+  return { bg: 'var(--sam-color-success-tint)', fg: 'var(--sam-color-success-fg)' };
 }
 
 export const MiniMetricBadge: FC<MiniMetricBadgeProps> = ({

@@ -283,29 +283,29 @@
 
 ### Hover Handler Remediation (Tier 1 from research.md R6)
 
-- [ ] T084 [P] Replace all `onMouseEnter`/`onMouseLeave` hover handlers with CSS `:hover` classes across `apps/web/src/components/` — audit and replace ~35 instances per research.md R6
+- [x] T084 [P] Replace all `onMouseEnter`/`onMouseLeave` hover handlers with CSS `:hover` classes across `apps/web/src/components/` — audit and replace ~35 instances per research.md R6
 
 ### Hardcoded Color Remediation (Tier 2–3 from research.md R6)
 
-- [ ] T085 [P] Replace all hardcoded hex color values (`#xxx`) with `--sam-color-*` design tokens across `apps/web/src/` — ~118 instances per research.md R6
-- [ ] T086 [P] Replace all hardcoded `rgba()` values with `--sam-color-*-tint` or `--sam-shadow-*` tokens across `apps/web/src/` — ~118 instances per research.md R6
+- [x] T085 [P] Replace all hardcoded hex color values (`#xxx`) with `--sam-color-*` design tokens across `apps/web/src/` — ~118 instances per research.md R6
+- [x] T086 [P] Replace all hardcoded `rgba()` values with `--sam-color-*-tint` or `--sam-shadow-*` tokens across `apps/web/src/` — ~118 instances per research.md R6
 
 ### Border & Spacing Pattern Remediation (Tier 5 from research.md R6)
 
-- [ ] T087 [P] Replace repeated inline border/borderRadius/padding patterns with shared component usage or CSS classes across `apps/web/src/` — ~89 instances per research.md R6
+- [x] T087 [P] Replace repeated inline border/borderRadius/padding patterns with shared component usage or CSS classes across `apps/web/src/` — ~89 instances per research.md R6
 
 ### Z-Index Consolidation
 
-- [ ] T088 Update existing overlay components to use z-index tokens — update `CommandPalette.tsx`, `Dialog.tsx`, `MobileNavDrawer.tsx`, `FileBrowserPanel.tsx`, `GitChangesPanel.tsx`, `FileViewerPanel.tsx` in `apps/web/src/components/` to use `var(--sam-z-*)` tokens instead of hardcoded z-index values
+- [x] T088 Update existing overlay components to use z-index tokens — update `CommandPalette.tsx`, `Dialog.tsx`, `MobileNavDrawer.tsx`, `FileBrowserPanel.tsx`, `GitChangesPanel.tsx`, `FileViewerPanel.tsx` in `apps/web/src/components/` to use `var(--sam-z-*)` tokens instead of hardcoded z-index values
 
 ### Final Validation
 
-- [ ] T089 Run full lint, typecheck, and test suite — `pnpm lint && pnpm typecheck && pnpm test`
-- [ ] T090 Validate zero inline fontSize declarations: `grep -r "fontSize:" apps/web/src/` returns zero results in component/page TSX files
-- [ ] T091 Validate zero hardcoded hex colors: `grep -rP "#[0-9a-fA-F]{3,8}" apps/web/src/components/ apps/web/src/pages/` returns zero results in TSX files
-- [ ] T092 Validate zero hover handlers: `grep -r "onMouseEnter" apps/web/src/` returns zero results
-- [ ] T093 Run `quickstart.md` validation — verify development workflow, test commands, and testing checklist items all pass
-- [ ] T094 Update `apps/web/src/pages/UiStandards.tsx` with final primitive inventory and usage guidelines
+- [x] T089 Run full lint, typecheck, and test suite — `pnpm lint && pnpm typecheck && pnpm test`
+- [x] T090 Validate zero inline fontSize declarations: `grep -r "fontSize:" apps/web/src/` returns zero results in component/page TSX files
+- [x] T091 Validate zero hardcoded hex colors: `grep -rP "#[0-9a-fA-F]{3,8}" apps/web/src/components/ apps/web/src/pages/` returns zero results in TSX files
+- [x] T092 Validate zero hover handlers: `grep -r "onMouseEnter" apps/web/src/` returns zero results
+- [x] T093 Run `quickstart.md` validation — verify development workflow, test commands, and testing checklist items all pass
+- [x] T094 Update `apps/web/src/pages/UiStandards.tsx` with final primitive inventory and usage guidelines
 
 **Checkpoint**: All success criteria from spec.md (SC-001 through SC-008) verified.
 

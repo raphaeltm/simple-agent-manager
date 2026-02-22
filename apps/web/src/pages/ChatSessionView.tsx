@@ -21,10 +21,10 @@ function formatDuration(startedAt: number, endedAt: number | null): string {
 }
 
 const roleStyles: Record<string, { label: string; color: string; bg: string }> = {
-  user: { label: 'User', color: '#7aa2f7', bg: 'rgba(122, 162, 247, 0.1)' },
-  assistant: { label: 'Assistant', color: '#9ece6a', bg: 'rgba(158, 206, 106, 0.1)' },
-  system: { label: 'System', color: '#e0af68', bg: 'rgba(224, 175, 104, 0.1)' },
-  tool: { label: 'Tool', color: '#bb9af7', bg: 'rgba(187, 154, 247, 0.1)' },
+  user: { label: 'User', color: 'var(--sam-color-tn-blue)', bg: 'var(--sam-color-info-tint)' },
+  assistant: { label: 'Assistant', color: 'var(--sam-color-tn-green)', bg: 'var(--sam-color-success-tint)' },
+  system: { label: 'System', color: 'var(--sam-color-tn-yellow)', bg: 'var(--sam-color-warning-tint)' },
+  tool: { label: 'Tool', color: 'var(--sam-color-tn-purple)', bg: 'var(--sam-color-info-tint)' },
 };
 
 function MessageBubble({ message }: { message: ChatMessageResponse }) {
