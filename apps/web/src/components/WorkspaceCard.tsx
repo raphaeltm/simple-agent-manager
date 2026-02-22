@@ -74,22 +74,23 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
   const overflowItems = getWorkspaceActions(workspace, { onStop, onRestart, onDelete });
 
   return (
-    <Card style={{ padding: 'var(--sam-space-3) var(--sam-space-4)', transition: 'border-color 150ms' }}>
+    <Card style={{ padding: 'var(--sam-space-3) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))', transition: 'border-color 150ms' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
         {/* Main content */}
         <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
           <StatusBadge status={workspace.status} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--sam-space-2)' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--sam-space-2)', minWidth: 0 }}>
               <span className="sam-type-card-title" style={{
                 color: 'var(--sam-color-fg-primary)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
+                minWidth: 0,
               }}>
                 {workspace.displayName || workspace.name}
               </span>
-              <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', flexShrink: 0 }}>
+              <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {workspace.branch}
               </span>
             </div>
@@ -104,14 +105,18 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
 
         {/* Primary action */}
         {isActive && (
-          <Button variant="primary" size="sm" onClick={handleOpen}>
-            Open
-          </Button>
+          <div style={{ flexShrink: 0 }}>
+            <Button variant="primary" size="sm" onClick={handleOpen}>
+              Open
+            </Button>
+          </div>
         )}
         {workspace.status === 'stopped' && onRestart && (
-          <Button variant="secondary" size="sm" onClick={() => onRestart(workspace.id)}>
-            Start
-          </Button>
+          <div style={{ flexShrink: 0 }}>
+            <Button variant="secondary" size="sm" onClick={() => onRestart(workspace.id)}>
+              Start
+            </Button>
+          </div>
         )}
         {(workspace.status === 'creating' || workspace.status === 'stopping') && (
           <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', flexShrink: 0 }}>
@@ -121,7 +126,9 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
 
         {/* Overflow menu */}
         {overflowItems.length > 0 && (
-          <DropdownMenu items={overflowItems} aria-label={`Actions for ${workspace.displayName || workspace.name}`} />
+          <div style={{ flexShrink: 0 }}>
+            <DropdownMenu items={overflowItems} aria-label={`Actions for ${workspace.displayName || workspace.name}`} />
+          </div>
         )}
       </div>
 

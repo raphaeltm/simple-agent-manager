@@ -32,7 +32,7 @@ export function PageLayout({
   const headerInnerStyle: CSSProperties = {
     maxWidth: maxWidthMap[maxWidth],
     margin: '0 auto',
-    padding: 'var(--sam-space-4)',
+    padding: 'var(--sam-space-4) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -64,7 +64,7 @@ export function PageLayout({
   const mainStyle: CSSProperties = {
     maxWidth: maxWidthMap[maxWidth],
     margin: '0 auto',
-    padding: 'var(--sam-space-8) var(--sam-space-4)',
+    padding: 'var(--sam-space-8) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))',
   };
 
   const handleBack = () => {
