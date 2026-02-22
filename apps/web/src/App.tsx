@@ -14,6 +14,7 @@ import { UiStandards } from './pages/UiStandards';
 import { Projects } from './pages/Projects';
 import { Project } from './pages/Project';
 import { TaskDetail } from './pages/TaskDetail';
+import { ChatSessionView } from './pages/ChatSessionView';
 
 export default function App() {
   return (
@@ -95,6 +96,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <TaskDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/projects/:id/sessions/:sessionId"
+            element={
+              <ProtectedRoute>
+                <ChatSessionView />
               </ProtectedRoute>
             }
           />

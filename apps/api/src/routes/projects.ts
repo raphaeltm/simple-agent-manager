@@ -7,6 +7,7 @@ import type {
   Project,
   ProjectDetailResponse,
   ProjectRuntimeConfigResponse,
+  ProjectSummary,
   TaskStatus,
   UpsertProjectRuntimeEnvVarRequest,
   UpsertProjectRuntimeFileRequest,
@@ -21,6 +22,7 @@ import { requireOwnedProject } from '../middleware/project-auth';
 import { getRuntimeLimits } from '../services/limits';
 import { getInstallationRepositories } from '../services/github-app';
 import { encrypt } from '../services/encryption';
+import * as projectDataService from '../services/project-data';
 
 const projectsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -86,8 +88,29 @@ function toProjectResponse(project: schema.Project): Project {
     installationId: project.installationId,
     repository: project.repository,
     defaultBranch: project.defaultBranch,
+    status: (project.status as 'active' | 'detached') || 'active',
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
+  };
+}
+
+function toProjectSummaryResponse(
+  project: schema.Project,
+  activeWorkspaceCount: number
+): ProjectSummary {
+  return {
+    id: project.id,
+    name: project.name,
+    repository: project.repository,
+    githubRepoId: project.githubRepoId,
+    defaultBranch: project.defaultBranch,
+    status: (project.status as 'active' | 'detached') || 'active',
+    activeWorkspaceCount,
+    activeSessionCount: project.activeSessionCount ?? 0,
+    lastActivityAt: project.lastActivityAt ?? null,
+    createdAt: project.createdAt,
+    taskCountsByStatus: {},
+    linkedWorkspaces: 0,
   };
 }
 
@@ -200,6 +223,8 @@ projectsRoutes.post('/', async (c) => {
   const repository = normalizeRepository(body.repository ?? '');
   const defaultBranch = body.defaultBranch?.trim();
   const description = body.description?.trim() || null;
+  const githubRepoId = typeof body.githubRepoId === 'number' ? body.githubRepoId : null;
+  const githubRepoNodeId = body.githubRepoNodeId?.trim() || null;
 
   if (!name || !installationId || !repository || !defaultBranch) {
     throw errors.badRequest('name, installationId, repository, and defaultBranch are required');
@@ -252,6 +277,23 @@ projectsRoutes.post('/', async (c) => {
     throw errors.conflict('Project repository is already linked');
   }
 
+  // Enforce unique (userId, githubRepoId) when provided
+  if (githubRepoId !== null) {
+    const duplicateRepoIdRows = await db
+      .select({ id: schema.projects.id })
+      .from(schema.projects)
+      .where(
+        and(
+          eq(schema.projects.userId, userId),
+          eq(schema.projects.githubRepoId, githubRepoId)
+        )
+      )
+      .limit(1);
+    if (duplicateRepoIdRows[0]) {
+      throw errors.conflict('A project with this GitHub repository ID already exists');
+    }
+  }
+
   const now = new Date().toISOString();
   const projectId = ulid();
 
@@ -264,6 +306,8 @@ projectsRoutes.post('/', async (c) => {
     installationId: installation.id,
     repository,
     defaultBranch,
+    githubRepoId,
+    githubRepoNodeId,
     createdBy: userId,
     createdAt: now,
     updatedAt: now,
@@ -291,25 +335,64 @@ projectsRoutes.get('/', async (c) => {
   const requestedLimit = parsePositiveInt(c.req.query('limit'), limits.taskListDefaultPageSize);
   const limit = Math.min(requestedLimit, limits.taskListMaxPageSize);
   const cursor = c.req.query('cursor')?.trim();
+  const statusFilter = c.req.query('status')?.trim();
+  const sortField = c.req.query('sort')?.trim() || 'last_activity';
 
   const conditions = [eq(schema.projects.userId, userId)];
   if (cursor) {
     conditions.push(lt(schema.projects.id, cursor));
   }
+  if (statusFilter && (statusFilter === 'active' || statusFilter === 'detached')) {
+    conditions.push(eq(schema.projects.status, statusFilter));
+  }
+
+  // Choose sort order
+  const orderBy = sortField === 'name'
+    ? desc(schema.projects.name)
+    : sortField === 'created_at'
+      ? desc(schema.projects.createdAt)
+      : desc(schema.projects.lastActivityAt);
 
   const rows = await db
     .select()
     .from(schema.projects)
     .where(and(...conditions))
-    .orderBy(desc(schema.projects.id))
+    .orderBy(orderBy, desc(schema.projects.id))
     .limit(limit + 1);
 
   const hasNextPage = rows.length > limit;
   const projects = hasNextPage ? rows.slice(0, limit) : rows;
   const nextCursor = hasNextPage ? (projects[projects.length - 1]?.id ?? null) : null;
 
+  // Batch query for active workspace counts per project
+  const projectIds = projects.map((p) => p.id);
+  const workspaceCountMap = new Map<string, number>();
+  if (projectIds.length > 0) {
+    const wsCounts = await db
+      .select({
+        projectId: schema.workspaces.projectId,
+        count: count(),
+      })
+      .from(schema.workspaces)
+      .where(
+        and(
+          sql`${schema.workspaces.projectId} IN (${sql.join(projectIds.map((id) => sql`${id}`), sql`, `)})`,
+          eq(schema.workspaces.status, 'running')
+        )
+      )
+      .groupBy(schema.workspaces.projectId);
+
+    for (const row of wsCounts) {
+      if (row.projectId) {
+        workspaceCountMap.set(row.projectId, row.count);
+      }
+    }
+  }
+
   const response: ListProjectsResponse = {
-    projects: projects.map(toProjectResponse),
+    projects: projects.map((p) =>
+      toProjectSummaryResponse(p, workspaceCountMap.get(p.id) ?? 0) as unknown as Project
+    ),
     nextCursor,
   };
 
@@ -340,13 +423,43 @@ projectsRoutes.get('/:id', async (c) => {
     .where(and(eq(schema.tasks.projectId, project.id), isNotNull(schema.tasks.workspaceId)))
     .limit(1);
 
+  const activeWorkspaceCountRow = await db
+    .select({ count: count() })
+    .from(schema.workspaces)
+    .where(
+      and(
+        eq(schema.workspaces.projectId, project.id),
+        eq(schema.workspaces.status, 'running')
+      )
+    );
+
+  // Fetch recent sessions and activity from the project's DO (best-effort)
+  let recentSessions: Record<string, unknown>[] = [];
+  let recentActivity: Record<string, unknown>[] = [];
+  try {
+    const [sessionsResult, activityResult] = await Promise.all([
+      projectDataService.listSessions(c.env, project.id, null, 5, 0),
+      projectDataService.listActivityEvents(c.env, project.id, null, 10, null),
+    ]);
+    recentSessions = sessionsResult.sessions;
+    recentActivity = activityResult.events;
+  } catch (err) {
+    // DO may not exist yet for projects created before this feature
+    console.error('Failed to fetch DO data for project', project.id, err);
+  }
+
   const response: ProjectDetailResponse = {
     ...toProjectResponse(project),
     summary: {
       taskCountsByStatus,
       linkedWorkspaces: linkedWorkspacesRow[0]?.count ?? 0,
+      activeWorkspaceCount: activeWorkspaceCountRow[0]?.count ?? 0,
+      activeSessionCount: project.activeSessionCount ?? 0,
+      lastActivityAt: project.lastActivityAt ?? null,
     },
-  };
+    recentSessions,
+    recentActivity,
+  } as ProjectDetailResponse & { recentSessions: unknown[]; recentActivity: unknown[] };
 
   return c.json(response);
 });

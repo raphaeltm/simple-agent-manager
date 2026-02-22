@@ -4,12 +4,13 @@ import { UserMenu } from '../components/UserMenu';
 import { RepoSelector } from '../components/RepoSelector';
 import {
   createWorkspace,
+  getProject,
   listBranches,
   listCredentials,
   listGitHubInstallations,
   listNodes,
 } from '../lib/api';
-import type { GitHubInstallation, NodeResponse } from '@simple-agent-manager/shared';
+import type { GitHubInstallation, NodeResponse, ProjectDetailResponse } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, Input, PageLayout, Select, Spinner } from '@simple-agent-manager/ui';
 
 type PrereqStatus = 'loading' | 'ready' | 'missing' | 'error';
@@ -95,6 +96,7 @@ const VM_LOCATIONS = [
 
 type LocationState = {
   nodeId?: string;
+  projectId?: string;
 };
 
 export function CreateWorkspace() {
@@ -110,10 +112,12 @@ export function CreateWorkspace() {
   const [hasHetzner, setHasHetzner] = useState(false);
   const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
   const [nodes, setNodes] = useState<NodeResponse[]>([]);
+  const [linkedProject, setLinkedProject] = useState<ProjectDetailResponse | null>(null);
 
   const [name, setName] = useState('');
   const [repository, setRepository] = useState('');
   const [branch, setBranch] = useState('main');
+  const isProjectLinked = !!linkedProject;
   const [branches, setBranches] = useState<Array<{ name: string }>>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [branchesError, setBranchesError] = useState<string | null>(null);
@@ -155,6 +159,24 @@ export function CreateWorkspace() {
       })
       .catch(() => setNodesStatus('error'));
   }, []);
+
+  // Load project context if navigated from a project
+  useEffect(() => {
+    const projectId = locationState?.projectId;
+    if (!projectId) return;
+
+    getProject(projectId)
+      .then((proj) => {
+        setLinkedProject(proj);
+        setName(`${proj.name} Workspace`);
+        setRepository(proj.repository);
+        setBranch(proj.defaultBranch ?? 'main');
+        setInstallationId(proj.installationId);
+      })
+      .catch(() => {
+        // Project fetch failed — continue without project context
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const checkingPrereqs = hetznerStatus === 'loading' || githubStatus === 'loading';
 
@@ -206,6 +228,7 @@ export function CreateWorkspace() {
 
       const workspace = await createWorkspace({
         name,
+        projectId: linkedProject?.id,
         nodeId: selectedNodeId || undefined,
         repository: repo,
         branch,
@@ -238,8 +261,8 @@ export function CreateWorkspace() {
 
   return (
     <PageLayout
-      title="Create Workspace"
-      onBack={() => navigate('/dashboard')}
+      title={isProjectLinked ? `New Workspace — ${linkedProject?.name}` : 'Create Workspace'}
+      onBack={() => isProjectLinked ? navigate(`/projects/${linkedProject?.id}`) : navigate('/dashboard')}
       maxWidth="md"
       headerRight={<UserMenu />}
     >
@@ -325,17 +348,41 @@ export function CreateWorkspace() {
             />
           </div>
 
+          {isProjectLinked && (
+            <div style={{
+              padding: 'var(--sam-space-3) var(--sam-space-4)',
+              borderRadius: 'var(--sam-radius-md)',
+              backgroundColor: 'color-mix(in srgb, var(--sam-color-accent-primary) 8%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--sam-color-accent-primary) 25%, transparent)',
+              fontSize: '0.8125rem',
+              color: 'var(--sam-color-fg-muted)',
+            }}>
+              Creating workspace for project <strong style={{ color: 'var(--sam-color-fg-primary)' }}>{linkedProject?.name}</strong>.
+              Repository and branch are pre-filled from the project.
+            </div>
+          )}
+
           <div>
             <label htmlFor="repository" style={labelStyle}>
               Repository
             </label>
-            <RepoSelector
-              id="repository"
-              value={repository}
-              onChange={setRepository}
-              onRepoSelect={handleRepoSelect}
-              required
-            />
+            {isProjectLinked ? (
+              <Input
+                id="repository"
+                type="text"
+                value={repository}
+                readOnly
+                style={{ opacity: 0.7, cursor: 'not-allowed' }}
+              />
+            ) : (
+              <RepoSelector
+                id="repository"
+                value={repository}
+                onChange={setRepository}
+                onRepoSelect={handleRepoSelect}
+                required
+              />
+            )}
           </div>
 
           <div>
@@ -343,7 +390,15 @@ export function CreateWorkspace() {
               Branch
             </label>
             <div style={{ position: 'relative' }}>
-              {branches.length > 0 ? (
+              {isProjectLinked ? (
+                <Input
+                  id="branch"
+                  type="text"
+                  value={branch}
+                  onChange={(e) => setBranch(e.target.value)}
+                  placeholder="main"
+                />
+              ) : branches.length > 0 ? (
                 <Select
                   id="branch"
                   value={branch}

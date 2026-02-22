@@ -10,6 +10,7 @@ export interface ProjectFormValues {
   installationId: string;
   repository: string;
   defaultBranch: string;
+  githubRepoId?: number;
 }
 
 interface ProjectFormProps {
@@ -96,14 +97,14 @@ export function ProjectForm({
   };
 
   const handleRepoSelect = useCallback(
-    (repo: { fullName: string; defaultBranch: string } | null) => {
+    (repo: { fullName: string; defaultBranch: string; githubRepoId?: number } | null) => {
       if (!repo) {
         setBranches([]);
         setBranchesError(null);
         return;
       }
 
-      setValues((current) => ({ ...current, defaultBranch: repo.defaultBranch }));
+      setValues((current) => ({ ...current, defaultBranch: repo.defaultBranch, githubRepoId: repo.githubRepoId }));
       void fetchBranches(repo.fullName, values.installationId);
     },
     [fetchBranches, values.installationId]
@@ -156,6 +157,7 @@ export function ProjectForm({
       installationId: values.installationId,
       repository: normalizeRepository(values.repository),
       defaultBranch: values.defaultBranch.trim(),
+      githubRepoId: values.githubRepoId,
     });
   };
 

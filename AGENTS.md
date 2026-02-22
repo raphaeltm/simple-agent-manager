@@ -41,3 +41,16 @@ All behavioral rules for agents are in `.claude/rules/`:
 - `07-env-and-urls.md` — Environment variable naming, URL construction
 - `08-architecture.md` — Architecture research requirements
 - `09-task-tracking.md` — Task tracking system
+
+## Durable Object Patterns
+
+Per-project data (chat sessions, messages, activity events) is stored in a `ProjectData` Durable Object with embedded SQLite. Key patterns:
+
+- **Access**: `env.PROJECT_DATA.idFromName(projectId)` → deterministic DO stub
+- **Service layer**: `apps/api/src/services/project-data.ts` — typed wrapper for all DO RPC calls
+- **DO class**: `apps/api/src/durable-objects/project-data.ts` — extends `DurableObject`, constructor runs migrations
+- **Migrations**: `apps/api/src/durable-objects/migrations.ts` — append-only, tracked in `migrations` table
+- **WebSocket**: Hibernatable WebSockets for real-time event streaming (ping/pong, broadcast)
+- **D1 sync**: `scheduleSummarySync()` debounces summary updates to D1 for cross-project dashboard queries
+- **Activity recording**: Best-effort via `c.executionCtx.waitUntil()` with `.catch()` — non-blocking
+- **ADR**: `docs/adr/004-hybrid-d1-do-storage.md`

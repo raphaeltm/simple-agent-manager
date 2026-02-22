@@ -12,6 +12,13 @@ MAX_WORKSPACES_PER_USER = "10"
 MAX_WORKSPACES_PER_NODE = "10"
 MAX_AGENT_SESSIONS_PER_WORKSPACE = "10"
 NODE_HEARTBEAT_STALE_SECONDS = "180"
+MAX_PROJECTS_PER_USER = "50"
+MAX_SESSIONS_PER_PROJECT = "1000"
+MAX_MESSAGES_PER_SESSION = "10000"
+MESSAGE_SIZE_THRESHOLD = "102400"
+ACTIVITY_RETENTION_DAYS = "90"
+SESSION_IDLE_TIMEOUT_MINUTES = "60"
+DO_SUMMARY_SYNC_DEBOUNCE_MS = "5000"
 
 # D1 Database
 [[d1_databases]]
@@ -31,6 +38,15 @@ binding = "R2"
 bucket_name = "workspaces-dev-assets"
 
 
+# Durable Objects for per-project data (chat sessions, activity events, task status events)
+[[durable_objects.bindings]]
+name = "PROJECT_DATA"
+class_name = "ProjectData"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ProjectData"]
+
 # Workers AI for speech-to-text transcription
 [ai]
 binding = "AI"
@@ -38,7 +54,7 @@ binding = "AI"
 # Environment-specific configuration
 [env.staging]
 name = "sam-api-staging"
-vars = { BASE_DOMAIN = "staging.workspaces.example.com", VERSION = "0.1.0", MAX_NODES_PER_USER = "10", MAX_WORKSPACES_PER_USER = "10", MAX_WORKSPACES_PER_NODE = "10", MAX_AGENT_SESSIONS_PER_WORKSPACE = "10", NODE_HEARTBEAT_STALE_SECONDS = "180" }
+vars = { BASE_DOMAIN = "staging.workspaces.example.com", VERSION = "0.1.0", MAX_NODES_PER_USER = "10", MAX_WORKSPACES_PER_USER = "10", MAX_WORKSPACES_PER_NODE = "10", MAX_AGENT_SESSIONS_PER_WORKSPACE = "10", NODE_HEARTBEAT_STALE_SECONDS = "180", MAX_PROJECTS_PER_USER = "50", MAX_SESSIONS_PER_PROJECT = "1000", MAX_MESSAGES_PER_SESSION = "10000", MESSAGE_SIZE_THRESHOLD = "102400", ACTIVITY_RETENTION_DAYS = "90", SESSION_IDLE_TIMEOUT_MINUTES = "60", DO_SUMMARY_SYNC_DEBOUNCE_MS = "5000" }
 
 [[env.staging.d1_databases]]
 binding = "DATABASE"
@@ -59,7 +75,7 @@ binding = "AI"
 
 [env.production]
 name = "sam-api-prod"
-vars = { BASE_DOMAIN = "workspaces.example.com", VERSION = "0.1.0", MAX_NODES_PER_USER = "10", MAX_WORKSPACES_PER_USER = "10", MAX_WORKSPACES_PER_NODE = "10", MAX_AGENT_SESSIONS_PER_WORKSPACE = "10", NODE_HEARTBEAT_STALE_SECONDS = "180" }
+vars = { BASE_DOMAIN = "workspaces.example.com", VERSION = "0.1.0", MAX_NODES_PER_USER = "10", MAX_WORKSPACES_PER_USER = "10", MAX_WORKSPACES_PER_NODE = "10", MAX_AGENT_SESSIONS_PER_WORKSPACE = "10", NODE_HEARTBEAT_STALE_SECONDS = "180", MAX_PROJECTS_PER_USER = "50", MAX_SESSIONS_PER_PROJECT = "1000", MAX_MESSAGES_PER_SESSION = "10000", MESSAGE_SIZE_THRESHOLD = "102400", ACTIVITY_RETENTION_DAYS = "90", SESSION_IDLE_TIMEOUT_MINUTES = "60", DO_SUMMARY_SYNC_DEBOUNCE_MS = "5000" }
 
 [env.production.observability]
 enabled = true

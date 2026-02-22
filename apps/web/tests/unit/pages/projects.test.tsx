@@ -134,6 +134,7 @@ describe('Projects page', () => {
         installationId: 'inst-1',
         repository: 'acme/new-repo',
         defaultBranch: 'main',
+        githubRepoId: 1,
       });
     });
   });

@@ -45,6 +45,7 @@ import {
 } from '../services/task-graph';
 import { getRuntimeLimits } from '../services/limits';
 import { verifyCallbackToken } from '../services/jwt';
+import * as projectDataService from '../services/project-data';
 
 const tasksRoutes = new Hono<{ Bindings: Env }>();
 
@@ -601,6 +602,14 @@ tasksRoutes.post('/:taskId/status', async (c) => {
     errorMessage: body.errorMessage,
   });
 
+  // Record activity event for task status change
+  c.executionCtx.waitUntil(
+    projectDataService.recordActivityEvent(
+      c.env, projectId, `task.${body.toStatus}`, 'user', userId,
+      null, null, taskId, { title: task.title, fromStatus: task.status, toStatus: body.toStatus }
+    ).catch(() => { /* best-effort */ })
+  );
+
   const nextBlocked = await computeBlockedForTask(db, updatedTask.id);
   return c.json(toTaskResponse(updatedTask, nextBlocked));
 });
@@ -651,6 +660,14 @@ tasksRoutes.post('/:taskId/status/callback', async (c) => {
     outputPrUrl: body.outputPrUrl,
     errorMessage: body.errorMessage,
   });
+
+  // Record activity event for task status change (from workspace callback)
+  c.executionCtx.waitUntil(
+    projectDataService.recordActivityEvent(
+      c.env, projectId, `task.${body.toStatus}`, 'workspace_callback', payload.workspace,
+      task.workspaceId, null, taskId, { title: task.title, fromStatus: task.status, toStatus: body.toStatus }
+    ).catch(() => { /* best-effort */ })
+  );
 
   const blocked = await computeBlockedForTask(db, updatedTask.id);
   return c.json(toTaskResponse(updatedTask, blocked));

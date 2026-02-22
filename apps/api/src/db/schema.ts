@@ -173,6 +173,11 @@ export const projects = sqliteTable(
       .references(() => githubInstallations.id, { onDelete: 'cascade' }),
     repository: text('repository').notNull(),
     defaultBranch: text('default_branch').notNull().default('main'),
+    githubRepoId: integer('github_repo_id'),
+    githubRepoNodeId: text('github_repo_node_id'),
+    status: text('status').notNull().default('active'),
+    lastActivityAt: text('last_activity_at'),
+    activeSessionCount: integer('active_session_count').notNull().default(0),
     createdBy: text('created_by')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -195,6 +200,9 @@ export const projects = sqliteTable(
       table.installationId,
       table.repository
     ),
+    userGithubRepoIdUnique: uniqueIndex('idx_projects_user_github_repo_id')
+      .on(table.userId, table.githubRepoId)
+      .where(sql`github_repo_id IS NOT NULL`),
   })
 );
 

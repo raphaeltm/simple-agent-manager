@@ -682,6 +682,37 @@ wrangler d1 migrations create workspaces your-migration-name
 wrangler d1 migrations apply workspaces --remote
 ```
 
+**Note**: Durable Object (DO) SQLite migrations are managed automatically. Each project's DO runs pending migrations in its constructor via `blockConcurrencyWhile()`. No manual migration step is needed for DO schemas.
+
+### Durable Object Configuration
+
+SAM uses a per-project Durable Object (`PROJECT_DATA`) for chat sessions, messages, activity events, and real-time WebSocket streaming. This is configured automatically by Pulumi during deployment.
+
+**For manual deployments**, ensure your `wrangler.toml` includes the DO binding:
+
+```toml
+[[durable_objects.bindings]]
+name = "PROJECT_DATA"
+class_name = "ProjectData"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ProjectData"]
+```
+
+**Configurable DO limits** (set as Worker vars or environment variables):
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MAX_SESSIONS_PER_PROJECT` | Max chat sessions per project | `1000` |
+| `MAX_MESSAGES_PER_SESSION` | Max messages per chat session | `10000` |
+| `MESSAGE_SIZE_THRESHOLD` | Max message size in bytes | `102400` |
+| `ACTIVITY_RETENTION_DAYS` | Days to retain activity events | `90` |
+| `SESSION_IDLE_TIMEOUT_MINUTES` | Idle session timeout | `60` |
+| `DO_SUMMARY_SYNC_DEBOUNCE_MS` | Debounce for DO-to-D1 summary sync | `5000` |
+
+See `apps/api/.env.example` for the full list of configurable variables.
+
 ### Rotating Security Keys
 
 Security keys are managed by Pulumi and normally don't need rotation. If you need to rotate keys:

@@ -389,6 +389,140 @@ export async function listTaskEvents(
 }
 
 // =============================================================================
+// Chat Sessions (Project DO)
+// =============================================================================
+
+export interface ChatSessionListResponse {
+  sessions: ChatSessionResponse[];
+  total: number;
+}
+
+export interface ChatSessionResponse {
+  id: string;
+  workspaceId: string | null;
+  topic: string | null;
+  status: string;
+  messageCount: number;
+  startedAt: number;
+  endedAt: number | null;
+  createdAt: number;
+}
+
+export interface ChatMessageResponse {
+  id: string;
+  sessionId: string;
+  role: string;
+  content: string;
+  toolMetadata: Record<string, unknown> | null;
+  createdAt: number;
+}
+
+export interface ChatSessionDetailResponse {
+  session: ChatSessionResponse;
+  messages: ChatMessageResponse[];
+  hasMore: boolean;
+}
+
+export async function listChatSessions(
+  projectId: string,
+  params: { status?: string; limit?: number; offset?: number } = {}
+): Promise<ChatSessionListResponse> {
+  const searchParams = new URLSearchParams();
+  if (params.status) searchParams.set('status', params.status);
+  if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
+  if (params.offset !== undefined) searchParams.set('offset', String(params.offset));
+
+  const qs = searchParams.toString();
+  const endpoint = qs
+    ? `/api/projects/${projectId}/sessions?${qs}`
+    : `/api/projects/${projectId}/sessions`;
+
+  return request<ChatSessionListResponse>(endpoint);
+}
+
+export async function getChatSession(
+  projectId: string,
+  sessionId: string,
+  params: { limit?: number; before?: number } = {}
+): Promise<ChatSessionDetailResponse> {
+  const searchParams = new URLSearchParams();
+  if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
+  if (params.before !== undefined) searchParams.set('before', String(params.before));
+
+  const qs = searchParams.toString();
+  const endpoint = qs
+    ? `/api/projects/${projectId}/sessions/${sessionId}?${qs}`
+    : `/api/projects/${projectId}/sessions/${sessionId}`;
+
+  return request<ChatSessionDetailResponse>(endpoint);
+}
+
+export async function createChatSession(
+  projectId: string,
+  data: { workspaceId?: string; topic?: string } = {}
+): Promise<{ id: string }> {
+  return request<{ id: string }>(`/api/projects/${projectId}/sessions`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function stopChatSession(
+  projectId: string,
+  sessionId: string
+): Promise<{ status: string }> {
+  return request<{ status: string }>(`/api/projects/${projectId}/sessions/${sessionId}/stop`, {
+    method: 'POST',
+  });
+}
+
+export async function persistChatMessage(
+  projectId: string,
+  sessionId: string,
+  data: { role: string; content: string; toolMetadata?: Record<string, unknown> | null }
+): Promise<{ id: string }> {
+  return request<{ id: string }>(`/api/projects/${projectId}/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+// =============================================================================
+// Activity Events
+// =============================================================================
+
+export interface ActivityEventResponse {
+  id: string;
+  eventType: string;
+  actorType: string;
+  actorId: string | null;
+  workspaceId: string | null;
+  sessionId: string | null;
+  taskId: string | null;
+  payload: Record<string, unknown> | null;
+  createdAt: number;
+}
+
+export interface ActivityEventsListResponse {
+  events: ActivityEventResponse[];
+  hasMore: boolean;
+}
+
+export async function listActivityEvents(
+  projectId: string,
+  params?: { eventType?: string; before?: number; limit?: number }
+): Promise<ActivityEventsListResponse> {
+  const searchParams = new URLSearchParams();
+  if (params?.eventType) searchParams.set('eventType', params.eventType);
+  if (params?.before) searchParams.set('before', String(params.before));
+  if (params?.limit) searchParams.set('limit', String(params.limit));
+
+  const qs = searchParams.toString();
+  const endpoint = `/api/projects/${projectId}/activity${qs ? `?${qs}` : ''}`;
+  return request<ActivityEventsListResponse>(endpoint);
+}
+
+// =============================================================================
 // Nodes
 // =============================================================================
 export async function listNodes(): Promise<NodeResponse[]> {

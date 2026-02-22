@@ -21,6 +21,8 @@ import {
   delegateTask,
   getProject,
   getProjectRuntimeConfig,
+  listActivityEvents,
+  listChatSessions,
   listGitHubInstallations,
   listProjectTasks,
   listWorkspaces,
@@ -29,6 +31,7 @@ import {
   upsertProjectRuntimeEnvVar,
   upsertProjectRuntimeFile,
 } from '../lib/api';
+import type { ActivityEventResponse, ChatSessionResponse } from '../lib/api';
 import { useToast } from '../hooks/useToast';
 import { ProjectForm, type ProjectFormValues } from '../components/project/ProjectForm';
 import { TaskFilters, type TaskFilterState } from '../components/project/TaskFilters';
@@ -36,6 +39,8 @@ import { TaskForm, type TaskFormValues } from '../components/project/TaskForm';
 import { TaskList } from '../components/project/TaskList';
 import { TaskDelegateDialog } from '../components/project/TaskDelegateDialog';
 import { NeedsAttentionSection } from '../components/project/NeedsAttentionSection';
+import { ChatSessionList } from '../components/ChatSessionList';
+import { ActivityFeed } from '../components/ActivityFeed';
 
 type ProjectTab = 'overview' | 'tasks';
 
@@ -81,6 +86,10 @@ export function Project() {
   const [projectLoading, setProjectLoading] = useState(true);
   const [tasksLoading, setTasksLoading] = useState(true);
   const [runtimeConfigLoading, setRuntimeConfigLoading] = useState(true);
+  const [chatSessions, setChatSessions] = useState<ChatSessionResponse[]>([]);
+  const [activityEvents, setActivityEvents] = useState<ActivityEventResponse[]>([]);
+  const [activityHasMore, setActivityHasMore] = useState(false);
+  const [activityLoading, setActivityLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [showProjectEdit, setShowProjectEdit] = useState(false);
@@ -99,12 +108,6 @@ export function Project() {
   const [filePathInput, setFilePathInput] = useState('');
   const [fileContentInput, setFileContentInput] = useState('');
   const [fileSecretInput, setFileSecretInput] = useState(false);
-
-  const recentActivity = useMemo(() => {
-    return [...tasks]
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-      .slice(0, 5);
-  }, [tasks]);
 
   const filters: TaskFilterState = useMemo(() => {
     const status = searchParams.get('status');
@@ -170,9 +173,41 @@ export function Project() {
     }
   }, [projectId]);
 
+  const loadChatSessions = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const result = await listChatSessions(projectId, { limit: 10 });
+      setChatSessions(result.sessions);
+    } catch {
+      // Best-effort — chat sessions may not exist for pre-migration projects
+    }
+  }, [projectId]);
+
+  const loadActivityEvents = useCallback(async (loadMore = false) => {
+    if (!projectId) return;
+    try {
+      setActivityLoading(true);
+      const lastEvent = loadMore ? activityEvents[activityEvents.length - 1] : undefined;
+      const before = lastEvent?.createdAt;
+      const result = await listActivityEvents(projectId, { limit: 20, before });
+      if (loadMore) {
+        setActivityEvents((prev) => [...prev, ...result.events]);
+      } else {
+        setActivityEvents(result.events);
+      }
+      setActivityHasMore(result.hasMore);
+    } catch {
+      // Best-effort
+    } finally {
+      setActivityLoading(false);
+    }
+  }, [projectId, activityEvents]);
+
   useEffect(() => { void loadProject(); }, [loadProject]);
   useEffect(() => { void loadTasks(); }, [loadTasks]);
   useEffect(() => { void loadRuntimeConfig(); }, [loadRuntimeConfig]);
+  useEffect(() => { void loadChatSessions(); }, [loadChatSessions]);
+  useEffect(() => { void loadActivityEvents(); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     void listGitHubInstallations()
@@ -370,6 +405,12 @@ export function Project() {
 
   return (
     <PageLayout title="Project" maxWidth="xl" headerRight={<UserMenu />}>
+      {/* Breadcrumb */}
+      <nav style={{ marginBottom: 'var(--sam-space-4)', fontSize: '0.875rem' }}>
+        <Link to="/" style={{ color: 'var(--sam-color-fg-muted)', textDecoration: 'none' }}>Dashboard</Link>
+        <span style={{ margin: '0 var(--sam-space-2)', color: 'var(--sam-color-fg-muted)' }}>/</span>
+        <span style={{ color: 'var(--sam-color-fg-primary)' }}>{project?.name || 'Project'}</span>
+      </nav>
       <style>{`
         .project-tab-btn {
           background: transparent;
@@ -424,7 +465,12 @@ export function Project() {
               )}
             </div>
             <div style={{ display: 'flex', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
-              <Button onClick={handleLaunchWorkspace} loading={launchingWorkspace} disabled={launchingWorkspace}>
+              <Button
+                onClick={handleLaunchWorkspace}
+                loading={launchingWorkspace}
+                disabled={launchingWorkspace || project.status === 'detached'}
+                title={project.status === 'detached' ? 'Cannot launch workspace for a detached project' : undefined}
+              >
                 Launch Workspace
               </Button>
               <Button variant="secondary" onClick={() => setShowProjectEdit((v) => !v)}>
@@ -447,6 +493,14 @@ export function Project() {
               </Button>
             </div>
           </div>
+
+          {/* Detached warning */}
+          {project.status === 'detached' && (
+            <Alert variant="warning">
+              This project&apos;s GitHub repository has been deleted. Workspace creation is disabled.
+              You can still view existing sessions, tasks, and activity.
+            </Alert>
+          )}
 
           {/* ── Tab strip ── */}
           <div
@@ -703,55 +757,46 @@ export function Project() {
                 )}
               </section>
 
-              {/* Recent activity */}
+              {/* Chat sessions (from DO) */}
               <section
                 style={{
                   border: '1px solid var(--sam-color-border-default)',
                   borderRadius: 'var(--sam-radius-md)',
                   background: 'var(--sam-color-bg-surface)',
-                  padding: 'var(--sam-space-3)',
-                  display: 'grid',
-                  gap: 'var(--sam-space-2)',
+                  overflow: 'hidden',
                 }}
               >
-                <strong style={{ color: 'var(--sam-color-fg-primary)', fontSize: '0.9375rem' }}>
-                  Recent activity
-                </strong>
-                {recentActivity.length === 0 ? (
-                  <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.875rem' }}>
-                    No task activity yet.
-                  </div>
-                ) : (
-                  <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: '0.5rem' }}>
-                    {recentActivity.map((task) => (
-                      <li
-                        key={task.id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 'var(--sam-space-2)',
-                          flexWrap: 'wrap',
-                        }}
-                      >
-                        <StatusBadge status={task.status} />
-                        <Link
-                          to={`/projects/${projectId}/tasks/${task.id}`}
-                          style={{
-                            color: 'var(--sam-color-fg-primary)',
-                            textDecoration: 'none',
-                            fontSize: '0.875rem',
-                            fontWeight: 600,
-                          }}
-                        >
-                          {task.title}
-                        </Link>
-                        <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.75rem' }}>
-                          Updated {new Date(task.updatedAt).toLocaleString()}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <div style={{ padding: 'var(--sam-space-3) var(--sam-space-4)', borderBottom: '1px solid var(--sam-color-border-default)' }}>
+                  <strong style={{ color: 'var(--sam-color-fg-primary)', fontSize: '0.9375rem' }}>
+                    Chat Sessions
+                  </strong>
+                </div>
+                <ChatSessionList
+                  sessions={chatSessions}
+                  onSelect={(sessionId) => navigate(`/projects/${projectId}/sessions/${sessionId}`)}
+                />
+              </section>
+
+              {/* Activity feed */}
+              <section
+                style={{
+                  border: '1px solid var(--sam-color-border-default)',
+                  borderRadius: 'var(--sam-radius-md)',
+                  background: 'var(--sam-color-bg-surface)',
+                  overflow: 'hidden',
+                }}
+              >
+                <div style={{ padding: 'var(--sam-space-3) var(--sam-space-4)', borderBottom: '1px solid var(--sam-color-border-default)' }}>
+                  <strong style={{ color: 'var(--sam-color-fg-primary)', fontSize: '0.9375rem' }}>
+                    Activity
+                  </strong>
+                </div>
+                <ActivityFeed
+                  events={activityEvents}
+                  hasMore={activityHasMore}
+                  onLoadMore={() => void loadActivityEvents(true)}
+                  loading={activityLoading}
+                />
               </section>
             </div>
           )}

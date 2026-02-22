@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => ({
   removeTaskDependency: vi.fn(),
   delegateTask: vi.fn(),
   deleteProject: vi.fn(),
+  listActivityEvents: vi.fn(),
+  listChatSessions: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
@@ -49,6 +51,8 @@ vi.mock('../../../src/lib/api', () => ({
   removeTaskDependency: mocks.removeTaskDependency,
   delegateTask: mocks.delegateTask,
   deleteProject: mocks.deleteProject,
+  listActivityEvents: mocks.listActivityEvents,
+  listChatSessions: mocks.listChatSessions,
 }));
 
 vi.mock('../../../src/components/UserMenu', () => ({
@@ -184,6 +188,8 @@ describe('Project page', () => {
     mocks.removeTaskDependency.mockResolvedValue({ success: true });
     mocks.delegateTask.mockResolvedValue({});
     mocks.deleteProject.mockResolvedValue({ success: true });
+    mocks.listActivityEvents.mockResolvedValue({ events: [], hasMore: false });
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
   });
 
   it('loads project details and renders task backlog', async () => {
@@ -198,7 +204,7 @@ describe('Project page', () => {
       });
     });
 
-    expect(await screen.findByText('Project One')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Project One' })).toBeInTheDocument();
     expect(await screen.findByRole('link', { name: 'Draft task' })).toBeInTheDocument();
   });
 
@@ -283,12 +289,27 @@ describe('Project page', () => {
     });
   });
 
-  it('renders overview recent activity with links to task detail', async () => {
+  it('renders overview activity section with ActivityFeed', async () => {
+    mocks.listActivityEvents.mockResolvedValue({
+      events: [
+        {
+          id: 'evt-1',
+          eventType: 'workspace.created',
+          actorType: 'user',
+          actorId: 'user-1',
+          workspaceId: 'ws-1',
+          sessionId: null,
+          taskId: null,
+          payload: null,
+          createdAt: Date.now(),
+        },
+      ],
+      hasMore: false,
+    });
+
     renderProjectPage();
 
-    expect(await screen.findByText('Recent activity')).toBeInTheDocument();
-    const activityLink = await screen.findByRole('link', { name: 'Draft task' });
-    expect(activityLink).toHaveAttribute('href', '/projects/proj-1/tasks/task-1');
+    expect(await screen.findByText('Activity')).toBeInTheDocument();
   });
 
   it('saves runtime env vars from project runtime config panel', async () => {
