@@ -196,7 +196,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
               backgroundColor: 'rgba(247, 118, 142, 0.1)',
               borderRadius: 8,
               color: '#f7768e',
-              fontSize: '0.8125rem',
+              fontSize: 'var(--sam-type-caption-size)',
             }}
           >
             {error}
@@ -210,7 +210,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
               justifyContent: 'center',
               padding: 48,
               color: 'var(--sam-color-fg-muted)',
-              fontSize: '0.875rem',
+              fontSize: 'var(--sam-type-secondary-size)',
             }}
           >
             No diff available

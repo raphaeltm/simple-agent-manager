@@ -94,14 +94,14 @@ function AgentSettingsCard({
   };
 
   const labelStyle: React.CSSProperties = {
-    fontSize: '0.875rem',
+    fontSize: 'var(--sam-type-secondary-size)',
     fontWeight: 500,
     color: 'var(--sam-color-fg-primary)',
     marginBottom: 'var(--sam-space-1)',
   };
 
   const descStyle: React.CSSProperties = {
-    fontSize: '0.75rem',
+    fontSize: 'var(--sam-type-caption-size)',
     color: 'var(--sam-color-fg-muted)',
     marginBottom: 'var(--sam-space-2)',
   };
@@ -113,7 +113,7 @@ function AgentSettingsCard({
     border: '1px solid var(--sam-color-border-default)',
     backgroundColor: 'var(--sam-color-bg-surface)',
     color: 'var(--sam-color-fg-primary)',
-    fontSize: '0.875rem',
+    fontSize: 'var(--sam-type-secondary-size)',
     outline: 'none',
     boxSizing: 'border-box',
   };
@@ -128,7 +128,7 @@ function AgentSettingsCard({
     display: 'flex',
     alignItems: 'center',
     gap: 'var(--sam-space-2)',
-    fontSize: '0.875rem',
+    fontSize: 'var(--sam-type-secondary-size)',
     color: 'var(--sam-color-fg-primary)',
     cursor: 'pointer',
   };
@@ -139,7 +139,7 @@ function AgentSettingsCard({
     border: variant === 'primary' ? 'none' : '1px solid var(--sam-color-border-default)',
     backgroundColor: variant === 'primary' ? 'var(--sam-color-accent-primary)' : 'transparent',
     color: variant === 'primary' ? '#fff' : 'var(--sam-color-fg-muted)',
-    fontSize: '0.875rem',
+    fontSize: 'var(--sam-type-secondary-size)',
     fontWeight: 500,
     cursor: 'pointer',
     minHeight: 40,
@@ -147,7 +147,7 @@ function AgentSettingsCard({
   });
 
   const warningStyle: React.CSSProperties = {
-    fontSize: '0.75rem',
+    fontSize: 'var(--sam-type-caption-size)',
     color: 'var(--sam-color-status-error)',
     padding: 'var(--sam-space-2) var(--sam-space-3)',
     borderRadius: 'var(--sam-radius-md)',
@@ -157,7 +157,7 @@ function AgentSettingsCard({
 
   return (
     <div style={cardStyle} data-testid={`agent-settings-${agent.id}`}>
-      <div style={{ marginBottom: 'var(--sam-space-2)', fontWeight: 600, fontSize: '0.95rem', color: 'var(--sam-color-fg-primary)' }}>
+      <div style={{ marginBottom: 'var(--sam-space-2)', fontWeight: 600, fontSize: 'var(--sam-type-body-size)', color: 'var(--sam-color-fg-primary)' }}>
         {agent.name}
       </div>
 

@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 const mocks = vi.hoisted(() => ({
   listWorkspaces: vi.fn(),
+  listProjects: vi.fn(),
   stopWorkspace: vi.fn(),
   restartWorkspace: vi.fn(),
   deleteWorkspace: vi.fn(),
@@ -14,6 +15,7 @@ vi.mock('../../../src/lib/api', () => ({
   stopWorkspace: mocks.stopWorkspace,
   restartWorkspace: mocks.restartWorkspace,
   deleteWorkspace: mocks.deleteWorkspace,
+  listProjects: mocks.listProjects,
 }));
 
 vi.mock('../../../src/components/AuthProvider', () => ({
@@ -42,6 +44,13 @@ vi.mock('../../../src/components/WorkspaceCard', () => ({
   ),
 }));
 
+vi.mock('../../../src/components/ProjectSummaryCard', () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ProjectSummaryCard: ({ project }: any) => (
+    <div data-testid="project-summary-card">{project.name}</div>
+  ),
+}));
+
 vi.mock('../../../src/components/ConfirmDialog', () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ConfirmDialog: ({ isOpen, onConfirm, onClose, title }: any) => {
@@ -63,6 +72,7 @@ const runningWorkspace = {
   id: 'ws-1',
   name: 'My Workspace',
   displayName: 'My Workspace',
+  projectId: 'proj-1',
   repository: 'acme/repo',
   branch: 'main',
   status: 'running' as const,
@@ -79,12 +89,24 @@ const runningWorkspace = {
   url: 'https://ws-ws-1.example.com',
 };
 
-const stoppedWorkspace = {
+const unlinkedWorkspace = {
   ...runningWorkspace,
   id: 'ws-2',
-  name: 'Stopped Workspace',
-  displayName: 'Stopped Workspace',
+  name: 'Unlinked Workspace',
+  displayName: 'Unlinked Workspace',
+  projectId: null,
   status: 'stopped' as const,
+};
+
+const sampleProject = {
+  id: 'proj-1',
+  name: 'Project One',
+  repository: 'acme/repo-one',
+  defaultBranch: 'main',
+  status: 'active',
+  activeWorkspaceCount: 1,
+  activeSessionCount: 0,
+  lastActivityAt: '2026-02-18T00:00:00.000Z',
 };
 
 function renderDashboard() {
@@ -101,23 +123,70 @@ describe('Dashboard page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listWorkspaces.mockResolvedValue([]);
+    mocks.listProjects.mockResolvedValue({ projects: [] });
   });
 
-  it('does not render UI standards quick action', async () => {
+  it('shows projects section heading', async () => {
     renderDashboard();
 
     await waitFor(() => {
       expect(mocks.listWorkspaces).toHaveBeenCalled();
     });
 
-    expect(screen.getByRole('button', { name: 'New Workspace' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'UI Standards' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Projects' })).toBeInTheDocument();
+  });
+
+  it('does not render quick-action navigation buttons', async () => {
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(mocks.listWorkspaces).toHaveBeenCalled();
+    });
+
+    expect(screen.queryByRole('button', { name: 'New Workspace' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Nodes' })).not.toBeInTheDocument();
+  });
+
+  it('shows EmptyState with create action when no projects', async () => {
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('No projects yet')).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('button', { name: 'Create Project' })).toBeInTheDocument();
+  });
+
+  it('renders projects with grouped workspaces', async () => {
+    mocks.listProjects.mockResolvedValue({ projects: [sampleProject] });
+    mocks.listWorkspaces.mockResolvedValue([runningWorkspace]);
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-summary-card')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Project One')).toBeInTheDocument();
+    expect(screen.getByText('My Workspace (running)')).toBeInTheDocument();
+  });
+
+  it('shows unlinked workspaces in separate section', async () => {
+    mocks.listProjects.mockResolvedValue({ projects: [sampleProject] });
+    mocks.listWorkspaces.mockResolvedValue([runningWorkspace, unlinkedWorkspace]);
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Unlinked Workspaces' })).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Unlinked Workspace (stopped)')).toBeInTheDocument();
   });
 
   it('optimistically updates workspace status to stopping on stop', async () => {
-    mocks.listWorkspaces.mockResolvedValue([runningWorkspace]);
-    // Never resolve to observe the optimistic state
+    mocks.listWorkspaces.mockResolvedValue([{ ...runningWorkspace, projectId: null }]);
     mocks.stopWorkspace.mockReturnValue(new Promise(() => {}));
 
     renderDashboard();
@@ -128,14 +197,13 @@ describe('Dashboard page', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
 
-    // Optimistic: status should change immediately to stopping
     await waitFor(() => {
       expect(screen.getByText('My Workspace (stopping)')).toBeInTheDocument();
     });
   });
 
   it('reverts optimistic stop on API failure', async () => {
-    mocks.listWorkspaces.mockResolvedValue([runningWorkspace]);
+    mocks.listWorkspaces.mockResolvedValue([{ ...runningWorkspace, projectId: null }]);
     mocks.stopWorkspace.mockRejectedValue(new Error('Server error'));
 
     renderDashboard();
@@ -146,81 +214,42 @@ describe('Dashboard page', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
 
-    // Should revert back to running after error
     await waitFor(() => {
       expect(screen.getByText('My Workspace (running)')).toBeInTheDocument();
     });
   });
 
-  it('optimistically updates workspace status to creating on restart', async () => {
-    mocks.listWorkspaces.mockResolvedValue([stoppedWorkspace]);
-    mocks.restartWorkspace.mockReturnValue(new Promise(() => {}));
-
-    renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByText('Stopped Workspace (stopped)')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Restart' }));
-
-    await waitFor(() => {
-      expect(screen.getByText('Stopped Workspace (creating)')).toBeInTheDocument();
-    });
-  });
-
-  it('reverts optimistic restart on API failure', async () => {
-    mocks.listWorkspaces.mockResolvedValue([stoppedWorkspace]);
-    mocks.restartWorkspace.mockRejectedValue(new Error('Server error'));
-
-    renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByText('Stopped Workspace (stopped)')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Restart' }));
-
-    await waitFor(() => {
-      expect(screen.getByText('Stopped Workspace (stopped)')).toBeInTheDocument();
-    });
-  });
-
-  it('optimistically removes workspace from list on delete', async () => {
-    mocks.listWorkspaces.mockResolvedValue([stoppedWorkspace]);
+  it('optimistically removes workspace on delete confirmation', async () => {
+    mocks.listWorkspaces.mockResolvedValue([unlinkedWorkspace]);
     mocks.deleteWorkspace.mockReturnValue(new Promise(() => {}));
 
     renderDashboard();
 
     await waitFor(() => {
-      expect(screen.getByText('Stopped Workspace (stopped)')).toBeInTheDocument();
+      expect(screen.getByText('Unlinked Workspace (stopped)')).toBeInTheDocument();
     });
 
-    // Click delete on the workspace card to open confirm dialog
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
-    // Confirm dialog should appear
     await waitFor(() => {
       expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument();
     });
 
-    // Confirm the delete
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
 
-    // Workspace should be removed optimistically
     await waitFor(() => {
-      expect(screen.queryByText('Stopped Workspace (stopped)')).not.toBeInTheDocument();
+      expect(screen.queryByText('Unlinked Workspace (stopped)')).not.toBeInTheDocument();
     });
   });
 
   it('reverts optimistic delete on API failure', async () => {
-    mocks.listWorkspaces.mockResolvedValue([stoppedWorkspace]);
+    mocks.listWorkspaces.mockResolvedValue([unlinkedWorkspace]);
     mocks.deleteWorkspace.mockRejectedValue(new Error('Server error'));
 
     renderDashboard();
 
     await waitFor(() => {
-      expect(screen.getByText('Stopped Workspace (stopped)')).toBeInTheDocument();
+      expect(screen.getByText('Unlinked Workspace (stopped)')).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
@@ -230,9 +259,8 @@ describe('Dashboard page', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
 
-    // Should revert: workspace reappears after error
     await waitFor(() => {
-      expect(screen.getByText('Stopped Workspace (stopped)')).toBeInTheDocument();
+      expect(screen.getByText('Unlinked Workspace (stopped)')).toBeInTheDocument();
     });
   });
 });

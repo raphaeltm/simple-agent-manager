@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import type { Task, TaskStatus } from '@simple-agent-manager/shared';
-import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
+import { Button, EmptyState, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 
 interface TaskListProps {
   tasks: Task[];
@@ -53,16 +53,10 @@ export function TaskList({
 
   if (tasks.length === 0) {
     return (
-      <div style={{
-        padding: 'var(--sam-space-4)',
-        border: '1px solid var(--sam-color-border-default)',
-        borderRadius: 'var(--sam-radius-md)',
-        background: 'var(--sam-color-bg-surface)',
-        color: 'var(--sam-color-fg-muted)',
-        textAlign: 'center',
-      }}>
-        No tasks yet.
-      </div>
+      <EmptyState
+        heading="No tasks yet"
+        description="Create a task to start planning and delegating work."
+      />
     );
   }
 
@@ -94,7 +88,7 @@ export function TaskList({
                   color: 'var(--sam-color-fg-primary)',
                   fontWeight: 600,
                   textDecoration: 'none',
-                  fontSize: '0.9375rem',
+                  fontSize: 'var(--sam-type-body-size)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -102,12 +96,12 @@ export function TaskList({
               >
                 {task.title}
               </Link>
-              <span style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', flexShrink: 0 }}>
+              <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)', flexShrink: 0 }}>
                 P{task.priority}
               </span>
               {task.blocked && (
                 <span style={{
-                  fontSize: '0.75rem',
+                  fontSize: 'var(--sam-type-caption-size)',
                   padding: '2px 7px',
                   borderRadius: '9999px',
                   background: 'rgba(239,68,68,0.15)',
@@ -138,7 +132,7 @@ export function TaskList({
                     border: '1px solid var(--sam-color-border-default)',
                     background: 'var(--sam-color-bg-surface)',
                     color: 'var(--sam-color-fg-primary)',
-                    fontSize: '0.8125rem',
+                    fontSize: 'var(--sam-type-caption-size)',
                     minHeight: '2rem',
                     padding: '0.25rem 0.5rem',
                   }}

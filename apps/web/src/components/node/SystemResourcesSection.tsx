@@ -70,7 +70,7 @@ export const SystemResourcesSection: FC<SystemResourcesSectionProps> = ({
           ))}
         </div>
       ) : !hasData ? (
-        <div style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
+        <div style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
           No resource data available yet. Waiting for heartbeat data...
         </div>
       ) : (
@@ -99,7 +99,7 @@ export const SystemResourcesSection: FC<SystemResourcesSectionProps> = ({
             marginTop: 'var(--sam-space-4)',
             paddingTop: 'var(--sam-space-3)',
             borderTop: '1px solid var(--sam-color-border-default)',
-            fontSize: '0.75rem',
+            fontSize: 'var(--sam-type-caption-size)',
             color: 'var(--sam-color-fg-muted)',
           }}
         >

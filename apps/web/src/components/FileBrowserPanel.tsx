@@ -129,7 +129,7 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
         <span
           style={{
             fontWeight: 600,
-            fontSize: '0.875rem',
+            fontSize: 'var(--sam-type-secondary-size)',
             color: 'var(--sam-color-fg-primary)',
             flex: 1,
           }}
@@ -187,7 +187,7 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
                 padding: isMobile ? '4px 6px' : '2px 4px',
                 borderRadius: 4,
                 fontFamily: 'monospace',
-                fontSize: '0.75rem',
+                fontSize: 'var(--sam-type-caption-size)',
                 color:
                   idx === breadcrumbs.length - 1
                     ? 'var(--sam-color-fg-primary)'
@@ -218,7 +218,7 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
               backgroundColor: 'rgba(247, 118, 142, 0.1)',
               borderRadius: 8,
               color: '#f7768e',
-              fontSize: '0.8125rem',
+              fontSize: 'var(--sam-type-caption-size)',
             }}
           >
             {error}
@@ -232,7 +232,7 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
               justifyContent: 'center',
               padding: 48,
               color: 'var(--sam-color-fg-muted)',
-              fontSize: '0.875rem',
+              fontSize: 'var(--sam-type-secondary-size)',
             }}
           >
             This directory is empty
@@ -310,7 +310,7 @@ const FileRow: FC<FileRowProps> = ({ entry, onClick, isMobile }) => {
       <span
         style={{
           fontFamily: 'monospace',
-          fontSize: '0.8125rem',
+          fontSize: 'var(--sam-type-caption-size)',
           color: 'var(--sam-color-fg-primary)',
           flex: 1,
           overflow: 'hidden',

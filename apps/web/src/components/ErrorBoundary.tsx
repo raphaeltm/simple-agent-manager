@@ -77,7 +77,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <p
             style={{
               color: 'var(--sam-color-fg-secondary, #a3a3a3)',
-              fontSize: '0.95rem',
+              fontSize: 'var(--sam-type-body-size)',
               lineHeight: 1.6,
               marginBottom: '24px',
             }}
@@ -123,7 +123,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 color: '#ffffff',
                 border: 'none',
                 borderRadius: '8px',
-                fontSize: '0.95rem',
+                fontSize: 'var(--sam-type-body-size)',
                 fontWeight: 600,
                 cursor: 'pointer',
               }}
@@ -139,7 +139,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 color: 'var(--sam-color-fg-primary, #e5e5e5)',
                 border: '1px solid var(--sam-color-border-default, #333)',
                 borderRadius: '8px',
-                fontSize: '0.95rem',
+                fontSize: 'var(--sam-type-body-size)',
                 fontWeight: 600,
                 cursor: 'pointer',
               }}

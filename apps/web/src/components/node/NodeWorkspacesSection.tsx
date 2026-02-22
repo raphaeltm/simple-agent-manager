@@ -34,7 +34,7 @@ export const NodeWorkspacesSection: FC<NodeWorkspacesSectionProps> = ({
             borderRadius: 'var(--sam-radius-md)',
           }}
         >
-          <div style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)', marginBottom: 'var(--sam-space-3)' }}>
+          <div style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)', marginBottom: 'var(--sam-space-3)' }}>
             No workspaces on this node yet.
           </div>
           <button
@@ -45,7 +45,7 @@ export const NodeWorkspacesSection: FC<NodeWorkspacesSectionProps> = ({
               color: '#fff',
               border: 'none',
               borderRadius: 'var(--sam-radius-md)',
-              fontSize: '0.8125rem',
+              fontSize: 'var(--sam-type-caption-size)',
               fontWeight: 500,
               cursor: 'pointer',
             }}
@@ -82,7 +82,7 @@ export const NodeWorkspacesSection: FC<NodeWorkspacesSectionProps> = ({
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div
                   style={{
-                    fontSize: '0.875rem',
+                    fontSize: 'var(--sam-type-secondary-size)',
                     fontWeight: 500,
                     color: 'var(--sam-color-fg-primary)',
                     overflow: 'hidden',
@@ -94,7 +94,7 @@ export const NodeWorkspacesSection: FC<NodeWorkspacesSectionProps> = ({
                 </div>
                 <div
                   style={{
-                    fontSize: '0.75rem',
+                    fontSize: 'var(--sam-type-caption-size)',
                     color: 'var(--sam-color-fg-muted)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',

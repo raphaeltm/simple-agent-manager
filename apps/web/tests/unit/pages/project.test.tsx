@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { ToastProvider } from '../../../src/hooks/useToast';
 
 const mocks = vi.hoisted(() => ({
@@ -60,14 +60,23 @@ vi.mock('../../../src/components/UserMenu', () => ({
 }));
 
 import { Project } from '../../../src/pages/Project';
+import { ProjectOverview } from '../../../src/pages/ProjectOverview';
+import { ProjectTasks } from '../../../src/pages/ProjectTasks';
+import { ProjectSettings } from '../../../src/pages/ProjectSettings';
+import { ProjectActivity } from '../../../src/pages/ProjectActivity';
 
-function renderProjectPage(tab?: 'overview' | 'tasks') {
-  const url = tab === 'tasks' ? '/projects/proj-1?tab=tasks' : '/projects/proj-1';
+function renderProjectPage(path = '/projects/proj-1/overview') {
   return render(
     <ToastProvider>
-      <MemoryRouter initialEntries={[url]}>
+      <MemoryRouter initialEntries={[path]}>
         <Routes>
-          <Route path="/projects/:id" element={<Project />} />
+          <Route path="/projects/:id" element={<Project />}>
+            <Route index element={<Navigate to="overview" replace />} />
+            <Route path="overview" element={<ProjectOverview />} />
+            <Route path="tasks" element={<ProjectTasks />} />
+            <Route path="settings" element={<ProjectSettings />} />
+            <Route path="activity" element={<ProjectActivity />} />
+          </Route>
         </Routes>
       </MemoryRouter>
     </ToastProvider>
@@ -121,30 +130,6 @@ describe('Project page', () => {
       nextCursor: null,
     });
 
-    mocks.getProjectTask.mockResolvedValue({
-      id: 'task-1',
-      projectId: 'proj-1',
-      userId: 'user-1',
-      parentTaskId: null,
-      workspaceId: null,
-      title: 'Draft task',
-      description: 'Task description',
-      status: 'draft',
-      priority: 3,
-      agentProfileHint: null,
-      blocked: false,
-      startedAt: null,
-      completedAt: null,
-      errorMessage: null,
-      outputSummary: null,
-      outputBranch: null,
-      outputPrUrl: null,
-      createdAt: '2026-02-18T00:00:00.000Z',
-      updatedAt: '2026-02-18T00:00:00.000Z',
-      dependencies: [],
-    });
-
-    mocks.listTaskEvents.mockResolvedValue({ events: [] });
     mocks.listGitHubInstallations.mockResolvedValue([
       {
         id: 'inst-1',
@@ -165,35 +150,19 @@ describe('Project page', () => {
       envVars: [],
       files: [],
     });
-    mocks.deleteProjectRuntimeEnvVar.mockResolvedValue({
-      envVars: [],
-      files: [],
-    });
-    mocks.upsertProjectRuntimeFile.mockResolvedValue({
-      envVars: [],
-      files: [],
-    });
-    mocks.deleteProjectRuntimeFile.mockResolvedValue({
-      envVars: [],
-      files: [],
-    });
     mocks.createWorkspace.mockResolvedValue({ id: 'ws-1' });
-
     mocks.updateProject.mockResolvedValue({});
     mocks.createProjectTask.mockResolvedValue({});
-    mocks.updateProjectTask.mockResolvedValue({});
     mocks.deleteProjectTask.mockResolvedValue({ success: true });
     mocks.updateProjectTaskStatus.mockResolvedValue({});
-    mocks.addTaskDependency.mockResolvedValue({});
-    mocks.removeTaskDependency.mockResolvedValue({ success: true });
     mocks.delegateTask.mockResolvedValue({});
     mocks.deleteProject.mockResolvedValue({ success: true });
     mocks.listActivityEvents.mockResolvedValue({ events: [], hasMore: false });
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
   });
 
-  it('loads project details and renders task backlog', async () => {
-    renderProjectPage('tasks');
+  it('loads project details and renders task backlog on tasks tab', async () => {
+    renderProjectPage('/projects/proj-1/tasks');
 
     await waitFor(() => {
       expect(mocks.getProject).toHaveBeenCalledWith('proj-1');
@@ -209,7 +178,7 @@ describe('Project page', () => {
   });
 
   it('syncs task filters to list request', async () => {
-    renderProjectPage('tasks');
+    renderProjectPage('/projects/proj-1/tasks');
 
     const statusSelect = await screen.findByLabelText('Status');
     fireEvent.change(statusSelect, { target: { value: 'ready' } });
@@ -235,7 +204,7 @@ describe('Project page', () => {
   });
 
   it('creates a task from the new-task form', async () => {
-    renderProjectPage('tasks');
+    renderProjectPage('/projects/proj-1/tasks');
 
     fireEvent.click(await screen.findByRole('button', { name: 'New task' }));
 
@@ -257,7 +226,7 @@ describe('Project page', () => {
   });
 
   it('supports multi-character typing across new-task form fields', async () => {
-    renderProjectPage('tasks');
+    renderProjectPage('/projects/proj-1/tasks');
 
     fireEvent.click(await screen.findByRole('button', { name: 'New task' }));
 
@@ -289,36 +258,13 @@ describe('Project page', () => {
     });
   });
 
-  it('renders overview activity section with ActivityFeed', async () => {
-    mocks.listActivityEvents.mockResolvedValue({
-      events: [
-        {
-          id: 'evt-1',
-          eventType: 'workspace.created',
-          actorType: 'user',
-          actorId: 'user-1',
-          workspaceId: 'ws-1',
-          sessionId: null,
-          taskId: null,
-          payload: null,
-          createdAt: Date.now(),
-        },
-      ],
-      hasMore: false,
-    });
-
-    renderProjectPage();
-
-    expect(await screen.findByText('Activity')).toBeInTheDocument();
-  });
-
-  it('saves runtime env vars from project runtime config panel', async () => {
+  it('saves runtime env vars from project settings tab', async () => {
     mocks.upsertProjectRuntimeEnvVar.mockResolvedValue({
       envVars: [{ key: 'API_TOKEN', value: null, isSecret: true, hasValue: true }],
       files: [],
     });
 
-    renderProjectPage();
+    renderProjectPage('/projects/proj-1/settings');
 
     fireEvent.change(await screen.findByLabelText('Runtime env key'), {
       target: { value: 'API_TOKEN' },
@@ -338,8 +284,8 @@ describe('Project page', () => {
     });
   });
 
-  it('launches a workspace directly from project context', async () => {
-    renderProjectPage();
+  it('launches a workspace from project overview', async () => {
+    renderProjectPage('/projects/proj-1/overview');
     fireEvent.click(await screen.findByRole('button', { name: 'Launch Workspace' }));
 
     await waitFor(() => {
@@ -348,5 +294,15 @@ describe('Project page', () => {
         projectId: 'proj-1',
       });
     });
+  });
+
+  it('renders 5 tabs in the project shell', async () => {
+    renderProjectPage();
+    await screen.findByRole('heading', { name: 'Project One' });
+    expect(screen.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Tasks' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Sessions' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Activity' })).toBeInTheDocument();
   });
 });

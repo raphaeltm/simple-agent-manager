@@ -54,7 +54,7 @@ export function MobileNavDrawer({
           width: 100%;
           min-height: 44px;
           padding: 0.625rem 1.25rem;
-          font-size: 0.9375rem;
+          font-size: var(--sam-type-body-size);
           font-weight: 500;
           color: var(--sam-color-fg-muted);
           background: none;
@@ -136,7 +136,7 @@ export function MobileNavDrawer({
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: '#fff',
-                fontSize: '0.875rem',
+                fontSize: 'var(--sam-type-secondary-size)',
                 fontWeight: 500,
                 flexShrink: 0,
               }}
@@ -147,7 +147,7 @@ export function MobileNavDrawer({
           <div style={{ flex: 1, minWidth: 0 }}>
             <p
               style={{
-                fontSize: '0.875rem',
+                fontSize: 'var(--sam-type-secondary-size)',
                 fontWeight: 600,
                 color: 'var(--sam-color-fg-primary)',
                 margin: 0,
@@ -160,7 +160,7 @@ export function MobileNavDrawer({
             </p>
             <p
               style={{
-                fontSize: '0.75rem',
+                fontSize: 'var(--sam-type-caption-size)',
                 color: 'var(--sam-color-fg-muted)',
                 margin: 0,
                 overflow: 'hidden',

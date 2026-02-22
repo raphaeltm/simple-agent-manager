@@ -58,7 +58,7 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
 
   const actionBtnStyle: React.CSSProperties = {
     padding: '4px 12px',
-    fontSize: '0.875rem',
+    fontSize: 'var(--sam-type-secondary-size)',
     background: 'none',
     border: 'none',
     cursor: 'pointer',
@@ -89,7 +89,7 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
             </div>
             <div>
               <p style={{ fontWeight: 500, color: '#4ade80' }}>Connected</p>
-              <p style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
+              <p style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
                 Added: {new Date(credential.createdAt).toLocaleDateString()}
               </p>
             </div>
@@ -110,7 +110,7 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
 
   const labelStyle: React.CSSProperties = {
     display: 'block',
-    fontSize: '0.875rem',
+    fontSize: 'var(--sam-type-secondary-size)',
     fontWeight: 500,
     color: 'var(--sam-color-fg-primary)',
     marginBottom: 'var(--sam-space-1)',
@@ -128,7 +128,7 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
           placeholder="Enter your Hetzner Cloud API token"
           required
         />
-        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
           Get your API token from{' '}
           <a
             href="https://console.hetzner.cloud/projects"

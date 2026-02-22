@@ -17,15 +17,25 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "lint": "eslint 'src/**/*.{ts,tsx}'"
   },
   "peerDependencies": {
+    "lucide-react": ">=0.300.0",
     "react": "^18.0.0",
-    "react-dom": "^18.0.0"
+    "react-dom": "^18.0.0",
+    "react-router-dom": "^6.0.0"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.0.0",
+    "@testing-library/react": "^14.0.0",
     "@types/react": "^18.0.0",
     "@types/react-dom": "^18.0.0",
-    "typescript": "^5.0.0"
+    "@vitejs/plugin-react": "^4.0.0",
+    "jsdom": "^24.0.0",
+    "lucide-react": "^0.460.0",
+    "react-router-dom": "^6.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.18"
   }
 }

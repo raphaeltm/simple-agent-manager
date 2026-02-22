@@ -68,7 +68,7 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
   };
 
   const actionBtnStyle: React.CSSProperties = {
-    fontSize: '0.75rem',
+    fontSize: 'var(--sam-type-caption-size)',
     background: 'none',
     border: 'none',
     cursor: 'pointer',
@@ -83,8 +83,8 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--sam-space-3)' }}>
         <div>
-          <h3 style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>{agent.name}</h3>
-          <p style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>{agent.description}</p>
+          <h3 style={{ fontSize: 'var(--sam-type-secondary-size)', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>{agent.name}</h3>
+          <p style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>{agent.description}</p>
         </div>
         <StatusBadge
           status={hasAnyCredential ? 'connected' : 'disconnected'}
@@ -107,11 +107,11 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
             borderRadius: 'var(--sam-radius-sm)',
           }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-1)' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+              <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
                 {activeCredential.credentialKind === 'oauth-token' ? 'OAuth Token' : 'API Key'}
                 {activeCredential.label && ` (${activeCredential.label})`}
               </span>
-              <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)', fontFamily: 'monospace' }}>
+              <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)', fontFamily: 'monospace' }}>
                 {activeCredential.maskedKey}
               </span>
             </div>
@@ -142,7 +142,7 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
                   backgroundColor: credentialKind === 'api-key' ? 'var(--sam-color-accent-primary)' : 'transparent',
                   color: credentialKind === 'api-key' ? 'white' : 'var(--sam-color-fg-primary)',
                   cursor: 'pointer',
-                  fontSize: '0.875rem',
+                  fontSize: 'var(--sam-type-secondary-size)',
                 }}
               >
                 API Key
@@ -157,7 +157,7 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
                   backgroundColor: credentialKind === 'oauth-token' ? 'var(--sam-color-accent-primary)' : 'transparent',
                   color: credentialKind === 'oauth-token' ? 'white' : 'var(--sam-color-fg-primary)',
                   cursor: 'pointer',
-                  fontSize: '0.875rem',
+                  fontSize: 'var(--sam-type-secondary-size)',
                 }}
               >
                 OAuth Token (Pro/Max)
@@ -177,7 +177,7 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
               }
               required
             />
-            <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+            <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
               {credentialKind === 'oauth-token' && agentDef?.oauthSupport ? (
                 <>
                   {agentDef.oauthSupport.setupInstructions}{' '}

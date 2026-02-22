@@ -38,7 +38,7 @@ export function OrphanedSessionsBanner({
         padding: '4px 12px',
         backgroundColor: '#2e2a1f',
         borderBottom: '1px solid rgba(224, 175, 104, 0.3)',
-        fontSize: '0.75rem',
+        fontSize: 'var(--sam-type-caption-size)',
         color: '#e0af68',
         flexShrink: 0,
         gap: '8px',
@@ -68,7 +68,7 @@ export function OrphanedSessionsBanner({
             border: 'none',
             color: '#e0af68',
             cursor: 'pointer',
-            fontSize: '0.875rem',
+            fontSize: 'var(--sam-type-secondary-size)',
             padding: '0 4px',
             lineHeight: 1,
           }}

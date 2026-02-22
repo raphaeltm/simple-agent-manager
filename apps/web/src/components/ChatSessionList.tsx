@@ -1,4 +1,4 @@
-import { StatusBadge } from '@simple-agent-manager/ui';
+import { EmptyState, StatusBadge } from '@simple-agent-manager/ui';
 import type { ChatSessionResponse } from '../lib/api';
 
 interface ChatSessionListProps {
@@ -32,22 +32,21 @@ function formatDuration(startedAt: number, endedAt: number | null): string {
 export function ChatSessionList({ sessions, onSelect }: ChatSessionListProps) {
   if (sessions.length === 0) {
     return (
-      <div style={{
-        color: 'var(--sam-color-fg-muted)',
-        fontSize: '0.875rem',
-        padding: 'var(--sam-space-4)',
-        textAlign: 'center',
-      }}>
-        No chat sessions yet.
-      </div>
+      <EmptyState
+        heading="No sessions yet"
+        description="Chat sessions appear here when workspaces connect to this project."
+      />
     );
   }
 
   return (
+    <>
+    <style>{`.chat-session-row:hover { background-color: var(--sam-color-bg-inset); }`}</style>
     <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: '1px' }}>
       {sessions.map((session) => (
         <li
           key={session.id}
+          className="chat-session-row"
           onClick={() => onSelect(session.id)}
           style={{
             display: 'flex',
@@ -58,8 +57,6 @@ export function ChatSessionList({ sessions, onSelect }: ChatSessionListProps) {
             borderBottom: '1px solid var(--sam-color-border-default)',
             transition: 'background-color 0.1s',
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--sam-color-bg-inset)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{
@@ -69,7 +66,7 @@ export function ChatSessionList({ sessions, onSelect }: ChatSessionListProps) {
               marginBottom: '2px',
             }}>
               <span style={{
-                fontSize: '0.875rem',
+                fontSize: 'var(--sam-type-secondary-size)',
                 fontWeight: 500,
                 color: 'var(--sam-color-fg-primary)',
                 overflow: 'hidden',
@@ -86,7 +83,7 @@ export function ChatSessionList({ sessions, onSelect }: ChatSessionListProps) {
             <div style={{
               display: 'flex',
               gap: 'var(--sam-space-3)',
-              fontSize: '0.75rem',
+              fontSize: 'var(--sam-type-caption-size)',
               color: 'var(--sam-color-fg-muted)',
             }}>
               <span>{session.messageCount} message{session.messageCount !== 1 ? 's' : ''}</span>
@@ -94,7 +91,7 @@ export function ChatSessionList({ sessions, onSelect }: ChatSessionListProps) {
             </div>
           </div>
           <span style={{
-            fontSize: '0.75rem',
+            fontSize: 'var(--sam-type-caption-size)',
             color: 'var(--sam-color-fg-muted)',
             whiteSpace: 'nowrap',
             flexShrink: 0,
@@ -104,5 +101,6 @@ export function ChatSessionList({ sessions, onSelect }: ChatSessionListProps) {
         </li>
       ))}
     </ul>
+    </>
   );
 }

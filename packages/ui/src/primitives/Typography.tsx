@@ -69,3 +69,84 @@ export function Typography({
     </Tag>
   );
 }
+
+/* ── Named tier components ──────────────────────────────────
+ * Each maps to the 6-tier typography scale from theme.css
+ * (--sam-type-page-title-*, --sam-type-section-heading-*, etc.)
+ * These use CSS custom properties so they stay in sync with tokens.
+ */
+
+interface TierProps {
+  children: ReactNode;
+  className?: string;
+  style?: CSSProperties;
+}
+
+const tierStyles = {
+  pageTitle: {
+    fontSize: 'var(--sam-type-page-title-size)',
+    fontWeight: 'var(--sam-type-page-title-weight)',
+    lineHeight: 'var(--sam-type-page-title-line-height)',
+    color: 'var(--sam-color-fg-primary)',
+    margin: 0,
+  } as CSSProperties,
+  sectionHeading: {
+    fontSize: 'var(--sam-type-section-heading-size)',
+    fontWeight: 'var(--sam-type-section-heading-weight)',
+    lineHeight: 'var(--sam-type-section-heading-line-height)',
+    color: 'var(--sam-color-fg-primary)',
+    margin: 0,
+  } as CSSProperties,
+  cardTitle: {
+    fontSize: 'var(--sam-type-card-title-size)',
+    fontWeight: 'var(--sam-type-card-title-weight)',
+    lineHeight: 'var(--sam-type-card-title-line-height)',
+    color: 'var(--sam-color-fg-primary)',
+    margin: 0,
+  } as CSSProperties,
+  body: {
+    fontSize: 'var(--sam-type-body-size)',
+    fontWeight: 'var(--sam-type-body-weight)',
+    lineHeight: 'var(--sam-type-body-line-height)',
+    color: 'var(--sam-color-fg-primary)',
+    margin: 0,
+  } as CSSProperties,
+  secondary: {
+    fontSize: 'var(--sam-type-secondary-size)',
+    fontWeight: 'var(--sam-type-secondary-weight)',
+    lineHeight: 'var(--sam-type-secondary-line-height)',
+    color: 'var(--sam-color-fg-muted)',
+    margin: 0,
+  } as CSSProperties,
+  caption: {
+    fontSize: 'var(--sam-type-caption-size)',
+    fontWeight: 'var(--sam-type-caption-weight)',
+    lineHeight: 'var(--sam-type-caption-line-height)',
+    color: 'var(--sam-color-fg-muted)',
+    margin: 0,
+  } as CSSProperties,
+};
+
+export function PageTitle({ children, className, style }: TierProps) {
+  return <h1 style={{ ...tierStyles.pageTitle, ...style }} className={className}>{children}</h1>;
+}
+
+export function SectionHeading({ children, className, style }: TierProps) {
+  return <h2 style={{ ...tierStyles.sectionHeading, ...style }} className={className}>{children}</h2>;
+}
+
+export function CardTitle({ children, className, style }: TierProps) {
+  return <h3 style={{ ...tierStyles.cardTitle, ...style }} className={className}>{children}</h3>;
+}
+
+export function Body({ children, className, style }: TierProps) {
+  return <p style={{ ...tierStyles.body, ...style }} className={className}>{children}</p>;
+}
+
+export function Secondary({ children, className, style }: TierProps) {
+  return <p style={{ ...tierStyles.secondary, ...style }} className={className}>{children}</p>;
+}
+
+export function Caption({ children, className, style }: TierProps) {
+  return <span style={{ ...tierStyles.caption, ...style }} className={className}>{children}</span>;
+}

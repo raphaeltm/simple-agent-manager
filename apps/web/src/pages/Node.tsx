@@ -141,7 +141,7 @@ export function Node() {
           alignItems: 'center',
           gap: 'var(--sam-space-2)',
           marginBottom: 'var(--sam-space-4)',
-          fontSize: '0.875rem',
+          fontSize: 'var(--sam-type-secondary-size)',
           color: 'var(--sam-color-fg-muted)',
         }}
       >

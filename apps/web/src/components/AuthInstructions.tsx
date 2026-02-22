@@ -17,7 +17,7 @@ export const AuthInstructions: FC<AuthInstructionsProps> = ({ workspaceUrl }) =>
     borderRadius: 'var(--sam-radius-sm)',
     fontFamily: 'monospace',
     color: 'var(--sam-color-fg-primary)',
-    fontSize: '0.8125rem',
+    fontSize: 'var(--sam-type-caption-size)',
   };
 
   return (
@@ -28,8 +28,8 @@ export const AuthInstructions: FC<AuthInstructionsProps> = ({ workspaceUrl }) =>
       padding: 'var(--sam-space-6)',
     }}>
       <h3 style={{
-        fontSize: '1.125rem',
-        fontWeight: 600,
+        fontSize: 'var(--sam-type-section-heading-size)',
+        fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number,
         color: '#93c5fd',
         marginBottom: 'var(--sam-space-3)',
       }}>
@@ -37,7 +37,7 @@ export const AuthInstructions: FC<AuthInstructionsProps> = ({ workspaceUrl }) =>
       </h3>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-4)' }}>
-        <p style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
+        <p style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
           Your workspace is ready! To use Claude Code, you need to authenticate with your Claude Max subscription.
         </p>
 
@@ -48,7 +48,7 @@ export const AuthInstructions: FC<AuthInstructionsProps> = ({ workspaceUrl }) =>
           border: '1px solid var(--sam-color-border-default)',
         }}>
           <h4 style={{ fontWeight: 500, color: 'var(--sam-color-fg-primary)', marginBottom: 'var(--sam-space-2)' }}>Quick Setup:</h4>
-          <ol style={{ listStyle: 'decimal', listStylePosition: 'inside', display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-2)', fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
+          <ol style={{ listStyle: 'decimal', listStylePosition: 'inside', display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-2)', fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
             <li>
               {workspaceUrl ? (
                 <>
@@ -83,13 +83,13 @@ export const AuthInstructions: FC<AuthInstructionsProps> = ({ workspaceUrl }) =>
           borderRadius: 'var(--sam-radius-md)',
           padding: 'var(--sam-space-3)',
         }}>
-          <p style={{ fontSize: '0.75rem', color: '#fbbf24' }}>
+          <p style={{ fontSize: 'var(--sam-type-caption-size)', color: '#fbbf24' }}>
             <strong>Note:</strong> Claude Max subscription is required. The workspace does not include an API key -
             you authenticate directly through your browser using <code style={{ fontFamily: 'monospace' }}>claude login</code>.
           </p>
         </div>
 
-        <details style={{ fontSize: '0.875rem' }}>
+        <details style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
           <summary style={{ cursor: 'pointer', color: 'var(--sam-color-accent-primary)', fontWeight: 500 }}>
             Troubleshooting
           </summary>

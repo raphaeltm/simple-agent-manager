@@ -252,7 +252,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
               background: 'var(--sam-color-bg-canvas)',
               color: 'var(--sam-color-fg-primary)',
               padding: '5px 8px',
-              fontSize: '0.8125rem',
+              fontSize: 'var(--sam-type-caption-size)',
               minWidth: 0,
             }}
           />
@@ -313,7 +313,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
           title="Workspace Info"
           storageKey="sam-sidebar-workspace-info"
         >
-          <div style={{ display: 'grid', gap: 6, fontSize: '0.8125rem' }}>
+          <div style={{ display: 'grid', gap: 6, fontSize: 'var(--sam-type-caption-size)' }}>
             {/* Repository */}
             {workspace?.repository && (
               <InfoRow label="Repository">
@@ -436,7 +436,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                         flex: 1,
                         minWidth: 0,
                         textAlign: 'left',
-                        fontSize: '0.8125rem',
+                        fontSize: 'var(--sam-type-caption-size)',
                         color: active
                           ? 'var(--sam-color-fg-primary)'
                           : 'var(--sam-color-fg-muted)',
@@ -467,7 +467,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                       {tab.viewerCount != null && tab.viewerCount > 0 && (
                         <span
                           style={{
-                            fontSize: '0.625rem',
+                            fontSize: 'var(--sam-type-caption-size)',
                             color: 'var(--sam-color-fg-muted)',
                             backgroundColor: 'rgba(122, 162, 247, 0.15)',
                             borderRadius: 'var(--sam-radius-sm)',
@@ -483,7 +483,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                       {isChat && tab.hostStatus && (
                         <span
                           style={{
-                            fontSize: '0.6875rem',
+                            fontSize: 'var(--sam-type-caption-size)',
                             color: sessionStatusColor(tab.status, tab.hostStatus),
                             flexShrink: 0,
                           }}
@@ -495,7 +495,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                       {active && !(isChat && tab.hostStatus) && (
                         <span
                           style={{
-                            fontSize: '0.6875rem',
+                            fontSize: 'var(--sam-type-caption-size)',
                             color: '#7aa2f7',
                             flexShrink: 0,
                           }}
@@ -554,7 +554,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                   style={{
                     display: 'flex',
                     gap: 12,
-                    fontSize: '0.8125rem',
+                    fontSize: 'var(--sam-type-caption-size)',
                     color: 'var(--sam-color-fg-muted)',
                   }}
                 >
@@ -579,7 +579,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                     border: 'none',
                     cursor: 'pointer',
                     color: '#7aa2f7',
-                    fontSize: '0.75rem',
+                    fontSize: 'var(--sam-type-caption-size)',
                     textAlign: 'left',
                   }}
                 >
@@ -588,7 +588,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                 </button>
               </div>
             ) : (
-              <span style={{ fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>
+              <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
                 Loading...
               </span>
             )}
@@ -606,7 +606,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 6,
-                fontSize: '0.8125rem',
+                fontSize: 'var(--sam-type-caption-size)',
               }}
             >
               {sessionTokenUsages
@@ -669,7 +669,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
           {workspaceEvents.length === 0 ? (
             <span
               style={{
-                fontSize: '0.8125rem',
+                fontSize: 'var(--sam-type-caption-size)',
                 color: 'var(--sam-color-fg-muted)',
               }}
             >
@@ -680,7 +680,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
               {workspaceEvents.map((event) => (
                 <div
                   key={event.id}
-                  style={{ fontSize: '0.75rem' }}
+                  style={{ fontSize: 'var(--sam-type-caption-size)' }}
                 >
                   <div
                     style={{
@@ -723,7 +723,7 @@ const InfoRow: FC<{ label: string; children: React.ReactNode }> = ({ label, chil
     <span
       style={{
         color: 'var(--sam-color-fg-muted)',
-        fontSize: '0.75rem',
+        fontSize: 'var(--sam-type-caption-size)',
         flexShrink: 0,
       }}
     >
@@ -732,7 +732,7 @@ const InfoRow: FC<{ label: string; children: React.ReactNode }> = ({ label, chil
     <span
       style={{
         color: 'var(--sam-color-fg-primary)',
-        fontSize: '0.8125rem',
+        fontSize: 'var(--sam-type-caption-size)',
         textAlign: 'right',
         minWidth: 0,
         overflow: 'hidden',

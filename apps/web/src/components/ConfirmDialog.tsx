@@ -138,10 +138,10 @@ export function ConfirmDialog({
               </svg>
             </div>
             <div style={{ marginLeft: 'var(--sam-space-4)', flex: 1 }}>
-              <h3 style={{ fontSize: '1.125rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }} id="modal-title">
+              <h3 style={{ fontSize: 'var(--sam-type-section-heading-size)', fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number, color: 'var(--sam-color-fg-primary)' }} id="modal-title">
                 {title}
               </h3>
-              <div style={{ marginTop: 'var(--sam-space-2)', fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>{message}</div>
+              <div style={{ marginTop: 'var(--sam-space-2)', fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>{message}</div>
             </div>
           </div>
 

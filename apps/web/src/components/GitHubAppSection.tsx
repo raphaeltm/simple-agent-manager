@@ -143,7 +143,7 @@ export function GitHubAppSection() {
           </div>
           <div>
             <p style={{ fontWeight: 500, color: '#4ade80' }}>Connected</p>
-            <p style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
+            <p style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
               {installations.length} account{installations.length > 1 ? 's' : ''}
               {repoCount !== null && ` · ${repoCount} repositor${repoCount === 1 ? 'y' : 'ies'} accessible`}
             </p>
@@ -153,7 +153,7 @@ export function GitHubAppSection() {
           onClick={handleInstallClick}
           style={{
             padding: '4px 12px',
-            fontSize: '0.875rem',
+            fontSize: 'var(--sam-type-secondary-size)',
             color: 'var(--sam-color-accent-primary)',
             background: 'none',
             border: 'none',
@@ -198,11 +198,11 @@ export function GitHubAppSection() {
                 )}
               </div>
               <div>
-                <p style={{ fontWeight: 500, fontSize: '0.875rem', color: 'var(--sam-color-fg-primary)' }}>{inst.accountName}</p>
-                <p style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', textTransform: 'capitalize' }}>{inst.accountType}</p>
+                <p style={{ fontWeight: 500, fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-primary)' }}>{inst.accountName}</p>
+                <p style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)', textTransform: 'capitalize' }}>{inst.accountType}</p>
               </div>
             </div>
-            <span style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+            <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
               Installed {new Date(inst.createdAt).toLocaleDateString()}
             </span>
           </div>

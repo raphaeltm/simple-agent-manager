@@ -85,7 +85,7 @@ export function Landing() {
                 borderRadius: 'var(--sam-radius-md)',
                 border: '1px solid var(--sam-color-border-default)',
               }}>
-                <div style={{ fontSize: 'clamp(1.125rem, 2vw, 1.25rem)', fontWeight: 700, color: item.color }}>{item.label}</div>
+                <div style={{ fontSize: 'var(--sam-type-section-heading-size)', fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number, color: item.color }}>{item.label}</div>
                 <Typography variant="caption">{item.sub}</Typography>
               </div>
             ))}

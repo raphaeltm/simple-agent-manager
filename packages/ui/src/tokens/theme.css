@@ -24,11 +24,98 @@
   --sam-radius-sm: 6px;
   --sam-radius-md: 10px;
   --sam-radius-lg: 14px;
+
+  /* Typography Scale — 6 tiers */
+  --sam-type-page-title-size: 1.5rem;
+  --sam-type-page-title-weight: 700;
+  --sam-type-page-title-line-height: 1.2;
+
+  --sam-type-section-heading-size: 1.125rem;
+  --sam-type-section-heading-weight: 600;
+  --sam-type-section-heading-line-height: 1.3;
+
+  --sam-type-card-title-size: 1rem;
+  --sam-type-card-title-weight: 600;
+  --sam-type-card-title-line-height: 1.4;
+
+  --sam-type-body-size: 0.9375rem;
+  --sam-type-body-weight: 400;
+  --sam-type-body-line-height: 1.5;
+
+  --sam-type-secondary-size: 0.875rem;
+  --sam-type-secondary-weight: 400;
+  --sam-type-secondary-line-height: 1.5;
+
+  --sam-type-caption-size: 0.75rem;
+  --sam-type-caption-weight: 400;
+  --sam-type-caption-line-height: 1.4;
+
+  /* Color Tints */
+  --sam-color-accent-primary-tint: rgba(22, 163, 74, 0.1);
+  --sam-color-success-tint: rgba(34, 197, 94, 0.1);
+  --sam-color-warning-tint: rgba(245, 158, 11, 0.1);
+  --sam-color-danger-tint: rgba(239, 68, 68, 0.1);
+  --sam-color-info-tint: rgba(122, 162, 247, 0.1);
+
+  /* Shadows */
+  --sam-shadow-dropdown: 0 4px 16px rgba(0, 0, 0, 0.3);
+  --sam-shadow-overlay: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --sam-shadow-tooltip: 0 2px 8px rgba(0, 0, 0, 0.3);
+
+  /* Z-Index Scale */
+  --sam-z-sticky: 10;
+  --sam-z-dropdown: 20;
+  --sam-z-drawer-backdrop: 40;
+  --sam-z-drawer: 41;
+  --sam-z-dialog-backdrop: 50;
+  --sam-z-dialog: 51;
+  --sam-z-panel: 60;
+  --sam-z-command-palette: 61;
+
+  /* Section Spacing */
+  --sam-space-section: 2rem;
 }
 
 [data-ui-theme='sam'] {
   color: var(--sam-color-fg-primary);
   background-color: var(--sam-color-bg-canvas);
+}
+
+/* Typography Utility Classes */
+.sam-type-page-title {
+  font-size: var(--sam-type-page-title-size);
+  font-weight: var(--sam-type-page-title-weight);
+  line-height: var(--sam-type-page-title-line-height);
+}
+
+.sam-type-section-heading {
+  font-size: var(--sam-type-section-heading-size);
+  font-weight: var(--sam-type-section-heading-weight);
+  line-height: var(--sam-type-section-heading-line-height);
+}
+
+.sam-type-card-title {
+  font-size: var(--sam-type-card-title-size);
+  font-weight: var(--sam-type-card-title-weight);
+  line-height: var(--sam-type-card-title-line-height);
+}
+
+.sam-type-body {
+  font-size: var(--sam-type-body-size);
+  font-weight: var(--sam-type-body-weight);
+  line-height: var(--sam-type-body-line-height);
+}
+
+.sam-type-secondary {
+  font-size: var(--sam-type-secondary-size);
+  font-weight: var(--sam-type-secondary-weight);
+  line-height: var(--sam-type-secondary-line-height);
+}
+
+.sam-type-caption {
+  font-size: var(--sam-type-caption-size);
+  font-weight: var(--sam-type-caption-weight);
+  line-height: var(--sam-type-caption-line-height);
 }
 
 @keyframes sam-spin {

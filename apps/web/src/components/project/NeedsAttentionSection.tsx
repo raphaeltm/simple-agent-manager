@@ -26,11 +26,11 @@ export function NeedsAttentionSection({ tasks, projectId }: NeedsAttentionSectio
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
-        <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#fbbf24' }}>
+        <span style={{ fontSize: 'var(--sam-type-secondary-size)', fontWeight: 600, color: '#fbbf24' }}>
           Needs attention
         </span>
         <span style={{
-          fontSize: '0.75rem',
+          fontSize: 'var(--sam-type-caption-size)',
           fontWeight: 600,
           padding: '1px 7px',
           borderRadius: '9999px',
@@ -55,7 +55,7 @@ export function NeedsAttentionSection({ tasks, projectId }: NeedsAttentionSectio
             <StatusBadge status={task.status} />
             {task.blocked && task.status !== 'failed' && (
               <span style={{
-                fontSize: '0.75rem',
+                fontSize: 'var(--sam-type-caption-size)',
                 padding: '2px 7px',
                 borderRadius: '9999px',
                 background: 'rgba(239,68,68,0.15)',
@@ -68,7 +68,7 @@ export function NeedsAttentionSection({ tasks, projectId }: NeedsAttentionSectio
             <Link
               to={`/projects/${projectId}/tasks/${task.id}`}
               style={{
-                fontSize: '0.875rem',
+                fontSize: 'var(--sam-type-secondary-size)',
                 color: 'var(--sam-color-fg-primary)',
                 textDecoration: 'none',
               }}

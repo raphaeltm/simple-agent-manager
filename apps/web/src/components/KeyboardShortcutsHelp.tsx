@@ -84,7 +84,7 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
           <h2
             style={{
               margin: 0,
-              fontSize: '1rem',
+              fontSize: 'var(--sam-type-card-title-size)',
               fontWeight: 600,
               color: '#a9b1d6',
             }}
@@ -121,7 +121,7 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
                 <h3
                   style={{
                     margin: '0 0 8px',
-                    fontSize: '0.75rem',
+                    fontSize: 'var(--sam-type-caption-size)',
                     fontWeight: 600,
                     color: '#787c99',
                     textTransform: 'uppercase',
@@ -140,7 +140,7 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
                       padding: '6px 0',
                     }}
                   >
-                    <span style={{ fontSize: '0.8125rem', color: '#a9b1d6' }}>
+                    <span style={{ fontSize: 'var(--sam-type-caption-size)', color: '#a9b1d6' }}>
                       {shortcut.id === 'tab-1'
                         ? 'Switch to tab 1\u20139'
                         : shortcut.description}
@@ -148,7 +148,7 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
                     <kbd
                       style={{
                         fontFamily: 'monospace',
-                        fontSize: '0.75rem',
+                        fontSize: 'var(--sam-type-caption-size)',
                         color: '#c0caf5',
                         backgroundColor: '#292e42',
                         border: '1px solid #3b4261',

@@ -30,13 +30,13 @@ function formatRelativeTime(iso: string | null): string {
 }
 
 const metaLabelStyle: React.CSSProperties = {
-  fontSize: '0.75rem',
+  fontSize: 'var(--sam-type-caption-size)',
   color: 'var(--sam-color-fg-muted)',
   marginBottom: 'var(--sam-space-1)',
 };
 
 const metaValueStyle: React.CSSProperties = {
-  fontSize: '0.875rem',
+  fontSize: 'var(--sam-type-secondary-size)',
   color: 'var(--sam-color-fg-primary)',
   fontWeight: 500,
 };
@@ -136,7 +136,7 @@ export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({ node, system
             backgroundColor: 'rgba(248, 113, 113, 0.1)',
             borderRadius: 'var(--sam-radius-sm)',
             border: '1px solid rgba(248, 113, 113, 0.3)',
-            fontSize: '0.875rem',
+            fontSize: 'var(--sam-type-secondary-size)',
             color: 'var(--sam-color-danger)',
           }}
         >

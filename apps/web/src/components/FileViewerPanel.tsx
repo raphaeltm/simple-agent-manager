@@ -279,7 +279,7 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
               backgroundColor: 'rgba(247, 118, 142, 0.1)',
               borderRadius: 8,
               color: '#f7768e',
-              fontSize: '0.8125rem',
+              fontSize: 'var(--sam-type-caption-size)',
             }}
           >
             {error}
@@ -293,7 +293,7 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
               justifyContent: 'center',
               padding: 48,
               color: 'var(--sam-color-fg-muted)',
-              fontSize: '0.875rem',
+              fontSize: 'var(--sam-type-secondary-size)',
             }}
           >
             Binary file — cannot display
@@ -383,7 +383,7 @@ const markdownContainerStyle: CSSProperties = {
   padding: '16px',
   color: 'var(--sam-color-fg-primary)',
   lineHeight: 1.6,
-  fontSize: '0.9rem',
+  fontSize: 'var(--sam-type-body-size)',
   wordBreak: 'break-word',
 };
 
@@ -394,13 +394,13 @@ const RenderedMarkdown: FC<{ content: string }> = ({ content }) => {
         remarkPlugins={[remarkGfm]}
         components={{
           h1: ({ children }) => (
-            <h1 style={{ fontSize: '1.5rem', margin: '0 0 12px', lineHeight: 1.25 }}>{children}</h1>
+            <h1 style={{ fontSize: 'var(--sam-type-page-title-size)', margin: '0 0 12px', lineHeight: 1.25 }}>{children}</h1>
           ),
           h2: ({ children }) => (
-            <h2 style={{ fontSize: '1.25rem', margin: '18px 0 10px', lineHeight: 1.3 }}>{children}</h2>
+            <h2 style={{ fontSize: 'var(--sam-type-page-title-size)', margin: '18px 0 10px', lineHeight: 1.3 }}>{children}</h2>
           ),
           h3: ({ children }) => (
-            <h3 style={{ fontSize: '1.1rem', margin: '16px 0 8px', lineHeight: 1.35 }}>{children}</h3>
+            <h3 style={{ fontSize: 'var(--sam-type-section-heading-size)', margin: '16px 0 8px', lineHeight: 1.35 }}>{children}</h3>
           ),
           p: ({ children }) => <p style={{ margin: '0 0 12px' }}>{children}</p>,
           ul: ({ children }) => <ul style={{ margin: '0 0 12px', paddingLeft: 22 }}>{children}</ul>,

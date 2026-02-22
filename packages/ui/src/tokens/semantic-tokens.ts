@@ -1,5 +1,11 @@
 export type SemanticTokenMode = 'default' | 'high-contrast' | 'reduced-motion';
 
+export interface TypographyTier {
+  size: string;
+  weight: number;
+  lineHeight: number;
+}
+
 export interface SemanticTokenSet {
   backgroundCanvas: string;
   backgroundSurface: string;
@@ -15,7 +21,35 @@ export interface SemanticTokenSet {
   warning: string;
   danger: string;
   focusRing: string;
+  accentPrimaryTint: string;
+  successTint: string;
+  warningTint: string;
+  dangerTint: string;
+  infoTint: string;
+  shadowDropdown: string;
+  shadowOverlay: string;
+  shadowTooltip: string;
 }
+
+export const typographyScale: Record<string, TypographyTier> = {
+  pageTitle: { size: '1.5rem', weight: 700, lineHeight: 1.2 },
+  sectionHeading: { size: '1.125rem', weight: 600, lineHeight: 1.3 },
+  cardTitle: { size: '1rem', weight: 600, lineHeight: 1.4 },
+  body: { size: '0.9375rem', weight: 400, lineHeight: 1.5 },
+  secondary: { size: '0.875rem', weight: 400, lineHeight: 1.5 },
+  caption: { size: '0.75rem', weight: 400, lineHeight: 1.4 },
+};
+
+export const zIndexScale = {
+  sticky: 10,
+  dropdown: 20,
+  drawerBackdrop: 40,
+  drawer: 41,
+  dialogBackdrop: 50,
+  dialog: 51,
+  panel: 60,
+  commandPalette: 61,
+} as const;
 
 export const samSemanticTokens: Record<SemanticTokenMode, SemanticTokenSet> = {
   default: {
@@ -33,6 +67,14 @@ export const samSemanticTokens: Record<SemanticTokenMode, SemanticTokenSet> = {
     warning: '#f59e0b',
     danger: '#ef4444',
     focusRing: '#34d399',
+    accentPrimaryTint: 'rgba(22, 163, 74, 0.1)',
+    successTint: 'rgba(34, 197, 94, 0.1)',
+    warningTint: 'rgba(245, 158, 11, 0.1)',
+    dangerTint: 'rgba(239, 68, 68, 0.1)',
+    infoTint: 'rgba(122, 162, 247, 0.1)',
+    shadowDropdown: '0 4px 16px rgba(0, 0, 0, 0.3)',
+    shadowOverlay: '0 8px 32px rgba(0, 0, 0, 0.4)',
+    shadowTooltip: '0 2px 8px rgba(0, 0, 0, 0.3)',
   },
   'high-contrast': {
     backgroundCanvas: '#050807',
@@ -49,6 +91,14 @@ export const samSemanticTokens: Record<SemanticTokenMode, SemanticTokenSet> = {
     warning: '#fbbf24',
     danger: '#f87171',
     focusRing: '#6ee7b7',
+    accentPrimaryTint: 'rgba(34, 197, 94, 0.15)',
+    successTint: 'rgba(74, 222, 128, 0.15)',
+    warningTint: 'rgba(251, 191, 36, 0.15)',
+    dangerTint: 'rgba(248, 113, 113, 0.15)',
+    infoTint: 'rgba(122, 162, 247, 0.15)',
+    shadowDropdown: '0 4px 16px rgba(0, 0, 0, 0.5)',
+    shadowOverlay: '0 8px 32px rgba(0, 0, 0, 0.6)',
+    shadowTooltip: '0 2px 8px rgba(0, 0, 0, 0.5)',
   },
   'reduced-motion': {
     backgroundCanvas: '#0b1110',
@@ -65,6 +115,14 @@ export const samSemanticTokens: Record<SemanticTokenMode, SemanticTokenSet> = {
     warning: '#f59e0b',
     danger: '#ef4444',
     focusRing: '#34d399',
+    accentPrimaryTint: 'rgba(22, 163, 74, 0.1)',
+    successTint: 'rgba(34, 197, 94, 0.1)',
+    warningTint: 'rgba(245, 158, 11, 0.1)',
+    dangerTint: 'rgba(239, 68, 68, 0.1)',
+    infoTint: 'rgba(122, 162, 247, 0.1)',
+    shadowDropdown: '0 4px 16px rgba(0, 0, 0, 0.3)',
+    shadowOverlay: '0 8px 32px rgba(0, 0, 0, 0.4)',
+    shadowTooltip: '0 2px 8px rgba(0, 0, 0, 0.3)',
   },
 };
 

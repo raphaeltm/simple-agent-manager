@@ -1507,7 +1507,7 @@ export function Workspace() {
               background: 'transparent',
               color: 'var(--sam-color-fg-primary)',
               padding: isMobile ? '14px 16px' : '10px 12px',
-              fontSize: isMobile ? '0.875rem' : '0.8125rem',
+              fontSize: isMobile ? 'var(--sam-type-secondary-size)' : 'var(--sam-type-caption-size)',
               cursor: sessionsLoading ? 'not-allowed' : 'pointer',
               opacity: sessionsLoading ? 0.65 : 1,
             }}
@@ -1531,7 +1531,7 @@ export function Workspace() {
                     ? 'var(--sam-color-fg-muted)'
                     : 'var(--sam-color-fg-primary)',
                 padding: isMobile ? '14px 16px' : '10px 12px',
-                fontSize: isMobile ? '0.875rem' : '0.8125rem',
+                fontSize: isMobile ? 'var(--sam-type-secondary-size)' : 'var(--sam-type-caption-size)',
                 cursor:
                   configuredAgents.length === 0 || sessionsLoading ? 'not-allowed' : 'pointer',
                 opacity: configuredAgents.length === 0 || sessionsLoading ? 0.65 : 1,
@@ -1554,7 +1554,7 @@ export function Workspace() {
                   background: 'transparent',
                   color: 'var(--sam-color-fg-primary)',
                   padding: isMobile ? '14px 16px' : '10px 12px',
-                  fontSize: isMobile ? '0.875rem' : '0.8125rem',
+                  fontSize: isMobile ? 'var(--sam-type-secondary-size)' : 'var(--sam-type-caption-size)',
                   cursor: sessionsLoading ? 'not-allowed' : 'pointer',
                   opacity: sessionsLoading ? 0.65 : 1,
                 }}
@@ -1680,7 +1680,7 @@ export function Workspace() {
           <span
             style={{
               fontWeight: 600,
-              fontSize: '0.875rem',
+              fontSize: 'var(--sam-type-secondary-size)',
               color: 'var(--sam-color-fg-primary)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -1711,7 +1711,7 @@ export function Workspace() {
                   background: 'none',
                   border: 'none',
                   cursor: 'pointer',
-                  fontSize: '0.75rem',
+                  fontSize: 'var(--sam-type-caption-size)',
                   color: 'var(--sam-color-accent-primary)',
                   whiteSpace: 'nowrap',
                   padding: 0,
@@ -1724,7 +1724,7 @@ export function Workspace() {
             )}
             <span
               style={{
-                fontSize: '0.75rem',
+                fontSize: 'var(--sam-type-caption-size)',
                 color: 'var(--sam-color-fg-muted)',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
@@ -1756,7 +1756,7 @@ export function Workspace() {
 
         {/* Error inline (desktop only — too noisy on mobile) */}
         {!isMobile && error && (
-          <span style={{ fontSize: '0.75rem', color: '#f87171', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: 'var(--sam-type-caption-size)', color: '#f87171', whiteSpace: 'nowrap' }}>
             {error}
             <button
               onClick={() => setError(null)}
@@ -1766,7 +1766,7 @@ export function Workspace() {
                 color: '#f87171',
                 cursor: 'pointer',
                 marginLeft: '4px',
-                fontSize: '0.75rem',
+                fontSize: 'var(--sam-type-caption-size)',
               }}
             >
               x
@@ -1837,7 +1837,7 @@ export function Workspace() {
             padding: '6px 12px',
             backgroundColor: 'rgba(248, 113, 113, 0.15)',
             borderBottom: '1px solid rgba(248, 113, 113, 0.3)',
-            fontSize: '0.75rem',
+            fontSize: 'var(--sam-type-caption-size)',
             color: '#f87171',
             display: 'flex',
             justifyContent: 'space-between',
@@ -1856,7 +1856,7 @@ export function Workspace() {
               color: '#f87171',
               cursor: 'pointer',
               padding: '4px 8px',
-              fontSize: '0.875rem',
+              fontSize: 'var(--sam-type-secondary-size)',
               flexShrink: 0,
             }}
           >
@@ -1990,7 +1990,7 @@ export function Workspace() {
               <span
                 style={{
                   fontWeight: 600,
-                  fontSize: '0.875rem',
+                  fontSize: 'var(--sam-type-secondary-size)',
                   color: 'var(--sam-color-fg-primary)',
                 }}
               >
@@ -2134,7 +2134,7 @@ function Toolbar({ onBack }: { onBack: () => void }) {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
         </svg>
       </button>
-      <span style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--sam-color-fg-primary)' }}>
+      <span style={{ fontWeight: 600, fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-primary)' }}>
         Workspace
       </span>
     </header>
@@ -2168,11 +2168,11 @@ function CenteredStatus({
       }}
     >
       {isLoading && <Spinner size="lg" />}
-      <h3 style={{ fontSize: '1rem', fontWeight: 600, color, margin: 0 }}>{title}</h3>
+      <h3 style={{ fontSize: 'var(--sam-type-card-title-size)', fontWeight: 600, color, margin: 0 }}>{title}</h3>
       {subtitle && (
         <p
           style={{
-            fontSize: '0.875rem',
+            fontSize: 'var(--sam-type-secondary-size)',
             color: '#787c99',
             margin: 0,
             maxWidth: '400px',
@@ -2210,11 +2210,11 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
     switch (status) {
       case 'completed':
         return (
-          <span style={{ color: '#4ade80', marginRight: 8, fontSize: '0.875rem' }}>&#10003;</span>
+          <span style={{ color: '#4ade80', marginRight: 8, fontSize: 'var(--sam-type-secondary-size)' }}>&#10003;</span>
         );
       case 'failed':
         return (
-          <span style={{ color: '#f87171', marginRight: 8, fontSize: '0.875rem' }}>&#10007;</span>
+          <span style={{ color: '#f87171', marginRight: 8, fontSize: 'var(--sam-type-secondary-size)' }}>&#10007;</span>
         );
       case 'started':
       default:
@@ -2244,7 +2244,7 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
     >
       <h3
         style={{
-          fontSize: '1rem',
+          fontSize: 'var(--sam-type-card-title-size)',
           fontWeight: 600,
           color: hasFailed ? '#f87171' : '#60a5fa',
           margin: '0 0 16px 0',
@@ -2267,7 +2267,7 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
             style={{
               display: 'flex',
               alignItems: 'center',
-              fontSize: '0.8125rem',
+              fontSize: 'var(--sam-type-caption-size)',
               color:
                 entry.status === 'failed'
                   ? '#f87171'
@@ -2284,7 +2284,7 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
       {lastStep?.status === 'failed' && lastStep.detail && (
         <p
           style={{
-            fontSize: '0.75rem',
+            fontSize: 'var(--sam-type-caption-size)',
             color: '#787c99',
             margin: '12px 0 0',
             maxWidth: '400px',

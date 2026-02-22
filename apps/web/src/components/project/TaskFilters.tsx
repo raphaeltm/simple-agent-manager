@@ -38,7 +38,7 @@ export function TaskFilters({ value, onChange }: TaskFiltersProps) {
       }}
     >
       <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>Status</span>
+        <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>Status</span>
         <select
           value={value.status ?? ''}
           onChange={(event) => {
@@ -67,7 +67,7 @@ export function TaskFilters({ value, onChange }: TaskFiltersProps) {
       </label>
 
       <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>Min priority</span>
+        <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>Min priority</span>
         <input
           type="number"
           value={value.minPriority ?? ''}
@@ -92,7 +92,7 @@ export function TaskFilters({ value, onChange }: TaskFiltersProps) {
       </label>
 
       <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>Sort</span>
+        <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>Sort</span>
         <select
           value={value.sort}
           onChange={(event) => {

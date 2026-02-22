@@ -324,7 +324,7 @@ export function CommandPalette({
     border: 'none',
     borderBottom: '1px solid #2a2d3a',
     color: '#a9b1d6',
-    fontSize: '0.875rem',
+    fontSize: 'var(--sam-type-secondary-size)',
     outline: 'none',
     fontFamily: 'inherit',
   };
@@ -337,7 +337,7 @@ export function CommandPalette({
 
   const categoryHeaderStyle: CSSProperties = {
     padding: '6px 16px 4px',
-    fontSize: '0.6875rem',
+    fontSize: 'var(--sam-type-caption-size)',
     fontWeight: 600,
     color: '#565f89',
     textTransform: 'uppercase',
@@ -370,7 +370,7 @@ export function CommandPalette({
                 padding: '16px',
                 textAlign: 'center',
                 color: '#787c99',
-                fontSize: '0.8125rem',
+                fontSize: 'var(--sam-type-caption-size)',
               }}
             >
               No matching results
@@ -383,7 +383,7 @@ export function CommandPalette({
                 padding: '16px',
                 textAlign: 'center',
                 color: '#787c99',
-                fontSize: '0.8125rem',
+                fontSize: 'var(--sam-type-caption-size)',
               }}
             >
               Loading files...
@@ -420,12 +420,12 @@ export function CommandPalette({
                     style={itemStyle}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
-                      <span style={{ fontSize: '0.8125rem', flexShrink: 0 }}>
+                      <span style={{ fontSize: 'var(--sam-type-caption-size)', flexShrink: 0 }}>
                         {resultIcon(result)}
                       </span>
                       <span
                         style={{
-                          fontSize: '0.8125rem',
+                          fontSize: 'var(--sam-type-caption-size)',
                           color: '#a9b1d6',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
@@ -439,7 +439,7 @@ export function CommandPalette({
                       <kbd
                         style={{
                           fontFamily: 'monospace',
-                          fontSize: '0.75rem',
+                          fontSize: 'var(--sam-type-caption-size)',
                           color: '#c0caf5',
                           backgroundColor: '#292e42',
                           border: '1px solid #3b4261',
@@ -455,7 +455,7 @@ export function CommandPalette({
                     {result.kind === 'tab' && (
                       <span
                         style={{
-                          fontSize: '0.6875rem',
+                          fontSize: 'var(--sam-type-caption-size)',
                           color: '#565f89',
                           flexShrink: 0,
                         }}

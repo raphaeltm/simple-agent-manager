@@ -1,20 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type {
-  ProjectDetailResponse,
   Task,
   TaskDetailResponse,
   TaskStatus,
   TaskStatusEvent,
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
-import { Alert, Button, PageLayout, Spinner, StatusBadge } from '@simple-agent-manager/ui';
-import { UserMenu } from '../components/UserMenu';
+import { Alert, Breadcrumb, Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import {
   addTaskDependency,
   deleteProjectTask,
   delegateTask,
-  getProject,
   getProjectTask,
   listProjectTasks,
   listTaskEvents,
@@ -26,6 +23,7 @@ import {
 import { useToast } from '../hooks/useToast';
 import { TaskDependencyEditor } from '../components/project/TaskDependencyEditor';
 import { TaskDelegateDialog } from '../components/project/TaskDelegateDialog';
+import { useProjectContext } from './ProjectContext';
 
 const TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   draft: ['ready', 'cancelled'],
@@ -48,11 +46,11 @@ function formatDate(value: string | null | undefined): string {
 }
 
 export function TaskDetail() {
-  const { id: projectId, taskId } = useParams<{ id: string; taskId: string }>();
+  const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
   const toast = useToast();
+  const { projectId, project } = useProjectContext();
 
-  const [project, setProject] = useState<ProjectDetailResponse | null>(null);
   const [task, setTask] = useState<TaskDetailResponse | null>(null);
   const [events, setEvents] = useState<TaskStatusEvent[]>([]);
   const [siblingTasks, setSiblingTasks] = useState<Task[]>([]);
@@ -70,18 +68,16 @@ export function TaskDetail() {
   const [savingTitle, setSavingTitle] = useState(false);
 
   const loadAll = useCallback(async () => {
-    if (!projectId || !taskId) return;
+    if (!taskId) return;
     try {
       setLoading(true);
       setError(null);
-      const [proj, taskDetail, eventsResponse, tasksResponse, wsList] = await Promise.all([
-        getProject(projectId),
+      const [taskDetail, eventsResponse, tasksResponse, wsList] = await Promise.all([
         getProjectTask(projectId, taskId),
         listTaskEvents(projectId, taskId, 50),
         listProjectTasks(projectId, {}),
         listWorkspaces('running').catch(() => [] as WorkspaceResponse[]),
       ]);
-      setProject(proj);
       setTask(taskDetail);
       setEvents(eventsResponse.events);
       setSiblingTasks(tasksResponse.tasks);
@@ -98,7 +94,7 @@ export function TaskDetail() {
   }, [loadAll]);
 
   const handleTransition = async (toStatus: TaskStatus) => {
-    if (!projectId || !taskId) return;
+    if (!taskId) return;
     try {
       setTransitioning(true);
       await updateProjectTaskStatus(projectId, taskId, { toStatus });
@@ -112,7 +108,7 @@ export function TaskDetail() {
   };
 
   const handleSaveTitle = async () => {
-    if (!projectId || !taskId || !titleDraft.trim() || titleDraft === task?.title) {
+    if (!taskId || !titleDraft.trim() || titleDraft === task?.title) {
       setEditingTitle(false);
       return;
     }
@@ -130,7 +126,7 @@ export function TaskDetail() {
   };
 
   const handleAddDependency = async (dependsOnTaskId: string) => {
-    if (!projectId || !taskId) return;
+    if (!taskId) return;
     try {
       setSavingDependency(true);
       await addTaskDependency(projectId, taskId, { dependsOnTaskId });
@@ -144,7 +140,7 @@ export function TaskDetail() {
   };
 
   const handleRemoveDependency = async (dependsOnTaskId: string) => {
-    if (!projectId || !taskId) return;
+    if (!taskId) return;
     try {
       setSavingDependency(true);
       await removeTaskDependency(projectId, taskId, dependsOnTaskId);
@@ -158,7 +154,7 @@ export function TaskDetail() {
   };
 
   const handleDelegate = async (workspaceId: string) => {
-    if (!projectId || !taskId) return;
+    if (!taskId) return;
     try {
       setDelegating(true);
       await delegateTask(projectId, taskId, { workspaceId });
@@ -173,27 +169,23 @@ export function TaskDetail() {
   };
 
   const handleDelete = async () => {
-    if (!projectId || !taskId || !task) return;
+    if (!taskId || !task) return;
     if (!window.confirm(`Delete task "${task.title}"?`)) return;
     try {
       await deleteProjectTask(projectId, taskId);
       toast.success('Task deleted');
-      navigate(`/projects/${projectId}?tab=tasks`);
+      navigate(`/projects/${projectId}/tasks`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete task');
     }
   };
 
-  if (!projectId || !taskId) {
-    return (
-      <PageLayout title="Task" maxWidth="xl" headerRight={<UserMenu />}>
-        <Alert variant="error">Invalid task URL.</Alert>
-      </PageLayout>
-    );
+  if (!taskId) {
+    return <Alert variant="error">Invalid task URL.</Alert>;
   }
 
   return (
-    <PageLayout title="Task" maxWidth="xl" headerRight={<UserMenu />}>
+    <div>
       <style>{`
         .task-detail-layout {
           display: grid;
@@ -209,44 +201,33 @@ export function TaskDetail() {
           text-decoration: underline;
           text-decoration-style: dotted;
         }
-        .breadcrumb-link {
-          color: var(--sam-color-fg-muted);
-          text-decoration: none;
-        }
-        .breadcrumb-link:hover {
-          color: var(--sam-color-fg-primary);
-          text-decoration: underline;
-        }
       `}</style>
 
-      {/* Breadcrumb */}
-      <nav
-        aria-label="Breadcrumb"
-        style={{ marginBottom: 'var(--sam-space-3)', fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}
-      >
-        <Link to="/projects" className="breadcrumb-link">Projects</Link>
-        <span style={{ margin: '0 0.375rem' }}>/</span>
-        <Link to={`/projects/${projectId}`} className="breadcrumb-link">
-          {project?.name ?? '…'}
-        </Link>
-        <span style={{ margin: '0 0.375rem' }}>/</span>
-        <span style={{ color: 'var(--sam-color-fg-primary)' }}>{task?.title ?? '…'}</span>
-      </nav>
+      {/* Breadcrumb within project context */}
+      <Breadcrumb
+        segments={[
+          { label: 'Dashboard', path: '/dashboard' },
+          { label: 'Projects', path: '/projects' },
+          { label: project?.name ?? '...', path: `/projects/${projectId}` },
+          { label: 'Tasks', path: `/projects/${projectId}/tasks` },
+          { label: task?.title ?? '...' },
+        ]}
+      />
 
       {error && (
-        <div style={{ marginBottom: 'var(--sam-space-3)' }}>
+        <div style={{ marginTop: 'var(--sam-space-3)' }}>
           <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
         </div>
       )}
 
       {loading && !task ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', marginTop: 'var(--sam-space-4)' }}>
           <Spinner size="md" />
-          <span style={{ color: 'var(--sam-color-fg-muted)' }}>Loading task…</span>
+          <span style={{ color: 'var(--sam-color-fg-muted)' }}>Loading task...</span>
         </div>
       ) : task ? (
-        <div className="task-detail-layout">
-          {/* ── Main content column ── */}
+        <div className="task-detail-layout" style={{ marginTop: 'var(--sam-space-4)' }}>
+          {/* Main content column */}
           <div style={{ display: 'grid', gap: 'var(--sam-space-4)' }}>
 
             {/* Title + status row */}
@@ -265,8 +246,8 @@ export function TaskDetail() {
                     disabled={savingTitle}
                     style={{
                       flex: 1,
-                      fontSize: '1.25rem',
-                      fontWeight: 700,
+                      fontSize: 'var(--sam-type-section-heading-size)',
+                      fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number,
                       background: 'var(--sam-color-bg-surface)',
                       border: '1px solid var(--sam-color-accent-primary)',
                       borderRadius: 'var(--sam-radius-md)',
@@ -287,8 +268,8 @@ export function TaskDetail() {
                     border: 'none',
                     padding: 0,
                     cursor: 'text',
-                    fontSize: '1.25rem',
-                    fontWeight: 700,
+                    fontSize: 'var(--sam-type-section-heading-size)',
+                    fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number,
                     color: 'var(--sam-color-fg-primary)',
                   }}
                 >
@@ -300,11 +281,11 @@ export function TaskDetail() {
                 <StatusBadge status={task.status} />
                 {task.blocked && (
                   <span style={{
-                    fontSize: '0.75rem',
+                    fontSize: 'var(--sam-type-caption-size)',
                     padding: '2px 8px',
                     borderRadius: '9999px',
-                    background: 'rgba(239,68,68,0.15)',
-                    color: '#f87171',
+                    background: 'var(--sam-color-danger-tint)',
+                    color: 'var(--sam-color-danger)',
                     fontWeight: 600,
                   }}>
                     Blocked
@@ -327,12 +308,12 @@ export function TaskDetail() {
                       border: '1px solid var(--sam-color-border-default)',
                       background: 'var(--sam-color-bg-surface)',
                       color: 'var(--sam-color-fg-primary)',
-                      fontSize: '0.875rem',
+                      fontSize: 'var(--sam-type-secondary-size)',
                       padding: '0.25rem 0.5rem',
                       minHeight: '2rem',
                     }}
                   >
-                    <option value="">{transitioning ? 'Updating…' : 'Move to…'}</option>
+                    <option value="">{transitioning ? 'Updating...' : 'Move to...'}</option>
                     {TRANSITIONS[task.status].map((s) => (
                       <option key={s} value={s}>{s.replace('_', ' ')}</option>
                     ))}
@@ -343,21 +324,21 @@ export function TaskDetail() {
 
             {/* Description */}
             <section style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
-              <h2 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600, color: 'var(--sam-color-fg-primary)' }}>
+              <h2 className="sam-type-card-title" style={{ margin: 0, color: 'var(--sam-color-fg-primary)' }}>
                 Description
               </h2>
               {task.description ? (
-                <p style={{ margin: 0, color: 'var(--sam-color-fg-muted)', whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: '0.9375rem' }}>
+                <p className="sam-type-body" style={{ margin: 0, color: 'var(--sam-color-fg-muted)', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
                   {task.description}
                 </p>
               ) : (
-                <p style={{ margin: 0, color: 'var(--sam-color-fg-muted)', fontStyle: 'italic', fontSize: '0.9375rem' }}>
+                <p className="sam-type-body" style={{ margin: 0, color: 'var(--sam-color-fg-muted)', fontStyle: 'italic' }}>
                   No description.
                 </p>
               )}
             </section>
 
-            {/* Output — shown only when content exists */}
+            {/* Output */}
             {(task.outputSummary || task.outputBranch || task.outputPrUrl) && (
               <section style={{
                 display: 'grid',
@@ -367,29 +348,29 @@ export function TaskDetail() {
                 padding: 'var(--sam-space-3)',
                 background: 'var(--sam-color-bg-surface)',
               }}>
-                <h2 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600, color: 'var(--sam-color-fg-primary)' }}>
+                <h2 className="sam-type-card-title" style={{ margin: 0, color: 'var(--sam-color-fg-primary)' }}>
                   Output
                 </h2>
                 {task.outputSummary && (
-                  <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)', whiteSpace: 'pre-wrap' }}>
+                  <p className="sam-type-secondary" style={{ margin: 0, color: 'var(--sam-color-fg-muted)', whiteSpace: 'pre-wrap' }}>
                     {task.outputSummary}
                   </p>
                 )}
                 {task.outputBranch && (
-                  <div style={{ fontSize: '0.875rem' }}>
+                  <div className="sam-type-secondary">
                     <strong>Branch: </strong>
                     <code style={{
                       background: 'var(--sam-color-bg-page)',
                       padding: '0.125rem 0.375rem',
                       borderRadius: '4px',
-                      fontSize: '0.8125rem',
+                      fontSize: 'var(--sam-type-caption-size)',
                     }}>
                       {task.outputBranch}
                     </code>
                   </div>
                 )}
                 {task.outputPrUrl && (
-                  <div style={{ fontSize: '0.875rem' }}>
+                  <div className="sam-type-secondary">
                     <strong>Pull Request: </strong>
                     <a
                       href={task.outputPrUrl}
@@ -404,18 +385,18 @@ export function TaskDetail() {
               </section>
             )}
 
-            {/* Error — shown only when content exists */}
+            {/* Error */}
             {task.errorMessage && (
               <section style={{
-                border: '1px solid rgba(239,68,68,0.3)',
+                border: '1px solid var(--sam-color-danger)',
                 borderRadius: 'var(--sam-radius-md)',
                 padding: 'var(--sam-space-3)',
-                background: 'rgba(239,68,68,0.05)',
+                background: 'var(--sam-color-danger-tint)',
                 display: 'grid',
                 gap: '0.375rem',
               }}>
-                <h2 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600, color: '#f87171' }}>Error</h2>
-                <p style={{ margin: 0, color: 'var(--sam-color-fg-muted)', fontSize: '0.875rem', whiteSpace: 'pre-wrap' }}>
+                <h2 className="sam-type-card-title" style={{ margin: 0, color: 'var(--sam-color-danger)' }}>Error</h2>
+                <p className="sam-type-secondary" style={{ margin: 0, color: 'var(--sam-color-fg-muted)', whiteSpace: 'pre-wrap' }}>
                   {task.errorMessage}
                 </p>
               </section>
@@ -423,25 +404,25 @@ export function TaskDetail() {
 
             {/* Activity log */}
             <section style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
-              <h2 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600, color: 'var(--sam-color-fg-primary)' }}>
+              <h2 className="sam-type-card-title" style={{ margin: 0, color: 'var(--sam-color-fg-primary)' }}>
                 Activity
               </h2>
               {events.length === 0 ? (
-                <p style={{ margin: 0, color: 'var(--sam-color-fg-muted)', fontSize: '0.875rem' }}>No activity yet.</p>
+                <p className="sam-type-secondary" style={{ margin: 0, color: 'var(--sam-color-fg-muted)' }}>No activity yet.</p>
               ) : (
                 <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: '0.5rem' }}>
                   {events.map((event) => (
                     <li
                       key={event.id}
                       style={{
-                        fontSize: '0.8125rem',
+                        fontSize: 'var(--sam-type-caption-size)',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '0.5rem',
                         flexWrap: 'wrap',
                       }}
                     >
-                      <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.75rem', flexShrink: 0 }}>
+                      <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', flexShrink: 0 }}>
                         {formatDate(event.createdAt)}
                       </span>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
@@ -454,12 +435,12 @@ export function TaskDetail() {
                         <StatusBadge status={event.toStatus} />
                       </span>
                       {event.actorType && (
-                        <span style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+                        <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)' }}>
                           by {event.actorType}
                         </span>
                       )}
                       {event.reason && (
-                        <span style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+                        <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)' }}>
                           — {event.reason}
                         </span>
                       )}
@@ -470,7 +451,7 @@ export function TaskDetail() {
             </section>
           </div>
 
-          {/* ── Sidebar ── */}
+          {/* Sidebar */}
           <aside style={{
             display: 'grid',
             gap: 'var(--sam-space-3)',
@@ -480,7 +461,7 @@ export function TaskDetail() {
             padding: 'var(--sam-space-3)',
           }}>
             {/* Metadata */}
-            <div style={{ display: 'grid', gap: '0.5rem', fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
+            <div style={{ display: 'grid', gap: '0.5rem', fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
               <div><strong style={{ color: 'var(--sam-color-fg-primary)' }}>Priority:</strong> {task.priority}</div>
               <div><strong style={{ color: 'var(--sam-color-fg-primary)' }}>Created:</strong> {formatDate(task.createdAt)}</div>
               <div><strong style={{ color: 'var(--sam-color-fg-primary)' }}>Updated:</strong> {formatDate(task.updatedAt)}</div>
@@ -540,6 +521,6 @@ export function TaskDetail() {
           onDelegate={handleDelegate}
         />
       )}
-    </PageLayout>
+    </div>
   );
 }

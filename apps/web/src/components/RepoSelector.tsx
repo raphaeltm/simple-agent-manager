@@ -243,7 +243,7 @@ export function RepoSelector({
               onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
-                <span style={{ fontWeight: 500, fontSize: '0.875rem' }}>{repo.fullName}</span>
+                <span style={{ fontWeight: 500, fontSize: 'var(--sam-type-secondary-size)' }}>{repo.fullName}</span>
                 {repo.private && (
                   <span style={{
                     padding: '1px 6px',
@@ -263,17 +263,17 @@ export function RepoSelector({
 
       {/* Status messages */}
       {loading && repositories.length === 0 && (
-        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
           Loading repositories...
         </p>
       )}
       {error && repositories.length === 0 && value && !value.startsWith('http') && !value.startsWith('git@') && (
-        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
           Connect GitHub App for repository autocomplete
         </p>
       )}
       {!loading && repositories.length > 0 && value && !value.startsWith('http') && !value.startsWith('git@') && filteredRepos.length === 0 && (
-        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
           No matching repositories found
         </p>
       )}

@@ -68,7 +68,7 @@ export function TaskForm({
   return (
     <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
       <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Title</span>
+        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Title</span>
         <Input
           value={values.title}
           onChange={(event) => {
@@ -81,7 +81,7 @@ export function TaskForm({
       </label>
 
       <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Description</span>
+        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Description</span>
         <textarea
           value={values.description}
           onChange={(event) => {
@@ -103,7 +103,7 @@ export function TaskForm({
       </label>
 
       <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Priority</span>
+        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Priority</span>
         <Input
           type="number"
           value={String(values.priority)}
@@ -117,7 +117,7 @@ export function TaskForm({
       </label>
 
       <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Parent task</span>
+        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Parent task</span>
         <select
           value={values.parentTaskId}
           onChange={(event) => {
@@ -145,7 +145,7 @@ export function TaskForm({
       </label>
 
       <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Agent hint</span>
+        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Agent hint</span>
         <Input
           value={values.agentProfileHint}
           onChange={(event) => {
@@ -158,7 +158,7 @@ export function TaskForm({
       </label>
 
       {error && (
-        <div role="alert" style={{ color: 'var(--sam-color-danger)', fontSize: '0.875rem' }}>
+        <div role="alert" style={{ color: 'var(--sam-color-danger)', fontSize: 'var(--sam-type-secondary-size)' }}>
           {error}
         </div>
       )}

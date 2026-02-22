@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { Button, PageLayout, Spinner, StatusBadge } from '@simple-agent-manager/ui';
-import { UserMenu } from '../components/UserMenu';
+import { useParams } from 'react-router-dom';
+import { Breadcrumb, Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { getChatSession } from '../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse } from '../lib/api';
+import { useProjectContext } from './ProjectContext';
 
 function formatTimestamp(ts: number): string {
   return new Date(ts).toLocaleString();
@@ -44,7 +44,7 @@ function MessageBubble({ message }: { message: ChatMessageResponse }) {
         marginBottom: 'var(--sam-space-2)',
       }}>
         <span style={{
-          fontSize: '0.75rem',
+          fontSize: 'var(--sam-type-caption-size)',
           fontWeight: 600,
           color: style.color,
           textTransform: 'uppercase',
@@ -52,15 +52,11 @@ function MessageBubble({ message }: { message: ChatMessageResponse }) {
         }}>
           {style.label}
         </span>
-        <span style={{
-          fontSize: '0.7rem',
-          color: 'var(--sam-color-fg-muted)',
-        }}>
+        <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)' }}>
           {formatTimestamp(message.createdAt)}
         </span>
       </div>
-      <div style={{
-        fontSize: '0.875rem',
+      <div className="sam-type-body" style={{
         color: 'var(--sam-color-fg-primary)',
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
@@ -70,15 +66,11 @@ function MessageBubble({ message }: { message: ChatMessageResponse }) {
       </div>
       {message.toolMetadata && (
         <details style={{ marginTop: 'var(--sam-space-2)' }}>
-          <summary style={{
-            fontSize: '0.75rem',
-            color: 'var(--sam-color-fg-muted)',
-            cursor: 'pointer',
-          }}>
+          <summary className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', cursor: 'pointer' }}>
             Tool metadata
           </summary>
           <pre style={{
-            fontSize: '0.7rem',
+            fontSize: 'var(--sam-type-caption-size)',
             color: 'var(--sam-color-fg-muted)',
             backgroundColor: 'var(--sam-color-bg-inset)',
             padding: 'var(--sam-space-2)',
@@ -96,8 +88,8 @@ function MessageBubble({ message }: { message: ChatMessageResponse }) {
 }
 
 export function ChatSessionView() {
-  const navigate = useNavigate();
-  const { id: projectId, sessionId } = useParams<{ id: string; sessionId: string }>();
+  const { sessionId } = useParams<{ sessionId: string }>();
+  const { projectId, project } = useProjectContext();
 
   const [session, setSession] = useState<ChatSessionResponse | null>(null);
   const [messages, setMessages] = useState<ChatMessageResponse[]>([]);
@@ -107,7 +99,7 @@ export function ChatSessionView() {
   const [error, setError] = useState<string | null>(null);
 
   const loadSession = useCallback(async () => {
-    if (!projectId || !sessionId) return;
+    if (!sessionId) return;
     try {
       setError(null);
       const data = await getChatSession(projectId, sessionId);
@@ -126,7 +118,7 @@ export function ChatSessionView() {
   }, [loadSession]);
 
   const loadMore = async () => {
-    if (!projectId || !sessionId || !hasMore || loadingMore) return;
+    if (!sessionId || !hasMore || loadingMore) return;
     const firstMessage = messages[0];
     if (!firstMessage) return;
 
@@ -144,53 +136,38 @@ export function ChatSessionView() {
     }
   };
 
+  const sessionTitle = session?.topic || `Session ${sessionId?.slice(0, 8) ?? ''}`;
+
   if (loading) {
     return (
-      <PageLayout title="Chat Session" maxWidth="lg" headerRight={<UserMenu />}>
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-8)' }}>
-          <Spinner size="lg" />
-        </div>
-      </PageLayout>
+      <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-8)' }}>
+        <Spinner size="lg" />
+      </div>
     );
   }
 
   return (
-    <PageLayout
-      title={session?.topic || `Session ${sessionId?.slice(0, 8) ?? ''}`}
-      onBack={() => navigate(`/projects/${projectId}`)}
-      maxWidth="lg"
-      headerRight={<UserMenu />}
-    >
+    <div>
       {/* Breadcrumb */}
-      <nav style={{ marginBottom: 'var(--sam-space-4)', fontSize: '0.875rem' }}>
-        <span
-          onClick={() => navigate('/dashboard')}
-          style={{ color: 'var(--sam-color-fg-muted)', cursor: 'pointer' }}
-        >
-          Dashboard
-        </span>
-        <span style={{ color: 'var(--sam-color-fg-muted)', margin: '0 0.5rem' }}>/</span>
-        <span
-          onClick={() => navigate(`/projects/${projectId}`)}
-          style={{ color: 'var(--sam-color-fg-muted)', cursor: 'pointer' }}
-        >
-          Project
-        </span>
-        <span style={{ color: 'var(--sam-color-fg-muted)', margin: '0 0.5rem' }}>/</span>
-        <span style={{ color: 'var(--sam-color-fg-primary)' }}>
-          {session?.topic || `Session ${sessionId?.slice(0, 8) ?? ''}`}
-        </span>
-      </nav>
+      <Breadcrumb
+        segments={[
+          { label: 'Dashboard', path: '/dashboard' },
+          { label: 'Projects', path: '/projects' },
+          { label: project?.name ?? '...', path: `/projects/${projectId}` },
+          { label: 'Sessions', path: `/projects/${projectId}/sessions` },
+          { label: sessionTitle },
+        ]}
+      />
 
       {error && (
         <div style={{
           padding: 'var(--sam-space-3) var(--sam-space-4)',
           borderRadius: 'var(--sam-radius-md)',
-          backgroundColor: 'rgba(248, 113, 113, 0.1)',
-          border: '1px solid rgba(248, 113, 113, 0.3)',
-          color: '#f87171',
-          fontSize: '0.875rem',
-          marginBottom: 'var(--sam-space-4)',
+          backgroundColor: 'var(--sam-color-danger-tint)',
+          border: '1px solid var(--sam-color-danger)',
+          color: 'var(--sam-color-danger)',
+          fontSize: 'var(--sam-type-secondary-size)',
+          marginTop: 'var(--sam-space-3)',
         }}>
           {error}
         </div>
@@ -206,20 +183,20 @@ export function ChatSessionView() {
           borderRadius: 'var(--sam-radius-md)',
           border: '1px solid var(--sam-color-border-default)',
           backgroundColor: 'var(--sam-color-bg-surface)',
-          marginBottom: 'var(--sam-space-4)',
+          marginTop: 'var(--sam-space-4)',
           flexWrap: 'wrap',
         }}>
           <StatusBadge
             status={session.status === 'active' ? 'running' : session.status === 'error' ? 'error' : 'stopped'}
             label={session.status}
           />
-          <span style={{ fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>
+          <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)' }}>
             {session.messageCount} message{session.messageCount !== 1 ? 's' : ''}
           </span>
-          <span style={{ fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>
+          <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)' }}>
             Duration: {formatDuration(session.startedAt, session.endedAt)}
           </span>
-          <span style={{ fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)', marginLeft: 'auto' }}>
+          <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', marginLeft: 'auto' }}>
             Started {formatTimestamp(session.startedAt)}
           </span>
         </div>
@@ -227,7 +204,7 @@ export function ChatSessionView() {
 
       {/* Load more */}
       {hasMore && (
-        <div style={{ textAlign: 'center', marginBottom: 'var(--sam-space-3)' }}>
+        <div style={{ textAlign: 'center', marginTop: 'var(--sam-space-3)' }}>
           <Button
             variant="ghost"
             size="sm"
@@ -241,11 +218,11 @@ export function ChatSessionView() {
       )}
 
       {/* Messages */}
-      <div style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
+      <div style={{ display: 'grid', gap: 'var(--sam-space-3)', marginTop: 'var(--sam-space-4)' }}>
         {messages.length === 0 ? (
           <div style={{
             color: 'var(--sam-color-fg-muted)',
-            fontSize: '0.875rem',
+            fontSize: 'var(--sam-type-secondary-size)',
             textAlign: 'center',
             padding: 'var(--sam-space-8)',
           }}>
@@ -255,6 +232,6 @@ export function ChatSessionView() {
           messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)
         )}
       </div>
-    </PageLayout>
+    </div>
   );
 }
