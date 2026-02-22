@@ -129,3 +129,10 @@ Claude Code supports dual authentication: **API keys** (pay-per-use from Anthrop
 ## Task Tracking
 
 Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks/README.md` for conventions.
+
+## Active Technologies
+- TypeScript 5.x (Worker/Web), Go 1.22+ (VM Agent) + Hono (API framework), Drizzle ORM (D1), React + Vite (Web), Cloudflare Workers SDK (Durable Objects) (018-project-first-architecture)
+- Cloudflare D1 (platform metadata) + Durable Objects with SQLite (per-project high-throughput data) + KV (ephemeral tokens) + R2 (agent binaries) (018-project-first-architecture)
+
+## Recent Changes
+- 018-project-first-architecture: Added TypeScript 5.x (Worker/Web), Go 1.22+ (VM Agent) + Hono (API framework), Drizzle ORM (D1), React + Vite (Web), Cloudflare Workers SDK (Durable Objects)

@@ -8,7 +8,7 @@ interface RepoSelectorProps {
   value: string;
   onChange: (value: string) => void;
   /** Called when a repository is selected from the dropdown with its metadata */
-  onRepoSelect?: (repo: { fullName: string; defaultBranch: string } | null) => void;
+  onRepoSelect?: (repo: { fullName: string; defaultBranch: string; githubRepoId?: number } | null) => void;
   disabled?: boolean;
   required?: boolean;
   placeholder?: string;
@@ -142,7 +142,7 @@ export function RepoSelector({
     const foundRepo = repositories.find(r => r.fullName === repoName);
     if (foundRepo) {
       // We have metadata for this repo
-      onRepoSelect?.({ fullName: foundRepo.fullName, defaultBranch: foundRepo.defaultBranch });
+      onRepoSelect?.({ fullName: foundRepo.fullName, defaultBranch: foundRepo.defaultBranch, githubRepoId: foundRepo.id });
     } else {
       // For manually entered repos not in the list, default to 'main'
       // The branch fetching will happen in CreateWorkspace component
@@ -176,7 +176,7 @@ export function RepoSelector({
 
   const handleRepoSelect = (repo: Repository) => {
     onChange(`https://github.com/${repo.fullName}`);
-    onRepoSelect?.({ fullName: repo.fullName, defaultBranch: repo.defaultBranch });
+    onRepoSelect?.({ fullName: repo.fullName, defaultBranch: repo.defaultBranch, githubRepoId: repo.id });
     setShowDropdown(false);
   };
 

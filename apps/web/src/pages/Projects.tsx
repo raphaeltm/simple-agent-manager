@@ -51,6 +51,7 @@ export function Projects() {
         installationId: values.installationId,
         repository: values.repository,
         defaultBranch: values.defaultBranch,
+        githubRepoId: values.githubRepoId,
       });
       toast.success('Project created');
       setShowCreateForm(false);

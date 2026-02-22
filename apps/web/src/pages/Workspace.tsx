@@ -1637,7 +1637,7 @@ export function Workspace() {
       >
         {/* Back */}
         <button
-          onClick={() => navigate('/dashboard')}
+          onClick={() => workspace?.projectId ? navigate(`/projects/${workspace.projectId}`) : navigate('/dashboard')}
           style={{
             background: 'none',
             border: 'none',
@@ -1650,7 +1650,7 @@ export function Workspace() {
             minWidth: isMobile ? 44 : undefined,
             minHeight: isMobile ? 44 : undefined,
           }}
-          aria-label="Back to dashboard"
+          aria-label={workspace?.projectId ? 'Back to project' : 'Back to dashboard'}
         >
           <svg
             style={{ height: isMobile ? 18 : 16, width: isMobile ? 18 : 16 }}
@@ -1693,7 +1693,7 @@ export function Workspace() {
           {workspace && <StatusBadge status={workspace.status} />}
         </div>
 
-        {/* Repo@branch (desktop only) */}
+        {/* Project link + Repo@branch (desktop only) */}
         {!isMobile && (
           <>
             <div
@@ -1704,6 +1704,24 @@ export function Workspace() {
                 flexShrink: 0,
               }}
             />
+            {workspace?.projectId && (
+              <button
+                onClick={() => navigate(`/projects/${workspace.projectId}`)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  color: 'var(--sam-color-accent-primary)',
+                  whiteSpace: 'nowrap',
+                  padding: 0,
+                  textDecoration: 'none',
+                }}
+                title="Go to project"
+              >
+                Project
+              </button>
+            )}
             <span
               style={{
                 fontSize: '0.75rem',

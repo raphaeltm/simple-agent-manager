@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../components/AuthProvider';
 import { UserMenu } from '../components/UserMenu';
 import { WorkspaceCard } from '../components/WorkspaceCard';
+import { ProjectSummaryCard } from '../components/ProjectSummaryCard';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useToast } from '../hooks/useToast';
+import { useProjectList } from '../hooks/useProjectData';
 import { listWorkspaces, stopWorkspace, restartWorkspace, deleteWorkspace } from '../lib/api';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
 import { PageLayout, Button, Alert, Spinner, SkeletonCard } from '@simple-agent-manager/ui';
@@ -117,6 +119,8 @@ export function Dashboard() {
     }
   };
 
+  const { projects, loading: projectsLoading } = useProjectList({ sort: 'last_activity', limit: 6 });
+
   const activeCount = workspaces.filter(
     (w) => w.status === 'running' || w.status === 'recovery'
   ).length;
@@ -140,6 +144,9 @@ export function Dashboard() {
       <style>{`
         .sam-quick-actions { grid-template-columns: 1fr; }
         @media (min-width: 768px) { .sam-quick-actions { grid-template-columns: repeat(5, 1fr); } }
+        .sam-project-grid { grid-template-columns: 1fr; }
+        @media (min-width: 768px) { .sam-project-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (min-width: 1024px) { .sam-project-grid { grid-template-columns: repeat(3, 1fr); } }
         .sam-workspace-grid { grid-template-columns: 1fr; }
         @media (min-width: 768px) { .sam-workspace-grid { grid-template-columns: repeat(2, 1fr); } }
         @media (min-width: 1024px) { .sam-workspace-grid { grid-template-columns: repeat(3, 1fr); } }
@@ -200,6 +207,31 @@ export function Dashboard() {
           <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--sam-color-fg-primary)' }}>{activeCount}</div>
         </div>
       </div>
+
+      {/* Projects section */}
+      {(projectsLoading || projects.length > 0) && (
+        <div style={{ marginBottom: 'var(--sam-space-8)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--sam-space-4)' }}>
+            <h3 style={{ fontSize: '1.125rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>Your Projects</h3>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/projects')}>
+              View all
+            </Button>
+          </div>
+          {projectsLoading ? (
+            <div className="sam-project-grid" style={{ display: 'grid', gap: 'var(--sam-space-4)' }}>
+              {Array.from({ length: 3 }, (_, i) => (
+                <SkeletonCard key={i} lines={2} />
+              ))}
+            </div>
+          ) : (
+            <div className="sam-project-grid" style={{ display: 'grid', gap: 'var(--sam-space-4)' }}>
+              {projects.map((project) => (
+                <ProjectSummaryCard key={project.id} project={project} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Error message */}
       {error && (

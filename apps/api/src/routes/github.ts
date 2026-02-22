@@ -221,6 +221,30 @@ githubRoutes.post('/webhook', async (c) => {
     }
   }
 
+  // Handle repository events (renamed, transferred, deleted)
+  if (event === 'repository') {
+    const action = data.action;
+    const repo = data.repository;
+    const repoId = repo?.id;
+
+    if (repoId && (action === 'renamed' || action === 'transferred')) {
+      // Update repository name for all projects linked by github_repo_id
+      const newFullName = (repo.full_name as string)?.toLowerCase();
+      if (newFullName) {
+        await db
+          .update(schema.projects)
+          .set({ repository: newFullName, updatedAt: now })
+          .where(eq(schema.projects.githubRepoId, repoId));
+      }
+    } else if (repoId && action === 'deleted') {
+      // Mark projects as detached when the repo is deleted
+      await db
+        .update(schema.projects)
+        .set({ status: 'detached', updatedAt: now })
+        .where(eq(schema.projects.githubRepoId, repoId));
+    }
+  }
+
   return c.json({ received: true });
 });
 

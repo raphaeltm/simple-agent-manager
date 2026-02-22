@@ -113,13 +113,101 @@ export interface Project {
   updatedAt: string;
 }
 
+export type ProjectStatus = 'active' | 'detached';
+
+export type ChatSessionStatus = 'active' | 'stopped' | 'error';
+
 export interface ProjectSummary {
+  id: string;
+  name: string;
+  repository: string;
+  githubRepoId: number | null;
+  defaultBranch: string;
+  status: ProjectStatus;
+  activeWorkspaceCount: number;
+  activeSessionCount: number;
+  lastActivityAt: string | null;
+  createdAt: string;
   taskCountsByStatus: Partial<Record<TaskStatus, number>>;
   linkedWorkspaces: number;
 }
 
+export interface ProjectDetail extends Project {
+  githubRepoId: number | null;
+  githubRepoNodeId: string | null;
+  status: ProjectStatus;
+  lastActivityAt: string | null;
+  activeSessionCount: number;
+  workspaces: WorkspaceResponse[];
+  recentSessions: ChatSession[];
+  recentActivity: ActivityEvent[];
+}
+
 export interface ProjectDetailResponse extends Project {
-  summary: ProjectSummary;
+  summary: Omit<ProjectSummary, 'id' | 'name' | 'repository' | 'githubRepoId' | 'defaultBranch' | 'status' | 'createdAt'>;
+}
+
+export interface ChatSession {
+  id: string;
+  workspaceId: string | null;
+  topic: string | null;
+  status: ChatSessionStatus;
+  messageCount: number;
+  startedAt: number;
+  endedAt: number | null;
+  createdAt: number;
+}
+
+export interface ChatSessionDetail extends ChatSession {
+  messages: ChatMessage[];
+  hasMoreMessages: boolean;
+}
+
+export interface ChatMessage {
+  id: string;
+  sessionId: string;
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+  toolMetadata: {
+    tool: string;
+    target: string;
+    status: 'success' | 'error';
+  } | null;
+  createdAt: number;
+}
+
+export type ActivityEventType =
+  | 'workspace.created'
+  | 'workspace.stopped'
+  | 'workspace.restarted'
+  | 'session.started'
+  | 'session.stopped'
+  | 'task.status_changed'
+  | 'task.created'
+  | 'task.delegated';
+
+export type ActivityActorType = 'user' | 'system' | 'agent';
+
+export interface ActivityEvent {
+  id: string;
+  eventType: ActivityEventType;
+  actorType: ActivityActorType;
+  actorId: string | null;
+  workspaceId: string | null;
+  sessionId: string | null;
+  taskId: string | null;
+  payload: Record<string, unknown> | null;
+  createdAt: number;
+}
+
+export interface PersistMessageRequest {
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+  toolMetadata?: {
+    tool: string;
+    target: string;
+    status: 'success' | 'error';
+  } | null;
 }
 
 export interface CreateProjectRequest {
@@ -127,6 +215,8 @@ export interface CreateProjectRequest {
   description?: string;
   installationId: string;
   repository: string;
+  githubRepoId?: number;
+  githubRepoNodeId?: string;
   defaultBranch: string;
 }
 

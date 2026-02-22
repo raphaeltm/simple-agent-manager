@@ -1,15 +1,14 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version Change: 1.5.0 → 1.6.0
-Bump Rationale: MINOR - Added Continuous Deployment workflow and GitHub Environments configuration
+Version Change: 1.6.0 → 1.7.0
+Bump Rationale: MINOR - Added Principle XII (Zero-to-Production Deployability)
 
 Modified Principles: None
-Modified Sections:
-  - Development Workflow: Completely rewritten for continuous deployment
+Modified Sections: None
 
 Added Sections:
-  - Continuous Deployment: Philosophy, rules, GitHub Environment configuration table, deployment pipeline
+  - Principle XII: Zero-to-Production Deployability (NON-NEGOTIABLE)
 
 Templates Status:
   - plan-template.md: ✅ Compatible (Constitution Check section references this file)
@@ -18,8 +17,8 @@ Templates Status:
   - checklist-template.md: ✅ Compatible (no direct dependency)
 
 Follow-up TODOs:
-  - Configure GitHub Environment 'production' with required variables and secrets
-  - Test continuous deployment workflow on merge to main
+  - Update spec 018 plan.md Constitution Check to include Principle XII validation
+  - Ensure Durable Object namespace provisioning is in Pulumi stack
 -->
 
 # Simple Agent Manager Constitution
@@ -214,6 +213,41 @@ const ISSUER = 'https://api.workspaces.example.com';
 3. Default values in code (fallback only)
 
 **Rationale:** Hardcoded values require code changes for configuration. This violates twelve-factor principles, complicates deployment across environments, and creates hidden coupling between code and infrastructure.
+
+### XII. Zero-to-Production Deployability (NON-NEGOTIABLE)
+
+This is an open source project. Every architectural decision, infrastructure change, and feature addition
+MUST consider two audiences equally: users upgrading an existing deployment AND users deploying from
+scratch to their own infrastructure accounts.
+
+**Rules:**
+- **From-scratch parity**: Any feature that works on the hosted platform MUST also work for a fresh
+  self-hosted deployment following the setup guide. No "works on our infra but not yours" situations.
+- **Infrastructure as Code for all resources**: Every infrastructure resource (D1 databases, KV namespaces,
+  Durable Object namespaces, R2 buckets, DNS records) MUST be provisionable via Pulumi or documented
+  setup scripts. Manual console clicks are not acceptable as the only setup path.
+- **Migrations must work from zero**: Database migrations MUST be replayable from an empty database to
+  the current state. Fresh installs run the full migration chain. There is no separate "initial schema"
+  to maintain — migrations are the single source of truth for database structure.
+- **Self-hosting docs updated in the same PR**: When adding infrastructure requirements (new bindings,
+  new secrets, new services), update `docs/guides/self-hosting.md` in the same change. Do not defer.
+- **Minimal external dependencies at deploy time**: The deployment should not depend on specific CI
+  providers, specific DNS providers beyond Cloudflare, or any service that the self-hoster cannot
+  substitute. GitHub Actions workflows are conveniences, not requirements.
+- **Architecture Decision Records for infrastructure changes**: When introducing new infrastructure
+  components (e.g., Durable Objects, new storage layers), document the decision in `docs/adr/` with
+  the self-hosting implications explicitly addressed.
+
+**Validation Checklist (for architectural changes):**
+- [ ] Can a new user deploy this from zero using only the setup guide?
+- [ ] Are all new infrastructure resources in the Pulumi stack or documented setup scripts?
+- [ ] Does the deploy workflow handle both "first deploy" and "upgrade" paths?
+- [ ] Are new secrets/env vars documented with descriptions of how to obtain them?
+- [ ] Is there a teardown path that cleanly removes all new resources?
+
+**Rationale:** Open source infrastructure software lives or dies by self-hostability. If deploying from
+scratch is painful or undocumented, the project is effectively closed-source in practice. Every
+architectural choice that makes self-hosting harder narrows the user base and contradicts Principle I.
 
 ## Code Organization Guidelines
 
@@ -797,4 +831,4 @@ and other project documentation, this Constitution takes precedence.
 - Violations should be addressed constructively with reference to specific principles
 - Repeated violations may result in contribution restrictions per Code of Conduct
 
-**Version**: 1.6.0 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-02-01
+**Version**: 1.7.0 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-02-22

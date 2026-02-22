@@ -85,14 +85,14 @@
 
 **Independent Test**: User sends messages in a workspace, stops the workspace, navigates to project session list, sees full conversation preserved.
 
-- [ ] T025 [US3] Create chat persistence service in `apps/api/src/services/chat-persistence.ts`: intercept messages in the existing WebSocket proxy path, call `projectDO.persistMessage()` asynchronously (non-blocking), handle session create/stop lifecycle
-- [ ] T026 [US3] Integrate chat persistence into the WebSocket proxy in `apps/api/src/index.ts` (or the existing workspace subdomain proxy handler): on message from browser → persist user message, on response from VM agent → persist assistant message
-- [ ] T027 [US3] Create chat routes in `apps/api/src/routes/chat.ts`: `GET /api/projects/:projectId/sessions` (list sessions), `GET /api/projects/:projectId/sessions/:sessionId` (session with messages, cursor pagination), `POST /api/projects/:projectId/sessions/:sessionId/messages` (persist message). Register in `apps/api/src/index.ts`
-- [ ] T028 [US3] Write unit tests for chat persistence pipeline in `apps/api/tests/unit/chat-persistence.test.ts`: test message interception, async DO write, error handling (non-blocking on failure), session lifecycle
-- [ ] T029 [P] [US3] Create `ChatSessionList` component in `apps/web/src/components/ChatSessionList.tsx`: list of sessions with topic, status badge, message count, duration, timestamp. Sorted by recency
-- [ ] T030 [P] [US3] Create `ChatSession.tsx` page in `apps/web/src/pages/ChatSession.tsx`: full message history view with role indicators (user/assistant/system/tool), tool call metadata display, cursor pagination for long sessions
-- [ ] T031 [US3] Add chat session list to project detail page in `apps/web/src/pages/Project.tsx`: integrate `ChatSessionList` into the sessions tab, link each session to `ChatSession.tsx`
-- [ ] T032 [US3] Add session resume flow: "Resume" button on stopped sessions that creates a new workspace with session context loaded (pass session ID to workspace creation)
+- [x] T025 [US3] Create chat persistence service in `apps/api/src/services/chat-persistence.ts`: intercept messages in the existing WebSocket proxy path, call `projectDO.persistMessage()` asynchronously (non-blocking), handle session create/stop lifecycle
+- [x] T026 [US3] Integrate chat persistence into the WebSocket proxy in `apps/api/src/index.ts` (or the existing workspace subdomain proxy handler): on message from browser → persist user message, on response from VM agent → persist assistant message
+- [x] T027 [US3] Create chat routes in `apps/api/src/routes/chat.ts`: `GET /api/projects/:projectId/sessions` (list sessions), `GET /api/projects/:projectId/sessions/:sessionId` (session with messages, cursor pagination), `POST /api/projects/:projectId/sessions/:sessionId/messages` (persist message). Register in `apps/api/src/index.ts`
+- [x] T028 [US3] Write unit tests for chat persistence pipeline in `apps/api/tests/unit/chat-persistence.test.ts`: test message interception, async DO write, error handling (non-blocking on failure), session lifecycle
+- [x] T029 [P] [US3] Create `ChatSessionList` component in `apps/web/src/components/ChatSessionList.tsx`: list of sessions with topic, status badge, message count, duration, timestamp. Sorted by recency
+- [x] T030 [P] [US3] Create `ChatSession.tsx` page in `apps/web/src/pages/ChatSession.tsx`: full message history view with role indicators (user/assistant/system/tool), tool call metadata display, cursor pagination for long sessions
+- [x] T031 [US3] Add chat session list to project detail page in `apps/web/src/pages/Project.tsx`: integrate `ChatSessionList` into the sessions tab, link each session to `ChatSession.tsx`
+- [x] T032 [US3] Add session resume flow: "Resume" button on stopped sessions that creates a new workspace with session context loaded (pass session ID to workspace creation)
 
 **Checkpoint**: Chat messages persist through workspace stop. Users can browse and read full session history from project detail.
 
@@ -104,10 +104,10 @@
 
 **Independent Test**: User creates a workspace, runs a chat session, stops it — all events appear in the project activity feed with timestamps.
 
-- [ ] T033 [US4] Add activity event recording calls to existing API routes: workspace creation/stop/restart in `apps/api/src/routes/workspaces.ts`, task status changes in `apps/api/src/routes/tasks.ts`, session start/stop in `apps/api/src/services/chat-persistence.ts` — each calls `projectDO.recordActivityEvent()`
-- [ ] T034 [US4] Create activity routes in `apps/api/src/routes/activity.ts`: `GET /api/projects/:projectId/activity` with `eventType` filter, cursor pagination (`before` param), `limit`. Register in `apps/api/src/index.ts`
-- [ ] T035 [P] [US4] Create `ActivityFeed` component in `apps/web/src/components/ActivityFeed.tsx`: reverse-chronological event timeline with event type icons, actor info, workspace/session links, relative timestamps, "load more" pagination
-- [ ] T036 [US4] Integrate `ActivityFeed` into project detail page in `apps/web/src/pages/Project.tsx`: add activity tab with the feed component
+- [x] T033 [US4] Add activity event recording calls to existing API routes: workspace creation/stop/restart in `apps/api/src/routes/workspaces.ts`, task status changes in `apps/api/src/routes/tasks.ts`, session start/stop in `apps/api/src/services/chat-persistence.ts` — each calls `projectDO.recordActivityEvent()`
+- [x] T034 [US4] Create activity routes in `apps/api/src/routes/activity.ts`: `GET /api/projects/:projectId/activity` with `eventType` filter, cursor pagination (`before` param), `limit`. Register in `apps/api/src/index.ts`
+- [x] T035 [P] [US4] Create `ActivityFeed` component in `apps/web/src/components/ActivityFeed.tsx`: reverse-chronological event timeline with event type icons, actor info, workspace/session links, relative timestamps, "load more" pagination
+- [x] T036 [US4] Integrate `ActivityFeed` into project detail page in `apps/web/src/pages/Project.tsx`: add activity tab with the feed component
 
 **Checkpoint**: Project detail page shows activity feed with workspace, session, and task events.
 
@@ -119,8 +119,8 @@
 
 **Independent Test**: Create a project for "user/repo-a", rename repo on GitHub, see project display updated name automatically.
 
-- [ ] T037 [US5] Update project creation in `apps/api/src/routes/projects.ts`: require `githubRepoId` in `CreateProjectRequest`, store `github_repo_id` and `github_repo_node_id`, enforce unique constraint `(user_id, github_repo_id)`
-- [ ] T038 [US5] Add GitHub webhook handlers for repository events in `apps/api/src/routes/github.ts`: handle `repository.renamed` (update `repository` field by `github_repo_id` lookup), `repository.transferred` (same), `repository.deleted` (set project `status = 'detached'`)
+- [x] T037 [US5] Update project creation in `apps/api/src/routes/projects.ts`: require `githubRepoId` in `CreateProjectRequest`, store `github_repo_id` and `github_repo_node_id`, enforce unique constraint `(user_id, github_repo_id)`
+- [x] T038 [US5] Add GitHub webhook handlers for repository events in `apps/api/src/routes/github.ts`: handle `repository.renamed` (update `repository` field by `github_repo_id` lookup), `repository.transferred` (same), `repository.deleted` (set project `status = 'detached'`)
 - [ ] T039 [US5] Update project creation UI in `apps/web/src/pages/Projects.tsx` (or the create project flow): pass `githubRepoId` from GitHub API repo data when user selects a repository
 - [ ] T040 [US5] Add "detached" state indicator in project UI components: show warning badge on `ProjectSummaryCard` and project detail page when `status === 'detached'`, block new workspace creation for detached projects
 

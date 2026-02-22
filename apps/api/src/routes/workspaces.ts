@@ -40,6 +40,7 @@ import { getInstallationToken } from '../services/github-app';
 import { appendBootLog, getBootLogs } from '../services/boot-log';
 import { requireOwnedProject } from '../middleware/project-auth';
 import { decrypt } from '../services/encryption';
+import * as projectDataService from '../services/project-data';
 
 const workspacesRoutes = new Hono<{ Bindings: Env }>();
 const ACTIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery'] as const);
@@ -625,6 +626,17 @@ workspacesRoutes.post('/', async (c) => {
   );
 
   const created = await getOwnedWorkspace(db, workspaceId, userId);
+
+  // Record activity event for workspace creation
+  if (created.projectId) {
+    c.executionCtx.waitUntil(
+      projectDataService.recordActivityEvent(
+        c.env, created.projectId, 'workspace.created', 'user', userId,
+        workspaceId, null, null, { name: created.name, repository: resolvedRepository }
+      ).catch(() => { /* best-effort */ })
+    );
+  }
+
   return c.json(toWorkspaceResponse(created, c.env.BASE_DOMAIN), 201);
 });
 
@@ -676,6 +688,16 @@ workspacesRoutes.post('/:id/stop', async (c) => {
     })()
   );
 
+  // Record activity event for workspace stop
+  if (workspace.projectId) {
+    c.executionCtx.waitUntil(
+      projectDataService.recordActivityEvent(
+        c.env, workspace.projectId, 'workspace.stopped', 'user', userId,
+        workspace.id, null, null, null
+      ).catch(() => { /* best-effort */ })
+    );
+  }
+
   return c.json({ status: 'stopping' });
 });
 
@@ -717,6 +739,16 @@ workspacesRoutes.post('/:id/restart', async (c) => {
       }
     })()
   );
+
+  // Record activity event for workspace restart
+  if (workspace.projectId) {
+    c.executionCtx.waitUntil(
+      projectDataService.recordActivityEvent(
+        c.env, workspace.projectId, 'workspace.restarted', 'user', userId,
+        workspace.id, null, null, null
+      ).catch(() => { /* best-effort */ })
+    );
+  }
 
   return c.json({ status: 'creating' });
 });

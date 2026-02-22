@@ -1,3 +1,6 @@
+// Re-export Durable Object class for Cloudflare Workers runtime
+export { ProjectData } from './durable-objects/project-data';
+
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
@@ -20,7 +23,10 @@ import { agentSettingsRoutes } from './routes/agent-settings';
 import { clientErrorsRoutes } from './routes/client-errors';
 import { projectsRoutes } from './routes/projects';
 import { tasksRoutes } from './routes/tasks';
+import { chatRoutes } from './routes/chat';
+import { activityRoutes } from './routes/activity';
 import { checkProvisioningTimeouts } from './services/timeout';
+import { migrateOrphanedWorkspaces } from './services/workspace-migration';
 import { getRuntimeLimits } from './services/limits';
 import { recordNodeRoutingMetric } from './services/telemetry';
 
@@ -34,6 +40,8 @@ export interface Env {
   R2: R2Bucket;
   // Workers AI for speech-to-text transcription
   AI: Ai;
+  // Durable Objects
+  PROJECT_DATA: DurableObjectNamespace;
   // Environment variables
   BASE_DOMAIN: string;
   VERSION: string;
@@ -106,6 +114,13 @@ export interface Env {
   HETZNER_API_TIMEOUT_MS?: string;
   CF_API_TIMEOUT_MS?: string;
   NODE_AGENT_REQUEST_TIMEOUT_MS?: string;
+  // Project data DO limits
+  MAX_SESSIONS_PER_PROJECT?: string;
+  MAX_MESSAGES_PER_SESSION?: string;
+  MESSAGE_SIZE_THRESHOLD?: string;
+  ACTIVITY_RETENTION_DAYS?: string;
+  SESSION_IDLE_TIMEOUT_MINUTES?: string;
+  DO_SUMMARY_SYNC_DEBOUNCE_MS?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -283,6 +298,8 @@ app.route('/api/agent-settings', agentSettingsRoutes);
 app.route('/api/client-errors', clientErrorsRoutes);
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
+app.route('/api/projects/:projectId/sessions', chatRoutes);
+app.route('/api/projects/:projectId/activity', activityRoutes);
 
 // 404 handler
 app.notFound((c) => {
@@ -310,6 +327,10 @@ export default {
     // Check for stuck provisioning workspaces
     const timedOut = await checkProvisioningTimeouts(env.DATABASE);
 
-    console.log(`Cron completed: ${timedOut} workspace(s) timed out`);
+    // Migrate orphaned workspaces (those with NULL projectId) to projects
+    const db = drizzle(env.DATABASE, { schema });
+    const migrated = await migrateOrphanedWorkspaces(db);
+
+    console.log(`Cron completed: ${timedOut} workspace(s) timed out, ${migrated} workspace(s) migrated`);
   },
 };
