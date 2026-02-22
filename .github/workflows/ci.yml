@@ -7,6 +7,32 @@ on:
     branches: [main]
 
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      vm-agent: ${{ steps.filter.outputs.vm-agent }}
+      devcontainer: ${{ steps.filter.outputs.devcontainer }}
+      devcontainer-volume-mount: ${{ steps.filter.outputs.devcontainer-volume-mount }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            vm-agent:
+              - 'packages/vm-agent/**'
+              - '.github/workflows/ci.yml'
+            devcontainer:
+              - '.devcontainer/**'
+              - '.github/workflows/ci.yml'
+            devcontainer-volume-mount:
+              - '.devcontainer/**'
+              - 'scripts/ci/**'
+              - 'packages/vm-agent/**'
+              - 'packages/cloud-init/**'
+              - '.github/workflows/ci.yml'
+
   preflight-evidence:
     name: Preflight Evidence
     if: github.event_name == 'pull_request'
@@ -181,6 +207,8 @@ jobs:
 
   vm-agent-test:
     name: VM Agent Test
+    needs: [changes]
+    if: needs.changes.outputs.vm-agent == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -197,6 +225,8 @@ jobs:
 
   vm-agent-integration:
     name: VM Agent Integration
+    needs: [changes]
+    if: needs.changes.outputs.vm-agent == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -226,6 +256,8 @@ jobs:
 
   vm-agent-e2e:
     name: VM Agent E2E
+    needs: [changes]
+    if: needs.changes.outputs.vm-agent == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -251,6 +283,8 @@ jobs:
 
   devcontainer:
     name: Devcontainer Validation
+    needs: [changes]
+    if: needs.changes.outputs.devcontainer == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -433,6 +467,8 @@ jobs:
 
   devcontainer-volume-mount:
     name: Devcontainer Volume Mount
+    needs: [changes]
+    if: needs.changes.outputs.devcontainer-volume-mount == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
