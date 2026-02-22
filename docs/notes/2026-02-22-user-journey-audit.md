@@ -16,6 +16,11 @@
 5. [Structural Tensions](#5-structural-tensions)
 6. [Gap Analysis](#6-gap-analysis)
 7. [Sources & Methodology](#7-sources--methodology)
+8. [Competitive UI/UX Analysis](#8-competitive-uiux-analysis)
+9. [Component-Level UI Issues](#9-component-level-ui-issues)
+10. [Recommended UI Improvements — Prioritized](#10-recommended-ui-improvements--prioritized)
+11. [Implementation Priorities — Summary Matrix](#11-implementation-priorities--summary-matrix)
+12. [Additional Sources (Competitive Research)](#12-additional-sources-competitive-research)
 
 ---
 
@@ -701,3 +706,532 @@ This audit was conducted through:
 **Shared Packages** (`packages/`):
 - `shared/src/` — types, constants, agents
 - `terminal/src/` — terminal component, WebSocket handling
+- `ui/src/` — design system components (Button, Card, StatusBadge, PageLayout, etc.)
+
+---
+
+## 8. Competitive UI/UX Analysis
+
+This section compares SAM's UI patterns against comparable cloud development environment and developer platform products.
+
+### 8.1 GitHub Codespaces
+
+**Dashboard pattern:** Flat list at `github.com/codespaces`. Each codespace is a single row showing repository name, branch, machine type, status, and last used time. A three-dot overflow menu (ellipsis icon) on each row contains: Open in... (browser/VS Code/JetBrains), Rename, Change machine type, Stop codespace, Export changes to a branch, Auto-delete toggle, Delete.
+
+**Key patterns SAM should adopt:**
+- **Overflow menu instead of visible buttons.** Codespaces shows zero visible action buttons per row — everything lives behind a single `...` menu. This keeps the list scannable and removes the visual clutter of 2-4 buttons per card.
+- **Machine type is a detail, not a management surface.** Users pick a machine type at creation time, and can change it later, but there's no "machine dashboard" or "VM detail page." Infrastructure is invisible.
+- **Status is a single pill badge** — not two badges (status + health) like SAM's nodes.
+- **Filtering:** Codespaces provides filters by repository, branch, and status at the top of the list.
+
+**What SAM does better:** Boot log streaming, real-time status polling during transitions, project-level organization.
+
+### 8.2 Gitpod
+
+**Dashboard pattern:** Workspace list with status indicators, repository/branch context, and a primary "New Workspace" button. Workspaces show elapsed time and can be filtered by status.
+
+**Key patterns:**
+- **One-click workspace creation from any repo.** Gitpod's signature UX is `gitpod.io/#https://github.com/org/repo` — prepend the URL and you're in. No prerequisite setup, no forms.
+- **Workspace presets via `.gitpod.yml`.** Configuration lives in the repo, not in a platform UI. This eliminates the "configure runtime" step entirely.
+- **Timeout-based lifecycle.** Workspaces auto-stop after inactivity. No "node management" — all abstracted.
+- **Context URL.** Shows the original trigger (PR, branch, issue) prominently on each workspace card.
+
+**What SAM does better:** Multi-terminal tabs, command palette, chat session persistence, task management.
+
+### 8.3 Coder
+
+**Dashboard pattern:** Template-based workspace creation. The primary abstraction is "Templates" — reusable workspace definitions that declare VM resources, Docker images, IDE preferences, and startup scripts.
+
+**Key patterns:**
+- **Template gallery as the primary creation flow.** Instead of filling a form, users browse and select from pre-defined templates. This is a strong progressive disclosure pattern — the complexity lives in the template definition, not the creation UI.
+- **Workspace list is a simple table** with name, template, status, and last used. Actions are behind an overflow menu.
+- **Agent-based architecture** with transparent resource display (CPU/memory) shown as compact inline badges on workspace rows, not a separate detail page.
+- **Settings organized by concern** — not all on one page. Account, SSH keys, tokens, appearance each get their own route.
+
+**What SAM does better:** Project-level organization, activity feeds, chat session management.
+
+### 8.4 Railway
+
+**Dashboard pattern:** Project-centric. The dashboard shows projects as cards. Each project opens to a canvas-style service graph showing services, databases, and their connections visually.
+
+**Key patterns:**
+- **Canvas/graph view for infrastructure.** Instead of listing nodes and workspaces separately, Railway shows them as connected nodes on a canvas. This makes the relationship between services immediately visible.
+- **Service detail uses tabbed navigation:** Overview, Deployments, Logs, Metrics, Settings, Variables. Each tab is a distinct route (`/project/:id/service/:id/settings`).
+- **Compact deployment cards** with commit message, branch, status badge, and timing — all in a single scannable row.
+- **Environment selector** as a top-level dropdown that filters the entire project view. Production, staging, development environments are first-class.
+- **Split button pattern:** The primary deploy button has a dropdown for "Deploy from branch," "Deploy from commit," etc.
+
+**What SAM should adopt:**
+- **Tab-based service detail** instead of putting everything on one scrollable page.
+- **Environment variables as a first-class tab**, not nested inside an "Overview" scroll.
+- **Breadcrumbs are always present** and clickable, showing the full path: Workspace > Project > Service.
+
+### 8.5 Vercel
+
+**Dashboard pattern:** Project cards in a grid. Each card shows the project name, linked repository, latest deployment status, production URL, and last updated time. Cards are compact — approximately 3 lines of information.
+
+**Key patterns:**
+- **Deployment list is the project's primary view.** When you click a project, you see recent deployments (not a settings page). Each deployment row shows: commit message, branch, status, timing, and a "Visit" link.
+- **Three environments (Production, Preview, Development)** shown as tabs or filters.
+- **Filter dropdowns** for branch, status, and environment — compact horizontal bar above the deployment list.
+- **Settings are deeply routed:** `/project/:name/settings`, `/project/:name/settings/environment-variables`, `/project/:name/settings/domains`, etc. Each concern has its own page.
+- **Project cards are clickable without any visible buttons.** The entire card is the click target. Actions (settings, domains, etc.) live inside the project detail.
+- **Production URL** shown prominently — the most important output of the system.
+
+**What SAM should adopt:**
+- **Cards as clickable surfaces** without embedded action buttons. Navigate first, act second.
+- **Deeply routed settings** instead of everything on one page.
+- **Show the "output" prominently** — for SAM this means the workspace URL or active session count, not just metadata.
+
+### 8.6 Render
+
+**Dashboard pattern:** Left-side navigation menu that adapts to context. At the workspace level, the sidebar shows services grouped by type. At the service level, the sidebar shows Logs, Metrics, Events, Settings.
+
+**Key patterns:**
+- **Contextual left sidebar.** The sidebar content changes based on what you're viewing. This is a strong navigation pattern for multi-level hierarchies.
+- **Breadcrumb header** showing exactly where you are: Workspace > Project > Service. Clickable to jump between levels.
+- **Service detail tabs:** Events, Logs, Metrics, Settings — each as a separate route, not inline sections.
+- **Event timeline** with deploy events, instance failures, and scaling events overlaid on metric graphs. Events are filterable by type.
+- **Themes:** Light and dark modes with high-contrast variants.
+
+**What SAM should adopt:**
+- **Contextual sidebar navigation** — SAM already has this on the workspace detail page but nowhere else.
+- **Event filtering** on activity feeds.
+- **Metric-event overlay** — showing events on top of node metrics graphs.
+
+### 8.7 Linear (Task Management Patterns)
+
+**Key patterns:**
+- **Ultra-compact task rows:** Title, status icon, priority icon, assignee avatar, due date — all in one horizontally dense row. No card chrome, no borders between items — just a list with hover highlighting.
+- **Keyboard-first interaction.** `c` to create, `e` to edit, `j/k` to navigate, space to select, `x` to close. Every action has a single-key shortcut.
+- **Multi-view:** List, Board (Kanban), and Timeline views toggled with a single click. Same data, different layouts.
+- **Inline editing.** Click any field to edit it in place — title, status, priority, assignee. No modal, no separate page for simple edits.
+- **Command palette** (`Cmd+K`) for everything — create, search, navigate, bulk operations.
+- **Bulk selection** with checkboxes and batch actions bar.
+- **Sub-issues and dependencies** shown inline with expand/collapse.
+- **Filter bar** with composable filters: status, priority, assignee, label, due date. Filters are saveable as "views."
+
+**What SAM should adopt for task management:**
+- **Compact rows instead of cards** for task lists.
+- **Inline status/priority editing** without navigating to task detail.
+- **Keyboard shortcuts** for the task view (currently only the workspace page has shortcuts).
+- **Board/Kanban view** as an alternative to the list.
+
+### 8.8 Competitive Summary
+
+| Pattern | Codespaces | Gitpod | Coder | Railway | Vercel | Render | Linear | **SAM** |
+|---------|-----------|--------|-------|---------|--------|--------|--------|---------|
+| Overflow menus (vs visible buttons) | Yes | Yes | Yes | Yes | Yes | Yes | Yes | **No** |
+| Button groups / split buttons | No | No | No | Yes | No | No | No | **No** |
+| Tabbed detail pages | N/A | N/A | Yes | Yes | Yes | Yes | N/A | **Partial** |
+| Deeply routed settings | N/A | Yes | Yes | Yes | Yes | Yes | Yes | **No** |
+| Breadcrumbs on all pages | Yes | Yes | Yes | Yes | Yes | Yes | N/A | **Partial** |
+| Contextual sidebar nav | N/A | N/A | No | No | No | Yes | Yes | **Workspace only** |
+| Command palette | N/A | N/A | No | No | No | No | Yes | **Workspace only** |
+| Keyboard shortcuts outside IDE | No | No | No | No | No | No | Yes | **No** |
+| Compact entity rows | Yes | Yes | Yes | Yes | Yes | Yes | Yes | **No (cards)** |
+| Infrastructure abstraction | Full | Full | Partial | Full | Full | Full | N/A | **None** |
+| Template/preset creation | No | Yes | Yes | Yes | No | No | N/A | **No** |
+
+---
+
+## 9. Component-Level UI Issues
+
+This section catalogs specific, code-level UI problems identified through codebase analysis of `apps/web/src/` and `packages/ui/src/`.
+
+### 9.1 Button Patterns
+
+**Problem: Dashboard quick actions use oversized buttons for navigation.**
+
+The dashboard renders 4 navigation buttons as `size="lg"` (56px height, full width on mobile), plus an info card in a 5-column grid. These are navigation links, not primary CTAs — they don't need to be 56px tall.
+
+```
+Current: 5 equally-weighted lg buttons in a grid
+Better:  Compact nav links/pills, with "New Workspace" as the sole prominent CTA
+```
+
+**Problem: WorkspaceCard uses custom inline button styling instead of the Button component.**
+
+`WorkspaceCard.tsx` defines its own `actionButtonStyle` object (`padding: '4px 12px', fontSize: '0.75rem'`) and manually implements hover with `onMouseEnter`/`onMouseLeave`. This bypasses the shared `Button` component entirely. On mobile, these custom buttons are conditionally resized to `minHeight: '56px'` via the `isMobile` hook.
+
+```
+Current: 6+ inline-styled <button> elements with manual hover logic per card
+Better:  Button component with size="sm" variant, hover handled by CSS
+```
+
+**Problem: Node detail page uses inline style overrides for the delete button.**
+
+`Node.tsx` renders the delete button as `variant="secondary"` with inline `style={{ borderColor: 'var(--sam-color-danger)', color: 'var(--sam-color-danger)' }}` instead of using `variant="danger"`. This creates visual inconsistency — the danger variant exists but isn't used.
+
+**Problem: Project detail page has three full-sized action buttons on the header.**
+
+"Launch Workspace", "Edit project", and "Delete project" are all rendered as standard `md` size buttons (44px) in a horizontal row. There's no visual separation between the primary action (Launch) and the destructive action (Delete). On narrow viewports, these three buttons wrap and dominate the header.
+
+```
+Current: [Launch Workspace] [Edit project] [Delete project]
+Better:  [Launch Workspace]  ...overflow menu containing Edit and Delete
+```
+
+### 9.2 Missing UI Primitives
+
+The `packages/ui/` component library has: Button, Card, StatusBadge, Alert, Input, Select, Spinner, Skeleton, Dialog, Toast, PageLayout, Container, Typography.
+
+**Missing primitives needed for the improvements below:**
+
+| Component | Use Case | Industry Precedent |
+|-----------|----------|-------------------|
+| **ButtonGroup** | Group related actions with shared border radius | Material UI, Atlassian, shadcn/ui |
+| **DropdownMenu / OverflowMenu** | Three-dot menu for secondary actions | Every product surveyed uses this |
+| **SplitButton** | Primary action + dropdown for variants | Railway deploy button, Atlassian |
+| **Tabs** | Routed tab navigation | Railway, Render, Vercel service detail |
+| **Breadcrumb** | Hierarchical navigation trail | Render, Railway, Vercel |
+| **Sidebar / NavMenu** | Contextual left navigation | Render, Linear |
+| **ActionBar / Toolbar** | Consistent header with filters + actions | Linear, Vercel filter bar |
+| **Badge / Tag** | Compact metadata display | All products |
+| **Tooltip** | Hover explanations for icons/terms | All products |
+| **EmptyState** | Structured empty state with icon, text, action | Codespaces, Gitpod, Vercel |
+
+### 9.3 Layout and Routing Issues
+
+**Problem: No persistent navigation.**
+
+The app has no global sidebar or top navigation bar. Each page renders its own `PageLayout` with a back button and title. Navigation between sections (Dashboard, Projects, Nodes, Settings) requires going back to the dashboard and clicking the right quick-action button. This is flat, not hierarchical.
+
+```
+Current: PageLayout with back arrow → Dashboard → quick action buttons → page
+Better:  Persistent sidebar or top nav with: Dashboard, Projects, Nodes, Settings
+```
+
+**Problem: Project detail page combines too many concerns in one scroll.**
+
+`Project.tsx` is 450+ lines and renders 2 tabs (Overview, Tasks). The Overview tab contains 5 inline sections: summary stats, edit form (toggleable), runtime config (env vars + files), chat sessions, and activity feed. These should be separate sub-routes or collapsible panels.
+
+```
+Current: /projects/:id  →  one long scroll with Overview/Tasks tabs
+Better:  /projects/:id/overview, /projects/:id/tasks, /projects/:id/settings, /projects/:id/sessions, /projects/:id/activity
+```
+
+**Problem: Settings page puts everything on one page.**
+
+Four sections (Hetzner, GitHub App, Agent Keys, Agent Settings) are all vertically stacked on `/settings`. Render and Vercel both route settings into sub-pages. As more settings are added, this page will become unwieldy.
+
+```
+Current: /settings  →  4 vertical sections
+Better:  /settings/cloud, /settings/github, /settings/agent-keys, /settings/agent-config
+         with a left sidebar or tab strip for navigation
+```
+
+**Problem: Inline forms instead of modals or routes.**
+
+Project creation (`Projects.tsx`), task creation (`Project.tsx`), and project editing are all inline toggle sections that push content down. This loses URL state (can't link to "create project"), and the form competes visually with the list it's embedded in.
+
+```
+Current: Click "New Project" → inline form appears above list
+Better:  Click "New Project" → navigate to /projects/new (or open a modal)
+```
+
+### 9.4 Card and Entity Display
+
+**Problem: Workspace cards are visually heavy.**
+
+Each `WorkspaceCard` shows: name, status badge, repository, branch, VM size, location, node ID, optional error message, last activity timestamp, and 2-3 action buttons. This is 5-7 lines of content per card. In a 3-column grid, the dashboard becomes a wall of text.
+
+Competing products use a single-row table layout (Codespaces, Coder) or ultra-compact cards (Vercel) with secondary information hidden behind click or hover.
+
+```
+Current: Card with name + badge + repo + branch·vmSize·location·nodeId + error + timestamp + buttons
+Better:  Compact row: [Status] Name — repo@branch — last active — [...] menu
+```
+
+**Problem: Node list items show too much inline metadata.**
+
+Each node row shows: name, status badge, health badge, heartbeat timestamp, and 3 metric badges (LOAD, MEM, DISK). This is the right information but presented too densely.
+
+```
+Current: [Running] [Healthy] node-name — Heartbeat: ... — [LOAD 0.5] [MEM 45%] [DISK 23%]
+Better:  [Running] node-name — 3 workspaces — [...] menu (metrics on detail page)
+```
+
+**Problem: Project list items use `<button>` styled as cards instead of the Card component.**
+
+`Projects.tsx` renders each project as a `<button>` with inline styles mimicking a card. This bypasses the shared `Card` component and creates inconsistency with `WorkspaceCard` and `ProjectSummaryCard`.
+
+### 9.5 Spacing and Visual Hierarchy
+
+**Problem: Inconsistent section spacing.**
+
+Dashboard uses `marginBottom: 'var(--sam-space-8)'` (32px) between major sections. Project detail uses `gap: 'var(--sam-space-4)'` (16px). Node detail uses `gap: 'var(--sam-space-6)'` (24px). There's no standard for "space between page sections."
+
+**Problem: Typography scale is too flat.**
+
+Page titles use `clamp(1.125rem, 2vw, 1.375rem)` via PageLayout. Section headings use `1.125rem`. Card titles use `0.875rem`. The difference between a page title and a section heading is 0-0.25rem — barely distinguishable.
+
+```
+Suggested scale:
+  Page title:       1.5rem, weight 700
+  Section heading:  1.125rem, weight 600
+  Card title:       0.9375rem, weight 500
+  Body text:        0.875rem, weight 400
+  Caption/meta:     0.75rem, weight 400
+```
+
+**Problem: Form fields are too tightly spaced.**
+
+Runtime config forms in `Project.tsx` use `gap: 'var(--sam-space-2)'` (8px) between fields. This is cramped. Industry standard for form field spacing is 16-24px.
+
+### 9.6 Inline Styles vs. CSS
+
+**Problem: Repetitive inline style objects across pages.**
+
+The pattern `{ border: '1px solid var(--sam-color-border-default)', borderRadius: 'var(--sam-radius-md)', background: 'var(--sam-color-bg-surface)', padding: 'var(--sam-space-4)' }` appears in Projects.tsx, Project.tsx, Node.tsx, and many component files. This should be a shared component (the `Card` component exists but isn't consistently used).
+
+**Problem: Responsive styles use inline `<style>` tags.**
+
+Dashboard, Project, and other pages inject `<style>` blocks for responsive grid definitions (e.g., `.sam-quick-actions { grid-template-columns: 1fr; }`). This mixes concerns and makes it hard to find all responsive rules.
+
+**Problem: Hardcoded colors alongside CSS variables.**
+
+WorkspaceCard uses hardcoded `'rgba(239, 68, 68, 0.1)'` for hover backgrounds and `'#f87171'` for error text. Settings page uses `'rgba(168, 85, 247, 0.15)'` for icon backgrounds. These should be derived from the token system.
+
+---
+
+## 10. Recommended UI Improvements — Prioritized
+
+Based on the competitive analysis, component audit, and gap analysis, here are concrete improvements ranked by impact and feasibility.
+
+### Tier 1: High Impact, Moderate Effort (Do First)
+
+#### R1: Add persistent top navigation
+
+**Problem:** No way to navigate between Dashboard, Projects, Nodes, Settings without going back to the Dashboard first.
+
+**Solution:** Add a compact top navigation bar to `PageLayout` with links to the four main sections. The dashboard quick-action buttons then become redundant and can be removed or repurposed as content (e.g., stats/summary cards).
+
+**Precedent:** Vercel, Railway, Render, Gitpod all have persistent nav.
+
+**Impact:** Reduces navigation clicks by 1-2 per task. Makes the app feel like a cohesive product instead of a collection of pages.
+
+#### R2: Replace visible card buttons with overflow menus
+
+**Problem:** WorkspaceCard shows 2-3 visible action buttons (Open, Stop, Delete, Restart). Node list shows status + health + metrics inline. This creates visual clutter.
+
+**Solution:** Add a `DropdownMenu` component to `packages/ui/`. Replace visible action buttons on cards/rows with a single `...` overflow menu. Keep only the primary action visible (e.g., "Open" for running workspaces).
+
+**Precedent:** GitHub Codespaces, Gitpod, Coder, Vercel — all use overflow menus on entity lists.
+
+**Impact:** Dramatically reduces visual noise on dashboard and list pages. Makes cards scannable.
+
+#### R3: Route project detail into sub-pages
+
+**Problem:** Project detail page is a 450+ line single component with 2 tabs and 5+ inline sections on the Overview tab.
+
+**Solution:** Break into sub-routes:
+- `/projects/:id` → Overview (summary + recent activity)
+- `/projects/:id/tasks` → Task list with filters
+- `/projects/:id/sessions` → Chat session list
+- `/projects/:id/settings` → Runtime config + project edit
+- `/projects/:id/activity` → Full activity feed
+
+Use a tab strip or sidebar for navigation between sub-routes.
+
+**Precedent:** Railway (service tabs), Vercel (project tabs), Render (service sidebar).
+
+**Impact:** Reduces page complexity, improves URL shareability, makes each concern independently accessible.
+
+#### R4: Create compact entity rows as an alternative to cards
+
+**Problem:** Workspace and node cards are visually heavy with 5-7 lines of content each.
+
+**Solution:** For list views, offer a compact row format: `[StatusDot] Name — repo@branch — last active — [...]`. Cards can remain for the dashboard summary or grid view.
+
+**Precedent:** GitHub Codespaces (table rows), Linear (compact rows), Coder (table rows).
+
+**Impact:** Users with many workspaces/nodes can scan the list much faster.
+
+### Tier 2: High Impact, Higher Effort
+
+#### R5: Add persistent sidebar navigation
+
+**Problem:** Navigation is flat — each page is independent with no hierarchy.
+
+**Solution:** Add an optional collapsible sidebar that shows:
+- Dashboard (home)
+- Projects (expandable to show each project)
+- Nodes
+- Settings
+
+The sidebar adapts to context: when viewing a project, it shows that project's sub-navigation (Overview, Tasks, Sessions, Settings, Activity).
+
+**Precedent:** Render (contextual sidebar), Linear (sidebar with projects).
+
+**Impact:** Provides hierarchical navigation, makes entity relationships visible, reduces back-and-forward navigation.
+
+#### R6: Build a Tabs component and use it consistently
+
+**Problem:** Project detail uses custom tab styling via `<style>` tags. No reusable tab component exists.
+
+**Solution:** Create a `Tabs` component in `packages/ui/` that:
+- Renders a horizontal tab strip with underline indicator
+- Integrates with React Router for route-based tabs
+- Supports URL search param-based tabs for simpler cases
+- Handles keyboard navigation (arrow keys)
+
+Use it in: Project detail, Node detail (overview / resources / events), Settings.
+
+**Precedent:** Every product surveyed uses tabs for detail page sections.
+
+#### R7: Implement an onboarding checklist
+
+**Problem:** New users land on an empty dashboard with no guidance through the 3-step setup process.
+
+**Solution:** Show a checklist card on the dashboard for users who haven't completed setup:
+1. Connect Hetzner Cloud (link to settings)
+2. Install GitHub App (link to settings)
+3. Create your first workspace (link to create)
+
+Each step shows a completion indicator. The checklist auto-dismisses when all steps are done.
+
+**Precedent:** Formbricks, Userpilot patterns. Gitpod's "connect repo" flow. Vercel's project import wizard.
+
+**Impact:** Guides new users through the critical path. Reduces the "now what?" moment after first login.
+
+### Tier 3: Medium Impact, Moderate Effort
+
+#### R8: Route settings into sub-pages
+
+**Problem:** All settings on one vertically stacked page. Will become unwieldy as settings grow.
+
+**Solution:** Route into: `/settings/cloud`, `/settings/github`, `/settings/agent-keys`, `/settings/agent-config`. Add a left sidebar or tab strip for navigation.
+
+**Precedent:** Coder, Vercel, Render all use routed settings.
+
+#### R9: Make Dashboard project-first
+
+**Problem:** Dashboard leads with "New Workspace" but the architecture is project-first. This creates a tension (Structural Tension T2 from the audit).
+
+**Solution:** Restructure the dashboard to lead with projects:
+- Recent projects section (top)
+- Active workspaces section (grouped by project)
+- Quick actions reduced to a compact bar: [+ New Project] [Settings]
+- Orphaned workspaces (not linked to a project) shown separately
+
+**Precedent:** Railway (project-centric dashboard), Vercel (project cards as primary).
+
+#### R10: Replace inline forms with modals or routes
+
+**Problem:** Project creation, task creation, and project editing use inline toggle forms that push content down and lose URL state.
+
+**Solution:**
+- Project creation → `/projects/new` route (or modal)
+- Task creation → Modal or slide-over panel
+- Project editing → `/projects/:id/settings` route
+
+**Precedent:** Vercel (import project page), Linear (modal for new issue, `c` shortcut).
+
+#### R11: Add a ButtonGroup and SplitButton to the design system
+
+**Problem:** No way to visually group related buttons. Node detail shows "Create Workspace," "Stop Node," "Delete Node" as three equal-weight standalone buttons.
+
+**Solution:** Create `ButtonGroup` (shared border radius, no gap) and `SplitButton` (primary action + dropdown) components.
+
+Use cases:
+- Node detail: `[Create Workspace]` primary + `[Stop | Delete ▾]` split
+- Workspace card: `[Open ▾]` split (Open in browser / Open in VS Code)
+- Task actions: `[Ready ▾]` split for status transitions
+
+**Precedent:** Material UI ButtonGroup, Atlassian SplitButton, shadcn/ui ButtonGroup.
+
+#### R12: Standardize the typography scale
+
+**Problem:** 0.25rem difference between page titles and section headings. Card titles at 0.875rem are the same size as body text.
+
+**Solution:** Define and enforce a typography scale in `packages/ui/`:
+```
+--sam-font-size-xs:    0.75rem    (captions, timestamps)
+--sam-font-size-sm:    0.8125rem  (secondary text, metadata)
+--sam-font-size-base:  0.875rem   (body text)
+--sam-font-size-md:    0.9375rem  (card titles, labels)
+--sam-font-size-lg:    1.125rem   (section headings)
+--sam-font-size-xl:    1.375rem   (page titles)
+--sam-font-size-2xl:   1.75rem    (dashboard welcome)
+```
+
+### Tier 4: Lower Priority but Valuable
+
+#### R13: Add keyboard shortcuts to non-workspace pages
+
+Workspace detail has 15+ shortcuts. The rest of the app has zero. Adding even basic shortcuts (`n` for new, `/` for search, `j/k` for navigation) would bring consistency.
+
+**Precedent:** Linear (keyboard shortcuts everywhere), GitHub (keyboard shortcuts on all pages).
+
+#### R14: Add a global command palette
+
+Extend the workspace's command palette to work globally across the app. `Cmd+K` anywhere should search across projects, workspaces, nodes, and settings.
+
+**Precedent:** Linear, Vercel, Raycast-style command palettes.
+
+#### R15: Add tooltip component for contextual help
+
+Many UI elements would benefit from hover explanations: "What is a node?", "What does rebuild do vs. restart?", "Why is my workspace in recovery?"
+
+**Precedent:** Every product surveyed has tooltips on non-obvious elements.
+
+#### R16: Add Breadcrumb component and use everywhere
+
+Create a reusable `Breadcrumb` component. Currently Node detail has hand-coded breadcrumbs, Project detail has a partial breadcrumb, Workspace detail has none.
+
+**Precedent:** Render, Railway, Vercel all use consistent breadcrumbs.
+
+---
+
+## 11. Implementation Priorities — Summary Matrix
+
+| # | Recommendation | Impact | Effort | Dependencies |
+|---|---------------|--------|--------|-------------|
+| R1 | Persistent top navigation | High | Medium | None |
+| R2 | Overflow menus on cards | High | Medium | DropdownMenu component |
+| R3 | Route project detail sub-pages | High | Medium | Tabs component (R6) |
+| R4 | Compact entity rows | High | Low | None |
+| R5 | Persistent sidebar navigation | High | High | R1 (replaces top nav at scale) |
+| R6 | Tabs component | High | Medium | None |
+| R7 | Onboarding checklist | High | Medium | None |
+| R8 | Route settings sub-pages | Medium | Medium | Tabs component (R6) |
+| R9 | Project-first dashboard | Medium | Medium | R1 or R5 |
+| R10 | Replace inline forms | Medium | Medium | None |
+| R11 | ButtonGroup / SplitButton | Medium | Low | None |
+| R12 | Typography scale | Medium | Low | None |
+| R13 | Global keyboard shortcuts | Low | Medium | None |
+| R14 | Global command palette | Low | High | R13 |
+| R15 | Tooltip component | Low | Low | None |
+| R16 | Breadcrumb component | Low | Low | None |
+
+**Suggested implementation order:**
+
+**Phase 1 (Foundation):** R12 (typography), R11 (ButtonGroup/SplitButton), R16 (Breadcrumb), R15 (Tooltip) — build the missing primitives.
+
+**Phase 2 (Navigation):** R1 (persistent nav), R6 (Tabs component), R2 (overflow menus) — fix the navigation model and reduce visual clutter.
+
+**Phase 3 (Page Structure):** R3 (project sub-routes), R8 (settings sub-routes), R10 (replace inline forms), R4 (compact rows) — restructure the information architecture.
+
+**Phase 4 (Refinement):** R7 (onboarding), R9 (project-first dashboard), R5 (sidebar), R13/R14 (keyboard shortcuts).
+
+---
+
+## 12. Additional Sources (Competitive Research)
+
+- [GitHub Codespaces Documentation](https://docs.github.com/en/codespaces) — Workspace management, three-dot menu patterns
+- [GitHub Codespaces Overview](https://github.com/features/codespaces) — Feature overview and machine type selection
+- [Gitpod Documentation](https://www.gitpod.io/docs) — Workspace presets, `.gitpod.yml` configuration
+- [Coder Documentation](https://coder.com/docs) — Template-based workspace creation, agent architecture
+- [Railway Documentation](https://docs.railway.com) — Project canvas, service tabs, deployment patterns
+- [Vercel Deployments Documentation](https://vercel.com/docs/deployments) — Project cards, deployment filtering, environment selector
+- [Vercel Project Settings](https://vercel.com/docs/project-configuration/project-settings) — Deeply routed settings pattern
+- [Render Dashboard Documentation](https://render.com/docs/render-dashboard) — Contextual sidebar, breadcrumb navigation
+- [Render Blog: New CLI and Refreshed Dashboard](https://render.com/blog/introducing-renders-new-cli-and-refreshed-dashboard) — Dashboard redesign principles
+- [Render Service Metrics](https://render.com/docs/service-metrics) — Metric-event overlay patterns
+- [Linear Method](https://linear.app/method) — Keyboard-first design, compact rows, multi-view patterns
+- [Nielsen Norman Group: Split Buttons](https://www.nngroup.com/articles/split-buttons/) — Split button UX patterns and discoverability
+- [Atlassian Design System: Split Button](https://atlassian.design/components/button/split-button/) — Split button implementation reference
+- [shadcn/ui: Split Button with Dropdown](https://www.shadcn.io/patterns/button-group-advanced-1) — React implementation of split button pattern
+- [Material UI: React Button Group](https://mui.com/material-ui/react-button-group/) — ButtonGroup component reference
+- [Andrew Coyle: Drop-Down Button vs. Split Button](https://coyleandrew.medium.com/drop-down-button-vs-split-button-f8e539fc0b78) — Pattern selection guidance
