@@ -663,6 +663,19 @@ export function Workspace() {
     navigate(`/workspaces/${id}?${params.toString()}`);
   }, [id, navigate, searchParams]);
 
+  const handleGitDiffToFileBrowser = useCallback(
+    (filePath: string) => {
+      const params = new URLSearchParams(searchParams);
+      params.delete('git');
+      params.delete('file');
+      params.delete('staged');
+      params.set('files', 'view');
+      params.set('path', filePath);
+      navigate(`/workspaces/${id}?${params.toString()}`);
+    },
+    [id, navigate, searchParams]
+  );
+
   // ── File browser navigation ──
   const handleOpenFileBrowser = useCallback(() => {
     const params = new URLSearchParams(searchParams);
@@ -2048,6 +2061,7 @@ export function Workspace() {
           isMobile={isMobile}
           onBack={handleBackFromGitDiff}
           onClose={handleCloseGitPanel}
+          onViewInFileBrowser={handleGitDiffToFileBrowser}
         />
       )}
 
