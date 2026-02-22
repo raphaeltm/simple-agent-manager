@@ -114,6 +114,43 @@ export function ProjectSettings() {
     }
   };
 
+  const inputStyle: React.CSSProperties = {
+    display: 'block',
+    width: '100%',
+    padding: '0.375rem 0.625rem',
+    minHeight: '36px',
+    border: '1px solid var(--sam-color-border-default)',
+    borderRadius: 'var(--sam-radius-sm)',
+    backgroundColor: 'var(--sam-color-bg-inset)',
+    color: 'var(--sam-color-fg-primary)',
+    fontSize: '0.8125rem',
+    fontFamily: 'inherit',
+    boxSizing: 'border-box',
+  };
+
+  const listItemStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'var(--sam-space-2)',
+    padding: '0.375rem 0.5rem',
+    borderBottom: '1px solid var(--sam-color-border-default)',
+    fontSize: '0.8125rem',
+  };
+
+  const deleteButtonStyle: React.CSSProperties = {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    color: 'var(--sam-color-fg-muted)',
+    padding: '4px',
+    borderRadius: 'var(--sam-radius-sm)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    transition: 'color 150ms',
+  };
+
   return (
     <section
       style={{
@@ -139,67 +176,88 @@ export function ProjectSettings() {
           {/* Environment Variables */}
           <div style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
             <h3 className="sam-type-card-title" style={{ margin: 0, color: 'var(--sam-color-fg-primary)' }}>Environment Variables</h3>
-            <div style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
-              <input
-                aria-label="Runtime env key"
-                placeholder="API_TOKEN"
-                value={envKeyInput}
-                onChange={(event) => setEnvKeyInput(event.currentTarget.value)}
-              />
-              <input
-                aria-label="Runtime env value"
-                placeholder="Value"
-                value={envValueInput}
-                onChange={(event) => setEnvValueInput(event.currentTarget.value)}
-              />
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', fontSize: 'var(--sam-type-caption-size)' }}>
+
+            {/* Add form — key and value on same row */}
+            <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginBottom: '2px' }}>Key</label>
                 <input
-                  type="checkbox"
-                  checked={envSecretInput}
-                  onChange={(event) => setEnvSecretInput(event.currentTarget.checked)}
+                  type="text"
+                  aria-label="Runtime env key"
+                  placeholder="API_TOKEN"
+                  value={envKeyInput}
+                  onChange={(event) => setEnvKeyInput(event.currentTarget.value)}
+                  style={inputStyle}
                 />
-                Secret
-              </label>
-              <Button
-                variant="secondary"
-                onClick={handleUpsertEnvVar}
-                loading={savingRuntimeConfig}
-                disabled={savingRuntimeConfig}
-              >
-                Save
-              </Button>
+              </div>
+              <div style={{ flex: '2 1 200px', minWidth: 0 }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginBottom: '2px' }}>Value</label>
+                <input
+                  type="text"
+                  aria-label="Runtime env value"
+                  placeholder="Value"
+                  value={envValueInput}
+                  onChange={(event) => setEnvValueInput(event.currentTarget.value)}
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', flexShrink: 0 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  <input
+                    type="checkbox"
+                    checked={envSecretInput}
+                    onChange={(event) => setEnvSecretInput(event.currentTarget.checked)}
+                  />
+                  Secret
+                </label>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleUpsertEnvVar}
+                  loading={savingRuntimeConfig}
+                  disabled={savingRuntimeConfig}
+                  style={{ minHeight: '36px' }}
+                >
+                  Add
+                </Button>
+              </div>
             </div>
+
+            {/* Env var list */}
             {runtimeConfig.envVars.length === 0 ? (
-              <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: 'var(--sam-type-caption-size)' }}>
-                No runtime env vars configured.
+              <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.75rem', padding: '0.25rem 0' }}>
+                No environment variables configured.
               </div>
             ) : (
-              <div style={{ display: 'grid', gap: '0.5rem' }}>
-                {runtimeConfig.envVars.map((item) => (
+              <div style={{ border: '1px solid var(--sam-color-border-default)', borderRadius: 'var(--sam-radius-sm)', overflow: 'hidden' }}>
+                {runtimeConfig.envVars.map((item, idx) => (
                   <div
                     key={item.key}
                     style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      gap: 'var(--sam-space-2)',
-                      alignItems: 'center',
-                      fontSize: 'var(--sam-type-caption-size)',
+                      ...listItemStyle,
+                      borderBottom: idx === runtimeConfig.envVars.length - 1 ? 'none' : listItemStyle.borderBottom,
                     }}
                   >
-                    <div>
-                      <strong>{item.key}</strong>{' '}
-                      <span style={{ color: 'var(--sam-color-fg-muted)' }}>
-                        {item.isSecret ? '••••••' : item.value}
-                      </span>
-                    </div>
-                    <Button
-                      variant="danger"
-                      size="sm"
+                    <code style={{ fontWeight: 600, color: 'var(--sam-color-fg-primary)', fontSize: '0.8125rem' }}>{item.key}</code>
+                    <span style={{ color: 'var(--sam-color-fg-muted)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      = {item.isSecret ? '••••••' : item.value}
+                    </span>
+                    {item.isSecret && (
+                      <span style={{ fontSize: '0.6875rem', color: 'var(--sam-color-fg-muted)', backgroundColor: 'var(--sam-color-bg-inset)', padding: '1px 6px', borderRadius: 'var(--sam-radius-sm)', flexShrink: 0 }}>secret</span>
+                    )}
+                    <button
                       onClick={() => void handleDeleteEnvVar(item.key)}
                       disabled={savingRuntimeConfig}
+                      style={deleteButtonStyle}
+                      aria-label={`Remove ${item.key}`}
+                      title={`Remove ${item.key}`}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--sam-color-danger)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--sam-color-fg-muted)'; }}
                     >
-                      Remove
-                    </Button>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
                   </div>
                 ))}
               </div>
@@ -209,22 +267,33 @@ export function ProjectSettings() {
           {/* Runtime Files */}
           <div style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
             <h3 className="sam-type-card-title" style={{ margin: 0, color: 'var(--sam-color-fg-primary)' }}>Runtime Files</h3>
+
+            {/* Add form */}
             <div style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
-              <input
-                aria-label="Runtime file path"
-                placeholder=".env.local"
-                value={filePathInput}
-                onChange={(event) => setFilePathInput(event.currentTarget.value)}
-              />
-              <textarea
-                aria-label="Runtime file content"
-                placeholder="FOO=bar"
-                rows={4}
-                value={fileContentInput}
-                onChange={(event) => setFileContentInput(event.currentTarget.value)}
-              />
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginBottom: '2px' }}>File path</label>
+                <input
+                  type="text"
+                  aria-label="Runtime file path"
+                  placeholder=".env.local"
+                  value={filePathInput}
+                  onChange={(event) => setFilePathInput(event.currentTarget.value)}
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginBottom: '2px' }}>Content</label>
+                <textarea
+                  aria-label="Runtime file content"
+                  placeholder="FOO=bar"
+                  rows={3}
+                  value={fileContentInput}
+                  onChange={(event) => setFileContentInput(event.currentTarget.value)}
+                  style={{ ...inputStyle, minHeight: 'auto', resize: 'vertical', fontFamily: 'var(--sam-font-mono, monospace)', fontSize: '0.8125rem' }}
+                />
+              </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', fontSize: 'var(--sam-type-caption-size)' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', cursor: 'pointer' }}>
                   <input
                     type="checkbox"
                     checked={fileSecretInput}
@@ -234,45 +303,50 @@ export function ProjectSettings() {
                 </label>
                 <Button
                   variant="secondary"
+                  size="sm"
                   onClick={handleUpsertFile}
                   loading={savingRuntimeConfig}
                   disabled={savingRuntimeConfig}
+                  style={{ minHeight: '36px' }}
                 >
-                  Save file
+                  Add file
                 </Button>
               </div>
             </div>
+
+            {/* File list */}
             {runtimeConfig.files.length === 0 ? (
-              <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: 'var(--sam-type-caption-size)' }}>
+              <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.75rem', padding: '0.25rem 0' }}>
                 No runtime files configured.
               </div>
             ) : (
-              <div style={{ display: 'grid', gap: '0.5rem' }}>
-                {runtimeConfig.files.map((item) => (
+              <div style={{ border: '1px solid var(--sam-color-border-default)', borderRadius: 'var(--sam-radius-sm)', overflow: 'hidden' }}>
+                {runtimeConfig.files.map((item, idx) => (
                   <div
                     key={item.path}
                     style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      gap: 'var(--sam-space-2)',
-                      alignItems: 'center',
-                      fontSize: 'var(--sam-type-caption-size)',
+                      ...listItemStyle,
+                      borderBottom: idx === runtimeConfig.files.length - 1 ? 'none' : listItemStyle.borderBottom,
                     }}
                   >
-                    <div>
-                      <strong>{item.path}</strong>{' '}
-                      <span style={{ color: 'var(--sam-color-fg-muted)' }}>
-                        {item.isSecret ? '••••••' : 'stored'}
-                      </span>
-                    </div>
-                    <Button
-                      variant="danger"
-                      size="sm"
+                    <code style={{ fontWeight: 600, color: 'var(--sam-color-fg-primary)', fontSize: '0.8125rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{item.path}</code>
+                    <span style={{ flex: 1 }} />
+                    {item.isSecret && (
+                      <span style={{ fontSize: '0.6875rem', color: 'var(--sam-color-fg-muted)', backgroundColor: 'var(--sam-color-bg-inset)', padding: '1px 6px', borderRadius: 'var(--sam-radius-sm)', flexShrink: 0 }}>secret</span>
+                    )}
+                    <button
                       onClick={() => void handleDeleteFile(item.path)}
                       disabled={savingRuntimeConfig}
+                      style={deleteButtonStyle}
+                      aria-label={`Remove ${item.path}`}
+                      title={`Remove ${item.path}`}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--sam-color-danger)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--sam-color-fg-muted)'; }}
                     >
-                      Remove
-                    </Button>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
                   </div>
                 ))}
               </div>
