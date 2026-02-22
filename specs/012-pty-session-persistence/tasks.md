@@ -156,12 +156,12 @@
 
 **Purpose**: Backward compatibility, documentation, and final validation.
 
-- [ ] T042 Verify single-terminal mode (`/terminal/ws`) is unchanged — run existing single-terminal tests in `packages/vm-agent/` and verify no regressions (FR-013)
-- [ ] T043 [P] Update CLAUDE.md active technologies section if not already updated by agent context script
-- [ ] T044 [P] Update spec.md status from "Draft" to "Implemented" in `specs/012-pty-session-persistence/spec.md`
-- [ ] T045 Run full Go test suite (`go test ./...` in `packages/vm-agent/`) and full Vitest suite (`pnpm test` in `packages/terminal/`) — fix any failures
-- [ ] T046 Run `pnpm typecheck` and `pnpm lint` from repo root — fix any issues
-- [ ] T047 Validate quickstart.md smoke test scenarios manually or via integration test
+- [x] T042 Verify single-terminal mode (`/terminal/ws`) is unchanged — run existing single-terminal tests in `packages/vm-agent/` and verify no regressions (FR-013)
+- [x] T043 [P] Update CLAUDE.md active technologies section if not already updated by agent context script
+- [x] T044 [P] Update spec.md status from "Draft" to "Implemented" in `specs/012-pty-session-persistence/spec.md`
+- [x] T045 Run full Go test suite (`go test ./...` in `packages/vm-agent/`) and full Vitest suite (`pnpm test` in `packages/terminal/`) — fix any failures
+- [x] T046 Run `pnpm typecheck` and `pnpm lint` from repo root — fix any issues
+- [x] T047 Validate quickstart.md smoke test scenarios manually or via integration test
 
 ---
 

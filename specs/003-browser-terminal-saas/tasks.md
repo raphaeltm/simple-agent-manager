@@ -139,21 +139,21 @@ Based on plan.md monorepo structure:
 
 ### Implementation for User Story 4
 
-- [ ] T049 [US4] Implement Hetzner server creation in apps/api/src/services/hetzner.ts
-- [ ] T050 [US4] Implement Hetzner server deletion in apps/api/src/services/hetzner.ts
-- [ ] T051 [US4] Implement DNS record creation in apps/api/src/services/dns.ts
-- [ ] T052 [US4] Implement DNS record deletion in apps/api/src/services/dns.ts
-- [ ] T053 [US4] Create cloud-init template in packages/cloud-init/src/template.ts
-- [ ] T054 [US4] Implement cloud-init generation with variables in packages/cloud-init/src/generate.ts
-- [ ] T055 [US4] Create workspaces routes in apps/api/src/routes/workspaces.ts (GET list, POST create, GET single)
-- [ ] T056 [US4] Mount workspaces routes at /api/workspaces in apps/api/src/index.ts
-- [ ] T057 [US4] Implement workspace provisioning flow (create VM, create DNS, update status) in apps/api/src/routes/workspaces.ts
-- [ ] T058 [US4] Create CreateWorkspace page with form in apps/web/src/pages/CreateWorkspace.tsx
-- [ ] T059 [US4] Create WorkspaceCard component in apps/web/src/components/WorkspaceCard.tsx
-- [ ] T060 [US4] Create StatusBadge component in apps/web/src/components/StatusBadge.tsx
-- [ ] T061 [US4] Update Dashboard to list workspaces in apps/web/src/pages/Dashboard.tsx
-- [ ] T062 [US4] Implement workspace heartbeat endpoint in apps/api/src/routes/workspaces.ts
-- [ ] T063 [US4] Add polling for workspace status updates in apps/web/src/pages/Dashboard.tsx
+- [x] T049 [US4] Implement Hetzner server creation in apps/api/src/services/hetzner.ts
+- [x] T050 [US4] Implement Hetzner server deletion in apps/api/src/services/hetzner.ts
+- [x] T051 [US4] Implement DNS record creation in apps/api/src/services/dns.ts
+- [x] T052 [US4] Implement DNS record deletion in apps/api/src/services/dns.ts
+- [x] T053 [US4] Create cloud-init template in packages/cloud-init/src/template.ts
+- [x] T054 [US4] Implement cloud-init generation with variables in packages/cloud-init/src/generate.ts
+- [x] T055 [US4] Create workspaces routes in apps/api/src/routes/workspaces.ts (GET list, POST create, GET single)
+- [x] T056 [US4] Mount workspaces routes at /api/workspaces in apps/api/src/index.ts
+- [x] T057 [US4] Implement workspace provisioning flow (create VM, create DNS, update status) in apps/api/src/routes/workspaces.ts
+- [x] T058 [US4] Create CreateWorkspace page with form in apps/web/src/pages/CreateWorkspace.tsx
+- [x] T059 [US4] Create WorkspaceCard component in apps/web/src/components/WorkspaceCard.tsx
+- [x] T060 [US4] Create StatusBadge component in apps/web/src/components/StatusBadge.tsx
+- [x] T061 [US4] Update Dashboard to list workspaces in apps/web/src/pages/Dashboard.tsx
+- [x] T062 [US4] Implement workspace heartbeat endpoint in apps/api/src/routes/workspaces.ts
+- [x] T063 [US4] Add polling for workspace status updates in apps/web/src/pages/Dashboard.tsx
 
 **Checkpoint**: User Story 4 complete - users can create and see workspaces
 
@@ -167,39 +167,39 @@ Based on plan.md monorepo structure:
 
 ### Control Plane (JWT + Agent Binary)
 
-- [ ] T064 [US5] Implement JWT signing service in apps/api/src/services/jwt.ts
-- [ ] T065 [US5] Create JWKS endpoint at /.well-known/jwks.json in apps/api/src/routes/terminal.ts
-- [ ] T066 [US5] Create terminal token endpoint at /api/terminal/token in apps/api/src/routes/terminal.ts
-- [ ] T067 [US5] Mount terminal routes in apps/api/src/index.ts
-- [ ] T068 [US5] Create agent download endpoint at /api/agent/download in apps/api/src/routes/agent.ts
-- [ ] T069 [US5] Mount agent routes in apps/api/src/index.ts
+- [x] T064 [US5] Implement JWT signing service in apps/api/src/services/jwt.ts
+- [x] T065 [US5] Create JWKS endpoint at /.well-known/jwks.json in apps/api/src/routes/terminal.ts
+- [x] T066 [US5] Create terminal token endpoint at /api/terminal/token in apps/api/src/routes/terminal.ts
+- [x] T067 [US5] Mount terminal routes in apps/api/src/index.ts
+- [x] T068 [US5] Create agent download endpoint at /api/agent/download in apps/api/src/routes/agent.ts
+- [x] T069 [US5] Mount agent routes in apps/api/src/index.ts
 
 ### VM Agent (Go Binary)
 
-- [ ] T070 [P] [US5] Create VM Agent config loader in packages/vm-agent/internal/config/config.go
-- [ ] T071 [P] [US5] Implement JWKS-based JWT validation in packages/vm-agent/internal/auth/jwt.go
-- [ ] T072 [P] [US5] Implement session cookie management in packages/vm-agent/internal/auth/session.go
-- [ ] T073 [US5] Implement PTY session in packages/vm-agent/internal/pty/session.go
-- [ ] T074 [US5] Implement PTY session manager in packages/vm-agent/internal/pty/manager.go
-- [ ] T075 [US5] Implement HTTP server in packages/vm-agent/internal/server/server.go
-- [ ] T076 [US5] Implement route handlers in packages/vm-agent/internal/server/routes.go
-- [ ] T077 [US5] Implement WebSocket terminal handler in packages/vm-agent/internal/server/websocket.go
-- [ ] T078 [US5] Create Go embed directive in packages/vm-agent/embed.go
-- [ ] T079 [US5] Create main entry point in packages/vm-agent/main.go
-- [ ] T080 [US5] Create Makefile for building VM Agent in packages/vm-agent/Makefile
+- [x] T070 [P] [US5] Create VM Agent config loader in packages/vm-agent/internal/config/config.go
+- [x] T071 [P] [US5] Implement JWKS-based JWT validation in packages/vm-agent/internal/auth/jwt.go
+- [x] T072 [P] [US5] Implement session cookie management in packages/vm-agent/internal/auth/session.go
+- [x] T073 [US5] Implement PTY session in packages/vm-agent/internal/pty/session.go
+- [x] T074 [US5] Implement PTY session manager in packages/vm-agent/internal/pty/manager.go
+- [x] T075 [US5] Implement HTTP server in packages/vm-agent/internal/server/server.go
+- [x] T076 [US5] Implement route handlers in packages/vm-agent/internal/server/routes.go
+- [x] T077 [US5] Implement WebSocket terminal handler in packages/vm-agent/internal/server/websocket.go
+- [x] T078 [US5] Create Go embed directive in packages/vm-agent/embed.go
+- [x] T079 [US5] Create main entry point in packages/vm-agent/main.go
+- [x] T080 [US5] Create Makefile for building VM Agent in packages/vm-agent/Makefile
 
 ### VM Agent Embedded UI
 
-- [ ] T081 [P] [US5] Initialize React app in packages/vm-agent/ui/
-- [ ] T082 [US5] Create Terminal component with xterm.js in packages/vm-agent/ui/src/components/Terminal.tsx
-- [ ] T083 [US5] Create StatusBar component in packages/vm-agent/ui/src/components/StatusBar.tsx
-- [ ] T084 [US5] Create App with routing in packages/vm-agent/ui/src/App.tsx
-- [ ] T085 [US5] Configure Vite for embedding in packages/vm-agent/ui/vite.config.ts
+- [x] T081 [P] [US5] Initialize React app in packages/vm-agent/ui/
+- [x] T082 [US5] Create Terminal component with xterm.js in packages/vm-agent/ui/src/components/Terminal.tsx
+- [x] T083 [US5] Create StatusBar component in packages/vm-agent/ui/src/components/StatusBar.tsx
+- [x] T084 [US5] Create App with routing in packages/vm-agent/ui/src/App.tsx
+- [x] T085 [US5] Configure Vite for embedding in packages/vm-agent/ui/vite.config.ts
 
 ### Web UI Terminal Access
 
-- [ ] T086 [US5] Create Workspace detail page in apps/web/src/pages/Workspace.tsx
-- [ ] T087 [US5] Add "Open Terminal" button with JWT redirect in apps/web/src/pages/Workspace.tsx
+- [x] T086 [US5] Create Workspace detail page in apps/web/src/pages/Workspace.tsx
+- [x] T087 [US5] Add "Open Terminal" button with JWT redirect in apps/web/src/pages/Workspace.tsx
 
 **Checkpoint**: User Story 5 complete - users can access terminal in browser
 
@@ -213,13 +213,13 @@ Based on plan.md monorepo structure:
 
 ### Implementation for User Story 6
 
-- [ ] T088 [US6] Implement idle detection in packages/vm-agent/internal/idle/detector.go
-- [ ] T089 [US6] Integrate idle detector with PTY session manager in packages/vm-agent/internal/pty/manager.go
-- [ ] T090 [US6] Send heartbeat to control plane in packages/vm-agent/internal/server/server.go
-- [ ] T091 [US6] Handle shutdown action from heartbeat response in packages/vm-agent/main.go
-- [ ] T092 [US6] Add idle warning display in packages/vm-agent/ui/src/components/StatusBar.tsx
-- [ ] T093 [US6] Handle idle timeout in control plane heartbeat endpoint in apps/api/src/routes/workspaces.ts
-- [ ] T094 [US6] Implement workspace cleanup on idle timeout in apps/api/src/routes/workspaces.ts
+- [x] T088 [US6] Implement idle detection in packages/vm-agent/internal/idle/detector.go
+- [x] T089 [US6] Integrate idle detector with PTY session manager in packages/vm-agent/internal/pty/manager.go
+- [x] T090 [US6] Send heartbeat to control plane in packages/vm-agent/internal/server/server.go
+- [x] T091 [US6] Handle shutdown action from heartbeat response in packages/vm-agent/main.go
+- [x] T092 [US6] Add idle warning display in packages/vm-agent/ui/src/components/StatusBar.tsx
+- [x] T093 [US6] Handle idle timeout in control plane heartbeat endpoint in apps/api/src/routes/workspaces.ts
+- [x] T094 [US6] Implement workspace cleanup on idle timeout in apps/api/src/routes/workspaces.ts
 
 **Checkpoint**: User Story 6 complete - idle workspaces auto-shutdown
 
@@ -233,12 +233,12 @@ Based on plan.md monorepo structure:
 
 ### Implementation for User Story 7
 
-- [ ] T095 [US7] Implement stop endpoint at /api/workspaces/:id/stop in apps/api/src/routes/workspaces.ts
-- [ ] T096 [US7] Implement restart endpoint at /api/workspaces/:id/restart in apps/api/src/routes/workspaces.ts
-- [ ] T097 [US7] Implement delete endpoint at /api/workspaces/:id (DELETE) in apps/api/src/routes/workspaces.ts
-- [ ] T098 [US7] Add Stop/Restart/Delete buttons to WorkspaceCard in apps/web/src/components/WorkspaceCard.tsx
-- [ ] T099 [US7] Add confirmation dialog for delete in apps/web/src/components/ConfirmDialog.tsx
-- [ ] T100 [US7] Handle orphaned resource cleanup in apps/api/src/routes/workspaces.ts
+- [x] T095 [US7] Implement stop endpoint at /api/workspaces/:id/stop in apps/api/src/routes/workspaces.ts
+- [x] T096 [US7] Implement restart endpoint at /api/workspaces/:id/restart in apps/api/src/routes/workspaces.ts
+- [x] T097 [US7] Implement delete endpoint at /api/workspaces/:id (DELETE) in apps/api/src/routes/workspaces.ts
+- [x] T098 [US7] Add Stop/Restart/Delete buttons to WorkspaceCard in apps/web/src/components/WorkspaceCard.tsx
+- [x] T099 [US7] Add confirmation dialog for delete in apps/web/src/components/ConfirmDialog.tsx
+- [x] T100 [US7] Handle orphaned resource cleanup in apps/api/src/routes/workspaces.ts
 
 **Checkpoint**: User Story 7 complete - users can manage workspaces
 
@@ -250,25 +250,25 @@ Based on plan.md monorepo structure:
 
 ### Deployment Scripts
 
-- [ ] T101 [P] Create setup wizard script in scripts/setup.ts
-- [ ] T102 [P] Create key generation script in scripts/generate-keys.ts
-- [ ] T103 Create deploy-staging script in scripts/deploy-staging.ts
-- [ ] T104 Create deploy script in scripts/deploy.ts
-- [ ] T105 Create teardown script in scripts/teardown.ts
-- [ ] T106 Create goreleaser config in packages/vm-agent/.goreleaser.yml
+- [x] T101 [P] Create setup wizard script in scripts/setup.ts
+- [x] T102 [P] Create key generation script in scripts/generate-keys.ts
+- [x] T103 Create deploy-staging script in scripts/deploy-staging.ts
+- [x] T104 Create deploy script in scripts/deploy.ts
+- [x] T105 Create teardown script in scripts/teardown.ts
+- [x] T106 Create goreleaser config in packages/vm-agent/.goreleaser.yml
 
 ### Documentation
 
-- [ ] T107 [P] Create getting-started guide in docs/guides/getting-started.md
-- [ ] T108 [P] Create self-hosting guide in docs/guides/self-hosting.md
-- [ ] T109 [P] Create ADR for GitHub App decision in docs/adr/001-github-app-over-oauth.md
-- [ ] T110 Update README.md with project overview and quickstart
+- [x] T107 [P] Create getting-started guide in docs/guides/getting-started.md
+- [x] T108 [P] Create self-hosting guide in docs/guides/self-hosting.md
+- [x] T109 [P] Create ADR for GitHub App decision in docs/adr/001-github-app-over-oauth.md
+- [x] T110 Update README.md with project overview and quickstart
 
 ### Final Validation
 
-- [ ] T111 Run quickstart.md end-to-end validation
-- [ ] T112 Verify all deploy/teardown scripts work correctly
-- [ ] T113 Review and cleanup unused code
+- [x] T111 Run quickstart.md end-to-end validation
+- [x] T112 Verify all deploy/teardown scripts work correctly
+- [x] T113 Review and cleanup unused code
 
 ---
 
