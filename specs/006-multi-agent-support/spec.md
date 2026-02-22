@@ -2,7 +2,7 @@
 
 **Feature Branch**: `006-multi-agent-support`
 **Created**: 2026-02-05
-**Status**: Draft (Pre-Spec)
+**Status**: Implemented (via spec 007-multi-agent-acp)
 **Input**: Support multiple AI coding agents (Claude Code, OpenAI Codex, Google Gemini CLI) via the Agent Client Protocol, with agent-specific wrappers running inside devcontainers and a structured web UI.
 
 ## Overview

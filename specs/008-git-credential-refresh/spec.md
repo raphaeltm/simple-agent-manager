@@ -2,7 +2,7 @@
 
 **Feature Branch**: `008-git-credential-refresh`
 **Created**: 2026-02-07
-**Status**: Draft
+**Status**: Implemented
 **Input**: Investigation into GitHub App setup revealed that users cannot `git push` from inside devcontainers.
 
 ## Problem Statement

@@ -55,7 +55,7 @@
 - [X] T011 [P] [US1] Create TabOverflowMenu component in packages/terminal/src/components/TabOverflowMenu.tsx for handling tab overflow
 - [X] T012 [US1] Create useTerminalSessions hook in packages/terminal/src/hooks/useTerminalSessions.ts for managing terminal session state
 - [X] T013 [US1] Create MultiTerminal container component in packages/terminal/src/MultiTerminal.tsx integrating TabBar with Terminal instances
-- [ ] T014 [US1] Update Workspace page in apps/web/src/pages/Workspace.tsx to use MultiTerminal instead of Terminal
+- [x] T014 [US1] Update Workspace page in apps/web/src/pages/Workspace.tsx to use MultiTerminal instead of Terminal
 - [X] T015 [P] [US1] Style tab bar with active/inactive states in apps/web/src/styles/terminal-tabs.css
 
 ## Phase 4: User Story 2 - Session Independence (P1)
@@ -137,7 +137,7 @@
 - [X] T034 Add feature flag for multi-terminal in apps/web/src/config/features.ts
 - [ ] T035 [P] Create API endpoint for terminal configuration in apps/api/src/routes/terminal.ts
 - [ ] T036 [P] Add terminal session list endpoint in apps/api/src/routes/terminal.ts
-- [ ] T037 Update user documentation in docs/guides/multi-terminal.md
+- [x] T037 Update user documentation in docs/guides/multi-terminal.md
 - [X] T038 Add backward compatibility check to ensure single-terminal mode still works
 - [X] T039 Implement resource limit enforcement in packages/vm-agent/internal/pty/manager.go
 - [X] T040 Add performance monitoring for tab switch latency in packages/terminal/src/MultiTerminal.tsx
