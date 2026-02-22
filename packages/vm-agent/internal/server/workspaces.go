@@ -159,6 +159,13 @@ func (s *Server) startWorkspaceProvision(
 ) {
 	go func() {
 		recoveryMode, err := s.provisionWorkspaceRuntime(context.Background(), runtime)
+
+		// Mark the boot log broadcaster as complete and schedule cleanup.
+		// This notifies connected WebSocket clients that provisioning is done.
+		if broadcaster := s.bootLogBroadcasters.Get(runtime.ID); broadcaster != nil {
+			broadcaster.MarkComplete()
+		}
+
 		if err != nil {
 			// CAS: only transition to error if still in "creating" state.
 			// If the workspace was stopped/deleted while provisioning, skip.

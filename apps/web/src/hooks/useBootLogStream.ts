@@ -66,7 +66,7 @@ export function useBootLogStream(
 
         const url = new URL(workspaceUrl);
         const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${wsProtocol}//${url.host}/boot-log/ws?token=${encodeURIComponent(token)}`;
+        const wsUrl = `${wsProtocol}//${url.host}/boot-log/ws?token=${encodeURIComponent(token)}&workspace=${encodeURIComponent(workspaceId!)}`;
 
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;

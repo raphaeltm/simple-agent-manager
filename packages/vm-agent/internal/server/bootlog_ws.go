@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -130,19 +131,88 @@ func (b *BootLogBroadcaster) MarkComplete() {
 	}
 }
 
+// BootLogBroadcasterManager manages per-workspace broadcasters. On multi-workspace
+// nodes, each workspace gets its own broadcaster so logs don't mix. For the
+// boot-time bootstrap path, the default workspace ID is used as the key.
+type BootLogBroadcasterManager struct {
+	mu           sync.Mutex
+	broadcasters map[string]*BootLogBroadcaster
+}
+
+// NewBootLogBroadcasterManager creates a new manager.
+func NewBootLogBroadcasterManager() *BootLogBroadcasterManager {
+	return &BootLogBroadcasterManager{
+		broadcasters: make(map[string]*BootLogBroadcaster),
+	}
+}
+
+// GetOrCreate returns the broadcaster for a workspace, creating one if needed.
+// Nil-safe: returns nil if the manager is nil.
+func (m *BootLogBroadcasterManager) GetOrCreate(workspaceID string) *BootLogBroadcaster {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if b, ok := m.broadcasters[workspaceID]; ok {
+		return b
+	}
+	b := NewBootLogBroadcaster()
+	m.broadcasters[workspaceID] = b
+	return b
+}
+
+// Get returns the broadcaster for a workspace, or nil if none exists.
+// Nil-safe: returns nil if the manager is nil.
+func (m *BootLogBroadcasterManager) Get(workspaceID string) *BootLogBroadcaster {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.broadcasters[workspaceID]
+}
+
+// Remove removes the broadcaster for a workspace after provisioning completes.
+// This prevents memory leaks from accumulating broadcasters for old workspaces.
+// Nil-safe: no-ops if the manager is nil.
+func (m *BootLogBroadcasterManager) Remove(workspaceID string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.broadcasters, workspaceID)
+}
+
 // handleBootLogWS handles WebSocket connections for real-time boot log streaming.
+// The workspace ID is determined from the ?workspace query parameter, falling back
+// to the server's configured default workspace ID (boot-time bootstrap path).
 func (s *Server) handleBootLogWS(w http.ResponseWriter, r *http.Request) {
-	if s.bootLogBroadcaster == nil {
+	if s.bootLogBroadcasters == nil {
 		http.Error(w, "boot log streaming not available", http.StatusServiceUnavailable)
 		return
 	}
 
+	// Determine which workspace's boot logs to stream.
+	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace"))
+	if workspaceID == "" {
+		workspaceID = s.config.WorkspaceID
+	}
+	if workspaceID == "" {
+		http.Error(w, "workspace query parameter required", http.StatusBadRequest)
+		return
+	}
+
 	// Authenticate using the same mechanism as terminal WebSocket.
-	wsScope := defaultWorkspaceScope(s.config.WorkspaceID, s.config.NodeID)
+	wsScope := defaultWorkspaceScope(workspaceID, s.config.NodeID)
 	_, ok := s.authenticateWorkspaceWebsocket(w, r, wsScope)
 	if !ok {
 		return // authenticateWorkspaceWebsocket already wrote the HTTP error
 	}
+
+	broadcaster := s.bootLogBroadcasters.GetOrCreate(workspaceID)
 
 	// Upgrade to WebSocket.
 	upgrader := websocket.Upgrader{
@@ -156,7 +226,7 @@ func (s *Server) handleBootLogWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.bootLogBroadcaster.AddClient(conn)
+	broadcaster.AddClient(conn)
 
 	// Read loop — blocks until client disconnects or context cancelled.
 	// We don't expect messages from the client, just keep the connection alive.
@@ -166,6 +236,6 @@ func (s *Server) handleBootLogWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.bootLogBroadcaster.RemoveClient(conn)
+	broadcaster.RemoveClient(conn)
 	conn.Close()
 }

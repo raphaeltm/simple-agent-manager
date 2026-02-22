@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/workspace/vm-agent/internal/bootlog"
 	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/config"
 )
@@ -56,7 +57,7 @@ func TestRecoverWorkspaceRuntimeUsesRuntimeConfig(t *testing.T) {
 
 	var capturedCfg *config.Config
 	var capturedState bootstrap.ProvisionState
-	prepareWorkspaceForRuntime = func(_ context.Context, cfg *config.Config, state bootstrap.ProvisionState) (bool, error) {
+	prepareWorkspaceForRuntime = func(_ context.Context, cfg *config.Config, state bootstrap.ProvisionState, _ *bootlog.Reporter) (bool, error) {
 		copyCfg := *cfg
 		capturedCfg = &copyCfg
 		capturedState = state
@@ -141,7 +142,7 @@ func TestRecoverWorkspaceRuntimeNoopWhenContainerModeDisabled(t *testing.T) {
 	defer func() { prepareWorkspaceForRuntime = originalPrepare }()
 
 	called := false
-	prepareWorkspaceForRuntime = func(_ context.Context, _ *config.Config, _ bootstrap.ProvisionState) (bool, error) {
+	prepareWorkspaceForRuntime = func(_ context.Context, _ *config.Config, _ bootstrap.ProvisionState, _ *bootlog.Reporter) (bool, error) {
 		called = true
 		return false, nil
 	}
@@ -163,7 +164,7 @@ func TestProvisionWorkspaceRuntimeAppliesDetectedContainerUser(t *testing.T) {
 	originalPrepare := prepareWorkspaceForRuntime
 	defer func() { prepareWorkspaceForRuntime = originalPrepare }()
 
-	prepareWorkspaceForRuntime = func(_ context.Context, cfg *config.Config, _ bootstrap.ProvisionState) (bool, error) {
+	prepareWorkspaceForRuntime = func(_ context.Context, cfg *config.Config, _ bootstrap.ProvisionState, _ *bootlog.Reporter) (bool, error) {
 		cfg.ContainerUser = "vscode"
 		return false, nil
 	}
@@ -222,7 +223,7 @@ func TestRecoverWorkspaceRuntimeHydratesMetadataAndAdoptsLegacyLayout(t *testing
 
 	var capturedCfg *config.Config
 	var capturedState bootstrap.ProvisionState
-	prepareWorkspaceForRuntime = func(_ context.Context, cfg *config.Config, state bootstrap.ProvisionState) (bool, error) {
+	prepareWorkspaceForRuntime = func(_ context.Context, cfg *config.Config, state bootstrap.ProvisionState, _ *bootlog.Reporter) (bool, error) {
 		copyCfg := *cfg
 		capturedCfg = &copyCfg
 		capturedState = state
@@ -302,7 +303,7 @@ func TestRecoverWorkspaceRuntimeAdoptsLegacyLayoutFromBaseWorkspaceDir(t *testin
 	defer func() { prepareWorkspaceForRuntime = originalPrepare }()
 
 	var capturedCfg *config.Config
-	prepareWorkspaceForRuntime = func(_ context.Context, cfg *config.Config, _ bootstrap.ProvisionState) (bool, error) {
+	prepareWorkspaceForRuntime = func(_ context.Context, cfg *config.Config, _ bootstrap.ProvisionState, _ *bootlog.Reporter) (bool, error) {
 		copyCfg := *cfg
 		capturedCfg = &copyCfg
 		return false, nil
@@ -447,7 +448,7 @@ func TestRecoverWorkspaceRuntimePropagatesFallbackFlag(t *testing.T) {
 	defer func() { prepareWorkspaceForRuntime = originalPrepare }()
 
 	// Mock that returns usedFallback=true
-	prepareWorkspaceForRuntime = func(_ context.Context, _ *config.Config, _ bootstrap.ProvisionState) (bool, error) {
+	prepareWorkspaceForRuntime = func(_ context.Context, _ *config.Config, _ bootstrap.ProvisionState, _ *bootlog.Reporter) (bool, error) {
 		return true, nil
 	}
 
