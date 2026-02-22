@@ -1,9 +1,10 @@
 # ACP Session Stuck After Reconnect
 
 **Created**: 2026-02-17
-**Status**: Backlog
+**Status**: Archived (2026-02-22)
 **Priority**: High
 **Estimated Effort**: Medium
+**Resolution**: Appears to have been resolved through cumulative fixes in other changes (WebSocket heartbeat improvements, token refresh fixes, replay state handling, viewer buffer prioritization). All four root causes (R1-R4) have checked-off fixes in the task. No longer reproducible as of 2026-02-22.
 
 ## Context
 

@@ -1,9 +1,10 @@
 # Workspace Isolation via Canonical Identity Keys
 
-**Status:** backlog
+**Status:** Archived (2026-02-22)
 **Priority:** critical
 **Type:** bug fix + architecture hardening
 **Created:** 2026-02-19
+**Resolution:** Fully resolved in commit `9875696` (2026-02-19) — "fix(vm-agent): isolate same-repo workspaces by canonical runtime identity". Workspace directories now keyed by workspace ID (`/workspace/WS_ABC123`), container discovery labels use workspace ID for strict routing, and integration tests cover same-repo multi-workspace isolation. Confirmed working by user testing on 2026-02-22.
 
 ## Problem Statement
 

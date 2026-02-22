@@ -1,9 +1,10 @@
 # Prompt Timeout: Graceful Handling Instead of Agent Kill
 
-**Status:** backlog
+**Status:** Archived (2026-02-22)
 **Priority:** high
 **Estimated Effort:** 3-5 days
 **Created:** 2026-02-20
+**Resolution:** Appears to have been resolved through cumulative changes. The interim fix (timeout increased to 60min in `968abb5`) combined with other ACP reliability improvements have made this a non-issue in practice. No longer reproducible as of 2026-02-22.
 
 ## Problem Statement
 
