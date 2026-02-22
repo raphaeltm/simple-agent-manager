@@ -136,6 +136,8 @@ Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks
 ## Active Technologies
 - TypeScript 5.x (Worker/Web), Go 1.22+ (VM Agent) + Hono (API framework), Drizzle ORM (D1), React + Vite (Web), Cloudflare Workers SDK (Durable Objects) (018-project-first-architecture)
 - Cloudflare D1 (platform metadata) + Durable Objects with SQLite (per-project high-throughput data) + KV (ephemeral tokens) + R2 (agent binaries) (018-project-first-architecture)
+- TypeScript 5.x (React 18 + Vite for web UI) + React 18, React Router 6, Vite, existing `@simple-agent-manager/ui` design system (019-ui-overhaul)
+- N/A (frontend-only changes; backend APIs already exist from spec 018) (019-ui-overhaul)
 
 ## Recent Changes
 - 018-project-first-architecture: Added TypeScript 5.x (Worker/Web), Go 1.22+ (VM Agent) + Hono (API framework), Drizzle ORM (D1), React + Vite (Web), Cloudflare Workers SDK (Durable Objects)

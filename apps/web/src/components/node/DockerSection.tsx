@@ -12,7 +12,7 @@ interface DockerSectionProps {
 
 const cellStyle: React.CSSProperties = {
   padding: 'var(--sam-space-2) var(--sam-space-3)',
-  fontSize: '0.8125rem',
+  fontSize: 'var(--sam-type-caption-size)',
   color: 'var(--sam-color-fg-primary)',
   whiteSpace: 'nowrap',
   overflow: 'hidden',
@@ -49,7 +49,7 @@ export const DockerSection: FC<DockerSectionProps> = ({ docker, loading }) => {
           <Skeleton width="100%" height={32} />
         </div>
       ) : !docker || !docker.containerList || docker.containerList.length === 0 ? (
-        <div style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
+        <div style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
           {docker ? 'No running containers.' : 'Docker info unavailable.'}
         </div>
       ) : (

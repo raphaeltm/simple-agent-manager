@@ -89,7 +89,7 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
   const overlayStyle: CSSProperties = {
     position: 'fixed',
     inset: 0,
-    zIndex: 60,
+    zIndex: 'var(--sam-z-panel)' as unknown as number,
     backgroundColor: 'var(--sam-color-bg-canvas)',
     display: 'flex',
     flexDirection: 'column',
@@ -129,7 +129,7 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
         <span
           style={{
             fontWeight: 600,
-            fontSize: '0.875rem',
+            fontSize: 'var(--sam-type-secondary-size)',
             color: 'var(--sam-color-fg-primary)',
             flex: 1,
           }}
@@ -187,7 +187,7 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
                 padding: isMobile ? '4px 6px' : '2px 4px',
                 borderRadius: 4,
                 fontFamily: 'monospace',
-                fontSize: '0.75rem',
+                fontSize: 'var(--sam-type-caption-size)',
                 color:
                   idx === breadcrumbs.length - 1
                     ? 'var(--sam-color-fg-primary)'
@@ -215,10 +215,10 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
             style={{
               margin: 16,
               padding: 12,
-              backgroundColor: 'rgba(247, 118, 142, 0.1)',
+              backgroundColor: 'var(--sam-color-danger-tint)',
               borderRadius: 8,
-              color: '#f7768e',
-              fontSize: '0.8125rem',
+              color: 'var(--sam-color-tn-red)',
+              fontSize: 'var(--sam-type-caption-size)',
             }}
           >
             {error}
@@ -232,7 +232,7 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
               justifyContent: 'center',
               padding: 48,
               color: 'var(--sam-color-fg-muted)',
-              fontSize: '0.875rem',
+              fontSize: 'var(--sam-type-secondary-size)',
             }}
           >
             This directory is empty
@@ -267,7 +267,6 @@ interface FileRowProps {
 }
 
 const FileRow: FC<FileRowProps> = ({ entry, onClick, isMobile }) => {
-  const [hovered, setHovered] = useState(false);
   const isDir = entry.type === 'dir';
 
   const rowStyle: CSSProperties = {
@@ -277,15 +276,12 @@ const FileRow: FC<FileRowProps> = ({ entry, onClick, isMobile }) => {
     minHeight: isMobile ? 44 : 32,
     cursor: 'pointer',
     gap: 10,
-    backgroundColor: hovered ? 'var(--sam-color-bg-surface-hover)' : 'transparent',
-    transition: 'background-color 0.1s',
   };
 
   return (
     <div
       onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      className="sam-hover-surface"
       style={rowStyle}
       role="button"
       tabIndex={0}
@@ -310,7 +306,7 @@ const FileRow: FC<FileRowProps> = ({ entry, onClick, isMobile }) => {
       <span
         style={{
           fontFamily: 'monospace',
-          fontSize: '0.8125rem',
+          fontSize: 'var(--sam-type-caption-size)',
           color: 'var(--sam-color-fg-primary)',
           flex: 1,
           overflow: 'hidden',

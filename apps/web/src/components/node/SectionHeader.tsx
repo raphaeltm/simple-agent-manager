@@ -33,15 +33,15 @@ export const SectionHeader: FC<SectionHeaderProps> = ({ icon, iconBg, title, des
     <div>
       <div
         style={{
-          fontSize: '1.125rem',
-          fontWeight: 500,
+          fontSize: 'var(--sam-type-section-heading-size)',
+          fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number,
           color: 'var(--sam-color-fg-primary)',
         }}
       >
         {title}
       </div>
       {description && (
-        <div style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
+        <div style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
           {description}
         </div>
       )}

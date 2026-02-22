@@ -54,7 +54,7 @@ export function MobileNavDrawer({
           width: 100%;
           min-height: 44px;
           padding: 0.625rem 1.25rem;
-          font-size: 0.9375rem;
+          font-size: var(--sam-type-body-size);
           font-weight: 500;
           color: var(--sam-color-fg-muted);
           background: none;
@@ -82,8 +82,8 @@ export function MobileNavDrawer({
         style={{
           position: 'fixed',
           inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
-          zIndex: 50,
+          backgroundColor: 'var(--sam-color-bg-overlay)',
+          zIndex: 'var(--sam-z-drawer-backdrop)' as unknown as number,
           animation: 'sam-drawer-fade-in 0.15s ease-out',
         }}
       />
@@ -102,7 +102,7 @@ export function MobileNavDrawer({
           maxWidth: 320,
           backgroundColor: 'var(--sam-color-bg-surface)',
           borderLeft: '1px solid var(--sam-color-border-default)',
-          zIndex: 51,
+          zIndex: 'var(--sam-z-drawer)' as unknown as number,
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -135,8 +135,8 @@ export function MobileNavDrawer({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: '#fff',
-                fontSize: '0.875rem',
+                color: 'var(--sam-color-fg-on-accent)',
+                fontSize: 'var(--sam-type-secondary-size)',
                 fontWeight: 500,
                 flexShrink: 0,
               }}
@@ -147,7 +147,7 @@ export function MobileNavDrawer({
           <div style={{ flex: 1, minWidth: 0 }}>
             <p
               style={{
-                fontSize: '0.875rem',
+                fontSize: 'var(--sam-type-secondary-size)',
                 fontWeight: 600,
                 color: 'var(--sam-color-fg-primary)',
                 margin: 0,
@@ -160,7 +160,7 @@ export function MobileNavDrawer({
             </p>
             <p
               style={{
-                fontSize: '0.75rem',
+                fontSize: 'var(--sam-type-caption-size)',
                 color: 'var(--sam-color-fg-muted)',
                 margin: 0,
                 overflow: 'hidden',

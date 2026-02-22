@@ -60,7 +60,7 @@ export const SoftwareSection: FC<SoftwareSectionProps> = ({ software, agent, loa
     <Section>
       <SectionHeader
         icon={<Package size={20} color="#fb923c" />}
-        iconBg="rgba(251, 146, 60, 0.15)"
+        iconBg="var(--sam-color-warning-tint)"
         title="Software"
         description="Installed versions and agent runtime"
       />
@@ -75,7 +75,7 @@ export const SoftwareSection: FC<SoftwareSectionProps> = ({ software, agent, loa
           ))}
         </div>
       ) : rows.length === 0 ? (
-        <div style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
+        <div style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
           Software version info unavailable.
         </div>
       ) : (
@@ -97,12 +97,12 @@ export const SoftwareSection: FC<SoftwareSectionProps> = ({ software, agent, loa
                     : '1px solid var(--sam-color-border-default)',
               }}
             >
-              <span style={{ fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>
+              <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
                 {row.label}
               </span>
               <span
                 style={{
-                  fontSize: '0.8125rem',
+                  fontSize: 'var(--sam-type-caption-size)',
                   fontWeight: 500,
                   color: 'var(--sam-color-fg-primary)',
                   fontFamily: 'monospace',

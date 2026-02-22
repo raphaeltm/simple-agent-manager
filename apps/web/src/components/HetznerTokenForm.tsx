@@ -58,7 +58,7 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
 
   const actionBtnStyle: React.CSSProperties = {
     padding: '4px 12px',
-    fontSize: '0.875rem',
+    fontSize: 'var(--sam-type-secondary-size)',
     background: 'none',
     border: 'none',
     cursor: 'pointer',
@@ -72,24 +72,24 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: 'var(--sam-space-4)',
-          backgroundColor: 'rgba(34, 197, 94, 0.1)',
+          backgroundColor: 'var(--sam-color-success-tint)',
           border: '1px solid rgba(34, 197, 94, 0.3)',
           borderRadius: 'var(--sam-radius-md)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
             <div style={{
               height: 40, width: 40,
-              backgroundColor: 'rgba(34, 197, 94, 0.15)',
+              backgroundColor: 'var(--sam-color-success-tint)',
               borderRadius: '50%',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              <svg style={{ height: 20, width: 20, color: '#4ade80' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg style={{ height: 20, width: 20, color: 'var(--sam-color-success-fg)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             </div>
             <div>
-              <p style={{ fontWeight: 500, color: '#4ade80' }}>Connected</p>
-              <p style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
+              <p style={{ fontWeight: 500, color: 'var(--sam-color-success-fg)' }}>Connected</p>
+              <p style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
                 Added: {new Date(credential.createdAt).toLocaleDateString()}
               </p>
             </div>
@@ -110,7 +110,7 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
 
   const labelStyle: React.CSSProperties = {
     display: 'block',
-    fontSize: '0.875rem',
+    fontSize: 'var(--sam-type-secondary-size)',
     fontWeight: 500,
     color: 'var(--sam-color-fg-primary)',
     marginBottom: 'var(--sam-space-1)',
@@ -128,7 +128,7 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
           placeholder="Enter your Hetzner Cloud API token"
           required
         />
-        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
           Get your API token from{' '}
           <a
             href="https://console.hetzner.cloud/projects"

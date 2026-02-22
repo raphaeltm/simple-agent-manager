@@ -99,13 +99,13 @@ function workspaceTabStatusColor(tab: WorkspaceTab): string {
   if (tab.kind === 'terminal') {
     switch (tab.status) {
       case 'connecting':
-        return '#e0af68';
+        return 'var(--sam-color-tn-yellow)';
       case 'connected':
-        return '#9ece6a';
+        return 'var(--sam-color-tn-green)';
       case 'error':
-        return '#f7768e';
+        return 'var(--sam-color-tn-red)';
       default:
-        return '#787c99';
+        return 'var(--sam-color-tn-fg-muted)';
     }
   }
 
@@ -113,28 +113,28 @@ function workspaceTabStatusColor(tab: WorkspaceTab): string {
   if (tab.hostStatus) {
     switch (tab.hostStatus) {
       case 'prompting':
-        return '#bb9af7'; // purple — actively working
+        return 'var(--sam-color-tn-purple)'; // purple — actively working
       case 'ready':
-        return '#9ece6a'; // green — ready for prompts
+        return 'var(--sam-color-tn-green)'; // green — ready for prompts
       case 'starting':
-        return '#e0af68'; // amber — initializing
+        return 'var(--sam-color-tn-yellow)'; // amber — initializing
       case 'idle':
-        return '#787c99'; // dim — no agent selected
+        return 'var(--sam-color-tn-fg-muted)'; // dim — no agent selected
       case 'stopped':
-        return '#545868'; // dimmer — stopped
+        return 'var(--sam-color-tn-fg-dimmer)'; // dimmer — stopped
       case 'error':
-        return '#f7768e'; // red
+        return 'var(--sam-color-tn-red)'; // red
     }
   }
 
   // Fallback to DB status when hostStatus is not available
   switch (tab.status) {
     case 'running':
-      return '#9ece6a';
+      return 'var(--sam-color-tn-green)';
     case 'error':
-      return '#f7768e';
+      return 'var(--sam-color-tn-red)';
     default:
-      return '#787c99';
+      return 'var(--sam-color-tn-fg-muted)';
   }
 }
 
@@ -1307,7 +1307,7 @@ export function Workspace() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: '#1a1b26',
+          backgroundColor: 'var(--sam-color-tn-bg)',
         }}
       >
         <Spinner size="lg" />
@@ -1323,12 +1323,12 @@ export function Workspace() {
           height: 'var(--sam-app-height)',
           display: 'flex',
           flexDirection: 'column',
-          backgroundColor: '#1a1b26',
+          backgroundColor: 'var(--sam-color-tn-bg)',
         }}
       >
         <Toolbar onBack={() => navigate('/dashboard')} />
         <CenteredStatus
-          color="#f87171"
+          color="var(--sam-color-danger-fg)"
           title="Failed to Load Workspace"
           subtitle={error}
           action={
@@ -1372,14 +1372,14 @@ export function Workspace() {
         )
       ) : terminalLoading ? (
         <CenteredStatus
-          color="#60a5fa"
+          color="var(--sam-color-info)"
           title="Connecting to Terminal..."
           subtitle="Establishing secure connection"
           loading
         />
       ) : (
         <CenteredStatus
-          color="#f87171"
+          color="var(--sam-color-danger-fg)"
           title="Connection Failed"
           subtitle={terminalError || 'Unable to connect to terminal'}
           action={
@@ -1405,7 +1405,7 @@ export function Workspace() {
     workspace?.status === 'creating' ? (
       <BootProgress logs={streamedBootLogs.length > 0 ? streamedBootLogs : workspace.bootLogs} />
     ) : workspace?.status === 'stopping' ? (
-      <CenteredStatus color="#fbbf24" title="Stopping Workspace" loading />
+      <CenteredStatus color="var(--sam-color-warning-fg)" title="Stopping Workspace" loading />
     ) : workspace?.status === 'stopped' ? (
       <CenteredStatus
         color="var(--sam-color-fg-muted)"
@@ -1425,7 +1425,7 @@ export function Workspace() {
       />
     ) : workspace?.status === 'error' ? (
       <CenteredStatus
-        color="#f87171"
+        color="var(--sam-color-danger-fg)"
         title="Workspace Error"
         subtitle={workspace?.errorMessage || 'An unexpected error occurred.'}
         action={
@@ -1468,8 +1468,8 @@ export function Workspace() {
           height: '100%',
           background: 'none',
           border: 'none',
-          borderLeft: '1px solid #2a2d3a',
-          color: '#787c99',
+          borderLeft: '1px solid var(--sam-color-border-default)',
+          color: 'var(--sam-color-tn-fg-muted)',
           cursor: sessionsLoading ? 'not-allowed' : 'pointer',
           fontSize: 18,
           fontWeight: 300,
@@ -1492,8 +1492,8 @@ export function Workspace() {
             borderRadius: 'var(--sam-radius-md)',
             border: '1px solid var(--sam-color-border-default)',
             background: 'var(--sam-color-bg-surface)',
-            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.35)',
-            zIndex: 30,
+            boxShadow: '0 10px 30px var(--sam-shadow-overlay)',
+            zIndex: 'var(--sam-z-dropdown)' as unknown as number,
             overflow: 'hidden',
           }}
         >
@@ -1507,7 +1507,7 @@ export function Workspace() {
               background: 'transparent',
               color: 'var(--sam-color-fg-primary)',
               padding: isMobile ? '14px 16px' : '10px 12px',
-              fontSize: isMobile ? '0.875rem' : '0.8125rem',
+              fontSize: isMobile ? 'var(--sam-type-secondary-size)' : 'var(--sam-type-caption-size)',
               cursor: sessionsLoading ? 'not-allowed' : 'pointer',
               opacity: sessionsLoading ? 0.65 : 1,
             }}
@@ -1531,7 +1531,7 @@ export function Workspace() {
                     ? 'var(--sam-color-fg-muted)'
                     : 'var(--sam-color-fg-primary)',
                 padding: isMobile ? '14px 16px' : '10px 12px',
-                fontSize: isMobile ? '0.875rem' : '0.8125rem',
+                fontSize: isMobile ? 'var(--sam-type-secondary-size)' : 'var(--sam-type-caption-size)',
                 cursor:
                   configuredAgents.length === 0 || sessionsLoading ? 'not-allowed' : 'pointer',
                 opacity: configuredAgents.length === 0 || sessionsLoading ? 0.65 : 1,
@@ -1554,7 +1554,7 @@ export function Workspace() {
                   background: 'transparent',
                   color: 'var(--sam-color-fg-primary)',
                   padding: isMobile ? '14px 16px' : '10px 12px',
-                  fontSize: isMobile ? '0.875rem' : '0.8125rem',
+                  fontSize: isMobile ? 'var(--sam-type-secondary-size)' : 'var(--sam-type-caption-size)',
                   cursor: sessionsLoading ? 'not-allowed' : 'pointer',
                   opacity: sessionsLoading ? 0.65 : 1,
                 }}
@@ -1618,7 +1618,7 @@ export function Workspace() {
         height: 'var(--sam-app-height)',
         display: 'flex',
         flexDirection: 'column',
-        backgroundColor: '#1a1b26',
+        backgroundColor: 'var(--sam-color-tn-bg)',
         overflow: 'hidden',
       }}
     >
@@ -1680,7 +1680,7 @@ export function Workspace() {
           <span
             style={{
               fontWeight: 600,
-              fontSize: '0.875rem',
+              fontSize: 'var(--sam-type-secondary-size)',
               color: 'var(--sam-color-fg-primary)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -1711,7 +1711,7 @@ export function Workspace() {
                   background: 'none',
                   border: 'none',
                   cursor: 'pointer',
-                  fontSize: '0.75rem',
+                  fontSize: 'var(--sam-type-caption-size)',
                   color: 'var(--sam-color-accent-primary)',
                   whiteSpace: 'nowrap',
                   padding: 0,
@@ -1724,7 +1724,7 @@ export function Workspace() {
             )}
             <span
               style={{
-                fontSize: '0.75rem',
+                fontSize: 'var(--sam-type-caption-size)',
                 color: 'var(--sam-color-fg-muted)',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
@@ -1756,17 +1756,17 @@ export function Workspace() {
 
         {/* Error inline (desktop only — too noisy on mobile) */}
         {!isMobile && error && (
-          <span style={{ fontSize: '0.75rem', color: '#f87171', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-danger-fg)', whiteSpace: 'nowrap' }}>
             {error}
             <button
               onClick={() => setError(null)}
               style={{
                 background: 'none',
                 border: 'none',
-                color: '#f87171',
+                color: 'var(--sam-color-danger-fg)',
                 cursor: 'pointer',
                 marginLeft: '4px',
-                fontSize: '0.75rem',
+                fontSize: 'var(--sam-type-caption-size)',
               }}
             >
               x
@@ -1835,10 +1835,10 @@ export function Workspace() {
         <div
           style={{
             padding: '6px 12px',
-            backgroundColor: 'rgba(248, 113, 113, 0.15)',
+            backgroundColor: 'var(--sam-color-danger-tint)',
             borderBottom: '1px solid rgba(248, 113, 113, 0.3)',
-            fontSize: '0.75rem',
-            color: '#f87171',
+            fontSize: 'var(--sam-type-caption-size)',
+            color: 'var(--sam-color-danger-fg)',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -1853,10 +1853,10 @@ export function Workspace() {
             style={{
               background: 'none',
               border: 'none',
-              color: '#f87171',
+              color: 'var(--sam-color-danger-fg)',
               cursor: 'pointer',
               padding: '4px 8px',
-              fontSize: '0.875rem',
+              fontSize: 'var(--sam-type-secondary-size)',
               flexShrink: 0,
             }}
           >
@@ -1952,8 +1952,8 @@ export function Workspace() {
             style={{
               position: 'fixed',
               inset: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.5)',
-              zIndex: 50,
+              backgroundColor: 'var(--sam-color-bg-overlay)',
+              zIndex: 'var(--sam-z-drawer-backdrop)' as unknown as number,
             }}
           />
           {/* Panel (slides from right) */}
@@ -1970,7 +1970,7 @@ export function Workspace() {
               maxWidth: 360,
               backgroundColor: 'var(--sam-color-bg-surface)',
               borderLeft: '1px solid var(--sam-color-border-default)',
-              zIndex: 51,
+              zIndex: 'var(--sam-z-drawer)' as unknown as number,
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
@@ -1990,7 +1990,7 @@ export function Workspace() {
               <span
                 style={{
                   fontWeight: 600,
-                  fontSize: '0.875rem',
+                  fontSize: 'var(--sam-type-secondary-size)',
                   color: 'var(--sam-color-fg-primary)',
                 }}
               >
@@ -2134,7 +2134,7 @@ function Toolbar({ onBack }: { onBack: () => void }) {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
         </svg>
       </button>
-      <span style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--sam-color-fg-primary)' }}>
+      <span style={{ fontWeight: 600, fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-primary)' }}>
         Workspace
       </span>
     </header>
@@ -2163,17 +2163,17 @@ function CenteredStatus({
         justifyContent: 'center',
         height: '100%',
         gap: '12px',
-        backgroundColor: '#1a1b26',
-        color: '#a9b1d6',
+        backgroundColor: 'var(--sam-color-tn-bg)',
+        color: 'var(--sam-color-tn-fg)',
       }}
     >
       {isLoading && <Spinner size="lg" />}
-      <h3 style={{ fontSize: '1rem', fontWeight: 600, color, margin: 0 }}>{title}</h3>
+      <h3 style={{ fontSize: 'var(--sam-type-card-title-size)', fontWeight: 600, color, margin: 0 }}>{title}</h3>
       {subtitle && (
         <p
           style={{
-            fontSize: '0.875rem',
-            color: '#787c99',
+            fontSize: 'var(--sam-type-secondary-size)',
+            color: 'var(--sam-color-tn-fg-muted)',
             margin: 0,
             maxWidth: '400px',
             textAlign: 'center',
@@ -2191,7 +2191,7 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
   if (!logs || logs.length === 0) {
     return (
       <CenteredStatus
-        color="#60a5fa"
+        color="var(--sam-color-info)"
         title="Creating Workspace"
         subtitle="Initializing..."
         loading
@@ -2210,11 +2210,11 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
     switch (status) {
       case 'completed':
         return (
-          <span style={{ color: '#4ade80', marginRight: 8, fontSize: '0.875rem' }}>&#10003;</span>
+          <span style={{ color: 'var(--sam-color-success-fg)', marginRight: 8, fontSize: 'var(--sam-type-secondary-size)' }}>&#10003;</span>
         );
       case 'failed':
         return (
-          <span style={{ color: '#f87171', marginRight: 8, fontSize: '0.875rem' }}>&#10007;</span>
+          <span style={{ color: 'var(--sam-color-danger-fg)', marginRight: 8, fontSize: 'var(--sam-type-secondary-size)' }}>&#10007;</span>
         );
       case 'started':
       default:
@@ -2237,16 +2237,16 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
         alignItems: 'center',
         justifyContent: 'center',
         height: '100%',
-        backgroundColor: '#1a1b26',
-        color: '#a9b1d6',
+        backgroundColor: 'var(--sam-color-tn-bg)',
+        color: 'var(--sam-color-tn-fg)',
         padding: '24px',
       }}
     >
       <h3
         style={{
-          fontSize: '1rem',
+          fontSize: 'var(--sam-type-card-title-size)',
           fontWeight: 600,
-          color: hasFailed ? '#f87171' : '#60a5fa',
+          color: hasFailed ? 'var(--sam-color-danger-fg)' : 'var(--sam-color-info)',
           margin: '0 0 16px 0',
         }}
       >
@@ -2267,13 +2267,13 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
             style={{
               display: 'flex',
               alignItems: 'center',
-              fontSize: '0.8125rem',
+              fontSize: 'var(--sam-type-caption-size)',
               color:
                 entry.status === 'failed'
-                  ? '#f87171'
+                  ? 'var(--sam-color-danger-fg)'
                   : entry.status === 'completed'
-                    ? '#787c99'
-                    : '#a9b1d6',
+                    ? 'var(--sam-color-tn-fg-muted)'
+                    : 'var(--sam-color-tn-fg)',
             }}
           >
             {statusIcon(entry.status)}
@@ -2284,8 +2284,8 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
       {lastStep?.status === 'failed' && lastStep.detail && (
         <p
           style={{
-            fontSize: '0.75rem',
-            color: '#787c99',
+            fontSize: 'var(--sam-type-caption-size)',
+            color: 'var(--sam-color-tn-fg-muted)',
             margin: '12px 0 0',
             maxWidth: '400px',
             textAlign: 'center',

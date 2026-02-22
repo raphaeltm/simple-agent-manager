@@ -77,7 +77,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <p
             style={{
               color: 'var(--sam-color-fg-secondary, #a3a3a3)',
-              fontSize: '0.95rem',
+              fontSize: 'var(--sam-type-body-size)',
               lineHeight: 1.6,
               marginBottom: '24px',
             }}
@@ -88,7 +88,7 @@ export class ErrorBoundary extends Component<Props, State> {
           {this.state.error && (
             <div
               style={{
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                backgroundColor: 'var(--sam-color-danger-tint)',
                 border: '1px solid rgba(239, 68, 68, 0.3)',
                 borderRadius: '8px',
                 padding: '12px 16px',
@@ -96,7 +96,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 textAlign: 'left',
                 fontSize: '0.8rem',
                 fontFamily: 'monospace',
-                color: '#f87171',
+                color: 'var(--sam-color-danger-fg)',
                 wordBreak: 'break-word',
                 maxHeight: '120px',
                 overflow: 'auto',
@@ -120,10 +120,10 @@ export class ErrorBoundary extends Component<Props, State> {
                 minHeight: '48px',
                 padding: '0 24px',
                 backgroundColor: 'var(--sam-color-accent-primary, #10b981)',
-                color: '#ffffff',
+                color: 'var(--sam-color-fg-on-accent)',
                 border: 'none',
                 borderRadius: '8px',
-                fontSize: '0.95rem',
+                fontSize: 'var(--sam-type-body-size)',
                 fontWeight: 600,
                 cursor: 'pointer',
               }}
@@ -139,7 +139,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 color: 'var(--sam-color-fg-primary, #e5e5e5)',
                 border: '1px solid var(--sam-color-border-default, #333)',
                 borderRadius: '8px',
-                fontSize: '0.95rem',
+                fontSize: 'var(--sam-type-body-size)',
                 fontWeight: 600,
                 cursor: 'pointer',
               }}

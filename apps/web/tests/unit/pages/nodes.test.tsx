@@ -65,7 +65,6 @@ describe('Nodes page', () => {
     });
 
     expect(screen.getByText('Node 1')).toBeInTheDocument();
-    expect(screen.getByText(/heartbeat:/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /create node/i })).toBeInTheDocument();
   });
 

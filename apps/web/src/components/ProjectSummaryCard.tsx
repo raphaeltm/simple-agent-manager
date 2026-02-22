@@ -1,9 +1,10 @@
 import { useNavigate } from 'react-router-dom';
-import { Card, StatusBadge } from '@simple-agent-manager/ui';
+import { Card, StatusBadge, DropdownMenu, type DropdownMenuItem } from '@simple-agent-manager/ui';
 import type { ProjectSummary } from '@simple-agent-manager/shared';
 
 interface ProjectSummaryCardProps {
   project: ProjectSummary;
+  onDelete?: (id: string) => void;
 }
 
 function formatRelativeTime(dateStr: string | null): string {
@@ -19,54 +20,67 @@ function formatRelativeTime(dateStr: string | null): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
-export function ProjectSummaryCard({ project }: ProjectSummaryCardProps) {
+export function ProjectSummaryCard({ project, onDelete }: ProjectSummaryCardProps) {
   const navigate = useNavigate();
 
-  return (
-    <div onClick={() => navigate(`/projects/${project.id}`)} style={{ cursor: 'pointer' }}>
-    <Card>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <h3 style={{
-            margin: 0,
-            fontSize: '1rem',
-            fontWeight: 600,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}>
-            {project.name}
-          </h3>
-          <p style={{
-            margin: '2px 0 0',
-            fontSize: '0.8rem',
-            color: 'var(--sam-color-text-secondary)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}>
-            {project.repository}
-          </p>
-        </div>
-        <StatusBadge status={project.status === 'detached' ? 'error' : 'running'} label={project.status} />
-      </div>
+  const overflowItems: DropdownMenuItem[] = [
+    {
+      id: 'edit',
+      label: 'Edit',
+      onClick: () => navigate(`/projects/${project.id}`),
+    },
+    ...(onDelete
+      ? [
+          {
+            id: 'delete',
+            label: 'Delete',
+            variant: 'danger' as const,
+            onClick: () => onDelete(project.id),
+          },
+        ]
+      : []),
+  ];
 
-      <div style={{
-        display: 'flex',
-        gap: '16px',
-        fontSize: '0.8rem',
-        color: 'var(--sam-color-text-secondary)',
-        marginTop: '12px',
-      }}>
-        <span title="Active workspaces">
-          {project.activeWorkspaceCount} workspace{project.activeWorkspaceCount !== 1 ? 's' : ''}
-        </span>
-        <span title="Active sessions">
-          {project.activeSessionCount} session{project.activeSessionCount !== 1 ? 's' : ''}
-        </span>
-        <span title="Last activity" style={{ marginLeft: 'auto' }}>
-          {formatRelativeTime(project.lastActivityAt)}
-        </span>
+  return (
+    <div
+      onClick={() => navigate(`/projects/${project.id}`)}
+      style={{ cursor: 'pointer' }}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/projects/${project.id}`); } }}
+    >
+    <Card style={{ padding: 'var(--sam-space-3) var(--sam-space-4)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
+        {/* Status + main info */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
+          <StatusBadge status={project.status === 'detached' ? 'error' : 'running'} label={project.status} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--sam-space-2)' }}>
+              <span className="sam-type-card-title" style={{
+                color: 'var(--sam-color-fg-primary)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {project.name}
+              </span>
+              <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', flexShrink: 0 }}>
+                {project.activeWorkspaceCount} ws &middot; {project.activeSessionCount} sessions
+              </span>
+            </div>
+            <div className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {project.repository}
+              <> &middot; {formatRelativeTime(project.lastActivityAt)}</>
+            </div>
+          </div>
+        </div>
+
+        {/* Overflow menu */}
+        {overflowItems.length > 0 && (
+          <div onClick={(e) => e.stopPropagation()}>
+            <DropdownMenu items={overflowItems} aria-label={`Actions for ${project.name}`} />
+          </div>
+        )}
       </div>
     </Card>
     </div>

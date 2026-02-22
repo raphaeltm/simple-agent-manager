@@ -69,7 +69,7 @@ export function CredentialToggle({
               color: kind === activeKind
                 ? 'white'
                 : 'var(--sam-color-fg-secondary)',
-              fontSize: '0.75rem',
+              fontSize: 'var(--sam-type-caption-size)',
               fontWeight: kind === activeKind ? 500 : 400,
               cursor: disabled || loading ? 'not-allowed' : 'pointer',
               transition: 'all 0.2s ease',
@@ -84,7 +84,7 @@ export function CredentialToggle({
 
       {error && (
         <div style={{
-          fontSize: '0.75rem',
+          fontSize: 'var(--sam-type-caption-size)',
           color: 'var(--sam-color-danger)',
         }}>
           {error}
@@ -93,7 +93,7 @@ export function CredentialToggle({
 
       {loading && (
         <div style={{
-          fontSize: '0.75rem',
+          fontSize: 'var(--sam-type-caption-size)',
           color: 'var(--sam-color-fg-muted)',
         }}>
           Switching credential...

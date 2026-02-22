@@ -16,17 +16,17 @@ interface ConfirmDialogProps {
 const variantConfig = {
   danger: {
     iconColor: 'var(--sam-color-danger)',
-    iconBg: 'rgba(239, 68, 68, 0.15)',
+    iconBg: 'var(--sam-color-danger-tint)',
     iconPath: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z',
   },
   warning: {
     iconColor: 'var(--sam-color-warning)',
-    iconBg: 'rgba(245, 158, 11, 0.15)',
+    iconBg: 'var(--sam-color-warning-tint)',
     iconPath: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z',
   },
   info: {
     iconColor: 'var(--sam-color-accent-primary)',
-    iconBg: 'rgba(22, 163, 74, 0.15)',
+    iconBg: 'var(--sam-color-accent-primary-tint)',
     iconPath: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
   },
 };
@@ -84,7 +84,7 @@ export function ConfirmDialog({
 
   return (
     <div
-      style={{ position: 'fixed', inset: 0, zIndex: 50, overflowY: 'auto' }}
+      style={{ position: 'fixed', inset: 0, zIndex: 'var(--sam-z-dialog-backdrop)' as unknown as number, overflowY: 'auto' }}
       aria-labelledby="modal-title"
       role="dialog"
       aria-modal="true"
@@ -114,7 +114,7 @@ export function ConfirmDialog({
             position: 'relative',
             backgroundColor: 'var(--sam-color-bg-surface)',
             borderRadius: 'var(--sam-radius-lg)',
-            boxShadow: '0 16px 48px rgba(0, 0, 0, 0.5)',
+            boxShadow: 'var(--sam-shadow-overlay)',
             border: '1px solid var(--sam-color-border-default)',
             maxWidth: '28rem',
             width: '100%',
@@ -138,10 +138,10 @@ export function ConfirmDialog({
               </svg>
             </div>
             <div style={{ marginLeft: 'var(--sam-space-4)', flex: 1 }}>
-              <h3 style={{ fontSize: '1.125rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }} id="modal-title">
+              <h3 style={{ fontSize: 'var(--sam-type-section-heading-size)', fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number, color: 'var(--sam-color-fg-primary)' }} id="modal-title">
                 {title}
               </h3>
-              <div style={{ marginTop: 'var(--sam-space-2)', fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>{message}</div>
+              <div style={{ marginTop: 'var(--sam-space-2)', fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>{message}</div>
             </div>
           </div>
 

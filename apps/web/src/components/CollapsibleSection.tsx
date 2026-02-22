@@ -68,7 +68,7 @@ export const CollapsibleSection: FC<CollapsibleSectionProps> = ({
           border: 'none',
           cursor: 'pointer',
           color: 'var(--sam-color-fg-primary)',
-          fontSize: '0.75rem',
+          fontSize: 'var(--sam-type-caption-size)',
           fontWeight: 600,
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
@@ -88,7 +88,7 @@ export const CollapsibleSection: FC<CollapsibleSectionProps> = ({
         {badge !== undefined && badge !== 0 && (
           <span
             style={{
-              fontSize: '0.6875rem',
+              fontSize: 'var(--sam-type-caption-size)',
               fontWeight: 500,
               color: 'var(--sam-color-fg-muted)',
               backgroundColor: 'rgba(120, 124, 153, 0.15)',

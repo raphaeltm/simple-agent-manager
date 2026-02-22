@@ -7,9 +7,9 @@ interface ResourceBarProps {
 }
 
 function getBarColor(percent: number): string {
-  if (percent >= 85) return '#f87171';
-  if (percent >= 60) return '#fbbf24';
-  return '#4ade80';
+  if (percent >= 85) return 'var(--sam-color-danger-fg)';
+  if (percent >= 60) return 'var(--sam-color-warning-fg)';
+  return 'var(--sam-color-success-fg)';
 }
 
 export const ResourceBar: FC<ResourceBarProps> = ({ label, percent, detail }) => {
@@ -26,8 +26,8 @@ export const ResourceBar: FC<ResourceBarProps> = ({ label, percent, detail }) =>
           marginBottom: 'var(--sam-space-1)',
         }}
       >
-        <span style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>{label}</span>
-        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--sam-color-fg-primary)' }}>
+        <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>{label}</span>
+        <span style={{ fontSize: 'var(--sam-type-caption-size)', fontWeight: 600, color: 'var(--sam-color-fg-primary)' }}>
           {clampedPercent.toFixed(1)}%
         </span>
       </div>

@@ -213,13 +213,13 @@ export function RepoSelector({
           ref={dropdownRef}
           style={{
             position: 'absolute',
-            zIndex: 10,
+            zIndex: 'var(--sam-z-dropdown)' as unknown as number,
             width: '100%',
             marginTop: '4px',
             backgroundColor: 'var(--sam-color-bg-surface)',
             border: '1px solid var(--sam-color-border-default)',
             borderRadius: 'var(--sam-radius-md)',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+            boxShadow: 'var(--sam-shadow-overlay)',
             maxHeight: '15rem',
             overflowY: 'auto',
           }}
@@ -229,6 +229,7 @@ export function RepoSelector({
               key={repo.fullName}
               type="button"
               onClick={() => handleRepoSelect(repo)}
+              className="sam-hover-surface"
               style={{
                 width: '100%',
                 padding: '0.5rem 0.75rem',
@@ -237,19 +238,16 @@ export function RepoSelector({
                 border: 'none',
                 cursor: 'pointer',
                 color: 'var(--sam-color-fg-primary)',
-                transition: 'background-color 0.1s',
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--sam-color-bg-surface-hover)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
-                <span style={{ fontWeight: 500, fontSize: '0.875rem' }}>{repo.fullName}</span>
+                <span style={{ fontWeight: 500, fontSize: 'var(--sam-type-secondary-size)' }}>{repo.fullName}</span>
                 {repo.private && (
                   <span style={{
                     padding: '1px 6px',
                     fontSize: '0.7rem',
-                    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-                    color: '#fbbf24',
+                    backgroundColor: 'var(--sam-color-warning-tint)',
+                    color: 'var(--sam-color-warning-fg)',
                     borderRadius: 'var(--sam-radius-sm)',
                   }}>
                     Private
@@ -263,17 +261,17 @@ export function RepoSelector({
 
       {/* Status messages */}
       {loading && repositories.length === 0 && (
-        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
           Loading repositories...
         </p>
       )}
       {error && repositories.length === 0 && value && !value.startsWith('http') && !value.startsWith('git@') && (
-        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
           Connect GitHub App for repository autocomplete
         </p>
       )}
       {!loading && repositories.length > 0 && value && !value.startsWith('http') && !value.startsWith('git@') && filteredRepos.length === 0 && (
-        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
           No matching repositories found
         </p>
       )}

@@ -53,7 +53,7 @@ function PrereqItem({ label, status, detail, actionLabel, onAction }: PrereqItem
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: status === 'loading' ? '1rem' : '0.875rem',
+            fontSize: status === 'loading' ? 'var(--sam-type-body-size)' : 'var(--sam-type-secondary-size)',
             fontWeight: 700,
             color: icon.color,
             backgroundColor: `color-mix(in srgb, ${icon.color} 12%, transparent)`,
@@ -63,11 +63,11 @@ function PrereqItem({ label, status, detail, actionLabel, onAction }: PrereqItem
           {status === 'loading' ? <Spinner size="sm" /> : icon.symbol}
         </span>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>
+          <div style={{ fontSize: 'var(--sam-type-secondary-size)', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>
             {label}
           </div>
           {detail && (
-            <div style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginTop: 2 }}>
+            <div style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)', marginTop: 2 }}>
               {detail}
             </div>
           )}
@@ -253,7 +253,7 @@ export function CreateWorkspace() {
 
   const labelStyle = {
     display: 'block',
-    fontSize: '0.875rem',
+    fontSize: 'var(--sam-type-secondary-size)',
     fontWeight: 500,
     color: 'var(--sam-color-fg-muted)',
     marginBottom: '0.25rem',
@@ -269,11 +269,11 @@ export function CreateWorkspace() {
       {showPrereqs && (
         <Card style={{ marginBottom: 'var(--sam-space-6)', overflow: 'hidden' }}>
           <div style={{ padding: 'var(--sam-space-4)', borderBottom: '1px solid var(--sam-color-border-default)' }}>
-            <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: 'var(--sam-color-fg-primary)' }}>
+            <h3 style={{ margin: 0, fontSize: 'var(--sam-type-card-title-size)', fontWeight: 'var(--sam-type-card-title-weight)' as unknown as number, color: 'var(--sam-color-fg-primary)' }}>
               {checkingPrereqs ? 'Checking prerequisites...' : 'Setup Required'}
             </h3>
             {!checkingPrereqs && anyMissing && (
-              <p style={{ margin: '4px 0 0', fontSize: '0.8125rem', color: 'var(--sam-color-fg-muted)' }}>
+              <p style={{ margin: '4px 0 0', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
                 Complete the items below before creating a workspace.
               </p>
             )}
@@ -354,7 +354,7 @@ export function CreateWorkspace() {
               borderRadius: 'var(--sam-radius-md)',
               backgroundColor: 'color-mix(in srgb, var(--sam-color-accent-primary) 8%, transparent)',
               border: '1px solid color-mix(in srgb, var(--sam-color-accent-primary) 25%, transparent)',
-              fontSize: '0.8125rem',
+              fontSize: 'var(--sam-type-caption-size)',
               color: 'var(--sam-color-fg-muted)',
             }}>
               Creating workspace for project <strong style={{ color: 'var(--sam-color-fg-primary)' }}>{linkedProject?.name}</strong>.
@@ -426,7 +426,7 @@ export function CreateWorkspace() {
               )}
             </div>
             {branchesError && (
-              <p style={{ marginTop: 'var(--sam-space-1)', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+              <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
                 {branchesError}
               </p>
             )}
@@ -486,7 +486,7 @@ export function CreateWorkspace() {
                         cursor: 'pointer',
                         backgroundColor:
                           vmSize === size.value
-                            ? 'rgba(22, 163, 74, 0.1)'
+                            ? 'var(--sam-color-accent-primary-tint)'
                             : 'var(--sam-color-bg-inset)',
                         color: 'var(--sam-color-fg-primary)',
                         transition: 'all 0.15s ease',
@@ -495,7 +495,7 @@ export function CreateWorkspace() {
                       <div style={{ fontWeight: 500 }}>{size.label}</div>
                       <div
                         style={{
-                          fontSize: '0.75rem',
+                          fontSize: 'var(--sam-type-caption-size)',
                           color: 'var(--sam-color-fg-muted)',
                           marginTop: '0.125rem',
                         }}

@@ -43,7 +43,7 @@ export function TaskDependencyEditor({
   return (
     <section style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sam-space-2)' }}>
-        <strong style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-primary)' }}>Dependencies</strong>
+        <strong style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-primary)' }}>Dependencies</strong>
         {onClose && (
           <Button variant="secondary" size="sm" onClick={onClose}>
             Close

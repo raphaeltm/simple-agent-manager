@@ -174,7 +174,7 @@ export function ProjectForm({
   return (
     <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
       <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Name</span>
+        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Name</span>
         <Input
           value={values.name}
           onChange={(event) => handleChange('name', event.currentTarget.value)}
@@ -184,7 +184,7 @@ export function ProjectForm({
       </label>
 
       <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Description</span>
+        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Description</span>
         <textarea
           value={values.description}
           onChange={(event) => handleChange('description', event.currentTarget.value)}
@@ -203,7 +203,7 @@ export function ProjectForm({
       </label>
 
       <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Installation</span>
+        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Installation</span>
         <select
           value={values.installationId}
           onChange={(event) => handleInstallationChange(event.currentTarget.value)}
@@ -223,7 +223,7 @@ export function ProjectForm({
       </label>
 
       <label htmlFor="project-repository" style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Repository</span>
+        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Repository</span>
         {isEditMode ? (
           <Input
             id="project-repository"
@@ -245,7 +245,7 @@ export function ProjectForm({
       </label>
 
       <label htmlFor="project-default-branch" style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>Default branch</span>
+        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Default branch</span>
         <div style={{ position: 'relative' }}>
           {!isEditMode && branches.length > 0 ? (
             <select
@@ -277,14 +277,14 @@ export function ProjectForm({
           )}
         </div>
         {!isEditMode && branchesError && (
-          <span style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+          <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
             {branchesError}
           </span>
         )}
       </label>
 
       {error && (
-        <div style={{ color: 'var(--sam-color-danger)', fontSize: '0.875rem' }} role="alert">
+        <div style={{ color: 'var(--sam-color-danger)', fontSize: 'var(--sam-type-secondary-size)' }} role="alert">
           {error}
         </div>
       )}

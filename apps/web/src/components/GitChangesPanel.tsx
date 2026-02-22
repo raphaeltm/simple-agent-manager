@@ -26,13 +26,13 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  M: '#e0af68', // yellow
-  A: '#9ece6a', // green
-  D: '#f7768e', // red
-  R: '#7aa2f7', // blue
-  C: '#7aa2f7', // blue
-  U: '#ff9e64', // orange
-  '??': '#787c99', // grey
+  M: 'var(--sam-color-tn-yellow)',
+  A: 'var(--sam-color-tn-green)',
+  D: 'var(--sam-color-tn-red)',
+  R: 'var(--sam-color-tn-blue)',
+  C: 'var(--sam-color-tn-blue)',
+  U: 'var(--sam-color-tn-orange)',
+  '??': 'var(--sam-color-tn-fg-muted)',
 };
 
 function statusColor(status: string): string {
@@ -99,7 +99,7 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
   const overlayStyle: CSSProperties = {
     position: 'fixed',
     inset: 0,
-    zIndex: 60,
+    zIndex: 'var(--sam-z-panel)' as unknown as number,
     backgroundColor: 'var(--sam-color-bg-canvas)',
     display: 'flex',
     flexDirection: 'column',
@@ -139,7 +139,7 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
         <span
           style={{
             fontWeight: 600,
-            fontSize: '0.875rem',
+            fontSize: 'var(--sam-type-secondary-size)',
             color: 'var(--sam-color-fg-primary)',
             flex: 1,
           }}
@@ -185,10 +185,10 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
             style={{
               margin: 16,
               padding: 12,
-              backgroundColor: 'rgba(247, 118, 142, 0.1)',
+              backgroundColor: 'var(--sam-color-danger-tint)',
               borderRadius: 8,
-              color: '#f7768e',
-              fontSize: '0.8125rem',
+              color: 'var(--sam-color-tn-red)',
+              fontSize: 'var(--sam-type-caption-size)',
             }}
           >
             {error}
@@ -204,10 +204,10 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
               justifyContent: 'center',
               padding: 48,
               color: 'var(--sam-color-fg-muted)',
-              fontSize: '0.875rem',
+              fontSize: 'var(--sam-type-secondary-size)',
             }}
           >
-            <span style={{ fontSize: '1.5rem', marginBottom: 8 }}>Clean</span>
+            <span style={{ fontSize: 'var(--sam-type-page-title-size)', marginBottom: 8 }}>Clean</span>
             <span>No changes detected</span>
           </div>
         )}
@@ -250,7 +250,10 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
       </div>
 
       {/* Inline keyframe for spinner */}
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .git-file-row:hover { background-color: var(--sam-color-bg-surface-hover); }
+      `}</style>
     </div>
   );
 };
@@ -312,7 +315,7 @@ const FileSection: FC<FileSectionProps> = ({
         <span
           style={{
             fontWeight: 600,
-            fontSize: '0.75rem',
+            fontSize: 'var(--sam-type-caption-size)',
             color: 'var(--sam-color-fg-muted)',
             textTransform: 'uppercase',
             letterSpacing: '0.05em',
@@ -357,8 +360,6 @@ interface FileRowProps {
 }
 
 const FileRow: FC<FileRowProps> = ({ file, onClick, isMobile }) => {
-  const [hovered, setHovered] = useState(false);
-
   // Split path into directory and filename
   const lastSlash = file.path.lastIndexOf('/');
   const dir = lastSlash >= 0 ? file.path.slice(0, lastSlash + 1) : '';
@@ -371,15 +372,13 @@ const FileRow: FC<FileRowProps> = ({ file, onClick, isMobile }) => {
     minHeight: isMobile ? 44 : 32,
     cursor: 'pointer',
     gap: 10,
-    backgroundColor: hovered ? 'var(--sam-color-bg-surface-hover)' : 'transparent',
     transition: 'background-color 0.1s',
   };
 
   return (
     <div
+      className="git-file-row"
       onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       style={rowStyle}
       role="button"
       tabIndex={0}
@@ -407,7 +406,7 @@ const FileRow: FC<FileRowProps> = ({ file, onClick, isMobile }) => {
       <span
         style={{
           fontFamily: 'monospace',
-          fontSize: '0.8125rem',
+          fontSize: 'var(--sam-type-caption-size)',
           color: 'var(--sam-color-fg-primary)',
           overflow: 'hidden',
           textOverflow: 'ellipsis',

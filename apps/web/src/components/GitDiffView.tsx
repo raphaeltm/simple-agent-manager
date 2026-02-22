@@ -101,7 +101,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
   const overlayStyle: CSSProperties = {
     position: 'fixed',
     inset: 0,
-    zIndex: 60,
+    zIndex: 'var(--sam-z-panel)' as unknown as number,
     backgroundColor: 'var(--sam-color-bg-canvas)',
     display: 'flex',
     flexDirection: 'column',
@@ -193,10 +193,10 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
             style={{
               margin: 16,
               padding: 12,
-              backgroundColor: 'rgba(247, 118, 142, 0.1)',
+              backgroundColor: 'var(--sam-color-danger-tint)',
               borderRadius: 8,
-              color: '#f7768e',
-              fontSize: '0.8125rem',
+              color: 'var(--sam-color-tn-red)',
+              fontSize: 'var(--sam-type-caption-size)',
             }}
           >
             {error}
@@ -210,7 +210,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
               justifyContent: 'center',
               padding: 48,
               color: 'var(--sam-color-fg-muted)',
-              fontSize: '0.875rem',
+              fontSize: 'var(--sam-type-secondary-size)',
             }}
           >
             No diff available
@@ -263,22 +263,22 @@ function diffLineStyle(line: string): CSSProperties {
   if (line.startsWith('+') && !line.startsWith('+++')) {
     return {
       ...base,
-      backgroundColor: 'rgba(154, 206, 106, 0.15)',
-      color: '#9ece6a',
+      backgroundColor: 'var(--sam-color-success-tint)',
+      color: 'var(--sam-color-tn-green)',
     };
   }
   if (line.startsWith('-') && !line.startsWith('---')) {
     return {
       ...base,
-      backgroundColor: 'rgba(247, 118, 142, 0.15)',
-      color: '#f7768e',
+      backgroundColor: 'var(--sam-color-danger-tint)',
+      color: 'var(--sam-color-tn-red)',
     };
   }
   if (line.startsWith('@@')) {
     return {
       ...base,
-      backgroundColor: 'rgba(122, 162, 247, 0.1)',
-      color: '#7aa2f7',
+      backgroundColor: 'var(--sam-color-info-tint)',
+      color: 'var(--sam-color-tn-blue)',
     };
   }
   if (
@@ -323,7 +323,7 @@ const FullFileRenderer: FC<{ content: string; addedLines: Set<number> }> = ({
               whiteSpace: 'pre',
               minHeight: '1.4em',
               lineHeight: '1.4',
-              backgroundColor: isAdded ? 'rgba(154, 206, 106, 0.1)' : 'transparent',
+              backgroundColor: isAdded ? 'var(--sam-color-success-tint)' : 'transparent',
             }}
           >
             <span
@@ -332,7 +332,7 @@ const FullFileRenderer: FC<{ content: string; addedLines: Set<number> }> = ({
                 width: 48,
                 textAlign: 'right',
                 paddingRight: 12,
-                color: isAdded ? '#9ece6a' : 'var(--sam-color-fg-muted)',
+                color: isAdded ? 'var(--sam-color-tn-green)' : 'var(--sam-color-fg-muted)',
                 opacity: isAdded ? 1 : 0.5,
                 userSelect: 'none',
                 flexShrink: 0,
@@ -342,7 +342,7 @@ const FullFileRenderer: FC<{ content: string; addedLines: Set<number> }> = ({
             </span>
             <span
               style={{
-                color: isAdded ? '#9ece6a' : 'var(--sam-color-fg-primary)',
+                color: isAdded ? 'var(--sam-color-tn-green)' : 'var(--sam-color-fg-primary)',
                 flex: 1,
               }}
             >
@@ -371,7 +371,7 @@ const ToggleButton: FC<{ label: string; active: boolean; onClick: () => void }> 
       border: 'none',
       cursor: 'pointer',
       backgroundColor: active ? 'var(--sam-color-accent-primary)' : 'transparent',
-      color: active ? '#fff' : 'var(--sam-color-fg-muted)',
+      color: active ? 'var(--sam-color-fg-on-accent)' : 'var(--sam-color-fg-muted)',
       transition: 'background-color 0.15s, color 0.15s',
     }}
   >

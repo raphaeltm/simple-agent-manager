@@ -40,7 +40,7 @@ export function TaskDelegateDialog({
   return (
     <Dialog isOpen={open && !!task} onClose={onClose} maxWidth="md">
       <div style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
-        <strong style={{ color: 'var(--sam-color-fg-primary)', fontSize: '1rem' }}>
+        <strong style={{ color: 'var(--sam-color-fg-primary)', fontSize: 'var(--sam-type-card-title-size)' }}>
           Delegate task
         </strong>
 
@@ -49,20 +49,20 @@ export function TaskDelegateDialog({
           style={{
             padding: 'var(--sam-space-3)',
             borderRadius: 'var(--sam-radius-md)',
-            background: 'rgba(99,102,241,0.07)',
+            background: 'var(--sam-color-info-tint)',
             border: '1px solid rgba(99,102,241,0.2)',
             display: 'grid',
             gap: '0.375rem',
           }}
         >
-          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--sam-color-fg-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          <div style={{ fontSize: 'var(--sam-type-caption-size)', fontWeight: 600, color: 'var(--sam-color-fg-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Agent will receive
           </div>
-          <div style={{ fontWeight: 600, color: 'var(--sam-color-fg-primary)', fontSize: '0.9375rem' }}>
+          <div style={{ fontWeight: 600, color: 'var(--sam-color-fg-primary)', fontSize: 'var(--sam-type-body-size)' }}>
             {task?.title}
           </div>
           {task?.description && (
-            <div style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)', lineHeight: 1.5 }}>
+            <div style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)', lineHeight: 1.5 }}>
               {task.description}
             </div>
           )}
@@ -74,17 +74,17 @@ export function TaskDelegateDialog({
             style={{
               padding: 'var(--sam-space-3)',
               borderRadius: 'var(--sam-radius-md)',
-              background: 'rgba(245, 158, 11, 0.1)',
+              background: 'var(--sam-color-warning-tint)',
               border: '1px solid rgba(245, 158, 11, 0.3)',
               color: 'var(--sam-color-fg-muted)',
-              fontSize: '0.875rem',
+              fontSize: 'var(--sam-type-secondary-size)',
             }}
           >
             No running workspaces. Start a workspace first.
           </div>
         ) : (
           <label style={{ display: 'grid', gap: '0.375rem' }}>
-            <span style={{ fontSize: '0.875rem', color: 'var(--sam-color-fg-muted)' }}>
+            <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
               Target workspace
             </span>
             <select
@@ -122,7 +122,7 @@ export function TaskDelegateDialog({
               alignItems: 'center',
               gap: 'var(--sam-space-2)',
               flexWrap: 'wrap',
-              fontSize: '0.875rem',
+              fontSize: 'var(--sam-type-secondary-size)',
             }}
           >
             <StatusBadge status={selectedWorkspace.status} />

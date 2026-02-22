@@ -17,6 +17,10 @@ vi.mock('../../src/components/ProtectedRoute', () => ({
   ProtectedRoute: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+vi.mock('../../src/components/AppShell', () => ({
+  AppShell: ({ children }: { children: React.ReactNode }) => <div data-testid="app-shell">{children}</div>,
+}));
+
 vi.mock('../../src/pages/Landing', () => ({
   Landing: () => <div data-testid="landing-page" />,
 }));
@@ -53,12 +57,40 @@ vi.mock('../../src/pages/Projects', () => ({
   Projects: () => <div data-testid="projects-page" />,
 }));
 
-vi.mock('../../src/pages/Project', () => ({
-  Project: () => <div data-testid="project-detail-page" />,
+// Project now uses Outlet to render child routes, so mock it to pass children through
+vi.mock('../../src/pages/Project', async () => {
+  const { Outlet } = await import('react-router-dom');
+  return {
+    Project: () => <div data-testid="project-detail-page"><Outlet /></div>,
+  };
+});
+
+vi.mock('../../src/pages/ProjectOverview', () => ({
+  ProjectOverview: () => <div data-testid="project-overview-page" />,
+}));
+
+vi.mock('../../src/pages/ProjectTasks', () => ({
+  ProjectTasks: () => <div data-testid="project-tasks-page" />,
+}));
+
+vi.mock('../../src/pages/ProjectSessions', () => ({
+  ProjectSessions: () => <div data-testid="project-sessions-page" />,
+}));
+
+vi.mock('../../src/pages/ProjectSettings', () => ({
+  ProjectSettings: () => <div data-testid="project-settings-page" />,
+}));
+
+vi.mock('../../src/pages/ProjectActivity', () => ({
+  ProjectActivity: () => <div data-testid="project-activity-page" />,
 }));
 
 vi.mock('../../src/pages/TaskDetail', () => ({
   TaskDetail: () => <div data-testid="task-detail-page" />,
+}));
+
+vi.mock('../../src/pages/ChatSessionView', () => ({
+  ChatSessionView: () => <div data-testid="chat-session-page" />,
 }));
 
 import App from '../../src/App';
@@ -76,10 +108,11 @@ describe('App routes', () => {
     expect(screen.queryByTestId('dashboard-page')).not.toBeInTheDocument();
   });
 
-  it('routes /projects/:id/tasks/:taskId to the task detail page', () => {
+  it('routes /projects/:id/tasks/:taskId to the task detail page nested inside project', () => {
     renderAt('/projects/proj-1/tasks/task-1');
 
+    // TaskDetail is now a child route of Project, so both should be present
+    expect(screen.getByTestId('project-detail-page')).toBeInTheDocument();
     expect(screen.getByTestId('task-detail-page')).toBeInTheDocument();
-    expect(screen.queryByTestId('project-detail-page')).not.toBeInTheDocument();
   });
 });

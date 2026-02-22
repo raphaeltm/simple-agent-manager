@@ -103,7 +103,7 @@ export function ActivityFeed({ events, hasMore, onLoadMore, loading }: ActivityF
     return (
       <div style={{
         color: 'var(--sam-color-fg-muted)',
-        fontSize: '0.875rem',
+        fontSize: 'var(--sam-type-secondary-size)',
         padding: 'var(--sam-space-4)',
         textAlign: 'center',
       }}>
@@ -133,11 +133,11 @@ export function ActivityFeed({ events, hasMore, onLoadMore, loading }: ActivityF
                 height: '28px',
                 borderRadius: '50%',
                 backgroundColor: color,
-                color: '#fff',
+                color: 'var(--sam-color-fg-on-accent)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: '0.7rem',
+                fontSize: 'var(--sam-type-caption-size)',
                 fontWeight: 700,
                 flexShrink: 0,
                 marginTop: '2px',
@@ -148,7 +148,7 @@ export function ActivityFeed({ events, hasMore, onLoadMore, loading }: ActivityF
               {/* Content */}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{
-                  fontSize: '0.875rem',
+                  fontSize: 'var(--sam-type-secondary-size)',
                   color: 'var(--sam-color-fg-primary)',
                   lineHeight: 1.4,
                 }}>
@@ -157,7 +157,7 @@ export function ActivityFeed({ events, hasMore, onLoadMore, loading }: ActivityF
                 <div style={{
                   display: 'flex',
                   gap: 'var(--sam-space-2)',
-                  fontSize: '0.75rem',
+                  fontSize: 'var(--sam-type-caption-size)',
                   color: 'var(--sam-color-fg-muted)',
                   marginTop: '2px',
                 }}>
@@ -178,7 +178,7 @@ export function ActivityFeed({ events, hasMore, onLoadMore, loading }: ActivityF
             disabled={loading}
             style={{
               padding: 'var(--sam-space-2) var(--sam-space-4)',
-              fontSize: '0.8rem',
+              fontSize: 'var(--sam-type-caption-size)',
               color: 'var(--sam-color-fg-primary)',
               backgroundColor: 'var(--sam-color-bg-inset)',
               border: '1px solid var(--sam-color-border-default)',
