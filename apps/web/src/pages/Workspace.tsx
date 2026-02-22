@@ -1827,7 +1827,7 @@ export function Workspace() {
         )}
 
         {/* User menu */}
-        <UserMenu />
+        <UserMenu compact />
       </header>
 
       {/* ── Mobile error banner ── */}
