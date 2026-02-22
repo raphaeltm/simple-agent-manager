@@ -6,7 +6,7 @@ import { signOut } from '../lib/auth';
  * User menu with avatar and dropdown for user-specific actions.
  * Navigation links have been moved to AppShell sidebar.
  */
-export function UserMenu() {
+export function UserMenu({ compact = false }: { compact?: boolean }) {
   const { user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -71,17 +71,21 @@ export function UserMenu() {
         }}
       >
         {avatarElement}
-        <span style={{ fontSize: 'var(--sam-type-secondary-size)', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>
-          {user.name || user.email}
-        </span>
-        <svg
-          style={{ height: 16, width: 16, transition: 'transform 150ms', transform: isOpen ? 'rotate(180deg)' : 'none' }}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
+        {!compact && (
+          <>
+            <span style={{ fontSize: 'var(--sam-type-secondary-size)', fontWeight: 500, color: 'var(--sam-color-fg-primary)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {user.name || user.email}
+            </span>
+            <svg
+              style={{ height: 16, width: 16, transition: 'transform 150ms', transform: isOpen ? 'rotate(180deg)' : 'none' }}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </>
+        )}
       </button>
 
       {isOpen && (
