@@ -49,22 +49,23 @@ export function ProjectSummaryCard({ project, onDelete }: ProjectSummaryCardProp
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/projects/${project.id}`); } }}
     >
-    <Card style={{ padding: 'var(--sam-space-3) var(--sam-space-4)' }}>
+    <Card style={{ padding: 'var(--sam-space-3) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
         {/* Status + main info */}
         <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
           <StatusBadge status={project.status === 'detached' ? 'error' : 'running'} label={project.status} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--sam-space-2)' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--sam-space-2)', minWidth: 0 }}>
               <span className="sam-type-card-title" style={{
                 color: 'var(--sam-color-fg-primary)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
+                minWidth: 0,
               }}>
                 {project.name}
               </span>
-              <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', flexShrink: 0 }}>
+              <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {project.activeWorkspaceCount} ws &middot; {project.activeSessionCount} sessions
               </span>
             </div>
@@ -77,7 +78,7 @@ export function ProjectSummaryCard({ project, onDelete }: ProjectSummaryCardProp
 
         {/* Overflow menu */}
         {overflowItems.length > 0 && (
-          <div onClick={(e) => e.stopPropagation()}>
+          <div onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0 }}>
             <DropdownMenu items={overflowItems} aria-label={`Actions for ${project.name}`} />
           </div>
         )}
