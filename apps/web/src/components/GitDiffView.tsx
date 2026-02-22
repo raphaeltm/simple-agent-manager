@@ -1,5 +1,5 @@
 import { type CSSProperties, type FC, useCallback, useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { X, FileText } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
 import { getGitDiff, getGitFile } from '../lib/api';
 
@@ -13,6 +13,7 @@ interface GitDiffViewProps {
   isMobile: boolean;
   onBack: () => void;
   onClose: () => void;
+  onViewInFileBrowser?: (filePath: string) => void;
 }
 
 type ViewMode = 'diff' | 'full';
@@ -27,6 +28,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
   isMobile,
   onBack,
   onClose,
+  onViewInFileBrowser,
 }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -174,6 +176,17 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
             onClick={() => setViewMode('full')}
           />
         </div>
+
+        {onViewInFileBrowser && (
+          <button
+            onClick={() => onViewInFileBrowser(filePath)}
+            aria-label="View in file browser"
+            title="View in file browser"
+            style={iconBtnStyle(isMobile)}
+          >
+            <FileText size={isMobile ? 18 : 16} />
+          </button>
+        )}
 
         <button onClick={onClose} aria-label="Close" style={iconBtnStyle(isMobile)}>
           <X size={isMobile ? 18 : 16} />
