@@ -273,7 +273,7 @@ describe('Project page', () => {
       target: { value: 'secret-value' },
     });
     fireEvent.click(screen.getByLabelText('Secret'));
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
 
     await waitFor(() => {
       expect(mocks.upsertProjectRuntimeEnvVar).toHaveBeenCalledWith('proj-1', {
