@@ -485,7 +485,12 @@ func TestNormalizeProjectRuntimeFilePath(t *testing.T) {
 	}{
 		{name: "relative path", input: ".env.local", want: ".env.local"},
 		{name: "nested path", input: "config/app/env.txt", want: "config/app/env.txt"},
-		{name: "reject absolute", input: "/etc/passwd", wantErr: true},
+		{name: "absolute path", input: "/home/node/.npmrc", want: "/home/node/.npmrc"},
+		{name: "absolute etc path", input: "/etc/apt/sources.list.d/custom.list", want: "/etc/apt/sources.list.d/custom.list"},
+		{name: "home tilde path", input: "~/.ssh/config", want: "~/.ssh/config"},
+		{name: "home tilde nested", input: "~/.config/gh/hosts.yml", want: "~/.config/gh/hosts.yml"},
+		{name: "reject absolute with dotdot", input: "/home/node/../../etc/shadow", wantErr: true},
+		{name: "reject tilde with dotdot", input: "~/../etc/shadow", wantErr: true},
 		{name: "reject traversal", input: "../secret.txt", wantErr: true},
 		{name: "reject empty", input: "  ", wantErr: true},
 	}

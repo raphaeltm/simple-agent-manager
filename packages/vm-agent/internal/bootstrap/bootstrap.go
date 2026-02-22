@@ -1672,16 +1672,27 @@ func normalizeProjectRuntimeFilePath(rawPath string) (string, error) {
 	if trimmed == "" {
 		return "", fmt.Errorf("project file path is required")
 	}
-	if strings.HasPrefix(trimmed, "/") {
-		return "", fmt.Errorf("project file path must be relative")
+
+	// Reject .. segments before filepath.Clean which would resolve them away.
+	// This catches traversal attempts like /home/node/../../etc/shadow.
+	slashed := strings.ReplaceAll(trimmed, "\\", "/")
+	for _, seg := range strings.Split(slashed, "/") {
+		if seg == ".." {
+			return "", fmt.Errorf("project file path must not contain dot-dot segments")
+		}
 	}
 
 	normalized := filepath.ToSlash(filepath.Clean(trimmed))
+
+	// Allow absolute paths (e.g., /home/node/.npmrc) and ~ paths (e.g., ~/.ssh/config).
+	// Files are injected into the devcontainer which is already a sandbox.
+	if strings.HasPrefix(normalized, "/") || strings.HasPrefix(normalized, "~/") {
+		return normalized, nil
+	}
+
+	// Relative paths: reject current-dir-only
 	if normalized == "." {
 		return "", fmt.Errorf("project file path must not be current directory")
-	}
-	if strings.HasPrefix(normalized, "../") || normalized == ".." {
-		return "", fmt.Errorf("project file path must not escape workspace")
 	}
 
 	return normalized, nil
@@ -1734,7 +1745,14 @@ func ensureProjectRuntimeAssets(
 				return normalizeErr
 			}
 
-			targetPath := filepath.ToSlash(filepath.Join(baseDir, normalizedPath))
+			var targetPath string
+			if strings.HasPrefix(normalizedPath, "/") || strings.HasPrefix(normalizedPath, "~/") {
+				// Absolute or home-relative path: use as-is inside the container
+				targetPath = normalizedPath
+			} else {
+				// Relative path: resolve against container work directory
+				targetPath = filepath.ToSlash(filepath.Join(baseDir, normalizedPath))
+			}
 			targetDir := filepath.ToSlash(filepath.Dir(targetPath))
 
 			writeCmd := exec.CommandContext(

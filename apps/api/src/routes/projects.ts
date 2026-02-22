@@ -64,16 +64,23 @@ function normalizeProjectFilePath(path: string): string {
   if (!normalized) {
     throw errors.badRequest('path is required');
   }
-  if (normalized.startsWith('/')) {
-    throw errors.badRequest('path must be relative');
-  }
   if (!PROJECT_FILE_PATH_PATTERN.test(normalized)) {
     throw errors.badRequest('path contains invalid characters');
   }
 
+  // Allow absolute paths (e.g., /home/node/.npmrc) and ~ paths (e.g., ~/.ssh/config).
+  // Files are injected into the devcontainer, which is already a sandbox —
+  // there is no host filesystem exposure.
   const segments = normalized.split('/');
-  if (segments.some((segment) => segment === '' || segment === '.' || segment === '..')) {
-    throw errors.badRequest('path must not contain empty, dot, or dot-dot segments');
+  // For absolute paths, the first segment will be empty (from leading /). Skip it.
+  const checkSegments = normalized.startsWith('/') ? segments.slice(1) : segments;
+  // Allow ~ as the first segment for home directory expansion
+  const startIdx = checkSegments[0] === '~' ? 1 : 0;
+  for (let i = startIdx; i < checkSegments.length; i++) {
+    const seg = checkSegments[i];
+    if (seg === '' || seg === '.' || seg === '..') {
+      throw errors.badRequest('path must not contain empty, dot, or dot-dot segments');
+    }
   }
 
   return segments.join('/');
