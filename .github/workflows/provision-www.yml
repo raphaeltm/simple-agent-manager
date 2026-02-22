@@ -1,0 +1,290 @@
+name: Provision Marketing Site Infrastructure
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: www-infra
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '22'
+  # Pages project name — must match deploy-www.yml
+  PAGES_PROJECT: sam-www
+
+jobs:
+  provision:
+    name: Provision Cloudflare Pages + DNS
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve Domain
+        id: domain
+        run: |
+          DOMAIN="${{ vars.BASE_DOMAIN }}"
+          if [ -z "$DOMAIN" ]; then
+            echo "::error::BASE_DOMAIN is not set in environment variables."
+            exit 1
+          fi
+          echo "base=$DOMAIN" >> "$GITHUB_OUTPUT"
+          echo "www=www.$DOMAIN" >> "$GITHUB_OUTPUT"
+          echo "Base domain: $DOMAIN"
+          echo "WWW domain: www.$DOMAIN"
+
+      # ========================================
+      # Phase 1: Cloudflare Pages Project
+      # ========================================
+      - name: Create Pages Project
+        run: |
+          echo "Creating Cloudflare Pages project: $PAGES_PROJECT"
+          # wrangler pages project create is idempotent-ish — errors if project exists, which is fine
+          npx wrangler pages project create "$PAGES_PROJECT" --production-branch main 2>&1 || echo "Pages project already exists (OK)"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      # ========================================
+      # Phase 2: DNS Records
+      # ========================================
+      - name: Create DNS Records
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+        run: |
+          BASE_DOMAIN="${{ steps.domain.outputs.base }}"
+          API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer $CF_API_TOKEN"
+
+          # --- www CNAME → sam-www.pages.dev (proxied) ---
+          echo "=== Creating CNAME record for www.$BASE_DOMAIN ==="
+          EXISTING=$(curl -sf "$API/zones/$CF_ZONE_ID/dns_records?type=CNAME&name=www.$BASE_DOMAIN" \
+            -H "$AUTH" | jq '.result | length')
+
+          if [ "$EXISTING" -gt 0 ]; then
+            echo "CNAME record for www.$BASE_DOMAIN already exists, updating..."
+            RECORD_ID=$(curl -sf "$API/zones/$CF_ZONE_ID/dns_records?type=CNAME&name=www.$BASE_DOMAIN" \
+              -H "$AUTH" | jq -r '.result[0].id')
+            curl -sf "$API/zones/$CF_ZONE_ID/dns_records/$RECORD_ID" \
+              -X PUT \
+              -H "$AUTH" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"type\": \"CNAME\",
+                \"name\": \"www\",
+                \"content\": \"${PAGES_PROJECT}.pages.dev\",
+                \"ttl\": 1,
+                \"proxied\": true,
+                \"comment\": \"Marketing site (Cloudflare Pages) - managed by provision-www workflow\"
+              }" | jq '.success'
+          else
+            echo "Creating CNAME: www.$BASE_DOMAIN -> ${PAGES_PROJECT}.pages.dev"
+            curl -sf "$API/zones/$CF_ZONE_ID/dns_records" \
+              -H "$AUTH" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"type\": \"CNAME\",
+                \"name\": \"www\",
+                \"content\": \"${PAGES_PROJECT}.pages.dev\",
+                \"ttl\": 1,
+                \"proxied\": true,
+                \"comment\": \"Marketing site (Cloudflare Pages) - managed by provision-www workflow\"
+              }" | jq '.success'
+          fi
+
+          # --- Apex A record → 192.0.2.1 (proxied, for redirect interception) ---
+          echo ""
+          echo "=== Creating A record for $BASE_DOMAIN (apex redirect target) ==="
+          EXISTING=$(curl -sf "$API/zones/$CF_ZONE_ID/dns_records?type=A&name=$BASE_DOMAIN" \
+            -H "$AUTH" | jq '.result | length')
+
+          if [ "$EXISTING" -gt 0 ]; then
+            echo "A record for $BASE_DOMAIN already exists, updating..."
+            RECORD_ID=$(curl -sf "$API/zones/$CF_ZONE_ID/dns_records?type=A&name=$BASE_DOMAIN" \
+              -H "$AUTH" | jq -r '.result[0].id')
+            curl -sf "$API/zones/$CF_ZONE_ID/dns_records/$RECORD_ID" \
+              -X PUT \
+              -H "$AUTH" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"type\": \"A\",
+                \"name\": \"@\",
+                \"content\": \"192.0.2.1\",
+                \"ttl\": 1,
+                \"proxied\": true,
+                \"comment\": \"Apex redirect to www - managed by provision-www workflow\"
+              }" | jq '.success'
+          else
+            echo "Creating A record: $BASE_DOMAIN -> 192.0.2.1 (proxied, for redirect)"
+            curl -sf "$API/zones/$CF_ZONE_ID/dns_records" \
+              -H "$AUTH" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"type\": \"A\",
+                \"name\": \"@\",
+                \"content\": \"192.0.2.1\",
+                \"ttl\": 1,
+                \"proxied\": true,
+                \"comment\": \"Apex redirect to www - managed by provision-www workflow\"
+              }" | jq '.success'
+          fi
+
+      # ========================================
+      # Phase 3: Custom Domain on Pages Project
+      # ========================================
+      - name: Add Custom Domain to Pages Project
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          WWW_DOMAIN="${{ steps.domain.outputs.www }}"
+          API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer $CF_API_TOKEN"
+
+          echo "Adding custom domain $WWW_DOMAIN to Pages project $PAGES_PROJECT..."
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" "$API/accounts/$CF_ACCOUNT_ID/pages/projects/$PAGES_PROJECT/domains" \
+            -H "$AUTH" \
+            -H "Content-Type: application/json" \
+            -d "{\"name\": \"$WWW_DOMAIN\"}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if echo "$BODY" | jq -e '.success == true' > /dev/null 2>&1; then
+            echo "Custom domain $WWW_DOMAIN added successfully."
+          elif echo "$BODY" | jq -e '.errors[0].code == 8000040' > /dev/null 2>&1; then
+            echo "Custom domain $WWW_DOMAIN already exists on project (OK)."
+          else
+            echo "::warning::Custom domain response (HTTP $HTTP_CODE): $BODY"
+            echo "This may resolve after DNS propagation. Check Cloudflare dashboard if needed."
+          fi
+
+      # ========================================
+      # Phase 4: Apex → www Redirect (Page Rule)
+      # ========================================
+      - name: Create Apex Redirect Rule
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+        run: |
+          BASE_DOMAIN="${{ steps.domain.outputs.base }}"
+          WWW_DOMAIN="${{ steps.domain.outputs.www }}"
+          API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer $CF_API_TOKEN"
+
+          echo "Creating Page Rule: $BASE_DOMAIN/* -> https://$WWW_DOMAIN/\$1 (301)"
+
+          # Check for existing page rule matching this pattern
+          EXISTING_RULES=$(curl -sf "$API/zones/$CF_ZONE_ID/pagerules?status=active" \
+            -H "$AUTH")
+          EXISTING_ID=$(echo "$EXISTING_RULES" | jq -r --arg pattern "${BASE_DOMAIN}/*" \
+            '.result[] | select(.targets[0].constraint.value == $pattern) | .id' 2>/dev/null)
+
+          if [ -n "$EXISTING_ID" ] && [ "$EXISTING_ID" != "null" ]; then
+            echo "Page Rule already exists (ID: $EXISTING_ID), updating..."
+            curl -sf "$API/zones/$CF_ZONE_ID/pagerules/$EXISTING_ID" \
+              -X PUT \
+              -H "$AUTH" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"targets\": [{
+                  \"target\": \"url\",
+                  \"constraint\": {
+                    \"operator\": \"matches\",
+                    \"value\": \"${BASE_DOMAIN}/*\"
+                  }
+                }],
+                \"actions\": [{
+                  \"id\": \"forwarding_url\",
+                  \"value\": {
+                    \"url\": \"https://${WWW_DOMAIN}/\$1\",
+                    \"status_code\": 301
+                  }
+                }],
+                \"status\": \"active\"
+              }" | jq '.success'
+          else
+            echo "Creating new Page Rule..."
+            curl -sf "$API/zones/$CF_ZONE_ID/pagerules" \
+              -H "$AUTH" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"targets\": [{
+                  \"target\": \"url\",
+                  \"constraint\": {
+                    \"operator\": \"matches\",
+                    \"value\": \"${BASE_DOMAIN}/*\"
+                  }
+                }],
+                \"actions\": [{
+                  \"id\": \"forwarding_url\",
+                  \"value\": {
+                    \"url\": \"https://${WWW_DOMAIN}/\$1\",
+                    \"status_code\": 301
+                  }
+                }],
+                \"status\": \"active\"
+              }" | jq '.success'
+          fi
+
+      # ========================================
+      # Summary
+      # ========================================
+      - name: Write Job Summary
+        if: always()
+        run: |
+          BASE_DOMAIN="${{ steps.domain.outputs.base }}"
+          WWW_DOMAIN="${{ steps.domain.outputs.www }}"
+
+          if [ "${{ job.status }}" = "success" ]; then
+            cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Marketing Site Infrastructure Provisioned
+
+          ### DNS Records (Cloudflare)
+          | Type | Name | Content | Proxied |
+          |------|------|---------|---------|
+          | CNAME | \`www.${BASE_DOMAIN}\` | \`${PAGES_PROJECT}.pages.dev\` | Yes |
+          | A | \`${BASE_DOMAIN}\` | \`192.0.2.1\` | Yes (redirect target) |
+
+          ### Cloudflare Pages
+          - **Project:** \`${PAGES_PROJECT}\`
+          - **Custom domain:** \`${WWW_DOMAIN}\`
+          - **Pages URL:** \`${PAGES_PROJECT}.pages.dev\`
+
+          ### Redirect
+          - \`${BASE_DOMAIN}/*\` → \`https://${WWW_DOMAIN}/\$1\` (301)
+
+          ### Next Steps
+          1. Run the **Deploy Marketing Site** workflow to publish the site
+          2. Verify \`https://${WWW_DOMAIN}\` loads after deployment
+          3. Verify \`https://${BASE_DOMAIN}\` redirects to \`https://${WWW_DOMAIN}\`
+          EOF
+          else
+            cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Provisioning Failed
+
+          Check the logs above for error details.
+
+          ### Troubleshooting
+          - Verify \`CF_API_TOKEN\` has DNS and Pages edit permissions
+          - Verify \`CF_ZONE_ID\` is correct for \`${BASE_DOMAIN}\`
+          - Verify \`BASE_DOMAIN\` is set in environment variables
+          EOF
+          fi

@@ -1,0 +1,201 @@
+name: Teardown Marketing Site Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type DELETE to confirm teardown'
+        required: true
+        type: string
+
+concurrency:
+  group: www-infra
+  cancel-in-progress: false
+
+env:
+  PAGES_PROJECT: sam-www
+
+jobs:
+  teardown:
+    name: Teardown Cloudflare Pages + DNS
+    runs-on: ubuntu-latest
+    environment: production
+    if: ${{ github.event.inputs.confirm == 'DELETE' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Resolve Domain
+        id: domain
+        run: |
+          DOMAIN="${{ vars.BASE_DOMAIN }}"
+          if [ -z "$DOMAIN" ]; then
+            echo "::error::BASE_DOMAIN is not set in environment variables."
+            exit 1
+          fi
+          echo "base=$DOMAIN" >> "$GITHUB_OUTPUT"
+          echo "www=www.$DOMAIN" >> "$GITHUB_OUTPUT"
+
+      # ========================================
+      # Phase 1: Remove Page Rule (apex redirect)
+      # ========================================
+      - name: Remove Apex Redirect Page Rule
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+        run: |
+          BASE_DOMAIN="${{ steps.domain.outputs.base }}"
+          API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer $CF_API_TOKEN"
+
+          echo "Looking for Page Rule matching ${BASE_DOMAIN}/*..."
+          RULE_ID=$(curl -sf "$API/zones/$CF_ZONE_ID/pagerules?status=active" \
+            -H "$AUTH" | jq -r --arg pattern "${BASE_DOMAIN}/*" \
+            '.result[] | select(.targets[0].constraint.value == $pattern) | .id' 2>/dev/null)
+
+          if [ -n "$RULE_ID" ] && [ "$RULE_ID" != "null" ]; then
+            echo "Deleting Page Rule: $RULE_ID"
+            curl -sf "$API/zones/$CF_ZONE_ID/pagerules/$RULE_ID" \
+              -X DELETE \
+              -H "$AUTH" | jq '.success'
+          else
+            echo "No matching Page Rule found (OK)."
+          fi
+
+      # ========================================
+      # Phase 2: Remove Custom Domain from Pages
+      # ========================================
+      - name: Remove Custom Domain from Pages Project
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          WWW_DOMAIN="${{ steps.domain.outputs.www }}"
+          API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer $CF_API_TOKEN"
+
+          echo "Removing custom domain $WWW_DOMAIN from $PAGES_PROJECT..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "$API/accounts/$CF_ACCOUNT_ID/pages/projects/$PAGES_PROJECT/domains/$WWW_DOMAIN" \
+            -X DELETE \
+            -H "$AUTH")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if echo "$BODY" | jq -e '.success == true' > /dev/null 2>&1; then
+            echo "Custom domain removed."
+          else
+            echo "Custom domain removal response (HTTP $HTTP_CODE): $BODY"
+            echo "May already be removed (OK)."
+          fi
+
+      # ========================================
+      # Phase 3: Remove DNS Records
+      # ========================================
+      - name: Remove DNS Records
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+        run: |
+          BASE_DOMAIN="${{ steps.domain.outputs.base }}"
+          API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer $CF_API_TOKEN"
+
+          # --- Remove www CNAME ---
+          echo "=== Removing CNAME record for www.$BASE_DOMAIN ==="
+          RECORD_ID=$(curl -sf "$API/zones/$CF_ZONE_ID/dns_records?type=CNAME&name=www.$BASE_DOMAIN" \
+            -H "$AUTH" | jq -r '.result[] | select(.comment | test("provision-www")) | .id' 2>/dev/null)
+
+          if [ -n "$RECORD_ID" ] && [ "$RECORD_ID" != "null" ]; then
+            echo "Deleting CNAME record: $RECORD_ID"
+            curl -sf "$API/zones/$CF_ZONE_ID/dns_records/$RECORD_ID" \
+              -X DELETE \
+              -H "$AUTH" | jq '.success'
+          else
+            echo "No www CNAME record found with provision-www tag (OK)."
+          fi
+
+          # --- Remove apex A record ---
+          echo ""
+          echo "=== Removing A record for $BASE_DOMAIN ==="
+          RECORD_ID=$(curl -sf "$API/zones/$CF_ZONE_ID/dns_records?type=A&name=$BASE_DOMAIN" \
+            -H "$AUTH" | jq -r '.result[] | select(.comment | test("provision-www")) | .id' 2>/dev/null)
+
+          if [ -n "$RECORD_ID" ] && [ "$RECORD_ID" != "null" ]; then
+            echo "Deleting A record: $RECORD_ID"
+            curl -sf "$API/zones/$CF_ZONE_ID/dns_records/$RECORD_ID" \
+              -X DELETE \
+              -H "$AUTH" | jq '.success'
+          else
+            echo "No apex A record found with provision-www tag (OK)."
+          fi
+
+      # ========================================
+      # Phase 4: Delete Pages Project
+      # ========================================
+      - name: Delete Pages Project
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer $CF_API_TOKEN"
+
+          echo "Deleting Cloudflare Pages project: $PAGES_PROJECT"
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "$API/accounts/$CF_ACCOUNT_ID/pages/projects/$PAGES_PROJECT" \
+            -X DELETE \
+            -H "$AUTH")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if echo "$BODY" | jq -e '.success == true' > /dev/null 2>&1; then
+            echo "Pages project deleted."
+          elif [ "$HTTP_CODE" = "404" ]; then
+            echo "Pages project not found (already deleted, OK)."
+          else
+            echo "::warning::Delete response (HTTP $HTTP_CODE): $BODY"
+          fi
+
+      # ========================================
+      # Summary
+      # ========================================
+      - name: Write Job Summary
+        if: always()
+        run: |
+          BASE_DOMAIN="${{ steps.domain.outputs.base }}"
+          if [ "${{ job.status }}" = "success" ]; then
+            cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Marketing Site Infrastructure Torn Down
+
+          ### Removed
+          - Page Rule: \`${BASE_DOMAIN}/*\` redirect
+          - Custom domain: \`www.${BASE_DOMAIN}\`
+          - DNS CNAME: \`www.${BASE_DOMAIN}\`
+          - DNS A: \`${BASE_DOMAIN}\` (apex redirect)
+          - Pages project: \`${PAGES_PROJECT}\`
+
+          ### To Re-provision
+          Run the **Provision Marketing Site Infrastructure** workflow.
+          EOF
+          else
+            cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Teardown Failed
+
+          Check the logs above for error details. Some resources may have been partially removed.
+          EOF
+          fi
+
+  validate:
+    name: Validate Confirmation
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirm != 'DELETE' }}
+    steps:
+      - name: Confirmation Required
+        run: |
+          echo "::error::Teardown requires confirmation. Type 'DELETE' in the confirm field."
+          echo "## Teardown Cancelled" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "You must type \`DELETE\` in the confirmation field to proceed." >> "$GITHUB_STEP_SUMMARY"
+          exit 1
