@@ -1,0 +1,322 @@
+# Data Model: Project-First Architecture
+
+**Date**: 2026-02-22
+**Spec**: [spec.md](./spec.md)
+**Research**: [research.md](./research.md)
+
+---
+
+## Storage Allocation
+
+| Data | Storage Layer | Rationale |
+|------|--------------|-----------|
+| Projects (metadata) | D1 (central) | Cross-project queries for dashboard, relational FKs |
+| Workspaces (metadata) | D1 (central) | Cross-project queries, node association |
+| Nodes (metadata) | D1 (central) | Infrastructure-scoped, not project-scoped |
+| Users, sessions, credentials | D1 (central) | Auth/platform data, BetterAuth managed |
+| Tasks (metadata) | D1 (central) | Cross-project task dashboard queries |
+| Task status events | DO (per-project) | Append-only, unbounded growth, project-scoped |
+| Chat sessions | DO (per-project) | Write-heavy, real-time, project-scoped |
+| Chat messages | DO (per-project) | Write-heavy, append-only, high volume |
+| Activity events | DO (per-project) | Append-only, project-scoped, retention-managed |
+
+---
+
+## D1 Schema Changes (Central Platform Database)
+
+### Modified: `projects` table
+
+```sql
+ALTER TABLE projects ADD COLUMN github_repo_id INTEGER;
+ALTER TABLE projects ADD COLUMN github_repo_node_id TEXT;
+ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE projects ADD COLUMN last_activity_at TEXT;
+ALTER TABLE projects ADD COLUMN active_session_count INTEGER NOT NULL DEFAULT 0;
+
+-- After backfilling github_repo_id for existing projects:
+CREATE UNIQUE INDEX idx_projects_user_github_repo_id
+  ON projects(user_id, github_repo_id)
+  WHERE github_repo_id IS NOT NULL;
+```
+
+**New columns**:
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `github_repo_id` | INTEGER (nullable initially) | Stable GitHub numeric repository ID |
+| `github_repo_node_id` | TEXT | GitHub GraphQL node ID |
+| `status` | TEXT | `active`, `detached` (repo deleted) |
+| `last_activity_at` | TEXT | Synced from DO on activity events |
+| `active_session_count` | INTEGER | Synced from DO for dashboard display |
+
+### Modified: `workspaces` table
+
+```sql
+-- Make projectId required for new workspaces
+-- Existing NULL values migrated before constraint applied
+ALTER TABLE workspaces ADD COLUMN project_id_new TEXT NOT NULL
+  REFERENCES projects(id) ON DELETE CASCADE;
+-- (actual migration will handle data copy + column swap)
+```
+
+### Unchanged tables
+
+All other D1 tables remain unchanged: `users`, `sessions`, `accounts`, `verifications`, `credentials`, `github_installations`, `nodes`, `agent_sessions`, `agent_settings`, `tasks`, `task_dependencies`, `project_runtime_env_vars`, `project_runtime_files`, UI governance tables.
+
+---
+
+## Durable Object SQLite Schema (Per-Project)
+
+Each project gets one Durable Object instance (`ProjectData`) with the following SQLite schema.
+
+### Migration 001: Initial Schema
+
+```sql
+-- Migrations tracking
+CREATE TABLE IF NOT EXISTS migrations (
+  name TEXT PRIMARY KEY,
+  applied_at INTEGER NOT NULL
+);
+
+-- Chat sessions
+CREATE TABLE chat_sessions (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT,
+  topic TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  message_count INTEGER NOT NULL DEFAULT 0,
+  started_at INTEGER NOT NULL,
+  ended_at INTEGER,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+);
+
+CREATE INDEX idx_chat_sessions_status ON chat_sessions(status);
+CREATE INDEX idx_chat_sessions_started_at ON chat_sessions(started_at DESC);
+CREATE INDEX idx_chat_sessions_workspace ON chat_sessions(workspace_id);
+
+-- Chat messages (append-only)
+CREATE TABLE chat_messages (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  tool_metadata TEXT,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+);
+
+CREATE INDEX idx_chat_messages_session_created
+  ON chat_messages(session_id, created_at);
+
+-- Task status events (moved from D1)
+CREATE TABLE task_status_events (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  from_status TEXT,
+  to_status TEXT NOT NULL,
+  actor_type TEXT NOT NULL,
+  actor_id TEXT,
+  reason TEXT,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+);
+
+CREATE INDEX idx_task_status_events_task
+  ON task_status_events(task_id, created_at);
+
+-- Activity events
+CREATE TABLE activity_events (
+  id TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  actor_type TEXT NOT NULL,
+  actor_id TEXT,
+  workspace_id TEXT,
+  session_id TEXT,
+  task_id TEXT,
+  payload TEXT,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+);
+
+CREATE INDEX idx_activity_events_created
+  ON activity_events(created_at DESC);
+CREATE INDEX idx_activity_events_type
+  ON activity_events(event_type, created_at DESC);
+```
+
+### Storage Notes
+
+- All timestamps are INTEGER (Unix epoch milliseconds) for D1/SQLite compatibility
+- IDs are TEXT (UUIDs generated by the Worker)
+- `content` in chat_messages stores the full message text. Messages exceeding `MESSAGE_SIZE_THRESHOLD` (configurable, default 100KB) store a truncated version with a reference to R2 for the full payload.
+- `tool_metadata` is JSON: `{ "tool": "Read", "target": "src/index.ts", "status": "success" }`
+- `payload` in activity_events is JSON with event-type-specific data
+
+---
+
+## Entity Definitions
+
+### ChatSession
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| id | TEXT (UUID) | Yes | Unique session identifier |
+| workspace_id | TEXT | No | Workspace that ran this session (null if orphaned) |
+| topic | TEXT | No | Auto-captured from first user message |
+| status | TEXT | Yes | `active`, `stopped`, `error` |
+| message_count | INTEGER | Yes | Running count for display |
+| started_at | INTEGER | Yes | Epoch ms when session began |
+| ended_at | INTEGER | No | Epoch ms when session ended |
+| created_at | INTEGER | Yes | Record creation timestamp |
+| updated_at | INTEGER | Yes | Last modification timestamp |
+
+### ChatMessage
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| id | TEXT (UUID) | Yes | Unique message identifier |
+| session_id | TEXT | Yes | Parent session FK |
+| role | TEXT | Yes | `user`, `assistant`, `system`, `tool` |
+| content | TEXT | Yes | Message content (may be truncated if oversized) |
+| tool_metadata | TEXT (JSON) | No | Tool call details for role=tool messages |
+| created_at | INTEGER | Yes | Epoch ms |
+
+### ActivityEvent
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| id | TEXT (UUID) | Yes | Unique event identifier |
+| event_type | TEXT | Yes | See event types below |
+| actor_type | TEXT | Yes | `user`, `system`, `agent` |
+| actor_id | TEXT | No | User ID or agent identifier |
+| workspace_id | TEXT | No | Related workspace if applicable |
+| session_id | TEXT | No | Related chat session if applicable |
+| task_id | TEXT | No | Related task if applicable |
+| payload | TEXT (JSON) | No | Event-specific structured data |
+| created_at | INTEGER | Yes | Epoch ms |
+
+### Activity Event Types
+
+| Event Type | Trigger | Payload Example |
+|------------|---------|-----------------|
+| `workspace.created` | Workspace created under project | `{ "name": "feature-x", "branch": "main" }` |
+| `workspace.stopped` | Workspace stopped | `{ "reason": "idle", "duration_minutes": 45 }` |
+| `workspace.restarted` | Workspace restarted | `{}` |
+| `session.started` | Chat session begins | `{ "workspace_name": "feature-x" }` |
+| `session.stopped` | Chat session ends | `{ "message_count": 42, "duration_minutes": 30 }` |
+| `task.status_changed` | Task status transition | `{ "from": "ready", "to": "in_progress" }` |
+| `task.created` | New task created | `{ "title": "Fix auth bug" }` |
+| `task.delegated` | Task assigned to workspace | `{ "workspace_name": "feature-x" }` |
+
+---
+
+## State Machines
+
+### ChatSession Status
+
+```
+                  ┌──────────┐
+    create() ───→ │  active   │
+                  └────┬─────┘
+                       │
+              ┌────────┴────────┐
+              │                 │
+         stop()            error()
+              │                 │
+              ▼                 ▼
+        ┌──────────┐    ┌──────────┐
+        │ stopped   │    │  error   │
+        └──────────┘    └──────────┘
+```
+
+- `active` → `stopped`: Workspace stops, user ends session, or session timeout
+- `active` → `error`: Unrecoverable error during session (agent crash, etc.)
+- Terminal states: `stopped`, `error` (sessions are immutable after ending)
+
+### Project Status
+
+```
+                  ┌──────────┐
+    create() ───→ │  active   │
+                  └────┬─────┘
+                       │
+              repo_deleted()
+                       │
+                       ▼
+                ┌──────────┐
+                │ detached  │
+                └──────────┘
+```
+
+- `active` → `detached`: GitHub repository deleted (data preserved, new workspace creation blocked)
+- No `detached` → `active` transition (user must create a new project if repo is re-created)
+
+---
+
+## Configurable Limits (Constitution Principle XI)
+
+All limits are configurable via Worker environment variables with sensible defaults.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAX_PROJECTS_PER_USER` | `50` | Maximum projects per user |
+| `MAX_SESSIONS_PER_PROJECT` | `1000` | Maximum retained sessions per project |
+| `MAX_MESSAGES_PER_SESSION` | `10000` | Maximum messages per session |
+| `MESSAGE_SIZE_THRESHOLD` | `102400` (100KB) | Messages larger than this are truncated; full content stored in R2 |
+| `ACTIVITY_RETENTION_DAYS` | `90` | Activity events older than this are compacted/archived |
+| `SESSION_IDLE_TIMEOUT_MINUTES` | `60` | Active session with no messages for this duration is auto-stopped |
+| `DO_SUMMARY_SYNC_DEBOUNCE_MS` | `5000` | Debounce interval for syncing summary data from DO to D1 |
+
+---
+
+## Data Flow Diagrams
+
+### Chat Message Persistence
+
+```
+Browser ─────WebSocket────→ API Worker ────WebSocket────→ VM Agent
+                               │
+                               │ (async, non-blocking)
+                               ▼
+                        Project DO (SQLite)
+                         ├── chat_sessions
+                         └── chat_messages
+```
+
+### Dashboard Summary Sync
+
+```
+Project DO ──(on significant event)──→ API Worker ──→ D1
+                                                      ├── projects.last_activity_at
+                                                      └── projects.active_session_count
+```
+
+### Activity Feed
+
+```
+Any project action ──→ API Worker ──→ Project DO
+                                       └── activity_events (INSERT)
+                                       └── WebSocket broadcast to connected clients
+```
+
+---
+
+## Migration Plan (D1)
+
+### Phase 1: Add new columns
+
+1. Add `github_repo_id`, `github_repo_node_id`, `status`, `last_activity_at`, `active_session_count` to `projects`
+2. All nullable initially to avoid breaking existing data
+
+### Phase 2: Backfill
+
+1. For each existing project, fetch `github_repo_id` from GitHub API using the `repository` (owner/repo) field
+2. Update project records with stable IDs
+
+### Phase 3: Enforce constraints
+
+1. Add unique index on `(user_id, github_repo_id)` where `github_repo_id IS NOT NULL`
+2. Make `workspace.projectId` required (after migrating orphaned workspaces)
+
+### Phase 4: Task status events migration
+
+1. For each project, copy relevant `task_status_events` from D1 to the project's DO
+2. After verification, drop `task_status_events` from D1 schema

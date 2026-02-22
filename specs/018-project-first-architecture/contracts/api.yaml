@@ -1,0 +1,521 @@
+openapi: 3.1.0
+info:
+  title: SAM Project-First Architecture API
+  version: 0.2.0
+  description: |
+    New and modified API endpoints for the project-first architecture (spec 018).
+    Endpoints are grouped by domain. All endpoints require authentication via
+    BetterAuth session cookie unless noted otherwise.
+
+servers:
+  - url: https://api.{baseDomain}
+    variables:
+      baseDomain:
+        default: simple-agent-manager.org
+
+paths:
+  # ===========================================================================
+  # Projects — Modified endpoints
+  # ===========================================================================
+
+  /api/projects:
+    get:
+      summary: List user's projects with summary data
+      description: |
+        Returns projects for the authenticated user with summary cards including
+        active workspace count, last activity timestamp, and active session count.
+        This is the primary dashboard landing page data source.
+      tags: [Projects]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, detached]
+          description: Filter by project status
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [last_activity, name, created_at]
+            default: last_activity
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Project list with summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProjectSummary'
+                  total:
+                    type: integer
+
+    post:
+      summary: Create a new project
+      description: |
+        Creates a project linked to a GitHub repository by its stable numeric ID.
+        The github_repo_id is required and must be unique per user.
+      tags: [Projects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '201':
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '409':
+          description: Project already exists for this repository
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/projects/{projectId}:
+    get:
+      summary: Get project detail with workspaces, sessions, and activity
+      description: |
+        Returns full project detail including associated workspaces,
+        recent chat sessions (from DO), and recent activity events (from DO).
+      tags: [Projects]
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200':
+          description: Project detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDetail'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ===========================================================================
+  # Chat Sessions — New endpoints (proxied to Project DO)
+  # ===========================================================================
+
+  /api/projects/{projectId}/sessions:
+    get:
+      summary: List chat sessions for a project
+      description: |
+        Returns chat sessions from the project's Durable Object, sorted by
+        recency. Includes topic, status, message count, and duration.
+      tags: [Chat]
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, stopped, error]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Session list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatSession'
+                  total:
+                    type: integer
+
+  /api/projects/{projectId}/sessions/{sessionId}:
+    get:
+      summary: Get chat session with full message history
+      description: |
+        Returns a chat session with its complete message history from the
+        project's Durable Object. Supports pagination for long sessions.
+      tags: [Chat]
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - $ref: '#/components/parameters/sessionId'
+        - name: messageLimit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Max messages to return per page
+        - name: messageBefore
+          in: query
+          schema:
+            type: integer
+          description: Return messages with created_at before this epoch ms (cursor pagination)
+      responses:
+        '200':
+          description: Session with messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSessionDetail'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/projects/{projectId}/sessions/{sessionId}/messages:
+    post:
+      summary: Persist a chat message
+      description: |
+        Persists a chat message to the project DO. Called by the API Worker's
+        WebSocket proxy when messages pass through. Not typically called by
+        external clients directly.
+      tags: [Chat]
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - $ref: '#/components/parameters/sessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersistMessageRequest'
+      responses:
+        '201':
+          description: Message persisted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+
+  # ===========================================================================
+  # Activity Feed — New endpoints (proxied to Project DO)
+  # ===========================================================================
+
+  /api/projects/{projectId}/activity:
+    get:
+      summary: Get project activity feed
+      description: |
+        Returns activity events from the project's Durable Object in reverse
+        chronological order. Supports cursor-based pagination.
+      tags: [Activity]
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - name: eventType
+          in: query
+          schema:
+            type: string
+          description: Filter by event type (e.g., workspace.created, session.started)
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: before
+          in: query
+          schema:
+            type: integer
+          description: Return events with created_at before this epoch ms
+      responses:
+        '200':
+          description: Activity event list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ActivityEvent'
+                  hasMore:
+                    type: boolean
+
+  # ===========================================================================
+  # WebSocket — Real-time project data stream
+  # ===========================================================================
+
+  /api/projects/{projectId}/ws:
+    get:
+      summary: WebSocket connection to project DO
+      description: |
+        Upgrades to a WebSocket connection proxied to the project's Durable
+        Object. Streams real-time events: new messages for active sessions,
+        activity feed updates, session status changes.
+
+        Protocol: JSON frames with { type, payload } structure.
+        Supports ping/pong auto-response (Hibernatable WebSocket).
+      tags: [WebSocket]
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '101':
+          description: WebSocket upgrade successful
+
+  # ===========================================================================
+  # GitHub Webhooks — Modified endpoint
+  # ===========================================================================
+
+  /api/github/webhooks:
+    post:
+      summary: GitHub App webhook receiver
+      description: |
+        Handles GitHub webhook events. Extended to handle repository lifecycle
+        events for stable identity maintenance.
+      tags: [GitHub]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Webhook processed
+
+components:
+  parameters:
+    projectId:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Project UUID
+    sessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Chat session UUID
+
+  schemas:
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+
+    ProjectSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        repository:
+          type: string
+          description: Cached owner/repo display name
+        githubRepoId:
+          type: integer
+          description: Stable GitHub numeric repo ID
+        defaultBranch:
+          type: string
+        status:
+          type: string
+          enum: [active, detached]
+        activeWorkspaceCount:
+          type: integer
+        activeSessionCount:
+          type: integer
+        lastActivityAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    Project:
+      allOf:
+        - $ref: '#/components/schemas/ProjectSummary'
+        - type: object
+          properties:
+            description:
+              type: string
+              nullable: true
+            installationId:
+              type: string
+            githubRepoNodeId:
+              type: string
+              nullable: true
+
+    ProjectDetail:
+      allOf:
+        - $ref: '#/components/schemas/Project'
+        - type: object
+          properties:
+            workspaces:
+              type: array
+              items:
+                type: object
+                description: Existing WorkspaceResponse schema
+            recentSessions:
+              type: array
+              items:
+                $ref: '#/components/schemas/ChatSession'
+            recentActivity:
+              type: array
+              items:
+                $ref: '#/components/schemas/ActivityEvent'
+
+    CreateProjectRequest:
+      type: object
+      required: [name, installationId, repository, githubRepoId]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        installationId:
+          type: string
+        repository:
+          type: string
+          description: GitHub full name (owner/repo)
+        githubRepoId:
+          type: integer
+          description: Stable GitHub numeric repository ID
+        githubRepoNodeId:
+          type: string
+        defaultBranch:
+          type: string
+          default: main
+
+    ChatSession:
+      type: object
+      properties:
+        id:
+          type: string
+        workspaceId:
+          type: string
+          nullable: true
+        topic:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [active, stopped, error]
+        messageCount:
+          type: integer
+        startedAt:
+          type: integer
+          description: Epoch milliseconds
+        endedAt:
+          type: integer
+          nullable: true
+        createdAt:
+          type: integer
+
+    ChatSessionDetail:
+      allOf:
+        - $ref: '#/components/schemas/ChatSession'
+        - type: object
+          properties:
+            messages:
+              type: array
+              items:
+                $ref: '#/components/schemas/ChatMessage'
+            hasMoreMessages:
+              type: boolean
+
+    ChatMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        sessionId:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant, system, tool]
+        content:
+          type: string
+        toolMetadata:
+          type: object
+          nullable: true
+          properties:
+            tool:
+              type: string
+            target:
+              type: string
+            status:
+              type: string
+              enum: [success, error]
+        createdAt:
+          type: integer
+
+    PersistMessageRequest:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant, system, tool]
+        content:
+          type: string
+        toolMetadata:
+          type: object
+          nullable: true
+
+    ActivityEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        eventType:
+          type: string
+        actorType:
+          type: string
+          enum: [user, system, agent]
+        actorId:
+          type: string
+          nullable: true
+        workspaceId:
+          type: string
+          nullable: true
+        sessionId:
+          type: string
+          nullable: true
+        taskId:
+          type: string
+          nullable: true
+        payload:
+          type: object
+          nullable: true
+        createdAt:
+          type: integer
