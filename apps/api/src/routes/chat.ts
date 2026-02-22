@@ -157,4 +157,24 @@ chatRoutes.post('/:sessionId/messages', async (c) => {
   return c.json({ id: messageId }, 201);
 });
 
+/**
+ * GET /api/projects/:projectId/sessions/ws
+ * WebSocket upgrade — streams real-time events (new messages, session changes, activity)
+ * from the project's Durable Object to the connected client.
+ */
+chatRoutes.get('/ws', async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireOwnedProject(db, projectId, userId);
+
+  const upgradeHeader = c.req.header('Upgrade');
+  if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
+    throw errors.badRequest('Expected WebSocket upgrade');
+  }
+
+  return projectDataService.forwardWebSocket(c.env, projectId, c.req.raw);
+});
+
 export { chatRoutes };

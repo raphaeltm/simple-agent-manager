@@ -465,7 +465,12 @@ export function Project() {
               )}
             </div>
             <div style={{ display: 'flex', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
-              <Button onClick={handleLaunchWorkspace} loading={launchingWorkspace} disabled={launchingWorkspace}>
+              <Button
+                onClick={handleLaunchWorkspace}
+                loading={launchingWorkspace}
+                disabled={launchingWorkspace || project.status === 'detached'}
+                title={project.status === 'detached' ? 'Cannot launch workspace for a detached project' : undefined}
+              >
                 Launch Workspace
               </Button>
               <Button variant="secondary" onClick={() => setShowProjectEdit((v) => !v)}>
@@ -488,6 +493,14 @@ export function Project() {
               </Button>
             </div>
           </div>
+
+          {/* Detached warning */}
+          {project.status === 'detached' && (
+            <Alert variant="warning">
+              This project&apos;s GitHub repository has been deleted. Workspace creation is disabled.
+              You can still view existing sessions, tasks, and activity.
+            </Alert>
+          )}
 
           {/* ── Tab strip ── */}
           <div

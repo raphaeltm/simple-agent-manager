@@ -109,6 +109,7 @@ export interface Project {
   installationId: string;
   repository: string;
   defaultBranch: string;
+  status?: ProjectStatus;
   createdAt: string;
   updatedAt: string;
 }

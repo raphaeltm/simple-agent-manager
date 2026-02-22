@@ -121,8 +121,8 @@
 
 - [x] T037 [US5] Update project creation in `apps/api/src/routes/projects.ts`: require `githubRepoId` in `CreateProjectRequest`, store `github_repo_id` and `github_repo_node_id`, enforce unique constraint `(user_id, github_repo_id)`
 - [x] T038 [US5] Add GitHub webhook handlers for repository events in `apps/api/src/routes/github.ts`: handle `repository.renamed` (update `repository` field by `github_repo_id` lookup), `repository.transferred` (same), `repository.deleted` (set project `status = 'detached'`)
-- [ ] T039 [US5] Update project creation UI in `apps/web/src/pages/Projects.tsx` (or the create project flow): pass `githubRepoId` from GitHub API repo data when user selects a repository
-- [ ] T040 [US5] Add "detached" state indicator in project UI components: show warning badge on `ProjectSummaryCard` and project detail page when `status === 'detached'`, block new workspace creation for detached projects
+- [x] T039 [US5] Update project creation UI in `apps/web/src/pages/Projects.tsx` (or the create project flow): pass `githubRepoId` from GitHub API repo data when user selects a repository
+- [x] T040 [US5] Add "detached" state indicator in project UI components: show warning badge on `ProjectSummaryCard` and project detail page when `status === 'detached'`, block new workspace creation for detached projects
 
 **Checkpoint**: Projects survive repo renames/transfers. Deleted repos show detached state.
 
@@ -134,10 +134,10 @@
 
 **Independent Test**: Two projects simultaneously receive chat messages; both maintain consistent response times.
 
-- [ ] T041 [US6] Implement DO-to-D1 summary sync in `apps/api/src/durable-objects/project-data.ts`: on session create/stop and activity events, debounce and call back to update `projects.last_activity_at` and `projects.active_session_count` in D1 via the env DATABASE binding
-- [ ] T042 [US6] Implement Hibernatable WebSocket handlers in `apps/api/src/durable-objects/project-data.ts`: `fetch()` for WebSocket upgrade, `webSocketMessage()` for incoming messages, `webSocketClose()` for cleanup. Broadcast new messages and activity events to connected clients
-- [ ] T043 [US6] Create WebSocket route in `apps/api/src/routes/chat.ts` (or separate file): `GET /api/projects/:projectId/ws` — authenticate, get DO stub, forward upgrade request via `stub.fetch(c.req.raw)`
-- [ ] T044 [US6] Write integration tests in `apps/api/tests/integration/project-data.test.ts`: test two project DOs operating concurrently via Miniflare, verify no cross-project data leakage, verify summary sync to D1
+- [x] T041 [US6] Implement DO-to-D1 summary sync in `apps/api/src/durable-objects/project-data.ts`: on session create/stop and activity events, debounce and call back to update `projects.last_activity_at` and `projects.active_session_count` in D1 via the env DATABASE binding
+- [x] T042 [US6] Implement Hibernatable WebSocket handlers in `apps/api/src/durable-objects/project-data.ts`: `fetch()` for WebSocket upgrade, `webSocketMessage()` for incoming messages, `webSocketClose()` for cleanup. Broadcast new messages and activity events to connected clients
+- [x] T043 [US6] Create WebSocket route in `apps/api/src/routes/chat.ts` (or separate file): `GET /api/projects/:projectId/ws` — authenticate, get DO stub, forward upgrade request via `stub.fetch(c.req.raw)`
+- [x] T044 [US6] Write integration tests in `apps/api/tests/integration/project-data.test.ts`: test two project DOs operating concurrently via Miniflare, verify no cross-project data leakage, verify summary sync to D1
 
 **Checkpoint**: Per-project data isolation validated. Real-time WebSocket streaming functional.
 
@@ -147,12 +147,12 @@
 
 **Purpose**: Documentation, deployment, and quality
 
-- [ ] T045 [P] Create ADR for hybrid D1+DO storage decision in `docs/adr/` — document rationale, alternatives, self-hosting implications (Constitution Principle XII)
-- [ ] T046 [P] Update self-hosting guide in `docs/guides/self-hosting.md`: document new `PROJECT_DATA` DO namespace requirement, new env vars, Pulumi stack changes (Constitution Principle XII)
-- [ ] T047 [P] Update `apps/api/.env.example` with all new env vars and descriptions
-- [ ] T048 Run `pnpm lint && pnpm typecheck && pnpm test` from repo root — fix any failures
+- [x] T045 [P] Create ADR for hybrid D1+DO storage decision in `docs/adr/` — document rationale, alternatives, self-hosting implications (Constitution Principle XII)
+- [x] T046 [P] Update self-hosting guide in `docs/guides/self-hosting.md`: document new `PROJECT_DATA` DO namespace requirement, new env vars, Pulumi stack changes (Constitution Principle XII)
+- [x] T047 [P] Update `apps/api/.env.example` with all new env vars and descriptions
+- [x] T048 Run `pnpm lint && pnpm typecheck && pnpm test` from repo root — fix any failures
 - [ ] T049 Deploy to staging and run Playwright E2E tests: create project, create workspace from project, send chat messages, stop workspace, verify session history persists, verify activity feed
-- [ ] T050 Update `CLAUDE.md` and `AGENTS.md` with Durable Object patterns and new project structure references
+- [x] T050 Update `CLAUDE.md` and `AGENTS.md` with Durable Object patterns and new project structure references
 
 ---
 

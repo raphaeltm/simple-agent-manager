@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MIGRATIONS, runMigrations, type Migration } from '../../../src/durable-objects/migrations';
+import { MIGRATIONS, runMigrations } from '../../../src/durable-objects/migrations';
 
 /**
  * In-memory mock of SqlStorage for testing migration logic.

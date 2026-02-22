@@ -88,6 +88,7 @@ function toProjectResponse(project: schema.Project): Project {
     installationId: project.installationId,
     repository: project.repository,
     defaultBranch: project.defaultBranch,
+    status: (project.status as 'active' | 'detached') || 'active',
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
   };
@@ -365,7 +366,7 @@ projectsRoutes.get('/', async (c) => {
 
   // Batch query for active workspace counts per project
   const projectIds = projects.map((p) => p.id);
-  let workspaceCountMap = new Map<string, number>();
+  const workspaceCountMap = new Map<string, number>();
   if (projectIds.length > 0) {
     const wsCounts = await db
       .select({
