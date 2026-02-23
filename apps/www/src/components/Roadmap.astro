@@ -1,34 +1,39 @@
 ---
 const phases = [
   {
-    title: 'MVP',
+    title: 'Core Platform',
     status: 'complete',
-    description: 'Core workspace management, GitHub OAuth, encrypted credential storage',
+    description: 'Workspace management, GitHub OAuth, encrypted credential storage, Hetzner VM provisioning',
   },
   {
-    title: 'Browser Terminal',
+    title: 'Browser Terminal & Agent Chat',
     status: 'complete',
-    description: 'Web terminal via xterm.js, Go VM agent, JWT auth, WebSocket sessions',
+    description: 'xterm.js WebSocket terminal, Go VM agent, JWT auth, structured agent chat UI via ACP',
   },
   {
-    title: 'Hardening',
+    title: 'Multi-Agent Protocol',
     status: 'complete',
-    description: 'Bootstrap tokens, ownership validation, session persistence, ACP agent protocol',
+    description: 'Claude Code, Codex, and Gemini CLI support. Tool call cards, permission dialogs, file diffs, thinking blocks',
   },
   {
     title: 'Multi-Workspace Nodes',
     status: 'complete',
-    description: 'Multiple workspaces per VM, tab persistence, agent sessions, node consolidation',
+    description: 'Multiple isolated workspaces per VM, tab persistence, session ring buffer replay, node consolidation',
   },
   {
-    title: 'Enhanced UX',
+    title: 'Project-First Architecture',
     status: 'in-progress',
-    description: 'Workspace templates, persistent storage, better error UX, SSH access, cost estimation',
+    description: 'Projects as primary organizational unit, persistent chat sessions, Durable Object storage, activity feeds',
   },
   {
-    title: 'Enterprise',
+    title: 'Multi-Cloud & CLI',
     status: 'planned',
-    description: 'Teams, usage quotas, billing, SSO, multi-region, custom VM images',
+    description: 'DigitalOcean, Vultr, Scaleway, and more. CLI for workspace management and agent scripting',
+  },
+  {
+    title: 'Teams & Orchestration',
+    status: 'planned',
+    description: 'Team workspaces, task assignment to agents, usage visibility, SSO, and collaborative agent workflows',
   },
 ];
 ---
@@ -39,7 +44,7 @@ const phases = [
       <span class="section-label">Roadmap</span>
       <h2 class="section-title">Built in the open, shipped fast</h2>
       <p class="section-subtitle">
-        Four phases complete and shipping. Two more on the way.
+        Four phases shipped. Three more on the way — from project-first architecture to full agent orchestration.
       </p>
     </div>
 

@@ -1,44 +1,63 @@
 ---
 const features = [
   {
-    icon: 'terminal',
-    title: 'Claude Code First',
-    description: 'Pre-installed and optimized. Session persistence, MCP server support, and agent protocol built in.',
+    icon: 'agents',
+    title: 'Multi-Agent Support',
+    description: 'Run Claude Code, OpenAI Codex, or Google Gemini CLI. Switch between agents per workspace. Bring your own API keys, stored encrypted.',
   },
   {
-    icon: 'dollar',
-    title: '2-3x Cheaper',
-    description: 'Hetzner Cloud VMs at ~$0.07-0.15/hr. Node consolidation runs multiple workspaces on one VM.',
+    icon: 'eye',
+    title: 'Structured Visibility',
+    description: 'The Agent Client Protocol streams tool calls, file diffs, permission requests, and thinking blocks to your browser. Not raw terminal output — structured, readable context.',
   },
   {
     icon: 'shield',
     title: 'Bring Your Own Cloud',
-    description: 'You own your infrastructure. Hetzner tokens stored encrypted per-user, never on our servers.',
+    description: 'Your code runs on your VMs. Hetzner tokens encrypted per-user, never stored as platform secrets. You control costs, regions, and data residency.',
   },
   {
-    icon: 'zap',
-    title: 'Instant Workspaces',
-    description: 'Point at any GitHub repo and get a fully configured devcontainer environment in minutes.',
+    icon: 'project',
+    title: 'Project-Centric Workflows',
+    description: 'Organize workspaces by project. Persistent chat sessions, activity feeds, and cross-workspace monitoring — all tied to your GitHub repos.',
   },
   {
     icon: 'layers',
-    title: 'Multi-Workspace Nodes',
-    description: 'Run multiple workspaces on a single VM. Consolidation cuts costs without sacrificing isolation.',
+    title: 'Node Consolidation',
+    description: 'Run multiple isolated workspaces on a single VM. Each gets its own devcontainer, agent sessions, and lifecycle — sharing infrastructure costs.',
   },
   {
-    icon: 'lock',
-    title: 'Private Repo Support',
-    description: 'GitHub App integration gives secure access to your organization\'s private repositories.',
+    icon: 'code',
+    title: 'Open Source & Self-Hostable',
+    description: 'MIT licensed. Self-host the control plane on Cloudflare\'s free tier. No vendor lock-in to any cloud provider or AI model.',
   },
 ];
 
-const iconPaths: Record<string, string> = {
-  terminal: 'M4 17l6-5-6-5M12 19h8',
-  dollar: 'M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
-  shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
-  zap: 'M13 2L3 14h9l-1 10 10-12h-9l1-10z',
-  layers: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
-  lock: 'M19 11H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2zM7 11V7a5 5 0 0 1 10 0v4',
+const iconPaths: Record<string, string[]> = {
+  agents: [
+    'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2',
+    'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+    'M22 21v-2a4 4 0 0 0-3-3.87',
+    'M16 3.13a4 4 0 0 1 0 7.75',
+  ],
+  eye: [
+    'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z',
+    'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+  ],
+  shield: [
+    'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+  ],
+  project: [
+    'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z',
+  ],
+  layers: [
+    'M12 2L2 7l10 5 10-5-10-5z',
+    'M2 17l10 5 10-5',
+    'M2 12l10 5 10-5',
+  ],
+  code: [
+    'M16 18l6-6-6-6',
+    'M8 6l-6 6 6 6',
+  ],
 };
 ---
 
@@ -46,9 +65,9 @@ const iconPaths: Record<string, string> = {
   <div class="container">
     <div class="features-header animate-on-scroll">
       <span class="section-label">Features</span>
-      <h2 class="section-title">Everything you need for<br />AI-powered development</h2>
+      <h2 class="section-title">AI agent infrastructure<br />that you control</h2>
       <p class="section-subtitle">
-        Purpose-built for developers who use Claude Code. No bloat, no vendor lock-in.
+        Purpose-built for running AI coding agents on your own cloud. Multi-agent, multi-workspace, fully observable.
       </p>
     </div>
 
@@ -57,7 +76,9 @@ const iconPaths: Record<string, string> = {
         <div class="feature-card animate-on-scroll" style={`transition-delay: ${i * 80}ms`}>
           <div class="feature-icon">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d={iconPaths[feature.icon]} />
+              {iconPaths[feature.icon].map((d) => (
+                <path d={d} />
+              ))}
             </svg>
           </div>
           <h3 class="feature-title">{feature.title}</h3>
