@@ -26,6 +26,7 @@ import { ProjectActivity } from './pages/ProjectActivity';
 import { TaskDetail } from './pages/TaskDetail';
 import { ChatSessionView } from './pages/ChatSessionView';
 import { ProjectCreate } from './pages/ProjectCreate';
+import { Admin } from './pages/Admin';
 
 function ProtectedLayout() {
   return (
@@ -76,6 +77,7 @@ export default function App() {
               <Route path="agent-config" element={<SettingsAgentConfig />} />
             </Route>
             <Route path="/ui-standards" element={<UiStandards />} />
+            <Route path="/admin" element={<Admin />} />
           </Route>
 
           {/* Workspace — NO AppShell (full-width terminal) */}

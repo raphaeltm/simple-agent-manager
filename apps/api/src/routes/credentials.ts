@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { eq, and } from 'drizzle-orm';
 import { ulid } from '../lib/ulid';
 import type { Env } from '../index';
-import { requireAuth, getUserId } from '../middleware/auth';
+import { requireAuth, requireApproved, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { encrypt, decrypt } from '../services/encryption';
 import { validateHetznerToken } from '../services/hetzner';
@@ -15,7 +15,7 @@ import { isValidAgentType, getAgentDefinition } from '@simple-agent-manager/shar
 const credentialsRoutes = new Hono<{ Bindings: Env }>();
 
 // Apply auth middleware to all routes
-credentialsRoutes.use('*', requireAuth());
+credentialsRoutes.use('*', requireAuth(), requireApproved());
 
 /**
  * GET /api/credentials - List all credentials for the current user

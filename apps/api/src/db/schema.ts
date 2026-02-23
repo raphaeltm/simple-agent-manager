@@ -15,6 +15,9 @@ export const users = sqliteTable('users', {
   // Custom fields
   githubId: text('github_id').unique(),
   avatarUrl: text('avatar_url'),
+  // User approval / invite-only mode
+  role: text('role').notNull().default('user'), // 'superadmin' | 'admin' | 'user'
+  status: text('status').notNull().default('active'), // 'active' | 'pending' | 'suspended'
   createdAt: integer('created_at', { mode: 'timestamp_ms' })
     .notNull()
     .default(sql`(cast(unixepoch() * 1000 as integer))`),

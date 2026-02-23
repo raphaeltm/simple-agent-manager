@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { eq, and } from 'drizzle-orm';
 import { ulid } from '../lib/ulid';
 import type { Env } from '../index';
-import { requireAuth, getUserId, optionalAuth } from '../middleware/auth';
+import { requireAuth, requireApproved, getUserId, optionalAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import {
   getInstallationRepositories,
@@ -19,7 +19,7 @@ const githubRoutes = new Hono<{ Bindings: Env }>();
 /**
  * GET /api/github/installations - List user's GitHub App installations
  */
-githubRoutes.get('/installations', requireAuth(), async (c) => {
+githubRoutes.get('/installations', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
 
@@ -45,7 +45,7 @@ githubRoutes.get('/installations', requireAuth(), async (c) => {
  * GET /api/github/install-url - Get GitHub App installation URL
  * Requires GITHUB_APP_SLUG env var per constitution principle XI (no hardcoded values).
  */
-githubRoutes.get('/install-url', requireAuth(), async (c) => {
+githubRoutes.get('/install-url', requireAuth(), requireApproved(), async (c) => {
   // The app slug must be configured via environment variable
   const appSlug = c.env.GITHUB_APP_SLUG;
   if (!appSlug) {
@@ -58,7 +58,7 @@ githubRoutes.get('/install-url', requireAuth(), async (c) => {
 /**
  * GET /api/github/repositories - List repositories from installations
  */
-githubRoutes.get('/repositories', requireAuth(), async (c) => {
+githubRoutes.get('/repositories', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const installationId = c.req.query('installation_id');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -113,7 +113,7 @@ githubRoutes.get('/repositories', requireAuth(), async (c) => {
  * GET /api/github/branches - List branches for a repository
  * Query params: repository (full name like owner/repo), installation_id (DB row id)
  */
-githubRoutes.get('/branches', requireAuth(), async (c) => {
+githubRoutes.get('/branches', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const repoFullName = c.req.query('repository');
   const installationRowId = c.req.query('installation_id');
@@ -327,7 +327,7 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
 /**
  * DELETE /api/github/installations/:id - Remove an installation
  */
-githubRoutes.delete('/installations/:id', requireAuth(), async (c) => {
+githubRoutes.delete('/installations/:id', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const installationId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });

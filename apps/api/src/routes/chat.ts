@@ -9,7 +9,7 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Env } from '../index';
-import { getUserId, requireAuth } from '../middleware/auth';
+import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
 import { requireOwnedProject } from '../middleware/project-auth';
 import { errors } from '../middleware/error';
 import * as schema from '../db/schema';
@@ -30,7 +30,7 @@ function requireRouteParam(
   return value;
 }
 
-chatRoutes.use('/*', requireAuth());
+chatRoutes.use('/*', requireAuth(), requireApproved());
 
 /**
  * GET /api/projects/:projectId/sessions

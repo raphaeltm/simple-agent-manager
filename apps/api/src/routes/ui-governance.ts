@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../index';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import {
   validateComplianceRunCreate,
@@ -15,7 +15,7 @@ import { createUiGovernanceService } from '../services/ui-governance';
 
 const uiGovernanceRoutes = new Hono<{ Bindings: Env }>();
 
-uiGovernanceRoutes.use('*', requireAuth());
+uiGovernanceRoutes.use('*', requireAuth(), requireApproved());
 
 uiGovernanceRoutes.get('/standards/active', async (c) => {
   const service = createUiGovernanceService(c.env.DATABASE);

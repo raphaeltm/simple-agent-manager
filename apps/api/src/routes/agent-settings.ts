@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { ulid } from '../lib/ulid';
 import type { Env } from '../index';
-import { getUserId, requireAuth } from '../middleware/auth';
+import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import * as schema from '../db/schema';
 import {
@@ -19,7 +19,7 @@ import type {
 export const agentSettingsRoutes = new Hono<{ Bindings: Env }>();
 
 // All agent settings routes require authentication
-agentSettingsRoutes.use('/*', requireAuth());
+agentSettingsRoutes.use('/*', requireAuth(), requireApproved());
 
 /**
  * Convert a DB row to an API response.

@@ -1,7 +1,8 @@
 import type { Context, Next, MiddlewareHandler } from 'hono';
 import { createAuth } from '../auth';
-import { errors } from './error';
+import { AppError, errors } from './error';
 import type { Env } from '../index';
+import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
 
 /**
  * Extended context with authenticated user.
@@ -12,6 +13,8 @@ export interface AuthContext {
     email: string;
     name: string | null;
     avatarUrl: string | null;
+    role: UserRole;
+    status: UserStatus;
   };
   session: {
     id: string;
@@ -47,6 +50,8 @@ export function requireAuth(): MiddlewareHandler<{ Bindings: Env }> {
         email: session.user.email,
         name: session.user.name ?? null,
         avatarUrl: session.user.image ?? null,
+        role: ((session.user as Record<string, unknown>).role as UserRole) ?? 'user',
+        status: ((session.user as Record<string, unknown>).status as UserStatus) ?? 'active',
       },
       session: {
         id: session.session.id,
@@ -78,6 +83,8 @@ export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
             email: session.user.email,
             name: session.user.name ?? null,
             avatarUrl: session.user.image ?? null,
+            role: ((session.user as Record<string, unknown>).role as UserRole) ?? 'user',
+            status: ((session.user as Record<string, unknown>).status as UserStatus) ?? 'active',
           },
           session: {
             id: session.session.id,
@@ -87,6 +94,64 @@ export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
       }
     } catch {
       // Ignore errors in optional auth
+    }
+
+    await next();
+  };
+}
+
+/**
+ * Approval middleware.
+ * When REQUIRE_APPROVAL is enabled, blocks users whose status is not 'active'.
+ * Admins and superadmins always pass through.
+ * Must be used AFTER requireAuth().
+ */
+export function requireApproved(): MiddlewareHandler<{ Bindings: Env }> {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    if (c.env.REQUIRE_APPROVAL !== 'true') {
+      await next();
+      return;
+    }
+
+    const auth = c.get('auth');
+    if (!auth) {
+      throw errors.unauthorized('Authentication required');
+    }
+
+    // Admins and superadmins always pass through
+    if (auth.user.role === 'superadmin' || auth.user.role === 'admin') {
+      await next();
+      return;
+    }
+
+    if (auth.user.status === 'active') {
+      await next();
+      return;
+    }
+
+    if (auth.user.status === 'suspended') {
+      throw errors.forbidden('Your account has been suspended');
+    }
+
+    // Default: pending
+    throw new AppError(403, 'APPROVAL_REQUIRED', 'Your account is pending admin approval');
+  };
+}
+
+/**
+ * Superadmin middleware.
+ * Requires the user to have the 'superadmin' role.
+ * Must be used AFTER requireAuth().
+ */
+export function requireSuperadmin(): MiddlewareHandler<{ Bindings: Env }> {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    const auth = c.get('auth');
+    if (!auth) {
+      throw errors.unauthorized('Authentication required');
+    }
+
+    if (auth.user.role !== 'superadmin') {
+      throw errors.forbidden('Superadmin access required');
     }
 
     await next();

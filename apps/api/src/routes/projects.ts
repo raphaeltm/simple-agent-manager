@@ -16,7 +16,7 @@ import type {
 import type { Env } from '../index';
 import * as schema from '../db/schema';
 import { ulid } from '../lib/ulid';
-import { getUserId, requireAuth } from '../middleware/auth';
+import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
 import { getRuntimeLimits } from '../services/limits';
@@ -26,7 +26,7 @@ import * as projectDataService from '../services/project-data';
 
 const projectsRoutes = new Hono<{ Bindings: Env }>();
 
-projectsRoutes.use('/*', requireAuth());
+projectsRoutes.use('/*', requireAuth(), requireApproved());
 
 function normalizeProjectName(name: string): string {
   return name.trim().replace(/\s+/g, ' ').toLowerCase();

@@ -28,7 +28,7 @@ import type {
 import type { Env } from '../index';
 import * as schema from '../db/schema';
 import { ulid } from '../lib/ulid';
-import { getUserId, requireAuth } from '../middleware/auth';
+import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireOwnedProject, requireOwnedTask, requireOwnedWorkspace } from '../middleware/project-auth';
 import {
@@ -53,7 +53,9 @@ tasksRoutes.use('/*', async (c, next) => {
   if (c.req.path.endsWith('/status/callback')) {
     return next();
   }
-  return requireAuth()(c, next);
+  return requireAuth()(c, async () => {
+    await requireApproved()(c, next);
+  });
 });
 
 function requireRouteParam(

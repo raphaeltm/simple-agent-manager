@@ -26,6 +26,7 @@ import { tasksRoutes } from './routes/tasks';
 import { chatRoutes } from './routes/chat';
 import { activityRoutes } from './routes/activity';
 import { taskRunsRoutes } from './routes/task-runs';
+import { adminRoutes } from './routes/admin';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
 import { getRuntimeLimits } from './services/limits';
@@ -61,6 +62,8 @@ export interface Env {
   PAGES_PROJECT_NAME?: string;
   // Pages project name for proxying www.* requests (marketing site)
   WWW_PAGES_PROJECT_NAME?: string;
+  // User approval / invite-only mode
+  REQUIRE_APPROVAL?: string;
   // Optional configurable values (per constitution principle XI)
   IDLE_TIMEOUT_SECONDS?: string;
   TERMINAL_TOKEN_EXPIRY_MS?: string;
@@ -329,6 +332,7 @@ app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
 app.route('/api/projects/:projectId/tasks', taskRunsRoutes);
+app.route('/api/admin', adminRoutes);
 
 // 404 handler
 app.notFound((c) => {
