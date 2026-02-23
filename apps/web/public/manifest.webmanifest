@@ -1,7 +1,7 @@
 {
   "name": "Simple Agent Manager",
   "short_name": "SAM",
-  "description": "Manage ephemeral AI coding workspaces from your phone or desktop.",
+  "description": "Orchestrate coding agents in parallel across cloud VMs.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

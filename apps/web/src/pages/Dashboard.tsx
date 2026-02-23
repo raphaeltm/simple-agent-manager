@@ -138,7 +138,7 @@ export function Dashboard() {
           Welcome, {user?.name || user?.email}!
         </h2>
         <p style={{ color: 'var(--sam-color-fg-muted)', marginTop: 'var(--sam-space-1)' }}>
-          Manage your AI coding workspaces
+          Manage your coding agent workspaces
         </p>
       </div>
 
