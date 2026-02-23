@@ -76,7 +76,7 @@ export function Node() {
     if (!id || !node) return;
 
     const confirmed = window.confirm(
-      `Stop node "${node.name}"? This stops all workspaces and coding agent sessions on the node.`
+      `Stop node "${node.name}"? This stops all workspaces and agent sessions on the node.`
     );
     if (!confirmed) return;
 

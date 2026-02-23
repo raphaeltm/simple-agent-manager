@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Simple Agent Manager (SAM) - Run coding agents in parallel on cloud VMs.</strong>
+  <strong>Simple Agent Manager (SAM) - Spin up AI coding environments on-demand.</strong>
 </p>
 
 <p align="center">
@@ -20,9 +20,9 @@
 
 ---
 
-Simple Agent Manager (SAM) is a serverless platform for orchestrating coding agents — [Claude Code](https://www.anthropic.com/claude-code), [Codex](https://openai.com/codex/), [Gemini CLI](https://github.com/google-gemini/gemini-cli) — in parallel across cloud VMs. Point it at your GitHub repositories and spin up as many agents as you need to work through your backlog.
+Simple Agent Manager (SAM) is a serverless platform for creating ephemeral cloud development environments optimized for [Claude Code](https://www.anthropic.com/claude-code). Point it at any GitHub repository and get a fully configured workspace with Claude Code pre-installed—accessible from your browser in minutes.
 
-Think **GitHub Codespaces, but built for coding agents** — with explicit lifecycle controls, node-level consolidation, and support for multiple agent runtimes.
+Think **GitHub Codespaces, but built for AI-assisted development** with explicit lifecycle controls and node-level consolidation.
 
 ## Why Simple Agent Manager?
 
@@ -30,7 +30,7 @@ Think **GitHub Codespaces, but built for coding agents** — with explicit lifec
 | ----------------- | ----------------------- | ------------------------------------ |
 | **Cost**          | $0.18–$0.36/hour        | ~$0.07–$0.15/hour                    |
 | **Lifecycle control** | Manual or 30min timeout | Explicit workspace/node stop, restart, and delete |
-| **Coding agents** | Manual setup required   | Claude Code, Codex, Gemini CLI pre-configured |
+| **Claude Code**   | Manual setup required   | Pre-installed and optimized          |
 | **Private repos** | Native GitHub support   | GitHub App integration               |
 | **Control plane** | Managed                 | Self-hosted (free tier)              |
 
@@ -39,7 +39,7 @@ Think **GitHub Codespaces, but built for coding agents** — with explicit lifec
 - **2-3x cheaper** than hosted alternatives using Hetzner Cloud VMs
 - **Node consolidation** — run multiple workspaces on a single node VM
 - **Operator-controlled lifecycle** — explicit stop/restart/delete actions for nodes and workspaces
-- **Multi-agent support** — Claude Code, Codex, and Gemini CLI with session persistence and MCP support
+- **Claude Code first** — pre-installed, session persistence, MCP server support
 - **Private repository support** — secure GitHub App integration for your org
 
 ## Features
