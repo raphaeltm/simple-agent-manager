@@ -3,6 +3,8 @@ name: E2E Smoke
 on:
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'apps/www/**'
 
 jobs:
   vm-agent-smoke:
