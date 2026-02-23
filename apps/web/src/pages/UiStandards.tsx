@@ -230,7 +230,7 @@ function EmptyStateShowcase() {
             <EmptyState
               icon={<Inbox size={48} />}
               heading="No projects yet"
-              description="Create your first project to get started with coding agent workspaces."
+              description="Create your first project to get started with agent workspaces."
               action={{ label: 'Create Project', onClick: () => {} }}
             />
           </div>
