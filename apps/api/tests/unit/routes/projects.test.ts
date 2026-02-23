@@ -6,7 +6,7 @@ describe('projects routes source contract', () => {
   const file = readFileSync(resolve(process.cwd(), 'src/routes/projects.ts'), 'utf8');
 
   it('defines authenticated CRUD endpoints for projects', () => {
-    expect(file).toContain("projectsRoutes.use('/*', requireAuth())");
+    expect(file).toContain("projectsRoutes.use('/*', requireAuth(), requireApproved())");
     expect(file).toContain("projectsRoutes.post('/',");
     expect(file).toContain("projectsRoutes.get('/',");
     expect(file).toContain("projectsRoutes.get('/:id',");

@@ -7,12 +7,18 @@ const mocks = vi.hoisted(() => {
       await next();
     }
   );
+  const requireApproved = vi.fn(
+    () => async (_: unknown, next: () => Promise<void>) => {
+      await next();
+    }
+  );
   const createUiGovernanceService = vi.fn();
-  return { requireAuth, createUiGovernanceService };
+  return { requireAuth, requireApproved, createUiGovernanceService };
 });
 
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: mocks.requireAuth,
+  requireApproved: mocks.requireApproved,
 }));
 
 vi.mock('../../../src/services/ui-governance', () => ({

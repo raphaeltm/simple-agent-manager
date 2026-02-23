@@ -12,6 +12,7 @@ vi.mock('../../../src/services/jwt', () => ({
 // Mock auth middleware — allow all
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: any, next: any) => next()),
+  requireApproved: () => vi.fn((_c: any, next: any) => next()),
   getUserId: () => 'user-1',
 }));
 

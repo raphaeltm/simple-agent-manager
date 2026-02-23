@@ -9,6 +9,7 @@ import type { SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
 vi.mock('drizzle-orm/d1');
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((c: any, next: any) => next()),
+  requireApproved: () => vi.fn((c: any, next: any) => next()),
   getUserId: () => 'test-user-id',
 }));
 vi.mock('../../../src/lib/ulid', () => ({
