@@ -1,0 +1,146 @@
+---
+const items = [
+  {
+    title: 'Project-First Architecture',
+    description: 'Organize everything by project. Persistent chat sessions survive workspace stops. Activity feeds track what every agent did, across all workspaces.',
+    status: 'building',
+  },
+  {
+    title: 'Cross-Workspace Monitoring',
+    description: 'See all active agent sessions from your dashboard. Jump directly into any conversation. Monitor progress across your entire fleet of workspaces.',
+    status: 'building',
+  },
+  {
+    title: 'Multi-Cloud Providers',
+    description: 'Hetzner today. DigitalOcean, Vultr, Scaleway, AWS, and GCP next. Bring whichever cloud you already use — or mix and match.',
+    status: 'planned',
+  },
+  {
+    title: 'CLI for Power Users',
+    description: 'Create workspaces, manage agents, and monitor sessions from your terminal. Script your agent workflows. Integrate with your existing toolchains.',
+    status: 'planned',
+  },
+  {
+    title: 'Teams & Collaboration',
+    description: 'Shared projects, usage visibility, and team-scoped infrastructure. Run a fleet of agents across your engineering team on shared nodes.',
+    status: 'planned',
+  },
+  {
+    title: 'Task Orchestration',
+    description: 'Define tasks, assign them to agents, and track completion across workspaces. The missing layer between your backlog and autonomous agent execution.',
+    status: 'planned',
+  },
+];
+---
+
+<section id="vision" class="section">
+  <div class="container">
+    <div class="vision-header animate-on-scroll">
+      <span class="section-label">What's Next</span>
+      <h2 class="section-title">Building the full<br />agent orchestration platform</h2>
+      <p class="section-subtitle">
+        SAM today runs AI agents in managed workspaces. The roadmap: a complete platform for
+        orchestrating, monitoring, and managing agent work across your infrastructure.
+      </p>
+    </div>
+
+    <div class="vision-grid">
+      {items.map((item, i) => (
+        <div class="vision-card animate-on-scroll" style={`transition-delay: ${i * 80}ms`}>
+          <div class="vision-card-header">
+            <h3 class="vision-card-title">{item.title}</h3>
+            <span class={`vision-badge ${item.status}`}>
+              {item.status === 'building' ? 'Building Now' : 'Planned'}
+            </span>
+          </div>
+          <p class="vision-card-desc">{item.description}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .vision-header {
+    text-align: center;
+    margin-bottom: 64px;
+  }
+
+  .vision-header .section-subtitle {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .vision-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  @media (min-width: 640px) {
+    .vision-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .vision-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  .vision-card {
+    padding: 28px;
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-lg);
+    transition: border-color 0.3s, box-shadow 0.3s, opacity 0.6s ease, transform 0.6s ease;
+  }
+
+  .vision-card:hover {
+    border-color: var(--color-border);
+    box-shadow: 0 0 40px var(--color-accent-glow);
+  }
+
+  .vision-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+
+  .vision-card-title {
+    font-family: var(--font-display);
+    font-size: 1.0625rem;
+    font-weight: 600;
+    color: var(--color-fg-primary);
+  }
+
+  .vision-badge {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    padding: 3px 10px;
+    border-radius: 100px;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .vision-badge.building {
+    color: var(--color-warning);
+    background: rgba(245, 158, 11, 0.1);
+  }
+
+  .vision-badge.planned {
+    color: var(--color-fg-dim);
+    border: 1px solid var(--color-border-subtle);
+  }
+
+  .vision-card-desc {
+    font-size: 0.875rem;
+    color: var(--color-fg-muted);
+    line-height: 1.65;
+  }
+</style>

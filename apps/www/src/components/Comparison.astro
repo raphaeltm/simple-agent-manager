@@ -1,22 +1,24 @@
 ---
 const rows = [
-  { label: 'Hourly Cost', sam: '~$0.07–0.15', codespaces: '$0.18–0.36', samWins: true },
-  { label: 'Claude Code', sam: 'Pre-installed', codespaces: 'Manual setup', samWins: true },
-  { label: 'Lifecycle Control', sam: 'Explicit stop/restart/delete', codespaces: 'Manual or 30min timeout', samWins: true },
+  { label: 'AI Agent Support', sam: 'Claude, Codex, Gemini', codespaces: 'Manual setup', samWins: true },
+  { label: 'Agent Visibility', sam: 'Structured (ACP)', codespaces: 'Terminal only', samWins: true },
+  { label: 'Infrastructure', sam: 'Your cloud (BYOC)', codespaces: 'Managed', samWins: true },
+  { label: 'Hourly Cost', sam: '~$0.07-0.15', codespaces: '$0.18-0.36', samWins: true },
   { label: 'Node Consolidation', sam: 'Multiple workspaces per VM', codespaces: '1:1 mapping', samWins: true },
-  { label: 'Private Repos', sam: 'GitHub App integration', codespaces: 'Native GitHub support', samWins: false },
-  { label: 'Infrastructure', sam: 'Self-hosted (BYOC)', codespaces: 'Managed', samWins: false },
-  { label: 'Control Plane', sam: 'Free (self-hosted on CF)', codespaces: 'Included', samWins: true },
+  { label: 'Control Plane', sam: 'Free (Cloudflare)', codespaces: 'Included', samWins: true },
+  { label: 'Open Source', sam: 'MIT licensed', codespaces: 'Proprietary', samWins: true },
+  { label: 'Private Repos', sam: 'GitHub App', codespaces: 'Native GitHub', samWins: false },
+  { label: 'Setup Effort', sam: 'Self-hosted', codespaces: 'Zero config', samWins: false },
 ];
 ---
 
 <section id="pricing" class="section">
   <div class="container">
     <div class="comparison-header animate-on-scroll">
-      <span class="section-label">Pricing</span>
-      <h2 class="section-title">Cut your cloud dev costs in half</h2>
+      <span class="section-label">Comparison</span>
+      <h2 class="section-title">How SAM stacks up</h2>
       <p class="section-subtitle">
-        SAM runs on Hetzner Cloud VMs — significantly cheaper than managed alternatives, with no feature trade-offs.
+        More agent capabilities, full infrastructure ownership, and significantly lower costs. The trade-off: you host it yourself.
       </p>
     </div>
 
@@ -54,19 +56,6 @@ const rows = [
         </tbody>
       </table>
     </div>
-
-    <div class="cost-callout animate-on-scroll">
-      <div class="callout-inner">
-        <div class="callout-text">
-          <span class="callout-number">~50%</span>
-          <span class="callout-label">lower cost per hour on average</span>
-        </div>
-        <p class="callout-detail">
-          A medium workspace (4 vCPU / 8 GB) runs at roughly $0.11/hr on Hetzner vs $0.26/hr on Codespaces.
-          Node consolidation can push savings even further.
-        </p>
-      </div>
-    </div>
   </div>
 </section>
 
@@ -84,7 +73,6 @@ const rows = [
   .table-wrapper {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    margin-bottom: 48px;
   }
 
   .comparison-table {
@@ -134,55 +122,5 @@ const rows = [
 
   .col-other {
     color: var(--color-fg-dim);
-  }
-
-  /* Cost callout */
-  .cost-callout {
-    max-width: 720px;
-    margin: 0 auto;
-  }
-
-  .callout-inner {
-    padding: 32px;
-    background: var(--color-accent-glow);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    text-align: center;
-  }
-
-  .callout-text {
-    display: flex;
-    align-items: baseline;
-    justify-content: center;
-    gap: 12px;
-    margin-bottom: 12px;
-  }
-
-  .callout-number {
-    font-family: var(--font-display);
-    font-size: 2.5rem;
-    font-weight: 700;
-    color: var(--color-accent);
-    letter-spacing: -0.02em;
-  }
-
-  .callout-label {
-    font-size: 1.125rem;
-    color: var(--color-fg-muted);
-  }
-
-  .callout-detail {
-    font-size: 0.875rem;
-    color: var(--color-fg-dim);
-    max-width: 480px;
-    margin: 0 auto;
-    line-height: 1.6;
-  }
-
-  @media (max-width: 640px) {
-    .callout-text {
-      flex-direction: column;
-      gap: 4px;
-    }
   }
 </style>
