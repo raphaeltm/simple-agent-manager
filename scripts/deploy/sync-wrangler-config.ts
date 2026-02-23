@@ -76,6 +76,8 @@ function updateEnvironmentBindings(
       BASE_DOMAIN: outputs.stackSummary.baseDomain,
       VERSION: DEPLOYMENT_CONFIG.version,
       PAGES_PROJECT_NAME: outputs.pagesName,
+      // Optional feature flags from environment
+      ...(process.env.REQUIRE_APPROVAL ? { REQUIRE_APPROVAL: process.env.REQUIRE_APPROVAL } : {}),
     },
     d1_databases: [
       {

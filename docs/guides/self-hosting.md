@@ -45,6 +45,12 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | `RESOURCE_PREFIX` | Prefix for Cloudflare resources (optional) | `sam` |
 | `PULUMI_STATE_BUCKET` | R2 bucket for Pulumi state (optional) | `sam-pulumi-state` |
 
+**Optional feature flags** (GitHub Environment variables):
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `REQUIRE_APPROVAL` | Require admin approval for new users. First user becomes superadmin. | _(unset — all users active)_ |
+
 **Optional runtime-config limit variables** (GitHub Environment variables):
 
 | Variable | Description | Default |
