@@ -292,12 +292,12 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
             <ConversationItemView key={item.id} item={item} />
           ))}
         </div>
-        {/* Scroll-to-bottom FAB */}
+        {/* Scroll-to-bottom FAB — z-10 required because overflow-y-auto creates a stacking context */}
         {!isAtBottom && messages.items.length > 0 && (
           <button
             type="button"
             onClick={scrollToBottom}
-            className="absolute bottom-3 right-3 w-8 h-8 flex items-center justify-center rounded-full bg-white border border-gray-300 shadow-md text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
+            className="absolute bottom-3 right-5 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-white border border-gray-300 shadow-md text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
             aria-label="Scroll to bottom"
             title="Scroll to bottom"
           >
