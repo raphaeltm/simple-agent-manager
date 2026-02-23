@@ -230,6 +230,8 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          # Optional feature flags (GitHub Environment variables)
+          REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
 
       - name: Read Security Keys from Pulumi State
         id: pulumi_keys
