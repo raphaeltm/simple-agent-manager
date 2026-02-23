@@ -40,7 +40,7 @@ export function Landing() {
           <div style={{ marginBottom: 'var(--sam-space-6)' }}>
             <Typography variant="display">Simple Agent Manager</Typography>
             <Typography variant="body-muted" style={{ marginTop: 'var(--sam-space-2)' }}>
-              Spin up AI coding environments in seconds
+              Run coding agents in parallel on cloud VMs
             </Typography>
           </div>
 
@@ -51,7 +51,7 @@ export function Landing() {
                   Sign in to get started
                 </Typography>
                 <Typography variant="caption">
-                  Use your GitHub account to manage cloud workspaces
+                  Use your GitHub account to orchestrate coding agent workspaces
                 </Typography>
               </div>
 
@@ -74,8 +74,8 @@ export function Landing() {
             paddingTop: 'var(--sam-space-6)',
           }}>
             {[
+              { label: 'Coding Agents', sub: 'Claude Code, Codex, Gemini CLI', color: 'var(--sam-color-success)' },
               { label: 'Cloud VMs', sub: 'Powered by Hetzner', color: 'var(--sam-color-info)' },
-              { label: 'Claude Code', sub: 'Pre-installed', color: 'var(--sam-color-success)' },
               { label: 'Pay as you go', sub: 'Stop when done', color: 'var(--sam-color-purple)' },
             ].map((item) => (
               <div key={item.label} style={{
