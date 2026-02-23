@@ -59,6 +59,8 @@ export interface Env {
   ENCRYPTION_KEY: string;
   // Pages project name for proxying app.* requests
   PAGES_PROJECT_NAME?: string;
+  // Pages project name for proxying www.* requests (marketing site)
+  WWW_PAGES_PROJECT_NAME?: string;
   // Optional configurable values (per constitution principle XI)
   IDLE_TIMEOUT_SECONDS?: string;
   TERMINAL_TOKEN_EXPIRY_MS?: string;
@@ -152,17 +154,36 @@ app.onError((err, c) => {
   );
 });
 
-// Proxy requests for the web UI subdomain (app.*) to Cloudflare Pages.
-// The Worker wildcard route *.{domain}/* intercepts ALL subdomains including app.*,
-// so we proxy app.* requests to the Pages deployment before any other middleware runs.
+// Proxy non-API subdomains to their respective Cloudflare Pages deployments.
+// The Worker wildcard route *.{domain}/* intercepts ALL subdomains, so we must
+// proxy app.* and www.* requests to Pages before any other middleware runs.
+// The apex domain is redirected to www.* for the marketing site.
 app.use('*', async (c, next) => {
   const hostname = new URL(c.req.url).hostname;
   const baseDomain = c.env?.BASE_DOMAIN || '';
-  if (baseDomain && hostname === `app.${baseDomain}`) {
+  if (!baseDomain) { await next(); return; }
+
+  // Proxy app.* to web UI Pages project
+  if (hostname === `app.${baseDomain}`) {
     const pagesUrl = new URL(c.req.url);
     pagesUrl.hostname = `${c.env.PAGES_PROJECT_NAME || 'sam-web-prod'}.pages.dev`;
     return fetch(new Request(pagesUrl.toString(), c.req.raw));
   }
+
+  // Proxy www.* to marketing site Pages project
+  if (hostname === `www.${baseDomain}`) {
+    const pagesUrl = new URL(c.req.url);
+    pagesUrl.hostname = `${c.env.WWW_PAGES_PROJECT_NAME || 'sam-www'}.pages.dev`;
+    return fetch(new Request(pagesUrl.toString(), c.req.raw));
+  }
+
+  // Redirect apex domain to www
+  if (hostname === baseDomain) {
+    const wwwUrl = new URL(c.req.url);
+    wwwUrl.hostname = `www.${baseDomain}`;
+    return c.redirect(wwwUrl.toString(), 301);
+  }
+
   await next();
 });
 
