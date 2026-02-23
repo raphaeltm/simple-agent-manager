@@ -276,7 +276,7 @@ describe('AgentPanel auto-scroll behavior', () => {
     // is the right element.
     expect(scrollContainer).toBeTruthy();
     expect(scrollContainer.classList.contains('overflow-y-auto')).toBe(true);
-    expect(scrollContainer.classList.contains('flex-1')).toBe(true);
+    expect(scrollContainer.classList.contains('h-full')).toBe(true);
   });
 
   it('renders streaming messages correctly in scroll container', () => {
@@ -505,5 +505,79 @@ describe('AgentPanel scroll reset on replay', () => {
     rerender(<AgentPanel session={promptingSession} messages={messages} />);
 
     expect(resetToBottomSpy).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// Scroll-to-bottom FAB tests
+// =============================================================================
+
+describe('AgentPanel scroll-to-bottom FAB', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let autoScrollSpy: any;
+  let scrollToBottomSpy: ReturnType<typeof vi.fn>;
+
+  function setupMock(isAtBottom: boolean) {
+    scrollToBottomSpy = vi.fn();
+    autoScrollSpy = vi.spyOn(autoScrollModule, 'useAutoScroll').mockReturnValue({
+      scrollRef: vi.fn(),
+      isAtBottom,
+      scrollToBottom: scrollToBottomSpy,
+      resetToBottom: vi.fn(),
+    });
+  }
+
+  afterEach(() => {
+    autoScrollSpy?.mockRestore();
+  });
+
+  it('shows scroll-to-bottom button when not at bottom and messages exist', () => {
+    setupMock(false);
+    const session = createMockSession();
+    const items: ConversationItem[] = [
+      { kind: 'user_message', id: '1', text: 'Hello', timestamp: Date.now() },
+    ];
+    const messages = createMockMessages({ items });
+
+    render(<AgentPanel session={session} messages={messages} />);
+
+    expect(screen.getByLabelText('Scroll to bottom')).toBeTruthy();
+  });
+
+  it('hides scroll-to-bottom button when at bottom', () => {
+    setupMock(true);
+    const session = createMockSession();
+    const items: ConversationItem[] = [
+      { kind: 'user_message', id: '1', text: 'Hello', timestamp: Date.now() },
+    ];
+    const messages = createMockMessages({ items });
+
+    render(<AgentPanel session={session} messages={messages} />);
+
+    expect(screen.queryByLabelText('Scroll to bottom')).toBeNull();
+  });
+
+  it('hides scroll-to-bottom button when no messages', () => {
+    setupMock(false);
+    const session = createMockSession();
+    const messages = createMockMessages({ items: [] });
+
+    render(<AgentPanel session={session} messages={messages} />);
+
+    expect(screen.queryByLabelText('Scroll to bottom')).toBeNull();
+  });
+
+  it('calls scrollToBottom when FAB is clicked', () => {
+    setupMock(false);
+    const session = createMockSession();
+    const items: ConversationItem[] = [
+      { kind: 'user_message', id: '1', text: 'Hello', timestamp: Date.now() },
+    ];
+    const messages = createMockMessages({ items });
+
+    render(<AgentPanel session={session} messages={messages} />);
+
+    fireEvent.click(screen.getByLabelText('Scroll to bottom'));
+    expect(scrollToBottomSpy).toHaveBeenCalledTimes(1);
   });
 });
