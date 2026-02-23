@@ -279,11 +279,53 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
             onClose={() => setShowSettings(false)}
           />
         )}
-        {/* Sticky plan button (above input) */}
-        <StickyPlanButton plan={currentPlan} onClick={() => setShowPlanModal(true)} />
-        {currentPlan && (
-          <PlanModal plan={currentPlan} isOpen={showPlanModal} onClose={() => setShowPlanModal(false)} />
-        )}
+        {/* Toolbar row: settings, plan, cancel */}
+        <div className="flex items-center gap-2 mb-2">
+          {/* Settings gear button */}
+          {onSaveSettings && (
+            <button
+              type="button"
+              onClick={() => setShowSettings((prev) => !prev)}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                showSettings
+                  ? 'bg-blue-50 border-blue-300 text-blue-600'
+                  : 'bg-gray-50 border-gray-300 text-gray-600 hover:bg-gray-100'
+              }`}
+              aria-label="Agent settings"
+              title="Agent settings"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+              <span>Settings</span>
+            </button>
+          )}
+          {/* Plan button */}
+          <StickyPlanButton plan={currentPlan} onClick={() => setShowPlanModal(true)} />
+          {currentPlan && (
+            <PlanModal plan={currentPlan} isOpen={showPlanModal} onClose={() => setShowPlanModal(false)} />
+          )}
+          {/* Cancel button — always visible so user can force-cancel unreported activity */}
+          <button
+            type="button"
+            onClick={() => session.sendMessage({ jsonrpc: '2.0', method: 'session/cancel', params: {} })}
+            className={`ml-auto flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+              isPrompting
+                ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100'
+                : 'border-gray-300 bg-gray-50 text-gray-400 hover:bg-gray-100 hover:text-gray-600'
+            }`}
+            aria-label="Cancel agent"
+            title="Send cancel signal to agent"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="15" y1="9" x2="9" y2="15" />
+              <line x1="9" y1="9" x2="15" y2="15" />
+            </svg>
+            <span>Cancel</span>
+          </button>
+        </div>
         {/* Slash command palette (above input, in document flow) */}
         <SlashCommandPalette
           ref={paletteRef}
@@ -294,26 +336,6 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
           visible={showPalette}
         />
         <form onSubmit={handleSubmit} className="flex items-end space-x-2">
-            {/* Settings gear button */}
-            {onSaveSettings && (
-              <button
-                type="button"
-                onClick={() => setShowSettings((prev) => !prev)}
-                className={`p-2 rounded-md border transition-colors flex-shrink-0 ${
-                  showSettings
-                    ? 'bg-blue-50 border-blue-300 text-blue-600'
-                    : 'bg-white border-gray-300 text-gray-400 hover:text-gray-600 hover:bg-gray-50'
-                }`}
-                style={{ minHeight: 38, minWidth: 38 }}
-                aria-label="Agent settings"
-                title="Agent settings"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                </svg>
-              </button>
-            )}
             <textarea
               ref={inputRef}
               value={input}
@@ -340,16 +362,6 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
             >
               Send
             </button>
-            {isPrompting && (
-              <button
-                type="button"
-                onClick={() => session.sendMessage({ jsonrpc: '2.0', method: 'session/cancel', params: {} })}
-                className="px-3 py-2 text-sm text-red-600 border border-red-300 rounded-md hover:bg-red-50"
-                style={{ minHeight: 44 }}
-              >
-                Cancel
-              </button>
-            )}
           </form>
         {/* Usage indicator */}
         <div className="mt-2 flex justify-end">
