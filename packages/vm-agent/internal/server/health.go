@@ -3,7 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -38,20 +38,20 @@ func (s *Server) sendNodeReady() {
 	url := strings.TrimRight(s.config.ControlPlaneURL, "/") + "/api/nodes/" + s.config.NodeID + "/ready"
 	req, err := http.NewRequest(http.MethodPost, url, nil)
 	if err != nil {
-		log.Printf("Node ready callback request create failed: %v", err)
+		slog.Error("Node ready callback request create failed", "error", err)
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+s.config.CallbackToken)
 
 	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 	if err != nil {
-		log.Printf("Node ready callback failed: %v", err)
+		slog.Error("Node ready callback failed", "error", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		log.Printf("Node ready callback returned status %d", resp.StatusCode)
+		slog.Warn("Node ready callback returned non-success status", "statusCode", resp.StatusCode)
 	}
 }
 
@@ -72,7 +72,7 @@ func (s *Server) sendNodeHeartbeat() {
 				"diskPercent":   quick.DiskPercent,
 			}
 		} else {
-			log.Printf("Heartbeat metrics collection failed: %v", err)
+			slog.Warn("Heartbeat metrics collection failed", "error", err)
 		}
 	}
 
@@ -80,7 +80,7 @@ func (s *Server) sendNodeHeartbeat() {
 
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		log.Printf("Node heartbeat request create failed: %v", err)
+		slog.Error("Node heartbeat request create failed", "error", err)
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+s.config.CallbackToken)
@@ -88,13 +88,13 @@ func (s *Server) sendNodeHeartbeat() {
 
 	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 	if err != nil {
-		log.Printf("Node heartbeat failed: %v", err)
+		slog.Error("Node heartbeat failed", "error", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		log.Printf("Node heartbeat returned status %d", resp.StatusCode)
+		slog.Warn("Node heartbeat returned non-success status", "statusCode", resp.StatusCode)
 	}
 }
 

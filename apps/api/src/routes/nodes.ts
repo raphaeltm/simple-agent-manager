@@ -15,6 +15,7 @@ import { signCallbackToken, signNodeManagementToken, verifyCallbackToken } from 
 import { recordNodeRoutingMetric } from '../services/telemetry';
 import {
   createWorkspaceOnNode,
+  getNodeLogsFromNode,
   getNodeSystemInfoFromNode,
   listNodeEventsOnNode,
   stopWorkspaceOnNode,
@@ -341,6 +342,80 @@ nodesRoutes.get('/:id/system-info', async (c) => {
     // Node agent may be unreachable — return 503
     return c.json({ error: 'UNAVAILABLE', message: 'Could not reach node agent' }, 503);
   }
+});
+
+/**
+ * GET /:id/logs — Proxy node logs from the VM Agent.
+ * Passes through query params (source, level, container, since, until, search, cursor, limit)
+ * to the VM Agent's /logs endpoint. Only available when the node is running.
+ */
+nodesRoutes.get('/:id/logs', async (c) => {
+  const nodeId = c.req.param('id');
+  const userId = getUserId(c);
+  const node = await requireNodeOwnership(c, nodeId);
+
+  if (!node) {
+    throw errors.notFound('Node');
+  }
+
+  if (node.status !== 'running') {
+    return c.json({ entries: [], nextCursor: null, hasMore: false });
+  }
+
+  // Pass through all query params to the VM Agent
+  const queryString = new URL(c.req.url).searchParams.toString();
+
+  try {
+    const result = await getNodeLogsFromNode(nodeId, c.env, userId, queryString);
+    return c.json(result);
+  } catch {
+    // Node agent may be unreachable — return empty rather than 500
+    return c.json({ entries: [], nextCursor: null, hasMore: false });
+  }
+});
+
+/**
+ * GET /:id/logs/stream — WebSocket proxy for real-time log streaming from the VM Agent.
+ * Authenticates the user, verifies node ownership, signs a management JWT,
+ * and proxies the WebSocket connection to the VM agent's /logs/stream endpoint.
+ */
+nodesRoutes.get('/:id/logs/stream', async (c) => {
+  const nodeId = c.req.param('id');
+  const userId = getUserId(c);
+  const node = await requireNodeOwnership(c, nodeId);
+
+  if (!node) {
+    throw errors.notFound('Node');
+  }
+
+  if (node.status !== 'running') {
+    throw errors.badRequest(`Node is not running (status: ${node.status})`);
+  }
+
+  // Sign a management JWT for the VM agent
+  const { token } = await signNodeManagementToken(userId, nodeId, null, c.env);
+
+  // Build the VM agent WebSocket URL with all query params
+  const clientUrl = new URL(c.req.url);
+  const vmUrl = new URL(`http://vm-${nodeId.toLowerCase()}.${c.env.BASE_DOMAIN}:8080/logs/stream`);
+  vmUrl.searchParams.set('token', token);
+
+  // Forward filter params from client
+  for (const [key, value] of clientUrl.searchParams.entries()) {
+    if (key !== 'token') {
+      vmUrl.searchParams.set(key, value);
+    }
+  }
+
+  // Proxy the WebSocket upgrade to the VM agent
+  const headers = new Headers(c.req.raw.headers);
+  headers.delete('x-sam-node-id');
+  headers.set('X-SAM-Node-Id', nodeId);
+
+  return fetch(vmUrl.toString(), {
+    method: 'GET',
+    headers,
+  });
 });
 
 /**

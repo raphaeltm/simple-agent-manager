@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -96,7 +96,7 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 		if state.WorkspaceID != cfg.WorkspaceID {
 			return fmt.Errorf("bootstrap state workspace mismatch: expected %s, found %s", cfg.WorkspaceID, state.WorkspaceID)
 		}
-		log.Printf("Using cached bootstrap state from %s", cfg.BootstrapStatePath)
+		slog.Info("Using cached bootstrap state", "path", cfg.BootstrapStatePath)
 		cfg.CallbackToken = state.CallbackToken
 		reporter.SetToken(state.CallbackToken)
 	} else {
@@ -168,14 +168,14 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	reporter.Log("sam_env", "started", "Configuring SAM environment")
 	if err := ensureSAMEnvironment(ctx, cfg, state.GitHubToken); err != nil {
 		reporter.Log("sam_env", "failed", "SAM environment setup failed", err.Error())
-		log.Printf("Warning: SAM environment setup failed (non-fatal): %v", err)
+		slog.Warn("SAM environment setup failed (non-fatal)", "error", err)
 	} else {
 		reporter.Log("sam_env", "completed", "SAM environment configured")
 	}
 
 	readyStatus := workspaceReadyStatusRunning
 	if recovery, recoveryErr := hasBuildErrorMarker(cfg); recoveryErr != nil {
-		log.Printf("Warning: failed to inspect build error marker for workspace %s: %v", cfg.WorkspaceID, recoveryErr)
+		slog.Warn("Failed to inspect build error marker", "workspaceID", cfg.WorkspaceID, "error", recoveryErr)
 	} else if recovery {
 		readyStatus = workspaceReadyStatusRecovery
 	}
@@ -249,7 +249,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 
 	recoveryMode := usedFallback
 	if markerFound, markerErr := hasBuildErrorMarker(cfg); markerErr != nil {
-		log.Printf("Warning: failed to inspect build error marker for workspace %s: %v", cfg.WorkspaceID, markerErr)
+		slog.Warn("Failed to inspect build error marker", "workspaceID", cfg.WorkspaceID, "error", markerErr)
 	} else if markerFound {
 		recoveryMode = true
 	}
@@ -271,7 +271,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	reporter.Log("sam_env", "started", "Configuring SAM environment")
 	if err := ensureSAMEnvironment(ctx, cfg, bootstrap.GitHubToken); err != nil {
 		reporter.Log("sam_env", "failed", "SAM environment setup failed", err.Error())
-		log.Printf("Warning: SAM environment setup failed (non-fatal): %v", err)
+		slog.Warn("SAM environment setup failed (non-fatal)", "error", err)
 	} else {
 		reporter.Log("sam_env", "completed", "SAM environment configured")
 	}
@@ -306,7 +306,7 @@ func ensureVolumeReady(ctx context.Context, workspaceID string) (string, error) 
 		return "", fmt.Errorf("failed to create Docker volume %s: %w: %s", volumeName, err, strings.TrimSpace(string(output)))
 	}
 
-	log.Printf("Docker volume ready: %s", volumeName)
+	slog.Info("Docker volume ready", "volumeName", volumeName)
 	return volumeName, nil
 }
 
@@ -319,7 +319,7 @@ func RemoveVolume(ctx context.Context, workspaceID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to remove Docker volume %s: %w: %s", volumeName, err, strings.TrimSpace(string(output)))
 	}
-	log.Printf("Docker volume removed: %s", volumeName)
+	slog.Info("Docker volume removed", "volumeName", volumeName)
 	return nil
 }
 
@@ -377,7 +377,7 @@ func persistBuildErrorArtifacts(ctx context.Context, cfg *config.Config, volumeN
 func clearBuildErrorArtifacts(ctx context.Context, cfg *config.Config, volumeName string) {
 	errorLogPath := buildErrorLogPath(cfg.WorkspaceDir)
 	if err := os.Remove(errorLogPath); err != nil && !os.IsNotExist(err) {
-		log.Printf("Warning: failed to remove build error marker %s: %v", errorLogPath, err)
+		slog.Warn("Failed to remove build error marker", "path", errorLogPath, "error", err)
 	}
 
 	if volumeName == "" {
@@ -390,7 +390,7 @@ func clearBuildErrorArtifacts(ctx context.Context, cfg *config.Config, volumeNam
 		"rm", "-f", "/workspaces/"+buildErrorLogFilename,
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Printf("Warning: failed to remove build error marker from volume %s: %v: %s", volumeName, err, strings.TrimSpace(string(out)))
+		slog.Warn("Failed to remove build error marker from volume", "volumeName", volumeName, "error", err, "output", strings.TrimSpace(string(out)))
 	}
 }
 
@@ -412,7 +412,7 @@ func ensureVolumeWritable(ctx context.Context, volumeName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to chmod workspace volume %s: %w: %s", volumeName, err, strings.TrimSpace(string(output)))
 	}
-	log.Printf("Adjusted permissions in volume %s", volumeName)
+	slog.Info("Adjusted permissions in volume", "volumeName", volumeName)
 	return nil
 }
 
@@ -432,7 +432,7 @@ func populateVolumeFromHost(ctx context.Context, hostPath, volumeName, repoDirNa
 	}
 	checkCmd := exec.CommandContext(ctx, "docker", checkArgs...)
 	if err := checkCmd.Run(); err == nil {
-		log.Printf("Volume %s already has repository at %s, skipping populate", volumeName, targetPath)
+		slog.Info("Volume already has repository, skipping populate", "volumeName", volumeName, "targetPath", targetPath)
 		return ensureVolumeWritable(ctx, volumeName)
 	}
 
@@ -445,7 +445,7 @@ func populateVolumeFromHost(ctx context.Context, hostPath, volumeName, repoDirNa
 		"alpine:latest",
 		"sh", "-c", fmt.Sprintf("cp -a /src %s", targetPath),
 	}
-	log.Printf("Populating volume %s at %s from host clone %s", volumeName, targetPath, hostPath)
+	slog.Info("Populating volume from host clone", "volumeName", volumeName, "targetPath", targetPath, "hostPath", hostPath)
 	cmd := exec.CommandContext(ctx, "docker", copyArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -456,7 +456,7 @@ func populateVolumeFromHost(ctx context.Context, hostPath, volumeName, repoDirNa
 		return err
 	}
 
-	log.Printf("Volume %s populated at %s", volumeName, targetPath)
+	slog.Info("Volume populated", "volumeName", volumeName, "targetPath", targetPath)
 	return nil
 }
 
@@ -468,7 +468,7 @@ func redeemBootstrapTokenWithRetry(ctx context.Context, cfg *config.Config) (*bo
 	for {
 		state, retryable, err := redeemBootstrapToken(ctx, cfg)
 		if err == nil {
-			log.Printf("Bootstrap token redeemed successfully for workspace %s", cfg.WorkspaceID)
+			slog.Info("Bootstrap token redeemed successfully", "workspaceID", cfg.WorkspaceID)
 			return state, nil
 		}
 
@@ -490,7 +490,7 @@ func redeemBootstrapTokenWithRetry(ctx context.Context, cfg *config.Config) (*bo
 			wait = remaining
 		}
 
-		log.Printf("Bootstrap redemption failed, retrying in %s: %v", wait, err)
+		slog.Warn("Bootstrap redemption failed, retrying", "retryIn", wait, "error", err)
 
 		select {
 		case <-ctx.Done():
@@ -561,7 +561,7 @@ func redeemBootstrapToken(ctx context.Context, cfg *config.Config) (*bootstrapSt
 
 func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *bootstrapState, volumeName string) error {
 	if cfg.Repository == "" {
-		log.Printf("Repository is empty, skipping clone step")
+		slog.Info("Repository is empty, skipping clone step")
 		return nil
 	}
 
@@ -590,7 +590,7 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 	// on the host to discover .devcontainer/ configs and resolve Dockerfile paths.
 	gitDir := filepath.Join(cfg.WorkspaceDir, ".git")
 	if _, err := os.Stat(gitDir); err == nil {
-		log.Printf("Repository already present at %s, skipping clone", cfg.WorkspaceDir)
+		slog.Info("Repository already present, skipping clone", "workspaceDir", cfg.WorkspaceDir)
 	} else {
 		if err := os.MkdirAll(filepath.Dir(cfg.WorkspaceDir), 0o755); err != nil {
 			return fmt.Errorf("failed to create workspace parent directory: %w", err)
@@ -600,7 +600,7 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 			return fmt.Errorf("failed to clean workspace directory: %w", err)
 		}
 
-		log.Printf("Cloning repository %s (branch: %s) into %s", cfg.Repository, branch, cfg.WorkspaceDir)
+		slog.Info("Cloning repository", "repository", cfg.Repository, "branch", branch, "workspaceDir", cfg.WorkspaceDir)
 		cmd := exec.CommandContext(ctx, "git", "clone", "--branch", branch, "--single-branch", cloneURL, cfg.WorkspaceDir)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
@@ -635,7 +635,7 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 // inside the volume.
 func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName string) (bool, error) {
 	if _, err := findDevcontainerID(ctx, cfg); err == nil {
-		log.Printf("Devcontainer already running for %s=%s", cfg.ContainerLabelKey, cfg.ContainerLabelValue)
+		slog.Info("Devcontainer already running", "labelKey", cfg.ContainerLabelKey, "labelValue", cfg.ContainerLabelValue)
 		ensureContainerUserResolved(ctx, cfg)
 		if err := ensureWorkspaceOwnership(ctx, cfg); err != nil {
 			return false, err
@@ -650,7 +650,7 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 		return false, fmt.Errorf("devcontainer CLI never became available: %w", err)
 	}
 
-	log.Printf("Starting devcontainer for workspace at %s", cfg.WorkspaceDir)
+	slog.Info("Starting devcontainer for workspace", "workspaceDir", cfg.WorkspaceDir)
 
 	hasConfig := hasDevcontainerConfig(cfg.WorkspaceDir)
 	usedFallback := false
@@ -666,7 +666,7 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 			var mountErr error
 			overridePath, mountErr = writeMountOverrideConfig(ctx, cfg, volumeName)
 			if mountErr != nil {
-				log.Printf("Failed to prepare repo mount override config, falling back to default image: %v", mountErr)
+				slog.Warn("Failed to prepare repo mount override config, falling back to default image", "error", mountErr)
 				fallbackOutput := []byte(fmt.Sprintf("failed to prepare repo devcontainer mount override: %v\n", mountErr))
 				var fallbackErr error
 				usedFallback, fallbackErr = fallbackToDefaultDevcontainer(ctx, cfg, volumeName, mountErr, fallbackOutput)
@@ -680,14 +680,14 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 		if !usedFallback {
 			args := devcontainerUpArgs(cfg, overridePath)
 			if cfg.AdditionalFeatures != "" {
-				log.Printf("Repo has its own devcontainer config — skipping additional-features injection")
+				slog.Info("Repo has its own devcontainer config, skipping additional-features injection")
 			}
 
 			cmd := exec.CommandContext(ctx, "devcontainer", args...)
 			output, err := cmd.CombinedOutput()
 			if err != nil {
 				// Repo config failed — log the error and fall back to default image.
-				log.Printf("Devcontainer build failed with repo config, falling back to default image: %v: %s", err, strings.TrimSpace(string(output)))
+				slog.Warn("Devcontainer build failed with repo config, falling back to default image", "error", err, "output", strings.TrimSpace(string(output)))
 				var fallbackErr error
 				usedFallback, fallbackErr = fallbackToDefaultDevcontainer(ctx, cfg, volumeName, err, output)
 				if fallbackErr != nil {
@@ -739,7 +739,7 @@ func fallbackToDefaultDevcontainer(
 		return false, fmt.Errorf("devcontainer fallback also failed: %w (original error: %v)", err, originalErr)
 	}
 
-	log.Printf("Devcontainer fallback succeeded with default image")
+	slog.Info("Devcontainer fallback succeeded with default image")
 	return true, nil
 }
 
@@ -973,13 +973,13 @@ func extractContainerUserFromMetadataLabel(raw string) string {
 func detectContainerUserFromReadConfiguration(ctx context.Context, cfg *config.Config) string {
 	readResult, err := runReadConfiguration(ctx, cfg.WorkspaceDir)
 	if err != nil {
-		log.Printf("Container user detection: read-configuration unavailable: %v", err)
+		slog.Warn("Container user detection: read-configuration unavailable", "error", err)
 		return ""
 	}
 
 	user := extractContainerUserFromMergedConfiguration(readResult.MergedConfiguration)
 	if user == "" {
-		log.Printf("Container user detection: read-configuration returned no remote/container user")
+		slog.Info("Container user detection: read-configuration returned no remote/container user")
 	}
 	return user
 }
@@ -987,7 +987,7 @@ func detectContainerUserFromReadConfiguration(ctx context.Context, cfg *config.C
 func detectContainerUserFromMetadata(ctx context.Context, cfg *config.Config) string {
 	containerID, err := findDevcontainerID(ctx, cfg)
 	if err != nil {
-		log.Printf("Container user detection: failed to resolve running container for metadata lookup: %v", err)
+		slog.Warn("Container user detection: failed to resolve running container for metadata lookup", "error", err)
 		return ""
 	}
 
@@ -1001,13 +1001,13 @@ func detectContainerUserFromMetadata(ctx context.Context, cfg *config.Config) st
 	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("Container user detection: docker inspect metadata failed: %v: %s", err, strings.TrimSpace(string(output)))
+		slog.Warn("Container user detection: docker inspect metadata failed", "error", err, "output", strings.TrimSpace(string(output)))
 		return ""
 	}
 
 	var encoded *string
 	if err := json.Unmarshal(bytes.TrimSpace(output), &encoded); err != nil {
-		log.Printf("Container user detection: failed to decode metadata label payload: %v", err)
+		slog.Warn("Container user detection: failed to decode metadata label payload", "error", err)
 		return ""
 	}
 	if encoded == nil || strings.TrimSpace(*encoded) == "" {
@@ -1020,14 +1020,14 @@ func detectContainerUserFromMetadata(ctx context.Context, cfg *config.Config) st
 func detectContainerUserFromExec(ctx context.Context, cfg *config.Config) string {
 	containerID, err := findDevcontainerID(ctx, cfg)
 	if err != nil {
-		log.Printf("Container user detection: failed to resolve running container for exec fallback: %v", err)
+		slog.Warn("Container user detection: failed to resolve running container for exec fallback", "error", err)
 		return ""
 	}
 
 	cmd := exec.CommandContext(ctx, "docker", "exec", containerID, "id", "-un")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("Container user detection: docker exec id fallback failed: %v: %s", err, strings.TrimSpace(string(output)))
+		slog.Warn("Container user detection: docker exec id fallback failed", "error", err, "output", strings.TrimSpace(string(output)))
 		return ""
 	}
 
@@ -1037,7 +1037,7 @@ func detectContainerUserFromExec(ctx context.Context, cfg *config.Config) string
 func ensureContainerUserResolved(ctx context.Context, cfg *config.Config) {
 	override := strings.TrimSpace(cfg.ContainerUser)
 	if override != "" {
-		log.Printf("Container user override active via CONTAINER_USER=%q", override)
+		slog.Info("Container user override active", "containerUser", override)
 		cfg.ContainerUser = override
 		return
 	}
@@ -1045,32 +1045,32 @@ func ensureContainerUserResolved(ctx context.Context, cfg *config.Config) {
 	if detected := detectContainerUserFromReadConfiguration(ctx, cfg); detected != "" {
 		cfg.ContainerUser = detected
 		if detected == "root" {
-			log.Printf("Warning: detected devcontainer user is root (source=read-configuration)")
+			slog.Warn("Detected devcontainer user is root", "source", "read-configuration")
 		} else {
-			log.Printf("Detected devcontainer user %q via read-configuration", detected)
+			slog.Info("Detected devcontainer user via read-configuration", "user", detected)
 		}
 		return
 	}
 	if detected := detectContainerUserFromMetadata(ctx, cfg); detected != "" {
 		cfg.ContainerUser = detected
 		if detected == "root" {
-			log.Printf("Warning: detected devcontainer user is root (source=devcontainer.metadata)")
+			slog.Warn("Detected devcontainer user is root", "source", "devcontainer.metadata")
 		} else {
-			log.Printf("Detected devcontainer user %q via devcontainer.metadata", detected)
+			slog.Info("Detected devcontainer user via devcontainer.metadata", "user", detected)
 		}
 		return
 	}
 	if detected := detectContainerUserFromExec(ctx, cfg); detected != "" {
 		cfg.ContainerUser = detected
 		if detected == "root" {
-			log.Printf("Warning: detected devcontainer user is root (source=docker exec id -un fallback)")
+			slog.Warn("Detected devcontainer user is root", "source", "docker exec id -un fallback")
 		} else {
-			log.Printf("Detected devcontainer user %q via docker exec fallback", detected)
+			slog.Info("Detected devcontainer user via docker exec fallback", "user", detected)
 		}
 		return
 	}
 
-	log.Printf("Warning: unable to detect devcontainer user; docker exec will use container default user")
+	slog.Warn("Unable to detect devcontainer user; docker exec will use container default user")
 }
 
 func ensureWorkspaceOwnership(ctx context.Context, cfg *config.Config) error {
@@ -1102,7 +1102,7 @@ func ensureWorkspaceOwnership(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 	if ownerUID == uid && ownerGID == gid {
-		log.Printf("Workspace ownership already set for %s (uid=%s gid=%s)", user, uid, gid)
+		slog.Info("Workspace ownership already set", "user", user, "uid", uid, "gid", gid)
 		return nil
 	}
 
@@ -1110,7 +1110,7 @@ func ensureWorkspaceOwnership(ctx context.Context, cfg *config.Config) error {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to chown /workspaces to %s (%s:%s): %w: %s", user, uid, gid, err, strings.TrimSpace(string(output)))
 	}
-	log.Printf("Adjusted /workspaces ownership to %s (%s:%s)", user, uid, gid)
+	slog.Info("Adjusted /workspaces ownership", "user", user, "uid", uid, "gid", gid)
 	return nil
 }
 
@@ -1204,7 +1204,7 @@ func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeNam
 		return "", fmt.Errorf("failed to finalize mount override config: %w", err)
 	}
 
-	log.Printf("Wrote mount override config: %s (volume=%s, workspaceFolder=/workspaces/%s)", tmpFile.Name(), volumeName, repoDirName)
+	slog.Info("Wrote mount override config", "path", tmpFile.Name(), "volume", volumeName, "workspaceFolder", "/workspaces/"+repoDirName)
 	return tmpFile.Name(), nil
 }
 
@@ -1215,11 +1215,11 @@ func runDevcontainerWithDefault(ctx context.Context, cfg *config.Config, volumeN
 	if err != nil {
 		return false, fmt.Errorf("failed to write default devcontainer config: %w", err)
 	}
-	log.Printf("Using default devcontainer config: %s (image: %s)", configPath, cfg.DefaultDevcontainerImage)
+	slog.Info("Using default devcontainer config", "configPath", configPath, "image", cfg.DefaultDevcontainerImage)
 
 	args := devcontainerUpArgs(cfg, configPath)
 	if cfg.AdditionalFeatures != "" {
-		log.Printf("Injecting additional devcontainer features: %s", cfg.AdditionalFeatures)
+		slog.Info("Injecting additional devcontainer features", "features", cfg.AdditionalFeatures)
 		args = append(args, "--additional-features", cfg.AdditionalFeatures)
 	}
 
@@ -1242,16 +1242,16 @@ func removeStaleContainers(ctx context.Context, cfg *config.Config) {
 	cmd := exec.CommandContext(ctx, "docker", "ps", "-aq", "--filter", filter)
 	output, err := cmd.Output()
 	if err != nil {
-		log.Printf("Warning: failed to list stale containers for cleanup: %v", err)
+		slog.Warn("Failed to list stale containers for cleanup", "error", err)
 		return
 	}
 
 	containers := strings.Fields(string(output))
 	for _, id := range containers {
-		log.Printf("Removing stale container %s before fallback", id)
+		slog.Info("Removing stale container before fallback", "containerID", id)
 		rmCmd := exec.CommandContext(ctx, "docker", "rm", "-f", id)
 		if rmOutput, rmErr := rmCmd.CombinedOutput(); rmErr != nil {
-			log.Printf("Warning: failed to remove stale container %s: %v: %s", id, rmErr, strings.TrimSpace(string(rmOutput)))
+			slog.Warn("Failed to remove stale container", "containerID", id, "error", rmErr, "output", strings.TrimSpace(string(rmOutput)))
 		}
 	}
 }
@@ -1328,7 +1328,7 @@ func hasDevcontainerConfig(workspaceDir string) bool {
 	}
 	for _, path := range candidates {
 		if _, err := os.Stat(path); err == nil {
-			log.Printf("Found devcontainer config: %s", path)
+			slog.Info("Found devcontainer config", "path", path)
 			return true
 		}
 	}
@@ -1341,7 +1341,7 @@ func waitForCommand(ctx context.Context, name string) error {
 		return nil // Already available
 	}
 
-	log.Printf("Waiting for %q to be installed (cloud-init may still be running)...", name)
+	slog.Info("Waiting for command to be installed (cloud-init may still be running)", "command", name)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -1352,11 +1352,11 @@ func waitForCommand(ctx context.Context, name string) error {
 			return fmt.Errorf("context cancelled while waiting for %q: %w", name, ctx.Err())
 		case <-ticker.C:
 			if _, err := exec.LookPath(name); err == nil {
-				log.Printf("Command %q is now available", name)
+				slog.Info("Command is now available", "command", name)
 				return nil
 			}
 			if time.Since(logged) >= 30*time.Second {
-				log.Printf("Still waiting for %q to be installed...", name)
+				slog.Info("Still waiting for command to be installed", "command", name)
 				logged = time.Now()
 			}
 		}
@@ -1368,7 +1368,7 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 		return nil
 	}
 	if !isGitHubRepo(cfg.Repository) {
-		log.Printf("Repository %s is not a GitHub repository, skipping git credential helper setup", cfg.Repository)
+		slog.Info("Repository is not a GitHub repository, skipping git credential helper setup", "repository", cfg.Repository)
 		return nil
 	}
 	if cfg.CallbackToken == "" {
@@ -1421,7 +1421,7 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
-	log.Printf("Configured git credential helper in devcontainer %s", containerID)
+	slog.Info("Configured git credential helper in devcontainer", "containerID", containerID)
 	return nil
 }
 
@@ -1546,9 +1546,9 @@ func ensureGitIdentity(ctx context.Context, cfg *config.Config, state *bootstrap
 	gitUserName, gitUserEmail, ok := resolveGitIdentity(state)
 	if !ok {
 		if state == nil {
-			log.Printf("Warning: git identity skipped — bootstrap state is nil")
+			slog.Warn("Git identity skipped — bootstrap state is nil")
 		} else {
-			log.Printf("Warning: git identity skipped — received name=%q email=%q (email is required)", state.GitUserName, state.GitUserEmail)
+			slog.Warn("Git identity skipped — email is required", "name", state.GitUserName, "email", state.GitUserEmail)
 		}
 		return nil
 	}
@@ -1590,7 +1590,7 @@ func ensureGitIdentity(ctx context.Context, cfg *config.Config, state *bootstrap
 		return fmt.Errorf("failed to configure git user.name in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
-	log.Printf("Configured git identity in devcontainer %s: name=%q email=%q", containerID, gitUserName, gitUserEmail)
+	slog.Info("Configured git identity in devcontainer", "containerID", containerID, "name", gitUserName, "email", gitUserEmail)
 	return nil
 }
 
@@ -1650,7 +1650,7 @@ func ensureSAMEnvironment(ctx context.Context, cfg *config.Config, githubToken s
 		return fmt.Errorf("failed to write SAM environment files: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
-	log.Printf("Configured SAM environment in devcontainer %s", containerID)
+	slog.Info("Configured SAM environment in devcontainer", "containerID", containerID)
 	return nil
 }
 
@@ -1768,7 +1768,7 @@ func ensureProjectRuntimeAssets(
 		}
 	}
 
-	log.Printf("Injected project runtime assets in devcontainer %s (env=%d files=%d)", containerID, len(envVars), len(files))
+	slog.Info("Injected project runtime assets in devcontainer", "containerID", containerID, "envVarCount", len(envVars), "fileCount", len(files))
 	return nil
 }
 
@@ -1805,7 +1805,7 @@ func markWorkspaceReady(ctx context.Context, cfg *config.Config, status string) 
 		return fmt.Errorf("ready endpoint returned HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	log.Printf("Workspace %s marked ready (%s)", cfg.WorkspaceID, status)
+	slog.Info("Workspace marked ready", "workspaceID", cfg.WorkspaceID, "status", status)
 	return nil
 }
 

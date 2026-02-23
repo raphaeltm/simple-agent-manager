@@ -109,6 +109,9 @@ export async function provisionNode(nodeId: string, env: Env): Promise<void> {
       controlPlaneUrl: `https://api.${env.BASE_DOMAIN}`,
       jwksUrl: `https://api.${env.BASE_DOMAIN}/.well-known/jwks.json`,
       callbackToken,
+      logJournalMaxUse: env.LOG_JOURNAL_MAX_USE,
+      logJournalKeepFree: env.LOG_JOURNAL_KEEP_FREE,
+      logJournalMaxRetention: env.LOG_JOURNAL_MAX_RETENTION,
     });
 
     if (!validateCloudInitSize(cloudInit)) {

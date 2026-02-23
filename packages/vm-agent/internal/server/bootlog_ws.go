@@ -2,7 +2,7 @@ package server
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -69,7 +69,7 @@ func (b *BootLogBroadcaster) Broadcast(step, status, message string, detail ...s
 	}
 	for conn := range b.clients {
 		if writeErr := conn.WriteMessage(websocket.TextMessage, data); writeErr != nil {
-			log.Printf("bootlog-ws: write error, removing client: %v", writeErr)
+			slog.Warn("bootlog-ws: write error, removing client", "error", writeErr)
 			conn.Close()
 			delete(b.clients, conn)
 		}
@@ -89,7 +89,7 @@ func (b *BootLogBroadcaster) AddClient(conn *websocket.Conn) {
 			continue
 		}
 		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-			log.Printf("bootlog-ws: failed to send history to new client: %v", err)
+			slog.Warn("bootlog-ws: failed to send history to new client", "error", err)
 			conn.Close()
 			return
 		}
@@ -124,7 +124,7 @@ func (b *BootLogBroadcaster) MarkComplete() {
 	completeMsg, _ := json.Marshal(BootLogWSEntry{Type: "complete"})
 	for conn := range b.clients {
 		if err := conn.WriteMessage(websocket.TextMessage, completeMsg); err != nil {
-			log.Printf("bootlog-ws: failed to send complete to client: %v", err)
+			slog.Warn("bootlog-ws: failed to send complete to client", "error", err)
 		}
 		conn.Close()
 		delete(b.clients, conn)
@@ -222,7 +222,7 @@ func (s *Server) handleBootLogWS(w http.ResponseWriter, r *http.Request) {
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("bootlog-ws: upgrade failed: %v", err)
+		slog.Error("bootlog-ws: upgrade failed", "error", err)
 		return
 	}
 

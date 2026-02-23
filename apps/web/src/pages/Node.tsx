@@ -12,6 +12,7 @@ import { DockerSection } from '../components/node/DockerSection';
 import { SoftwareSection } from '../components/node/SoftwareSection';
 import { NodeWorkspacesSection } from '../components/node/NodeWorkspacesSection';
 import { NodeEventsSection } from '../components/node/NodeEventsSection';
+import { LogsSection } from '../components/node/LogsSection';
 
 export function Node() {
   const navigate = useNavigate();
@@ -273,6 +274,8 @@ export function Node() {
               />
             </>
           )}
+
+          <LogsSection nodeId={id} nodeStatus={node.status} />
 
           <NodeWorkspacesSection
             workspaces={workspaces}

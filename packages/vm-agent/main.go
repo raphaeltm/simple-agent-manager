@@ -3,7 +3,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,22 +12,24 @@ import (
 	"github.com/workspace/vm-agent/internal/bootlog"
 	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/logging"
 	"github.com/workspace/vm-agent/internal/server"
 )
 
 func main() {
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Println("Starting VM Agent...")
+	logging.Setup()
+	slog.Info("Starting VM Agent...")
 
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		slog.Error("Failed to load configuration", "error", err)
+		os.Exit(1)
 	}
 
 	reporter := bootlog.New(cfg.ControlPlaneURL, cfg.NodeID)
 
-	log.Printf("Configuration loaded: node=%s, port=%d", cfg.NodeID, cfg.Port)
+	slog.Info("Configuration loaded", "node", cfg.NodeID, "port", cfg.Port)
 
 	// Create server BEFORE bootstrap so /health and /boot-log/ws are available
 	// while the workspace is still being provisioned. This allows the API's
@@ -35,7 +37,8 @@ func main() {
 	// boot log streaming during the "creating" phase.
 	srv, err := server.New(cfg)
 	if err != nil {
-		log.Fatalf("Failed to create server: %v", err)
+		slog.Error("Failed to create server", "error", err)
+		os.Exit(1)
 	}
 
 	// Wire boot-log reporter into ACP gateway for agent error reporting
@@ -62,7 +65,8 @@ func main() {
 	defer bootstrapCancel()
 
 	if err := bootstrap.Run(bootstrapCtx, cfg, reporter); err != nil {
-		log.Fatalf("Bootstrap failed: %v", err)
+		slog.Error("Bootstrap failed", "error", err)
+		os.Exit(1)
 	}
 
 	// Propagate callback token (obtained during bootstrap) to all subsystems
@@ -72,9 +76,10 @@ func main() {
 	// Wait for shutdown signal or fatal server error.
 	select {
 	case err := <-errCh:
-		log.Fatalf("Server error: %v", err)
+		slog.Error("Server error", "error", err)
+		os.Exit(1)
 	case sig := <-sigCh:
-		log.Printf("Received signal %v, shutting down...", sig)
+		slog.Info("Received signal, shutting down...", "signal", sig)
 		srv.StopAllWorkspacesAndSessions()
 	}
 
@@ -83,8 +88,8 @@ func main() {
 	defer cancel()
 
 	if err := srv.Stop(ctx); err != nil {
-		log.Printf("Error during shutdown: %v", err)
+		slog.Error("Error during shutdown", "error", err)
 	}
 
-	log.Println("VM Agent stopped")
+	slog.Info("VM Agent stopped")
 }

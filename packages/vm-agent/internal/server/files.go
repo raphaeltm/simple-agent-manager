@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -79,7 +79,7 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 
 	output, _, err := s.execInContainer(ctx, containerID, user, workDir, "sh", "-c", findCmd)
 	if err != nil {
-		log.Printf("[files] Error listing directory %q in workspace %s: %v", dirPath, workspaceID, err)
+		slog.Error("Error listing directory", "path", dirPath, "workspace", workspaceID, "error", err)
 		http.Error(w, `{"error":"failed to list directory"}`, http.StatusInternalServerError)
 		return
 	}
@@ -101,7 +101,7 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("[files] Error encoding response: %v", err)
+		slog.Error("Error encoding file list response", "error", err)
 	}
 }
 
@@ -158,7 +158,7 @@ func (s *Server) handleFileFind(w http.ResponseWriter, r *http.Request) {
 
 	output, _, err := s.execInContainer(ctx, containerID, user, workDir, "sh", "-c", findCmd)
 	if err != nil {
-		log.Printf("[files] Error finding files in workspace %s: %v", workspaceID, err)
+		slog.Error("Error finding files", "workspace", workspaceID, "error", err)
 		http.Error(w, `{"error":"failed to find files"}`, http.StatusInternalServerError)
 		return
 	}
@@ -168,7 +168,7 @@ func (s *Server) handleFileFind(w http.ResponseWriter, r *http.Request) {
 	resp := FileFindResponse{Files: files}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("[files] Error encoding find response: %v", err)
+		slog.Error("Error encoding file find response", "error", err)
 	}
 }
 

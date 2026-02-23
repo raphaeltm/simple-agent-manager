@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"sync"
@@ -285,7 +285,7 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 		Params  json.RawMessage `json:"params,omitempty"`
 	}
 	if err := json.Unmarshal(data, &rpcMsg); err != nil {
-		log.Printf("Failed to parse WebSocket message: %v", err)
+		slog.Warn("Failed to parse WebSocket message", "error", err)
 		return
 	}
 
@@ -384,11 +384,11 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 	checkArgs := []string{"exec", containerID, "which", info.command}
 	checkCmd := exec.CommandContext(ctx, "docker", checkArgs...)
 	if err := checkCmd.Run(); err == nil {
-		log.Printf("Agent binary %s is already installed", info.command)
+		slog.Info("Agent binary is already installed", "command", info.command)
 		return nil
 	}
 
-	log.Printf("Agent binary %s not found in container, installing", info.command)
+	slog.Info("Agent binary not found in container, installing", "command", info.command)
 
 	installScript := fmt.Sprintf(
 		`which npm >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq nodejs npm; }; %s`,
@@ -402,7 +402,7 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 		return fmt.Errorf("install command failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
-	log.Printf("Agent binary %s installed successfully", info.command)
+	slog.Info("Agent binary installed successfully", "command", info.command)
 	return nil
 }
 

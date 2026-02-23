@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	neturl "net/url"
 	"os"
@@ -83,7 +83,7 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 
 	gitToken, err := s.fetchGitTokenForWorkspace(provisionCtx, runtime.ID, callbackToken)
 	if err != nil {
-		log.Printf("Workspace %s: proceeding without git token: %v", runtime.ID, err)
+		slog.Warn("Proceeding without git token", "workspace", runtime.ID, "error", err)
 	}
 
 	runtimeAssets, err := s.fetchProjectRuntimeAssetsForWorkspace(provisionCtx, runtime.ID, callbackToken)
@@ -157,7 +157,7 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 	if cfg.Repository != "" && callbackToken != "" {
 		gitToken, fetchErr := s.fetchGitTokenForWorkspace(recoveryCtx, runtime.ID, callbackToken)
 		if fetchErr != nil {
-			log.Printf("Workspace %s: recovery proceeding without git token: %v", runtime.ID, fetchErr)
+			slog.Warn("Recovery proceeding without git token", "workspace", runtime.ID, "error", fetchErr)
 		} else {
 			state.GitHubToken = gitToken
 		}
@@ -191,7 +191,7 @@ func (s *Server) hydrateWorkspaceRuntimeForRecovery(
 	if strings.TrimSpace(runtime.Repository) == "" || strings.TrimSpace(runtime.Branch) == "" {
 		metadata, err := s.fetchWorkspaceRuntimeMetadata(ctx, runtime.ID, callbackToken)
 		if err != nil {
-			log.Printf("Workspace %s: unable to hydrate runtime metadata from control plane: %v", runtime.ID, err)
+			slog.Warn("Unable to hydrate runtime metadata from control plane", "workspace", runtime.ID, "error", err)
 		} else if metadata != nil {
 			if strings.TrimSpace(runtime.Repository) == "" && strings.TrimSpace(metadata.Repository) != "" {
 				runtime.Repository = strings.TrimSpace(metadata.Repository)
@@ -304,7 +304,7 @@ func (s *Server) adoptLegacyWorkspaceLayout(runtime *WorkspaceRuntime) bool {
 		return false
 	}
 
-	log.Printf("Workspace %s: adopting legacy workspace layout at %s", runtime.ID, legacyDir)
+	slog.Info("Adopting legacy workspace layout", "workspace", runtime.ID, "legacyDir", legacyDir)
 	runtime.WorkspaceDir = legacyDir
 	runtime.ContainerLabelValue = legacyDir
 	runtime.ContainerWorkDir = nextContainerWorkDir

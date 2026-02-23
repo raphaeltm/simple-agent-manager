@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -45,16 +45,16 @@ func (s *Server) removeWorkspaceContainer(workspaceID string) {
 	cmd := exec.CommandContext(ctx, "docker", "ps", "-aq", "--filter", filter)
 	output, err := cmd.Output()
 	if err != nil {
-		log.Printf("Warning: failed to list containers for workspace %s: %v", workspaceID, err)
+		slog.Warn("Failed to list containers for workspace", "workspace", workspaceID, "error", err)
 		return
 	}
 
 	containers := strings.Fields(string(output))
 	for _, id := range containers {
-		log.Printf("Removing container %s for workspace %s", id, workspaceID)
+		slog.Info("Removing container", "containerId", id, "workspace", workspaceID)
 		rmCmd := exec.CommandContext(ctx, "docker", "rm", "-f", id)
 		if rmOutput, rmErr := rmCmd.CombinedOutput(); rmErr != nil {
-			log.Printf("Warning: failed to remove container %s: %v: %s", id, rmErr, strings.TrimSpace(string(rmOutput)))
+			slog.Warn("Failed to remove container", "containerId", id, "error", rmErr, "output", strings.TrimSpace(string(rmOutput)))
 		}
 	}
 }
@@ -174,7 +174,7 @@ func (s *Server) startWorkspaceProvision(
 			callbackToken := s.callbackTokenForWorkspace(runtime.ID)
 			if callbackToken != "" {
 				if callbackErr := s.notifyWorkspaceProvisioningFailed(context.Background(), runtime.ID, callbackToken, err.Error()); callbackErr != nil {
-					log.Printf("Workspace %s: provisioning-failed callback error: %v", runtime.ID, callbackErr)
+					slog.Error("Provisioning-failed callback error", "workspace", runtime.ID, "error", callbackErr)
 				}
 			}
 
@@ -196,7 +196,7 @@ func (s *Server) startWorkspaceProvision(
 		// CAS: only transition to a ready state if still in "creating" state.
 		// Prevents overwriting "stopped" if user stopped workspace during provisioning.
 		if !s.casWorkspaceStatus(runtime.ID, []string{"creating"}, nextStatus) {
-			log.Printf("Workspace %s: provisioning completed but status already changed from creating, skipping %s transition", runtime.ID, nextStatus)
+			slog.Warn("Provisioning completed but status already changed from creating, skipping transition", "workspace", runtime.ID, "targetStatus", nextStatus)
 			return
 		}
 
@@ -308,7 +308,7 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Clear persisted tabs — workspace is stopped, no live sessions remain
 	if s.store != nil {
 		if err := s.store.DeleteWorkspaceTabs(workspaceID); err != nil {
-			log.Printf("Warning: failed to delete persisted tabs on workspace stop %s: %v", workspaceID, err)
+			slog.Warn("Failed to delete persisted tabs on workspace stop", "workspace", workspaceID, "error", err)
 		}
 	}
 
@@ -410,7 +410,7 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	// The container must be removed before the volume (Docker won't remove a volume in use).
 	s.removeWorkspaceContainer(workspaceID)
 	if err := bootstrap.RemoveVolume(context.Background(), workspaceID); err != nil {
-		log.Printf("Warning: failed to remove Docker volume for workspace %s: %v", workspaceID, err)
+		slog.Warn("Failed to remove Docker volume for workspace", "workspace", workspaceID, "error", err)
 	}
 
 	s.removeWorkspaceRuntime(workspaceID)
@@ -418,7 +418,7 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Remove all persisted tabs for this workspace
 	if s.store != nil {
 		if err := s.store.DeleteWorkspaceTabs(workspaceID); err != nil {
-			log.Printf("Warning: failed to delete persisted tabs for workspace %s: %v", workspaceID, err)
+			slog.Warn("Failed to delete persisted tabs for workspace", "workspace", workspaceID, "error", err)
 		}
 	}
 
@@ -449,7 +449,7 @@ func (s *Server) handleListTabs(w http.ResponseWriter, r *http.Request) {
 
 	tabs, err := s.store.ListTabs(workspaceID)
 	if err != nil {
-		log.Printf("Error listing tabs for workspace %s: %v", workspaceID, err)
+		slog.Error("Error listing tabs for workspace", "workspace", workspaceID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list tabs")
 		return
 	}
@@ -545,7 +545,7 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 				AgentID:     "", // Agent ID is inferred from label currently
 				SortOrder:   tabCount,
 			}); err != nil {
-				log.Printf("Warning: failed to persist chat tab: %v", err)
+				slog.Warn("Failed to persist chat tab", "error", err)
 			}
 		}
 	}
@@ -575,7 +575,7 @@ func (s *Server) handleStopAgentSession(w http.ResponseWriter, r *http.Request) 
 	// Remove persisted chat tab
 	if s.store != nil {
 		if err := s.store.DeleteTab(sessionID); err != nil {
-			log.Printf("Warning: failed to delete persisted chat tab: %v", err)
+			slog.Warn("Failed to delete persisted chat tab", "error", err)
 		}
 	}
 

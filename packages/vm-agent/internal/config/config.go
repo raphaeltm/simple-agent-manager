@@ -148,6 +148,11 @@ type Config struct {
 	SysInfoDockerTimeout  time.Duration // Timeout for Docker CLI commands in system info (default: 10s)
 	SysInfoVersionTimeout time.Duration // Timeout for version check commands (default: 5s)
 	SysInfoCacheTTL       time.Duration // Cache TTL for system info responses (default: 5s)
+
+	// Log reader/stream settings - configurable per constitution principle XI
+	LogReaderTimeout     time.Duration // Timeout for journalctl read commands (default: 30s)
+	LogStreamPingInterval time.Duration // WebSocket ping interval for log stream (default: 30s)
+	LogStreamPongTimeout  time.Duration // WebSocket pong deadline for log stream (default: 90s)
 }
 
 // Load reads configuration from environment variables.
@@ -287,6 +292,11 @@ func Load() (*Config, error) {
 		SysInfoDockerTimeout:  getEnvDuration("SYSINFO_DOCKER_TIMEOUT", 10*time.Second),
 		SysInfoVersionTimeout: getEnvDuration("SYSINFO_VERSION_TIMEOUT", 5*time.Second),
 		SysInfoCacheTTL:       getEnvDuration("SYSINFO_CACHE_TTL", 5*time.Second),
+
+		// Log reader/stream settings - configurable per constitution principle XI
+		LogReaderTimeout:      getEnvDuration("LOG_READER_TIMEOUT", 30*time.Second),
+		LogStreamPingInterval: getEnvDuration("LOG_STREAM_PING_INTERVAL", 30*time.Second),
+		LogStreamPongTimeout:  getEnvDuration("LOG_STREAM_PONG_TIMEOUT", 90*time.Second),
 	}
 
 	// Validate required fields

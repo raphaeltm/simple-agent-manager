@@ -4,7 +4,7 @@ package idle
 import (
 	"bytes"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -165,14 +165,14 @@ func (d *Detector) SendHeartbeat() {
 
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("Failed to marshal heartbeat: %v", err)
+		slog.Error("Failed to marshal heartbeat", "error", err)
 		return
 	}
 
 	url := d.controlPlaneURL + "/api/workspaces/" + d.workspaceID + "/heartbeat"
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
-		log.Printf("Failed to create heartbeat request: %v", err)
+		slog.Error("Failed to create heartbeat request", "error", err)
 		return
 	}
 
@@ -185,13 +185,13 @@ func (d *Detector) SendHeartbeat() {
 	resp, err := client.Do(req)
 	if err != nil {
 		// Don't fail on heartbeat errors - VM manages its own lifecycle
-		log.Printf("Failed to send heartbeat (non-critical): %v", err)
+		slog.Warn("Failed to send heartbeat (non-critical)", "error", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("Heartbeat returned status %d (non-critical)", resp.StatusCode)
+		slog.Warn("Heartbeat returned non-OK status (non-critical)", "statusCode", resp.StatusCode)
 		return
 	}
 

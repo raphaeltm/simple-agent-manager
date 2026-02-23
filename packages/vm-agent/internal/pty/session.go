@@ -3,7 +3,7 @@ package pty
 
 import (
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sync"
@@ -228,7 +228,7 @@ func (s *Session) StartOutputReader(onOutput func(sessionID string, data []byte)
 				}
 				s.mu.Unlock()
 
-				log.Printf("PTY output reader ended for session %s: %v", s.ID, err)
+				slog.Info("PTY output reader ended", "sessionID", s.ID, "error", err)
 
 				if onExit != nil {
 					onExit(s.ID)

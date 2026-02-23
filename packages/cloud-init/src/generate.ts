@@ -9,6 +9,12 @@ export interface CloudInitVariables {
   controlPlaneUrl: string;
   jwksUrl: string;
   callbackToken: string;
+  /** journald SystemMaxUse (default: 500M) */
+  logJournalMaxUse?: string;
+  /** journald SystemKeepFree (default: 1G) */
+  logJournalKeepFree?: string;
+  /** journald MaxRetentionSec (default: 7day) */
+  logJournalMaxRetention?: string;
 }
 
 /**
@@ -23,6 +29,10 @@ export function generateCloudInit(variables: CloudInitVariables): string {
     '{{ control_plane_url }}': variables.controlPlaneUrl,
     '{{ jwks_url }}': variables.jwksUrl,
     '{{ callback_token }}': variables.callbackToken,
+    '{{ log_journal_max_use }}': variables.logJournalMaxUse ?? '500M',
+    '{{ log_journal_keep_free }}': variables.logJournalKeepFree ?? '1G',
+    '{{ log_journal_max_retention }}': variables.logJournalMaxRetention ?? '7day',
+    '{{ docker_name_tag }}': '{{.Name}}',
   };
 
   for (const [placeholder, value] of Object.entries(replacements)) {

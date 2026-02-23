@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -213,7 +213,7 @@ func (h *SessionHost) AttachViewer(id string, conn *websocket.Conn) *Viewer {
 	h.viewers[id] = viewer
 	h.viewerMu.Unlock()
 
-	log.Printf("SessionHost[%s]: viewer %s attached (total=%d)", h.config.SessionID, id, h.ViewerCount())
+	slog.Info("SessionHost: viewer attached", "sessionID", h.config.SessionID, "viewerID", id, "totalViewers", h.ViewerCount())
 
 	// Send current session state
 	h.sendToViewerPriority(viewer, h.marshalSessionState(currentStatus, currentAgentType, currentErr))
@@ -247,7 +247,7 @@ func (h *SessionHost) DetachViewer(viewerID string) {
 
 	if ok && viewer != nil {
 		viewer.once.Do(func() { close(viewer.done) })
-		log.Printf("SessionHost[%s]: viewer %s detached (total=%d)", h.config.SessionID, viewerID, h.ViewerCount())
+		slog.Info("SessionHost: viewer detached", "sessionID", h.config.SessionID, "viewerID", viewerID, "totalViewers", h.ViewerCount())
 	}
 }
 
@@ -257,7 +257,7 @@ func (h *SessionHost) DetachViewer(viewerID string) {
 func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 	h.mu.Lock()
 
-	log.Printf("SessionHost[%s]: agent selection requested: %s", h.config.SessionID, agentType)
+	slog.Info("SessionHost: agent selection requested", "sessionID", h.config.SessionID, "agentType", agentType)
 
 	// Capture previous ACP session ID before stopping the agent.
 	previousAcpSessionID := ""
@@ -304,7 +304,7 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 	cred, err := h.fetchAgentKey(ctx, agentType)
 	if err != nil {
 		errMsg := fmt.Sprintf("Failed to fetch credential for %s — check Settings", agentType)
-		log.Printf("Agent credential fetch failed: %v", err)
+		slog.Error("Agent credential fetch failed", "error", err)
 		h.setStatus(HostError, errMsg)
 		h.broadcastAgentStatus(StatusError, agentType, errMsg)
 		h.reportAgentError(agentType, "agent_key_fetch", errMsg, err.Error())
@@ -319,7 +319,7 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 	info := getAgentCommandInfo(agentType, cred.credentialKind)
 	if err := h.ensureAgentInstalled(ctx, info); err != nil {
 		errMsg := fmt.Sprintf("Failed to install %s: %v", info.command, err)
-		log.Printf("Agent install failed: %v", err)
+		slog.Error("Agent install failed", "error", err)
 		h.setStatus(HostError, errMsg)
 		h.broadcastAgentStatus(StatusError, agentType, errMsg)
 		h.reportAgentError(agentType, "agent_install", errMsg, err.Error())
@@ -333,20 +333,20 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 	// Fetch user's agent settings (non-blocking)
 	settings := h.fetchAgentSettings(ctx, agentType)
 	if settings != nil {
-		log.Printf("Agent settings loaded: model=%q permissionMode=%q", settings.Model, settings.PermissionMode)
+		slog.Info("Agent settings loaded", "model", settings.Model, "permissionMode", settings.PermissionMode)
 	}
 
 	// Only attempt LoadSession if reconnecting with the same agent type
 	loadSessionID := ""
 	if previousAcpSessionID != "" && previousAgentType == agentType {
 		loadSessionID = previousAcpSessionID
-		log.Printf("ACP: will attempt LoadSession with sessionID=%s", loadSessionID)
+		slog.Info("ACP: will attempt LoadSession", "sessionID", loadSessionID)
 		h.reportLifecycle("info", "LoadSession will be attempted", map[string]interface{}{
 			"agentType":            agentType,
 			"previousAcpSessionID": previousAcpSessionID,
 		})
 	} else if previousAcpSessionID != "" {
-		log.Printf("ACP: skipping LoadSession — agent type mismatch (previous=%q, requested=%q)", previousAgentType, agentType)
+		slog.Info("ACP: skipping LoadSession, agent type mismatch", "previousAgentType", previousAgentType, "requestedAgentType", agentType)
 		h.reportLifecycle("info", "LoadSession skipped: agent type mismatch", map[string]interface{}{
 			"previousAgentType": previousAgentType,
 			"requestedAgent":    agentType,
@@ -359,7 +359,7 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 		h.status = HostError
 		h.statusErr = err.Error()
 		h.mu.Unlock()
-		log.Printf("Agent start failed: %v", err)
+		slog.Error("Agent start failed", "error", err)
 		h.broadcastAgentStatus(StatusError, agentType, err.Error())
 		h.reportAgentError(agentType, "agent_start", err.Error(), "")
 		return
@@ -392,7 +392,7 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 	h.mu.RUnlock()
 
 	if acpConn == nil || sessionID == acpsdk.SessionId("") {
-		log.Printf("Prompt request received but no ACP session active")
+		slog.Warn("Prompt request received but no ACP session active")
 		h.reportLifecycle("warn", "Prompt received but no ACP session active", nil)
 		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, "No ACP session active")
 		return
@@ -406,7 +406,7 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 		} `json:"prompt"`
 	}
 	if err := json.Unmarshal(params, &promptParams); err != nil {
-		log.Printf("Failed to parse prompt params: %v", err)
+		slog.Error("Failed to parse prompt params", "error", err)
 		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32602, "Invalid prompt params")
 		return
 	}
@@ -444,7 +444,7 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 	h.setStatus(HostPrompting, "")
 	h.broadcastControl(MsgSessionPrompting, nil)
 
-	log.Printf("ACP: sending Prompt (session=%s, blocks=%d)", sessionID, len(blocks))
+	slog.Info("ACP: sending Prompt", "sessionID", string(sessionID), "blockCount", len(blocks))
 	promptStart := time.Now()
 	h.reportLifecycle("info", "ACP Prompt started", map[string]interface{}{
 		"acpSessionId": string(sessionID),
@@ -472,7 +472,7 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
 			errMsg = fmt.Sprintf("Prompt timed out after %s", promptTimeout)
 		}
-		log.Printf("ACP Prompt failed: %v", err)
+		slog.Error("ACP Prompt failed", "error", err)
 		h.reportLifecycle("warn", "ACP Prompt failed", map[string]interface{}{
 			"error":    errMsg,
 			"duration": time.Since(promptStart).String(),
@@ -483,7 +483,7 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 		return
 	}
 
-	log.Printf("ACP: Prompt completed (stopReason=%s)", resp.StopReason)
+	slog.Info("ACP: Prompt completed", "stopReason", string(resp.StopReason))
 	h.reportLifecycle("info", "ACP Prompt completed", map[string]interface{}{
 		"stopReason": string(resp.StopReason),
 		"duration":   time.Since(promptStart).String(),
@@ -511,11 +511,11 @@ func (h *SessionHost) CancelPrompt() {
 	h.promptCancelMu.Unlock()
 
 	if cancelFn == nil {
-		log.Printf("CancelPrompt: no prompt in flight")
+		slog.Info("CancelPrompt: no prompt in flight")
 		return
 	}
 
-	log.Printf("CancelPrompt: cancelling in-flight prompt")
+	slog.Info("CancelPrompt: cancelling in-flight prompt")
 	h.reportLifecycle("info", "Prompt cancel requested", nil)
 	cancelFn()
 
@@ -539,13 +539,13 @@ func (h *SessionHost) ForwardToAgent(message []byte) {
 	h.mu.RUnlock()
 
 	if process == nil {
-		log.Printf("No agent process running, dropping message")
+		slog.Warn("No agent process running, dropping message")
 		return
 	}
 
 	data := append(message, '\n')
 	if _, err := process.Stdin().Write(data); err != nil {
-		log.Printf("Failed to write to agent stdin: %v", err)
+		slog.Error("Failed to write to agent stdin", "error", err)
 	}
 }
 
@@ -606,7 +606,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		modelEnv := getModelEnvVar(agentType)
 		if modelEnv != "" {
 			envVars = append(envVars, fmt.Sprintf("%s=%s", modelEnv, settings.Model))
-			log.Printf("Agent model override: %s=%s", modelEnv, settings.Model)
+			slog.Info("Agent model override", "envVar", modelEnv, "model", settings.Model)
 		}
 	}
 
@@ -644,7 +644,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 	initCtx, initCancel := context.WithTimeout(ctx, initTimeout)
 	defer initCancel()
 
-	log.Printf("ACP: sending Initialize request")
+	slog.Info("ACP: sending Initialize request")
 	h.reportLifecycle("info", "ACP Initialize started", map[string]interface{}{
 		"agentType": agentType,
 	})
@@ -661,7 +661,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		})
 		return fmt.Errorf("ACP initialize failed: %w", err)
 	}
-	log.Printf("ACP: Initialize succeeded (loadSession=%v)", initResp.AgentCapabilities.LoadSession)
+	slog.Info("ACP: Initialize succeeded", "loadSession", initResp.AgentCapabilities.LoadSession)
 	h.reportLifecycle("info", "ACP Initialize succeeded", map[string]interface{}{
 		"agentType":           agentType,
 		"supportsLoadSession": initResp.AgentCapabilities.LoadSession,
@@ -669,7 +669,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 
 	// Attempt LoadSession if we have a previous session ID and the agent supports it
 	if previousAcpSessionID != "" && initResp.AgentCapabilities.LoadSession {
-		log.Printf("ACP: attempting LoadSession with previous sessionID=%s", previousAcpSessionID)
+		slog.Info("ACP: attempting LoadSession with previous session", "previousAcpSessionID", previousAcpSessionID)
 		h.reportLifecycle("info", "ACP LoadSession started", map[string]interface{}{
 			"agentType":            agentType,
 			"previousAcpSessionID": previousAcpSessionID,
@@ -684,7 +684,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		})
 		if loadErr == nil {
 			h.sessionID = acpsdk.SessionId(previousAcpSessionID)
-			log.Printf("ACP: LoadSession succeeded, sessionID=%s", previousAcpSessionID)
+			slog.Info("ACP: LoadSession succeeded", "sessionID", previousAcpSessionID)
 			h.reportLifecycle("info", "ACP LoadSession succeeded", map[string]interface{}{
 				"agentType":    agentType,
 				"acpSessionId": previousAcpSessionID,
@@ -696,7 +696,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 			h.applySessionSettings(initCtx, settings)
 			return nil
 		}
-		log.Printf("ACP: LoadSession failed (falling back to NewSession): %v", loadErr)
+		slog.Warn("ACP: LoadSession failed, falling back to NewSession", "error", loadErr)
 		h.reportLifecycle("warn", "ACP LoadSession failed, falling back to NewSession", map[string]interface{}{
 			"agentType": agentType,
 			"error":     loadErr.Error(),
@@ -705,13 +705,13 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 			"error": loadErr.Error(),
 		})
 	} else if previousAcpSessionID != "" {
-		log.Printf("ACP: agent does not support LoadSession, using NewSession instead")
+		slog.Info("ACP: agent does not support LoadSession, using NewSession instead")
 		h.reportLifecycle("info", "Agent does not support LoadSession", map[string]interface{}{
 			"agentType": agentType,
 		})
 	}
 
-	log.Printf("ACP: sending NewSession request")
+	slog.Info("ACP: sending NewSession request")
 	h.reportLifecycle("info", "ACP NewSession started", map[string]interface{}{
 		"agentType": agentType,
 	})
@@ -727,7 +727,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		return fmt.Errorf("ACP new session failed: %w", err)
 	}
 	h.sessionID = sessResp.SessionId
-	log.Printf("ACP: NewSession succeeded, sessionID=%s", string(h.sessionID))
+	slog.Info("ACP: NewSession succeeded", "sessionID", string(h.sessionID))
 	h.reportLifecycle("info", "ACP NewSession succeeded", map[string]interface{}{
 		"agentType":    agentType,
 		"acpSessionId": string(h.sessionID),
@@ -746,18 +746,18 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 	}
 
 	if settings.Model != "" {
-		log.Printf("ACP: setting session model to %q", settings.Model)
+		slog.Info("ACP: setting session model", "model", settings.Model)
 		if _, err := h.acpConn.SetSessionModel(ctx, acpsdk.SetSessionModelRequest{
 			SessionId: h.sessionID,
 			ModelId:   acpsdk.ModelId(settings.Model),
 		}); err != nil {
-			log.Printf("ACP SetSessionModel(%q) failed (non-fatal): %v", settings.Model, err)
+			slog.Warn("ACP SetSessionModel failed (non-fatal)", "model", settings.Model, "error", err)
 			h.reportLifecycle("warn", "ACP SetSessionModel failed", map[string]interface{}{
 				"model": settings.Model,
 				"error": err.Error(),
 			})
 		} else {
-			log.Printf("ACP: session model set to %q", settings.Model)
+			slog.Info("ACP: session model set", "model", settings.Model)
 			h.reportLifecycle("info", "ACP session model applied", map[string]interface{}{
 				"model": settings.Model,
 			})
@@ -765,18 +765,18 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 	}
 
 	if settings.PermissionMode != "" && settings.PermissionMode != "default" {
-		log.Printf("ACP: setting session mode to %q", settings.PermissionMode)
+		slog.Info("ACP: setting session mode", "mode", settings.PermissionMode)
 		if _, err := h.acpConn.SetSessionMode(ctx, acpsdk.SetSessionModeRequest{
 			SessionId: h.sessionID,
 			ModeId:    acpsdk.SessionModeId(settings.PermissionMode),
 		}); err != nil {
-			log.Printf("ACP SetSessionMode(%q) failed (non-fatal): %v", settings.PermissionMode, err)
+			slog.Warn("ACP SetSessionMode failed (non-fatal)", "mode", settings.PermissionMode, "error", err)
 			h.reportLifecycle("warn", "ACP SetSessionMode failed", map[string]interface{}{
 				"mode":  settings.PermissionMode,
 				"error": err.Error(),
 			})
 		} else {
-			log.Printf("ACP: session mode set to %q", settings.PermissionMode)
+			slog.Info("ACP: session mode set", "mode", settings.PermissionMode)
 			h.reportLifecycle("info", "ACP session mode applied", map[string]interface{}{
 				"mode": settings.PermissionMode,
 			})
@@ -799,7 +799,7 @@ func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentComman
 	checkArgs := []string{"exec", containerID, "which", info.command}
 	checkCmd := exec.CommandContext(ctx, "docker", checkArgs...)
 	if err := checkCmd.Run(); err == nil {
-		log.Printf("Agent binary %s is already installed", info.command)
+		slog.Info("Agent binary is already installed", "command", info.command)
 		return nil
 	}
 
@@ -812,7 +812,7 @@ func (h *SessionHost) monitorStderr(process *AgentProcess) {
 	scanner := bufio.NewScanner(process.Stderr())
 	for scanner.Scan() {
 		line := scanner.Text()
-		log.Printf("Agent stderr: %s", line)
+		slog.Warn("Agent stderr", "line", line)
 		h.stderrMu.Lock()
 		if h.stderrBuf.Len() < 4096 {
 			if h.stderrBuf.Len() > 0 {
@@ -844,8 +844,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 	if err != nil {
 		exitInfo = fmt.Sprintf("exit=%v", err)
 	}
-	log.Printf("Agent process exited: type=%s, uptime=%v, %s, stderr=%d bytes",
-		agentType, uptime.Round(time.Millisecond), exitInfo, len(stderrOutput))
+	slog.Info("Agent process exited", "agentType", agentType, "uptime", uptime.Round(time.Millisecond), "exitInfo", exitInfo, "stderrBytes", len(stderrOutput))
 
 	isRapidExit := uptime < 5*time.Second
 	if isRapidExit {
@@ -853,20 +852,20 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 		if stderrOutput != "" {
 			errMsg = fmt.Sprintf("%s: %s", errMsg, truncate(stderrOutput, 500))
 		}
-		log.Printf("Agent rapid exit: %s", errMsg)
+		slog.Error("Agent rapid exit", "message", errMsg)
 		h.reportAgentError(agentType, "agent_crash", errMsg, stderrOutput)
 	}
 
 	h.mu.Lock()
 	if h.process != process {
 		h.mu.Unlock()
-		log.Printf("Agent process monitor: process replaced, skipping status/restart")
+		slog.Info("Agent process monitor: process replaced, skipping status/restart")
 		return
 	}
 
 	if h.status == HostStopped {
 		h.mu.Unlock()
-		log.Printf("Agent process monitor: session stopped, skipping restart")
+		slog.Info("Agent process monitor: session stopped, skipping restart")
 		return
 	}
 
@@ -891,7 +890,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 		maxRestarts = 3
 	}
 	if h.restartCount > maxRestarts {
-		log.Printf("Agent exceeded max restart attempts (%d)", maxRestarts)
+		slog.Error("Agent exceeded max restart attempts", "maxRestarts", maxRestarts)
 		h.process = nil
 		h.acpConn = nil
 		h.sessionID = ""
@@ -913,7 +912,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 	h.status = HostStarting
 	h.mu.Unlock()
 
-	log.Printf("Attempting agent restart (%d/%d)", h.restartCount, maxRestarts)
+	slog.Info("Attempting agent restart", "attempt", h.restartCount, "maxRestarts", maxRestarts)
 	h.broadcastAgentStatus(StatusRestarting, agentType, "")
 
 	time.Sleep(time.Second)
@@ -927,7 +926,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 		h.status = HostError
 		h.statusErr = err.Error()
 		h.mu.Unlock()
-		log.Printf("Agent restart failed: %v", err)
+		slog.Error("Agent restart failed", "error", err)
 		h.broadcastAgentStatus(StatusError, agentType, err.Error())
 		h.reportAgentError(agentType, "agent_restart_failed", err.Error(), "")
 		return
@@ -960,17 +959,17 @@ func (h *SessionHost) persistAcpSessionID(agentType string) {
 		if err := h.config.SessionManager.UpdateAcpSessionID(
 			h.config.WorkspaceID, h.config.SessionID, sessionID, agentType,
 		); err != nil {
-			log.Printf("Failed to persist ACP session ID to session manager: %v", err)
+			slog.Error("Failed to persist ACP session ID to session manager", "error", err)
 		} else {
-			log.Printf("ACP session ID persisted to session manager: %s", sessionID)
+			slog.Info("ACP session ID persisted to session manager", "sessionID", sessionID)
 		}
 	}
 
 	if h.config.TabStore != nil && h.config.SessionID != "" {
 		if err := h.config.TabStore.UpdateTabAcpSessionID(h.config.SessionID, sessionID); err != nil {
-			log.Printf("Failed to persist ACP session ID to tab store: %v", err)
+			slog.Error("Failed to persist ACP session ID to tab store", "error", err)
 		} else {
-			log.Printf("ACP session ID persisted to tab store: %s", sessionID)
+			slog.Info("ACP session ID persisted to tab store", "sessionID", sessionID)
 		}
 	}
 }
@@ -1051,8 +1050,7 @@ func (h *SessionHost) replayToViewer(viewer *Viewer) {
 		}
 	}
 	if dropped > 0 {
-		log.Printf("SessionHost[%s]: viewer %s replay aborted (%d/%d messages delivered)",
-			h.config.SessionID, viewer.ID, len(messages)-dropped, len(messages))
+		slog.Warn("SessionHost: viewer replay aborted", "sessionID", h.config.SessionID, "viewerID", viewer.ID, "delivered", len(messages)-dropped, "total", len(messages))
 	}
 }
 
@@ -1067,8 +1065,7 @@ func (h *SessionHost) sendToViewerWithTimeout(viewer *Viewer, data []byte, timeo
 	case <-viewer.done:
 		return false
 	case <-timer.C:
-		log.Printf("SessionHost[%s]: viewer %s replay send timed out after %s",
-			h.config.SessionID, viewer.ID, timeout)
+		slog.Warn("SessionHost: viewer replay send timed out", "sessionID", h.config.SessionID, "viewerID", viewer.ID, "timeout", timeout)
 		return false
 	}
 }
@@ -1081,7 +1078,7 @@ func (h *SessionHost) sendToViewer(viewer *Viewer, data []byte) {
 	case <-viewer.done:
 	default:
 		// Channel full — drop message for this viewer
-		log.Printf("SessionHost[%s]: viewer %s send buffer full, dropping message", h.config.SessionID, viewer.ID)
+		slog.Warn("SessionHost: viewer send buffer full, dropping message", "sessionID", h.config.SessionID, "viewerID", viewer.ID)
 	}
 }
 
@@ -1107,7 +1104,7 @@ func (h *SessionHost) sendToViewerPriority(viewer *Viewer, data []byte) {
 	case viewer.sendCh <- data:
 	case <-viewer.done:
 	default:
-		log.Printf("SessionHost[%s]: viewer %s priority message dropped (buffer saturated)", h.config.SessionID, viewer.ID)
+		slog.Warn("SessionHost: viewer priority message dropped (buffer saturated)", "sessionID", h.config.SessionID, "viewerID", viewer.ID)
 	}
 }
 
@@ -1131,7 +1128,7 @@ func (h *SessionHost) viewerWritePump(viewer *Viewer) {
 			}
 			viewer.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := viewer.conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				log.Printf("SessionHost[%s]: viewer %s write failed: %v", h.config.SessionID, viewer.ID, err)
+				slog.Error("SessionHost: viewer write failed", "sessionID", h.config.SessionID, "viewerID", viewer.ID, "error", err)
 				return
 			}
 		case <-viewer.done:
@@ -1429,13 +1426,13 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 
 	body, err := json.Marshal(map[string]string{"agentType": agentType})
 	if err != nil {
-		log.Printf("Failed to marshal agent settings request: %v", err)
+		slog.Error("Failed to marshal agent settings request", "error", err)
 		return nil
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, byteReader(body))
 	if err != nil {
-		log.Printf("Failed to create agent settings request: %v", err)
+		slog.Error("Failed to create agent settings request", "error", err)
 		return nil
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -1443,23 +1440,23 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Printf("Failed to fetch agent settings: %v", err)
+		slog.Error("Failed to fetch agent settings", "error", err)
 		return nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("Agent settings returned status %d, using defaults", resp.StatusCode)
+		slog.Warn("Agent settings returned non-OK status, using defaults", "statusCode", resp.StatusCode)
 		return nil
 	}
 
 	var result agentSettingsPayload
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		log.Printf("Failed to decode agent settings: %v", err)
+		slog.Error("Failed to decode agent settings", "error", err)
 		return nil
 	}
 
-	log.Printf("Fetched agent settings from control plane: model=%q permissionMode=%q", result.Model, result.PermissionMode)
+	slog.Info("Fetched agent settings from control plane", "model", result.Model, "permissionMode", result.PermissionMode)
 	return &result
 }
 
@@ -1499,7 +1496,7 @@ func (c *sessionHostClient) RequestPermission(_ context.Context, params acpsdk.R
 	if mode == "" {
 		mode = "default"
 	}
-	log.Printf("Permission request (mode=%s): %d options available", mode, len(params.Options))
+	slog.Info("Permission request", "mode", mode, "optionsCount", len(params.Options))
 
 	if len(params.Options) > 0 {
 		return acpsdk.RequestPermissionResponse{
@@ -1533,7 +1530,7 @@ func (c *sessionHostClient) ReadTextFile(ctx context.Context, params acpsdk.Read
 
 	content, stderr, err := execInContainer(execCtx, containerID, c.host.config.ContainerUser, "", "cat", params.Path)
 	if err != nil {
-		log.Printf("[acp] ReadTextFile error for %q: %v, stderr: %s", params.Path, err, stderr)
+		slog.Error("ReadTextFile error", "path", params.Path, "error", err, "stderr", stderr)
 		return acpsdk.ReadTextFileResponse{}, fmt.Errorf("failed to read file %q: %v", params.Path, err)
 	}
 
@@ -1593,7 +1590,7 @@ func (c *sessionHostClient) WriteTextFile(ctx context.Context, params acpsdk.Wri
 
 	if err := cmd.Run(); err != nil {
 		stderrStr := strings.TrimSpace(stderrBuf.String())
-		log.Printf("[acp] WriteTextFile error for %q: %v, stderr: %s", params.Path, err, stderrStr)
+		slog.Error("WriteTextFile error", "path", params.Path, "error", err, "stderr", stderrStr)
 		return acpsdk.WriteTextFileResponse{}, fmt.Errorf("failed to write file %q: %v", params.Path, err)
 	}
 

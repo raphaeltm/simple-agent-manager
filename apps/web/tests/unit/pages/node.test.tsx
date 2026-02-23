@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   stopNode: vi.fn(),
   deleteNode: vi.fn(),
   getNodeSystemInfo: vi.fn(),
+  getNodeLogs: vi.fn().mockResolvedValue({ entries: [], nextCursor: null, hasMore: false }),
+  getNodeLogStreamUrl: vi.fn().mockReturnValue('ws://localhost/logs/stream'),
 }));
 
 let confirmSpy: ReturnType<typeof vi.spyOn>;
@@ -20,10 +22,31 @@ vi.mock('../../../src/lib/api', () => ({
   stopNode: mocks.stopNode,
   deleteNode: mocks.deleteNode,
   getNodeSystemInfo: mocks.getNodeSystemInfo,
+  getNodeLogs: mocks.getNodeLogs,
+  getNodeLogStreamUrl: mocks.getNodeLogStreamUrl,
 }));
 
 vi.mock('../../../src/hooks/useNodeSystemInfo', () => ({
   useNodeSystemInfo: () => ({ systemInfo: null, loading: false, error: null }),
+}));
+
+vi.mock('../../../src/hooks/useNodeLogs', () => ({
+  useNodeLogs: () => ({
+    entries: [],
+    loading: false,
+    error: null,
+    hasMore: false,
+    streaming: false,
+    paused: false,
+    filter: { source: 'all', level: 'info', container: '', search: '' },
+    setSource: vi.fn(),
+    setLevel: vi.fn(),
+    setContainer: vi.fn(),
+    setSearch: vi.fn(),
+    loadMore: vi.fn(),
+    togglePause: vi.fn(),
+    refresh: vi.fn(),
+  }),
 }));
 
 vi.mock('../../../src/components/UserMenu', () => ({
