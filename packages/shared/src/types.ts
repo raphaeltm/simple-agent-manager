@@ -352,6 +352,21 @@ export interface DelegateTaskRequest {
   workspaceId: string;
 }
 
+export interface RunTaskRequest {
+  vmSize?: VMSize;
+  vmLocation?: VMLocation;
+  nodeId?: string;
+  branch?: string;
+}
+
+export interface RunTaskResponse {
+  taskId: string;
+  status: TaskStatus;
+  workspaceId: string | null;
+  nodeId: string | null;
+  autoProvisionedNode: boolean;
+}
+
 export interface ListProjectsResponse {
   projects: Project[];
   nextCursor?: string | null;

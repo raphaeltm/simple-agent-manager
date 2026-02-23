@@ -115,6 +115,22 @@ export const DEFAULT_IDLE_WARNING_SECONDS = 25 * 60;
 export const WORKSPACE_NAME_MAX_LENGTH = 64;
 
 // =============================================================================
+// Task Run Defaults (Autonomous Execution)
+// =============================================================================
+
+/** Default CPU usage threshold (%) above which a node is considered full. Override via TASK_RUN_NODE_CPU_THRESHOLD_PERCENT env var. */
+export const DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT = 80;
+
+/** Default memory usage threshold (%) above which a node is considered full. Override via TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT env var. */
+export const DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT = 80;
+
+/** Default idle timeout (seconds) for workspaces created by autonomous task runs. Override via TASK_RUN_WORKSPACE_IDLE_TIMEOUT_SECONDS env var. */
+export const DEFAULT_TASK_RUN_WORKSPACE_IDLE_TIMEOUT_SECONDS = 3600;
+
+/** Default delay (ms) after task completion before cleanup. Override via TASK_RUN_CLEANUP_DELAY_MS env var. */
+export const DEFAULT_TASK_RUN_CLEANUP_DELAY_MS = 5000;
+
+// =============================================================================
 // Hetzner Configuration
 // =============================================================================
 
