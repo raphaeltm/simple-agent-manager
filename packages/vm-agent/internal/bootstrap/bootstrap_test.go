@@ -347,9 +347,9 @@ func TestBuildSAMEnvScript(t *testing.T) {
 		}
 	}
 
-	// GITHUB_TOKEN should NOT be present when empty.
-	if strings.Contains(script, "GITHUB_TOKEN") {
-		t.Errorf("script should not contain GITHUB_TOKEN when empty, got:\n%s", script)
+	// GH_TOKEN should NOT be present when empty.
+	if strings.Contains(script, "GH_TOKEN") {
+		t.Errorf("script should not contain GH_TOKEN when empty, got:\n%s", script)
 	}
 
 	// Verify header comment is present.
@@ -378,8 +378,8 @@ func TestBuildSAMEnvScriptOmitsEmptyValues(t *testing.T) {
 	if strings.Contains(script, "SAM_BRANCH") {
 		t.Errorf("script should not contain SAM_BRANCH when empty, got:\n%s", script)
 	}
-	if strings.Contains(script, "GITHUB_TOKEN") {
-		t.Errorf("script should not contain GITHUB_TOKEN when empty, got:\n%s", script)
+	if strings.Contains(script, "GH_TOKEN") {
+		t.Errorf("script should not contain GH_TOKEN when empty, got:\n%s", script)
 	}
 	// SAM_API_URL and SAM_WORKSPACE_ID should still be present.
 	if !strings.Contains(script, "SAM_API_URL") {
@@ -402,7 +402,7 @@ func TestBuildSAMEnvScriptIncludesGitHubToken(t *testing.T) {
 
 	script := buildSAMEnvScript(cfg, "ghs_test_token_abc123")
 
-	want := `export GITHUB_TOKEN="ghs_test_token_abc123"`
+	want := `export GH_TOKEN="ghs_test_token_abc123"`
 	if !strings.Contains(script, want) {
 		t.Errorf("script missing %q\ngot:\n%s", want, script)
 	}
@@ -423,7 +423,7 @@ func TestBuildSAMEnvScriptTrimsGitHubTokenWhitespace(t *testing.T) {
 
 	script := buildSAMEnvScript(cfg, "  ghs_token  ")
 
-	want := `export GITHUB_TOKEN="ghs_token"`
+	want := `export GH_TOKEN="ghs_token"`
 	if !strings.Contains(script, want) {
 		t.Errorf("expected trimmed token in script, got:\n%s", script)
 	}
@@ -439,8 +439,8 @@ func TestBuildSAMEnvScriptWhitespaceOnlyTokenOmitted(t *testing.T) {
 
 	script := buildSAMEnvScript(cfg, "   ")
 
-	if strings.Contains(script, "GITHUB_TOKEN") {
-		t.Errorf("script should not contain GITHUB_TOKEN for whitespace-only token, got:\n%s", script)
+	if strings.Contains(script, "GH_TOKEN") {
+		t.Errorf("script should not contain GH_TOKEN for whitespace-only token, got:\n%s", script)
 	}
 }
 

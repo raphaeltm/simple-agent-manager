@@ -3,13 +3,65 @@
 package acp
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 )
+
+// samEnvFiles are the paths inside the devcontainer where SAM and project
+// environment variables are persisted during bootstrap. Both use the same
+// shell `export KEY="value"` format.
+var samEnvFiles = []string{
+	"/etc/sam/env",         // SAM platform vars (GH_TOKEN, SAM_WORKSPACE_ID, etc.)
+	"/etc/sam/project-env", // Project-specific vars configured by the user
+}
+
+// ReadContainerEnvFiles reads SAM env files from inside the container and
+// returns parsed KEY=value pairs. The files contain shell `export KEY="value"`
+// lines written during bootstrap. Missing files are silently skipped.
+func ReadContainerEnvFiles(ctx context.Context, containerID string) []string {
+	var result []string
+	for _, path := range samEnvFiles {
+		cmd := exec.CommandContext(ctx, "docker", "exec", containerID, "cat", path)
+		output, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+		result = append(result, parseEnvExportLines(string(output))...)
+	}
+	return result
+}
+
+// parseEnvExportLines parses shell `export KEY="value"` lines into KEY=value pairs.
+func parseEnvExportLines(content string) []string {
+	var result []string
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Strip "export " prefix
+		line = strings.TrimPrefix(line, "export ")
+		// Parse KEY="value" or KEY=value
+		eqIdx := strings.Index(line, "=")
+		if eqIdx <= 0 {
+			continue
+		}
+		key := line[:eqIdx]
+		value := line[eqIdx+1:]
+		// Unquote if surrounded by double quotes
+		if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+			value = value[1 : len(value)-1]
+		}
+		result = append(result, key+"="+value)
+	}
+	return result
+}
 
 // AgentProcess manages an ACP-compliant agent subprocess running inside the
 // devcontainer via docker exec. It pipes stdin/stdout for NDJSON communication.

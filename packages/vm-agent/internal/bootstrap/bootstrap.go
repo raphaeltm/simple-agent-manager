@@ -1596,8 +1596,10 @@ func ensureGitIdentity(ctx context.Context, cfg *config.Config, state *bootstrap
 
 // buildSAMEnvScript generates a shell script that exports SAM platform metadata
 // as environment variables. Only non-empty values are included.
-// When githubToken is non-empty, it is exported as GITHUB_TOKEN so that the
-// gh CLI and other GitHub API consumers work out of the box.
+// When githubToken is non-empty, it is exported as GH_TOKEN so that the
+// gh CLI and other GitHub API consumers work out of the box. GH_TOKEN is
+// preferred over GITHUB_TOKEN because the gh CLI gives it higher precedence
+// and GITHUB_TOKEN can interfere with `gh auth login`.
 func buildSAMEnvScript(cfg *config.Config, githubToken string) string {
 	baseDomain := config.DeriveBaseDomain(cfg.ControlPlaneURL)
 
@@ -1605,7 +1607,7 @@ func buildSAMEnvScript(cfg *config.Config, githubToken string) string {
 		key, value string
 	}
 	entries := []envEntry{
-		{"GITHUB_TOKEN", strings.TrimSpace(githubToken)},
+		{"GH_TOKEN", strings.TrimSpace(githubToken)},
 		{"SAM_API_URL", strings.TrimRight(cfg.ControlPlaneURL, "/")},
 		{"SAM_BRANCH", cfg.Branch},
 		{"SAM_NODE_ID", cfg.NodeID},
@@ -1629,7 +1631,7 @@ func buildSAMEnvScript(cfg *config.Config, githubToken string) string {
 // ensureSAMEnvironment injects SAM platform metadata as environment variables into
 // the devcontainer. Variables are written to /etc/profile.d/sam-env.sh (sourced by
 // login/interactive shells) and /etc/sam/env (for non-shell consumers).
-// When githubToken is non-empty, it is exported as GITHUB_TOKEN for gh CLI usage.
+// When githubToken is non-empty, it is exported as GH_TOKEN for gh CLI usage.
 func ensureSAMEnvironment(ctx context.Context, cfg *config.Config, githubToken string) error {
 	containerID, err := findDevcontainerID(ctx, cfg)
 	if err != nil {
