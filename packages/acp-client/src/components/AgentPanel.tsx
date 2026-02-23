@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, useImperativeHandle } from 'react';
 import type { AcpSessionHandle } from '../hooks/useAcpSession';
-import type { AcpMessagesHandle, ConversationItem } from '../hooks/useAcpMessages';
+import type { AcpMessagesHandle, ConversationItem, PlanItem } from '../hooks/useAcpMessages';
 import type { SlashCommand } from '../types';
 import { getErrorMeta } from '../errors';
 import { useAutoScroll } from '../hooks/useAutoScroll';
@@ -14,6 +14,8 @@ import type { SlashCommandPaletteHandle } from './SlashCommandPalette';
 import { VoiceButton } from './VoiceButton';
 import { ChatSettingsPanel } from './ChatSettingsPanel';
 import type { ChatSettingsData } from './ChatSettingsPanel';
+import { StickyPlanButton } from './StickyPlanButton';
+import { PlanModal } from './PlanModal';
 
 // =============================================================================
 // Client-side commands (not forwarded to agent)
@@ -77,9 +79,16 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
   const [input, setInput] = useState('');
   const [showPalette, setShowPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showPlanModal, setShowPlanModal] = useState(false);
   const { scrollRef } = useAutoScroll();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const paletteRef = useRef<SlashCommandPaletteHandle>(null);
+
+  // Derive current plan from conversation items (only one plan exists at a time)
+  const currentPlan = useMemo(
+    () => messages.items.find((i): i is PlanItem => i.kind === 'plan'),
+    [messages.items]
+  );
 
   useImperativeHandle(ref, () => ({
     focusInput: () => inputRef.current?.focus(),
@@ -269,6 +278,11 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
             onSave={onSaveSettings}
             onClose={() => setShowSettings(false)}
           />
+        )}
+        {/* Sticky plan button (above input) */}
+        <StickyPlanButton plan={currentPlan} onClick={() => setShowPlanModal(true)} />
+        {currentPlan && (
+          <PlanModal plan={currentPlan} isOpen={showPlanModal} onClose={() => setShowPlanModal(false)} />
         )}
         {/* Slash command palette (above input, in document flow) */}
         <SlashCommandPalette

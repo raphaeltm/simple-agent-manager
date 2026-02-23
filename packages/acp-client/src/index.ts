@@ -32,3 +32,8 @@ export type { VoiceButtonProps } from './components/VoiceButton';
 
 export { ChatSettingsPanel } from './components/ChatSettingsPanel';
 export type { ChatSettingsData, ChatSettingsPanelProps } from './components/ChatSettingsPanel';
+
+export { StickyPlanButton } from './components/StickyPlanButton';
+export type { StickyPlanButtonProps } from './components/StickyPlanButton';
+export { PlanModal } from './components/PlanModal';
+export type { PlanModalProps } from './components/PlanModal';
