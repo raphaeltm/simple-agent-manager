@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os/exec"
 	"path/filepath"
@@ -336,7 +336,7 @@ func (s *Server) execInContainer(ctx context.Context, containerID, user, workDir
 	if err := cmd.Run(); err != nil {
 		stderrStr := strings.TrimSpace(stderrBuf.String())
 		if stderrStr != "" {
-			log.Printf("[git] exec error: %v, stderr: %s", err, stderrStr)
+			slog.Error("Container exec error", "error", err, "stderr", stderrStr)
 		}
 		return "", stderrStr, fmt.Errorf("command failed: %w", err)
 	}

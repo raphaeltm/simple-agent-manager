@@ -45,6 +45,8 @@ import type {
   AgentSettingsResponse,
   SaveAgentSettingsRequest,
   NodeSystemInfo,
+  NodeLogFilter,
+  NodeLogResponse,
   AdminUsersResponse,
   UserRole,
   UserStatus,
@@ -561,6 +563,41 @@ export async function deleteNode(id: string): Promise<{ success: boolean }> {
  */
 export async function getNodeSystemInfo(nodeId: string): Promise<NodeSystemInfo> {
   return request<NodeSystemInfo>(`/api/nodes/${nodeId}/system-info`);
+}
+
+/**
+ * Fetch node logs via the control plane proxy.
+ */
+export async function getNodeLogs(
+  nodeId: string,
+  filter?: Partial<NodeLogFilter>
+): Promise<NodeLogResponse> {
+  const params = new URLSearchParams();
+  if (filter?.source && filter.source !== 'all') params.set('source', filter.source);
+  if (filter?.level) params.set('level', filter.level);
+  if (filter?.container) params.set('container', filter.container);
+  if (filter?.since) params.set('since', filter.since);
+  if (filter?.until) params.set('until', filter.until);
+  if (filter?.search) params.set('search', filter.search);
+  if (filter?.cursor) params.set('cursor', filter.cursor);
+  if (filter?.limit) params.set('limit', String(filter.limit));
+
+  const qs = params.toString();
+  return request<NodeLogResponse>(
+    `/api/nodes/${nodeId}/logs${qs ? `?${qs}` : ''}`
+  );
+}
+
+/** Build the WebSocket URL for real-time log streaming. */
+export function getNodeLogStreamUrl(nodeId: string, filter?: Partial<NodeLogFilter>): string {
+  const base = API_URL.replace(/^http/, 'ws');
+  const params = new URLSearchParams();
+  if (filter?.source && filter.source !== 'all') params.set('source', filter.source);
+  if (filter?.level) params.set('level', filter.level);
+  if (filter?.container) params.set('container', filter.container);
+
+  const qs = params.toString();
+  return `${base}/api/nodes/${nodeId}/logs/stream${qs ? `?${qs}` : ''}`;
 }
 
 /**

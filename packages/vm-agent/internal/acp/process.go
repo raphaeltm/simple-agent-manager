@@ -6,7 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"sync"
@@ -139,8 +139,7 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 		return nil, fmt.Errorf("failed to start agent process: %w", err)
 	}
 
-	log.Printf("ACP agent process started: command=%s, container=%s, pid=%d",
-		cfg.AcpCommand, cfg.ContainerID, cmd.Process.Pid)
+	slog.Info("ACP agent process started", "command", cfg.AcpCommand, "container", cfg.ContainerID, "pid", cmd.Process.Pid)
 
 	return &AgentProcess{
 		agentType:   cfg.AcpCommand,
@@ -178,7 +177,7 @@ func (p *AgentProcess) Stop() error {
 	}
 	p.stopped = true
 
-	log.Printf("Stopping ACP agent process: %s", p.agentType)
+	slog.Info("Stopping ACP agent process", "agentType", p.agentType)
 
 	// Close stdin first to signal the agent to exit gracefully
 	p.stdin.Close()

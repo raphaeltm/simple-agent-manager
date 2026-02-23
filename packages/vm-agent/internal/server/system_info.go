@@ -1,7 +1,7 @@
 package server
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 )
 
@@ -19,7 +19,7 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 
 	info, err := s.sysInfoCollector.Collect()
 	if err != nil {
-		log.Printf("System info collection error: %v", err)
+		slog.Error("System info collection error", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to collect system info")
 		return
 	}

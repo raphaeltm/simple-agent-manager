@@ -6,7 +6,7 @@ package errorreport
 import (
 	"bytes"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -119,7 +119,7 @@ func (r *Reporter) Report(entry ErrorEntry) {
 	r.mu.Lock()
 	if len(r.queue) >= r.config.MaxQueueSize {
 		r.mu.Unlock()
-		log.Printf("errorreport: queue full (%d), dropping error: %s", r.config.MaxQueueSize, entry.Message)
+		slog.Warn("errorreport: queue full, dropping error", "maxQueueSize", r.config.MaxQueueSize, "message", entry.Message)
 		return
 	}
 	r.queue = append(r.queue, entry)
@@ -224,14 +224,14 @@ func (r *Reporter) send(entries []ErrorEntry) {
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("errorreport: failed to marshal entries: %v", err)
+		slog.Error("errorreport: failed to marshal entries", "error", err)
 		return
 	}
 
 	url := r.apiBaseURL + "/api/nodes/" + r.nodeID + "/errors"
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		log.Printf("errorreport: failed to create request: %v", err)
+		slog.Error("errorreport: failed to create request", "error", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -239,12 +239,12 @@ func (r *Reporter) send(entries []ErrorEntry) {
 
 	resp, err := r.client.Do(req)
 	if err != nil {
-		log.Printf("errorreport: failed to send %d entries: %v", len(entries), err)
+		slog.Error("errorreport: failed to send entries", "count", len(entries), "error", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		log.Printf("errorreport: control plane returned HTTP %d for %d entries", resp.StatusCode, len(entries))
+		slog.Warn("errorreport: control plane returned non-OK status", "statusCode", resp.StatusCode, "count", len(entries))
 	}
 }

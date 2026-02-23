@@ -3,7 +3,7 @@ package server
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -189,7 +189,7 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	upgrader := s.createUpgrader()
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("WebSocket upgrade failed: %v", err)
+		slog.Error("WebSocket upgrade failed", "error", err)
 		return
 	}
 	defer conn.Close()
@@ -209,9 +209,9 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 	ptySession, err := runtime.PTY.CreateSession(userID, rows, cols)
 	if err != nil && isContainerUnavailableError(err) {
-		log.Printf("Workspace %s: terminal session create failed due to unavailable container, attempting recovery: %v", workspaceID, err)
+		slog.Warn("Terminal session create failed due to unavailable container, attempting recovery", "workspace", workspaceID, "error", err)
 		if recoverErr := s.recoverWorkspaceRuntime(r.Context(), runtime); recoverErr != nil {
-			log.Printf("Workspace %s: terminal recovery failed: %v", workspaceID, recoverErr)
+			slog.Error("Terminal recovery failed", "workspace", workspaceID, "error", recoverErr)
 		} else {
 			ptySession, err = runtime.PTY.CreateSession(userID, rows, cols)
 		}
@@ -302,7 +302,7 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 	upgrader := s.createUpgrader()
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("WebSocket upgrade failed: %v", err)
+		slog.Error("WebSocket upgrade failed", "error", err)
 		return
 	}
 	defer conn.Close()
@@ -440,9 +440,9 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 			ptySession, err := runtime.PTY.CreateSessionWithID(data.SessionID, userID, data.Rows, data.Cols, requestedWorkDir)
 			if err != nil && isContainerUnavailableError(err) {
-				log.Printf("Workspace %s: multi-terminal session create failed due to unavailable container, attempting recovery: %v", workspaceID, err)
+				slog.Warn("Multi-terminal session create failed due to unavailable container, attempting recovery", "workspace", workspaceID, "error", err)
 				if recoverErr := s.recoverWorkspaceRuntime(r.Context(), runtime); recoverErr != nil {
-					log.Printf("Workspace %s: multi-terminal recovery failed: %v", workspaceID, recoverErr)
+					slog.Error("Multi-terminal recovery failed", "workspace", workspaceID, "error", recoverErr)
 				} else {
 					ptySession, err = runtime.PTY.CreateSessionWithID(data.SessionID, userID, data.Rows, data.Cols, requestedWorkDir)
 				}
@@ -469,7 +469,7 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 					Label:       label,
 					SortOrder:   tabCount,
 				}); err != nil {
-					log.Printf("Warning: failed to persist terminal tab: %v", err)
+					slog.Warn("Failed to persist terminal tab", "error", err)
 				}
 			}
 
@@ -529,7 +529,7 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 			// Remove persisted terminal tab
 			if s.store != nil {
 				if err := s.store.DeleteTab(data.SessionID); err != nil {
-					log.Printf("Warning: failed to delete persisted terminal tab: %v", err)
+					slog.Warn("Failed to delete persisted terminal tab", "error", err)
 				}
 			}
 

@@ -294,6 +294,19 @@ export async function getNodeSystemInfoFromNode(
   });
 }
 
+export async function getNodeLogsFromNode(
+  nodeId: string,
+  env: Env,
+  userId: string,
+  queryString: string
+): Promise<unknown> {
+  const path = queryString ? `/logs?${queryString}` : '/logs';
+  return nodeAgentRequest(nodeId, env, path, {
+    method: 'GET',
+    userId,
+  });
+}
+
 export async function rebuildWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,

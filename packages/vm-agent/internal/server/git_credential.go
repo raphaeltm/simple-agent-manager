@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -31,7 +31,7 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 	bearerToken := bearerTokenFromHeader(r.Header.Get("Authorization"))
 	gitToken, err := s.fetchGitTokenForWorkspace(r.Context(), workspaceID, bearerToken)
 	if err != nil {
-		log.Printf("Failed to fetch git token: %v", err)
+		slog.Error("Failed to fetch git token", "error", err)
 		writeError(w, http.StatusBadGateway, "failed to fetch git token")
 		return
 	}

@@ -3,7 +3,7 @@ package container
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"sync"
@@ -91,7 +91,7 @@ func (d *Discovery) discover() (string, error) {
 	d.containerID = strings.TrimSpace(lines[0])
 	d.lastCheck = time.Now()
 
-	log.Printf("Discovered devcontainer: %s", d.containerID)
+	slog.Info("Discovered devcontainer", "containerID", d.containerID)
 	return d.containerID, nil
 }
 

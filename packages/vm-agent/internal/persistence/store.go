@@ -5,7 +5,7 @@ package persistence
 import (
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -85,7 +85,7 @@ func (s *Store) migrate() error {
 	}
 
 	for i := version; i < len(migrations); i++ {
-		log.Printf("Applying persistence migration v%d", i+1)
+		slog.Info("Applying persistence migration", "version", i+1)
 		if err := migrations[i](s.db); err != nil {
 			return fmt.Errorf("migration v%d: %w", i+1, err)
 		}

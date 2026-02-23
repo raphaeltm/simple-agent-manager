@@ -401,3 +401,289 @@ func TestBuildTimeVariables(t *testing.T) {
 		t.Logf("BuildDate = %q (injected at build time)", BuildDate)
 	}
 }
+
+func TestParseDockerPS(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantCount  int
+		wantFirst  ContainerInfo
+		wantStates []string
+	}{
+		{
+			name: "multiple containers in different states",
+			input: `{"ID":"abc123","Names":"my-app","Image":"node:20","Status":"Up 2 hours","State":"running","CreatedAt":"2026-02-23 10:00:00 +0000 UTC"}
+{"ID":"def456","Names":"old-app","Image":"python:3.12","Status":"Exited (0) 3 hours ago","State":"exited","CreatedAt":"2026-02-22 08:00:00 +0000 UTC"}
+{"ID":"ghi789","Names":"paused-svc","Image":"redis:7","Status":"Up 1 hour (Paused)","State":"paused","CreatedAt":"2026-02-23 09:00:00 +0000 UTC"}`,
+			wantCount: 3,
+			wantFirst: ContainerInfo{
+				ID:        "abc123",
+				Name:      "my-app",
+				Image:     "node:20",
+				Status:    "Up 2 hours",
+				State:     "running",
+				CreatedAt: "2026-02-23 10:00:00 +0000 UTC",
+			},
+			wantStates: []string{"running", "exited", "paused"},
+		},
+		{
+			name: "single running container",
+			input: `{"ID":"abc123","Names":"/my-app","Image":"node:20","Status":"Up 5 minutes","State":"Running","CreatedAt":"2026-02-23 10:00:00 +0000 UTC"}
+`,
+			wantCount: 1,
+			wantFirst: ContainerInfo{
+				ID:        "abc123",
+				Name:      "my-app", // leading / stripped
+				Image:     "node:20",
+				Status:    "Up 5 minutes",
+				State:     "running", // lowercased
+				CreatedAt: "2026-02-23 10:00:00 +0000 UTC",
+			},
+			wantStates: []string{"running"},
+		},
+		{
+			name:      "empty output",
+			input:     "",
+			wantCount: 0,
+		},
+		{
+			name:      "whitespace only",
+			input:     "  \n  \n  ",
+			wantCount: 0,
+		},
+		{
+			name:  "invalid JSON lines skipped",
+			input: "not json\n{\"ID\":\"abc\",\"Names\":\"ok\",\"Image\":\"img\",\"Status\":\"Up\",\"State\":\"running\",\"CreatedAt\":\"now\"}\nmore garbage",
+			wantCount: 1,
+			wantFirst: ContainerInfo{
+				ID:        "abc",
+				Name:      "ok",
+				Image:     "img",
+				Status:    "Up",
+				State:     "running",
+				CreatedAt: "now",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			containers := parseDockerPS(tt.input)
+			if len(containers) != tt.wantCount {
+				t.Fatalf("got %d containers, want %d", len(containers), tt.wantCount)
+			}
+			if tt.wantCount > 0 {
+				got := containers[0]
+				if got.ID != tt.wantFirst.ID {
+					t.Errorf("first.ID = %q, want %q", got.ID, tt.wantFirst.ID)
+				}
+				if got.Name != tt.wantFirst.Name {
+					t.Errorf("first.Name = %q, want %q", got.Name, tt.wantFirst.Name)
+				}
+				if got.Image != tt.wantFirst.Image {
+					t.Errorf("first.Image = %q, want %q", got.Image, tt.wantFirst.Image)
+				}
+				if got.Status != tt.wantFirst.Status {
+					t.Errorf("first.Status = %q, want %q", got.Status, tt.wantFirst.Status)
+				}
+				if got.State != tt.wantFirst.State {
+					t.Errorf("first.State = %q, want %q", got.State, tt.wantFirst.State)
+				}
+				if got.CreatedAt != tt.wantFirst.CreatedAt {
+					t.Errorf("first.CreatedAt = %q, want %q", got.CreatedAt, tt.wantFirst.CreatedAt)
+				}
+			}
+			if tt.wantStates != nil {
+				for i, wantState := range tt.wantStates {
+					if containers[i].State != wantState {
+						t.Errorf("containers[%d].State = %q, want %q", i, containers[i].State, wantState)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestParseDockerStats(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantCount int
+		wantIDs   []string
+	}{
+		{
+			name: "two containers with stats",
+			input: `{"id":"abc123","cpuPercent":"5.25%","memUsage":"128MiB / 2GiB","memPercent":"6.25%"}
+{"id":"def456","cpuPercent":"0.50%","memUsage":"64MiB / 2GiB","memPercent":"3.12%"}`,
+			wantCount: 2,
+			wantIDs:   []string{"abc123", "def456"},
+		},
+		{
+			name:      "empty output",
+			input:     "",
+			wantCount: 0,
+		},
+		{
+			name:      "invalid JSON skipped",
+			input:     "not json\n{\"id\":\"abc\",\"cpuPercent\":\"1%\",\"memUsage\":\"10MiB\",\"memPercent\":\"2%\"}",
+			wantCount: 1,
+			wantIDs:   []string{"abc"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseDockerStats(tt.input)
+			if len(result) != tt.wantCount {
+				t.Fatalf("got %d entries, want %d", len(result), tt.wantCount)
+			}
+			for _, wantID := range tt.wantIDs {
+				if _, ok := result[wantID]; !ok {
+					t.Errorf("missing expected entry for ID %q", wantID)
+				}
+			}
+		})
+	}
+}
+
+func TestParseDockerStatsMerge(t *testing.T) {
+	// Verify that parseDockerStats values can be correctly parsed by parsePercentString
+	input := `{"id":"abc123","cpuPercent":"52.30%","memUsage":"256MiB / 4GiB","memPercent":"6.25%"}`
+	result := parseDockerStats(input)
+
+	entry, ok := result["abc123"]
+	if !ok {
+		t.Fatal("missing entry for abc123")
+	}
+
+	cpuPct := parsePercentString(entry.CPUPercent)
+	if cpuPct != 52.3 {
+		t.Errorf("cpuPercent = %f, want 52.3", cpuPct)
+	}
+
+	memPct := parsePercentString(entry.MemPercent)
+	if memPct != 6.25 {
+		t.Errorf("memPercent = %f, want 6.25", memPct)
+	}
+
+	if entry.MemUsage != "256MiB / 4GiB" {
+		t.Errorf("memUsage = %q, want %q", entry.MemUsage, "256MiB / 4GiB")
+	}
+}
+
+func TestDockerInfoErrorField(t *testing.T) {
+	// When DockerInfo has an error, it should be non-nil
+	errMsg := "failed to list containers: connection refused"
+	info := DockerInfo{
+		Error: &errMsg,
+	}
+	if info.Error == nil {
+		t.Fatal("expected error to be non-nil")
+	}
+	if *info.Error != errMsg {
+		t.Errorf("error = %q, want %q", *info.Error, errMsg)
+	}
+
+	// When no error, it should be nil
+	infoOk := DockerInfo{}
+	if infoOk.Error != nil {
+		t.Errorf("expected nil error, got %q", *infoOk.Error)
+	}
+}
+
+func TestContainerInfoStateField(t *testing.T) {
+	// Verify ContainerInfo has both Status (human-readable) and State (machine-readable)
+	ci := ContainerInfo{
+		ID:     "abc",
+		Name:   "test",
+		Image:  "nginx",
+		Status: "Up 2 hours",
+		State:  "running",
+	}
+	if ci.State != "running" {
+		t.Errorf("State = %q, want %q", ci.State, "running")
+	}
+	if ci.Status != "Up 2 hours" {
+		t.Errorf("Status = %q, want %q", ci.Status, "Up 2 hours")
+	}
+}
+
+func TestEnvDuration(t *testing.T) {
+	// Test with unset env var — should return default
+	got := envDuration("SYSINFO_TEST_NONEXISTENT_VAR", 42*time.Second)
+	if got != 42*time.Second {
+		t.Errorf("envDuration(unset) = %v, want 42s", got)
+	}
+
+	// Test with valid env var
+	t.Setenv("SYSINFO_TEST_DURATION", "5s")
+	got = envDuration("SYSINFO_TEST_DURATION", 42*time.Second)
+	if got != 5*time.Second {
+		t.Errorf("envDuration(5s) = %v, want 5s", got)
+	}
+
+	// Test with invalid env var — should return default
+	t.Setenv("SYSINFO_TEST_DURATION_BAD", "not-a-duration")
+	got = envDuration("SYSINFO_TEST_DURATION_BAD", 42*time.Second)
+	if got != 42*time.Second {
+		t.Errorf("envDuration(invalid) = %v, want 42s", got)
+	}
+}
+
+func TestNewCollectorEnvTimeouts(t *testing.T) {
+	// Test that NewCollector reads env vars for Docker timeouts
+	t.Setenv("SYSINFO_DOCKER_LIST_TIMEOUT", "15s")
+	t.Setenv("SYSINFO_DOCKER_STATS_TIMEOUT", "20s")
+
+	c := NewCollector(CollectorConfig{})
+	if c.config.DockerListTimeout != 15*time.Second {
+		t.Errorf("DockerListTimeout = %v, want 15s", c.config.DockerListTimeout)
+	}
+	if c.config.DockerStatsTimeout != 20*time.Second {
+		t.Errorf("DockerStatsTimeout = %v, want 20s", c.config.DockerStatsTimeout)
+	}
+}
+
+func TestStatsOnlyForRunningContainers(t *testing.T) {
+	// Verify that non-running containers have zero CPU/mem after merge
+	// (since stats are only collected for running containers)
+	psOutput := `{"ID":"run1","Names":"runner","Image":"img","Status":"Up","State":"running","CreatedAt":"now"}
+{"ID":"exit1","Names":"stopped","Image":"img","Status":"Exited (0)","State":"exited","CreatedAt":"now"}`
+
+	statsOutput := `{"id":"run1","cpuPercent":"12.5%","memUsage":"128MiB / 2GiB","memPercent":"6.25%"}`
+
+	containers := parseDockerPS(psOutput)
+	statsMap := parseDockerStats(statsOutput)
+
+	// Merge
+	for i := range containers {
+		if stats, ok := statsMap[containers[i].ID]; ok {
+			containers[i].CPUPercent = parsePercentString(stats.CPUPercent)
+			containers[i].MemUsage = stats.MemUsage
+			containers[i].MemPercent = parsePercentString(stats.MemPercent)
+		}
+	}
+
+	if len(containers) != 2 {
+		t.Fatalf("expected 2 containers, got %d", len(containers))
+	}
+
+	// Running container should have stats
+	if containers[0].CPUPercent != 12.5 {
+		t.Errorf("running container CPUPercent = %f, want 12.5", containers[0].CPUPercent)
+	}
+	if containers[0].MemUsage != "128MiB / 2GiB" {
+		t.Errorf("running container MemUsage = %q, want %q", containers[0].MemUsage, "128MiB / 2GiB")
+	}
+
+	// Exited container should have zero stats (no stats entry)
+	if containers[1].CPUPercent != 0 {
+		t.Errorf("exited container CPUPercent = %f, want 0", containers[1].CPUPercent)
+	}
+	if containers[1].MemUsage != "" {
+		t.Errorf("exited container MemUsage = %q, want empty", containers[1].MemUsage)
+	}
+	if containers[1].MemPercent != 0 {
+		t.Errorf("exited container MemPercent = %f, want 0", containers[1].MemPercent)
+	}
+}

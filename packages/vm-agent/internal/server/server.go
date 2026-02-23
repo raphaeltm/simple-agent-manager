@@ -6,7 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,6 +21,7 @@ import (
 	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/errorreport"
 	"github.com/workspace/vm-agent/internal/idle"
+	"github.com/workspace/vm-agent/internal/logreader"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/pty"
 	"github.com/workspace/vm-agent/internal/sysinfo"
@@ -51,6 +52,7 @@ type Server struct {
 	errorReporter       *errorreport.Reporter
 	worktreeCacheMu     sync.RWMutex
 	worktreeCache       map[string]cachedWorktreeList
+	logReader           *logreader.Reader
 	bootLogBroadcasters *BootLogBroadcasterManager
 	bootstrapComplete   bool
 }
@@ -136,9 +138,9 @@ func New(cfg *config.Config) (*Server, error) {
 		containerResolver = discovery.GetContainerID
 		containerWorkDir = cfg.ContainerWorkDir
 		containerUser = cfg.ContainerUser
-		log.Printf("Container mode enabled: user=%s, workDir=%s", containerUser, containerWorkDir)
+		slog.Info("Container mode enabled", "user", containerUser, "workDir", containerWorkDir)
 	} else {
-		log.Printf("Container mode disabled: PTY sessions will run on host")
+		slog.Info("Container mode disabled: PTY sessions will run on host")
 	}
 
 	// Create PTY manager
@@ -214,6 +216,7 @@ func New(cfg *config.Config) (*Server, error) {
 		store:              store,
 		errorReporter:      errorReporter,
 		worktreeCache:      make(map[string]cachedWorktreeList),
+		logReader:           logreader.NewReaderWithTimeout(cfg.LogReaderTimeout),
 		bootLogBroadcasters: NewBootLogBroadcasterManager(),
 	}
 
@@ -316,7 +319,7 @@ func (s *Server) Start() error {
 	// Start error reporter background flush
 	s.errorReporter.Start()
 
-	log.Printf("Starting VM Agent on %s", s.httpServer.Addr)
+	slog.Info("Starting VM Agent", "addr", s.httpServer.Addr)
 	return s.httpServer.ListenAndServe()
 }
 
@@ -384,7 +387,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	// Close persistence store
 	if s.store != nil {
 		if err := s.store.Close(); err != nil {
-			log.Printf("Warning: failed to close persistence store: %v", err)
+			slog.Warn("Failed to close persistence store", "error", err)
 		}
 	}
 
@@ -434,6 +437,8 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /events", s.handleListNodeEvents)
 	mux.HandleFunc("GET /system-info", s.handleSystemInfo)
+	mux.HandleFunc("GET /logs", s.handleLogs)
+	mux.HandleFunc("GET /logs/stream", s.handleLogStream)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/ports/{port}", s.handleWorkspacePortProxy)
 
 	// Boot log WebSocket (available during bootstrap for real-time streaming)
@@ -446,7 +451,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// Static files (embedded UI)
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
-		log.Printf("Warning: Could not load embedded static files: %v", err)
+		slog.Warn("Could not load embedded static files", "error", err)
 		// Fallback to serving from disk
 		mux.Handle("/", http.FileServer(http.Dir("./ui/dist")))
 	} else {

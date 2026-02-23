@@ -122,6 +122,10 @@ export interface Env {
   // VM agent error reporting
   MAX_VM_AGENT_ERROR_BODY_BYTES?: string;
   MAX_VM_AGENT_ERROR_BATCH_SIZE?: string;
+  // Node log configuration (cloud-init journal settings)
+  LOG_JOURNAL_MAX_USE?: string;
+  LOG_JOURNAL_KEEP_FREE?: string;
+  LOG_JOURNAL_MAX_RETENTION?: string;
   // External API timeouts (milliseconds)
   HETZNER_API_TIMEOUT_MS?: string;
   CF_API_TIMEOUT_MS?: string;

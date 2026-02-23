@@ -504,15 +504,8 @@ export interface NodeSystemInfo {
   docker: {
     version: string;
     containers: number;
-    containerList: Array<{
-      id: string;
-      name: string;
-      image: string;
-      status: string;
-      cpuPercent: number;
-      memUsage: string;
-      memPercent: number;
-    }>;
+    containerList: ContainerInfo[];
+    error?: string | null;
   };
   software: {
     goVersion: string;
@@ -764,6 +757,71 @@ export interface WorkspaceRuntimeAssetsResponse {
   workspaceId: string;
   envVars: WorkspaceRuntimeEnvVar[];
   files: WorkspaceRuntimeFile[];
+}
+
+// =============================================================================
+// Node Observability — Log Types
+// =============================================================================
+
+/** Log entry from any source on the node */
+export interface NodeLogEntry {
+  timestamp: string; // ISO 8601
+  level: NodeLogLevel;
+  source: string; // e.g., "agent", "docker:ws-abc", "cloud-init"
+  message: string;
+  metadata?: Record<string, unknown>;
+}
+
+/** Log source filter values */
+export type NodeLogSource = 'all' | 'agent' | 'cloud-init' | 'docker' | 'systemd';
+
+/** Log level filter values */
+export type NodeLogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+/** Parameters for log retrieval */
+export interface NodeLogFilter {
+  source?: NodeLogSource;
+  level?: NodeLogLevel;
+  container?: string;
+  since?: string;
+  until?: string;
+  search?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+/** Response from log retrieval endpoint */
+export interface NodeLogResponse {
+  entries: NodeLogEntry[];
+  nextCursor?: string | null;
+  hasMore: boolean;
+}
+
+// =============================================================================
+// Node Observability — Container Types
+// =============================================================================
+
+/** Machine-readable container state */
+export type ContainerState =
+  | 'running'
+  | 'exited'
+  | 'paused'
+  | 'created'
+  | 'restarting'
+  | 'removing'
+  | 'dead';
+
+/** Container info with full state and metrics */
+export interface ContainerInfo {
+  id: string;
+  name: string;
+  image: string;
+  status: string; // Human-readable (e.g., "Up 2 hours")
+  state: ContainerState; // Machine-readable enum
+  cpuPercent: number;
+  memUsage: string;
+  memPercent: number;
+  createdAt: string;
 }
 
 // =============================================================================

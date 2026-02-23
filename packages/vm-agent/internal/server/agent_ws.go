@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -72,8 +72,8 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 						session.AcpSessionID = tab.AcpSessionID
 						session.AgentType = tab.AgentID
 						_ = s.agentSessions.UpdateAcpSessionID(workspaceID, requestedSessionID, tab.AcpSessionID, tab.AgentID)
-						log.Printf("Workspace %s: hydrated AcpSessionID=%s agentType=%s from SQLite for session %s",
-							workspaceID, tab.AcpSessionID, tab.AgentID, requestedSessionID)
+						slog.Info("Hydrated AcpSessionID from SQLite",
+							"workspace", workspaceID, "acpSessionId", tab.AcpSessionID, "agentType", tab.AgentID, "sessionId", requestedSessionID)
 						break
 					}
 				}
@@ -105,7 +105,7 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	upgrader := s.createUpgrader()
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("ACP WebSocket upgrade failed: %v", err)
+		slog.Error("ACP WebSocket upgrade failed", "error", err)
 		return
 	}
 
@@ -183,8 +183,8 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	if session.AcpSessionID != "" {
 		cfg.PreviousAcpSessionID = session.AcpSessionID
 		cfg.PreviousAgentType = session.AgentType
-		log.Printf("Workspace %s: SessionHost created with previous ACP session ID %s (agentType=%s)",
-			workspaceID, session.AcpSessionID, session.AgentType)
+		slog.Info("SessionHost created with previous ACP session ID",
+			"workspace", workspaceID, "acpSessionId", session.AcpSessionID, "agentType", session.AgentType)
 	}
 	if callbackToken := s.callbackTokenForWorkspace(workspaceID); callbackToken != "" {
 		cfg.CallbackToken = callbackToken
@@ -192,9 +192,9 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	if runtime != nil {
 		if resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue); resolver != nil {
 			if _, resolveErr := resolver(); isContainerUnavailableError(resolveErr) {
-				log.Printf("Workspace %s: SessionHost detected unavailable container, attempting recovery: %v", workspaceID, resolveErr)
+				slog.Warn("SessionHost detected unavailable container, attempting recovery", "workspace", workspaceID, "error", resolveErr)
 				if recoverErr := s.recoverWorkspaceRuntime(context.Background(), runtime); recoverErr != nil {
-					log.Printf("Workspace %s: SessionHost recovery failed: %v", workspaceID, recoverErr)
+					slog.Error("SessionHost recovery failed", "workspace", workspaceID, "error", recoverErr)
 				}
 			}
 		}
@@ -225,6 +225,6 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	host := acp.NewSessionHost(hostCfg)
 	s.sessionHosts[hostKey] = host
 
-	log.Printf("Workspace %s: SessionHost created for session %s", workspaceID, sessionID)
+	slog.Info("SessionHost created", "workspace", workspaceID, "sessionId", sessionID)
 	return host
 }

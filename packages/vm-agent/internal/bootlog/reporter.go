@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -104,14 +104,14 @@ func (r *Reporter) logHTTP(step, status, message string, detail ...string) {
 
 	body, err := json.Marshal(entry)
 	if err != nil {
-		log.Printf("bootlog: failed to marshal entry: %v", err)
+		slog.Error("bootlog: failed to marshal entry", "error", err)
 		return
 	}
 
 	url := fmt.Sprintf("%s/api/workspaces/%s/boot-log", r.controlPlaneURL, r.workspaceID)
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		log.Printf("bootlog: failed to create request: %v", err)
+		slog.Error("bootlog: failed to create request", "error", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -119,12 +119,12 @@ func (r *Reporter) logHTTP(step, status, message string, detail ...string) {
 
 	resp, err := r.client.Do(req)
 	if err != nil {
-		log.Printf("bootlog: failed to send log entry (step=%s): %v", step, err)
+		slog.Error("bootlog: failed to send log entry", "step", step, "error", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		log.Printf("bootlog: control plane returned HTTP %d for step=%s", resp.StatusCode, step)
+		slog.Warn("bootlog: control plane returned non-OK status", "statusCode", resp.StatusCode, "step", step)
 	}
 }

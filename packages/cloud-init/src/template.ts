@@ -69,7 +69,34 @@ runcmd:
   - apt-get install -y nodejs
   - npm install -g @devcontainers/cli || true
 
+  # Apply journald configuration and restart to pick up new limits
+  - mkdir -p /etc/systemd/journald.conf.d
+  - systemctl restart systemd-journald
+
+  # Restart Docker to pick up journald log driver
+  - systemctl restart docker
+
 write_files:
+  - path: /etc/systemd/journald.conf.d/sam.conf
+    content: |
+      [Journal]
+      Storage=persistent
+      Compress=yes
+      SystemMaxUse={{ log_journal_max_use }}
+      SystemKeepFree={{ log_journal_keep_free }}
+      MaxRetentionSec={{ log_journal_max_retention }}
+    permissions: '0644'
+
+  - path: /etc/docker/daemon.json
+    content: |
+      {
+        "log-driver": "journald",
+        "log-opts": {
+          "tag": "docker/{{ docker_name_tag }}"
+        }
+      }
+    permissions: '0644'
+
   - path: /etc/workspace/config.json
     content: |
       {

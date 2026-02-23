@@ -659,6 +659,39 @@ wrangler tail
 wrangler tail --format=pretty --filter error
 ```
 
+### Node Log Configuration
+
+Nodes use systemd journald for centralized log aggregation. The cloud-init template automatically configures journald and Docker logging on new nodes.
+
+**Journald configuration** (applied via `/etc/systemd/journald.conf.d/sam.conf`):
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `SystemMaxUse` | `500M` | Max disk space for journal |
+| `SystemKeepFree` | `1G` | Minimum free disk to maintain |
+| `MaxRetentionSec` | `7day` | Max log retention period |
+| `Storage` | `persistent` | Persist logs across reboots |
+| `Compress` | `yes` | Compress stored journal entries |
+
+These defaults can be overridden per-node by passing `logJournalMaxUse`, `logJournalKeepFree`, and `logJournalMaxRetention` to the cloud-init generator.
+
+**Docker logging**: Docker is configured to use the `journald` log driver, so all container stdout/stderr flows into the same journal. This enables unified log viewing from the control plane UI.
+
+**VM Agent environment variables**:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOG_LEVEL` | `info` | Agent log level (`debug`, `info`, `warn`, `error`) |
+| `LOG_FORMAT` | `json` | Log output format (`json` or `text`) |
+| `LOG_RETRIEVAL_DEFAULT_LIMIT` | `200` | Default entries per log page |
+| `LOG_RETRIEVAL_MAX_LIMIT` | `1000` | Maximum entries per log page |
+| `LOG_STREAM_BUFFER_SIZE` | `100` | Catch-up entries sent on stream connect |
+| `LOG_READER_TIMEOUT` | `30s` | Timeout for journalctl read commands |
+| `LOG_STREAM_PING_INTERVAL` | `30s` | WebSocket ping interval for log stream |
+| `LOG_STREAM_PONG_TIMEOUT` | `90s` | WebSocket pong deadline for log stream |
+| `SYSINFO_DOCKER_LIST_TIMEOUT` | `10s` | Timeout for `docker ps` command |
+| `SYSINFO_DOCKER_STATS_TIMEOUT` | `10s` | Timeout for `docker stats` command |
+
 ### Updating the VM Agent
 
 When you make changes to the VM Agent:

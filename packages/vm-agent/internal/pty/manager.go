@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -304,9 +304,9 @@ func (m *Manager) OrphanSession(sessionID string) {
 		session.orphanTimer = time.AfterFunc(m.gracePeriod, func() {
 			m.cleanupOrphanedSession(sessionID)
 		})
-		log.Printf("Session %s orphaned, will cleanup in %v", sessionID, m.gracePeriod)
+		slog.Info("Session orphaned, will cleanup after grace period", "sessionID", sessionID, "gracePeriod", m.gracePeriod)
 	} else {
-		log.Printf("Session %s orphaned, automatic cleanup disabled", sessionID)
+		slog.Info("Session orphaned, automatic cleanup disabled", "sessionID", sessionID)
 	}
 	m.mu.Unlock()
 }
@@ -342,7 +342,7 @@ func (m *Manager) ReattachSession(sessionID string) (*Session, error) {
 	session.mu.Unlock()
 	m.mu.Unlock()
 
-	log.Printf("Session %s reattached", sessionID)
+	slog.Info("Session reattached", "sessionID", sessionID)
 	return session, nil
 }
 
@@ -409,7 +409,7 @@ func (m *Manager) cleanupOrphanedSession(sessionID string) {
 	delete(m.sessions, sessionID)
 	m.mu.Unlock()
 
-	log.Printf("Cleaning up orphaned session %s", sessionID)
+	slog.Info("Cleaning up orphaned session", "sessionID", sessionID)
 	_ = session.Close()
 }
 
