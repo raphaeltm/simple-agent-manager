@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, and } from 'drizzle-orm';
 import type { Env } from '../index';
-import { requireAuth, getUserId } from '../middleware/auth';
+import { requireAuth, requireApproved, getUserId } from '../middleware/auth';
 import * as schema from '../db/schema';
 import { AGENT_CATALOG } from '@simple-agent-manager/shared';
 import type { AgentInfo } from '@simple-agent-manager/shared';
@@ -10,7 +10,7 @@ import type { AgentInfo } from '@simple-agent-manager/shared';
 const agentsCatalogRoutes = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
-agentsCatalogRoutes.use('*', requireAuth());
+agentsCatalogRoutes.use('*', requireAuth(), requireApproved());
 
 /**
  * GET /api/agents - List supported agents with user's connection status

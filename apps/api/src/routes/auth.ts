@@ -43,11 +43,14 @@ authRoutes.get('/me', async (c) => {
     throw errors.unauthorized('Not authenticated');
   }
 
+  const user = session.user as Record<string, unknown>;
   return c.json({
     id: session.user.id,
     email: session.user.email,
     name: session.user.name,
     avatarUrl: session.user.image,
+    role: (user.role as string) ?? 'user',
+    status: (user.status as string) ?? 'active',
     createdAt: session.user.createdAt,
   });
 });

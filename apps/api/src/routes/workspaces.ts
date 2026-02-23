@@ -4,7 +4,7 @@ import { and, count, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { ulid } from '../lib/ulid';
 import type { Env } from '../index';
-import { getAuth, getUserId, requireAuth } from '../middleware/auth';
+import { getAuth, getUserId, requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import * as schema from '../db/schema';
 import type {
@@ -61,7 +61,9 @@ workspacesRoutes.use('/*', async (c, next) => {
     return next();
   }
 
-  return requireAuth()(c, next);
+  return requireAuth()(c, async () => {
+    await requireApproved()(c, next);
+  });
 });
 
 function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): WorkspaceResponse {

@@ -16,7 +16,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { RunTaskRequest, RunTaskResponse, TaskStatus } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import * as schema from '../db/schema';
-import { getAuth, requireAuth } from '../middleware/auth';
+import { getAuth, requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireOwnedProject, requireOwnedTask } from '../middleware/project-auth';
 import { initiateTaskRun, cleanupTaskRun, TaskRunError } from '../services/task-runner';
@@ -24,7 +24,7 @@ import { isTaskBlocked } from '../services/task-graph';
 
 const taskRunsRoutes = new Hono<{ Bindings: Env }>();
 
-taskRunsRoutes.use('/*', requireAuth());
+taskRunsRoutes.use('/*', requireAuth(), requireApproved());
 
 /**
  * POST /projects/:projectId/tasks/:taskId/run

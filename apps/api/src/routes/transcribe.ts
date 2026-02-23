@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../index';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
 
 /** Default Whisper model — configurable via WHISPER_MODEL_ID env var (Constitution Principle XI) */
@@ -27,7 +27,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 const transcribeRoutes = new Hono<{ Bindings: Env }>();
 
 // Apply auth middleware to all routes
-transcribeRoutes.use('*', requireAuth());
+transcribeRoutes.use('*', requireAuth(), requireApproved());
 
 /**
  * POST /api/transcribe

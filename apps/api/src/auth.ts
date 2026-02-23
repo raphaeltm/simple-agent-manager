@@ -181,6 +181,49 @@ export function createAuth(env: Env) {
           type: 'string',
           required: false,
         },
+        role: {
+          type: 'string',
+          required: false,
+          defaultValue: 'user',
+          input: false,
+        },
+        status: {
+          type: 'string',
+          required: false,
+          defaultValue: 'active',
+          input: false,
+        },
+      },
+    },
+    databaseHooks: {
+      user: {
+        create: {
+          before: async (user) => {
+            if (env.REQUIRE_APPROVAL !== 'true') {
+              // Open registration — defaults are fine (role='user', status='active')
+              return { data: user };
+            }
+
+            // Check if this is the first user (auto-superadmin)
+            const hookDb = drizzle(env.DATABASE, { schema });
+            const existing = await hookDb
+              .select({ id: schema.users.id })
+              .from(schema.users)
+              .limit(1)
+              .all();
+
+            if (existing.length === 0) {
+              return {
+                data: { ...user, role: 'superadmin', status: 'active' },
+              };
+            }
+
+            // Subsequent users need approval
+            return {
+              data: { ...user, role: 'user', status: 'pending' },
+            };
+          },
+        },
       },
     },
     account: {

@@ -5,7 +5,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { CreateNodeRequest, NodeHealthStatus, NodeResponse } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
-import { getUserId, requireAuth } from '../middleware/auth';
+import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireNodeOwnership } from '../middleware/node-auth';
 import * as schema from '../db/schema';
@@ -27,7 +27,9 @@ nodesRoutes.use('/*', async (c, next) => {
   if (path.endsWith('/ready') || path.endsWith('/heartbeat') || path.endsWith('/errors')) {
     return next();
   }
-  return requireAuth()(c, next);
+  return requireAuth()(c, async () => {
+    await requireApproved()(c, next);
+  });
 });
 
 function deriveHealthStatus(node: schema.Node, now: number): NodeHealthStatus {

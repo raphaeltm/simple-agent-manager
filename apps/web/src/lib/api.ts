@@ -45,6 +45,9 @@ import type {
   AgentSettingsResponse,
   SaveAgentSettingsRequest,
   NodeSystemInfo,
+  AdminUsersResponse,
+  UserRole,
+  UserStatus,
 } from '@simple-agent-manager/shared';
 
 // In production, VITE_API_URL must be explicitly set
@@ -1060,4 +1063,32 @@ export async function removeWorktree(
     throw new Error(`Worktree remove failed: ${text}`);
   }
   return res.json() as Promise<RemoveWorktreeResponse>;
+}
+
+// =============================================================================
+// Admin
+// =============================================================================
+export async function listAdminUsers(status?: UserStatus): Promise<AdminUsersResponse> {
+  const params = status ? `?status=${status}` : '';
+  return request<AdminUsersResponse>(`/api/admin/users${params}`);
+}
+
+export async function approveOrSuspendUser(
+  userId: string,
+  action: 'approve' | 'suspend'
+): Promise<{ id: string; status: UserStatus }> {
+  return request<{ id: string; status: UserStatus }>(`/api/admin/users/${userId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ action }),
+  });
+}
+
+export async function changeUserRole(
+  userId: string,
+  role: Exclude<UserRole, 'superadmin'>
+): Promise<{ id: string; role: UserRole }> {
+  return request<{ id: string; role: UserRole }>(`/api/admin/users/${userId}/role`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+  });
 }

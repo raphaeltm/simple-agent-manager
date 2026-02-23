@@ -9,7 +9,7 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Env } from '../index';
-import { getUserId, requireAuth } from '../middleware/auth';
+import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import * as schema from '../db/schema';
 import { requireOwnedProject } from '../middleware/project-auth';
@@ -17,7 +17,7 @@ import * as projectDataService from '../services/project-data';
 
 const activityRoutes = new Hono<{ Bindings: Env }>();
 
-activityRoutes.use('/*', requireAuth());
+activityRoutes.use('/*', requireAuth(), requireApproved());
 
 function requireRouteParam(
   c: { req: { param: (name: string) => string | undefined } },

@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, and } from 'drizzle-orm';
 import type { Env } from '../index';
-import { requireAuth, getUserId } from '../middleware/auth';
+import { requireAuth, requireApproved, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { signTerminalToken } from '../services/jwt';
 import * as schema from '../db/schema';
@@ -11,7 +11,7 @@ import type { TerminalTokenResponse } from '@simple-agent-manager/shared';
 const terminalRoutes = new Hono<{ Bindings: Env }>();
 
 // Apply auth middleware to all routes
-terminalRoutes.use('*', requireAuth());
+terminalRoutes.use('*', requireAuth(), requireApproved());
 
 /**
  * POST /api/terminal/token - Generate a terminal access token for a workspace.

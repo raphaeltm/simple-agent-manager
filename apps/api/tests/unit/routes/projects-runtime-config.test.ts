@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('drizzle-orm/d1');
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((c: any, next: any) => next()),
+  requireApproved: () => vi.fn((c: any, next: any) => next()),
   getUserId: () => 'user-1',
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({

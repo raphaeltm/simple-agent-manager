@@ -6,6 +6,7 @@ import { transcribeRoutes } from '../../../src/routes/transcribe';
 // Mock auth middleware
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: any, next: any) => next()),
+  requireApproved: () => vi.fn((_c: any, next: any) => next()),
   getUserId: () => 'test-user-id',
 }));
 

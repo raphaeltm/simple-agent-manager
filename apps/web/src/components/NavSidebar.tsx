@@ -1,6 +1,7 @@
 import { type CSSProperties } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, FolderKanban, Server, Settings } from 'lucide-react';
+import { Home, FolderKanban, Server, Settings, Shield } from 'lucide-react';
+import { useAuth } from './AuthProvider';
 
 export interface NavItem {
   label: string;
@@ -33,10 +34,15 @@ const navStyle: CSSProperties = {
 
 export function NavSidebar({ className }: NavSidebarProps) {
   const location = useLocation();
+  const { isSuperadmin } = useAuth();
+
+  const items = isSuperadmin
+    ? [...NAV_ITEMS, { label: 'Admin', path: '/admin', icon: <Shield size={18} /> }]
+    : NAV_ITEMS;
 
   return (
     <nav aria-label="Primary navigation" className={className} style={navStyle}>
-      {NAV_ITEMS.map((item) => {
+      {items.map((item) => {
         const active = isActive(item.path, location.pathname);
         return (
           <Link
