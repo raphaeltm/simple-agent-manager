@@ -230,3 +230,73 @@ func TestProcessConfig_EnvVarInjection(t *testing.T) {
 		})
 	}
 }
+
+func TestParseEnvExportLines(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		want    []string
+	}{
+		{
+			name: "standard SAM env file",
+			content: `# SAM workspace environment variables (auto-generated)
+export GH_TOKEN="ghs_abc123"
+export SAM_API_URL="https://api.example.com"
+export SAM_WORKSPACE_ID="ws-123"
+`,
+			want: []string{
+				"GH_TOKEN=ghs_abc123",
+				"SAM_API_URL=https://api.example.com",
+				"SAM_WORKSPACE_ID=ws-123",
+			},
+		},
+		{
+			name:    "empty content",
+			content: "",
+			want:    nil,
+		},
+		{
+			name:    "comments only",
+			content: "# just a comment\n# another comment\n",
+			want:    nil,
+		},
+		{
+			name:    "unquoted values",
+			content: "export FOO=bar\n",
+			want:    []string{"FOO=bar"},
+		},
+		{
+			name:    "blank lines ignored",
+			content: "\n\nexport A=\"1\"\n\n",
+			want:    []string{"A=1"},
+		},
+		{
+			name:    "no export prefix",
+			content: "KEY=\"value\"\n",
+			want:    []string{"KEY=value"},
+		},
+		{
+			name:    "malformed line no equals",
+			content: "export NOEQUALS\n",
+			want:    nil,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := parseEnvExportLines(tt.content)
+			if len(got) != len(tt.want) {
+				t.Fatalf("parseEnvExportLines() returned %d entries, want %d\ngot: %v\nwant: %v", len(got), len(tt.want), got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("entry[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}

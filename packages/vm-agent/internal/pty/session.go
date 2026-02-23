@@ -134,7 +134,7 @@ func NewSession(cfg SessionConfig) (*Session, error) {
 			args = append(args, "-e", env)
 		}
 		args = append(args, "-e", "TERM=xterm-256color")
-		args = append(args, cfg.ContainerID, shell)
+		args = append(args, cfg.ContainerID, shell, "-l")
 		cmd = exec.Command("docker", args...)
 	} else {
 		// Direct host shell (fallback)

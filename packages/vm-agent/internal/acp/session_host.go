@@ -596,7 +596,12 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 
 	info := getAgentCommandInfo(agentType, cred.credentialKind)
 
-	envVars := []string{fmt.Sprintf("%s=%s", info.envVarName, cred.credential)}
+	// Read SAM env vars (GH_TOKEN, SAM_WORKSPACE_ID, etc.) from the container's
+	// /etc/sam/env file and inject them into the agent process. These are written
+	// during bootstrap but aren't available to docker exec without explicit -e flags.
+	envVars := ReadContainerEnvFiles(ctx, containerID)
+
+	envVars = append(envVars, fmt.Sprintf("%s=%s", info.envVarName, cred.credential))
 	if settings != nil && settings.Model != "" {
 		modelEnv := getModelEnvVar(agentType)
 		if modelEnv != "" {
