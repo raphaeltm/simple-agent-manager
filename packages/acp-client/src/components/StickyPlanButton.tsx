@@ -29,7 +29,7 @@ export const StickyPlanButton: React.FC<StickyPlanButtonProps> = ({ plan, onClic
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center space-x-2 px-3 py-1.5 mb-2 text-xs font-medium rounded-md border transition-colors ${borderClass}`}
+      className={`flex items-center space-x-2 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${borderClass}`}
       title={`Plan: ${completed}/${total} complete`}
       aria-label={`View plan, ${completed} of ${total} steps complete`}
     >

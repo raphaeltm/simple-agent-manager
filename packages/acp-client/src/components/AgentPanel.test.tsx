@@ -293,3 +293,120 @@ describe('AgentPanel auto-scroll behavior', () => {
     expect(screen.getByText(/Partial response/)).toBeTruthy();
   });
 });
+
+// =============================================================================
+// Toolbar row tests
+// =============================================================================
+
+describe('AgentPanel toolbar row', () => {
+  let originalResizeObserver: typeof ResizeObserver;
+  let originalMutationObserver: typeof MutationObserver;
+
+  beforeEach(() => {
+    originalResizeObserver = globalThis.ResizeObserver;
+    originalMutationObserver = globalThis.MutationObserver;
+    globalThis.ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    globalThis.MutationObserver = class {
+      observe() {}
+      disconnect() {}
+      takeRecords() { return []; }
+    } as unknown as typeof MutationObserver;
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      cb(performance.now());
+      return 1;
+    });
+  });
+
+  afterEach(() => {
+    globalThis.ResizeObserver = originalResizeObserver;
+    globalThis.MutationObserver = originalMutationObserver;
+    vi.restoreAllMocks();
+  });
+
+  it('renders settings button in toolbar when onSaveSettings provided', () => {
+    const session = createMockSession();
+    const messages = createMockMessages();
+
+    render(
+      <AgentPanel
+        session={session}
+        messages={messages}
+        onSaveSettings={vi.fn()}
+        permissionModes={[{ value: 'default', label: 'Default' }]}
+      />
+    );
+
+    const settingsButton = screen.getByLabelText('Agent settings');
+    expect(settingsButton).toBeTruthy();
+    expect(screen.getByText('Settings')).toBeTruthy();
+  });
+
+  it('cancel button is always visible even when not prompting', () => {
+    const session = createMockSession({ state: 'ready' });
+    const messages = createMockMessages();
+
+    render(<AgentPanel session={session} messages={messages} />);
+
+    const cancelButton = screen.getByLabelText('Cancel agent');
+    expect(cancelButton).toBeTruthy();
+    expect(screen.getByText('Cancel')).toBeTruthy();
+  });
+
+  it('cancel button sends session/cancel when clicked', () => {
+    const sendMessage = vi.fn();
+    const session = createMockSession({ sendMessage });
+    const messages = createMockMessages();
+
+    render(<AgentPanel session={session} messages={messages} />);
+
+    fireEvent.click(screen.getByLabelText('Cancel agent'));
+    expect(sendMessage).toHaveBeenCalledWith({
+      jsonrpc: '2.0',
+      method: 'session/cancel',
+      params: {},
+    });
+  });
+
+  it('cancel button has red styling when prompting', () => {
+    const session = createMockSession({ state: 'prompting' });
+    const messages = createMockMessages();
+
+    render(<AgentPanel session={session} messages={messages} />);
+
+    const cancelButton = screen.getByLabelText('Cancel agent');
+    expect(cancelButton.className).toContain('border-red-300');
+    expect(cancelButton.className).toContain('text-red-600');
+  });
+
+  it('cancel button has muted styling when not prompting', () => {
+    const session = createMockSession({ state: 'ready' });
+    const messages = createMockMessages();
+
+    render(<AgentPanel session={session} messages={messages} />);
+
+    const cancelButton = screen.getByLabelText('Cancel agent');
+    expect(cancelButton.className).toContain('text-gray-400');
+  });
+
+  it('settings button is not inside the form element', () => {
+    const session = createMockSession();
+    const messages = createMockMessages();
+
+    render(
+      <AgentPanel
+        session={session}
+        messages={messages}
+        onSaveSettings={vi.fn()}
+        permissionModes={[{ value: 'default', label: 'Default' }]}
+      />
+    );
+
+    const settingsButton = screen.getByLabelText('Agent settings');
+    const form = screen.getByPlaceholderText(/type \/ for commands/i).closest('form');
+    expect(form!.contains(settingsButton)).toBe(false);
+  });
+});
