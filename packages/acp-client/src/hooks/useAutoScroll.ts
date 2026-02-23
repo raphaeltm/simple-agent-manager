@@ -22,6 +22,12 @@ export interface UseAutoScrollReturn {
   isAtBottom: boolean;
   /** Programmatically scroll to bottom and re-engage auto-scroll */
   scrollToBottom: () => void;
+  /**
+   * Reset scroll tracking to "at bottom" state and scroll down.
+   * Call this when conversation items are cleared (e.g., replay, /clear)
+   * so the scroll hook treats the next batch of content as a fresh start.
+   */
+  resetToBottom: () => void;
 }
 
 /**
@@ -85,15 +91,25 @@ export function useAutoScroll(options: UseAutoScrollOptions = {}): UseAutoScroll
 
       if (!node) return;
 
-      // Coalesce rapid scroll-to-bottom requests into a single rAF
+      // Coalesce rapid scroll-to-bottom requests into a single rAF.
+      // Re-checks actual scroll geometry at execution time to avoid acting
+      // on a stale isAtBottomRef snapshot (which can go stale when browser
+      // layout shifts fire scroll events between observer callback and RAF).
       let rafPending = false;
       const scheduleScrollToBottom = () => {
         if (rafPending) return;
         rafPending = true;
         requestAnimationFrame(() => {
           rafPending = false;
-          if (elementRef.current && isAtBottomRef.current) {
-            elementRef.current.scrollTop = elementRef.current.scrollHeight;
+          const el = elementRef.current;
+          if (!el) return;
+          // Use ref OR live geometry check — covers the case where a browser
+          // layout shift briefly moved scrollTop a few pixels off bottom
+          // between the observer firing and this RAF executing.
+          if (isAtBottomRef.current || checkIsAtBottom(el)) {
+            el.scrollTop = el.scrollHeight;
+            isAtBottomRef.current = true;
+            setIsAtBottom(true);
           }
         });
       };
@@ -148,5 +164,21 @@ export function useAutoScroll(options: UseAutoScrollOptions = {}): UseAutoScroll
     setIsAtBottom(true);
   }, []);
 
-  return { scrollRef, isAtBottom, scrollToBottom };
+  /**
+   * Reset scroll tracking to "at bottom" and scroll down.
+   * Use this when conversation items are cleared (replay, /clear) so the
+   * hook treats subsequently arriving content as a fresh conversation that
+   * should auto-scroll. Without this, isAtBottomRef stays stale from the
+   * user's scroll position in the previous conversation.
+   */
+  const resetToBottom = useCallback(() => {
+    isAtBottomRef.current = true;
+    setIsAtBottom(true);
+    const el = elementRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, []);
+
+  return { scrollRef, isAtBottom, scrollToBottom, resetToBottom };
 }

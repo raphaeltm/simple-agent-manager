@@ -80,7 +80,7 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
   const [showPalette, setShowPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showPlanModal, setShowPlanModal] = useState(false);
-  const { scrollRef } = useAutoScroll();
+  const { scrollRef, resetToBottom } = useAutoScroll();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const paletteRef = useRef<SlashCommandPaletteHandle>(null);
 
@@ -89,6 +89,31 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
     () => messages.items.find((i): i is PlanItem => i.kind === 'plan'),
     [messages.items]
   );
+
+  // Reset scroll to bottom when items are cleared (replay or /clear).
+  // When prepareForReplay() sets items to [], isAtBottomRef in the scroll
+  // hook is stale from the user's previous scroll position. This resets it
+  // so replay messages auto-scroll correctly.
+  const prevItemCountRef = useRef(messages.items.length);
+  useEffect(() => {
+    const prev = prevItemCountRef.current;
+    prevItemCountRef.current = messages.items.length;
+    if (prev > 0 && messages.items.length === 0) {
+      resetToBottom();
+    }
+  }, [messages.items.length, resetToBottom]);
+
+  // Safety net: after replay completes (replaying → ready/prompting),
+  // force scroll to bottom. Covers the case where items are never empty
+  // because replay messages arrive in the same React batch as the clear.
+  const prevSessionStateRef = useRef(session.state);
+  useEffect(() => {
+    const prev = prevSessionStateRef.current;
+    prevSessionStateRef.current = session.state;
+    if (prev === 'replaying' && (session.state === 'ready' || session.state === 'prompting')) {
+      resetToBottom();
+    }
+  }, [session.state, resetToBottom]);
 
   useImperativeHandle(ref, () => ({
     focusInput: () => inputRef.current?.focus(),

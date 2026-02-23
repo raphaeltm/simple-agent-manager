@@ -540,4 +540,88 @@ describe('useAutoScroll', () => {
     });
     expect(result.current.isAtBottom).toBe(false);
   });
+
+  // ---------------------------------------------------------------------------
+  // resetToBottom
+  // ---------------------------------------------------------------------------
+
+  it('returns a resetToBottom function', () => {
+    const { result } = renderHook(() => useAutoScroll());
+    expect(typeof result.current.resetToBottom).toBe('function');
+  });
+
+  it('resetToBottom re-engages auto-scroll after user scrolled up', () => {
+    const { result } = renderHook(() => useAutoScroll());
+    const el = createMockScrollContainer({ scrollHeight: 1000, clientHeight: 500, scrollTop: 100 }) as ScrollMock;
+    attach(result, el);
+
+    // Scroll up — isAtBottom becomes false
+    act(() => { el.dispatchEvent(new Event('scroll')); });
+    expect(result.current.isAtBottom).toBe(false);
+
+    // Reset — should re-engage auto-scroll
+    act(() => { result.current.resetToBottom(); });
+    expect(result.current.isAtBottom).toBe(true);
+    expect(el.scrollTop).toBe(1000); // scrolled to bottom
+  });
+
+  it('resetToBottom allows subsequent content to auto-scroll', () => {
+    const { result } = renderHook(() => useAutoScroll());
+    const el = createMockScrollContainer({ scrollHeight: 1000, clientHeight: 500, scrollTop: 100 }) as ScrollMock;
+    const child = document.createElement('div');
+    el.appendChild(child);
+    attach(result, el);
+
+    // User scrolled up
+    act(() => { el.dispatchEvent(new Event('scroll')); });
+    expect(result.current.isAtBottom).toBe(false);
+
+    // Reset
+    act(() => { result.current.resetToBottom(); });
+
+    // New content arrives
+    el.__setScrollHeight(1500);
+    act(() => {
+      roInstances[0]?.trigger();
+      flushRaf();
+    });
+
+    // Should auto-scroll because resetToBottom re-engaged
+    expect(el.scrollTop).toBe(1500);
+  });
+
+  // ---------------------------------------------------------------------------
+  // RAF re-checks geometry (anti-bounce fix)
+  // ---------------------------------------------------------------------------
+
+  it('RAF callback re-checks geometry even if isAtBottom was briefly false', () => {
+    const { result } = renderHook(() => useAutoScroll());
+    // Start at bottom: distance = 1000 - 500 - 500 = 0
+    const el = createMockScrollContainer({ scrollHeight: 1000, clientHeight: 500, scrollTop: 500 }) as ScrollMock;
+    const child = document.createElement('div');
+    el.appendChild(child);
+    attach(result, el);
+
+    // Confirm at bottom
+    act(() => { el.dispatchEvent(new Event('scroll')); });
+    expect(result.current.isAtBottom).toBe(true);
+
+    // Content grows — ResizeObserver fires, queues RAF
+    el.__setScrollHeight(1200);
+    act(() => { roInstances[0]?.trigger(); });
+
+    // Simulate browser layout shift: scroll event fires BETWEEN observer and
+    // RAF, briefly putting us a few pixels off bottom. This is the "bounce" bug.
+    act(() => {
+      el.__setScrollTop(650); // distance = 1200 - 650 - 500 = 50 <= threshold
+      el.dispatchEvent(new Event('scroll'));
+    });
+
+    // isAtBottom is still true (within threshold), but even if it were briefly
+    // false, the RAF re-checks geometry. Flush the RAF:
+    act(() => { flushRaf(); });
+
+    // Should have scrolled to bottom
+    expect(el.scrollTop).toBe(1200);
+  });
 });

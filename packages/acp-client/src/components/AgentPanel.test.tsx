@@ -5,6 +5,7 @@ import type { AcpSessionHandle } from '../hooks/useAcpSession';
 import type { AcpMessagesHandle } from '../hooks/useAcpMessages';
 import type { ConversationItem } from '../hooks/useAcpMessages';
 import type { SlashCommand } from '../types';
+import * as autoScrollModule from '../hooks/useAutoScroll';
 
 function createMockSession(overrides: Partial<AcpSessionHandle> = {}): AcpSessionHandle {
   return {
@@ -408,5 +409,101 @@ describe('AgentPanel toolbar row', () => {
     const settingsButton = screen.getByLabelText('Agent settings');
     const form = screen.getByPlaceholderText(/type \/ for commands/i).closest('form');
     expect(form!.contains(settingsButton)).toBe(false);
+  });
+});
+
+// =============================================================================
+// Scroll reset on replay / clear tests
+// =============================================================================
+
+describe('AgentPanel scroll reset on replay', () => {
+  let resetToBottomSpy: ReturnType<typeof vi.fn>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let autoScrollSpy: any;
+
+  beforeEach(() => {
+    resetToBottomSpy = vi.fn();
+    autoScrollSpy = vi.spyOn(autoScrollModule, 'useAutoScroll').mockReturnValue({
+      scrollRef: vi.fn(),
+      isAtBottom: true,
+      scrollToBottom: vi.fn(),
+      resetToBottom: resetToBottomSpy,
+    });
+  });
+
+  afterEach(() => {
+    autoScrollSpy.mockRestore();
+  });
+
+  it('calls resetToBottom when items transition from >0 to 0 (replay clear)', () => {
+    const session = createMockSession();
+    const items: ConversationItem[] = [
+      { kind: 'user_message', id: '1', text: 'Hello', timestamp: Date.now() },
+    ];
+    const messages = createMockMessages({ items });
+
+    const { rerender } = render(<AgentPanel session={session} messages={messages} />);
+
+    // Initially resetToBottom should NOT have been called (items didn't go to 0)
+    expect(resetToBottomSpy).not.toHaveBeenCalled();
+
+    // Simulate prepareForReplay clearing items
+    const clearedMessages = createMockMessages({ items: [] });
+    rerender(<AgentPanel session={session} messages={clearedMessages} />);
+
+    expect(resetToBottomSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call resetToBottom when items go from 0 to 0', () => {
+    const session = createMockSession();
+    const messages = createMockMessages({ items: [] });
+
+    const { rerender } = render(<AgentPanel session={session} messages={messages} />);
+
+    // Rerender with still-empty items
+    rerender(<AgentPanel session={session} messages={createMockMessages({ items: [] })} />);
+
+    expect(resetToBottomSpy).not.toHaveBeenCalled();
+  });
+
+  it('calls resetToBottom when session transitions from replaying to ready', () => {
+    const session = createMockSession({ state: 'replaying' as AcpSessionHandle['state'] });
+    const messages = createMockMessages();
+
+    const { rerender } = render(<AgentPanel session={session} messages={messages} />);
+
+    expect(resetToBottomSpy).not.toHaveBeenCalled();
+
+    // Transition from replaying → ready
+    const readySession = createMockSession({ state: 'ready' });
+    rerender(<AgentPanel session={readySession} messages={messages} />);
+
+    expect(resetToBottomSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls resetToBottom when session transitions from replaying to prompting', () => {
+    const session = createMockSession({ state: 'replaying' as AcpSessionHandle['state'] });
+    const messages = createMockMessages();
+
+    const { rerender } = render(<AgentPanel session={session} messages={messages} />);
+
+    // Transition from replaying → prompting
+    const promptingSession = createMockSession({ state: 'prompting' });
+    rerender(<AgentPanel session={promptingSession} messages={messages} />);
+
+    expect(resetToBottomSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call resetToBottom for non-replay state transitions', () => {
+    const session = createMockSession({ state: 'ready' });
+    const messages = createMockMessages();
+
+    const { rerender } = render(<AgentPanel session={session} messages={messages} />);
+
+    // Transition from ready → prompting (not a replay transition)
+    const promptingSession = createMockSession({ state: 'prompting' });
+    rerender(<AgentPanel session={promptingSession} messages={messages} />);
+
+    expect(resetToBottomSpy).not.toHaveBeenCalled();
   });
 });
