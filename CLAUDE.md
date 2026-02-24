@@ -64,6 +64,9 @@ Merge to `main` automatically deploys to production via GitHub Actions.
 - **Provider**: Cloud infrastructure abstraction (currently Hetzner only)
 - **Project**: Primary organizational unit linking a GitHub repo to workspaces, chat sessions, tasks, and activity
 - **ProjectData DO**: Per-project Durable Object with embedded SQLite for chat sessions, messages, activity events. Accessed via `env.PROJECT_DATA.idFromName(projectId)`
+- **NodeLifecycle DO**: Per-node Durable Object managing warm pool state machine (active → warm → destroying). Accessed via `env.NODE_LIFECYCLE.idFromName(nodeId)`. Handles idle timeout alarms; actual infrastructure teardown delegated to cron sweep.
+- **Warm Node Pooling**: After task completion, auto-provisioned nodes enter "warm" state for 30 min (configurable via `NODE_WARM_TIMEOUT_MS`) for fast reuse. Three-layer defense against orphans: DO alarm + cron sweep + max lifetime.
+- **Task Runner**: Autonomous task execution — selects/provisions nodes, creates workspaces, runs agents, cleans up. VM size precedence: explicit override > project default > platform default.
 - **Lifecycle Control**: Workspaces/nodes stopped, restarted, or deleted explicitly via API/UI
 
 ## URL Construction Rules
@@ -140,6 +143,9 @@ Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks
 - N/A (frontend-only changes; backend APIs already exist from spec 018) (019-ui-overhaul)
 - Go 1.24 (VM Agent) with log/slog structured logging, TypeScript 5.x (API Worker + Web UI) (020-node-observability)
 - journald (systemd journal) on VM for log aggregation; Docker journald log driver; no new database storage (020-node-observability)
+- TypeScript 5.x (API Worker, Web UI), Go 1.24+ (VM Agent) + Hono (API), React 18 + Vite (Web), Drizzle ORM (D1), Cloudflare Workers SDK (DOs), ACP Go SDK, cenkalti/backoff/v5 (new, Go retry) (021-task-chat-architecture)
+- Cloudflare D1 (relational metadata), Durable Objects with SQLite (per-project chat data), VM-local SQLite (message outbox) (021-task-chat-architecture)
 
 ## Recent Changes
+- 021-task-chat-architecture: Task-driven chat with autonomous workspace execution, warm node pooling, project chat view, kanban board, task submit form, project default VM size
 - 018-project-first-architecture: Added TypeScript 5.x (Worker/Web), Go 1.24+ (VM Agent) + Hono (API framework), Drizzle ORM (D1), React + Vite (Web), Cloudflare Workers SDK (Durable Objects)

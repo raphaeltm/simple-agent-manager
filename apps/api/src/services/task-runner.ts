@@ -15,12 +15,16 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { TaskStatus, VMSize, VMLocation } from '@simple-agent-manager/shared';
 import {
   DEFAULT_TASK_RUN_CLEANUP_DELAY_MS,
+  DEFAULT_VM_SIZE,
+  DEFAULT_WORKSPACE_READY_POLL_INTERVAL_MS,
+  DEFAULT_WORKSPACE_READY_MAX_POLL_INTERVAL_MS,
 } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import * as schema from '../db/schema';
 import { ulid } from '../lib/ulid';
 import { selectNodeForTaskRun } from './node-selector';
 import { createNodeRecord, provisionNode } from './nodes';
+import * as nodeLifecycleService from './node-lifecycle';
 import {
   createWorkspaceOnNode,
   waitForNodeAgentReady,
@@ -30,6 +34,7 @@ import {
 import { signCallbackToken } from './jwt';
 import { resolveUniqueWorkspaceDisplayName } from './workspace-names';
 import { getRuntimeLimits } from './limits';
+import * as projectDataService from './project-data';
 
 export interface TaskRunInput {
   taskId: string;
@@ -129,7 +134,10 @@ export async function initiateTaskRun(
   });
 
   // Determine node strategy
-  const vmSize = input.vmSize ?? 'medium';
+  // Precedence: explicit override > project default > platform default
+  const vmSize = input.vmSize
+    ?? (project.defaultVmSize as VMSize | null)
+    ?? DEFAULT_VM_SIZE;
   const vmLocation = input.vmLocation ?? 'nbg1';
   const branch = input.branch ?? project.defaultBranch;
 
@@ -209,7 +217,7 @@ async function executeTaskRun(
       nodeId = node.id;
     } else {
       // Try to find an existing node with capacity
-      const selectedNode = await selectNodeForTaskRun(db, userId, env, vmLocation, vmSize);
+      const selectedNode = await selectNodeForTaskRun(db, userId, env, vmLocation, vmSize, task.id);
       if (selectedNode) {
         nodeId = selectedNode.id;
       } else {
@@ -309,6 +317,32 @@ async function executeTaskRun(
       reason: `Delegated to workspace ${workspaceId} on node ${nodeId}`,
       createdAt: now(),
     });
+
+    // Create chat session in ProjectData DO for task message persistence.
+    // Best-effort: session creation failure should not block workspace creation.
+    let chatSessionId: string | null = null;
+    try {
+      chatSessionId = await projectDataService.createSession(
+        env,
+        project.id,
+        workspaceId,
+        task.title,
+        task.id // taskId
+      );
+      await db
+        .update(schema.workspaces)
+        .set({ chatSessionId, updatedAt: now() })
+        .where(eq(schema.workspaces.id, workspaceId));
+    } catch (err) {
+      console.error('Failed to create chat session for task workspace:', err);
+    }
+
+    // Set output_branch to task/{taskId} format
+    const outputBranch = `task/${task.id}`;
+    await db
+      .update(schema.tasks)
+      .set({ outputBranch, updatedAt: now() })
+      .where(eq(schema.tasks.id, task.id));
 
     // Create workspace on node agent
     const callbackToken = await signCallbackToken(workspaceId, env);
@@ -413,7 +447,13 @@ async function waitForWorkspaceReady(
     ? Number.parseInt(env.WORKSPACE_READY_TIMEOUT_MS, 10)
     : 300_000; // 5 minutes default
   const deadline = Date.now() + timeoutMs;
-  let pollInterval = 2000;
+  const basePollInterval = env.WORKSPACE_READY_POLL_INTERVAL_MS
+    ? Number.parseInt(env.WORKSPACE_READY_POLL_INTERVAL_MS, 10)
+    : DEFAULT_WORKSPACE_READY_POLL_INTERVAL_MS;
+  const maxPollInterval = env.WORKSPACE_READY_MAX_POLL_INTERVAL_MS
+    ? Number.parseInt(env.WORKSPACE_READY_MAX_POLL_INTERVAL_MS, 10)
+    : DEFAULT_WORKSPACE_READY_MAX_POLL_INTERVAL_MS;
+  let pollInterval = basePollInterval;
 
   while (Date.now() < deadline) {
     const [ws] = await db
@@ -442,7 +482,7 @@ async function waitForWorkspaceReady(
     }
 
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
-    pollInterval = Math.min(pollInterval * 1.5, 10_000);
+    pollInterval = Math.min(pollInterval * 1.5, maxPollInterval);
   }
 
   throw new TaskRunError(
@@ -555,7 +595,10 @@ export async function cleanupTaskRun(
 }
 
 /**
- * Check if an auto-provisioned node has no other active workspaces and can be stopped.
+ * Check if an auto-provisioned node has no other active workspaces.
+ * If empty, marks the node as warm (idle) via the NodeLifecycle DO
+ * so it stays available for fast reuse. The DO alarm handles eventual
+ * teardown if not reclaimed within the warm timeout.
  */
 async function cleanupAutoProvisionedNode(
   db: ReturnType<typeof drizzle<typeof schema>>,
@@ -582,18 +625,27 @@ async function cleanupAutoProvisionedNode(
   );
 
   if (activeWorkspaces.length > 0) {
-    // Other workspaces still running, don't stop the node
+    // Other workspaces still running, don't mark idle
     return;
   }
 
-  // Import here to avoid circular dependency at module level
-  const { stopNodeResources } = await import('./nodes');
-
-  // No active workspaces, stop the node
+  // No active workspaces — mark node as warm for reuse.
+  // The NodeLifecycle DO will schedule an alarm for eventual teardown.
   try {
-    await stopNodeResources(nodeId, userId, env);
-  } catch {
-    // Best effort — the node will idle out eventually
+    await nodeLifecycleService.markIdle(env, nodeId, userId);
+  } catch (err) {
+    console.error(`Failed to mark node ${nodeId} as warm; falling back to immediate stop`, err);
+    // Fallback: stop node directly if DO fails
+    try {
+      const { stopNodeResources } = await import('./nodes');
+      await stopNodeResources(nodeId, userId, env);
+    } catch (stopErr) {
+      // Both markIdle and fallback stop failed — log for cron sweep to catch
+      console.error(
+        `Node cleanup failed for node ${nodeId} (user ${userId}): markIdle and stopNodeResources both failed`,
+        stopErr
+      );
+    }
   }
 }
 

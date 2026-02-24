@@ -1,4 +1,4 @@
-import { and, eq, count } from 'drizzle-orm';
+import { and, eq, inArray, count, isNotNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import {
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
@@ -6,6 +6,7 @@ import {
 } from '@simple-agent-manager/shared';
 import type { NodeMetrics } from '@simple-agent-manager/shared';
 import * as schema from '../db/schema';
+import * as nodeLifecycle from './node-lifecycle';
 
 export interface NodeCandidate {
   id: string;
@@ -26,6 +27,7 @@ export interface NodeSelectorEnv {
   TASK_RUN_NODE_CPU_THRESHOLD_PERCENT?: string;
   TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;
   MAX_WORKSPACES_PER_NODE?: string;
+  NODE_LIFECYCLE?: DurableObjectNamespace;
 }
 
 function parseThreshold(value: string | undefined, fallback: number): number {
@@ -98,6 +100,7 @@ export function nodeHasCapacity(
  * Select the best available node for a task run, or indicate that a new node is needed.
  *
  * Selection algorithm:
+ * 0. Try to claim a warm node first (fast startup for sequential tasks)
  * 1. Get all running, healthy (or stale) nodes for the user
  * 2. For each node, check workspace count and resource metrics
  * 3. Filter to nodes with capacity
@@ -110,7 +113,8 @@ export async function selectNodeForTaskRun(
   userId: string,
   env: NodeSelectorEnv,
   preferredLocation?: string,
-  preferredSize?: string
+  preferredSize?: string,
+  taskId?: string
 ): Promise<NodeCandidate | null> {
   const cpuThreshold = parseThreshold(
     env.TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
@@ -123,6 +127,73 @@ export async function selectNodeForTaskRun(
   const maxWorkspacesPerNode = env.MAX_WORKSPACES_PER_NODE
     ? Number.parseInt(env.MAX_WORKSPACES_PER_NODE, 10) || 10
     : 10;
+
+  // Step 0: Try to claim a warm node (fast startup for sequential tasks)
+  if (taskId && env.NODE_LIFECYCLE) {
+    const warmNodes = await db
+      .select({
+        id: schema.nodes.id,
+        status: schema.nodes.status,
+        healthStatus: schema.nodes.healthStatus,
+        vmSize: schema.nodes.vmSize,
+        vmLocation: schema.nodes.vmLocation,
+        lastMetrics: schema.nodes.lastMetrics,
+        warmSince: schema.nodes.warmSince,
+      })
+      .from(schema.nodes)
+      .where(
+        and(
+          eq(schema.nodes.userId, userId),
+          eq(schema.nodes.status, 'running'),
+          isNotNull(schema.nodes.warmSince)
+        )
+      );
+
+    // Try each warm node, preferring matching size/location
+    const sortedWarm = warmNodes.sort((a, b) => {
+      const aSizeMatch = preferredSize && a.vmSize === preferredSize ? 1 : 0;
+      const bSizeMatch = preferredSize && b.vmSize === preferredSize ? 1 : 0;
+      if (aSizeMatch !== bSizeMatch) return bSizeMatch - aSizeMatch;
+      const aLocMatch = preferredLocation && a.vmLocation === preferredLocation ? 1 : 0;
+      const bLocMatch = preferredLocation && b.vmLocation === preferredLocation ? 1 : 0;
+      return bLocMatch - aLocMatch;
+    });
+
+    for (const warmNode of sortedWarm) {
+      try {
+        // Defense-in-depth: re-check D1 status before DO call to avoid
+        // unnecessary DO round-trips for nodes that changed between query and claim.
+        const [freshNode] = await db
+          .select({ status: schema.nodes.status, warmSince: schema.nodes.warmSince })
+          .from(schema.nodes)
+          .where(eq(schema.nodes.id, warmNode.id))
+          .limit(1);
+
+        if (!freshNode || freshNode.status !== 'running' || !freshNode.warmSince) {
+          continue; // Node state changed since initial query
+        }
+
+        const result = await nodeLifecycle.tryClaim(
+          env as unknown as import('../index').Env,
+          warmNode.id,
+          taskId
+        );
+        if (result.claimed) {
+          return {
+            id: warmNode.id,
+            status: warmNode.status,
+            healthStatus: warmNode.healthStatus,
+            vmSize: warmNode.vmSize,
+            vmLocation: warmNode.vmLocation,
+            lastMetrics: parseMetrics(warmNode.lastMetrics),
+            activeWorkspaceCount: 0,
+          };
+        }
+      } catch {
+        // tryClaim failed (e.g. concurrent claim) — try next
+      }
+    }
+  }
 
   // Get all running nodes for this user
   const nodes = await db
@@ -153,7 +224,8 @@ export async function selectNodeForTaskRun(
       .where(
         and(
           eq(schema.workspaces.nodeId, node.id),
-          eq(schema.workspaces.userId, userId)
+          eq(schema.workspaces.userId, userId),
+          inArray(schema.workspaces.status, ['running', 'creating', 'recovery'])
         )
       );
 

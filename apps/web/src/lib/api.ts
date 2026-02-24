@@ -8,6 +8,8 @@ import type {
   WorkspaceResponse,
   CreateWorkspaceRequest,
   DelegateTaskRequest,
+  RunTaskRequest,
+  RunTaskResponse,
   ListProjectsResponse,
   ListTaskEventsResponse,
   ListTasksResponse,
@@ -376,6 +378,17 @@ export async function delegateTask(
   });
 }
 
+export async function runProjectTask(
+  projectId: string,
+  taskId: string,
+  data: RunTaskRequest = {}
+): Promise<RunTaskResponse> {
+  return request<RunTaskResponse>(`/api/projects/${projectId}/tasks/${taskId}/run`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 export async function listTaskEvents(
   projectId: string,
   taskId: string,
@@ -481,16 +494,8 @@ export async function stopChatSession(
   });
 }
 
-export async function persistChatMessage(
-  projectId: string,
-  sessionId: string,
-  data: { role: string; content: string; toolMetadata?: Record<string, unknown> | null }
-): Promise<{ id: string }> {
-  return request<{ id: string }>(`/api/projects/${projectId}/sessions/${sessionId}/messages`, {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
+// persistChatMessage removed — messages are now persisted exclusively by the
+// VM agent. See: specs/021-task-chat-architecture (US1).
 
 // =============================================================================
 // Activity Events

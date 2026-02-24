@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/gorilla/websocket"
 )
 
@@ -975,6 +977,207 @@ func TestSessionHost_AutoSuspendDisabledWhenTimeoutZero(t *testing.T) {
 
 	if hasTimer {
 		t.Fatal("suspendTimer should be nil when IdleSuspendTimeout is 0")
+	}
+}
+
+// --- Message reporter integration tests (T025) ---
+
+// mockMessageReporter captures enqueued messages for testing.
+type mockMessageReporter struct {
+	mu       sync.Mutex
+	messages []MessageReportEntry
+	errOnce  error // if set, return this error on first Enqueue call
+}
+
+func (m *mockMessageReporter) Enqueue(msg MessageReportEntry) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.errOnce != nil {
+		err := m.errOnce
+		m.errOnce = nil
+		return err
+	}
+	m.messages = append(m.messages, msg)
+	return nil
+}
+
+func (m *mockMessageReporter) Messages() []MessageReportEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]MessageReportEntry, len(m.messages))
+	copy(cp, m.messages)
+	return cp
+}
+
+func TestSessionUpdate_NilReporter_StillBroadcasts(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:       "test-session",
+			WorkspaceID:     "test-workspace",
+			MessageReporter: nil, // no reporter
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	client := &sessionHostClient{host: host}
+
+	notif := acpsdk.SessionNotification{
+		SessionId: "acp-sess",
+		Update: acpsdk.SessionUpdate{
+			AgentMessageChunk: &acpsdk.SessionUpdateAgentMessageChunk{
+				Content: acpsdk.ContentBlock{
+					Text: &acpsdk.ContentBlockText{Text: "hello"},
+				},
+			},
+		},
+	}
+
+	if err := client.SessionUpdate(context.Background(), notif); err != nil {
+		t.Fatalf("SessionUpdate: %v", err)
+	}
+
+	// Message should be in the broadcast buffer.
+	host.bufMu.RLock()
+	bufLen := len(host.messageBuf)
+	host.bufMu.RUnlock()
+	if bufLen != 1 {
+		t.Fatalf("expected 1 buffered message, got %d", bufLen)
+	}
+}
+
+func TestSessionUpdate_WithReporter_EnqueuesMessages(t *testing.T) {
+	t.Parallel()
+
+	reporter := &mockMessageReporter{}
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:       "test-session",
+			WorkspaceID:     "test-workspace",
+			MessageReporter: reporter,
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	client := &sessionHostClient{host: host}
+
+	notif := acpsdk.SessionNotification{
+		SessionId: "acp-sess",
+		Update: acpsdk.SessionUpdate{
+			AgentMessageChunk: &acpsdk.SessionUpdateAgentMessageChunk{
+				Content: acpsdk.ContentBlock{
+					Text: &acpsdk.ContentBlockText{Text: "assistant response"},
+				},
+			},
+		},
+	}
+
+	if err := client.SessionUpdate(context.Background(), notif); err != nil {
+		t.Fatalf("SessionUpdate: %v", err)
+	}
+
+	msgs := reporter.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 enqueued message, got %d", len(msgs))
+	}
+	if msgs[0].Role != "assistant" {
+		t.Fatalf("role = %q, want assistant", msgs[0].Role)
+	}
+	if msgs[0].Content != "assistant response" {
+		t.Fatalf("content = %q, want 'assistant response'", msgs[0].Content)
+	}
+	if msgs[0].MessageID == "" {
+		t.Fatal("expected non-empty messageId")
+	}
+}
+
+func TestSessionUpdate_EnqueueError_NonBlocking(t *testing.T) {
+	t.Parallel()
+
+	reporter := &mockMessageReporter{
+		errOnce: fmt.Errorf("outbox full"),
+	}
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:       "test-session",
+			WorkspaceID:     "test-workspace",
+			MessageReporter: reporter,
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	client := &sessionHostClient{host: host}
+
+	notif := acpsdk.SessionNotification{
+		SessionId: "acp-sess",
+		Update: acpsdk.SessionUpdate{
+			UserMessageChunk: &acpsdk.SessionUpdateUserMessageChunk{
+				Content: acpsdk.ContentBlock{
+					Text: &acpsdk.ContentBlockText{Text: "user msg"},
+				},
+			},
+		},
+	}
+
+	// SessionUpdate should return nil even if Enqueue fails.
+	if err := client.SessionUpdate(context.Background(), notif); err != nil {
+		t.Fatalf("SessionUpdate should not fail on Enqueue error: %v", err)
+	}
+
+	// Broadcast should still have worked.
+	host.bufMu.RLock()
+	bufLen := len(host.messageBuf)
+	host.bufMu.RUnlock()
+	if bufLen != 1 {
+		t.Fatalf("expected broadcast to still work, got %d buffered messages", bufLen)
+	}
+}
+
+func TestSessionUpdate_EmptyUpdate_NoEnqueue(t *testing.T) {
+	t.Parallel()
+
+	reporter := &mockMessageReporter{}
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:       "test-session",
+			WorkspaceID:     "test-workspace",
+			MessageReporter: reporter,
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	client := &sessionHostClient{host: host}
+
+	// Send an update type that ExtractMessages ignores (AgentThoughtChunk).
+	// Note: ACP SDK's SessionUpdate requires at least one union field to be
+	// set for MarshalJSON to succeed, so we can't use a truly empty update.
+	notif := acpsdk.SessionNotification{
+		SessionId: "acp-sess",
+		Update: acpsdk.SessionUpdate{
+			AgentThoughtChunk: &acpsdk.SessionUpdateAgentThoughtChunk{
+				Content: acpsdk.ContentBlock{
+					Text: &acpsdk.ContentBlockText{Text: "thinking..."},
+				},
+			},
+		},
+	}
+
+	if err := client.SessionUpdate(context.Background(), notif); err != nil {
+		t.Fatalf("SessionUpdate: %v", err)
+	}
+
+	msgs := reporter.Messages()
+	if len(msgs) != 0 {
+		t.Fatalf("expected 0 enqueued messages for empty update, got %d", len(msgs))
 	}
 }
 

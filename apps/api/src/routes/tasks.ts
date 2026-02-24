@@ -45,6 +45,7 @@ import {
 } from '../services/task-graph';
 import { getRuntimeLimits } from '../services/limits';
 import { verifyCallbackToken } from '../services/jwt';
+import { cleanupTaskRun } from '../services/task-runner';
 import * as projectDataService from '../services/project-data';
 
 const tasksRoutes = new Hono<{ Bindings: Env }>();
@@ -612,6 +613,24 @@ tasksRoutes.post('/:taskId/status', async (c) => {
     ).catch(() => { /* best-effort */ })
   );
 
+  // On terminal states, stop the chat session (best-effort).
+  if (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled') {
+    if (updatedTask.workspaceId && updatedTask.projectId) {
+      c.executionCtx.waitUntil(
+        (async () => {
+          const [ws] = await db
+            .select({ chatSessionId: schema.workspaces.chatSessionId })
+            .from(schema.workspaces)
+            .where(eq(schema.workspaces.id, updatedTask.workspaceId!))
+            .limit(1);
+          if (ws?.chatSessionId) {
+            await projectDataService.stopSession(c.env, updatedTask.projectId, ws.chatSessionId);
+          }
+        })().catch(() => { /* best-effort */ })
+      );
+    }
+  }
+
   const nextBlocked = await computeBlockedForTask(db, updatedTask.id);
   return c.json(toTaskResponse(updatedTask, nextBlocked));
 });
@@ -670,6 +689,34 @@ tasksRoutes.post('/:taskId/status/callback', async (c) => {
       task.workspaceId, null, taskId, { title: task.title, fromStatus: task.status, toStatus: body.toStatus }
     ).catch(() => { /* best-effort */ })
   );
+
+  // On terminal states, stop the chat session and handle workspace cleanup.
+  if (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled') {
+    // Stop the chat session in ProjectData DO (best-effort).
+    // chatSessionId lives on the workspace, not the task — look it up.
+    if (updatedTask.workspaceId && updatedTask.projectId) {
+      c.executionCtx.waitUntil(
+        (async () => {
+          const [ws] = await db
+            .select({ chatSessionId: schema.workspaces.chatSessionId })
+            .from(schema.workspaces)
+            .where(eq(schema.workspaces.id, updatedTask.workspaceId!))
+            .limit(1);
+          if (ws?.chatSessionId) {
+            await projectDataService.stopSession(c.env, updatedTask.projectId, ws.chatSessionId);
+          }
+        })().catch(() => { /* best-effort */ })
+      );
+    }
+
+    // On clean completion, auto-trigger workspace cleanup (destroy workspace + optionally node).
+    // On failure/cancellation, keep workspace alive for debugging.
+    if (body.toStatus === 'completed') {
+      c.executionCtx.waitUntil(
+        cleanupTaskRun(taskId, c.env).catch(() => { /* best-effort */ })
+      );
+    }
+  }
 
   const blocked = await computeBlockedForTask(db, updatedTask.id);
   return c.json(toTaskResponse(updatedTask, blocked));

@@ -53,6 +53,9 @@ runcmd:
     Environment=CONTROL_PLANE_URL={{ control_plane_url }}
     Environment=JWKS_ENDPOINT={{ jwks_url }}
     Environment=CALLBACK_TOKEN={{ callback_token }}
+    Environment=PROJECT_ID={{ project_id }}
+    Environment=CHAT_SESSION_ID={{ chat_session_id }}
+    Environment=TASK_ID={{ task_id }}
     ExecStart=/usr/local/bin/vm-agent
     Restart=always
     RestartSec=5

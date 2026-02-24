@@ -60,6 +60,25 @@ type SessionLastPromptUpdater interface {
 	UpdateLastPrompt(workspaceID, sessionID, lastPrompt string) error
 }
 
+// MessageReporter enqueues chat messages for batched delivery to the control plane.
+// All methods must be nil-safe (a nil reporter is a no-op).
+type MessageReporter interface {
+	// Enqueue adds a message to the outbox for eventual HTTP delivery.
+	Enqueue(msg MessageReportEntry) error
+}
+
+// MessageReportEntry is the data needed to enqueue a chat message.
+// It mirrors messagereport.Message but lives in the acp package to avoid
+// circular imports.
+type MessageReportEntry struct {
+	MessageID    string
+	SessionID    string
+	Role         string
+	Content      string
+	ToolMetadata string
+	Timestamp    string
+}
+
 // GatewayConfig holds configuration for the ACP gateway and SessionHost.
 type GatewayConfig struct {
 	// InitTimeoutMs is the ACP initialization timeout in milliseconds.
@@ -126,6 +145,13 @@ type GatewayConfig struct {
 	// OnSuspend is called when auto-suspend triggers. The server uses this to
 	// update the agent session status and remove the SessionHost from the map.
 	OnSuspend func(workspaceID, sessionID string)
+	// MessageReporter enqueues chat messages for batched delivery to the
+	// control plane. When nil, message persistence is a no-op.
+	MessageReporter MessageReporter
+	// OnPromptComplete is called after a prompt finishes (success or failure).
+	// Used by task-driven workspaces to report completion back to the control plane.
+	// When nil, no callback fires. The string arg is the stop reason (e.g. "end_turn", "error").
+	OnPromptComplete func(stopReason string, promptErr error)
 }
 
 // Gateway is a thin per-WebSocket relay between a browser and a SessionHost.

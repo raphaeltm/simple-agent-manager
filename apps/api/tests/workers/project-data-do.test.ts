@@ -87,6 +87,242 @@ describe('ProjectData Durable Object', () => {
   });
 
   // =========================================================================
+  // Session with taskId
+  // =========================================================================
+
+  describe('session with taskId', () => {
+    it('creates a session with taskId and returns it', async () => {
+      const stub = getStub('project-taskid-test');
+      const sessionId = await stub.createSession(null, 'Task session', 'task-abc-123');
+
+      const session = await stub.getSession(sessionId);
+      expect(session).not.toBeNull();
+      expect(session!.taskId).toBe('task-abc-123');
+      expect(session!.topic).toBe('Task session');
+      expect(session!.status).toBe('active');
+    });
+
+    it('creates a session without taskId (null by default)', async () => {
+      const stub = getStub('project-no-taskid');
+      const sessionId = await stub.createSession('ws-111', 'No task');
+
+      const session = await stub.getSession(sessionId);
+      expect(session).not.toBeNull();
+      expect(session!.taskId).toBeNull();
+    });
+
+    it('creates a session with explicit null taskId', async () => {
+      const stub = getStub('project-explicit-null-taskid');
+      const sessionId = await stub.createSession('ws-222', 'Explicit null', null);
+
+      const session = await stub.getSession(sessionId);
+      expect(session).not.toBeNull();
+      expect(session!.taskId).toBeNull();
+    });
+
+    it('filters sessions by taskId', async () => {
+      const stub = getStub('project-filter-taskid');
+      await stub.createSession(null, 'Task A session', 'task-aaa');
+      await stub.createSession(null, 'Task B session', 'task-bbb');
+      await stub.createSession(null, 'No task session');
+
+      const { sessions: taskA, total: totalA } = await stub.listSessions(null, 20, 0, 'task-aaa');
+      expect(totalA).toBe(1);
+      expect(taskA).toHaveLength(1);
+      expect(taskA[0]!.taskId).toBe('task-aaa');
+
+      const { sessions: taskB, total: totalB } = await stub.listSessions(null, 20, 0, 'task-bbb');
+      expect(totalB).toBe(1);
+      expect(taskB).toHaveLength(1);
+      expect(taskB[0]!.taskId).toBe('task-bbb');
+    });
+
+    it('filters sessions by both status and taskId', async () => {
+      const stub = getStub('project-filter-status-taskid');
+      const s1 = await stub.createSession(null, 'Active task', 'task-combo');
+      const s2 = await stub.createSession(null, 'Stopped task', 'task-combo');
+      await stub.stopSession(s2);
+
+      const { sessions: activeTaskCombo, total } = await stub.listSessions('active', 20, 0, 'task-combo');
+      expect(total).toBe(1);
+      expect(activeTaskCombo).toHaveLength(1);
+      expect(activeTaskCombo[0]!.id).toBe(s1);
+      expect(activeTaskCombo[0]!.taskId).toBe('task-combo');
+    });
+
+    it('returns empty when filtering by non-existent taskId', async () => {
+      const stub = getStub('project-no-match-taskid');
+      await stub.createSession(null, 'Some session', 'task-exists');
+
+      const { sessions, total } = await stub.listSessions(null, 20, 0, 'task-does-not-exist');
+      expect(total).toBe(0);
+      expect(sessions).toHaveLength(0);
+    });
+  });
+
+  // =========================================================================
+  // Batch Message Persistence
+  // =========================================================================
+
+  describe('batch message persistence', () => {
+    it('persists a batch of messages', async () => {
+      const stub = getStub('project-batch-basic');
+      const sessionId = await stub.createSession(null, null);
+
+      const messages = [
+        { messageId: crypto.randomUUID(), role: 'user', content: 'Hello', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Hi there', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: crypto.randomUUID(), role: 'user', content: 'How are you?', toolMetadata: null, timestamp: new Date().toISOString() },
+      ];
+
+      const result = await stub.persistMessageBatch(sessionId, messages);
+      expect(result.persisted).toBe(3);
+      expect(result.duplicates).toBe(0);
+
+      const { messages: stored } = await stub.getMessages(sessionId);
+      expect(stored).toHaveLength(3);
+    });
+
+    it('deduplicates messages by messageId', async () => {
+      const stub = getStub('project-batch-dedup');
+      const sessionId = await stub.createSession(null, null);
+      const sharedId = crypto.randomUUID();
+
+      // First batch with a unique messageId
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: sharedId, role: 'user', content: 'Original', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      // Second batch with the same messageId + a new one
+      const newId = crypto.randomUUID();
+      const result = await stub.persistMessageBatch(sessionId, [
+        { messageId: sharedId, role: 'user', content: 'Duplicate attempt', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: newId, role: 'assistant', content: 'New message', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      expect(result.persisted).toBe(1);
+      expect(result.duplicates).toBe(1);
+
+      // Verify original content preserved (not overwritten)
+      const { messages: stored } = await stub.getMessages(sessionId);
+      expect(stored).toHaveLength(2);
+      const original = stored.find((m) => m.id === sharedId);
+      expect(original!.content).toBe('Original');
+    });
+
+    it('increments message_count by persisted count only', async () => {
+      const stub = getStub('project-batch-count');
+      const sessionId = await stub.createSession(null, null);
+      const id1 = crypto.randomUUID();
+
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: id1, role: 'user', content: 'First', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Second', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      let session = await stub.getSession(sessionId);
+      expect(session!.messageCount).toBe(2);
+
+      // Batch with 1 duplicate and 1 new
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: id1, role: 'user', content: 'Dup', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: crypto.randomUUID(), role: 'user', content: 'Third', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      session = await stub.getSession(sessionId);
+      expect(session!.messageCount).toBe(3); // Only 1 new, not 2
+    });
+
+    it('auto-captures topic from first user message if not set', async () => {
+      const stub = getStub('project-batch-topic');
+      const sessionId = await stub.createSession(null, null);
+
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: crypto.randomUUID(), role: 'assistant', content: 'System init', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: crypto.randomUUID(), role: 'user', content: 'Deploy my app to staging', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      const session = await stub.getSession(sessionId);
+      expect(session!.topic).toBe('Deploy my app to staging');
+    });
+
+    it('does not overwrite existing topic', async () => {
+      const stub = getStub('project-batch-keep-topic');
+      const sessionId = await stub.createSession(null, 'Existing topic');
+
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: crypto.randomUUID(), role: 'user', content: 'New content', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      const session = await stub.getSession(sessionId);
+      expect(session!.topic).toBe('Existing topic');
+    });
+
+    it('stores tool metadata as JSON', async () => {
+      const stub = getStub('project-batch-toolmeta');
+      const sessionId = await stub.createSession(null, null);
+      const msgId = crypto.randomUUID();
+      const toolMeta = JSON.stringify({ tool: 'bash', target: 'ls -la', status: 'success' });
+
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: msgId, role: 'assistant', content: 'Running command', toolMetadata: toolMeta, timestamp: new Date().toISOString() },
+      ]);
+
+      const { messages } = await stub.getMessages(sessionId);
+      expect(messages).toHaveLength(1);
+      expect(messages[0]!.toolMetadata).toEqual({ tool: 'bash', target: 'ls -la', status: 'success' });
+    });
+
+    it('throws for non-existent session', async () => {
+      const stub = getStub('project-batch-nosession');
+
+      await expect(
+        stub.persistMessageBatch('non-existent-session', [
+          { messageId: crypto.randomUUID(), role: 'user', content: 'Hello', toolMetadata: null, timestamp: new Date().toISOString() },
+        ])
+      ).rejects.toThrow(/not found/i);
+    });
+
+    it('handles empty batch gracefully', async () => {
+      const stub = getStub('project-batch-empty');
+      const sessionId = await stub.createSession(null, null);
+
+      const result = await stub.persistMessageBatch(sessionId, []);
+      expect(result.persisted).toBe(0);
+      expect(result.duplicates).toBe(0);
+
+      const session = await stub.getSession(sessionId);
+      expect(session!.messageCount).toBe(0);
+    });
+
+    it('all-duplicate batch does not update session timestamp', async () => {
+      const stub = getStub('project-batch-all-dup');
+      const sessionId = await stub.createSession(null, null);
+      const msgId = crypto.randomUUID();
+
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: msgId, role: 'user', content: 'Original', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      const sessionBefore = await stub.getSession(sessionId);
+
+      // Small delay to ensure timestamps differ
+      await new Promise((r) => setTimeout(r, 10));
+
+      const result = await stub.persistMessageBatch(sessionId, [
+        { messageId: msgId, role: 'user', content: 'Duplicate', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      expect(result.persisted).toBe(0);
+      expect(result.duplicates).toBe(1);
+
+      // message_count should not have changed
+      const sessionAfter = await stub.getSession(sessionId);
+      expect(sessionAfter!.messageCount).toBe(sessionBefore!.messageCount);
+    });
+  });
+
+  // =========================================================================
   // Session Limits
   // =========================================================================
 
@@ -451,6 +687,146 @@ describe('ProjectData Durable Object', () => {
         null
       );
       expect(eventId).toBeTruthy();
+    });
+  });
+
+  // =========================================================================
+  // VM Agent Message Persistence Flow (Integration — T027)
+  // =========================================================================
+
+  describe('VM agent message persistence flow', () => {
+    it('full round-trip: session with taskId → batch persist → retrieve with metadata', async () => {
+      const stub = getStub('project-agent-flow-roundtrip');
+
+      // 1. Create session with taskId (simulates workspace creation hook)
+      const sessionId = await stub.createSession('ws-agent-1', null, 'task-run-42');
+      expect(sessionId).toBeTruthy();
+
+      const session = await stub.getSession(sessionId);
+      expect(session!.taskId).toBe('task-run-42');
+      expect(session!.workspaceId).toBe('ws-agent-1');
+      expect(session!.status).toBe('active');
+      expect(session!.messageCount).toBe(0);
+
+      // 2. First batch from reporter: user prompt + assistant response
+      const batch1 = [
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Fix the login bug in auth.ts',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'I\'ll investigate the authentication flow in auth.ts.',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      const result1 = await stub.persistMessageBatch(sessionId, batch1);
+      expect(result1.persisted).toBe(2);
+      expect(result1.duplicates).toBe(0);
+
+      // 3. Second batch: tool calls with metadata (the format Go reporter sends)
+      const toolMeta = JSON.stringify({
+        kind: 'tool_call',
+        status: 'completed',
+        locations: [{ path: 'src/auth.ts', line: 42 }],
+      });
+      const batch2 = [
+        {
+          messageId: crypto.randomUUID(),
+          role: 'tool',
+          content: 'Read file: src/auth.ts',
+          toolMetadata: toolMeta,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Found the bug — the token validation was missing.',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      const result2 = await stub.persistMessageBatch(sessionId, batch2);
+      expect(result2.persisted).toBe(2);
+
+      // 4. Verify all messages retrievable with correct content
+      const { messages } = await stub.getMessages(sessionId);
+      expect(messages).toHaveLength(4);
+
+      const userMsg = messages.find((m) => m.role === 'user');
+      expect(userMsg!.content).toBe('Fix the login bug in auth.ts');
+
+      const toolMsg = messages.find((m) => m.role === 'tool');
+      expect(toolMsg!.content).toBe('Read file: src/auth.ts');
+      expect(toolMsg!.toolMetadata).toEqual({
+        kind: 'tool_call',
+        status: 'completed',
+        locations: [{ path: 'src/auth.ts', line: 42 }],
+      });
+
+      // 5. Verify session counts and auto-topic
+      const updated = await stub.getSession(sessionId);
+      expect(updated!.messageCount).toBe(4);
+      expect(updated!.topic).toBe('Fix the login bug in auth.ts');
+    });
+
+    it('handles duplicate messages across batches (crash recovery)', async () => {
+      const stub = getStub('project-agent-flow-recovery');
+      const sessionId = await stub.createSession('ws-recovery', null);
+
+      const msgId1 = crypto.randomUUID();
+      const msgId2 = crypto.randomUUID();
+      const msgId3 = crypto.randomUUID();
+
+      // First batch: 2 messages
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: msgId1, role: 'user', content: 'Hello', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: msgId2, role: 'assistant', content: 'Hi', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      // Simulated crash recovery: reporter re-sends msgId2 (already persisted) + new msgId3
+      const result = await stub.persistMessageBatch(sessionId, [
+        { messageId: msgId2, role: 'assistant', content: 'Hi', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: msgId3, role: 'user', content: 'Thanks', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      expect(result.persisted).toBe(1);
+      expect(result.duplicates).toBe(1);
+
+      const session = await stub.getSession(sessionId);
+      expect(session!.messageCount).toBe(3); // 2 original + 1 new
+
+      const { messages } = await stub.getMessages(sessionId);
+      expect(messages).toHaveLength(3);
+    });
+
+    it('session stop preserves messages for retrieval', async () => {
+      const stub = getStub('project-agent-flow-stop');
+      const sessionId = await stub.createSession('ws-stop', null, 'task-stop');
+
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: crypto.randomUUID(), role: 'user', content: 'Build the project', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Building...', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      // Stop session (simulates workspace destruction)
+      await stub.stopSession(sessionId);
+
+      const session = await stub.getSession(sessionId);
+      expect(session!.status).toBe('stopped');
+      expect(session!.messageCount).toBe(2);
+
+      // Messages still retrievable after stop
+      const { messages } = await stub.getMessages(sessionId);
+      expect(messages).toHaveLength(2);
+      expect(messages.find((m) => m.role === 'user')!.content).toBe('Build the project');
     });
   });
 });

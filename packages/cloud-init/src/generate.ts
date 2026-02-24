@@ -15,6 +15,12 @@ export interface CloudInitVariables {
   logJournalKeepFree?: string;
   /** journald MaxRetentionSec (default: 7day) */
   logJournalMaxRetention?: string;
+  /** Project ID for message persistence (nullable — omitted for standalone workspaces) */
+  projectId?: string;
+  /** Pre-created chat session ID (nullable — omitted for standalone workspaces) */
+  chatSessionId?: string;
+  /** Task ID for task-driven workspaces (nullable — omitted for interactive workspaces) */
+  taskId?: string;
 }
 
 /**
@@ -32,6 +38,9 @@ export function generateCloudInit(variables: CloudInitVariables): string {
     '{{ log_journal_max_use }}': variables.logJournalMaxUse ?? '500M',
     '{{ log_journal_keep_free }}': variables.logJournalKeepFree ?? '1G',
     '{{ log_journal_max_retention }}': variables.logJournalMaxRetention ?? '7day',
+    '{{ project_id }}': variables.projectId ?? '',
+    '{{ chat_session_id }}': variables.chatSessionId ?? '',
+    '{{ task_id }}': variables.taskId ?? '',
     '{{ docker_name_tag }}': '{{.Name}}',
   };
 

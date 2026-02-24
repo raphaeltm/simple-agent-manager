@@ -10,12 +10,18 @@ import type { Env } from '../index';
 import type { ProjectData } from '../durable-objects/project-data';
 
 /**
- * Get a typed DO stub for the given project.
+ * Get a typed DO stub for the given project and ensure the DO knows its projectId.
  * Uses `idFromName(projectId)` for deterministic mapping.
+ *
+ * `ensureProjectId` stores the projectId in DO SQLite so that internal methods
+ * like `syncSummaryToD1` can reference the correct D1 row. This is necessary
+ * because `DurableObjectId.toString()` returns a hex ID, not the original name.
  */
-function getStub(env: Env, projectId: string): DurableObjectStub<ProjectData> {
+async function getStub(env: Env, projectId: string): Promise<DurableObjectStub<ProjectData>> {
   const id = env.PROJECT_DATA.idFromName(projectId);
-  return env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectData>;
+  const stub = env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectData>;
+  await stub.ensureProjectId(projectId);
+  return stub;
 }
 
 // =========================================================================
@@ -26,10 +32,11 @@ export async function createSession(
   env: Env,
   projectId: string,
   workspaceId: string | null,
-  topic: string | null
+  topic: string | null,
+  taskId: string | null = null
 ): Promise<string> {
-  const stub = getStub(env, projectId);
-  return stub.createSession(workspaceId, topic);
+  const stub = await getStub(env, projectId);
+  return stub.createSession(workspaceId, topic, taskId);
 }
 
 export async function stopSession(
@@ -37,7 +44,7 @@ export async function stopSession(
   projectId: string,
   sessionId: string
 ): Promise<void> {
-  const stub = getStub(env, projectId);
+  const stub = await getStub(env, projectId);
   return stub.stopSession(sessionId);
 }
 
@@ -49,7 +56,7 @@ export async function persistMessage(
   content: string,
   toolMetadata: Record<string, unknown> | null
 ): Promise<string> {
-  const stub = getStub(env, projectId);
+  const stub = await getStub(env, projectId);
   return stub.persistMessage(
     sessionId,
     role,
@@ -58,15 +65,41 @@ export async function persistMessage(
   );
 }
 
+export async function persistMessageBatch(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  messages: Array<{
+    messageId: string;
+    role: string;
+    content: string;
+    toolMetadata: Record<string, unknown> | null;
+    timestamp: string;
+  }>
+): Promise<{ persisted: number; duplicates: number }> {
+  const stub = await getStub(env, projectId);
+  return stub.persistMessageBatch(
+    sessionId,
+    messages.map((m) => ({
+      messageId: m.messageId,
+      role: m.role,
+      content: m.content,
+      toolMetadata: m.toolMetadata ? JSON.stringify(m.toolMetadata) : null,
+      timestamp: m.timestamp,
+    }))
+  );
+}
+
 export async function listSessions(
   env: Env,
   projectId: string,
   status: string | null = null,
   limit: number = 20,
-  offset: number = 0
+  offset: number = 0,
+  taskId: string | null = null
 ): Promise<{ sessions: Record<string, unknown>[]; total: number }> {
-  const stub = getStub(env, projectId);
-  return stub.listSessions(status, limit, offset);
+  const stub = await getStub(env, projectId);
+  return stub.listSessions(status, limit, offset, taskId);
 }
 
 export async function getSession(
@@ -74,7 +107,7 @@ export async function getSession(
   projectId: string,
   sessionId: string
 ): Promise<Record<string, unknown> | null> {
-  const stub = getStub(env, projectId);
+  const stub = await getStub(env, projectId);
   return stub.getSession(sessionId);
 }
 
@@ -85,7 +118,7 @@ export async function getMessages(
   limit: number = 100,
   before: number | null = null
 ): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
-  const stub = getStub(env, projectId);
+  const stub = await getStub(env, projectId);
   return stub.getMessages(sessionId, limit, before);
 }
 
@@ -104,7 +137,7 @@ export async function recordActivityEvent(
   taskId: string | null,
   payload: Record<string, unknown> | null
 ): Promise<string> {
-  const stub = getStub(env, projectId);
+  const stub = await getStub(env, projectId);
   return stub.recordActivityEvent(
     eventType,
     actorType,
@@ -123,7 +156,7 @@ export async function listActivityEvents(
   limit: number = 50,
   before: number | null = null
 ): Promise<{ events: Record<string, unknown>[]; hasMore: boolean }> {
-  const stub = getStub(env, projectId);
+  const stub = await getStub(env, projectId);
   return stub.listActivityEvents(eventType, limit, before);
 }
 
@@ -135,7 +168,7 @@ export async function getSummary(
   env: Env,
   projectId: string
 ): Promise<{ lastActivityAt: string; activeSessionCount: number }> {
-  const stub = getStub(env, projectId);
+  const stub = await getStub(env, projectId);
   return stub.getSummary();
 }
 
@@ -152,7 +185,7 @@ export async function forwardWebSocket(
   projectId: string,
   request: Request
 ): Promise<Response> {
-  const stub = getStub(env, projectId);
+  const stub = await getStub(env, projectId);
   const url = new URL(request.url);
   url.pathname = '/ws';
   return stub.fetch(new Request(url.toString(), request));

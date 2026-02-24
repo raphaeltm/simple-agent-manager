@@ -55,7 +55,8 @@ workspacesRoutes.use('/*', async (c, next) => {
     path.endsWith('/runtime-assets') ||
     path.endsWith('/git-token') ||
     path.endsWith('/boot-log') ||
-    path.endsWith('/provisioning-failed')
+    path.endsWith('/provisioning-failed') ||
+    path.endsWith('/messages')
   ) {
     return next();
   }
@@ -524,6 +525,25 @@ workspacesRoutes.post('/', async (c) => {
     createdAt: now,
     updatedAt: now,
   });
+
+  // Create chat session in ProjectData DO when workspace is linked to a project
+  if (linkedProject) {
+    try {
+      const chatSessionId = await projectDataService.createSession(
+        c.env,
+        linkedProject.id,
+        workspaceId,
+        workspaceName
+      );
+      await db
+        .update(schema.workspaces)
+        .set({ chatSessionId, updatedAt: now })
+        .where(eq(schema.workspaces.id, workspaceId));
+    } catch (err) {
+      // Best-effort: session creation failure should not block workspace creation
+      console.error('Failed to create chat session for workspace:', err);
+    }
+  }
 
   const nodeCountForUser = userNodeCountVal + (mustProvisionNode ? 1 : 0);
   const workspaceCountForUser = (userWorkspaceCount?.count ?? 0) + 1;
@@ -1324,6 +1344,7 @@ workspacesRoutes.get('/:id/runtime', async (c) => {
       repository: schema.workspaces.repository,
       branch: schema.workspaces.branch,
       projectId: schema.workspaces.projectId,
+      chatSessionId: schema.workspaces.chatSessionId,
       status: schema.workspaces.status,
       nodeId: schema.workspaces.nodeId,
     })
@@ -1341,6 +1362,7 @@ workspacesRoutes.get('/:id/runtime', async (c) => {
     repository: workspace.repository,
     branch: workspace.branch,
     projectId: workspace.projectId,
+    chatSessionId: workspace.chatSessionId,
     status: workspace.status,
     nodeId: workspace.nodeId,
   });
@@ -1405,6 +1427,112 @@ workspacesRoutes.post('/:id/boot-log', async (c) => {
 
   await appendBootLog(c.env.KV, workspaceId, entry, c.env);
   return c.json({ success: true });
+});
+
+/**
+ * POST /:id/messages — VM agent batch message persistence.
+ * Uses workspace callback auth. Accepts 1-100 messages per batch.
+ * All messages must target the same sessionId.
+ */
+workspacesRoutes.post('/:id/messages', async (c) => {
+  const workspaceId = c.req.param('id');
+  await verifyWorkspaceCallbackAuth(c, workspaceId);
+
+  // Payload size check (256KB limit)
+  const contentLength = parseInt(c.req.header('content-length') || '0', 10);
+  const maxPayloadBytes = 256 * 1024;
+  if (contentLength > maxPayloadBytes) {
+    throw errors.badRequest(`Payload exceeds ${maxPayloadBytes} byte limit`);
+  }
+
+  const body = await c.req.json<{
+    messages: Array<{
+      messageId: string;
+      sessionId: string;
+      role: string;
+      content: string;
+      toolMetadata?: { tool: string; target: string; status: string } | null;
+      timestamp: string;
+    }>;
+  }>();
+
+  if (!body.messages || !Array.isArray(body.messages)) {
+    throw errors.badRequest('messages array is required');
+  }
+  if (body.messages.length === 0) {
+    throw errors.badRequest('messages array must not be empty');
+  }
+  if (body.messages.length > 100) {
+    throw errors.badRequest('Maximum 100 messages per batch');
+  }
+
+  const validRoles = new Set(['user', 'assistant', 'system', 'tool']);
+  const maxMessageBytes = c.env.MESSAGE_SIZE_THRESHOLD
+    ? parseInt(c.env.MESSAGE_SIZE_THRESHOLD, 10) : 102400; // 100KB default
+
+  // Validate each message and extract sessionId
+  let sessionId: string | null = null;
+  for (const msg of body.messages) {
+    if (!msg.messageId || typeof msg.messageId !== 'string') {
+      throw errors.badRequest('Each message must have a messageId string');
+    }
+    if (!msg.sessionId || typeof msg.sessionId !== 'string') {
+      throw errors.badRequest('Each message must have a sessionId string');
+    }
+    if (!msg.role || !validRoles.has(msg.role)) {
+      throw errors.badRequest(`Invalid role "${msg.role}". Must be one of: user, assistant, system, tool`);
+    }
+    if (!msg.content || typeof msg.content !== 'string') {
+      throw errors.badRequest('Each message must have non-empty content');
+    }
+    if (msg.content.length > maxMessageBytes) {
+      throw errors.badRequest(`Individual message content exceeds ${maxMessageBytes} byte limit`);
+    }
+    if (!msg.timestamp || typeof msg.timestamp !== 'string') {
+      throw errors.badRequest('Each message must have a timestamp string');
+    }
+
+    if (sessionId === null) {
+      sessionId = msg.sessionId;
+    } else if (msg.sessionId !== sessionId) {
+      throw errors.badRequest('All messages in a batch must target the same sessionId');
+    }
+  }
+
+  // Resolve workspace to project
+  const db = drizzle(c.env.DATABASE, { schema });
+  const workspaceRows = await db
+    .select({ projectId: schema.workspaces.projectId })
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+
+  const workspace = workspaceRows[0];
+  if (!workspace) {
+    throw errors.notFound('Workspace');
+  }
+  if (!workspace.projectId) {
+    throw errors.badRequest('Workspace is not linked to a project');
+  }
+
+  // Delegate to ProjectData DO
+  const result = await projectDataService.persistMessageBatch(
+    c.env,
+    workspace.projectId,
+    sessionId!,
+    body.messages.map((m) => ({
+      messageId: m.messageId,
+      role: m.role,
+      content: m.content,
+      toolMetadata: m.toolMetadata ?? null,
+      timestamp: m.timestamp,
+    }))
+  );
+
+  return c.json({
+    persisted: result.persisted,
+    duplicates: result.duplicates,
+  });
 });
 
 // Legacy compatibility endpoint for node-side bootstrap exchange.

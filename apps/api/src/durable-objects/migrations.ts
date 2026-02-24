@@ -91,6 +91,24 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    name: '002-add-task-id-to-sessions',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE chat_sessions ADD COLUMN task_id TEXT`);
+      sql.exec(`CREATE INDEX idx_chat_sessions_task_id ON chat_sessions(task_id)`);
+    },
+  },
+  {
+    name: '003-add-do-meta',
+    run: (sql) => {
+      sql.exec(`
+        CREATE TABLE do_meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+      `);
+    },
+  },
 ];
 
 /**

@@ -15,7 +15,6 @@ import { errors } from '../middleware/error';
 import * as schema from '../db/schema';
 import * as chatPersistence from '../services/chat-persistence';
 import * as projectDataService from '../services/project-data';
-import type { PersistMessageRequest } from '@simple-agent-manager/shared';
 
 const chatRoutes = new Hono<{ Bindings: Env }>();
 
@@ -127,35 +126,9 @@ chatRoutes.post('/:sessionId/stop', async (c) => {
   return c.json({ status: 'stopped' });
 });
 
-/**
- * POST /api/projects/:projectId/sessions/:sessionId/messages
- * Persist a message to a chat session.
- */
-chatRoutes.post('/:sessionId/messages', async (c) => {
-  const userId = getUserId(c);
-  const projectId = requireRouteParam(c, 'projectId');
-  const sessionId = requireRouteParam(c, 'sessionId');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  await requireOwnedProject(db, projectId, userId);
-
-  const body = await c.req.json<PersistMessageRequest>();
-
-  if (!body.role || !body.content) {
-    throw errors.badRequest('role and content are required');
-  }
-
-  const messageId = await chatPersistence.persistMessage(
-    c.env,
-    projectId,
-    sessionId,
-    body.role,
-    body.content,
-    body.toolMetadata || null
-  );
-
-  return c.json({ id: messageId }, 201);
-});
+// Browser-side POST /:sessionId/messages route removed — messages are now
+// persisted exclusively by the VM agent via POST /api/workspaces/:id/messages.
+// See: specs/021-task-chat-architecture (US1 — Agent-Side Chat Persistence).
 
 /**
  * GET /api/projects/:projectId/sessions/ws

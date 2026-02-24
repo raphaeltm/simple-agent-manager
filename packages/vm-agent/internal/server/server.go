@@ -2,9 +2,13 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
 	"embed"
+	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -21,6 +25,7 @@ import (
 	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/errorreport"
 	"github.com/workspace/vm-agent/internal/logreader"
+	"github.com/workspace/vm-agent/internal/messagereport"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/pty"
 	"github.com/workspace/vm-agent/internal/sysinfo"
@@ -48,6 +53,7 @@ type Server struct {
 	sessionHosts        map[string]*acp.SessionHost
 	store               *persistence.Store
 	errorReporter       *errorreport.Reporter
+	messageReporter     *messagereport.Reporter
 	worktreeCacheMu     sync.RWMutex
 	worktreeCache       map[string]cachedWorktreeList
 	logReader           *logreader.Reader
@@ -182,6 +188,49 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("open persistence store: %w", err)
 	}
 
+	// Create message reporter for chat message persistence (project-linked workspaces only).
+	// Opens a separate SQLite connection to the same DB file used by the persistence store.
+	// Returns nil if ProjectID or ChatSessionID is empty (intentional no-op).
+	msgReporterCfg := messagereport.LoadConfigFromEnv()
+	msgReporterCfg.ProjectID = cfg.ProjectID
+	msgReporterCfg.SessionID = cfg.ChatSessionID
+	msgReporterCfg.WorkspaceID = defaultWorkspaceScope(cfg.WorkspaceID, cfg.NodeID)
+	msgReporterCfg.Endpoint = cfg.ControlPlaneURL
+
+	var msgReporter *messagereport.Reporter
+	if cfg.ProjectID != "" && cfg.ChatSessionID != "" {
+		msgDB, dbErr := openSQLiteDB(cfg.PersistenceDBPath)
+		if dbErr != nil {
+			slog.Warn("Failed to open message reporter DB; chat persistence disabled", "error", dbErr)
+		} else {
+			r, rErr := messagereport.New(msgDB, msgReporterCfg)
+			if rErr != nil {
+				slog.Warn("Failed to create message reporter; chat persistence disabled", "error", rErr)
+				msgDB.Close()
+			} else {
+				msgReporter = r
+				slog.Info("Message reporter enabled", "projectId", cfg.ProjectID, "sessionId", cfg.ChatSessionID)
+			}
+		}
+	}
+
+	// Set message reporter on ACP gateway config so all SessionHosts inherit it.
+	// Wrap in an adapter since the acp package uses MessageReportEntry (to avoid
+	// circular imports) while messagereport uses its own Message type.
+	if msgReporter != nil {
+		acpGatewayConfig.MessageReporter = &messageReporterAdapter{r: msgReporter}
+	}
+
+	// Wire task completion callback for task-driven workspaces.
+	// When TaskID is set, the VM agent POSTs to the task status callback endpoint
+	// after the ACP prompt completes.
+	if cfg.TaskID != "" && cfg.ProjectID != "" {
+		acpGatewayConfig.OnPromptComplete = makeTaskCompletionCallback(
+			cfg.ControlPlaneURL, cfg.ProjectID, cfg.TaskID, &acpGatewayConfig,
+		)
+		slog.Info("Task completion callback enabled", "taskId", cfg.TaskID, "projectId", cfg.ProjectID)
+	}
+
 	// Create system info collector for metrics and version reporting.
 	sysInfoCollector := sysinfo.NewCollector(sysinfo.CollectorConfig{
 		DockerTimeout:  cfg.SysInfoDockerTimeout,
@@ -203,6 +252,7 @@ func New(cfg *config.Config) (*Server, error) {
 		sessionHosts:       make(map[string]*acp.SessionHost),
 		store:              store,
 		errorReporter:      errorReporter,
+		messageReporter:    msgReporter,
 		worktreeCache:      make(map[string]cachedWorktreeList),
 		logReader:           logreader.NewReaderWithTimeout(cfg.LogReaderTimeout),
 		bootLogBroadcasters: NewBootLogBroadcasterManager(),
@@ -280,6 +330,11 @@ func (s *Server) GetBootLogBroadcasterForWorkspace(workspaceID string) *BootLogB
 func (s *Server) UpdateAfterBootstrap(cfg *config.Config) {
 	// Propagate callback token to error reporter.
 	s.errorReporter.SetToken(cfg.CallbackToken)
+
+	// Propagate callback token to message reporter (nil-safe).
+	if s.messageReporter != nil {
+		s.messageReporter.SetToken(cfg.CallbackToken)
+	}
 
 	// Update ACP gateway config with the callback token.
 	s.acpConfig.CallbackToken = cfg.CallbackToken
@@ -367,6 +422,11 @@ func (s *Server) Stop(ctx context.Context) error {
 
 	// Flush and stop error reporter
 	s.errorReporter.Shutdown()
+
+	// Flush and stop message reporter (nil-safe)
+	if s.messageReporter != nil {
+		s.messageReporter.Shutdown()
+	}
 
 	// Close persistence store
 	if s.store != nil {
@@ -484,4 +544,114 @@ func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// messageReporterAdapter bridges acp.MessageReporter (which uses
+// acp.MessageReportEntry) to messagereport.Reporter (which uses
+// messagereport.Message). This adapter exists to avoid circular imports
+// between the acp and messagereport packages.
+type messageReporterAdapter struct {
+	r *messagereport.Reporter
+}
+
+func (a *messageReporterAdapter) Enqueue(entry acp.MessageReportEntry) error {
+	return a.r.Enqueue(messagereport.Message{
+		MessageID:    entry.MessageID,
+		SessionID:    entry.SessionID,
+		Role:         entry.Role,
+		Content:      entry.Content,
+		ToolMetadata: entry.ToolMetadata,
+		Timestamp:    entry.Timestamp,
+	})
+}
+
+// makeTaskCompletionCallback returns an OnPromptComplete callback that POSTs
+// the task status to the control plane. It maps ACP stop reasons to task statuses:
+//   - "end_turn" → completed
+//   - "error" or prompt failure → failed
+//
+// The callback reads CallbackToken from the GatewayConfig pointer so it picks
+// up the token set after bootstrap.
+func makeTaskCompletionCallback(
+	controlPlaneURL, projectID, taskID string,
+	gwCfg *acp.GatewayConfig,
+) func(stopReason string, promptErr error) {
+	callbackURL := fmt.Sprintf("%s/api/projects/%s/tasks/%s/status/callback",
+		strings.TrimRight(controlPlaneURL, "/"), projectID, taskID)
+
+	return func(stopReason string, promptErr error) {
+		toStatus := "completed"
+		reason := "Agent prompt completed"
+		errorMessage := ""
+
+		if promptErr != nil || stopReason == "error" {
+			toStatus = "failed"
+			reason = "Agent prompt failed"
+			if promptErr != nil {
+				errorMessage = promptErr.Error()
+			}
+		}
+
+		body := map[string]string{
+			"toStatus": toStatus,
+			"reason":   reason,
+		}
+		if errorMessage != "" {
+			body["errorMessage"] = errorMessage
+		}
+
+		payload, err := json.Marshal(body)
+		if err != nil {
+			slog.Error("Task completion callback: marshal error", "error", err)
+			return
+		}
+
+		token := gwCfg.CallbackToken
+		if token == "" {
+			slog.Warn("Task completion callback: no callback token available, skipping")
+			return
+		}
+
+		req, err := http.NewRequest("POST", callbackURL, bytes.NewReader(payload))
+		if err != nil {
+			slog.Error("Task completion callback: request creation error", "error", err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			slog.Error("Task completion callback: request failed", "error", err, "url", callbackURL)
+			return
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			slog.Info("Task completion callback sent", "taskId", taskID, "toStatus", toStatus)
+		} else {
+			slog.Error("Task completion callback: unexpected status", "statusCode", resp.StatusCode, "taskId", taskID)
+		}
+	}
+}
+
+// openSQLiteDB opens a SQLite database connection with WAL mode and
+// appropriate tuning for concurrent access. Used by subsystems that
+// need an independent connection to the shared persistence file.
+func openSQLiteDB(dbPath string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?cache=shared&mode=rwc&_journal_mode=WAL", dbPath))
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("set WAL mode: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("set busy timeout: %w", err)
+	}
+	return db, nil
 }
