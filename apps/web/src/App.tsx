@@ -26,6 +26,7 @@ import { ProjectActivity } from './pages/ProjectActivity';
 import { TaskDetail } from './pages/TaskDetail';
 import { ChatSessionView } from './pages/ChatSessionView';
 import { ProjectChat } from './pages/ProjectChat';
+import { ProjectKanban } from './pages/ProjectKanban';
 import { ProjectCreate } from './pages/ProjectCreate';
 import { Admin } from './pages/Admin';
 
@@ -61,6 +62,7 @@ export default function App() {
               <Route path="overview" element={<ProjectOverview />} />
               <Route path="chat" element={<ProjectChat />} />
               <Route path="chat/:sessionId" element={<ProjectChat />} />
+              <Route path="kanban" element={<ProjectKanban />} />
               <Route path="tasks" element={<ProjectTasks />} />
               <Route path="tasks/:taskId" element={<TaskDetail />} />
               <Route path="sessions" element={<ProjectSessions />} />

@@ -9,6 +9,7 @@ import { ProjectContext } from './ProjectContext';
 const PROJECT_TABS = [
   { id: 'overview', label: 'Overview', path: 'overview' },
   { id: 'chat', label: 'Chat', path: 'chat' },
+  { id: 'kanban', label: 'Kanban', path: 'kanban' },
   { id: 'tasks', label: 'Tasks', path: 'tasks' },
   { id: 'sessions', label: 'Sessions', path: 'sessions' },
   { id: 'settings', label: 'Settings', path: 'settings' },

@@ -3,7 +3,15 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { EmptyState, Spinner } from '@simple-agent-manager/ui';
 import { SessionSidebar } from '../components/chat/SessionSidebar';
 import { ProjectMessageView } from '../components/chat/ProjectMessageView';
-import { listChatSessions } from '../lib/api';
+import { TaskSubmitForm } from '../components/task/TaskSubmitForm';
+import type { TaskSubmitOptions } from '../components/task/TaskSubmitForm';
+import {
+  createProjectTask,
+  listChatSessions,
+  listCredentials,
+  runProjectTask,
+  updateProjectTaskStatus,
+} from '../lib/api';
 import type { ChatSessionResponse } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
@@ -14,6 +22,39 @@ export function ProjectChat() {
 
   const [sessions, setSessions] = useState<ChatSessionResponse[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasCloudCredentials, setHasCloudCredentials] = useState(false);
+
+  // Check for Hetzner credentials
+  useEffect(() => {
+    void listCredentials()
+      .then((creds) => setHasCloudCredentials(creds.some((c) => c.provider === 'hetzner')))
+      .catch(() => setHasCloudCredentials(false));
+  }, []);
+
+  const handleRunNow = async (title: string, options: TaskSubmitOptions) => {
+    // Create task in draft, transition to ready, then run
+    const task = await createProjectTask(projectId, {
+      title,
+      description: options.description,
+      priority: options.priority,
+      agentProfileHint: options.agentProfileHint,
+    });
+    await updateProjectTaskStatus(projectId, task.id, { toStatus: 'ready' });
+    await runProjectTask(projectId, task.id, {
+      vmSize: options.vmSize,
+    });
+    // Reload sessions to pick up new task-runner session
+    void loadSessions();
+  };
+
+  const handleSaveToBacklog = async (title: string, options: TaskSubmitOptions) => {
+    await createProjectTask(projectId, {
+      title,
+      description: options.description,
+      priority: options.priority,
+      agentProfileHint: options.agentProfileHint,
+    });
+  };
 
   const loadSessions = useCallback(async () => {
     try {
@@ -103,20 +144,28 @@ export function ProjectChat() {
 
       {/* Main content */}
       <div style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        {sessionId ? (
-          <ProjectMessageView projectId={projectId} sessionId={sessionId} />
-        ) : (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100%',
-            color: 'var(--sam-color-fg-muted)',
-            fontSize: 'var(--sam-type-secondary-size)',
-          }}>
-            Select a session to view messages
-          </div>
-        )}
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          {sessionId ? (
+            <ProjectMessageView projectId={projectId} sessionId={sessionId} />
+          ) : (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              color: 'var(--sam-color-fg-muted)',
+              fontSize: 'var(--sam-type-secondary-size)',
+            }}>
+              Select a session to view messages
+            </div>
+          )}
+        </div>
+        <TaskSubmitForm
+          projectId={projectId}
+          hasCloudCredentials={hasCloudCredentials}
+          onRunNow={handleRunNow}
+          onSaveToBacklog={handleSaveToBacklog}
+        />
       </div>
     </div>
   );

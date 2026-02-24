@@ -8,6 +8,8 @@ import type {
   WorkspaceResponse,
   CreateWorkspaceRequest,
   DelegateTaskRequest,
+  RunTaskRequest,
+  RunTaskResponse,
   ListProjectsResponse,
   ListTaskEventsResponse,
   ListTasksResponse,
@@ -371,6 +373,17 @@ export async function delegateTask(
   data: DelegateTaskRequest
 ): Promise<Task> {
   return request<Task>(`/api/projects/${projectId}/tasks/${taskId}/delegate`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function runProjectTask(
+  projectId: string,
+  taskId: string,
+  data: RunTaskRequest = {}
+): Promise<RunTaskResponse> {
+  return request<RunTaskResponse>(`/api/projects/${projectId}/tasks/${taskId}/run`, {
     method: 'POST',
     body: JSON.stringify(data),
   });
