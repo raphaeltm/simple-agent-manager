@@ -275,6 +275,7 @@ func (h *SessionHost) DetachViewer(viewerID string) {
 // suspending to avoid interrupting work that started after the timer was set.
 func (h *SessionHost) autoSuspend() {
 	// Re-check conditions under lock: no viewers and not prompting.
+	// Hold viewerMu across both checks to prevent races with DetachViewer.
 	h.viewerMu.Lock()
 	h.suspendTimer = nil // Timer has fired, clear reference.
 	if len(h.viewers) > 0 {
@@ -282,20 +283,21 @@ func (h *SessionHost) autoSuspend() {
 		slog.Info("SessionHost: auto-suspend aborted (viewers present)", "sessionID", h.config.SessionID)
 		return
 	}
-	h.viewerMu.Unlock()
 
+	// Check prompting status while still holding viewerMu to prevent race
+	// where a viewer detaches and also tries to start a timer.
 	if h.IsPrompting() {
-		slog.Info("SessionHost: auto-suspend deferred (prompt in progress)", "sessionID", h.config.SessionID)
-		// Re-arm the timer to check again after the grace period.
-		h.viewerMu.Lock()
-		if h.suspendTimer == nil && len(h.viewers) == 0 {
+		// Re-arm the timer without releasing the lock.
+		if h.suspendTimer == nil {
 			h.suspendTimer = time.AfterFunc(h.config.IdleSuspendTimeout, func() {
 				h.autoSuspend()
 			})
 		}
 		h.viewerMu.Unlock()
+		slog.Info("SessionHost: auto-suspend deferred (prompt in progress)", "sessionID", h.config.SessionID)
 		return
 	}
+	h.viewerMu.Unlock()
 
 	slog.Info("SessionHost: auto-suspending idle viewerless session", "sessionID", h.config.SessionID)
 	h.reportLifecycle("info", "SessionHost auto-suspending (idle, no viewers)", map[string]interface{}{

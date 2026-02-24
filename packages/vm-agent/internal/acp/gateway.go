@@ -122,6 +122,12 @@ type GatewayConfig struct {
 	TabLastPromptStore TabLastPromptUpdater
 	// SessionLastPromptManager persists the last user prompt in the in-memory session manager.
 	SessionLastPromptManager SessionLastPromptUpdater
+	// IdleSuspendTimeout is how long a session can be idle with no viewers before
+	// being automatically suspended. Zero disables auto-suspend.
+	IdleSuspendTimeout time.Duration
+	// OnSuspend is called when auto-suspend triggers. The server uses this to
+	// update the agent session status and remove the SessionHost from the map.
+	OnSuspend func(workspaceID, sessionID string)
 }
 
 // Gateway is a thin per-WebSocket relay between a browser and a SessionHost.
