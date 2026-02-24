@@ -43,9 +43,18 @@ bucket_name = "workspaces-dev-assets"
 name = "PROJECT_DATA"
 class_name = "ProjectData"
 
+# Durable Objects for per-node warm pool lifecycle (alarm-based idle timeout)
+[[durable_objects.bindings]]
+name = "NODE_LIFECYCLE"
+class_name = "NodeLifecycle"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ProjectData"]
+
+[[migrations]]
+tag = "v2"
+new_classes = ["NodeLifecycle"]
 
 # Workers AI for speech-to-text transcription
 [ai]
@@ -101,7 +110,7 @@ bucket_name = "workspaces-assets"
 [env.production.ai]
 binding = "AI"
 
-# Cron trigger for provisioning timeout checks (every 5 minutes)
+# Cron trigger for provisioning timeout checks + warm node cleanup (every 5 minutes)
 [triggers]
 crons = ["*/5 * * * *"]
 

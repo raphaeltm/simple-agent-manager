@@ -1,5 +1,6 @@
-// Re-export Durable Object class for Cloudflare Workers runtime
+// Re-export Durable Object classes for Cloudflare Workers runtime
 export { ProjectData } from './durable-objects/project-data';
+export { NodeLifecycle } from './durable-objects/node-lifecycle';
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -29,6 +30,7 @@ import { taskRunsRoutes } from './routes/task-runs';
 import { adminRoutes } from './routes/admin';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
+import { runNodeCleanupSweep } from './scheduled/node-cleanup';
 import { getRuntimeLimits } from './services/limits';
 import { recordNodeRoutingMetric } from './services/telemetry';
 
@@ -44,6 +46,7 @@ export interface Env {
   AI: Ai;
   // Durable Objects
   PROJECT_DATA: DurableObjectNamespace;
+  NODE_LIFECYCLE: DurableObjectNamespace;
   // Environment variables
   BASE_DOMAIN: string;
   VERSION: string;
@@ -100,6 +103,10 @@ export interface Env {
   TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;
   TASK_RUN_CLEANUP_DELAY_MS?: string;
   WORKSPACE_READY_TIMEOUT_MS?: string;
+  // Warm node pooling configuration
+  NODE_WARM_TIMEOUT_MS?: string;
+  MAX_AUTO_NODE_LIFETIME_MS?: string;
+  NODE_WARM_GRACE_PERIOD_MS?: string;
   // ACP configuration (passed to VMs via environment)
   ACP_INIT_TIMEOUT_MS?: string;
   ACP_RECONNECT_DELAY_MS?: string;
@@ -366,6 +373,9 @@ export default {
     const db = drizzle(env.DATABASE, { schema });
     const migrated = await migrateOrphanedWorkspaces(db);
 
-    console.log(`Cron completed: ${timedOut} workspace(s) timed out, ${migrated} workspace(s) migrated`);
+    // Clean up stale warm nodes and expired auto-provisioned nodes
+    const nodeCleanup = await runNodeCleanupSweep(env);
+
+    console.log(`Cron completed: ${timedOut} workspace(s) timed out, ${migrated} workspace(s) migrated, ${nodeCleanup.staleDestroyed} stale node(s) destroyed, ${nodeCleanup.lifetimeDestroyed} lifetime node(s) destroyed`);
   },
 };

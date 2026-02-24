@@ -21,6 +21,7 @@ import * as schema from '../db/schema';
 import { ulid } from '../lib/ulid';
 import { selectNodeForTaskRun } from './node-selector';
 import { createNodeRecord, provisionNode } from './nodes';
+import * as nodeLifecycleService from './node-lifecycle';
 import {
   createWorkspaceOnNode,
   waitForNodeAgentReady,
@@ -210,7 +211,7 @@ async function executeTaskRun(
       nodeId = node.id;
     } else {
       // Try to find an existing node with capacity
-      const selectedNode = await selectNodeForTaskRun(db, userId, env, vmLocation, vmSize);
+      const selectedNode = await selectNodeForTaskRun(db, userId, env, vmLocation, vmSize, task.id);
       if (selectedNode) {
         nodeId = selectedNode.id;
       } else {
@@ -582,7 +583,10 @@ export async function cleanupTaskRun(
 }
 
 /**
- * Check if an auto-provisioned node has no other active workspaces and can be stopped.
+ * Check if an auto-provisioned node has no other active workspaces.
+ * If empty, marks the node as warm (idle) via the NodeLifecycle DO
+ * so it stays available for fast reuse. The DO alarm handles eventual
+ * teardown if not reclaimed within the warm timeout.
  */
 async function cleanupAutoProvisionedNode(
   db: ReturnType<typeof drizzle<typeof schema>>,
@@ -609,18 +613,23 @@ async function cleanupAutoProvisionedNode(
   );
 
   if (activeWorkspaces.length > 0) {
-    // Other workspaces still running, don't stop the node
+    // Other workspaces still running, don't mark idle
     return;
   }
 
-  // Import here to avoid circular dependency at module level
-  const { stopNodeResources } = await import('./nodes');
-
-  // No active workspaces, stop the node
+  // No active workspaces — mark node as warm for reuse.
+  // The NodeLifecycle DO will schedule an alarm for eventual teardown.
   try {
-    await stopNodeResources(nodeId, userId, env);
-  } catch {
-    // Best effort — the node will idle out eventually
+    await nodeLifecycleService.markIdle(env, nodeId, userId);
+  } catch (err) {
+    console.error('Failed to mark node as warm; falling back to immediate stop', err);
+    // Fallback: stop node directly if DO fails
+    try {
+      const { stopNodeResources } = await import('./nodes');
+      await stopNodeResources(nodeId, userId, env);
+    } catch {
+      // Best effort — the cron sweep will catch it
+    }
   }
 }
 
