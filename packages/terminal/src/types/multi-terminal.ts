@@ -269,9 +269,6 @@ export interface MultiTerminalProps {
   /** Optional resolver used for fresh URL/token retrieval before connect/reconnect. */
   resolveWsUrl?: () => Promise<string | null> | string | null;
 
-  /** Optional shutdown deadline */
-  shutdownDeadline?: string | null;
-
   /** Callback when user activity is detected */
   onActivity?: () => void;
 

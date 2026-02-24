@@ -13,8 +13,6 @@ import type {
   BootstrapTokenData,
   CreateAgentSessionRequest,
   CreateWorkspaceRequest,
-  HeartbeatRequest,
-  HeartbeatResponse,
   UpdateWorkspaceRequest,
   WorkspaceRuntimeAssetsResponse,
   WorkspaceResponse,
@@ -49,7 +47,6 @@ workspacesRoutes.use('/*', async (c, next) => {
   const path = c.req.path;
   if (
     path.endsWith('/ready') ||
-    path.endsWith('/heartbeat') ||
     path.endsWith('/agent-key') ||
     path.endsWith('/agent-settings') ||
     path.endsWith('/runtime') ||
@@ -81,8 +78,6 @@ function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): Workspac
     vmIp: ws.vmIp,
     lastActivityAt: ws.lastActivityAt,
     errorMessage: ws.errorMessage,
-    shutdownDeadline: ws.shutdownDeadline,
-    idleTimeoutSeconds: ws.idleTimeoutSeconds,
     createdAt: ws.createdAt,
     updatedAt: ws.updatedAt,
     url: getWorkspaceUrl(ws.id, baseDomain),
@@ -101,15 +96,6 @@ function toAgentSessionResponse(session: schema.AgentSession): AgentSession {
     label: session.label,
     worktreePath: session.worktreePath,
   };
-}
-
-function getIdleTimeoutSeconds(env: Env): number {
-  const value = env.IDLE_TIMEOUT_SECONDS;
-  const parsed = value ? Number.parseInt(value, 10) : 30 * 60;
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return 30 * 60;
-  }
-  return parsed;
 }
 
 function isActiveWorkspaceStatus(status: string): boolean {
@@ -514,10 +500,6 @@ workspacesRoutes.post('/', async (c) => {
   }
 
   const uniqueName = await resolveUniqueWorkspaceDisplayName(db, targetNodeId, workspaceName);
-  const idleTimeoutSeconds = body.idleTimeoutSeconds ?? getIdleTimeoutSeconds(c.env);
-  if (idleTimeoutSeconds < 0 || idleTimeoutSeconds > 86400) {
-    throw errors.badRequest('idleTimeoutSeconds must be between 0 and 86400');
-  }
 
   const workspaceId = ulid();
 
@@ -535,7 +517,6 @@ workspacesRoutes.post('/', async (c) => {
     status: 'creating',
     vmSize,
     vmLocation,
-    idleTimeoutSeconds,
     createdAt: now,
     updatedAt: now,
   });
@@ -677,7 +658,6 @@ workspacesRoutes.post('/:id/stop', async (c) => {
           .set({
             status: 'stopped',
             errorMessage: null,
-            shutdownDeadline: null,
             updatedAt: new Date().toISOString(),
           })
           .where(eq(schema.workspaces.id, workspace.id));
@@ -1157,41 +1137,11 @@ workspacesRoutes.post('/:id/provisioning-failed', async (c) => {
     .set({
       status: 'error',
       errorMessage,
-      shutdownDeadline: null,
       updatedAt: new Date().toISOString(),
     })
     .where(eq(schema.workspaces.id, workspaceId));
 
   return c.json({ success: true });
-});
-
-workspacesRoutes.post('/:id/heartbeat', async (c) => {
-  const workspaceId = c.req.param('id');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  await verifyWorkspaceCallbackAuth(c, workspaceId);
-
-  const body = await c.req.json<HeartbeatRequest>();
-  const now = new Date().toISOString();
-  const idleTimeoutSeconds = getIdleTimeoutSeconds(c.env);
-
-  await db
-    .update(schema.workspaces)
-    .set({
-      lastActivityAt: body.lastActivityAt || now,
-      shutdownDeadline: null,
-      updatedAt: now,
-    })
-    .where(eq(schema.workspaces.id, workspaceId));
-
-  const response: HeartbeatResponse = {
-    action: 'continue',
-    idleSeconds: Math.max(0, Math.floor(body.idleSeconds ?? 0)),
-    maxIdleSeconds: idleTimeoutSeconds,
-    shutdownDeadline: null,
-  };
-
-  return c.json(response);
 });
 
 workspacesRoutes.post('/:id/agent-key', async (c) => {

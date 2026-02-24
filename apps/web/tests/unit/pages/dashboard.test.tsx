@@ -82,8 +82,6 @@ const runningWorkspace = {
   nodeId: 'node-1',
   lastActivityAt: '2026-01-01T00:00:00.000Z',
   errorMessage: null,
-  shutdownDeadline: null,
-  idleTimeoutSeconds: 0,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
   url: 'https://ws-ws-1.example.com',

@@ -102,7 +102,6 @@ type SessionClosureReason string
 
 const (
 	ClosureReasonUserRequested SessionClosureReason = "user_requested"
-	ClosureReasonIdleTimeout   SessionClosureReason = "idle_timeout"
 	ClosureReasonProcessExit   SessionClosureReason = "process_exit"
 	ClosureReasonError         SessionClosureReason = "error"
 )

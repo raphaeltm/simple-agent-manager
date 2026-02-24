@@ -20,7 +20,6 @@ import (
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/errorreport"
-	"github.com/workspace/vm-agent/internal/idle"
 	"github.com/workspace/vm-agent/internal/logreader"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/pty"
@@ -37,7 +36,6 @@ type Server struct {
 	jwtValidator        *auth.JWTValidator
 	sessionManager      *auth.SessionManager
 	ptyManager          *pty.Manager
-	idleDetector        *idle.Detector
 	sysInfoCollector    *sysinfo.Collector
 	workspaceMu         sync.RWMutex
 	workspaces          map[string]*WorkspaceRuntime
@@ -55,6 +53,7 @@ type Server struct {
 	logReader           *logreader.Reader
 	bootLogBroadcasters *BootLogBroadcasterManager
 	bootstrapComplete   bool
+	done                chan struct{}
 }
 
 type cachedWorktreeList struct {
@@ -114,16 +113,6 @@ func New(cfg *config.Config) (*Server, error) {
 		MaxSessions:     cfg.SessionMaxCount,
 	})
 
-	// Create idle detector
-	idleDetector := idle.NewDetectorWithConfig(idle.DetectorConfig{
-		Timeout:           cfg.IdleTimeout,
-		HeartbeatInterval: cfg.HeartbeatInterval,
-		IdleCheckInterval: cfg.IdleCheckInterval,
-		ControlPlaneURL:   cfg.ControlPlaneURL,
-		WorkspaceID:       cfg.WorkspaceID,
-		CallbackToken:     cfg.CallbackToken,
-	})
-
 	// Setup container discovery for devcontainer exec
 	var containerResolver pty.ContainerResolver
 	containerWorkDir := "/workspace" // host fallback
@@ -173,7 +162,6 @@ func New(cfg *config.Config) (*Server, error) {
 		ContainerResolver:       containerResolver,
 		ContainerUser:           containerUser,
 		ContainerWorkDir:        containerWorkDir,
-		OnActivity:              idleDetector.RecordActivity,
 		GitTokenFetcher:         nil, // set below after server construction
 		FileExecTimeout:         cfg.GitExecTimeout,
 		FileMaxSize:             cfg.GitFileMaxSize,
@@ -206,7 +194,6 @@ func New(cfg *config.Config) (*Server, error) {
 		jwtValidator:       jwtValidator,
 		sessionManager:     sessionManager,
 		ptyManager:         ptyManager,
-		idleDetector:       idleDetector,
 		sysInfoCollector:   sysInfoCollector,
 		workspaces:         make(map[string]*WorkspaceRuntime),
 		nodeEvents:         make([]EventRecord, 0, 512),
@@ -219,6 +206,7 @@ func New(cfg *config.Config) (*Server, error) {
 		worktreeCache:      make(map[string]cachedWorktreeList),
 		logReader:           logreader.NewReaderWithTimeout(cfg.LogReaderTimeout),
 		bootLogBroadcasters: NewBootLogBroadcasterManager(),
+		done:                make(chan struct{}),
 	}
 
 	// Wire the git token fetcher now that the server exists.
@@ -290,8 +278,7 @@ func (s *Server) GetBootLogBroadcasterForWorkspace(workspaceID string) *BootLogB
 // to subsystems that were created before the token was available, and signals
 // that bootstrap is complete.
 func (s *Server) UpdateAfterBootstrap(cfg *config.Config) {
-	// Propagate callback token to idle detector and error reporter.
-	s.idleDetector.SetCallbackToken(cfg.CallbackToken)
+	// Propagate callback token to error reporter.
 	s.errorReporter.SetToken(cfg.CallbackToken)
 
 	// Update ACP gateway config with the callback token.
@@ -316,8 +303,6 @@ func (s *Server) UpdateAfterBootstrap(cfg *config.Config) {
 
 // Start starts the HTTP server.
 func (s *Server) Start() error {
-	// Start idle detector
-	go s.idleDetector.Start()
 	s.startNodeHealthReporter()
 
 	// Start error reporter background flush
@@ -325,11 +310,6 @@ func (s *Server) Start() error {
 
 	slog.Info("Starting VM Agent", "addr", s.httpServer.Addr)
 	return s.httpServer.ListenAndServe()
-}
-
-// GetIdleShutdownChannel returns the channel that's closed when idle shutdown is requested.
-func (s *Server) GetIdleShutdownChannel() <-chan struct{} {
-	return s.idleDetector.ShutdownChannel()
 }
 
 // StopAllWorkspacesAndSessions transitions all local workloads to stopped state.
@@ -363,8 +343,8 @@ func (s *Server) StopAllWorkspacesAndSessions() {
 
 // Stop gracefully stops the server.
 func (s *Server) Stop(ctx context.Context) error {
-	// Stop idle detector
-	s.idleDetector.Stop()
+	// Signal background goroutines to stop.
+	close(s.done)
 
 	// Close JWT validator
 	s.jwtValidator.Close()

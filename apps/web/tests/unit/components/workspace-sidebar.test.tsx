@@ -20,8 +20,6 @@ function makeWorkspace(overrides?: Partial<WorkspaceResponse>): WorkspaceRespons
     vmIp: '1.2.3.4',
     lastActivityAt: new Date().toISOString(),
     errorMessage: null,
-    shutdownDeadline: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-    idleTimeoutSeconds: 1800,
     createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
     updatedAt: new Date().toISOString(),
     ...overrides,

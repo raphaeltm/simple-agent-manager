@@ -102,8 +102,6 @@ describe('Node page', () => {
         vmIp: null,
         lastActivityAt: null,
         errorMessage: null,
-        shutdownDeadline: null,
-        idleTimeoutSeconds: 0,
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z',
         url: 'https://ws-ws-1.example.com',

@@ -381,11 +381,6 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 // HandlePrompt routes a session/prompt request through the ACP SDK.
 // Only one prompt runs at a time — concurrent requests are serialized.
 func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, params json.RawMessage, viewerID string) {
-	// Signal activity for idle detection
-	if h.config.OnActivity != nil {
-		h.config.OnActivity()
-	}
-
 	h.mu.RLock()
 	acpConn := h.acpConn
 	sessionID := h.sessionID

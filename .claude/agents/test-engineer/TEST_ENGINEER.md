@@ -29,7 +29,7 @@ The project constitution mandates:
 | DNS Management | `apps/api/src/services/dns.ts` | `apps/api/tests/unit/services/` |
 | JWT Issuance | `apps/api/src/services/jwt.ts` | `apps/api/tests/unit/services/` |
 | JWT Validation (Go) | `packages/vm-agent/internal/auth/jwt.go` | `packages/vm-agent/internal/auth/jwt_test.go` |
-| Idle Detection | `packages/vm-agent/internal/idle/detector.go` | `packages/vm-agent/internal/idle/detector_test.go` |
+| ACP Gateway | `packages/vm-agent/internal/acp/gateway.go` | `packages/vm-agent/internal/acp/gateway_test.go` |
 
 ## When Invoked
 

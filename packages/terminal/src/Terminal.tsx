@@ -24,7 +24,6 @@ const PING_INTERVAL_MS = 30_000;
 export function Terminal({
   wsUrl,
   resolveWsUrl,
-  shutdownDeadline,
   onActivity,
   className = '',
 }: TerminalProps) {
@@ -215,7 +214,6 @@ export function Terminal({
 
       <StatusBar
         connectionState={state}
-        shutdownDeadline={shutdownDeadline}
         reconnectAttempts={retryCount}
       />
     </div>

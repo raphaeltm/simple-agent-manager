@@ -1364,7 +1364,6 @@ export function Workspace() {
             wsUrl={wsUrl}
             resolveWsUrl={resolveTerminalWsUrl}
             defaultWorkDir={activeWorktree ?? undefined}
-            shutdownDeadline={workspace?.shutdownDeadline}
             onActivity={handleTerminalActivity}
             className="h-full"
             persistenceKey={id ? `sam-terminal-sessions-${id}` : undefined}
@@ -1378,7 +1377,6 @@ export function Workspace() {
           <Terminal
             wsUrl={wsUrl}
             resolveWsUrl={resolveTerminalWsUrl}
-            shutdownDeadline={workspace?.shutdownDeadline}
             onActivity={handleTerminalActivity}
             className="h-full"
           />

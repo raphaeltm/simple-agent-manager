@@ -32,7 +32,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		"activeWorkspaces": s.activeWorkspaceCount(),
 		"workspaces":       workspaceSummaries,
 		"sessions":         s.ptyManager.SessionCount(),
-		"lastActivityAt":   s.idleDetector.GetLastActivity().Format(timeRFC3339),
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -75,7 +74,6 @@ func (s *Server) handleTokenAuth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.sessionManager.SetCookie(w, session)
-	s.idleDetector.RecordActivity()
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":   true,

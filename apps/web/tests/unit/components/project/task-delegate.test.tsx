@@ -47,8 +47,6 @@ describe('Task delegation UI', () => {
             vmIp: null,
             lastActivityAt: null,
             errorMessage: null,
-            shutdownDeadline: null,
-            idleTimeoutSeconds: 1800,
             createdAt: '2026-02-18T00:00:00.000Z',
             updatedAt: '2026-02-18T00:00:00.000Z',
           },

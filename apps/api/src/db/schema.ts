@@ -424,8 +424,6 @@ export const workspaces = sqliteTable(
     dnsRecordId: text('dns_record_id'),
     lastActivityAt: text('last_activity_at'),
     errorMessage: text('error_message'),
-    shutdownDeadline: text('shutdown_deadline'),
-    idleTimeoutSeconds: integer('idle_timeout_seconds').notNull().default(1800), // Default 30 minutes
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),

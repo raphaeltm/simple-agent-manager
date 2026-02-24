@@ -147,7 +147,6 @@ describe('task-runs service source contract', () => {
     expect(file).toContain('createWorkspaceOnNode');
     expect(file).toContain('signCallbackToken');
     expect(file).toContain('resolveUniqueWorkspaceDisplayName');
-    expect(file).toContain('idleTimeoutSeconds');
   });
 
   it('creates agent session for task execution', () => {
@@ -180,11 +179,6 @@ describe('task-runs service source contract', () => {
   it('uses configurable cleanup delay', () => {
     expect(file).toContain('TASK_RUN_CLEANUP_DELAY_MS');
     expect(file).toContain('getCleanupDelayMs');
-  });
-
-  it('uses configurable workspace idle timeout', () => {
-    expect(file).toContain('TASK_RUN_WORKSPACE_IDLE_TIMEOUT_SECONDS');
-    expect(file).toContain('getIdleTimeoutSeconds');
   });
 });
 
@@ -308,17 +302,12 @@ describe('shared constants source contract', () => {
   });
 
   it('defines task run timeout constants', () => {
-    expect(constantsFile).toContain('DEFAULT_TASK_RUN_WORKSPACE_IDLE_TIMEOUT_SECONDS');
     expect(constantsFile).toContain('DEFAULT_TASK_RUN_CLEANUP_DELAY_MS');
   });
 
   it('sets reasonable defaults for thresholds', () => {
     expect(constantsFile).toContain('DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT = 80');
     expect(constantsFile).toContain('DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT = 80');
-  });
-
-  it('sets 1-hour default idle timeout for autonomous tasks', () => {
-    expect(constantsFile).toContain('DEFAULT_TASK_RUN_WORKSPACE_IDLE_TIMEOUT_SECONDS = 3600');
   });
 });
 
@@ -338,7 +327,6 @@ describe('API index route registration', () => {
   it('defines task run configuration env vars', () => {
     expect(indexFile).toContain('TASK_RUN_NODE_CPU_THRESHOLD_PERCENT');
     expect(indexFile).toContain('TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT');
-    expect(indexFile).toContain('TASK_RUN_WORKSPACE_IDLE_TIMEOUT_SECONDS');
     expect(indexFile).toContain('TASK_RUN_CLEANUP_DELAY_MS');
     expect(indexFile).toContain('WORKSPACE_READY_TIMEOUT_MS');
   });

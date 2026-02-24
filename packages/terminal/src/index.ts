@@ -4,7 +4,6 @@
  * Provides a terminal component with:
  * - Automatic WebSocket reconnection with exponential backoff
  * - Connection state visualization (connecting, reconnecting, failed)
- * - Idle deadline tracking and display
  * - xterm.js integration
  */
 
@@ -23,7 +22,6 @@ export { ConnectionOverlay } from './ConnectionOverlay';
 
 // Hooks
 export { useWebSocket } from './useWebSocket';
-export { useIdleDeadline, formatDeadlineDisplay } from './useIdleDeadline';
 export { useTerminalSessions } from './hooks/useTerminalSessions';
 export { useTabShortcuts } from './hooks/useTabShortcuts';
 

@@ -65,15 +65,6 @@ export default {
       });
     }
 
-    if (request.method === 'POST' && url.pathname === `/api/workspaces/${workspaceId}/heartbeat`) {
-      return jsonResponse({
-        action: 'continue',
-        idleSeconds: 0,
-        maxIdleSeconds: 1800,
-        shutdownDeadline: new Date(Date.now() + 1800_000).toISOString(),
-      });
-    }
-
     return jsonResponse({ error: 'not_found', message: 'Route not found' }, 404);
   },
 };

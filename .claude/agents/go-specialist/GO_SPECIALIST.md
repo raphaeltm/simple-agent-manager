@@ -159,17 +159,7 @@ if err != nil || !containsAudience(aud, expectedAudience) {
 }
 ```
 
-### 4. Idle Detection (`internal/idle/detector.go`)
-
-**Checklist**:
-- [ ] Activity timestamp updated atomically or with mutex
-- [ ] Idle check interval reasonable (not too frequent)
-- [ ] Shutdown callback triggers gracefully
-- [ ] Multiple concurrent activity updates handled
-- [ ] Time comparisons use monotonic clock
-- [ ] Heartbeats from WebSocket properly count as activity
-
-### 5. Concurrency Patterns
+### 4. Concurrency Patterns
 
 **General Go Concurrency Review**:
 - [ ] Mutexes used for shared state (not channels for simple sync)
