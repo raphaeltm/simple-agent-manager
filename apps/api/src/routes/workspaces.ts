@@ -335,6 +335,7 @@ workspacesRoutes.get('/', async (c) => {
   const userId = getUserId(c);
   const status = c.req.query('status');
   const nodeId = c.req.query('nodeId');
+  const projectId = c.req.query('projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
   // Build WHERE conditions in SQL instead of filtering in memory (P1 fix).
@@ -344,6 +345,9 @@ workspacesRoutes.get('/', async (c) => {
   }
   if (nodeId) {
     conditions.push(eq(schema.workspaces.nodeId, nodeId));
+  }
+  if (projectId) {
+    conditions.push(eq(schema.workspaces.projectId, projectId));
   }
 
   const rows = await db

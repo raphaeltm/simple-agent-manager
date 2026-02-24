@@ -622,11 +622,13 @@ export async function listNodeEvents(
 // =============================================================================
 export async function listWorkspaces(
   status?: string,
-  nodeId?: string
+  nodeId?: string,
+  projectId?: string
 ): Promise<WorkspaceResponse[]> {
   const params = new URLSearchParams();
   if (status) params.set('status', status);
   if (nodeId) params.set('nodeId', nodeId);
+  if (projectId) params.set('projectId', projectId);
   const url = params.toString() ? `/api/workspaces?${params.toString()}` : '/api/workspaces';
   return request<WorkspaceResponse[]>(url);
 }

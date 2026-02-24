@@ -1,10 +1,16 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Alert, Button, StatusBadge } from '@simple-agent-manager/ui';
+import { Alert, Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { ProjectForm, type ProjectFormValues } from '../components/project/ProjectForm';
+import { WorkspaceCard } from '../components/WorkspaceCard';
+import type { WorkspaceResponse } from '@simple-agent-manager/shared';
 import {
   createWorkspace,
   deleteProject,
+  listWorkspaces,
+  stopWorkspace,
+  restartWorkspace,
+  deleteWorkspace,
   updateProject,
 } from '../lib/api';
 import { useToast } from '../hooks/useToast';
@@ -18,6 +24,56 @@ export function ProjectOverview() {
   const [showProjectEdit, setShowProjectEdit] = useState(false);
   const [savingProject, setSavingProject] = useState(false);
   const [launchingWorkspace, setLaunchingWorkspace] = useState(false);
+  const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
+  const [workspacesLoading, setWorkspacesLoading] = useState(true);
+
+  const fetchWorkspaces = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      setWorkspacesLoading(true);
+      const data = await listWorkspaces(undefined, undefined, projectId);
+      setWorkspaces(data);
+    } catch {
+      // Silently fail — workspace list is supplementary info
+    } finally {
+      setWorkspacesLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void fetchWorkspaces();
+  }, [fetchWorkspaces]);
+
+  const handleStopWorkspace = async (id: string) => {
+    try {
+      await stopWorkspace(id);
+      toast.success('Workspace stopping');
+      await fetchWorkspaces();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to stop workspace');
+    }
+  };
+
+  const handleRestartWorkspace = async (id: string) => {
+    try {
+      await restartWorkspace(id);
+      toast.success('Workspace restarting');
+      await fetchWorkspaces();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to restart workspace');
+    }
+  };
+
+  const handleDeleteWorkspace = async (id: string) => {
+    try {
+      await deleteWorkspace(id);
+      toast.success('Workspace deleted');
+      await fetchWorkspaces();
+      await reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete workspace');
+    }
+  };
 
   const handleProjectUpdate = async (values: ProjectFormValues) => {
     try {
@@ -46,6 +102,7 @@ export function ProjectOverview() {
         projectId: project.id,
       });
       toast.success('Workspace launch started');
+      await fetchWorkspaces();
       navigate(`/workspaces/${workspace.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to launch workspace');
@@ -107,9 +164,6 @@ export function ProjectOverview() {
           gap: 'var(--sam-space-2)',
         }}
       >
-        <div style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
-          Linked workspaces: {project.summary.linkedWorkspaces}
-        </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.375rem' }}>
           <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>Tasks:</span>
           {(Object.entries(project.summary.taskCountsByStatus) as [string, number][])
@@ -125,6 +179,34 @@ export function ProjectOverview() {
             <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>none</span>
           )}
         </div>
+      </section>
+
+      {/* Workspaces section */}
+      <section>
+        <h3 style={{ margin: '0 0 var(--sam-space-3)', fontSize: 'var(--sam-type-section-heading-size)', fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number, color: 'var(--sam-color-fg-primary)' }}>
+          Workspaces ({workspaces.length})
+        </h3>
+        {workspacesLoading && workspaces.length === 0 ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-4)' }}>
+            <Spinner />
+          </div>
+        ) : workspaces.length === 0 ? (
+          <p style={{ margin: 0, color: 'var(--sam-color-fg-muted)', fontSize: 'var(--sam-type-secondary-size)' }}>
+            No workspaces yet. Launch one to get started.
+          </p>
+        ) : (
+          <div style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
+            {workspaces.map((ws) => (
+              <WorkspaceCard
+                key={ws.id}
+                workspace={ws}
+                onStop={handleStopWorkspace}
+                onRestart={handleRestartWorkspace}
+                onDelete={handleDeleteWorkspace}
+              />
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Edit form */}

@@ -34,14 +34,14 @@ Workspaces attached to a repository show up associated with the correct project 
 
 ## Detailed Tasklist
 
-- [ ] Add `projectId` query parameter support to `GET /api/workspaces` in `apps/api/src/routes/workspaces.ts`
-- [ ] Update `listWorkspaces()` in `apps/web/src/lib/api.ts` to accept `projectId` parameter
-- [ ] Add workspace fetching to `apps/web/src/pages/ProjectOverview.tsx` using `listWorkspaces({ projectId })`
-- [ ] Render workspace cards on ProjectOverview (reuse existing `WorkspaceCard` component from Dashboard)
-- [ ] Show loading state only when no data yet (follow the new loading state pattern)
-- [ ] Handle empty state (no workspaces for this project)
-- [ ] Run typecheck: `pnpm typecheck`
-- [ ] Run build: `pnpm build`
+- [x] Add `projectId` query parameter support to `GET /api/workspaces` in `apps/api/src/routes/workspaces.ts`
+- [x] Update `listWorkspaces()` in `apps/web/src/lib/api.ts` to accept `projectId` parameter
+- [x] Add workspace fetching to `apps/web/src/pages/ProjectOverview.tsx` using `listWorkspaces({ projectId })`
+- [x] Render workspace cards on ProjectOverview (reuse existing `WorkspaceCard` component from Dashboard)
+- [x] Show loading state only when no data yet (follow the new loading state pattern)
+- [x] Handle empty state (no workspaces for this project)
+- [x] Run typecheck: `pnpm typecheck`
+- [x] Run build: `pnpm build`
 
 ## Files to Modify
 
