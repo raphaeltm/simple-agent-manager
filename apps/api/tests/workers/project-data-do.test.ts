@@ -689,4 +689,144 @@ describe('ProjectData Durable Object', () => {
       expect(eventId).toBeTruthy();
     });
   });
+
+  // =========================================================================
+  // VM Agent Message Persistence Flow (Integration — T027)
+  // =========================================================================
+
+  describe('VM agent message persistence flow', () => {
+    it('full round-trip: session with taskId → batch persist → retrieve with metadata', async () => {
+      const stub = getStub('project-agent-flow-roundtrip');
+
+      // 1. Create session with taskId (simulates workspace creation hook)
+      const sessionId = await stub.createSession('ws-agent-1', null, 'task-run-42');
+      expect(sessionId).toBeTruthy();
+
+      const session = await stub.getSession(sessionId);
+      expect(session!.taskId).toBe('task-run-42');
+      expect(session!.workspaceId).toBe('ws-agent-1');
+      expect(session!.status).toBe('active');
+      expect(session!.messageCount).toBe(0);
+
+      // 2. First batch from reporter: user prompt + assistant response
+      const batch1 = [
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Fix the login bug in auth.ts',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'I\'ll investigate the authentication flow in auth.ts.',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      const result1 = await stub.persistMessageBatch(sessionId, batch1);
+      expect(result1.persisted).toBe(2);
+      expect(result1.duplicates).toBe(0);
+
+      // 3. Second batch: tool calls with metadata (the format Go reporter sends)
+      const toolMeta = JSON.stringify({
+        kind: 'tool_call',
+        status: 'completed',
+        locations: [{ path: 'src/auth.ts', line: 42 }],
+      });
+      const batch2 = [
+        {
+          messageId: crypto.randomUUID(),
+          role: 'tool',
+          content: 'Read file: src/auth.ts',
+          toolMetadata: toolMeta,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Found the bug — the token validation was missing.',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      const result2 = await stub.persistMessageBatch(sessionId, batch2);
+      expect(result2.persisted).toBe(2);
+
+      // 4. Verify all messages retrievable with correct content
+      const { messages } = await stub.getMessages(sessionId);
+      expect(messages).toHaveLength(4);
+
+      const userMsg = messages.find((m) => m.role === 'user');
+      expect(userMsg!.content).toBe('Fix the login bug in auth.ts');
+
+      const toolMsg = messages.find((m) => m.role === 'tool');
+      expect(toolMsg!.content).toBe('Read file: src/auth.ts');
+      expect(toolMsg!.toolMetadata).toEqual({
+        kind: 'tool_call',
+        status: 'completed',
+        locations: [{ path: 'src/auth.ts', line: 42 }],
+      });
+
+      // 5. Verify session counts and auto-topic
+      const updated = await stub.getSession(sessionId);
+      expect(updated!.messageCount).toBe(4);
+      expect(updated!.topic).toBe('Fix the login bug in auth.ts');
+    });
+
+    it('handles duplicate messages across batches (crash recovery)', async () => {
+      const stub = getStub('project-agent-flow-recovery');
+      const sessionId = await stub.createSession('ws-recovery', null);
+
+      const msgId1 = crypto.randomUUID();
+      const msgId2 = crypto.randomUUID();
+      const msgId3 = crypto.randomUUID();
+
+      // First batch: 2 messages
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: msgId1, role: 'user', content: 'Hello', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: msgId2, role: 'assistant', content: 'Hi', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      // Simulated crash recovery: reporter re-sends msgId2 (already persisted) + new msgId3
+      const result = await stub.persistMessageBatch(sessionId, [
+        { messageId: msgId2, role: 'assistant', content: 'Hi', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: msgId3, role: 'user', content: 'Thanks', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      expect(result.persisted).toBe(1);
+      expect(result.duplicates).toBe(1);
+
+      const session = await stub.getSession(sessionId);
+      expect(session!.messageCount).toBe(3); // 2 original + 1 new
+
+      const { messages } = await stub.getMessages(sessionId);
+      expect(messages).toHaveLength(3);
+    });
+
+    it('session stop preserves messages for retrieval', async () => {
+      const stub = getStub('project-agent-flow-stop');
+      const sessionId = await stub.createSession('ws-stop', null, 'task-stop');
+
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: crypto.randomUUID(), role: 'user', content: 'Build the project', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Building...', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      // Stop session (simulates workspace destruction)
+      await stub.stopSession(sessionId);
+
+      const session = await stub.getSession(sessionId);
+      expect(session!.status).toBe('stopped');
+      expect(session!.messageCount).toBe(2);
+
+      // Messages still retrievable after stop
+      const { messages } = await stub.getMessages(sessionId);
+      expect(messages).toHaveLength(2);
+      expect(messages.find((m) => m.role === 'user')!.content).toBe('Build the project');
+    });
+  });
 });

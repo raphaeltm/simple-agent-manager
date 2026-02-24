@@ -92,9 +92,9 @@
 
 ### End-to-End Validation
 
-- [ ] T027 [US1] Integration test: full message persistence flow — enqueue message in Go reporter mock → HTTP POST to Miniflare API → ProjectData DO persists → verify message retrievable via GET sessions/:id/messages → verify WebSocket broadcast fires in `apps/api/tests/integration/message-persistence-flow.test.ts`
-- [ ] T028 [US1] Remove browser-side message persistence writes: remove or disable the code paths in chat-persistence.ts that POST messages to the DO (keep read/create/stop session functions) in `apps/api/src/services/chat-persistence.ts`
-- [ ] T029 [US1] Remove browser-side persistence calls from web components that currently invoke persistMessage/persistMessageAsync — browser becomes read-only for chat history in `apps/web/src/` (identify and update relevant components)
+- [x] T027 [US1] Integration test: full message persistence flow — enqueue message in Go reporter mock → HTTP POST to Miniflare API → ProjectData DO persists → verify message retrievable via GET sessions/:id/messages → verify WebSocket broadcast fires in `apps/api/tests/integration/message-persistence-flow.test.ts`
+- [x] T028 [US1] Remove browser-side message persistence writes: remove or disable the code paths in chat-persistence.ts that POST messages to the DO (keep read/create/stop session functions) in `apps/api/src/services/chat-persistence.ts`
+- [x] T029 [US1] Remove browser-side persistence calls from web components that currently invoke persistMessage/persistMessageAsync — browser becomes read-only for chat history in `apps/web/src/` (identify and update relevant components)
 
 **Checkpoint**: US1 complete. All workspace chat messages persist via the VM agent. Browser disconnection causes zero message loss. Messages survive workspace destruction. Transient network failures are retried with backoff.
 

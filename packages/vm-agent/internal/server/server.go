@@ -192,7 +192,7 @@ func New(cfg *config.Config) (*Server, error) {
 	msgReporterCfg.ProjectID = cfg.ProjectID
 	msgReporterCfg.SessionID = cfg.ChatSessionID
 	msgReporterCfg.WorkspaceID = defaultWorkspaceScope(cfg.WorkspaceID, cfg.NodeID)
-	msgReporterCfg.Endpoint = cfg.ControlPlaneURL + "/api/workspaces/" + defaultWorkspaceScope(cfg.WorkspaceID, cfg.NodeID) + "/messages"
+	msgReporterCfg.Endpoint = cfg.ControlPlaneURL
 
 	var msgReporter *messagereport.Reporter
 	if cfg.ProjectID != "" && cfg.ChatSessionID != "" {

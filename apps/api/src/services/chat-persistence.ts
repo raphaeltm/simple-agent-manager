@@ -35,46 +35,6 @@ export async function stopChatSession(
   return projectDataService.stopSession(env, projectId, sessionId);
 }
 
-/**
- * Persist a chat message asynchronously (non-blocking).
- * Returns immediately; DO write happens in the background via waitUntil.
- *
- * When called from a route handler, pass executionCtx to use waitUntil.
- * When no executionCtx is available, the write is awaited directly.
- */
-export function persistMessageAsync(
-  env: Env,
-  projectId: string,
-  sessionId: string,
-  role: string,
-  content: string,
-  toolMetadata: Record<string, unknown> | null,
-  executionCtx?: ExecutionContext
-): void {
-  const doWrite = projectDataService
-    .persistMessage(env, projectId, sessionId, role, content, toolMetadata)
-    .catch((err) => {
-      // Non-blocking: log but don't propagate
-      console.error('Chat persistence failed:', err);
-    });
-
-  if (executionCtx) {
-    executionCtx.waitUntil(doWrite);
-  }
-  // If no executionCtx, fire-and-forget (promise will resolve independently)
-}
-
-/**
- * Persist a chat message synchronously (blocking).
- * Returns the message ID on success.
- */
-export async function persistMessage(
-  env: Env,
-  projectId: string,
-  sessionId: string,
-  role: string,
-  content: string,
-  toolMetadata: Record<string, unknown> | null
-): Promise<string> {
-  return projectDataService.persistMessage(env, projectId, sessionId, role, content, toolMetadata);
-}
+// Browser-side message persistence removed — messages are now persisted
+// exclusively by the VM agent via POST /api/workspaces/:id/messages.
+// See: specs/021-task-chat-architecture (US1 — Agent-Side Chat Persistence).
