@@ -424,6 +424,7 @@ export const workspaces = sqliteTable(
     vmIp: text('vm_ip'),
     dnsRecordId: text('dns_record_id'),
     lastActivityAt: text('last_activity_at'),
+    chatSessionId: text('chat_session_id'),
     errorMessage: text('error_message'),
     createdAt: text('created_at')
       .notNull()

@@ -37,28 +37,28 @@
 
 ### ProjectData DO Changes
 
-- [ ] T008 Update ProjectData DO `createSession()` to accept optional `taskId` parameter, add `task_id` column migration to DO SQLite, create index on `task_id`, and broadcast `session.created` event in `apps/api/src/durable-objects/project-data.ts`
-- [ ] T009 Unit tests for createSession with taskId in `apps/api/tests/unit/project-data-session.test.ts` — **Scenarios**: (1) create session with taskId stores and returns it, (2) create session without taskId stores null, (3) listSessions with taskId filter returns only matching sessions, (4) session.created WebSocket broadcast includes taskId, (5) session.stopped broadcast on stopSession, (6) task_id index created in migration
+- [x] T008 Update ProjectData DO `createSession()` to accept optional `taskId` parameter, add `task_id` column migration to DO SQLite, create index on `task_id`, and broadcast `session.created` event in `apps/api/src/durable-objects/project-data.ts`
+- [x] T009 Unit tests for createSession with taskId in `apps/api/tests/workers/project-data-do.test.ts` — **Scenarios**: (1) create session with taskId stores and returns it, (2) create session without taskId stores null, (3) listSessions with taskId filter returns only matching sessions, (4) session.created WebSocket broadcast includes taskId, (5) session.stopped broadcast on stopSession, (6) task_id index created in migration
 
 ### Batch Message Persistence in DO
 
-- [ ] T010 Implement `persistMessageBatch()` method on ProjectData DO for bulk insert with messageId deduplication (UNIQUE constraint skip), per-message WebSocket broadcast, message_count increment, and topic auto-capture in `apps/api/src/durable-objects/project-data.ts`
-- [ ] T011 Unit tests for persistMessageBatch in `apps/api/tests/unit/project-data-batch.test.ts` — **Scenarios**: (1) batch of 5 messages all persisted and broadcast, (2) duplicate messageId silently skipped and counted, (3) mixed new + duplicate returns correct persisted/duplicates counts, (4) session message_count incremented by persisted count only, (5) topic auto-captured from first user-role message if not set, (6) session updated_at bumped, (7) invalid session_id returns error
+- [x] T010 Implement `persistMessageBatch()` method on ProjectData DO for bulk insert with messageId deduplication (UNIQUE constraint skip), per-message WebSocket broadcast, message_count increment, and topic auto-capture in `apps/api/src/durable-objects/project-data.ts`
+- [x] T011 Unit tests for persistMessageBatch in `apps/api/tests/workers/project-data-do.test.ts` — **Scenarios**: (1) batch of 5 messages all persisted and broadcast, (2) duplicate messageId silently skipped and counted, (3) mixed new + duplicate returns correct persisted/duplicates counts, (4) session message_count incremented by persisted count only, (5) topic auto-captured from first user-role message if not set, (6) session updated_at bumped, (7) invalid session_id returns error
 
 ### Cloud-Init Generation
 
-- [ ] T012 Update cloud-init template generation to substitute `projectId` and `chatSessionId` as `PROJECT_ID` and `CHAT_SESSION_ID` environment variables in systemd service in `packages/cloud-init/src/generate.ts`
-- [ ] T013 Unit tests for cloud-init with new variables in `packages/cloud-init/tests/generate.test.ts` — **Scenarios**: (1) projectId and chatSessionId substituted into template, (2) nullable values produce empty env vars (not "undefined"), (3) generated config passes size validation with new vars, (4) existing variables still substituted correctly (no regression)
+- [x] T012 Update cloud-init template generation to substitute `projectId` and `chatSessionId` as `PROJECT_ID` and `CHAT_SESSION_ID` environment variables in systemd service in `packages/cloud-init/src/generate.ts`
+- [x] T013 Unit tests for cloud-init with new variables in `packages/cloud-init/tests/generate.test.ts` — **Scenarios**: (1) projectId and chatSessionId substituted into template, (2) nullable values produce empty env vars (not "undefined"), (3) generated config passes size validation with new vars, (4) existing variables still substituted correctly (no regression)
 
 ### Batch Message API Endpoint
 
-- [ ] T014 Implement `POST /api/workspaces/:workspaceId/messages` route with callback JWT auth, request validation (1-100 messages, role enum, non-empty content, UUID messageId, ISO timestamp, 256KB payload limit), workspace-to-project resolution, and DO delegation in `apps/api/src/routes/workspaces.ts`
-- [ ] T015 Unit tests for batch message endpoint in `apps/api/tests/unit/workspace-messages.test.ts` — **Scenarios**: (1) valid batch of 2 messages returns 200 with persisted count, (2) empty messages array returns 400, (3) >100 messages returns 400, (4) invalid role returns 400, (5) empty content returns 400, (6) missing auth returns 401, (7) JWT workspace claim mismatch returns 403, (8) non-existent session returns 404, (9) payload >256KB returns 413, (10) duplicate messageId returns 200 with duplicates count, (11) workspace without project returns appropriate error
+- [x] T014 Implement `POST /api/workspaces/:workspaceId/messages` route with callback JWT auth, request validation (1-100 messages, role enum, non-empty content, UUID messageId, ISO timestamp, 256KB payload limit), workspace-to-project resolution, and DO delegation in `apps/api/src/routes/workspaces.ts`
+- [x] T015 Unit tests for batch message endpoint in `apps/api/tests/unit/routes/workspace-messages.test.ts` — **Scenarios**: (1) valid batch of 2 messages returns 200 with persisted count, (2) empty messages array returns 400, (3) >100 messages returns 400, (4) invalid role returns 400, (5) empty content returns 400, (6) missing auth returns 401, (7) JWT workspace claim mismatch returns 403, (8) non-existent session returns 404, (9) payload >256KB returns 413, (10) duplicate messageId returns 200 with duplicates count, (11) workspace without project returns appropriate error
 
 ### Workspace Creation Session Hook
 
-- [ ] T016 Update workspace creation flow: when `projectId` is set, create chat session in ProjectData DO and include `chatSessionId` in cloud-init variables in `apps/api/src/services/workspaces.ts` (or `apps/api/src/routes/workspaces.ts`)
-- [ ] T017 Unit tests for workspace creation chat session in `apps/api/tests/unit/workspace-creation-session.test.ts` — **Scenarios**: (1) workspace with projectId creates session and passes chatSessionId to cloud-init, (2) workspace without projectId skips session creation and cloud-init has no chatSessionId, (3) session creation failure does not block workspace creation (best-effort)
+- [x] T016 Update workspace creation flow: when `projectId` is set, create chat session in ProjectData DO and store `chatSessionId` on workspace record; include `chatSessionId` in runtime endpoint response in `apps/api/src/routes/workspaces.ts`
+- [x] T017 Unit tests for workspace creation chat session in `apps/api/tests/unit/routes/workspace-session-hook.test.ts` — **Scenarios**: (1) workspace with projectId creates session and stores chatSessionId, (2) workspace without projectId skips session creation, (3) session creation failure does not block workspace creation (best-effort), (4) runtime endpoint returns chatSessionId
 
 **Checkpoint**: Foundation ready — all shared types, migrations, DO methods, cloud-init, and API endpoint are in place. User story implementation can begin.
 

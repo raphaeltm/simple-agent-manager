@@ -46,7 +46,11 @@ export class ProjectData extends DurableObject<Env> {
   // Chat Session CRUD
   // =========================================================================
 
-  async createSession(workspaceId: string | null, topic: string | null): Promise<string> {
+  async createSession(
+    workspaceId: string | null,
+    topic: string | null,
+    taskId: string | null = null
+  ): Promise<string> {
     const maxSessions = parseInt(this.env.MAX_SESSIONS_PER_PROJECT || '1000', 10);
     const countRow = this.sql
       .exec('SELECT COUNT(*) as cnt FROM chat_sessions')
@@ -58,18 +62,31 @@ export class ProjectData extends DurableObject<Env> {
     const id = generateId();
     const now = Date.now();
     this.sql.exec(
-      `INSERT INTO chat_sessions (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
-       VALUES (?, ?, ?, 'active', 0, ?, ?, ?)`,
+      `INSERT INTO chat_sessions (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'active', 0, ?, ?, ?)`,
       id,
       workspaceId,
+      taskId,
       topic,
       now,
       now,
       now
     );
 
-    this.recordActivityEventInternal('session.started', 'system', null, workspaceId, id, null, null);
+    this.recordActivityEventInternal('session.started', 'system', null, workspaceId, id, taskId, null);
     this.scheduleSummarySync();
+
+    // Broadcast session.created event to connected WebSocket clients
+    this.broadcastEvent('session.created', {
+      id,
+      workspaceId,
+      taskId,
+      topic,
+      status: 'active',
+      messageCount: 0,
+      createdAt: now,
+    });
+
     return id;
   }
 
@@ -163,38 +180,140 @@ export class ProjectData extends DurableObject<Env> {
     return id;
   }
 
+  /**
+   * Batch persist messages with messageId-based deduplication.
+   * Returns count of newly persisted and duplicate messages.
+   */
+  async persistMessageBatch(
+    sessionId: string,
+    messages: Array<{
+      messageId: string;
+      role: string;
+      content: string;
+      toolMetadata: string | null;
+      timestamp: string;
+    }>
+  ): Promise<{ persisted: number; duplicates: number }> {
+    const session = this.sql
+      .exec('SELECT id, message_count, topic, status FROM chat_sessions WHERE id = ?', sessionId)
+      .toArray()[0];
+
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+
+    const maxMessages = parseInt(this.env.MAX_MESSAGES_PER_SESSION || '10000', 10);
+    let persisted = 0;
+    let duplicates = 0;
+    const now = Date.now();
+
+    for (const msg of messages) {
+      // Check for duplicate messageId
+      const existing = this.sql
+        .exec('SELECT id FROM chat_messages WHERE id = ?', msg.messageId)
+        .toArray()[0];
+
+      if (existing) {
+        duplicates++;
+        continue;
+      }
+
+      // Check message count limit
+      const currentCount = (session.message_count as number) + persisted;
+      if (currentCount >= maxMessages) {
+        break;
+      }
+
+      const createdAt = new Date(msg.timestamp).getTime() || now;
+      this.sql.exec(
+        `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        msg.messageId,
+        sessionId,
+        msg.role,
+        msg.content,
+        msg.toolMetadata,
+        createdAt
+      );
+      persisted++;
+
+      // Broadcast each message individually for real-time viewers
+      this.broadcastEvent('message.new', {
+        sessionId,
+        message: {
+          id: msg.messageId,
+          role: msg.role,
+          content: msg.content,
+          toolMetadata: msg.toolMetadata ? JSON.parse(msg.toolMetadata) : null,
+          createdAt,
+        },
+      });
+    }
+
+    if (persisted > 0) {
+      // Update session message count and updated_at
+      this.sql.exec(
+        `UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ? WHERE id = ?`,
+        persisted,
+        now,
+        sessionId
+      );
+
+      // Auto-capture topic from first user message if not set
+      if (!session.topic) {
+        const firstUserMsg = messages.find((m) => m.role === 'user');
+        if (firstUserMsg) {
+          const truncatedTopic =
+            firstUserMsg.content.length > 100
+              ? firstUserMsg.content.substring(0, 97) + '...'
+              : firstUserMsg.content;
+          this.sql.exec(
+            'UPDATE chat_sessions SET topic = ?, updated_at = ? WHERE id = ?',
+            truncatedTopic,
+            now,
+            sessionId
+          );
+        }
+      }
+
+      this.scheduleSummarySync();
+    }
+
+    return { persisted, duplicates };
+  }
+
   async listSessions(
     status: string | null,
     limit: number = 20,
-    offset: number = 0
+    offset: number = 0,
+    taskId: string | null = null
   ): Promise<{ sessions: Record<string, unknown>[]; total: number }> {
-    let totalRow: Record<string, unknown> | undefined;
-    let rows: Record<string, unknown>[];
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
 
     if (status) {
-      totalRow = this.sql
-        .exec('SELECT COUNT(*) as cnt FROM chat_sessions WHERE status = ?', status)
-        .toArray()[0];
-      rows = this.sql
-        .exec(
-          'SELECT id, workspace_id, topic, status, message_count, started_at, ended_at, created_at, updated_at FROM chat_sessions WHERE status = ? ORDER BY started_at DESC LIMIT ? OFFSET ?',
-          status,
-          limit,
-          offset
-        )
-        .toArray();
-    } else {
-      totalRow = this.sql
-        .exec('SELECT COUNT(*) as cnt FROM chat_sessions')
-        .toArray()[0];
-      rows = this.sql
-        .exec(
-          'SELECT id, workspace_id, topic, status, message_count, started_at, ended_at, created_at, updated_at FROM chat_sessions ORDER BY started_at DESC LIMIT ? OFFSET ?',
-          limit,
-          offset
-        )
-        .toArray();
+      conditions.push('status = ?');
+      params.push(status);
     }
+    if (taskId) {
+      conditions.push('task_id = ?');
+      params.push(taskId);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const totalRow = this.sql
+      .exec(`SELECT COUNT(*) as cnt FROM chat_sessions ${whereClause}`, ...params)
+      .toArray()[0];
+
+    const rows = this.sql
+      .exec(
+        `SELECT id, workspace_id, task_id, topic, status, message_count, started_at, ended_at, created_at, updated_at FROM chat_sessions ${whereClause} ORDER BY started_at DESC LIMIT ? OFFSET ?`,
+        ...params,
+        limit,
+        offset
+      )
+      .toArray();
 
     return {
       sessions: rows.map((row) => this.mapSessionRow(row)),
@@ -205,7 +324,7 @@ export class ProjectData extends DurableObject<Env> {
   async getSession(sessionId: string): Promise<Record<string, unknown> | null> {
     const rows = this.sql
       .exec(
-        'SELECT id, workspace_id, topic, status, message_count, started_at, ended_at, created_at, updated_at FROM chat_sessions WHERE id = ?',
+        'SELECT id, workspace_id, task_id, topic, status, message_count, started_at, ended_at, created_at, updated_at FROM chat_sessions WHERE id = ?',
         sessionId
       )
       .toArray();
@@ -426,6 +545,7 @@ export class ProjectData extends DurableObject<Env> {
     return {
       id: row.id,
       workspaceId: row.workspace_id,
+      taskId: row.task_id ?? null,
       topic: row.topic,
       status: row.status,
       messageCount: row.message_count,

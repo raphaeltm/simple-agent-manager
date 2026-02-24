@@ -183,12 +183,12 @@ describe('DO Migrations', () => {
       const log = sql.getExecLog();
       const indexes = log.filter((q) => q.toUpperCase().startsWith('CREATE INDEX'));
 
-      // From data-model.md: 7 indexes total
-      // chat_sessions: 3 (status, started_at, workspace)
+      // From data-model.md: 8 indexes total
+      // chat_sessions: 3 (status, started_at, workspace) + 1 (task_id from migration 002)
       // chat_messages: 1 (session_created)
       // task_status_events: 1 (task)
       // activity_events: 2 (created, type)
-      expect(indexes.length).toBe(7);
+      expect(indexes.length).toBe(8);
     });
   });
 });

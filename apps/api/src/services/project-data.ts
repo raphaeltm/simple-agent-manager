@@ -26,10 +26,11 @@ export async function createSession(
   env: Env,
   projectId: string,
   workspaceId: string | null,
-  topic: string | null
+  topic: string | null,
+  taskId: string | null = null
 ): Promise<string> {
   const stub = getStub(env, projectId);
-  return stub.createSession(workspaceId, topic);
+  return stub.createSession(workspaceId, topic, taskId);
 }
 
 export async function stopSession(
@@ -58,15 +59,41 @@ export async function persistMessage(
   );
 }
 
+export async function persistMessageBatch(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  messages: Array<{
+    messageId: string;
+    role: string;
+    content: string;
+    toolMetadata: Record<string, unknown> | null;
+    timestamp: string;
+  }>
+): Promise<{ persisted: number; duplicates: number }> {
+  const stub = getStub(env, projectId);
+  return stub.persistMessageBatch(
+    sessionId,
+    messages.map((m) => ({
+      messageId: m.messageId,
+      role: m.role,
+      content: m.content,
+      toolMetadata: m.toolMetadata ? JSON.stringify(m.toolMetadata) : null,
+      timestamp: m.timestamp,
+    }))
+  );
+}
+
 export async function listSessions(
   env: Env,
   projectId: string,
   status: string | null = null,
   limit: number = 20,
-  offset: number = 0
+  offset: number = 0,
+  taskId: string | null = null
 ): Promise<{ sessions: Record<string, unknown>[]; total: number }> {
   const stub = getStub(env, projectId);
-  return stub.listSessions(status, limit, offset);
+  return stub.listSessions(status, limit, offset, taskId);
 }
 
 export async function getSession(

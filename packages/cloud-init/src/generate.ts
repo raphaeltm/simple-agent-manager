@@ -36,6 +36,8 @@ export function generateCloudInit(variables: CloudInitVariables): string {
     '{{ log_journal_max_use }}': variables.logJournalMaxUse ?? '500M',
     '{{ log_journal_keep_free }}': variables.logJournalKeepFree ?? '1G',
     '{{ log_journal_max_retention }}': variables.logJournalMaxRetention ?? '7day',
+    '{{ project_id }}': variables.projectId ?? '',
+    '{{ chat_session_id }}': variables.chatSessionId ?? '',
     '{{ docker_name_tag }}': '{{.Name}}',
   };
 
