@@ -1,10 +1,10 @@
 /**
- * Cron handler for warm node cleanup sweep.
+ * Cron handler for warm node cleanup sweep (Layer 2 defense).
  *
  * Three-layer defense against orphaned nodes:
- * 1. DO alarm — primary mechanism (NodeLifecycle DO)
- * 2. Cron sweep — catches nodes missed by alarm (this file)
- * 3. Max lifetime — hard cap on auto-provisioned node age
+ * 1. DO alarm — primary mechanism (NodeLifecycle DO schedules self-destruct)
+ * 2. Cron sweep — catches nodes missed by alarm failures (this file)
+ * 3. Max lifetime — hard cap on auto-provisioned node age (prevents unbounded cost)
  *
  * The sweep queries D1 for:
  * - Stale warm nodes (warm_since < now - grace_period) with no active workspaces
