@@ -82,12 +82,18 @@ describe('Nodes page', () => {
       expect(mocks.listNodes).toHaveBeenCalled();
     });
 
+    // Click "Create Node" to open the form (header button toggles to "Cancel")
+    fireEvent.click(screen.getByRole('button', { name: /create node/i }));
+
+    // The form is now visible; click the "Create Node" submit button inside it
     fireEvent.click(screen.getByRole('button', { name: /create node/i }));
 
     await waitFor(() => {
       expect(mocks.createNode).toHaveBeenCalledTimes(1);
       expect(mocks.createNode).toHaveBeenCalledWith({
         name: expect.stringMatching(/^node-[0-9]{14}$/),
+        vmSize: 'medium',
+        vmLocation: 'nbg1',
       });
     });
 

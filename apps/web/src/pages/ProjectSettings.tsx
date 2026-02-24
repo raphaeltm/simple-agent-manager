@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ProjectRuntimeConfigResponse } from '@simple-agent-manager/shared';
+import type { ProjectRuntimeConfigResponse, VMSize } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import {
   getProjectRuntimeConfig,
+  updateProject,
   upsertProjectRuntimeEnvVar,
   deleteProjectRuntimeEnvVar,
   upsertProjectRuntimeFile,
@@ -11,9 +12,43 @@ import {
 import { useToast } from '../hooks/useToast';
 import { useProjectContext } from './ProjectContext';
 
+const VM_SIZES: { value: VMSize; label: string; description: string }[] = [
+  { value: 'small', label: 'Small', description: '2 vCPUs, 4 GB RAM' },
+  { value: 'medium', label: 'Medium', description: '4 vCPUs, 8 GB RAM' },
+  { value: 'large', label: 'Large', description: '8 vCPUs, 16 GB RAM' },
+];
+
 export function ProjectSettings() {
   const toast = useToast();
-  const { projectId } = useProjectContext();
+  const { projectId, project, reload } = useProjectContext();
+
+  const [defaultVmSize, setDefaultVmSize] = useState<VMSize | null>(project?.defaultVmSize ?? null);
+  const [savingVmSize, setSavingVmSize] = useState(false);
+
+  // Sync from project when it reloads
+  useEffect(() => {
+    if (project) {
+      setDefaultVmSize(project.defaultVmSize ?? null);
+    }
+  }, [project]);
+
+  const handleSaveVmSize = async (size: VMSize) => {
+    // If clicking the already-selected size, clear to platform default
+    const newSize = size === defaultVmSize ? null : size;
+    setSavingVmSize(true);
+    setDefaultVmSize(newSize);
+    try {
+      await updateProject(projectId, { defaultVmSize: newSize });
+      await reload();
+      toast.success(newSize ? `Default VM size set to ${newSize}` : 'Default VM size cleared (will use platform default)');
+    } catch (err) {
+      // Revert on error
+      setDefaultVmSize(project?.defaultVmSize ?? null);
+      toast.error(err instanceof Error ? err.message : 'Failed to update VM size');
+    } finally {
+      setSavingVmSize(false);
+    }
+  };
 
   const [runtimeConfig, setRuntimeConfig] = useState<ProjectRuntimeConfigResponse>({ envVars: [], files: [] });
   const [runtimeConfigLoading, setRuntimeConfigLoading] = useState(true);
@@ -152,6 +187,68 @@ export function ProjectSettings() {
   };
 
   return (
+    <div style={{ display: 'grid', gap: 'var(--sam-space-4)' }}>
+      {/* Default VM Size */}
+      <section
+        style={{
+          border: '1px solid var(--sam-color-border-default)',
+          borderRadius: 'var(--sam-radius-md)',
+          background: 'var(--sam-color-bg-surface)',
+          padding: 'var(--sam-space-4)',
+          display: 'grid',
+          gap: 'var(--sam-space-3)',
+        }}
+      >
+        <div>
+          <h2 className="sam-type-section-heading" style={{ margin: 0, color: 'var(--sam-color-fg-primary)' }}>
+            Default Node Size
+          </h2>
+          <p style={{ margin: '4px 0 0', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+            Used when launching new workspaces from this project. Click again to clear.
+          </p>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--sam-space-3)' }}>
+          {VM_SIZES.map((size) => {
+            const isSelected = defaultVmSize === size.value;
+            return (
+              <button
+                key={size.value}
+                type="button"
+                aria-pressed={isSelected}
+                disabled={savingVmSize}
+                onClick={() => void handleSaveVmSize(size.value)}
+                style={{
+                  padding: 'var(--sam-space-3)',
+                  border: isSelected
+                    ? '2px solid var(--sam-color-accent-primary)'
+                    : '1px solid var(--sam-color-border-default)',
+                  borderRadius: 'var(--sam-radius-md)',
+                  textAlign: 'left',
+                  cursor: savingVmSize ? 'wait' : 'pointer',
+                  backgroundColor: isSelected
+                    ? 'var(--sam-color-accent-primary-tint)'
+                    : 'var(--sam-color-bg-inset)',
+                  color: 'var(--sam-color-fg-primary)',
+                  transition: 'all 0.15s ease',
+                  opacity: savingVmSize ? 0.6 : 1,
+                }}
+              >
+                <div style={{ fontWeight: 500 }}>{size.label}</div>
+                <div style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)', marginTop: '0.125rem' }}>
+                  {size.description}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {!defaultVmSize && (
+          <div style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+            No default set — workspaces will use the platform default (Medium).
+          </div>
+        )}
+      </section>
+
+    {/* Runtime Config */}
     <section
       style={{
         border: '1px solid var(--sam-color-border-default)',
@@ -355,5 +452,6 @@ export function ProjectSettings() {
         </div>
       )}
     </section>
+    </div>
   );
 }

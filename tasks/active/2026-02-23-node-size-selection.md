@@ -31,16 +31,16 @@ Users cannot select a node/VM size when creating workspaces. The "Launch Workspa
 
 ## Detailed Tasklist
 
-- [ ] Add `defaultVmSize` field to project settings schema in `apps/api/src/db/schema.ts`
-- [ ] Create migration for the new column
-- [ ] Update project PATCH endpoint in `apps/api/src/routes/projects.ts` to accept `defaultVmSize`
-- [ ] Update project settings UI (`apps/web/src/pages/ProjectSettings.tsx`) to include VM size selector
-- [ ] Update `ProjectOverview.tsx` quick launch to use project's `defaultVmSize` (or show a quick size picker)
-- [ ] Ensure `CreateWorkspace.tsx` shows size selection regardless of whether an existing node is selected
-- [ ] Add size selection to node creation on the Nodes page
-- [ ] Update shared types if needed for project settings
-- [ ] Run typecheck: `pnpm typecheck`
-- [ ] Run build: `pnpm build`
+- [x] Add `defaultVmSize` field to project settings schema in `apps/api/src/db/schema.ts`
+- [x] Create migration for the new column (0015_project_default_vm_size.sql)
+- [x] Update project PATCH endpoint in `apps/api/src/routes/projects.ts` to accept `defaultVmSize`
+- [x] Update project settings UI (`apps/web/src/pages/ProjectSettings.tsx`) to include VM size selector
+- [x] Update `ProjectOverview.tsx` quick launch to use project's `defaultVmSize` (or show a quick size picker)
+- [x] Ensure `CreateWorkspace.tsx` shows size selection regardless of whether an existing node is selected
+- [x] Add size selection to node creation on the Nodes page
+- [x] Update shared types if needed for project settings
+- [x] Run typecheck: `pnpm typecheck`
+- [x] Run build: `pnpm build`
 - [ ] Test the complete flow: project settings -> default size -> quick launch
 
 ## Files to Modify

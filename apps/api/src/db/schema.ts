@@ -178,6 +178,7 @@ export const projects = sqliteTable(
     defaultBranch: text('default_branch').notNull().default('main'),
     githubRepoId: integer('github_repo_id'),
     githubRepoNodeId: text('github_repo_node_id'),
+    defaultVmSize: text('default_vm_size'),
     status: text('status').notNull().default('active'),
     lastActivityAt: text('last_activity_at'),
     activeSessionCount: integer('active_session_count').notNull().default(0),
