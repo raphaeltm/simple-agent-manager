@@ -399,11 +399,18 @@ async function executeTaskRun(
       gitUserEmail: userEmail,
     });
 
-    // NOW transition to delegated — workspace is actually created on the node
-    await db
+    // NOW transition to delegated — workspace is actually created on the node.
+    // Use optimistic locking: only transition if still queued (cron may have failed it).
+    const delegatedRows = await db
       .update(schema.tasks)
       .set({ status: 'delegated', updatedAt: now() })
-      .where(eq(schema.tasks.id, task.id));
+      .where(and(eq(schema.tasks.id, task.id), eq(schema.tasks.status, 'queued')))
+      .returning({ id: schema.tasks.id });
+
+    if (delegatedRows.length === 0) {
+      log.warn('task_run.aborted_by_recovery', { ...ctx, expectedStatus: 'queued', step: 'delegated_transition' });
+      return; // Task was failed by cron recovery — abort gracefully
+    }
 
     await db.insert(schema.taskStatusEvents).values({
       id: ulid(),
@@ -453,10 +460,17 @@ async function executeTaskRun(
     // =========================================================================
     await setExecutionStep(db, task.id, 'running');
 
-    await db
+    // Use optimistic locking: only transition if still delegated (cron may have failed it).
+    const inProgressRows = await db
       .update(schema.tasks)
       .set({ status: 'in_progress', startedAt: now(), updatedAt: now() })
-      .where(eq(schema.tasks.id, task.id));
+      .where(and(eq(schema.tasks.id, task.id), eq(schema.tasks.status, 'delegated')))
+      .returning({ id: schema.tasks.id });
+
+    if (inProgressRows.length === 0) {
+      log.warn('task_run.aborted_by_recovery', { ...ctx, expectedStatus: 'delegated', step: 'in_progress_transition' });
+      return; // Task was failed by cron recovery — abort gracefully
+    }
 
     await db.insert(schema.taskStatusEvents).values({
       id: ulid(),
@@ -530,16 +544,13 @@ async function waitForWorkspaceReady(
   workspaceId: string,
   env: Env
 ): Promise<void> {
-  const timeoutMs = env.WORKSPACE_READY_TIMEOUT_MS
-    ? Number.parseInt(env.WORKSPACE_READY_TIMEOUT_MS, 10)
-    : 300_000; // 5 minutes default
+  const parsedTimeout = env.WORKSPACE_READY_TIMEOUT_MS ? Number.parseInt(env.WORKSPACE_READY_TIMEOUT_MS, 10) : NaN;
+  const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 300_000;
   const deadline = Date.now() + timeoutMs;
-  const basePollInterval = env.WORKSPACE_READY_POLL_INTERVAL_MS
-    ? Number.parseInt(env.WORKSPACE_READY_POLL_INTERVAL_MS, 10)
-    : DEFAULT_WORKSPACE_READY_POLL_INTERVAL_MS;
-  const maxPollInterval = env.WORKSPACE_READY_MAX_POLL_INTERVAL_MS
-    ? Number.parseInt(env.WORKSPACE_READY_MAX_POLL_INTERVAL_MS, 10)
-    : DEFAULT_WORKSPACE_READY_MAX_POLL_INTERVAL_MS;
+  const parsedPoll = env.WORKSPACE_READY_POLL_INTERVAL_MS ? Number.parseInt(env.WORKSPACE_READY_POLL_INTERVAL_MS, 10) : NaN;
+  const basePollInterval = Number.isFinite(parsedPoll) && parsedPoll > 0 ? parsedPoll : DEFAULT_WORKSPACE_READY_POLL_INTERVAL_MS;
+  const parsedMaxPoll = env.WORKSPACE_READY_MAX_POLL_INTERVAL_MS ? Number.parseInt(env.WORKSPACE_READY_MAX_POLL_INTERVAL_MS, 10) : NaN;
+  const maxPollInterval = Number.isFinite(parsedMaxPoll) && parsedMaxPoll > 0 ? parsedMaxPoll : DEFAULT_WORKSPACE_READY_MAX_POLL_INTERVAL_MS;
   let pollInterval = basePollInterval;
 
   while (Date.now() < deadline) {
@@ -581,6 +592,9 @@ async function waitForWorkspaceReady(
 /**
  * Mark a task as failed with an error message.
  * Clears executionStep since the task is in a terminal state.
+ *
+ * Idempotent: if the task is already in a terminal state (e.g., failed by
+ * the stuck-task cron), this is a no-op to avoid duplicate status events.
  */
 async function failTask(
   db: ReturnType<typeof drizzle<typeof schema>>,
@@ -597,6 +611,11 @@ async function failTask(
     .limit(1);
 
   const fromStatus = (task?.status ?? 'queued') as TaskStatus;
+
+  // Skip if already in a terminal state (idempotent — avoids duplicate events)
+  if (fromStatus === 'failed' || fromStatus === 'completed' || fromStatus === 'cancelled') {
+    return;
+  }
 
   await db
     .update(schema.tasks)

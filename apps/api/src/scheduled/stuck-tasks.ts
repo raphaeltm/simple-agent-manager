@@ -18,6 +18,7 @@ import type { Env } from '../index';
 import * as schema from '../db/schema';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
+import { cleanupTaskRun } from '../services/task-runner';
 
 function parseMs(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
@@ -144,6 +145,17 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         reason,
         createdAt: nowIso,
       });
+
+      // Best-effort cleanup: stop workspace and mark auto-provisioned node as warm.
+      // cleanupTaskRun reads the task's workspaceId and autoProvisionedNodeId from DB.
+      try {
+        await cleanupTaskRun(task.id, env);
+      } catch (cleanupErr) {
+        log.error('stuck_task.cleanup_failed', {
+          taskId: task.id,
+          error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
+        });
+      }
 
       switch (task.status) {
         case 'queued': result.failedQueued++; break;

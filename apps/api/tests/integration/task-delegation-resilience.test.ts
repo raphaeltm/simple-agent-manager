@@ -182,8 +182,8 @@ describe('task delegation resilience integration', () => {
       expect(stuckTasksFile).toContain('DEFAULT_TASK_RUN_MAX_EXECUTION_MS');
     });
 
-    it('queued timeout tightened to 2 minutes', () => {
-      expect(constantsFile).toContain('DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS = 2 * 60 * 1000');
+    it('queued timeout set to 5 minutes (>= provisioning time)', () => {
+      expect(constantsFile).toContain('DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS = 5 * 60 * 1000');
     });
 
     it('delegated timeout tightened to 5 minutes', () => {
@@ -225,7 +225,7 @@ describe('task delegation resilience integration', () => {
     });
 
     it('toTaskResponse maps executionStep from task record', () => {
-      expect(tasksRoutesFile).toContain("executionStep: (task.executionStep as Task['executionStep']) ?? null");
+      expect(tasksRoutesFile).toContain('isTaskExecutionStep(task.executionStep) ? task.executionStep : null');
     });
   });
 
@@ -260,27 +260,27 @@ describe('task delegation resilience integration', () => {
       expect(adminRoutesFile).toContain("adminRoutes.get('/tasks/recent-failures'");
     });
 
-    it('returns execution_step for failed tasks', () => {
+    it('returns executionStep for failed tasks', () => {
       const failuresSection = adminRoutesFile.slice(
         adminRoutesFile.indexOf("'/tasks/recent-failures'")
       );
-      expect(failuresSection).toContain('execution_step');
+      expect(failuresSection).toContain('executionStep: schema.tasks.executionStep');
     });
 
-    it('returns error_message for debugging', () => {
+    it('returns errorMessage for debugging', () => {
       const failuresSection = adminRoutesFile.slice(
         adminRoutesFile.indexOf("'/tasks/recent-failures'")
       );
-      expect(failuresSection).toContain('error_message');
+      expect(failuresSection).toContain('errorMessage: schema.tasks.errorMessage');
     });
 
     it('supports configurable limit parameter', () => {
       expect(adminRoutesFile).toContain("c.req.query('limit')");
-      expect(adminRoutesFile).toContain('LIMIT ?');
+      expect(adminRoutesFile).toContain('.limit(limit)');
     });
 
-    it('orders by completed_at DESC for most recent first', () => {
-      expect(adminRoutesFile).toContain('ORDER BY completed_at DESC');
+    it('orders by completedAt DESC for most recent first', () => {
+      expect(adminRoutesFile).toContain('desc(schema.tasks.completedAt)');
     });
   });
 
@@ -323,6 +323,181 @@ describe('task delegation resilience integration', () => {
       const catchSection = taskRunnerFile.slice(taskRunnerFile.indexOf('} catch (err)'));
       expect(catchSection).toContain('autoProvisioned && nodeId');
       expect(catchSection).toContain('cleanupAutoProvisionedNode');
+    });
+  });
+
+  // ===========================================================================
+  // Optimistic locking on status transitions
+  // ===========================================================================
+  describe('optimistic locking', () => {
+    it('delegated transition uses WHERE status = queued', () => {
+      const executeFnStart = taskRunnerFile.indexOf('async function executeTaskRun');
+      const executeFnSection = taskRunnerFile.slice(executeFnStart);
+      // The delegated transition must filter by current status to prevent TOCTOU race
+      expect(executeFnSection).toContain("eq(schema.tasks.status, 'queued')");
+    });
+
+    it('in_progress transition uses WHERE status = delegated', () => {
+      const executeFnStart = taskRunnerFile.indexOf('async function executeTaskRun');
+      const executeFnSection = taskRunnerFile.slice(executeFnStart);
+      expect(executeFnSection).toContain("eq(schema.tasks.status, 'delegated')");
+    });
+
+    it('aborts gracefully when delegated transition fails (cron already failed task)', () => {
+      expect(taskRunnerFile).toContain('delegatedRows.length === 0');
+      expect(taskRunnerFile).toContain("step: 'delegated_transition'");
+    });
+
+    it('aborts gracefully when in_progress transition fails (cron already failed task)', () => {
+      expect(taskRunnerFile).toContain('inProgressRows.length === 0');
+      expect(taskRunnerFile).toContain("step: 'in_progress_transition'");
+    });
+  });
+
+  // ===========================================================================
+  // Idempotent failTask
+  // ===========================================================================
+  describe('idempotent failTask', () => {
+    it('skips update when task is already in terminal state', () => {
+      const failFn = taskRunnerFile.slice(taskRunnerFile.indexOf('async function failTask'));
+      expect(failFn).toContain("fromStatus === 'failed'");
+      expect(failFn).toContain("fromStatus === 'completed'");
+      expect(failFn).toContain("fromStatus === 'cancelled'");
+    });
+
+    it('returns early without inserting duplicate status events', () => {
+      const failFn = taskRunnerFile.slice(taskRunnerFile.indexOf('async function failTask'));
+      // The early return must come before the DB update
+      const returnIdx = failFn.indexOf('return;');
+      const updateIdx = failFn.indexOf('.update(schema.tasks)');
+      expect(returnIdx).toBeGreaterThan(-1);
+      expect(updateIdx).toBeGreaterThan(returnIdx);
+    });
+  });
+
+  // ===========================================================================
+  // Stuck task cleanup
+  // ===========================================================================
+  describe('stuck task resource cleanup', () => {
+    it('imports cleanupTaskRun from task-runner', () => {
+      expect(stuckTasksFile).toContain("import { cleanupTaskRun } from '../services/task-runner'");
+    });
+
+    it('calls cleanupTaskRun after failing a stuck task', () => {
+      const recoverSection = stuckTasksFile.slice(stuckTasksFile.indexOf('if (!isStuck) continue'));
+      expect(recoverSection).toContain('cleanupTaskRun(task.id, env)');
+    });
+
+    it('wraps cleanup in try/catch for best-effort semantics', () => {
+      expect(stuckTasksFile).toContain("log.error('stuck_task.cleanup_failed'");
+    });
+  });
+
+  // ===========================================================================
+  // Runtime validation for executionStep
+  // ===========================================================================
+  describe('executionStep runtime validation', () => {
+    it('shared types export isTaskExecutionStep type guard', () => {
+      expect(sharedTypesFile).toContain('function isTaskExecutionStep');
+    });
+
+    it('shared types export TASK_EXECUTION_STEPS array', () => {
+      expect(sharedTypesFile).toContain('TASK_EXECUTION_STEPS');
+    });
+
+    it('toTaskResponse uses isTaskExecutionStep instead of unsafe cast', () => {
+      expect(tasksRoutesFile).toContain('isTaskExecutionStep(task.executionStep)');
+      // Must NOT contain the old unsafe cast
+      expect(tasksRoutesFile).not.toContain("as Task['executionStep']");
+    });
+  });
+
+  // ===========================================================================
+  // STEP_DESCRIPTIONS completeness
+  // ===========================================================================
+  describe('STEP_DESCRIPTIONS completeness', () => {
+    const expectedSteps = [
+      'node_selection',
+      'node_provisioning',
+      'node_agent_ready',
+      'workspace_creation',
+      'workspace_ready',
+      'agent_session',
+      'running',
+    ];
+
+    for (const step of expectedSteps) {
+      it(`STEP_DESCRIPTIONS covers ${step}`, () => {
+        // Each step in the type must have a human-readable description
+        const stepDescSection = stuckTasksFile.slice(
+          stuckTasksFile.indexOf('STEP_DESCRIPTIONS'),
+          stuckTasksFile.indexOf('function describeStep')
+        );
+        expect(stepDescSection).toContain(step);
+      });
+    }
+  });
+
+  // ===========================================================================
+  // Step ordering for remaining steps
+  // ===========================================================================
+  describe('execution step ordering (additional steps)', () => {
+    it('node_provisioning step set before provisionNode', () => {
+      const executeFnStart = taskRunnerFile.indexOf('async function executeTaskRun');
+      const executeFnSection = taskRunnerFile.slice(executeFnStart);
+      const stepIdx = executeFnSection.indexOf("setExecutionStep(db, task.id, 'node_provisioning')");
+      const provisionIdx = executeFnSection.indexOf('provisionNode(nodeId, env)');
+      expect(stepIdx).toBeGreaterThan(-1);
+      expect(provisionIdx).toBeGreaterThan(stepIdx);
+    });
+
+    it('node_agent_ready step set before waitForNodeAgentReady', () => {
+      const executeFnStart = taskRunnerFile.indexOf('async function executeTaskRun');
+      const executeFnSection = taskRunnerFile.slice(executeFnStart);
+      const stepIdx = executeFnSection.indexOf("setExecutionStep(db, task.id, 'node_agent_ready')");
+      const waitIdx = executeFnSection.indexOf('waitForNodeAgentReady(nodeId, env)');
+      expect(stepIdx).toBeGreaterThan(-1);
+      expect(waitIdx).toBeGreaterThan(stepIdx);
+    });
+
+    it('workspace_ready step set before waitForWorkspaceReady', () => {
+      const executeFnStart = taskRunnerFile.indexOf('async function executeTaskRun');
+      const executeFnSection = taskRunnerFile.slice(executeFnStart);
+      const stepIdx = executeFnSection.indexOf("setExecutionStep(db, task.id, 'workspace_ready')");
+      const waitIdx = executeFnSection.indexOf('waitForWorkspaceReady(db, workspaceId, env)');
+      expect(stepIdx).toBeGreaterThan(-1);
+      expect(waitIdx).toBeGreaterThan(stepIdx);
+    });
+
+    it('running step set before in_progress transition', () => {
+      const executeFnStart = taskRunnerFile.indexOf('async function executeTaskRun');
+      const executeFnSection = taskRunnerFile.slice(executeFnStart);
+      const stepIdx = executeFnSection.indexOf("setExecutionStep(db, task.id, 'running')");
+      const transitionIdx = executeFnSection.indexOf("status: 'in_progress'", stepIdx);
+      expect(stepIdx).toBeGreaterThan(-1);
+      expect(transitionIdx).toBeGreaterThan(stepIdx);
+    });
+  });
+
+  // ===========================================================================
+  // Admin endpoint standardization
+  // ===========================================================================
+  describe('admin endpoint consistency', () => {
+    it('recent-failures endpoint uses Drizzle ORM (not raw SQL)', () => {
+      const failuresSection = adminRoutesFile.slice(
+        adminRoutesFile.indexOf("'/tasks/recent-failures'")
+      );
+      // Must use Drizzle select pattern
+      expect(failuresSection).toContain('schema.tasks.id');
+      expect(failuresSection).toContain('.from(schema.tasks)');
+      // Must NOT contain raw SQL
+      expect(failuresSection).not.toContain('c.env.DATABASE.prepare');
+    });
+
+    it('both admin task endpoints use Drizzle ORM', () => {
+      // Count raw DATABASE.prepare calls — should be zero in admin routes
+      const rawSqlMatches = adminRoutesFile.match(/\.DATABASE\.prepare/g);
+      expect(rawSqlMatches).toBeNull();
     });
   });
 
