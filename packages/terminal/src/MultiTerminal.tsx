@@ -38,6 +38,7 @@ interface TerminalInstance {
   terminal: XTerm;
   fitAddon: FitAddon;
   containerEl: HTMLDivElement | null;
+  resizeObserver: ResizeObserver | null;
 }
 
 /**
@@ -183,7 +184,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
           }
         });
 
-        const instance: TerminalInstance = { terminal, fitAddon, containerEl: null };
+        const instance: TerminalInstance = { terminal, fitAddon, containerEl: null, resizeObserver: null };
         terminalsRef.current.set(sessionId, instance);
         return instance;
       },
@@ -194,6 +195,10 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
     const destroyTerminalInstance = useCallback((sessionId: string) => {
       const instance = terminalsRef.current.get(sessionId);
       if (instance) {
+        if (instance.resizeObserver) {
+          instance.resizeObserver.disconnect();
+          instance.resizeObserver = null;
+        }
         instance.terminal.dispose();
         terminalsRef.current.delete(sessionId);
       }
@@ -513,6 +518,9 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
         wsRef.current = null;
         // Dispose all terminal instances
         for (const [, instance] of terminalsRef.current) {
+          if (instance.resizeObserver) {
+            instance.resizeObserver.disconnect();
+          }
           instance.terminal.dispose();
         }
         terminalsRef.current.clear();
@@ -524,6 +532,16 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       (sessionId: string, containerEl: HTMLDivElement | null) => {
         const instance = terminalsRef.current.get(sessionId);
         if (!instance) return;
+
+        // Handle unmount: clean up observer when React passes null
+        if (!containerEl) {
+          if (instance.resizeObserver) {
+            instance.resizeObserver.disconnect();
+            instance.resizeObserver = null;
+          }
+          instance.containerEl = null;
+          return;
+        }
 
         if (containerEl && instance.containerEl !== containerEl) {
           instance.containerEl = containerEl;
@@ -542,6 +560,40 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
               )
             );
           }
+
+          // Add ResizeObserver to handle container size changes (including
+          // display:none → display:block transitions on tab switch).
+          // Also covers window resize, so acts as safety net alongside the
+          // explicit window resize listener.
+          if (instance.resizeObserver) {
+            instance.resizeObserver.disconnect();
+          }
+          let resizeDebounce: ReturnType<typeof setTimeout> | null = null;
+          instance.resizeObserver = new ResizeObserver(() => {
+            if (resizeDebounce) clearTimeout(resizeDebounce);
+            resizeDebounce = setTimeout(() => {
+              // Guard: instance may have been destroyed while resize was queued
+              if (!terminalsRef.current.has(sessionId)) return;
+              if (containerEl.offsetWidth > 0 && containerEl.offsetHeight > 0) {
+                try {
+                  instance.fitAddon.fit();
+                } catch {
+                  return; // terminal may be disposed
+                }
+                const currentWs = wsRef.current;
+                if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+                  currentWs.send(
+                    encodeTerminalWsResize(
+                      instance.terminal.rows,
+                      instance.terminal.cols,
+                      getOutboundSessionId(sessionId)
+                    )
+                  );
+                }
+              }
+            }, 100);
+          });
+          instance.resizeObserver.observe(containerEl);
         }
       },
       [getOutboundSessionId]
@@ -570,13 +622,26 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       return () => window.removeEventListener('resize', handleResize);
     }, [activeSessionId, getOutboundSessionId]);
 
-    // When active tab changes, fit the terminal
+    // When active tab changes, fit the terminal.
+    // Use double-rAF to ensure the browser has fully recalculated layout after
+    // the display:none → display:block transition before measuring dimensions.
+    // The ResizeObserver also handles this, but double-rAF ensures prompt focus.
     useEffect(() => {
       if (!activeSessionId) return;
       const instance = terminalsRef.current.get(activeSessionId);
-      if (instance && instance.containerEl) {
-        requestAnimationFrame(() => {
-          instance.fitAddon.fit();
+      if (!instance || !instance.containerEl) return;
+
+      let innerRaf: number;
+
+      const outerRaf = requestAnimationFrame(() => {
+        innerRaf = requestAnimationFrame(() => {
+          // Guard: terminal may have been disposed during the two frames
+          if (!terminalsRef.current.has(activeSessionId)) return;
+          try {
+            instance.fitAddon.fit();
+          } catch {
+            return; // terminal disposed
+          }
           instance.terminal.focus();
           const ws = wsRef.current;
           if (ws && ws.readyState === WebSocket.OPEN) {
@@ -589,7 +654,12 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
             );
           }
         });
-      }
+      });
+
+      return () => {
+        cancelAnimationFrame(outerRaf);
+        cancelAnimationFrame(innerRaf);
+      };
     }, [activeSessionId, getOutboundSessionId]);
 
     const sessionsArray = Array.from(sessions.values());

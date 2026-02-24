@@ -46,16 +46,17 @@ When returning to a PTY (terminal) session after switching tabs or being away, t
 
 ## Detailed Tasklist
 
-- [ ] Read `packages/terminal/src/MultiTerminal.tsx` lines 550-700 in detail
-- [ ] Read `packages/terminal/src/Terminal.tsx` lines 90-130 for ResizeObserver pattern
-- [ ] Add ResizeObserver per terminal container in MultiTerminal.tsx `attachTerminal` callback
-- [ ] Ensure the ResizeObserver calls `fitAddon.fit()` only when the container is visible (non-zero dimensions)
-- [ ] Alternatively: replace `display: none` with `visibility: hidden; position: absolute; pointer-events: none` to maintain layout
-- [ ] If using the visibility approach, ensure hidden terminals don't capture keyboard events
-- [ ] Clean up ResizeObserver on terminal unmount (prevent memory leaks)
+- [x] Read `packages/terminal/src/MultiTerminal.tsx` lines 550-700 in detail
+- [x] Read `packages/terminal/src/Terminal.tsx` lines 90-130 for ResizeObserver pattern
+- [x] Add ResizeObserver per terminal container in MultiTerminal.tsx `attachTerminal` callback
+- [x] Ensure the ResizeObserver calls `fitAddon.fit()` only when the container is visible (non-zero dimensions)
+- [N/A] Alternatively: replace `display: none` with `visibility: hidden` — chose ResizeObserver approach instead
+- [N/A] If using the visibility approach, ensure hidden terminals don't capture keyboard events — not applicable
+- [x] Clean up ResizeObserver on terminal unmount (prevent memory leaks) — in destroyTerminalInstance + WS cleanup
+- [x] Improve tab switch timing with double-rAF for reliable layout settling
 - [ ] Test: switch between terminal tabs multiple times and verify sizing is correct
-- [ ] Run build: `pnpm --filter @simple-agent-manager/terminal build`
-- [ ] Run typecheck: `pnpm typecheck`
+- [x] Run build: `pnpm --filter @simple-agent-manager/terminal build`
+- [x] Run typecheck: `pnpm typecheck`
 
 ## Files to Modify
 
