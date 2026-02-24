@@ -139,6 +139,7 @@ export interface Project {
   installationId: string;
   repository: string;
   defaultBranch: string;
+  defaultVmSize?: VMSize | null;
   status?: ProjectStatus;
   createdAt: string;
   updatedAt: string;
@@ -255,6 +256,7 @@ export interface UpdateProjectRequest {
   name?: string;
   description?: string;
   defaultBranch?: string;
+  defaultVmSize?: VMSize | null;
 }
 
 export interface ProjectRuntimeEnvVarResponse {

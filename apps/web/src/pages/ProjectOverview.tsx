@@ -100,6 +100,7 @@ export function ProjectOverview() {
       const workspace = await createWorkspace({
         name: `${project.name} Workspace`,
         projectId: project.id,
+        vmSize: project.defaultVmSize ?? undefined,
       });
       toast.success('Workspace launch started');
       await fetchWorkspaces();

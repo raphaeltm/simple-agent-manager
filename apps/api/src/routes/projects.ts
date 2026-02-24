@@ -95,6 +95,7 @@ function toProjectResponse(project: schema.Project): Project {
     installationId: project.installationId,
     repository: project.repository,
     defaultBranch: project.defaultBranch,
+    defaultVmSize: (project.defaultVmSize as Project['defaultVmSize']) ?? null,
     status: (project.status as 'active' | 'detached') || 'active',
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
@@ -718,7 +719,8 @@ projectsRoutes.patch('/:id', async (c) => {
   if (
     body.name === undefined &&
     body.description === undefined &&
-    body.defaultBranch === undefined
+    body.defaultBranch === undefined &&
+    body.defaultVmSize === undefined
   ) {
     throw errors.badRequest('At least one field is required');
   }
@@ -732,6 +734,11 @@ projectsRoutes.patch('/:id', async (c) => {
   }
   if (!nextDefaultBranch) {
     throw errors.badRequest('defaultBranch cannot be empty');
+  }
+
+  const validVmSizes = ['small', 'medium', 'large'];
+  if (body.defaultVmSize !== undefined && body.defaultVmSize !== null && !validVmSizes.includes(body.defaultVmSize)) {
+    throw errors.badRequest('defaultVmSize must be small, medium, or large');
   }
 
   await assertRepositoryAccess(
@@ -765,6 +772,7 @@ projectsRoutes.patch('/:id', async (c) => {
       normalizedName,
       description: body.description === undefined ? existing.description : body.description?.trim() || null,
       defaultBranch: nextDefaultBranch,
+      defaultVmSize: body.defaultVmSize === undefined ? existing.defaultVmSize : (body.defaultVmSize ?? null),
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)));

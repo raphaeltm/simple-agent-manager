@@ -172,6 +172,9 @@ export function CreateWorkspace() {
         setRepository(proj.repository);
         setBranch(proj.defaultBranch ?? 'main');
         setInstallationId(proj.installationId);
+        if (proj.defaultVmSize) {
+          setVmSize(proj.defaultVmSize);
+        }
       })
       .catch(() => {
         // Project fetch failed — continue without project context
@@ -465,61 +468,59 @@ export function CreateWorkspace() {
             </div>
           )}
 
-          {!selectedNodeId && (
-            <>
-              <div>
-                <label style={{ ...labelStyle, marginBottom: '0.5rem' }}>Node Size</label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--sam-space-3)' }}>
-                  {VM_SIZES.map((size) => (
-                    <button
-                      key={size.value}
-                      type="button"
-                      onClick={() => setVmSize(size.value)}
-                      style={{
-                        padding: 'var(--sam-space-3)',
-                        border:
-                          vmSize === size.value
-                            ? '2px solid var(--sam-color-accent-primary)'
-                            : '1px solid var(--sam-color-border-default)',
-                        borderRadius: 'var(--sam-radius-md)',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        backgroundColor:
-                          vmSize === size.value
-                            ? 'var(--sam-color-accent-primary-tint)'
-                            : 'var(--sam-color-bg-inset)',
-                        color: 'var(--sam-color-fg-primary)',
-                        transition: 'all 0.15s ease',
-                      }}
-                    >
-                      <div style={{ fontWeight: 500 }}>{size.label}</div>
-                      <div
-                        style={{
-                          fontSize: 'var(--sam-type-caption-size)',
-                          color: 'var(--sam-color-fg-muted)',
-                          marginTop: '0.125rem',
-                        }}
-                      >
-                        {size.description}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
+          <div>
+            <label style={{ ...labelStyle, marginBottom: '0.5rem' }}>VM Size</label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--sam-space-3)' }}>
+              {VM_SIZES.map((size) => (
+                <button
+                  key={size.value}
+                  type="button"
+                  onClick={() => setVmSize(size.value)}
+                  style={{
+                    padding: 'var(--sam-space-3)',
+                    border:
+                      vmSize === size.value
+                        ? '2px solid var(--sam-color-accent-primary)'
+                        : '1px solid var(--sam-color-border-default)',
+                    borderRadius: 'var(--sam-radius-md)',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    backgroundColor:
+                      vmSize === size.value
+                        ? 'var(--sam-color-accent-primary-tint)'
+                        : 'var(--sam-color-bg-inset)',
+                    color: 'var(--sam-color-fg-primary)',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <div style={{ fontWeight: 500 }}>{size.label}</div>
+                  <div
+                    style={{
+                      fontSize: 'var(--sam-type-caption-size)',
+                      color: 'var(--sam-color-fg-muted)',
+                      marginTop: '0.125rem',
+                    }}
+                  >
+                    {size.description}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
 
-              <div>
-                <label htmlFor="location" style={labelStyle}>
-                  Node Location
-                </label>
-                <Select id="location" value={vmLocation} onChange={(e) => setVmLocation(e.target.value)}>
-                  {VM_LOCATIONS.map((locationOption) => (
-                    <option key={locationOption.value} value={locationOption.value}>
-                      {locationOption.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            </>
+          {!selectedNodeId && (
+            <div>
+              <label htmlFor="location" style={labelStyle}>
+                Node Location
+              </label>
+              <Select id="location" value={vmLocation} onChange={(e) => setVmLocation(e.target.value)}>
+                {VM_LOCATIONS.map((locationOption) => (
+                  <option key={locationOption.value} value={locationOption.value}>
+                    {locationOption.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
           )}
 
           <div
