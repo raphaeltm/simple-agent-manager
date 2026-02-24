@@ -14,7 +14,7 @@
  *
  * See: specs/021-task-chat-architecture/tasks.md (T045-T047)
  */
-import { and, eq, isNotNull, lt, count } from 'drizzle-orm';
+import { eq, isNotNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import {
   DEFAULT_NODE_WARM_GRACE_PERIOD_MS,
@@ -48,36 +48,27 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
   const gracePeriodMs = parseMs(env.NODE_WARM_GRACE_PERIOD_MS, DEFAULT_NODE_WARM_GRACE_PERIOD_MS);
   const maxLifetimeMs = parseMs(env.MAX_AUTO_NODE_LIFETIME_MS, DEFAULT_MAX_AUTO_NODE_LIFETIME_MS);
 
-  // 1. Find stale warm nodes (warm_since is past grace period)
+  // 1. Find stale warm nodes with running workspace counts in a single query
+  //    to avoid N+1 per-node workspace count lookups.
   const staleThreshold = new Date(now.getTime() - gracePeriodMs).toISOString();
-  const staleWarmNodes = await db
-    .select({
-      id: schema.nodes.id,
-      userId: schema.nodes.userId,
-      warmSince: schema.nodes.warmSince,
-    })
-    .from(schema.nodes)
-    .where(
-      and(
-        isNotNull(schema.nodes.warmSince),
-        lt(schema.nodes.warmSince, staleThreshold),
-        eq(schema.nodes.status, 'running')
-      )
-    );
+  const staleWarmNodesWithCounts = await env.DATABASE.prepare(
+    `SELECT n.id, n.user_id, n.warm_since,
+            COUNT(CASE WHEN w.status = 'running' THEN 1 END) as running_ws_count
+     FROM nodes n
+     LEFT JOIN workspaces w ON w.node_id = n.id
+     WHERE n.warm_since IS NOT NULL
+       AND n.warm_since < ?
+       AND n.status = 'running'
+     GROUP BY n.id`
+  ).bind(staleThreshold).all<{
+    id: string;
+    user_id: string;
+    warm_since: string;
+    running_ws_count: number;
+  }>();
 
-  for (const node of staleWarmNodes) {
-    // Verify no active workspaces before destroying
-    const [wsCount] = await db
-      .select({ count: count() })
-      .from(schema.workspaces)
-      .where(
-        and(
-          eq(schema.workspaces.nodeId, node.id),
-          eq(schema.workspaces.status, 'running')
-        )
-      );
-
-    if ((wsCount?.count ?? 0) > 0) {
+  for (const node of staleWarmNodesWithCounts.results) {
+    if (node.running_ws_count > 0) {
       // Has active workspaces — clear warm_since (shouldn't be warm)
       await db
         .update(schema.nodes)
@@ -87,7 +78,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     }
 
     try {
-      await deleteNodeResources(node.id, node.userId, env);
+      await deleteNodeResources(node.id, node.user_id, env);
       await db
         .update(schema.nodes)
         .set({ status: 'stopped', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })

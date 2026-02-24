@@ -206,6 +206,13 @@ export class ProjectData extends DurableObject<Env> {
     let persisted = 0;
     let duplicates = 0;
     const now = Date.now();
+    const persistedMessages: Array<{
+      id: string;
+      role: string;
+      content: string;
+      toolMetadata: unknown;
+      createdAt: number;
+    }> = [];
 
     for (const msg of messages) {
       // Check for duplicate messageId
@@ -236,17 +243,12 @@ export class ProjectData extends DurableObject<Env> {
         createdAt
       );
       persisted++;
-
-      // Broadcast each message individually for real-time viewers
-      this.broadcastEvent('message.new', {
-        sessionId,
-        message: {
-          id: msg.messageId,
-          role: msg.role,
-          content: msg.content,
-          toolMetadata: msg.toolMetadata ? JSON.parse(msg.toolMetadata) : null,
-          createdAt,
-        },
+      persistedMessages.push({
+        id: msg.messageId,
+        role: msg.role,
+        content: msg.content,
+        toolMetadata: msg.toolMetadata ? JSON.parse(msg.toolMetadata) : null,
+        createdAt,
       });
     }
 
@@ -277,6 +279,13 @@ export class ProjectData extends DurableObject<Env> {
       }
 
       this.scheduleSummarySync();
+
+      // Single batched broadcast instead of per-message to reduce WebSocket traffic
+      this.broadcastEvent('messages.batch', {
+        sessionId,
+        messages: persistedMessages,
+        count: persisted,
+      });
     }
 
     return { persisted, duplicates };

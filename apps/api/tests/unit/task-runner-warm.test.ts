@@ -33,18 +33,18 @@ describe('task runner warm node marking source contract', () => {
       const cleanupSection = taskRunnerFile.slice(
         taskRunnerFile.indexOf('function cleanupAutoProvisionedNode')
       );
-      expect(cleanupSection).toContain('Failed to mark node as warm; falling back to immediate stop');
+      expect(cleanupSection).toContain('as warm; falling back to immediate stop');
       expect(cleanupSection).toContain('stopNodeResources(nodeId, userId, env)');
     });
 
-    it('markIdle failure does not propagate (best-effort)', () => {
+    it('markIdle failure does not propagate (best-effort with logging)', () => {
       const cleanupSection = taskRunnerFile.slice(
         taskRunnerFile.indexOf('function cleanupAutoProvisionedNode')
       );
       // Outer catch catches markIdle errors
       expect(cleanupSection).toContain('catch (err)');
-      // Inner catch catches fallback errors
-      expect(cleanupSection).toContain('// Best effort');
+      // Inner catch logs both failures for cron sweep to catch
+      expect(cleanupSection).toContain('markIdle and stopNodeResources both failed');
     });
   });
 

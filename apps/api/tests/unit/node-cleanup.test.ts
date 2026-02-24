@@ -13,21 +13,22 @@ describe('node cleanup cron sweep source contract', () => {
   const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
 
   describe('stale warm node detection', () => {
-    it('queries nodes with non-null warm_since', () => {
-      expect(cleanupFile).toContain('isNotNull(schema.nodes.warmSince)');
+    it('queries nodes with non-null warm_since via JOIN', () => {
+      expect(cleanupFile).toContain('n.warm_since IS NOT NULL');
     });
 
     it('filters by warm_since < stale threshold', () => {
-      expect(cleanupFile).toContain('lt(schema.nodes.warmSince, staleThreshold)');
+      expect(cleanupFile).toContain('n.warm_since < ?');
+      expect(cleanupFile).toContain('staleThreshold');
     });
 
     it('only targets running nodes', () => {
-      expect(cleanupFile).toContain("eq(schema.nodes.status, 'running')");
+      expect(cleanupFile).toContain("n.status = 'running'");
     });
 
-    it('verifies no active workspaces before destroying', () => {
-      expect(cleanupFile).toContain("eq(schema.workspaces.status, 'running')");
-      expect(cleanupFile).toContain('wsCount?.count ?? 0) > 0');
+    it('uses LEFT JOIN to count running workspaces in single query', () => {
+      expect(cleanupFile).toContain('LEFT JOIN workspaces w ON w.node_id = n.id');
+      expect(cleanupFile).toContain('running_ws_count');
     });
 
     it('clears warm_since if node has active workspaces (data fix)', () => {
@@ -35,7 +36,7 @@ describe('node cleanup cron sweep source contract', () => {
     });
 
     it('calls deleteNodeResources for stale nodes', () => {
-      expect(cleanupFile).toContain('deleteNodeResources(node.id, node.userId, env)');
+      expect(cleanupFile).toContain('deleteNodeResources(node.id, node.user_id, env)');
     });
   });
 

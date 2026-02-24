@@ -634,13 +634,17 @@ async function cleanupAutoProvisionedNode(
   try {
     await nodeLifecycleService.markIdle(env, nodeId, userId);
   } catch (err) {
-    console.error('Failed to mark node as warm; falling back to immediate stop', err);
+    console.error(`Failed to mark node ${nodeId} as warm; falling back to immediate stop`, err);
     // Fallback: stop node directly if DO fails
     try {
       const { stopNodeResources } = await import('./nodes');
       await stopNodeResources(nodeId, userId, env);
-    } catch {
-      // Best effort — the cron sweep will catch it
+    } catch (stopErr) {
+      // Both markIdle and fallback stop failed — log for cron sweep to catch
+      console.error(
+        `Node cleanup failed for node ${nodeId} (user ${userId}): markIdle and stopNodeResources both failed`,
+        stopErr
+      );
     }
   }
 }

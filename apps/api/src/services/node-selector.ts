@@ -161,6 +161,18 @@ export async function selectNodeForTaskRun(
 
     for (const warmNode of sortedWarm) {
       try {
+        // Defense-in-depth: re-check D1 status before DO call to avoid
+        // unnecessary DO round-trips for nodes that changed between query and claim.
+        const [freshNode] = await db
+          .select({ status: schema.nodes.status, warmSince: schema.nodes.warmSince })
+          .from(schema.nodes)
+          .where(eq(schema.nodes.id, warmNode.id))
+          .limit(1);
+
+        if (!freshNode || freshNode.status !== 'running' || !freshNode.warmSince) {
+          continue; // Node state changed since initial query
+        }
+
         const result = await nodeLifecycle.tryClaim(
           env as unknown as import('../index').Env,
           warmNode.id,
