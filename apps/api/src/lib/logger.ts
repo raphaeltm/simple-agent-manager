@@ -4,6 +4,9 @@
  * Provides consistent structured JSON logging for Cloudflare Workers.
  * All log entries are searchable in Cloudflare's log dashboard.
  *
+ * Each log entry is emitted as a single-line JSON object for Cloudflare
+ * Workers dashboard filtering (e.g. filter by event name or level).
+ *
  * Usage:
  *   import { log } from '../lib/logger';
  *   log.info('task_run.state_change', { taskId, fromStatus, toStatus });
