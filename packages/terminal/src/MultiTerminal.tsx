@@ -38,6 +38,7 @@ interface TerminalInstance {
   terminal: XTerm;
   fitAddon: FitAddon;
   containerEl: HTMLDivElement | null;
+  resizeObserver: ResizeObserver | null;
 }
 
 /**
@@ -183,7 +184,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
           }
         });
 
-        const instance: TerminalInstance = { terminal, fitAddon, containerEl: null };
+        const instance: TerminalInstance = { terminal, fitAddon, containerEl: null, resizeObserver: null };
         terminalsRef.current.set(sessionId, instance);
         return instance;
       },
@@ -194,6 +195,10 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
     const destroyTerminalInstance = useCallback((sessionId: string) => {
       const instance = terminalsRef.current.get(sessionId);
       if (instance) {
+        if (instance.resizeObserver) {
+          instance.resizeObserver.disconnect();
+          instance.resizeObserver = null;
+        }
         instance.terminal.dispose();
         terminalsRef.current.delete(sessionId);
       }
@@ -513,6 +518,9 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
         wsRef.current = null;
         // Dispose all terminal instances
         for (const [, instance] of terminalsRef.current) {
+          if (instance.resizeObserver) {
+            instance.resizeObserver.disconnect();
+          }
           instance.terminal.dispose();
         }
         terminalsRef.current.clear();
@@ -542,6 +550,29 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
               )
             );
           }
+
+          // Add ResizeObserver to handle container size changes (including
+          // display:none → display:block transitions on tab switch)
+          if (instance.resizeObserver) {
+            instance.resizeObserver.disconnect();
+          }
+          instance.resizeObserver = new ResizeObserver(() => {
+            // Only fit when the container has non-zero dimensions (i.e. visible)
+            if (containerEl.offsetWidth > 0 && containerEl.offsetHeight > 0) {
+              instance.fitAddon.fit();
+              const currentWs = wsRef.current;
+              if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+                currentWs.send(
+                  encodeTerminalWsResize(
+                    instance.terminal.rows,
+                    instance.terminal.cols,
+                    getOutboundSessionId(sessionId)
+                  )
+                );
+              }
+            }
+          });
+          instance.resizeObserver.observe(containerEl);
         }
       },
       [getOutboundSessionId]
@@ -570,24 +601,31 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       return () => window.removeEventListener('resize', handleResize);
     }, [activeSessionId, getOutboundSessionId]);
 
-    // When active tab changes, fit the terminal
+    // When active tab changes, fit the terminal.
+    // Use double-rAF to ensure the browser has fully recalculated layout after
+    // the display:none → display:block transition before measuring dimensions.
     useEffect(() => {
       if (!activeSessionId) return;
       const instance = terminalsRef.current.get(activeSessionId);
       if (instance && instance.containerEl) {
+        // Double requestAnimationFrame: first rAF schedules after the current
+        // paint, second rAF runs after the next paint — by which time the
+        // display:block layout has been fully computed.
         requestAnimationFrame(() => {
-          instance.fitAddon.fit();
-          instance.terminal.focus();
-          const ws = wsRef.current;
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              encodeTerminalWsResize(
-                instance.terminal.rows,
-                instance.terminal.cols,
-                getOutboundSessionId(activeSessionId)
-              )
-            );
-          }
+          requestAnimationFrame(() => {
+            instance.fitAddon.fit();
+            instance.terminal.focus();
+            const ws = wsRef.current;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(
+                encodeTerminalWsResize(
+                  instance.terminal.rows,
+                  instance.terminal.cols,
+                  getOutboundSessionId(activeSessionId)
+                )
+              );
+            }
+          });
         });
       }
     }, [activeSessionId, getOutboundSessionId]);
