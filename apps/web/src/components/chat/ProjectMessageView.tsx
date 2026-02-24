@@ -125,7 +125,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     if (!session || session.status !== 'active') return;
 
     const API_URL = import.meta.env.VITE_API_URL || '';
-    const wsUrl = API_URL.replace(/^http/, 'ws') + `/api/projects/${projectId}/ws`;
+    const wsUrl = API_URL.replace(/^http/, 'ws') + `/api/projects/${projectId}/sessions/ws`;
 
     let ws: WebSocket | null = null;
     try {

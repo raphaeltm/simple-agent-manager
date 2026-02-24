@@ -1467,6 +1467,8 @@ workspacesRoutes.post('/:id/messages', async (c) => {
   }
 
   const validRoles = new Set(['user', 'assistant', 'system', 'tool']);
+  const maxMessageBytes = c.env.MESSAGE_SIZE_THRESHOLD
+    ? parseInt(c.env.MESSAGE_SIZE_THRESHOLD, 10) : 102400; // 100KB default
 
   // Validate each message and extract sessionId
   let sessionId: string | null = null;
@@ -1482,6 +1484,9 @@ workspacesRoutes.post('/:id/messages', async (c) => {
     }
     if (!msg.content || typeof msg.content !== 'string') {
       throw errors.badRequest('Each message must have non-empty content');
+    }
+    if (msg.content.length > maxMessageBytes) {
+      throw errors.badRequest(`Individual message content exceeds ${maxMessageBytes} byte limit`);
     }
     if (!msg.timestamp || typeof msg.timestamp !== 'string') {
       throw errors.badRequest('Each message must have a timestamp string');

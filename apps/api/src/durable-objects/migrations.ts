@@ -98,6 +98,17 @@ export const MIGRATIONS: Migration[] = [
       sql.exec(`CREATE INDEX idx_chat_sessions_task_id ON chat_sessions(task_id)`);
     },
   },
+  {
+    name: '003-add-do-meta',
+    run: (sql) => {
+      sql.exec(`
+        CREATE TABLE do_meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+      `);
+    },
+  },
 ];
 
 /**

@@ -31,6 +31,7 @@ function generateId(): string {
 export class ProjectData extends DurableObject<Env> {
   private sql: SqlStorage;
   private summarySyncTimer: ReturnType<typeof setTimeout> | null = null;
+  private cachedProjectId: string | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -40,6 +41,40 @@ export class ProjectData extends DurableObject<Env> {
         runMigrations(this.sql);
       });
     });
+  }
+
+  /**
+   * Lazily resolve the project ID from DO meta storage.
+   * `idFromName(projectId)` is one-way — the DO cannot recover the original
+   * name from `this.ctx.id`. So we persist the projectId on first RPC call
+   * via `ensureProjectId` and read it back here.
+   */
+  private getProjectId(): string | null {
+    if (this.cachedProjectId) return this.cachedProjectId;
+    const row = this.sql.exec('SELECT value FROM do_meta WHERE key = ?', 'projectId').toArray()[0];
+    if (row) {
+      this.cachedProjectId = row.value as string;
+    }
+    return this.cachedProjectId;
+  }
+
+  /**
+   * Store the project ID in DO meta if not already set.
+   * Called from the service layer on every RPC call.
+   */
+  ensureProjectId(projectId: string): void {
+    if (this.cachedProjectId === projectId) return;
+    const existing = this.getProjectId();
+    if (existing) {
+      this.cachedProjectId = existing;
+      return;
+    }
+    this.sql.exec(
+      'INSERT OR IGNORE INTO do_meta (key, value) VALUES (?, ?)',
+      'projectId',
+      projectId
+    );
+    this.cachedProjectId = projectId;
   }
 
   // =========================================================================
@@ -594,12 +629,13 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   private async syncSummaryToD1(): Promise<void> {
-    const summary = await this.getSummary();
+    const projectId = this.getProjectId();
+    if (!projectId) {
+      console.warn('syncSummaryToD1: projectId not yet stored in DO meta, skipping');
+      return;
+    }
 
-    // The DO name is the projectId (set via idFromName)
-    // We need to update the projects table in D1
-    // Use the DATABASE binding to update D1 directly
-    const projectId = this.ctx.id.toString();
+    const summary = await this.getSummary();
 
     try {
       await this.env.DATABASE.prepare(

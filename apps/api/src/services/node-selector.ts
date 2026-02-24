@@ -1,4 +1,4 @@
-import { and, eq, count, isNotNull } from 'drizzle-orm';
+import { and, eq, inArray, count, isNotNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import {
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
@@ -224,7 +224,8 @@ export async function selectNodeForTaskRun(
       .where(
         and(
           eq(schema.workspaces.nodeId, node.id),
-          eq(schema.workspaces.userId, userId)
+          eq(schema.workspaces.userId, userId),
+          inArray(schema.workspaces.status, ['running', 'creating', 'recovery'])
         )
       );
 

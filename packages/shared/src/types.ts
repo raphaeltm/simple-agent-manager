@@ -201,11 +201,7 @@ export interface ChatMessage {
   sessionId: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
-  toolMetadata: {
-    tool: string;
-    target: string;
-    status: 'success' | 'error';
-  } | null;
+  toolMetadata: Record<string, unknown> | null;
   createdAt: number;
 }
 
@@ -236,11 +232,7 @@ export interface ActivityEvent {
 export interface PersistMessageRequest {
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
-  toolMetadata?: {
-    tool: string;
-    target: string;
-    status: 'success' | 'error';
-  } | null;
+  toolMetadata?: Record<string, unknown> | null;
 }
 
 // =============================================================================
@@ -252,11 +244,7 @@ export interface PersistMessageItem {
   sessionId: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
-  toolMetadata?: {
-    tool: string;
-    target: string;
-    status: 'success' | 'error';
-  } | null;
+  toolMetadata?: Record<string, unknown> | null;
   timestamp: string; // ISO 8601
 }
 
