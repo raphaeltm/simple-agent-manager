@@ -167,8 +167,8 @@ describe('task-runs service source contract', () => {
   it('implements best-effort cleanup on failure', () => {
     expect(file).toContain('stopWorkspaceOnNode');
     expect(file).toContain('cleanupAutoProvisionedNode');
-    // Best-effort pattern: try/catch around cleanup
-    expect(file).toContain('// Best effort');
+    // Best-effort pattern: try/catch around cleanup with structured error logging
+    expect(file).toContain('task_run.cleanup.workspace_stop_failed');
   });
 
   it('checks node limits before auto-provisioning', () => {

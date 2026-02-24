@@ -62,8 +62,8 @@ describe('node cleanup cron sweep source contract', () => {
     });
 
     it('logs errors with node ID', () => {
-      expect(cleanupFile).toContain('failed to destroy stale warm node');
-      expect(cleanupFile).toContain('failed to destroy max-lifetime node');
+      expect(cleanupFile).toContain('node_cleanup.stale_warm_destroy_failed');
+      expect(cleanupFile).toContain('node_cleanup.max_lifetime_destroy_failed');
     });
 
     it('returns structured result with counts', () => {

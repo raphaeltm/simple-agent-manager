@@ -95,7 +95,7 @@ describe('ProjectMessageView', () => {
 
   it('has polling fallback for WebSocket failures', () => {
     expect(source).toContain('setInterval');
-    expect(source).toContain('10000');
+    expect(source).toContain('ACTIVE_POLL_MS');
   });
 
   it('deduplicates messages by id', () => {
@@ -231,7 +231,7 @@ describe('ProjectChat page', () => {
   });
 
   it('shows empty state when no sessions exist', () => {
-    expect(source).toContain('No chat sessions');
+    expect(source).toContain('Start a task');
   });
 });
 

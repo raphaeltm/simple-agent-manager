@@ -22,6 +22,7 @@ import {
 import type { Env } from '../index';
 import * as schema from '../db/schema';
 import { ulid } from '../lib/ulid';
+import { log } from '../lib/logger';
 import { selectNodeForTaskRun } from './node-selector';
 import { createNodeRecord, provisionNode } from './nodes';
 import * as nodeLifecycleService from './node-lifecycle';
@@ -141,6 +142,16 @@ export async function initiateTaskRun(
   const vmLocation = input.vmLocation ?? 'nbg1';
   const branch = input.branch ?? project.defaultBranch;
 
+  log.info('task_run.initiated', {
+    taskId: task.id,
+    projectId: input.projectId,
+    userId: input.userId,
+    vmSize,
+    vmLocation,
+    branch,
+    preferredNodeId: input.nodeId ?? null,
+  });
+
   // Kick off async execution
   waitUntil(
     executeTaskRun(
@@ -192,12 +203,17 @@ async function executeTaskRun(
 ): Promise<void> {
   const { task, project, userId, vmSize, vmLocation, branch, preferredNodeId, userName, userEmail } = params;
   const now = () => new Date().toISOString();
+  const runStartMs = Date.now();
   let nodeId: string | null = null;
   let workspaceId: string | null = null;
   let autoProvisioned = false;
 
+  const ctx = { taskId: task.id, projectId: project.id, userId };
+
   try {
     // Step 1: Select or create a node
+    log.info('task_run.step.node_selection', { ...ctx, preferredNodeId: preferredNodeId ?? null });
+    const stepStartMs = Date.now();
     if (preferredNodeId) {
       // Validate the preferred node
       const [node] = await db
@@ -215,11 +231,13 @@ async function executeTaskRun(
         throw new TaskRunError('Specified node is not available', 'NODE_UNAVAILABLE');
       }
       nodeId = node.id;
+      log.info('task_run.step.node_selected', { ...ctx, nodeId, source: 'preferred', durationMs: Date.now() - stepStartMs });
     } else {
       // Try to find an existing node with capacity
       const selectedNode = await selectNodeForTaskRun(db, userId, env, vmLocation, vmSize, task.id);
       if (selectedNode) {
         nodeId = selectedNode.id;
+        log.info('task_run.step.node_selected', { ...ctx, nodeId, source: 'existing', durationMs: Date.now() - stepStartMs });
       } else {
         // Create a new node
         const limits = getRuntimeLimits(env);
@@ -245,6 +263,7 @@ async function executeTaskRun(
 
         nodeId = createdNode.id;
         autoProvisioned = true;
+        log.info('task_run.step.node_provisioning', { ...ctx, nodeId, vmSize, vmLocation });
 
         // Store autoProvisionedNodeId on the task
         await db
@@ -271,10 +290,12 @@ async function executeTaskRun(
 
         // Wait for node agent to be ready
         await waitForNodeAgentReady(nodeId, env);
+        log.info('task_run.step.node_ready', { ...ctx, nodeId, source: 'auto_provisioned', durationMs: Date.now() - stepStartMs });
       }
     }
 
     // Step 2: Create workspace
+    log.info('task_run.step.workspace_creation', { ...ctx, nodeId });
     const workspaceName = `Task: ${task.title.slice(0, 50)}`;
     const uniqueName = await resolveUniqueWorkspaceDisplayName(db, nodeId, workspaceName);
     workspaceId = ulid();
@@ -357,8 +378,10 @@ async function executeTaskRun(
 
     // Wait for workspace to be ready (poll status)
     await waitForWorkspaceReady(db, workspaceId, env);
+    log.info('task_run.step.workspace_ready', { ...ctx, workspaceId, nodeId });
 
     // Step 3: Create agent session with task as initial prompt
+    log.info('task_run.step.agent_session_creation', { ...ctx, workspaceId, nodeId });
     const sessionId = ulid();
     const sessionLabel = `Task: ${task.title.slice(0, 40)}`;
 
@@ -398,6 +421,15 @@ async function executeTaskRun(
       createdAt: now(),
     });
 
+    log.info('task_run.step.in_progress', {
+      ...ctx,
+      workspaceId,
+      nodeId,
+      agentSessionId: sessionId,
+      autoProvisioned,
+      totalDurationMs: Date.now() - runStartMs,
+    });
+
     // Note: The actual task completion and PR creation are handled by the
     // workspace callback mechanism. When the agent finishes:
     // 1. The agent pushes changes to a branch (sam/task-{taskId})
@@ -411,14 +443,31 @@ async function executeTaskRun(
   } catch (err) {
     // Transition task to failed
     const errorMessage = err instanceof Error ? err.message : 'Unknown error during task run';
+    const errorCode = err instanceof TaskRunError ? err.code : 'UNKNOWN';
+
+    log.error('task_run.failed', {
+      ...ctx,
+      errorMessage,
+      errorCode,
+      workspaceId,
+      nodeId,
+      autoProvisioned,
+      totalDurationMs: Date.now() - runStartMs,
+    });
+
     await failTask(db, task.id, errorMessage);
 
     // Best-effort cleanup
     if (workspaceId && nodeId) {
       try {
         await stopWorkspaceOnNode(nodeId, workspaceId, env, userId);
-      } catch {
-        // Best effort
+      } catch (stopErr) {
+        log.error('task_run.cleanup.workspace_stop_failed', {
+          ...ctx,
+          workspaceId,
+          nodeId,
+          error: stopErr instanceof Error ? stopErr.message : String(stopErr),
+        });
       }
 
       await db
@@ -568,12 +617,19 @@ export async function cleanupTaskRun(
     return;
   }
 
+  log.info('task_run.cleanup.started', { taskId, workspaceId: task.workspaceId, nodeId: workspace.nodeId });
+
   // Stop the workspace
   if (workspace.status === 'running' || workspace.status === 'recovery') {
     try {
       await stopWorkspaceOnNode(workspace.nodeId, workspace.id, env, task.userId);
-    } catch {
-      // Best effort
+    } catch (err) {
+      log.error('task_run.cleanup.workspace_stop_failed', {
+        taskId,
+        workspaceId: workspace.id,
+        nodeId: workspace.nodeId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     await db
@@ -633,18 +689,26 @@ async function cleanupAutoProvisionedNode(
   // The NodeLifecycle DO will schedule an alarm for eventual teardown.
   try {
     await nodeLifecycleService.markIdle(env, nodeId, userId);
+    log.info('task_run.cleanup.node_marked_warm', { nodeId, userId });
   } catch (err) {
-    console.error(`Failed to mark node ${nodeId} as warm; falling back to immediate stop`, err);
+    log.error('task_run.cleanup.mark_idle_failed', {
+      nodeId,
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     // Fallback: stop node directly if DO fails
     try {
       const { stopNodeResources } = await import('./nodes');
       await stopNodeResources(nodeId, userId, env);
+      log.info('task_run.cleanup.node_stopped_fallback', { nodeId, userId });
     } catch (stopErr) {
       // Both markIdle and fallback stop failed — log for cron sweep to catch
-      console.error(
-        `Node cleanup failed for node ${nodeId} (user ${userId}): markIdle and stopNodeResources both failed`,
-        stopErr
-      );
+      log.error('task_run.cleanup.node_cleanup_total_failure', {
+        nodeId,
+        userId,
+        markIdleError: err instanceof Error ? err.message : String(err),
+        stopError: stopErr instanceof Error ? stopErr.message : String(stopErr),
+      });
     }
   }
 }

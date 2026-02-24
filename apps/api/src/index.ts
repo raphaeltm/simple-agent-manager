@@ -31,6 +31,7 @@ import { adminRoutes } from './routes/admin';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
+import { recoverStuckTasks } from './scheduled/stuck-tasks';
 import { getRuntimeLimits } from './services/limits';
 import { recordNodeRoutingMetric } from './services/telemetry';
 
@@ -109,6 +110,10 @@ export interface Env {
   NODE_WARM_TIMEOUT_MS?: string;
   MAX_AUTO_NODE_LIFETIME_MS?: string;
   NODE_WARM_GRACE_PERIOD_MS?: string;
+  // Task execution timeout (stuck task recovery)
+  TASK_RUN_MAX_EXECUTION_MS?: string;
+  TASK_STUCK_QUEUED_TIMEOUT_MS?: string;
+  TASK_STUCK_DELEGATED_TIMEOUT_MS?: string;
   // ACP configuration (passed to VMs via environment)
   ACP_INIT_TIMEOUT_MS?: string;
   ACP_RECONNECT_DELAY_MS?: string;
@@ -287,7 +292,27 @@ app.use('*', async (c, next) => {
   });
 });
 
-// Middleware
+// Structured request/response logging middleware.
+// Emits one JSON log per request with method, path, status, and duration.
+app.use('*', async (c, next) => {
+  const start = Date.now();
+  await next();
+  const durationMs = Date.now() - start;
+  const path = new URL(c.req.url).pathname;
+  // Skip noisy health checks from structured logs
+  if (path === '/health') return;
+  console.log(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: 'info',
+    event: 'http.request',
+    method: c.req.method,
+    path,
+    status: c.res.status,
+    durationMs,
+  }));
+});
+
+// Hono built-in logger (kept for dev convenience, can be removed in production)
 app.use('*', logger());
 app.use('*', cors({
   origin: (origin, c) => {
@@ -366,7 +391,11 @@ export default {
     env: Env,
     _ctx: ExecutionContext
   ): Promise<void> {
-    console.log('Cron triggered:', new Date().toISOString());
+    console.log(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: 'info',
+      event: 'cron.started',
+    }));
 
     // Check for stuck provisioning workspaces
     const timedOut = await checkProvisioningTimeouts(env.DATABASE);
@@ -378,6 +407,22 @@ export default {
     // Clean up stale warm nodes and expired auto-provisioned nodes
     const nodeCleanup = await runNodeCleanupSweep(env);
 
-    console.log(`Cron completed: ${timedOut} workspace(s) timed out, ${migrated} workspace(s) migrated, ${nodeCleanup.staleDestroyed} stale node(s) destroyed, ${nodeCleanup.lifetimeDestroyed} lifetime node(s) destroyed`);
+    // Recover stuck tasks (queued/delegated/in_progress past timeout)
+    const stuckTasks = await recoverStuckTasks(env);
+
+    console.log(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: 'info',
+      event: 'cron.completed',
+      provisioningTimedOut: timedOut,
+      workspacesMigrated: migrated,
+      staleNodesDestroyed: nodeCleanup.staleDestroyed,
+      lifetimeNodesDestroyed: nodeCleanup.lifetimeDestroyed,
+      nodeCleanupErrors: nodeCleanup.errors,
+      stuckTasksFailedQueued: stuckTasks.failedQueued,
+      stuckTasksFailedDelegated: stuckTasks.failedDelegated,
+      stuckTasksFailedInProgress: stuckTasks.failedInProgress,
+      stuckTaskErrors: stuckTasks.errors,
+    }));
   },
 };
