@@ -1625,6 +1625,50 @@ func buildSAMEnvScript(cfg *config.Config, githubToken string) string {
 			sb.WriteString(fmt.Sprintf("export %s=%q\n", e.key, e.value))
 		}
 	}
+
+	// Dynamic GH_TOKEN fallback: if the static value was empty (e.g. token
+	// wasn't available at provisioning time), fetch a fresh one from the git
+	// credential helper on shell startup. This ensures PTY sessions always
+	// have a working GH_TOKEN.
+	sb.WriteString("\n# Dynamic GH_TOKEN fallback — fetch from credential helper if not set\n")
+	sb.WriteString("if [ -z \"$GH_TOKEN\" ] && command -v git >/dev/null 2>&1; then\n")
+	sb.WriteString("  _gh_token=$(printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill 2>/dev/null | sed -n 's/^password=//p')\n")
+	sb.WriteString("  if [ -n \"$_gh_token\" ]; then\n")
+	sb.WriteString("    export GH_TOKEN=\"$_gh_token\"\n")
+	sb.WriteString("  fi\n")
+	sb.WriteString("  unset _gh_token\n")
+	sb.WriteString("fi\n")
+
+	return sb.String()
+}
+
+// buildSAMStaticEnv returns a simple KEY=VALUE file (no shell commands) for
+// /etc/sam/env, which is parsed by ReadContainerEnvFiles for ACP sessions.
+func buildSAMStaticEnv(cfg *config.Config, githubToken string) string {
+	baseDomain := config.DeriveBaseDomain(cfg.ControlPlaneURL)
+
+	type envEntry struct {
+		key, value string
+	}
+	entries := []envEntry{
+		{"GH_TOKEN", strings.TrimSpace(githubToken)},
+		{"SAM_API_URL", strings.TrimRight(cfg.ControlPlaneURL, "/")},
+		{"SAM_BRANCH", cfg.Branch},
+		{"SAM_NODE_ID", cfg.NodeID},
+		{"SAM_REPOSITORY", cfg.Repository},
+		{"SAM_WORKSPACE_ID", cfg.WorkspaceID},
+	}
+	if baseDomain != "" && cfg.WorkspaceID != "" {
+		entries = append(entries, envEntry{"SAM_WORKSPACE_URL", fmt.Sprintf("https://ws-%s.%s", cfg.WorkspaceID, baseDomain)})
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# SAM workspace environment variables (auto-generated)\n")
+	for _, e := range entries {
+		if e.value != "" {
+			sb.WriteString(fmt.Sprintf("export %s=%q\n", e.key, e.value))
+		}
+	}
 	return sb.String()
 }
 
@@ -1638,16 +1682,31 @@ func ensureSAMEnvironment(ctx context.Context, cfg *config.Config, githubToken s
 		return fmt.Errorf("failed to locate devcontainer for SAM environment setup: %w", err)
 	}
 
-	script := buildSAMEnvScript(cfg, githubToken)
+	shellScript := buildSAMEnvScript(cfg, githubToken)
 
-	// Write to /etc/profile.d/sam-env.sh (sourced by login shells) and /etc/sam/env (parseable).
+	// Write /etc/profile.d/sam-env.sh (sourced by login shells, includes
+	// dynamic GH_TOKEN fallback) and /etc/sam/env (static KEY=VALUE only,
+	// parsed by ReadContainerEnvFiles for ACP sessions).
+	// The two files are written separately because /etc/sam/env must be a
+	// simple parseable format without shell command substitution.
 	writeCmd := exec.CommandContext(
 		ctx, "docker", "exec", "-u", "root", containerID,
-		"sh", "-c", "mkdir -p /etc/sam && cat > /etc/profile.d/sam-env.sh && cp /etc/profile.d/sam-env.sh /etc/sam/env",
+		"sh", "-c", "mkdir -p /etc/sam && cat > /etc/profile.d/sam-env.sh",
 	)
-	writeCmd.Stdin = strings.NewReader(script)
+	writeCmd.Stdin = strings.NewReader(shellScript)
 	if output, err := writeCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to write SAM environment files: %w: %s", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("failed to write SAM shell script: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	// Write static-only env file (strip the dynamic fallback block).
+	staticEnv := buildSAMStaticEnv(cfg, githubToken)
+	writeEnvCmd := exec.CommandContext(
+		ctx, "docker", "exec", "-u", "root", containerID,
+		"sh", "-c", "cat > /etc/sam/env",
+	)
+	writeEnvCmd.Stdin = strings.NewReader(staticEnv)
+	if output, err := writeEnvCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to write SAM env file: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
 	slog.Info("Configured SAM environment in devcontainer", "containerID", containerID)

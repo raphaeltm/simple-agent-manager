@@ -63,6 +63,17 @@ func parseEnvExportLines(content string) []string {
 	return result
 }
 
+// hasEnvVar checks whether a KEY=value list contains a non-empty value for key.
+func hasEnvVar(envVars []string, key string) bool {
+	prefix := key + "="
+	for _, entry := range envVars {
+		if strings.HasPrefix(entry, prefix) && len(entry) > len(prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // AgentProcess manages an ACP-compliant agent subprocess running inside the
 // devcontainer via docker exec. It pipes stdin/stdout for NDJSON communication.
 type AgentProcess struct {

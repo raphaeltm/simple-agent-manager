@@ -601,6 +601,16 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 	// during bootstrap but aren't available to docker exec without explicit -e flags.
 	envVars := ReadContainerEnvFiles(ctx, containerID)
 
+	// If GH_TOKEN is missing or empty from the env files (e.g. token wasn't
+	// available at provisioning time), fetch a fresh one from the control plane.
+	if h.config.GitTokenFetcher != nil && !hasEnvVar(envVars, "GH_TOKEN") {
+		if token, err := h.config.GitTokenFetcher(ctx); err == nil && token != "" {
+			envVars = append(envVars, "GH_TOKEN="+token)
+		} else if err != nil {
+			slog.Debug("Failed to fetch GH_TOKEN for ACP session", "error", err)
+		}
+	}
+
 	envVars = append(envVars, fmt.Sprintf("%s=%s", info.envVarName, cred.credential))
 	if settings != nil && settings.Model != "" {
 		modelEnv := getModelEnvVar(agentType)

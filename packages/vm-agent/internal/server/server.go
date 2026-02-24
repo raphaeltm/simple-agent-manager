@@ -174,6 +174,7 @@ func New(cfg *config.Config) (*Server, error) {
 		ContainerUser:           containerUser,
 		ContainerWorkDir:        containerWorkDir,
 		OnActivity:              idleDetector.RecordActivity,
+		GitTokenFetcher:         nil, // set below after server construction
 		FileExecTimeout:         cfg.GitExecTimeout,
 		FileMaxSize:             cfg.GitFileMaxSize,
 		ErrorReporter:           errorReporter,
@@ -219,6 +220,9 @@ func New(cfg *config.Config) (*Server, error) {
 		logReader:           logreader.NewReaderWithTimeout(cfg.LogReaderTimeout),
 		bootLogBroadcasters: NewBootLogBroadcasterManager(),
 	}
+
+	// Wire the git token fetcher now that the server exists.
+	s.acpConfig.GitTokenFetcher = s.fetchGitToken
 
 	if cfg.WorkspaceID != "" {
 		s.workspaces[cfg.WorkspaceID] = &WorkspaceRuntime{
