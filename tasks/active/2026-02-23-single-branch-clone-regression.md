@@ -29,12 +29,12 @@ Remove `--single-branch` from the git clone command. The `--branch` flag alone w
 
 ## Detailed Tasklist
 
-- [ ] Edit `packages/vm-agent/internal/bootstrap/bootstrap.go:604` — remove `"--single-branch"` from the git clone args
-- [ ] Verify the clone still checks out the correct branch (the `--branch` flag handles this)
-- [ ] Check if there are any other `--single-branch` usages in the codebase (grep for it)
-- [ ] Update any tests in `bootstrap_test.go` that assert on the clone command args
-- [ ] Run `go vet` and `go test` in `packages/vm-agent/`
-- [ ] Run full build to confirm no regressions
+- [x] Edit `packages/vm-agent/internal/bootstrap/bootstrap.go:604` — remove `"--single-branch"` from the git clone args
+- [x] Verify the clone still checks out the correct branch (the `--branch` flag handles this)
+- [x] Check if there are any other `--single-branch` usages in the codebase (grep for it)
+- [x] Update any tests in `bootstrap_test.go` that assert on the clone command args (none needed — no tests assert on clone args)
+- [x] Run `go vet` and `go test` in `packages/vm-agent/` — all pass
+- [x] Run full build to confirm no regressions — all pass
 
 ## Files to Modify
 
