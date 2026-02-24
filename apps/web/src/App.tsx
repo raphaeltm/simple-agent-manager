@@ -58,7 +58,7 @@ export default function App() {
 
             {/* Project detail — shell with sub-routes */}
             <Route path="/projects/:id" element={<Project />}>
-              <Route index element={<Navigate to="overview" replace />} />
+              <Route index element={<Navigate to="chat" replace />} />
               <Route path="overview" element={<ProjectOverview />} />
               <Route path="chat" element={<ProjectChat />} />
               <Route path="chat/:sessionId" element={<ProjectChat />} />

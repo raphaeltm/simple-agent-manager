@@ -23,6 +23,7 @@ import {
 import type { Env } from '../index';
 import * as schema from '../db/schema';
 import { deleteNodeResources } from '../services/nodes';
+import { log } from '../lib/logger';
 
 function parseMs(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
@@ -78,6 +79,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     }
 
     try {
+      log.info('node_cleanup.destroying_stale_warm', { nodeId: node.id, userId: node.user_id, warmSince: node.warm_since });
       await deleteNodeResources(node.id, node.user_id, env);
       await db
         .update(schema.nodes)
@@ -85,7 +87,11 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
         .where(eq(schema.nodes.id, node.id));
       result.staleDestroyed++;
     } catch (err) {
-      console.error(`Node cleanup: failed to destroy stale warm node ${node.id}`, err);
+      log.error('node_cleanup.stale_warm_destroy_failed', {
+        nodeId: node.id,
+        userId: node.user_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
       result.errors++;
     }
   }
@@ -121,6 +127,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
 
     // Node exceeds max lifetime — destroy regardless
     try {
+      log.info('node_cleanup.destroying_max_lifetime', { nodeId: node.id, userId: node.userId, createdAt: node.createdAt });
       await deleteNodeResources(node.id, node.userId, env);
       await db
         .update(schema.nodes)
@@ -128,7 +135,11 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
         .where(eq(schema.nodes.id, node.id));
       result.lifetimeDestroyed++;
     } catch (err) {
-      console.error(`Node cleanup: failed to destroy max-lifetime node ${node.id}`, err);
+      log.error('node_cleanup.max_lifetime_destroy_failed', {
+        nodeId: node.id,
+        userId: node.userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
       result.errors++;
     }
   }

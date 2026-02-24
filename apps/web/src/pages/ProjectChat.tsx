@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { EmptyState, Spinner } from '@simple-agent-manager/ui';
+import { Spinner } from '@simple-agent-manager/ui';
 import { SessionSidebar } from '../components/chat/SessionSidebar';
 import { ProjectMessageView } from '../components/chat/ProjectMessageView';
 import { TaskSubmitForm } from '../components/task/TaskSubmitForm';
+import { TaskExecutionProgress } from '../components/task/TaskExecutionProgress';
 import type { TaskSubmitOptions } from '../components/task/TaskSubmitForm';
+import type { TaskStatus } from '@simple-agent-manager/shared';
 import {
   createProjectTask,
   listChatSessions,
@@ -15,6 +17,9 @@ import {
 import type { ChatSessionResponse } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
+/** How often to re-poll sessions when a task is actively executing (ms). */
+const ACTIVE_SESSION_POLL_MS = 3000;
+
 export function ProjectChat() {
   const navigate = useNavigate();
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -24,6 +29,11 @@ export function ProjectChat() {
   const [loading, setLoading] = useState(true);
   const [hasCloudCredentials, setHasCloudCredentials] = useState(false);
 
+  // Active task execution tracking
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [showProgress, setShowProgress] = useState(false);
+  const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Check for Hetzner credentials
   useEffect(() => {
     void listCredentials()
@@ -31,20 +41,50 @@ export function ProjectChat() {
       .catch(() => setHasCloudCredentials(false));
   }, []);
 
+  const loadSessions = useCallback(async () => {
+    try {
+      const result = await listChatSessions(projectId, { limit: 100 });
+      setSessions(result.sessions);
+      return result.sessions;
+    } catch {
+      // Best-effort — chat sessions may not exist for pre-migration projects
+      return [];
+    }
+  }, [projectId]);
+
+  // Initial load
+  useEffect(() => {
+    setLoading(true);
+    void loadSessions().finally(() => setLoading(false));
+  }, [loadSessions]);
+
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
   const handleRunNow = async (title: string, options: TaskSubmitOptions) => {
-    // Create task in draft, transition to ready, then run
-    const task = await createProjectTask(projectId, {
-      title,
-      description: options.description,
-      priority: options.priority,
-      agentProfileHint: options.agentProfileHint,
-    });
-    await updateProjectTaskStatus(projectId, task.id, { toStatus: 'ready' });
-    await runProjectTask(projectId, task.id, {
-      vmSize: options.vmSize,
-    });
-    // Reload sessions to pick up new task-runner session
-    void loadSessions();
+    setSubmitError(null);
+    try {
+      // Create task in draft, transition to ready, then run
+      const task = await createProjectTask(projectId, {
+        title,
+        description: options.description,
+        priority: options.priority,
+        agentProfileHint: options.agentProfileHint,
+      });
+      await updateProjectTaskStatus(projectId, task.id, { toStatus: 'ready' });
+      await runProjectTask(projectId, task.id, {
+        vmSize: options.vmSize,
+      });
+
+      // Show the progress tracker
+      setActiveTaskId(task.id);
+      setShowProgress(true);
+
+      // Start polling sessions more aggressively to pick up the new session
+      if (sessionPollRef.current) clearInterval(sessionPollRef.current);
+      sessionPollRef.current = setInterval(() => void loadSessions(), ACTIVE_SESSION_POLL_MS);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Failed to start task');
+    }
   };
 
   const handleSaveToBacklog = async (title: string, options: TaskSubmitOptions) => {
@@ -56,21 +96,39 @@ export function ProjectChat() {
     });
   };
 
-  const loadSessions = useCallback(async () => {
-    try {
-      setLoading(true);
-      const result = await listChatSessions(projectId, { limit: 100 });
-      setSessions(result.sessions);
-    } catch {
-      // Best-effort — chat sessions may not exist for pre-migration projects
-    } finally {
-      setLoading(false);
+  // When the task reaches in_progress and a workspace exists, find the new session
+  const handleSessionReady = useCallback(async (_taskId: string, _workspaceId: string) => {
+    const freshSessions = await loadSessions();
+    // Navigate to the most recent session (should be the new task session)
+    if (freshSessions.length > 0) {
+      const newest = freshSessions[0];
+      if (newest) {
+        navigate(`/projects/${projectId}/chat/${newest.id}`, { replace: true });
+      }
     }
-  }, [projectId]);
+  }, [loadSessions, navigate, projectId]);
 
-  useEffect(() => {
+  // When task reaches terminal state, stop aggressive polling
+  const handleTerminal = useCallback((_taskId: string, _status: TaskStatus, _errorMessage: string | null) => {
+    if (sessionPollRef.current) {
+      clearInterval(sessionPollRef.current);
+      sessionPollRef.current = null;
+    }
+    // Reload sessions one final time
     void loadSessions();
   }, [loadSessions]);
+
+  const handleDismissProgress = useCallback(() => {
+    setShowProgress(false);
+    setActiveTaskId(null);
+  }, []);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (sessionPollRef.current) clearInterval(sessionPollRef.current);
+    };
+  }, []);
 
   // Auto-select the most recent session if none is selected
   useEffect(() => {
@@ -94,12 +152,68 @@ export function ProjectChat() {
     );
   }
 
-  if (sessions.length === 0) {
+  // Empty state: show the submit form prominently
+  if (sessions.length === 0 && !activeTaskId) {
     return (
-      <EmptyState
-        heading="No chat sessions"
-        description="Chat sessions appear here when tasks run or workspaces connect to this project."
-      />
+      <div style={{
+        border: '1px solid var(--sam-color-border-default)',
+        borderRadius: 'var(--sam-radius-md)',
+        backgroundColor: 'var(--sam-color-bg-surface)',
+        overflow: 'hidden',
+        minHeight: '400px',
+        display: 'flex',
+        flexDirection: 'column',
+      }}>
+        {showProgress && activeTaskId && (
+          <TaskExecutionProgress
+            projectId={projectId}
+            taskId={activeTaskId}
+            onSessionReady={handleSessionReady}
+            onTerminal={handleTerminal}
+            onDismiss={handleDismissProgress}
+          />
+        )}
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 'var(--sam-space-8)',
+          gap: 'var(--sam-space-3)',
+        }}>
+          <span style={{
+            fontSize: 'var(--sam-type-body-size)',
+            fontWeight: 600,
+            color: 'var(--sam-color-fg-primary)',
+          }}>
+            Start a task
+          </span>
+          <span className="sam-type-secondary" style={{
+            color: 'var(--sam-color-fg-muted)',
+            textAlign: 'center',
+            maxWidth: '400px',
+          }}>
+            Describe what you want the agent to do. It will provision infrastructure,
+            clone the repo, and start working autonomously.
+          </span>
+        </div>
+        {submitError && (
+          <div style={{
+            padding: 'var(--sam-space-2) var(--sam-space-4)',
+            color: 'var(--sam-color-danger)',
+            fontSize: 'var(--sam-type-caption-size)',
+          }}>
+            {submitError}
+          </div>
+        )}
+        <TaskSubmitForm
+          projectId={projectId}
+          hasCloudCredentials={hasCloudCredentials}
+          onRunNow={handleRunNow}
+          onSaveToBacklog={handleSaveToBacklog}
+        />
+      </div>
     );
   }
 
@@ -144,6 +258,16 @@ export function ProjectChat() {
 
       {/* Main content */}
       <div style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {/* Task execution progress banner */}
+        {showProgress && activeTaskId && (
+          <TaskExecutionProgress
+            projectId={projectId}
+            taskId={activeTaskId}
+            onSessionReady={handleSessionReady}
+            onTerminal={handleTerminal}
+            onDismiss={handleDismissProgress}
+          />
+        )}
         <div style={{ flex: 1, overflow: 'hidden' }}>
           {sessionId ? (
             <ProjectMessageView projectId={projectId} sessionId={sessionId} />
@@ -160,6 +284,15 @@ export function ProjectChat() {
             </div>
           )}
         </div>
+        {submitError && (
+          <div style={{
+            padding: 'var(--sam-space-2) var(--sam-space-4)',
+            color: 'var(--sam-color-danger)',
+            fontSize: 'var(--sam-type-caption-size)',
+          }}>
+            {submitError}
+          </div>
+        )}
         <TaskSubmitForm
           projectId={projectId}
           hasCloudCredentials={hasCloudCredentials}

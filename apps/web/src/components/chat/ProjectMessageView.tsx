@@ -158,7 +158,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       // WebSocket not available — polling fallback below
     }
 
-    // Polling fallback for when WebSocket is unavailable or fails
+    // Polling fallback for when WebSocket is unavailable or fails.
+    const ACTIVE_POLL_MS = 3000;
     const pollInterval = setInterval(async () => {
       try {
         const data = await getChatSession(projectId, sessionId);
@@ -168,7 +169,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       } catch {
         // Silently fail on poll errors
       }
-    }, 10000);
+    }, ACTIVE_POLL_MS);
 
     return () => {
       ws?.close();

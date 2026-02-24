@@ -144,6 +144,19 @@ export const DEFAULT_NODE_WARM_GRACE_PERIOD_MS = 35 * 60 * 1000; // 35 minutes (
 export const DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS = 60 * 1000; // 1 minute
 
 // =============================================================================
+// Task Execution Timeout (Stuck Task Recovery)
+// =============================================================================
+
+/** Default max execution time (ms) for a task before it's considered stuck. Override via TASK_RUN_MAX_EXECUTION_MS env var. */
+export const DEFAULT_TASK_RUN_MAX_EXECUTION_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+/** Default threshold (ms) for a task stuck in 'queued' status. Override via TASK_STUCK_QUEUED_TIMEOUT_MS env var. */
+export const DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+/** Default threshold (ms) for a task stuck in 'delegated' status. Override via TASK_STUCK_DELEGATED_TIMEOUT_MS env var. */
+export const DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+// =============================================================================
 // Hetzner Configuration
 // =============================================================================
 

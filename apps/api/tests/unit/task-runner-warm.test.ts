@@ -33,7 +33,7 @@ describe('task runner warm node marking source contract', () => {
       const cleanupSection = taskRunnerFile.slice(
         taskRunnerFile.indexOf('function cleanupAutoProvisionedNode')
       );
-      expect(cleanupSection).toContain('as warm; falling back to immediate stop');
+      expect(cleanupSection).toContain('task_run.cleanup.mark_idle_failed');
       expect(cleanupSection).toContain('stopNodeResources(nodeId, userId, env)');
     });
 
@@ -44,7 +44,7 @@ describe('task runner warm node marking source contract', () => {
       // Outer catch catches markIdle errors
       expect(cleanupSection).toContain('catch (err)');
       // Inner catch logs both failures for cron sweep to catch
-      expect(cleanupSection).toContain('markIdle and stopNodeResources both failed');
+      expect(cleanupSection).toContain('task_run.cleanup.node_cleanup_total_failure');
     });
   });
 

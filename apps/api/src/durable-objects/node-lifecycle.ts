@@ -25,6 +25,7 @@ import {
   DEFAULT_NODE_WARM_TIMEOUT_MS,
   DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS,
 } from '@simple-agent-manager/shared';
+import { log } from '../lib/logger';
 import type { NodeLifecycleStatus, NodeLifecycleState } from '@simple-agent-manager/shared';
 
 type NodeLifecycleEnv = {
@@ -169,6 +170,12 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     state.status = 'destroying';
     await this.ctx.storage.put('state', state);
 
+    log.info('node_lifecycle.alarm.warm_to_destroying', {
+      nodeId: state.nodeId,
+      userId: state.userId,
+      warmSince: state.warmSince ? new Date(state.warmSince).toISOString() : null,
+    });
+
     // Mark the node as stopped in D1 so the cron sweep can clean it up
     try {
       await this.env.DATABASE.prepare(
@@ -177,7 +184,10 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
         .bind(new Date().toISOString(), state.nodeId)
         .run();
     } catch (err) {
-      console.error('NodeLifecycle alarm: failed to update D1', err);
+      log.error('node_lifecycle.alarm.d1_update_failed', {
+        nodeId: state.nodeId,
+        error: err instanceof Error ? err.message : String(err),
+      });
       // Schedule retry
       await this.ctx.storage.setAlarm(Date.now() + DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS);
     }
@@ -217,7 +227,10 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
         .bind(value, new Date().toISOString(), nodeId)
         .run();
     } catch (err) {
-      console.error('NodeLifecycle: failed to update D1 warm_since', err);
+      log.error('node_lifecycle.d1_warm_since_update_failed', {
+        nodeId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 }
