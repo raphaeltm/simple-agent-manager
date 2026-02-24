@@ -347,9 +347,18 @@ func TestBuildSAMEnvScript(t *testing.T) {
 		}
 	}
 
-	// GH_TOKEN should NOT be present when empty.
-	if strings.Contains(script, "GH_TOKEN") {
-		t.Errorf("script should not contain GH_TOKEN when empty, got:\n%s", script)
+	// The static export line (at top of file, outside if-block) should NOT be
+	// present when the token is empty. The dynamic fallback block IS expected.
+	for _, line := range strings.Split(script, "\n") {
+		trimmed := strings.TrimSpace(line)
+		// A static GH_TOKEN line starts at column 0 (no leading whitespace)
+		if strings.HasPrefix(trimmed, "export GH_TOKEN=") && !strings.Contains(line, "$_gh_token") {
+			t.Errorf("script should not contain static GH_TOKEN export when empty, got:\n%s", script)
+			break
+		}
+	}
+	if !strings.Contains(script, "Dynamic GH_TOKEN fallback") {
+		t.Errorf("script should contain dynamic GH_TOKEN fallback, got:\n%s", script)
 	}
 
 	// Verify header comment is present.
@@ -378,8 +387,13 @@ func TestBuildSAMEnvScriptOmitsEmptyValues(t *testing.T) {
 	if strings.Contains(script, "SAM_BRANCH") {
 		t.Errorf("script should not contain SAM_BRANCH when empty, got:\n%s", script)
 	}
-	if strings.Contains(script, "GH_TOKEN") {
-		t.Errorf("script should not contain GH_TOKEN when empty, got:\n%s", script)
+	// Static GH_TOKEN export should not be present, but dynamic fallback should.
+	for _, line := range strings.Split(script, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "export GH_TOKEN=") && !strings.Contains(line, "$_gh_token") {
+			t.Errorf("script should not contain static GH_TOKEN export when empty, got:\n%s", script)
+			break
+		}
 	}
 	// SAM_API_URL and SAM_WORKSPACE_ID should still be present.
 	if !strings.Contains(script, "SAM_API_URL") {
@@ -439,8 +453,16 @@ func TestBuildSAMEnvScriptWhitespaceOnlyTokenOmitted(t *testing.T) {
 
 	script := buildSAMEnvScript(cfg, "   ")
 
-	if strings.Contains(script, "GH_TOKEN") {
-		t.Errorf("script should not contain GH_TOKEN for whitespace-only token, got:\n%s", script)
+	// Static export should not be present, but dynamic fallback should.
+	for _, line := range strings.Split(script, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "export GH_TOKEN=") && !strings.Contains(line, "$_gh_token") {
+			t.Errorf("script should not contain static GH_TOKEN export for whitespace-only token, got:\n%s", script)
+			break
+		}
+	}
+	if !strings.Contains(script, "Dynamic GH_TOKEN fallback") {
+		t.Errorf("script should contain dynamic GH_TOKEN fallback, got:\n%s", script)
 	}
 }
 

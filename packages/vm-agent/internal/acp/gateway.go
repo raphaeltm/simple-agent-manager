@@ -70,6 +70,10 @@ type GatewayConfig struct {
 	ContainerWorkDir string
 	// OnActivity is called when there's ACP activity (for idle detection).
 	OnActivity func()
+	// GitTokenFetcher returns a fresh GitHub installation token for the
+	// workspace. It is called at ACP session start to inject GH_TOKEN into
+	// the agent process. If nil or returns error, GH_TOKEN is omitted.
+	GitTokenFetcher func(ctx context.Context) (string, error)
 	// BootLog is the reporter for sending structured logs to the control plane.
 	// Agent errors (stderr, crashes) are reported here for observability.
 	BootLog BootLogReporter

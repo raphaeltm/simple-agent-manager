@@ -44,18 +44,18 @@ The suspected issue is that `ensureSAMEnvironment` in `bootstrap.go` is called w
 
 ## Detailed Tasklist
 
-- [ ] Read `packages/vm-agent/internal/server/workspace_provisioning.go` to understand the full provisioning flow
-- [ ] Read `packages/vm-agent/internal/server/git_credential.go` to understand token fetch
-- [ ] Read `apps/api/src/routes/workspaces.ts` around the `/git-token` endpoint (lines 1799-1823)
-- [ ] Check if `fetchGitTokenForWorkspace` has proper retry logic or if it fails silently
-- [ ] Check workspace records in the database — do workspaces have valid `installationId`?
-- [ ] Add retry logic to `fetchGitTokenForWorkspace` if it doesn't exist
-- [ ] Improve error logging when git token fetch fails
-- [ ] Consider adding a "refresh env" mechanism that re-fetches the token and updates env files
-- [ ] Alternatively: make `/etc/profile.d/sam-env.sh` dynamically source GH_TOKEN via the credential helper on shell startup
-- [ ] Test that GH_TOKEN is available in PTY sessions after fix
-- [ ] Test that GH_TOKEN is available in ACP agent sessions after fix
-- [ ] Run Go tests: `cd packages/vm-agent && go test ./...`
+- [x] Read `packages/vm-agent/internal/server/workspace_provisioning.go` to understand the full provisioning flow
+- [x] Read `packages/vm-agent/internal/server/git_credential.go` to understand token fetch
+- [x] Read `apps/api/src/routes/workspaces.ts` around the `/git-token` endpoint
+- [x] Check if `fetchGitTokenForWorkspace` has proper retry logic — it fails silently with warning
+- [x] Analyze root cause: token unavailable at provisioning time → empty GH_TOKEN in env files
+- [x] For PTY sessions: add dynamic GH_TOKEN fallback in `/etc/profile.d/sam-env.sh` via credential helper
+- [x] For ACP sessions: add `GitTokenFetcher` to GatewayConfig, inject fresh GH_TOKEN in session_host.go
+- [x] Separate shell script (with dynamic commands) from static env file (/etc/sam/env)
+- [x] Update tests for new behavior (dynamic fallback block always present)
+- [ ] Test that GH_TOKEN is available in PTY sessions after fix (requires deployed workspace)
+- [ ] Test that GH_TOKEN is available in ACP agent sessions after fix (requires deployed workspace)
+- [x] Run Go tests: `cd packages/vm-agent && go test ./...`
 
 ## Files to Modify
 
