@@ -182,6 +182,7 @@ export interface ProjectDetailResponse extends Project {
 export interface ChatSession {
   id: string;
   workspaceId: string | null;
+  taskId: string | null;
   topic: string | null;
   status: ChatSessionStatus;
   messageCount: number;
@@ -240,6 +241,60 @@ export interface PersistMessageRequest {
     target: string;
     status: 'success' | 'error';
   } | null;
+}
+
+// =============================================================================
+// Batch Message Persistence (VM Agent → Control Plane)
+// =============================================================================
+
+export interface PersistMessageItem {
+  messageId: string;
+  sessionId: string;
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+  toolMetadata?: {
+    tool: string;
+    target: string;
+    status: 'success' | 'error';
+  } | null;
+  timestamp: string; // ISO 8601
+}
+
+export interface PersistMessageBatchRequest {
+  messages: PersistMessageItem[];
+}
+
+export interface PersistMessageBatchResponse {
+  persisted: number;
+  duplicates: number;
+}
+
+// =============================================================================
+// Node Lifecycle (Warm Node Pooling)
+// =============================================================================
+
+export type NodeLifecycleStatus = 'active' | 'warm' | 'destroying';
+
+export interface NodeLifecycleState {
+  nodeId: string;
+  status: NodeLifecycleStatus;
+  warmSince: string | null;
+  claimedByTask: string | null;
+}
+
+// =============================================================================
+// ProjectData WebSocket Broadcast Events
+// =============================================================================
+
+export type ProjectWebSocketEventType =
+  | 'message.new'
+  | 'session.created'
+  | 'session.stopped'
+  | 'activity.new';
+
+export interface ProjectWebSocketEvent {
+  type: ProjectWebSocketEventType;
+  payload: Record<string, unknown>;
 }
 
 export interface CreateProjectRequest {

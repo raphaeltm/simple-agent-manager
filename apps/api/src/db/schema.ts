@@ -385,6 +385,7 @@ export const nodes = sqliteTable(
     healthStatus: text('health_status').notNull().default('unhealthy'),
     heartbeatStaleAfterSeconds: integer('heartbeat_stale_after_seconds').notNull().default(180),
     lastMetrics: text('last_metrics'),
+    warmSince: text('warm_since'),
     errorMessage: text('error_message'),
     createdAt: text('created_at')
       .notNull()

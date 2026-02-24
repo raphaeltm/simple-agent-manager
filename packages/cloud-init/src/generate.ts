@@ -15,6 +15,10 @@ export interface CloudInitVariables {
   logJournalKeepFree?: string;
   /** journald MaxRetentionSec (default: 7day) */
   logJournalMaxRetention?: string;
+  /** Project ID for message persistence (nullable — omitted for standalone workspaces) */
+  projectId?: string;
+  /** Pre-created chat session ID (nullable — omitted for standalone workspaces) */
+  chatSessionId?: string;
 }
 
 /**

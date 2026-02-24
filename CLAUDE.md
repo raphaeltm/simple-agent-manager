@@ -140,6 +140,8 @@ Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks
 - N/A (frontend-only changes; backend APIs already exist from spec 018) (019-ui-overhaul)
 - Go 1.24 (VM Agent) with log/slog structured logging, TypeScript 5.x (API Worker + Web UI) (020-node-observability)
 - journald (systemd journal) on VM for log aggregation; Docker journald log driver; no new database storage (020-node-observability)
+- TypeScript 5.x (API Worker, Web UI), Go 1.24+ (VM Agent) + Hono (API), React 18 + Vite (Web), Drizzle ORM (D1), Cloudflare Workers SDK (DOs), ACP Go SDK, cenkalti/backoff/v5 (new, Go retry) (021-task-chat-architecture)
+- Cloudflare D1 (relational metadata), Durable Objects with SQLite (per-project chat data), VM-local SQLite (message outbox) (021-task-chat-architecture)
 
 ## Recent Changes
 - 018-project-first-architecture: Added TypeScript 5.x (Worker/Web), Go 1.24+ (VM Agent) + Hono (API framework), Drizzle ORM (D1), React + Vite (Web), Cloudflare Workers SDK (Durable Objects)
