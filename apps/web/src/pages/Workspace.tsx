@@ -1311,8 +1311,8 @@ export function Workspace() {
     [handleFileViewerOpen]
   );
 
-  // ── Loading state ──
-  if (loading) {
+  // ── Loading state (only show spinner on initial load when no data yet) ──
+  if (loading && !workspace) {
     return (
       <div
         style={{

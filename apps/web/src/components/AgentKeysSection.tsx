@@ -71,7 +71,7 @@ export function AgentKeysSection() {
     }
   };
 
-  if (loading) {
+  if (loading && agents.length === 0) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-4)' }}>
         <Spinner size="md" />

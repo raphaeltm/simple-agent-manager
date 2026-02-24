@@ -78,7 +78,7 @@ export function GitHubAppSection() {
     }
   };
 
-  if (loading) {
+  if (loading && installations.length === 0) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-4)' }}>
         <Spinner size="md" />

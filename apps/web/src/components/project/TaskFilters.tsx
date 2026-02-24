@@ -28,16 +28,27 @@ const SORT_OPTIONS: Array<{ label: string; value: TaskSortOrder }> = [
   { label: 'Highest priority', value: 'priorityDesc' },
 ];
 
+const inputStyle: React.CSSProperties = {
+  borderRadius: 'var(--sam-radius-md)',
+  border: '1px solid var(--sam-color-border-default)',
+  background: 'var(--sam-color-bg-surface)',
+  color: 'var(--sam-color-fg-primary)',
+  minHeight: '2rem',
+  padding: '0.375rem 0.5rem',
+  fontSize: 'var(--sam-type-secondary-size)',
+};
+
 export function TaskFilters({ value, onChange }: TaskFiltersProps) {
   return (
     <div
       style={{
-        display: 'grid',
+        display: 'flex',
         gap: 'var(--sam-space-3)',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+        flexWrap: 'wrap',
+        alignItems: 'flex-end',
       }}
     >
-      <label style={{ display: 'grid', gap: '0.375rem' }}>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: 120 }}>
         <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>Status</span>
         <select
           value={value.status ?? ''}
@@ -48,14 +59,7 @@ export function TaskFilters({ value, onChange }: TaskFiltersProps) {
               status: nextStatus || undefined,
             });
           }}
-          style={{
-            borderRadius: 'var(--sam-radius-md)',
-            border: '1px solid var(--sam-color-border-default)',
-            background: 'var(--sam-color-bg-surface)',
-            color: 'var(--sam-color-fg-primary)',
-            minHeight: '2.75rem',
-            padding: '0.625rem 0.75rem',
-          }}
+          style={inputStyle}
         >
           <option value="">All statuses</option>
           {STATUS_OPTIONS.map((option) => (
@@ -66,7 +70,7 @@ export function TaskFilters({ value, onChange }: TaskFiltersProps) {
         </select>
       </label>
 
-      <label style={{ display: 'grid', gap: '0.375rem' }}>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: 80 }}>
         <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>Min priority</span>
         <input
           type="number"
@@ -80,18 +84,11 @@ export function TaskFilters({ value, onChange }: TaskFiltersProps) {
             const next = Number.parseInt(rawValue, 10);
             onChange({ ...value, minPriority: Number.isNaN(next) ? undefined : next });
           }}
-          style={{
-            borderRadius: 'var(--sam-radius-md)',
-            border: '1px solid var(--sam-color-border-default)',
-            background: 'var(--sam-color-bg-surface)',
-            color: 'var(--sam-color-fg-primary)',
-            minHeight: '2.75rem',
-            padding: '0.625rem 0.75rem',
-          }}
+          style={inputStyle}
         />
       </label>
 
-      <label style={{ display: 'grid', gap: '0.375rem' }}>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: 140 }}>
         <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>Sort</span>
         <select
           value={value.sort}
@@ -101,14 +98,7 @@ export function TaskFilters({ value, onChange }: TaskFiltersProps) {
               sort: event.currentTarget.value as TaskSortOrder,
             });
           }}
-          style={{
-            borderRadius: 'var(--sam-radius-md)',
-            border: '1px solid var(--sam-color-border-default)',
-            background: 'var(--sam-color-bg-surface)',
-            color: 'var(--sam-color-fg-primary)',
-            minHeight: '2.75rem',
-            padding: '0.625rem 0.75rem',
-          }}
+          style={inputStyle}
         >
           {SORT_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>

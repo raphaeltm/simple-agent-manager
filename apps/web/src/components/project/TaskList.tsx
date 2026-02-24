@@ -34,7 +34,7 @@ export function TaskList({
   onTransitionTask,
   onDelegateTask,
 }: TaskListProps) {
-  if (loading) {
+  if (loading && tasks.length === 0) {
     return (
       <div style={{
         padding: 'var(--sam-space-4)',
