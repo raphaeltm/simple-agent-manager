@@ -175,6 +175,11 @@ func (r *Reader) ReadLogs(ctx context.Context, filter LogFilter) (*LogResponse, 
 		entries = filterByLevel(entries, filter.Level)
 	}
 
+	// Ensure entries is never nil so JSON serializes as [] not null
+	if entries == nil {
+		entries = []LogEntry{}
+	}
+
 	// Paginate
 	hasMore := len(entries) > limit
 	if hasMore {
