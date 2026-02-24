@@ -30,6 +30,7 @@ import {
 import { signCallbackToken } from './jwt';
 import { resolveUniqueWorkspaceDisplayName } from './workspace-names';
 import { getRuntimeLimits } from './limits';
+import * as projectDataService from './project-data';
 
 export interface TaskRunInput {
   taskId: string;
@@ -309,6 +310,32 @@ async function executeTaskRun(
       reason: `Delegated to workspace ${workspaceId} on node ${nodeId}`,
       createdAt: now(),
     });
+
+    // Create chat session in ProjectData DO for task message persistence.
+    // Best-effort: session creation failure should not block workspace creation.
+    let chatSessionId: string | null = null;
+    try {
+      chatSessionId = await projectDataService.createSession(
+        env,
+        project.id,
+        workspaceId,
+        task.title,
+        task.id // taskId
+      );
+      await db
+        .update(schema.workspaces)
+        .set({ chatSessionId, updatedAt: now() })
+        .where(eq(schema.workspaces.id, workspaceId));
+    } catch (err) {
+      console.error('Failed to create chat session for task workspace:', err);
+    }
+
+    // Set output_branch to task/{taskId} format
+    const outputBranch = `task/${task.id}`;
+    await db
+      .update(schema.tasks)
+      .set({ outputBranch, updatedAt: now() })
+      .where(eq(schema.tasks.id, task.id));
 
     // Create workspace on node agent
     const callbackToken = await signCallbackToken(workspaceId, env);

@@ -19,6 +19,8 @@ export interface CloudInitVariables {
   projectId?: string;
   /** Pre-created chat session ID (nullable — omitted for standalone workspaces) */
   chatSessionId?: string;
+  /** Task ID for task-driven workspaces (nullable — omitted for interactive workspaces) */
+  taskId?: string;
 }
 
 /**
@@ -38,6 +40,7 @@ export function generateCloudInit(variables: CloudInitVariables): string {
     '{{ log_journal_max_retention }}': variables.logJournalMaxRetention ?? '7day',
     '{{ project_id }}': variables.projectId ?? '',
     '{{ chat_session_id }}': variables.chatSessionId ?? '',
+    '{{ task_id }}': variables.taskId ?? '',
     '{{ docker_name_tag }}': '{{.Name}}',
   };
 

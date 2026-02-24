@@ -123,8 +123,9 @@ type Config struct {
 
 	// Project linkage — set via cloud-init when the workspace belongs to a project.
 	// If ProjectID is empty, the message reporter is disabled (no-op).
-	ProjectID    string // Linked project ID (env: PROJECT_ID)
+	ProjectID     string // Linked project ID (env: PROJECT_ID)
 	ChatSessionID string // Chat session created during workspace provisioning (env: CHAT_SESSION_ID)
+	TaskID        string // Task ID for task-driven workspaces (env: TASK_ID)
 
 	// Persistence settings - configurable per constitution principle XI
 	PersistenceDBPath string // SQLite database path for session state persistence
@@ -272,6 +273,7 @@ func Load() (*Config, error) {
 		// Project linkage (set via cloud-init)
 		ProjectID:     getEnv("PROJECT_ID", ""),
 		ChatSessionID: getEnv("CHAT_SESSION_ID", ""),
+		TaskID:        getEnv("TASK_ID", ""),
 
 		// Persistence settings
 		PersistenceDBPath: getEnv("PERSISTENCE_DB_PATH", "/var/lib/vm-agent/state.db"),

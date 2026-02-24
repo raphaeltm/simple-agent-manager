@@ -560,6 +560,11 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 		// Broadcast error to all viewers so all tabs see it
 		errResp := h.marshalJSONRPCError(reqID, -32603, errMsg)
 		h.broadcastMessage(errResp)
+
+		// Fire prompt completion callback (error path)
+		if cb := h.config.OnPromptComplete; cb != nil {
+			go cb("error", err)
+		}
 		return
 	}
 
@@ -578,6 +583,11 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 	}
 	data, _ := json.Marshal(response)
 	h.broadcastMessage(data)
+
+	// Fire prompt completion callback (success path)
+	if cb := h.config.OnPromptComplete; cb != nil {
+		go cb(string(resp.StopReason), nil)
+	}
 }
 
 // CancelPrompt cancels the currently running Prompt() call, if any.

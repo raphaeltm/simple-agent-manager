@@ -110,8 +110,8 @@
 
 ### Task Runner Chat Session Integration
 
-- [ ] T030 [US2] Enhance `executeTaskRun()`: after workspace creation, create chat session in ProjectData DO via `createSession(workspaceId, task.title, taskId)`, include `chatSessionId` in cloud-init variables, set `output_branch` to `task/{taskId}` format in `apps/api/src/services/task-runner.ts`
-- [ ] T031 [US2] Unit tests for task runner chat session creation in `apps/api/tests/unit/task-runner-session.test.ts` — **Scenarios**: (1) executeTaskRun creates chat session with correct taskId and title, (2) chatSessionId included in cloud-init variables, (3) output_branch set to task/{taskId} format, (4) task description persisted as first user-role message in session, (5) project without projectId skips session creation gracefully, (6) session creation failure fails the task with descriptive error
+- [x] T030 [US2] Enhance `executeTaskRun()`: after workspace creation, create chat session in ProjectData DO via `createSession(workspaceId, task.title, taskId)`, include `chatSessionId` in cloud-init variables, set `output_branch` to `task/{taskId}` format in `apps/api/src/services/task-runner.ts`
+- [x] T031 [US2] Unit tests for task runner chat session creation in `apps/api/tests/unit/task-runner-session.test.ts` — **Scenarios**: (1) executeTaskRun creates chat session with correct taskId and title, (2) chatSessionId included in cloud-init variables, (3) output_branch set to task/{taskId} format, (4) task description persisted as first user-role message in session, (5) project without projectId skips session creation gracefully, (6) session creation failure fails the task with descriptive error
 
 ### Task Completion Flow
 

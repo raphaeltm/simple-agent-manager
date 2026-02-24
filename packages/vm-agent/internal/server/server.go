@@ -2,10 +2,13 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -216,6 +219,16 @@ func New(cfg *config.Config) (*Server, error) {
 	// circular imports) while messagereport uses its own Message type.
 	if msgReporter != nil {
 		acpGatewayConfig.MessageReporter = &messageReporterAdapter{r: msgReporter}
+	}
+
+	// Wire task completion callback for task-driven workspaces.
+	// When TaskID is set, the VM agent POSTs to the task status callback endpoint
+	// after the ACP prompt completes.
+	if cfg.TaskID != "" && cfg.ProjectID != "" {
+		acpGatewayConfig.OnPromptComplete = makeTaskCompletionCallback(
+			cfg.ControlPlaneURL, cfg.ProjectID, cfg.TaskID, &acpGatewayConfig,
+		)
+		slog.Info("Task completion callback enabled", "taskId", cfg.TaskID, "projectId", cfg.ProjectID)
 	}
 
 	// Create system info collector for metrics and version reporting.
@@ -550,6 +563,78 @@ func (a *messageReporterAdapter) Enqueue(entry acp.MessageReportEntry) error {
 		ToolMetadata: entry.ToolMetadata,
 		Timestamp:    entry.Timestamp,
 	})
+}
+
+// makeTaskCompletionCallback returns an OnPromptComplete callback that POSTs
+// the task status to the control plane. It maps ACP stop reasons to task statuses:
+//   - "end_turn" → completed
+//   - "error" or prompt failure → failed
+//
+// The callback reads CallbackToken from the GatewayConfig pointer so it picks
+// up the token set after bootstrap.
+func makeTaskCompletionCallback(
+	controlPlaneURL, projectID, taskID string,
+	gwCfg *acp.GatewayConfig,
+) func(stopReason string, promptErr error) {
+	callbackURL := fmt.Sprintf("%s/api/projects/%s/tasks/%s/status/callback",
+		strings.TrimRight(controlPlaneURL, "/"), projectID, taskID)
+
+	return func(stopReason string, promptErr error) {
+		toStatus := "completed"
+		reason := "Agent prompt completed"
+		errorMessage := ""
+
+		if promptErr != nil || stopReason == "error" {
+			toStatus = "failed"
+			reason = "Agent prompt failed"
+			if promptErr != nil {
+				errorMessage = promptErr.Error()
+			}
+		}
+
+		body := map[string]string{
+			"toStatus": toStatus,
+			"reason":   reason,
+		}
+		if errorMessage != "" {
+			body["errorMessage"] = errorMessage
+		}
+
+		payload, err := json.Marshal(body)
+		if err != nil {
+			slog.Error("Task completion callback: marshal error", "error", err)
+			return
+		}
+
+		token := gwCfg.CallbackToken
+		if token == "" {
+			slog.Warn("Task completion callback: no callback token available, skipping")
+			return
+		}
+
+		req, err := http.NewRequest("POST", callbackURL, bytes.NewReader(payload))
+		if err != nil {
+			slog.Error("Task completion callback: request creation error", "error", err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			slog.Error("Task completion callback: request failed", "error", err, "url", callbackURL)
+			return
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			slog.Info("Task completion callback sent", "taskId", taskID, "toStatus", toStatus)
+		} else {
+			slog.Error("Task completion callback: unexpected status", "statusCode", resp.StatusCode, "taskId", taskID)
+		}
+	}
 }
 
 // openSQLiteDB opens a SQLite database connection with WAL mode and

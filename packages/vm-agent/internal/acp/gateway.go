@@ -148,6 +148,10 @@ type GatewayConfig struct {
 	// MessageReporter enqueues chat messages for batched delivery to the
 	// control plane. When nil, message persistence is a no-op.
 	MessageReporter MessageReporter
+	// OnPromptComplete is called after a prompt finishes (success or failure).
+	// Used by task-driven workspaces to report completion back to the control plane.
+	// When nil, no callback fires. The string arg is the stop reason (e.g. "end_turn", "error").
+	OnPromptComplete func(stopReason string, promptErr error)
 }
 
 // Gateway is a thin per-WebSocket relay between a browser and a SessionHost.
