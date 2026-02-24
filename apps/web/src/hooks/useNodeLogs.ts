@@ -95,10 +95,11 @@ export function useNodeLogs({ nodeId, nodeStatus }: UseNodeLogsOptions): UseNode
       const result = await getNodeLogs(nodeId, f);
       if (!mountedRef.current) return;
 
+      const newEntries = result.entries ?? [];
       if (append) {
-        setEntries((prev) => [...prev, ...result.entries]);
+        setEntries((prev) => [...prev, ...newEntries]);
       } else {
-        setEntries(result.entries);
+        setEntries(newEntries);
       }
       cursorRef.current = result.nextCursor ?? null;
       setHasMore(result.hasMore);
@@ -196,7 +197,11 @@ export function useNodeLogs({ nodeId, nodeStatus }: UseNodeLogsOptions): UseNode
   }, [nodeId, nodeStatus, fetchLogs, connectStream]);
 
   const setSource = useCallback((source: NodeLogSource) => {
-    setFilter((prev) => ({ ...prev, source }));
+    setFilter((prev) => {
+      // Clear container filter when switching away from docker-relevant sources
+      const clearContainer = source !== 'docker' && source !== 'all';
+      return { ...prev, source, ...(clearContainer ? { container: '' } : {}) };
+    });
   }, []);
 
   const setLevel = useCallback((level: NodeLogLevel) => {

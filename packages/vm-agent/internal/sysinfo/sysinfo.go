@@ -494,6 +494,7 @@ func (c *Collector) collectDocker() DockerInfo {
 		errMsg := fmt.Sprintf("failed to list containers: %v", err)
 		slog.Warn("Docker container list failed", "error", err)
 		info.Error = &errMsg
+		info.ContainerList = []ContainerInfo{}
 		return info
 	}
 
@@ -501,6 +502,7 @@ func (c *Collector) collectDocker() DockerInfo {
 	containers := parseDockerPS(string(out))
 	if len(containers) == 0 {
 		info.Containers = 0
+		info.ContainerList = []ContainerInfo{}
 		return info
 	}
 
