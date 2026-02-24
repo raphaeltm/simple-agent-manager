@@ -1658,6 +1658,23 @@ func (c *sessionHostClient) SessionUpdate(_ context.Context, params acpsdk.Sessi
 		return fmt.Errorf("failed to marshal session update: %w", err)
 	}
 	c.host.broadcastMessage(data)
+
+	// Persist chat messages to the control plane via the message reporter.
+	if c.host.config.MessageReporter != nil {
+		msgs := ExtractMessages(params)
+		for _, m := range msgs {
+			if err := c.host.config.MessageReporter.Enqueue(MessageReportEntry{
+				MessageID:    m.MessageID,
+				Role:         m.Role,
+				Content:      m.Content,
+				ToolMetadata: m.ToolMetadata,
+			}); err != nil {
+				slog.Warn("messagereport: enqueue failed (non-blocking)",
+					"messageId", m.MessageID, "error", err)
+			}
+		}
+	}
+
 	return nil
 }
 
