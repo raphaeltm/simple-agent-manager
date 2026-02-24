@@ -238,7 +238,6 @@ export function CreateWorkspace() {
         installationId,
         vmSize: vmSize as VMSize,
         vmLocation: vmLocation as VMLocation,
-        idleTimeoutSeconds: 0,
       });
 
       navigate(`/workspaces/${workspace.id}`);

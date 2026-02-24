@@ -64,10 +64,8 @@ type Config struct {
 	CookieName             string
 	CookieSecure           bool
 
-	// Idle settings
-	IdleTimeout       time.Duration
+	// Node health reporter interval
 	HeartbeatInterval time.Duration
-	IdleCheckInterval time.Duration
 
 	// HTTP server timeouts
 	HTTPReadTimeout  time.Duration
@@ -209,9 +207,7 @@ func Load() (*Config, error) {
 		CookieName:             getEnv("COOKIE_NAME", "vm_session"),
 		CookieSecure:           getEnvBool("COOKIE_SECURE", true),
 
-		IdleTimeout:       getEnvDuration("IDLE_TIMEOUT", 30*time.Minute),
 		HeartbeatInterval: getEnvDuration("HEARTBEAT_INTERVAL", 60*time.Second),
-		IdleCheckInterval: getEnvDuration("IDLE_CHECK_INTERVAL", 10*time.Second),
 
 		// HTTP server timeouts - configurable per constitution
 		HTTPReadTimeout:  getEnvDuration("HTTP_READ_TIMEOUT", 15*time.Second),

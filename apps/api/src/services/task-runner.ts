@@ -14,7 +14,6 @@ import { and, eq, count } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { TaskStatus, VMSize, VMLocation } from '@simple-agent-manager/shared';
 import {
-  DEFAULT_TASK_RUN_WORKSPACE_IDLE_TIMEOUT_SECONDS,
   DEFAULT_TASK_RUN_CLEANUP_DELAY_MS,
 } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
@@ -50,15 +49,6 @@ export interface TaskRunResult {
   workspaceId: string | null;
   nodeId: string | null;
   autoProvisionedNode: boolean;
-}
-
-function getIdleTimeoutSeconds(env: Env): number {
-  const value = env.TASK_RUN_WORKSPACE_IDLE_TIMEOUT_SECONDS;
-  const parsed = value ? Number.parseInt(value, 10) : DEFAULT_TASK_RUN_WORKSPACE_IDLE_TIMEOUT_SECONDS;
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return DEFAULT_TASK_RUN_WORKSPACE_IDLE_TIMEOUT_SECONDS;
-  }
-  return parsed;
 }
 
 function getCleanupDelayMs(env: Env): number {
@@ -279,7 +269,6 @@ async function executeTaskRun(
     // Step 2: Create workspace
     const workspaceName = `Task: ${task.title.slice(0, 50)}`;
     const uniqueName = await resolveUniqueWorkspaceDisplayName(db, nodeId, workspaceName);
-    const idleTimeoutSeconds = getIdleTimeoutSeconds(env);
     workspaceId = ulid();
 
     await db.insert(schema.workspaces).values({
@@ -296,7 +285,6 @@ async function executeTaskRun(
       status: 'creating',
       vmSize,
       vmLocation,
-      idleTimeoutSeconds,
       createdAt: now(),
       updatedAt: now(),
     });

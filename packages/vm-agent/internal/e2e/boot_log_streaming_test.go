@@ -126,10 +126,8 @@ func buildTestConfig(t *testing.T, port int, mockServerURL, workspaceID, bootstr
 		SessionMaxCount:        100,
 		CookieName:             "sam_session",
 
-		// Idle detection
-		IdleTimeout:       30 * time.Minute,
+		// Health reporting
 		HeartbeatInterval: 60 * time.Second,
-		IdleCheckInterval: 10 * time.Second,
 
 		// HTTP
 		HTTPReadTimeout: 30 * time.Second,

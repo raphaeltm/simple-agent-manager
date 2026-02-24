@@ -188,19 +188,6 @@ function startControlPlaneMock(publicJwk) {
       return;
     }
 
-    if (req.method === 'POST' && url.pathname === `/api/workspaces/${WORKSPACE_ID}/heartbeat`) {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(
-        JSON.stringify({
-          action: 'continue',
-          idleSeconds: 0,
-          maxIdleSeconds: 1800,
-          shutdownDeadline: new Date(Date.now() + 1800_000).toISOString(),
-        })
-      );
-      return;
-    }
-
     res.writeHead(404, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: 'not_found', message: 'Route not found' }));
   });
@@ -437,7 +424,6 @@ function startVmAgent(privateKeyPem, issuer, binaryPath) {
     CONTAINER_USER: 'root',
     ALLOWED_ORIGINS: 'http://localhost:5173',
     COOKIE_SECURE: 'false',
-    IDLE_TIMEOUT: '24h',
     HEARTBEAT_INTERVAL: '24h',
     ACP_MAX_RESTART_ATTEMPTS: '1',
     PERSISTENCE_DB_PATH: '/tmp/sam-e2e-state.db',

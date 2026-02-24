@@ -12,7 +12,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/workspace/vm-agent/internal/auth"
 	"github.com/workspace/vm-agent/internal/config"
-	"github.com/workspace/vm-agent/internal/idle"
 	"github.com/workspace/vm-agent/internal/pty"
 )
 
@@ -43,13 +42,11 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server, string) {
 		BufferSize:   4096,
 	})
 
-	det := idle.NewDetector(30*time.Minute, 5*time.Minute, "http://localhost", "ws-test", "tok")
-
 	s := &Server{
 		config:         cfg,
 		sessionManager: sm,
 		ptyManager:     ptm,
-		idleDetector:   det,
+		done:           make(chan struct{}),
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(s.handleMultiTerminalWS))

@@ -222,7 +222,6 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer runtime.PTY.CloseSession(ptySession.ID)
 
-	s.idleDetector.RecordActivity()
 	s.appendNodeEvent(workspaceID, "info", "terminal.session_open", "Terminal session opened", map[string]interface{}{"sessionId": ptySession.ID})
 
 	sessionData, _ := json.Marshal(map[string]string{"sessionId": ptySession.ID})
@@ -267,7 +266,6 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(msg.Data, &input); err != nil {
 				continue
 			}
-			s.idleDetector.RecordActivity()
 			_, _ = ptySession.Write([]byte(input.Data))
 		case "resize":
 			var resize wsResizeData
@@ -560,7 +558,6 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 					sendSessionError(sessionID, "not authorized")
 					continue
 				}
-				s.idleDetector.RecordActivity()
 				_, _ = ptySession.Write([]byte(input.Data))
 			}
 

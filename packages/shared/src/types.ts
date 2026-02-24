@@ -548,8 +548,6 @@ export interface Workspace {
   dnsRecordId: string | null;
   lastActivityAt: string | null;
   errorMessage: string | null;
-  shutdownDeadline: string | null;
-  idleTimeoutSeconds: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -578,8 +576,6 @@ export interface WorkspaceResponse {
   vmIp: string | null;
   lastActivityAt: string | null;
   errorMessage: string | null;
-  shutdownDeadline: string | null;
-  idleTimeoutSeconds: number;
   createdAt: string;
   updatedAt: string;
   url?: string;
@@ -595,7 +591,6 @@ export interface CreateWorkspaceRequest {
   vmSize?: VMSize;
   vmLocation?: VMLocation;
   installationId?: string;
-  idleTimeoutSeconds?: number;
 }
 
 export interface UpdateWorkspaceRequest {
@@ -667,24 +662,6 @@ export interface CreateAgentSessionRequest {
 
 export interface UpdateAgentSessionRequest {
   label: string;
-}
-
-// =============================================================================
-// Heartbeat
-// =============================================================================
-export interface HeartbeatRequest {
-  workspaceId?: string;
-  idleSeconds: number;
-  idle: boolean;
-  lastActivityAt: string;
-  shutdownDeadline?: string;
-}
-
-export interface HeartbeatResponse {
-  action: 'continue' | 'shutdown';
-  idleSeconds: number;
-  maxIdleSeconds: number;
-  shutdownDeadline: string | null;
 }
 
 // =============================================================================

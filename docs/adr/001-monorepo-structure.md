@@ -27,7 +27,7 @@ simple-agent-manager/
 │   ├── cloud-init/   # VM cloud-init template generation
 │   ├── terminal/     # Shared terminal component (xterm.js + WebSocket)
 │   ├── ui/           # Shared UI component library
-│   ├── vm-agent/     # Go agent for WebSocket terminal + idle detection
+│   ├── vm-agent/     # Go agent for WebSocket terminal + ACP
 │   └── acp-client/   # Agent Communication Protocol client
 ├── infra/            # Pulumi infrastructure as code
 ├── scripts/

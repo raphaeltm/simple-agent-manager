@@ -328,7 +328,7 @@ erDiagram
         text status "pending|creating|running|recovery|stopping|stopped|error"
         text vm_ip
         text dns_record_id
-        int idle_timeout_seconds
+
     }
 
     credentials {
@@ -397,7 +397,6 @@ graph TB
         subgraph "Core Subsystems"
             PTYMgr["PTY Manager<br/>Terminal Multiplexing<br/>Ring Buffer Replay"]
             ContainerMgr["Container Manager<br/>Docker create/exec<br/>Devcontainer CLI"]
-            IdleDetect["Idle Detector<br/>Activity Tracking<br/>Shutdown Deadline"]
             ACPGateway["ACP Gateway<br/>Claude Code Protocol<br/>Initialize → Session → Prompt"]
             Persistence["SQLite Store<br/>Tab Persistence<br/>(modernc.org/sqlite)"]
         end
@@ -459,7 +458,6 @@ graph TB
 | **JWT Validator** | `internal/auth/` | Validates workspace JWTs via JWKS endpoint, extracts claims |
 | **Session Manager** | `internal/auth/` | HTTP cookie-based sessions, TTL cleanup |
 | **ACP Gateway** | `internal/acp/` | ACP SDK protocol — Initialize → NewSession → Prompt — streams to WebSocket |
-| **Idle Detector** | `internal/idle/` | Tracks last activity timestamp, computes shutdown deadline |
 | **Persistence** | `internal/persistence/` | SQLite storage for workspace tabs (survives browser refresh) |
 | **Boot Logger** | `internal/bootlog/` | Reports provisioning progress to control plane KV |
 

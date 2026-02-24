@@ -65,7 +65,6 @@ export interface Env {
   // User approval / invite-only mode
   REQUIRE_APPROVAL?: string;
   // Optional configurable values (per constitution principle XI)
-  IDLE_TIMEOUT_SECONDS?: string;
   TERMINAL_TOKEN_EXPIRY_MS?: string;
   CALLBACK_TOKEN_EXPIRY_MS?: string;
   BOOTSTRAP_TOKEN_TTL_SECONDS?: string;
@@ -99,7 +98,6 @@ export interface Env {
   // Task run configuration (autonomous execution)
   TASK_RUN_NODE_CPU_THRESHOLD_PERCENT?: string;
   TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;
-  TASK_RUN_WORKSPACE_IDLE_TIMEOUT_SECONDS?: string;
   TASK_RUN_CLEANUP_DELAY_MS?: string;
   WORKSPACE_READY_TIMEOUT_MS?: string;
   // ACP configuration (passed to VMs via environment)

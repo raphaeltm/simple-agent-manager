@@ -111,26 +111,6 @@ function useRelativeTime(isoDate: string | null | undefined): string {
   return `${hours}h ${minutes % 60}m`;
 }
 
-function useCountdown(deadline: string | null | undefined): string {
-  const [now, setNow] = useState(Date.now());
-
-  useEffect(() => {
-    if (!deadline) return;
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, [deadline]);
-
-  if (!deadline) return '-';
-
-  const ms = new Date(deadline).getTime() - now;
-  if (ms <= 0) return 'expired';
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  if (hours > 0) return `${hours}h ${minutes % 60}m`;
-  return `${minutes}m ${seconds % 60}s`;
-}
-
 function sessionStatusColor(status: string, hostStatus?: string | null): string {
   // Use live hostStatus for finer-grained colors when available
   if (hostStatus) {
@@ -208,7 +188,6 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
   workspaceEvents,
 }) => {
   const uptime = useRelativeTime(workspace?.createdAt);
-  const countdown = useCountdown(workspace?.shutdownDeadline);
 
   // Node resource polling — only when workspace is running
   const { systemInfo, error: systemInfoError } = useNodeSystemInfo(
@@ -397,19 +376,6 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
 
             {/* Uptime */}
             <InfoRow label="Uptime">{uptime}</InfoRow>
-
-            {/* Shutdown */}
-            {workspace?.shutdownDeadline && (
-              <InfoRow label="Shutdown in">
-                <span
-                  style={{
-                    color: countdown === 'expired' ? 'var(--sam-color-tn-red)' : undefined,
-                  }}
-                >
-                  {countdown}
-                </span>
-              </InfoRow>
-            )}
           </div>
         </CollapsibleSection>
 

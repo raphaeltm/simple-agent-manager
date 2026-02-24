@@ -11,8 +11,6 @@ export interface TerminalProps {
   wsUrl: string;
   /** Optional resolver used for fresh URL/token retrieval before connect/reconnect. */
   resolveWsUrl?: () => Promise<string | null> | string | null;
-  /** Optional shutdown deadline (ISO 8601 timestamp) */
-  shutdownDeadline?: string | null;
   /** Callback when user activity is detected */
   onActivity?: () => void;
   /** Additional CSS class name */
@@ -23,8 +21,6 @@ export interface TerminalProps {
 export interface StatusBarProps {
   /** Current connection state */
   connectionState: ConnectionState;
-  /** Optional shutdown deadline (ISO 8601 timestamp) */
-  shutdownDeadline?: string | null;
   /** Number of reconnection attempts (when reconnecting) */
   reconnectAttempts?: number;
 }

@@ -68,8 +68,6 @@ type GatewayConfig struct {
 	ContainerUser string
 	// ContainerWorkDir is the working directory inside the container.
 	ContainerWorkDir string
-	// OnActivity is called when there's ACP activity (for idle detection).
-	OnActivity func()
 	// GitTokenFetcher returns a fresh GitHub installation token for the
 	// workspace. It is called at ACP session start to inject GH_TOKEN into
 	// the agent process. If nil or returns error, GH_TOKEN is omitted.

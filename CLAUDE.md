@@ -13,7 +13,7 @@ packages/
 ├── providers/    # Cloud provider abstraction (Hetzner)
 ├── terminal/     # Shared terminal component
 ├── cloud-init/   # Cloud-init template generator
-└── vm-agent/     # Go VM agent (PTY, WebSocket, idle detection)
+└── vm-agent/     # Go VM agent (PTY, WebSocket, ACP)
 tasks/            # Task tracking (backlog -> active -> archive)
 specs/            # Feature specifications
 docs/             # Documentation

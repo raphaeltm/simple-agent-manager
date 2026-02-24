@@ -25,7 +25,7 @@ func (s *Server) startNodeHealthReporter() {
 
 		for {
 			select {
-			case <-s.idleDetector.Done():
+			case <-s.done:
 				return
 			case <-ticker.C:
 				s.sendNodeHeartbeat()

@@ -126,8 +126,7 @@ This file lives in the repo and is version-controlled. It defines defaults for h
     "vmSize": "medium",
     "vmLocation": "nbg1",
     "agentModel": "claude-sonnet-4-5-20250929",
-    "permissionMode": "acceptEdits",
-    "idleTimeoutSeconds": 1800
+    "permissionMode": "acceptEdits"
   },
   "agentProfiles": {
     "implementer": {

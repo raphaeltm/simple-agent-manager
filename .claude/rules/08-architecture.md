@@ -90,6 +90,6 @@ Before making ANY changes related to features, workflows, state machines, valida
 ### Business Logic Principles (Quick Reference)
 
 1. **Workspace Lifecycle**: pending -> creating -> running -> stopping -> stopped (see data-model.md)
-2. **Idle Detection**: Configurable timeout (default 30 minutes via `IDLE_TIMEOUT_SECONDS`), managed by VM Agent with PTY activity detection
+2. **Lifecycle Control**: Workspaces and nodes are stopped, restarted, or deleted explicitly via API/UI (no automatic idle shutdown)
 3. **Ownership Validation**: All workspace operations MUST verify `user_id` matches authenticated user
 4. **Bootstrap Tokens**: One-time use, 5-minute expiry, cryptographically random
