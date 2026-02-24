@@ -35,9 +35,9 @@ export function ProjectSettings() {
   const handleSaveVmSize = async (size: VMSize) => {
     // If clicking the already-selected size, clear to platform default
     const newSize = size === defaultVmSize ? null : size;
+    setSavingVmSize(true);
     setDefaultVmSize(newSize);
     try {
-      setSavingVmSize(true);
       await updateProject(projectId, { defaultVmSize: newSize });
       await reload();
       toast.success(newSize ? `Default VM size set to ${newSize}` : 'Default VM size cleared (will use platform default)');
@@ -214,6 +214,7 @@ export function ProjectSettings() {
               <button
                 key={size.value}
                 type="button"
+                aria-pressed={isSelected}
                 disabled={savingVmSize}
                 onClick={() => void handleSaveVmSize(size.value)}
                 style={{

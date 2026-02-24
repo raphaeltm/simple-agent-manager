@@ -164,6 +164,7 @@ export function Nodes() {
                 <button
                   key={size.value}
                   type="button"
+                  aria-pressed={newNodeSize === size.value}
                   onClick={() => setNewNodeSize(size.value)}
                   style={{
                     padding: 'var(--sam-space-3)',

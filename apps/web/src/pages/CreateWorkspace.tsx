@@ -10,7 +10,7 @@ import {
   listGitHubInstallations,
   listNodes,
 } from '../lib/api';
-import type { GitHubInstallation, NodeResponse, ProjectDetailResponse } from '@simple-agent-manager/shared';
+import type { GitHubInstallation, NodeResponse, ProjectDetailResponse, VMSize, VMLocation } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, Input, PageLayout, Select, Spinner } from '@simple-agent-manager/ui';
 
 type PrereqStatus = 'loading' | 'ready' | 'missing' | 'error';
@@ -236,8 +236,8 @@ export function CreateWorkspace() {
         repository: repo,
         branch,
         installationId,
-        vmSize: vmSize as any,
-        vmLocation: vmLocation as any,
+        vmSize: vmSize as VMSize,
+        vmLocation: vmLocation as VMLocation,
         idleTimeoutSeconds: 0,
       });
 
@@ -475,6 +475,7 @@ export function CreateWorkspace() {
                 <button
                   key={size.value}
                   type="button"
+                  aria-pressed={vmSize === size.value}
                   onClick={() => setVmSize(size.value)}
                   style={{
                     padding: 'var(--sam-space-3)',
