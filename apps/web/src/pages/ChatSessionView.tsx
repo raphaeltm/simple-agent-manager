@@ -138,7 +138,7 @@ export function ChatSessionView() {
 
   const sessionTitle = session?.topic || `Session ${sessionId?.slice(0, 8) ?? ''}`;
 
-  if (loading) {
+  if (loading && !session) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-8)' }}>
         <Spinner size="lg" />

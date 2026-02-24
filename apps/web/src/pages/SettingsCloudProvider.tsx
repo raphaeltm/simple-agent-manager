@@ -6,7 +6,7 @@ export function SettingsCloudProvider() {
   const { credentials, loading, reload } = useSettingsContext();
   const hetznerCredential = credentials.find((c) => c.provider === 'hetzner');
 
-  if (loading) {
+  if (loading && credentials.length === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-3)', padding: 'var(--sam-space-2) 0' }}>
         <Skeleton width="30%" height="0.875rem" />

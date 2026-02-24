@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Button, Card, Spinner, StatusBadge, PageTitle, Secondary, Body } from '@simple-agent-manager/ui';
+import { Button, Card, Spinner, StatusBadge, PageLayout, Body } from '@simple-agent-manager/ui';
 import { useAuth } from '../components/AuthProvider';
+import { UserMenu } from '../components/UserMenu';
 import { listAdminUsers, approveOrSuspendUser, changeUserRole } from '../lib/api';
 import type { AdminUser, UserStatus } from '@simple-agent-manager/shared';
 
@@ -71,13 +72,8 @@ export function Admin() {
   const pendingCount = users.filter((u) => u.status === 'pending').length;
 
   return (
-    <div>
-      <div style={{ marginBottom: 'var(--sam-space-6)' }}>
-        <PageTitle>Admin</PageTitle>
-        <Secondary style={{ marginTop: 'var(--sam-space-1)' }}>
-          Manage user access and roles
-        </Secondary>
-      </div>
+    <PageLayout title="Admin" maxWidth="xl" headerRight={<UserMenu />}>
+      <div>
 
       {error && (
         <div
@@ -132,7 +128,7 @@ export function Admin() {
         ))}
       </div>
 
-      {loading ? (
+      {loading && users.length === 0 ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-8)' }}>
           <Spinner size="lg" />
         </div>
@@ -309,7 +305,8 @@ export function Admin() {
           </div>
         </Card>
       )}
-    </div>
+      </div>
+    </PageLayout>
   );
 }
 

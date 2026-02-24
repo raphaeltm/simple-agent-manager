@@ -27,7 +27,7 @@ export function ProjectSessions() {
 
   useEffect(() => { void loadChatSessions(); }, [loadChatSessions]);
 
-  if (loading) {
+  if (loading && chatSessions.length === 0) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', padding: 'var(--sam-space-4)' }}>
         <Spinner size="sm" />
