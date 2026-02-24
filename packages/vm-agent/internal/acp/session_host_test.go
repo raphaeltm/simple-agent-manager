@@ -793,6 +793,191 @@ func TestSessionHost_SendToViewerPriority_EvictsQueuedMessage(t *testing.T) {
 	}
 }
 
+func TestSessionHost_Suspend(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+
+	// Set up some state to verify it's preserved
+	host.mu.Lock()
+	host.agentType = "claude-code"
+	host.sessionID = "acp-session-xyz"
+	host.status = HostReady
+	host.mu.Unlock()
+
+	acpSessionID, agentType := host.Suspend()
+
+	if acpSessionID != "acp-session-xyz" {
+		t.Fatalf("acpSessionID = %q, want 'acp-session-xyz'", acpSessionID)
+	}
+	if agentType != "claude-code" {
+		t.Fatalf("agentType = %q, want 'claude-code'", agentType)
+	}
+	if host.Status() != HostStopped {
+		t.Fatalf("status after suspend = %s, want %s", host.Status(), HostStopped)
+	}
+}
+
+func TestSessionHost_SuspendDisconnectsViewers(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+
+	serverConn, clientConn := testWSPair(t)
+	host.AttachViewer("v1", serverConn)
+
+	// Drain attach messages
+	for i := 0; i < 3; i++ {
+		clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_, _, _ = clientConn.ReadMessage()
+	}
+
+	host.Suspend()
+
+	if host.ViewerCount() != 0 {
+		t.Fatalf("viewer count after suspend = %d, want 0", host.ViewerCount())
+	}
+
+	// Client should get a close frame or error
+	clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, _, err := clientConn.ReadMessage()
+	if err == nil {
+		t.Fatal("expected error reading from client after suspend")
+	}
+}
+
+func TestSessionHost_SuspendWhenStopped(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	host.Stop()
+
+	acpSessionID, agentType := host.Suspend()
+	if acpSessionID != "" {
+		t.Fatalf("acpSessionID = %q, want empty for already-stopped host", acpSessionID)
+	}
+	if agentType != "" {
+		t.Fatalf("agentType = %q, want empty for already-stopped host", agentType)
+	}
+}
+
+func TestSessionHost_IsPrompting(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	if host.IsPrompting() {
+		t.Fatal("expected IsPrompting=false for idle host")
+	}
+
+	host.setStatus(HostReady, "")
+	if host.IsPrompting() {
+		t.Fatal("expected IsPrompting=false for ready host")
+	}
+
+	host.setStatus(HostPrompting, "")
+	if !host.IsPrompting() {
+		t.Fatal("expected IsPrompting=true for prompting host")
+	}
+}
+
+func TestSessionHost_AutoSuspendTimerStartsOnLastViewerDetach(t *testing.T) {
+	t.Parallel()
+
+	suspendCalled := make(chan struct{}, 1)
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:          "test-session",
+			WorkspaceID:        "test-workspace",
+			IdleSuspendTimeout: 50 * time.Millisecond,
+			OnSuspend: func(wsID, sessID string) {
+				suspendCalled <- struct{}{}
+			},
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+
+	// Attach and detach a viewer to trigger the timer
+	serverConn, _ := testWSPair(t)
+	host.AttachViewer("v1", serverConn)
+	host.DetachViewer("v1")
+
+	// Timer should fire and call OnSuspend
+	select {
+	case <-suspendCalled:
+		// good
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected OnSuspend to be called after idle timeout")
+	}
+}
+
+func TestSessionHost_AutoSuspendCancelledByViewerAttach(t *testing.T) {
+	t.Parallel()
+
+	suspendCalled := make(chan struct{}, 1)
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:          "test-session",
+			WorkspaceID:        "test-workspace",
+			IdleSuspendTimeout: 100 * time.Millisecond,
+			OnSuspend: func(wsID, sessID string) {
+				suspendCalled <- struct{}{}
+			},
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	// Attach, detach (starts timer), then re-attach (should cancel timer)
+	server1, _ := testWSPair(t)
+	host.AttachViewer("v1", server1)
+	host.DetachViewer("v1")
+
+	// Re-attach before timer fires
+	time.Sleep(30 * time.Millisecond) // well before 100ms timeout
+	server2, _ := testWSPair(t)
+	host.AttachViewer("v2", server2)
+
+	// Wait past the original timeout — suspend should NOT fire
+	select {
+	case <-suspendCalled:
+		t.Fatal("OnSuspend should NOT have been called — viewer re-attached")
+	case <-time.After(300 * time.Millisecond):
+		// good — timer was cancelled
+	}
+}
+
+func TestSessionHost_AutoSuspendDisabledWhenTimeoutZero(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:          "test-session",
+			WorkspaceID:        "test-workspace",
+			IdleSuspendTimeout: 0, // disabled
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	serverConn, _ := testWSPair(t)
+	host.AttachViewer("v1", serverConn)
+	host.DetachViewer("v1")
+
+	// Verify no timer was set
+	host.viewerMu.RLock()
+	hasTimer := host.suspendTimer != nil
+	host.viewerMu.RUnlock()
+
+	if hasTimer {
+		t.Fatal("suspendTimer should be nil when IdleSuspendTimeout is 0")
+	}
+}
+
 func TestSessionHost_CancelPrompt_ForceStopsAfterGracePeriod(t *testing.T) {
 	t.Parallel()
 
