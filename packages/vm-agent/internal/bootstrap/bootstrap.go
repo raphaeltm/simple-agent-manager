@@ -601,7 +601,7 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 		}
 
 		slog.Info("Cloning repository", "repository", cfg.Repository, "branch", branch, "workspaceDir", cfg.WorkspaceDir)
-		cmd := exec.CommandContext(ctx, "git", "clone", "--branch", branch, "--single-branch", cloneURL, cfg.WorkspaceDir)
+		cmd := exec.CommandContext(ctx, "git", "clone", "--branch", branch, cloneURL, cfg.WorkspaceDir)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("git clone failed: %w: %s", err, redactSecret(strings.TrimSpace(string(output)), cloneToken))
