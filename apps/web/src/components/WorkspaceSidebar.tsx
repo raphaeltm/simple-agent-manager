@@ -211,7 +211,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
   const countdown = useCountdown(workspace?.shutdownDeadline);
 
   // Node resource polling — only when workspace is running
-  const { systemInfo } = useNodeSystemInfo(
+  const { systemInfo, error: systemInfoError } = useNodeSystemInfo(
     workspace?.nodeId ?? undefined,
     isRunning ? 'running' : undefined
   );
@@ -438,6 +438,10 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                   detail={`${formatBytes(systemInfo.disk.usedBytes)} / ${formatBytes(systemInfo.disk.totalBytes)}`}
                 />
               </div>
+            ) : systemInfoError ? (
+              <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+                Unable to load resource data
+              </span>
             ) : (
               <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
                 Loading...
