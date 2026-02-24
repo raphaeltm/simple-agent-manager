@@ -970,6 +970,36 @@ export function Workspace() {
     setViewMode('conversation');
   };
 
+  const handleResumeSession = async (sessionId: string) => {
+    if (!id) return;
+    try {
+      setSessionsLoading(true);
+      await resumeAgentSession(id, sessionId);
+      const sessions = await listAgentSessions(id);
+      setAgentSessions(sessions);
+      // Navigate to the resumed session
+      handleAttachSession(sessionId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to resume session');
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
+
+  const handleDeleteHistorySession = async (sessionId: string) => {
+    if (!id) return;
+    try {
+      setSessionsLoading(true);
+      await stopAgentSession(id, sessionId);
+      const sessions = await listAgentSessions(id);
+      setAgentSessions(sessions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete session');
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
+
   const handleCreateTerminalTab = () => {
     setViewMode('terminal');
     const params = new URLSearchParams(searchParams);
@@ -1149,6 +1179,15 @@ export function Workspace() {
   // Orphaned sessions: alive on VM but DB status is not 'running'
   const orphanedSessions = useMemo(
     () => agentSessions.filter((s) => isOrphanedSession(s) && !recentlyStopped.has(s.id)),
+    [agentSessions, recentlyStopped]
+  );
+
+  // Session history: suspended and stopped sessions for the sidebar history panel
+  const historySessions = useMemo(
+    () =>
+      agentSessions
+        .filter((s) => s.status === 'suspended' || (s.status === 'stopped' && !recentlyStopped.has(s.id)))
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
     [agentSessions, recentlyStopped]
   );
 
@@ -1615,6 +1654,9 @@ export function Workspace() {
         if (found) handleSelectWorkspaceTab(found);
       }}
       onStopSession={handleStopSession}
+      historySessions={historySessions}
+      onResumeSession={handleResumeSession}
+      onDeleteSession={handleDeleteHistorySession}
       gitStatus={gitStatus}
       onOpenGitChanges={handleOpenGitChanges}
       sessionTokenUsages={sessionTokenUsages}

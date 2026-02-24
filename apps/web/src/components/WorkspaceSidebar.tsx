@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, type FC } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@simple-agent-manager/ui';
-import { GitBranch, ExternalLink } from 'lucide-react';
+import { GitBranch, ExternalLink, Play, Trash2 } from 'lucide-react';
+import type { AgentSession } from '@simple-agent-manager/shared';
 import { CollapsibleSection } from './CollapsibleSection';
 import { ResourceBar } from './node/ResourceBar';
 import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
@@ -49,6 +50,11 @@ interface WorkspaceSidebarProps {
   activeTabId: string | null;
   onSelectTab: (tab: SidebarTab) => void;
   onStopSession?: (sessionId: string) => void;
+
+  // Session history (suspended/stopped sessions)
+  historySessions?: AgentSession[];
+  onResumeSession?: (sessionId: string) => void;
+  onDeleteSession?: (sessionId: string) => void;
 
   // Git
   gitStatus: GitStatusData | null;
@@ -202,6 +208,9 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
   activeTabId,
   onSelectTab,
   onStopSession,
+  historySessions = [],
+  onResumeSession,
+  onDeleteSession,
   gitStatus,
   onOpenGitChanges,
   sessionTokenUsages,
@@ -591,6 +600,139 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                   </div>
                 );
               })}
+            </div>
+          </CollapsibleSection>
+        )}
+
+        {/* Session History (suspended/stopped) */}
+        {historySessions.length > 0 && (
+          <CollapsibleSection
+            title="Session History"
+            badge={historySessions.length}
+            defaultCollapsed
+            storageKey="sam-sidebar-session-history"
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {historySessions.map((session) => (
+                <div
+                  key={session.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 0,
+                    padding: isMobile ? '8px 6px' : '5px 6px',
+                    borderRadius: 'var(--sam-radius-sm)',
+                    background: 'var(--sam-color-bg-inset)',
+                    minHeight: isMobile ? 44 : undefined,
+                  }}
+                >
+                  {/* Status dot */}
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      width: 7,
+                      height: 7,
+                      borderRadius: '50%',
+                      backgroundColor:
+                        session.status === 'suspended'
+                          ? 'var(--sam-color-tn-yellow)'
+                          : 'var(--sam-color-tn-fg-dimmer)',
+                      flexShrink: 0,
+                      marginRight: 8,
+                    }}
+                  />
+                  {/* Label + last prompt */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 'var(--sam-type-caption-size)',
+                        color: 'var(--sam-color-fg-primary)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {session.label || `Chat ${session.id.slice(-6)}`}
+                    </div>
+                    {session.lastPrompt && (
+                      <div
+                        style={{
+                          fontSize: '10px',
+                          color: 'var(--sam-color-fg-muted)',
+                          marginTop: 1,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                        title={session.lastPrompt}
+                      >
+                        {session.lastPrompt}
+                      </div>
+                    )}
+                    <div
+                      style={{
+                        fontSize: '10px',
+                        color: 'var(--sam-color-fg-muted)',
+                        marginTop: 1,
+                      }}
+                    >
+                      {session.status === 'suspended' ? 'suspended' : 'stopped'}
+                      {session.suspendedAt &&
+                        ` \u00B7 ${new Date(session.suspendedAt).toLocaleTimeString()}`}
+                      {!session.suspendedAt &&
+                        session.stoppedAt &&
+                        ` \u00B7 ${new Date(session.stoppedAt).toLocaleTimeString()}`}
+                    </div>
+                  </div>
+                  {/* Action buttons */}
+                  <div style={{ display: 'flex', gap: 2, flexShrink: 0, marginLeft: 4 }}>
+                    {session.status === 'suspended' && onResumeSession && (
+                      <button
+                        onClick={() => onResumeSession(session.id)}
+                        title="Resume session"
+                        aria-label={`Resume session ${session.label || session.id}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: isMobile ? 36 : 24,
+                          height: isMobile ? 36 : 24,
+                          padding: 0,
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'var(--sam-color-tn-green)',
+                          cursor: 'pointer',
+                          borderRadius: 'var(--sam-radius-sm)',
+                        }}
+                      >
+                        <Play size={12} />
+                      </button>
+                    )}
+                    {onDeleteSession && (
+                      <button
+                        onClick={() => onDeleteSession(session.id)}
+                        title="Delete session"
+                        aria-label={`Delete session ${session.label || session.id}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: isMobile ? 36 : 24,
+                          height: isMobile ? 36 : 24,
+                          padding: 0,
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'var(--sam-color-fg-muted)',
+                          cursor: 'pointer',
+                          borderRadius: 'var(--sam-radius-sm)',
+                        }}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </CollapsibleSection>
         )}
