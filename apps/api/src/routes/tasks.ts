@@ -10,20 +10,21 @@ import {
 } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type {
-  CreateTaskDependencyRequest,
-  CreateTaskRequest,
-  DelegateTaskRequest,
-  ListTaskEventsResponse,
-  ListTasksResponse,
-  Task,
-  TaskActorType,
-  TaskDependency,
-  TaskDetailResponse,
-  TaskSortOrder,
-  TaskStatus,
-  UpdateTaskRequest,
-  UpdateTaskStatusRequest,
+import {
+  isTaskExecutionStep,
+  type CreateTaskDependencyRequest,
+  type CreateTaskRequest,
+  type DelegateTaskRequest,
+  type ListTaskEventsResponse,
+  type ListTasksResponse,
+  type Task,
+  type TaskActorType,
+  type TaskDependency,
+  type TaskDetailResponse,
+  type TaskSortOrder,
+  type TaskStatus,
+  type UpdateTaskRequest,
+  type UpdateTaskStatusRequest,
 } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import * as schema from '../db/schema';
@@ -98,6 +99,7 @@ function toTaskResponse(task: schema.Task, blocked = false): Task {
     title: task.title,
     description: task.description,
     status: task.status as TaskStatus,
+    executionStep: isTaskExecutionStep(task.executionStep) ? task.executionStep : null,
     priority: task.priority,
     agentProfileHint: task.agentProfileHint,
     blocked,
@@ -256,6 +258,7 @@ async function setTaskStatus(
 
   if (toStatus === 'completed' || toStatus === 'failed' || toStatus === 'cancelled') {
     nextValues.completedAt = now;
+    nextValues.executionStep = null;
   }
 
   if (toStatus === 'ready') {
@@ -263,6 +266,7 @@ async function setTaskStatus(
     nextValues.startedAt = null;
     nextValues.completedAt = null;
     nextValues.errorMessage = null;
+    nextValues.executionStep = null;
   }
 
   if (options.outputSummary !== undefined) {

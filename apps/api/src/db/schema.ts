@@ -285,6 +285,7 @@ export const tasks = sqliteTable(
     title: text('title').notNull(),
     description: text('description'),
     status: text('status').notNull().default('draft'),
+    executionStep: text('execution_step'),
     priority: integer('priority').notNull().default(0),
     agentProfileHint: text('agent_profile_hint'),
     startedAt: text('started_at'),

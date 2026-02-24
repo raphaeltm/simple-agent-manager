@@ -150,11 +150,12 @@ export const DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS = 60 * 1000; // 1 minute
 /** Default max execution time (ms) for a task before it's considered stuck. Override via TASK_RUN_MAX_EXECUTION_MS env var. */
 export const DEFAULT_TASK_RUN_MAX_EXECUTION_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-/** Default threshold (ms) for a task stuck in 'queued' status. Override via TASK_STUCK_QUEUED_TIMEOUT_MS env var. */
+/** Default threshold (ms) for a task stuck in 'queued' status. Override via TASK_STUCK_QUEUED_TIMEOUT_MS env var.
+ * Must be >= node provisioning time + agent ready timeout (~3-4 min) to avoid false positives. */
 export const DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 /** Default threshold (ms) for a task stuck in 'delegated' status. Override via TASK_STUCK_DELEGATED_TIMEOUT_MS env var. */
-export const DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+export const DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 // =============================================================================
 // Hetzner Configuration

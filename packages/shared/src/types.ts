@@ -347,6 +347,26 @@ export type TaskStatus =
   | 'failed'
   | 'cancelled';
 
+/**
+ * Tracks where the task runner is during async execution.
+ * Persisted to the task record so stuck-task recovery knows WHERE execution stalled.
+ */
+export const TASK_EXECUTION_STEPS = [
+  'node_selection',
+  'node_provisioning',
+  'node_agent_ready',
+  'workspace_creation',
+  'workspace_ready',
+  'agent_session',
+  'running',
+] as const;
+
+export type TaskExecutionStep = (typeof TASK_EXECUTION_STEPS)[number];
+
+export function isTaskExecutionStep(value: unknown): value is TaskExecutionStep {
+  return typeof value === 'string' && (TASK_EXECUTION_STEPS as readonly string[]).includes(value);
+}
+
 export type TaskActorType = 'user' | 'system' | 'workspace_callback';
 
 export type TaskSortOrder = 'createdAtDesc' | 'updatedAtDesc' | 'priorityDesc';
@@ -360,6 +380,7 @@ export interface Task {
   title: string;
   description: string | null;
   status: TaskStatus;
+  executionStep: TaskExecutionStep | null;
   priority: number;
   agentProfileHint: string | null;
   blocked?: boolean;

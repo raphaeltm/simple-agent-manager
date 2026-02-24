@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq } from 'drizzle-orm';
+import { desc, eq, inArray } from 'drizzle-orm';
 import * as schema from '../db/schema';
 import type { Env } from '../index';
 import { requireAuth, requireApproved, requireSuperadmin, getUserId } from '../middleware/auth';
@@ -130,6 +130,78 @@ adminRoutes.patch('/users/:userId/role', async (c) => {
     .where(eq(schema.users.id, userId));
 
   return c.json({ id: userId, role: newRole });
+});
+
+/**
+ * GET /api/admin/tasks/stuck - List tasks in transient states (queued, delegated, in_progress)
+ *
+ * Returns tasks that are currently being executed or may be stuck,
+ * including their execution step for debugging.
+ */
+adminRoutes.get('/tasks/stuck', async (c) => {
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  const stuckTasks = await db
+    .select({
+      id: schema.tasks.id,
+      projectId: schema.tasks.projectId,
+      userId: schema.tasks.userId,
+      title: schema.tasks.title,
+      status: schema.tasks.status,
+      executionStep: schema.tasks.executionStep,
+      workspaceId: schema.tasks.workspaceId,
+      autoProvisionedNodeId: schema.tasks.autoProvisionedNodeId,
+      errorMessage: schema.tasks.errorMessage,
+      startedAt: schema.tasks.startedAt,
+      updatedAt: schema.tasks.updatedAt,
+      createdAt: schema.tasks.createdAt,
+    })
+    .from(schema.tasks)
+    .where(inArray(schema.tasks.status, ['queued', 'delegated', 'in_progress']))
+    .all();
+
+  const now = Date.now();
+  const tasksWithAge = stuckTasks.map((t) => ({
+    ...t,
+    elapsedMs: now - new Date(t.updatedAt).getTime(),
+    elapsedSeconds: Math.round((now - new Date(t.updatedAt).getTime()) / 1000),
+  }));
+
+  return c.json({ tasks: tasksWithAge });
+});
+
+/**
+ * GET /api/admin/tasks/recent-failures - List recently failed tasks with error details
+ *
+ * Returns the most recent failed tasks for debugging delegation issues.
+ */
+adminRoutes.get('/tasks/recent-failures', async (c) => {
+  const db = drizzle(c.env.DATABASE, { schema });
+  const limitParam = c.req.query('limit');
+  const limit = limitParam ? Math.min(Number.parseInt(limitParam, 10) || 50, 200) : 50;
+
+  const failures = await db
+    .select({
+      id: schema.tasks.id,
+      projectId: schema.tasks.projectId,
+      userId: schema.tasks.userId,
+      title: schema.tasks.title,
+      status: schema.tasks.status,
+      executionStep: schema.tasks.executionStep,
+      workspaceId: schema.tasks.workspaceId,
+      autoProvisionedNodeId: schema.tasks.autoProvisionedNodeId,
+      errorMessage: schema.tasks.errorMessage,
+      startedAt: schema.tasks.startedAt,
+      completedAt: schema.tasks.completedAt,
+      updatedAt: schema.tasks.updatedAt,
+      createdAt: schema.tasks.createdAt,
+    })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.status, 'failed'))
+    .orderBy(desc(schema.tasks.completedAt))
+    .limit(limit);
+
+  return c.json({ tasks: failures });
 });
 
 export { adminRoutes };
