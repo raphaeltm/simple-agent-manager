@@ -131,6 +131,9 @@ type SessionHost struct {
 	stderrMu  sync.Mutex
 	stderrBuf strings.Builder
 
+	// Auto-suspend timer (guarded by viewerMu)
+	suspendTimer *time.Timer
+
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -208,9 +211,14 @@ func (h *SessionHost) AttachViewer(id string, conn *websocket.Conn) *Viewer {
 	// Start the viewer's write pump goroutine
 	go h.viewerWritePump(viewer)
 
-	// Register the viewer
+	// Register the viewer and cancel any pending auto-suspend timer.
 	h.viewerMu.Lock()
 	h.viewers[id] = viewer
+	if h.suspendTimer != nil {
+		h.suspendTimer.Stop()
+		h.suspendTimer = nil
+		slog.Info("SessionHost: auto-suspend timer cancelled (viewer attached)", "sessionID", h.config.SessionID)
+	}
 	h.viewerMu.Unlock()
 
 	slog.Info("SessionHost: viewer attached", "sessionID", h.config.SessionID, "viewerID", id, "totalViewers", h.ViewerCount())
@@ -237,18 +245,75 @@ func (h *SessionHost) AttachViewer(id string, conn *websocket.Conn) *Viewer {
 }
 
 // DetachViewer removes a viewer from the session. This does NOT stop the agent.
+// When the last viewer disconnects and IdleSuspendTimeout > 0, an auto-suspend
+// timer is started. The timer is cancelled if a viewer attaches before it fires.
 func (h *SessionHost) DetachViewer(viewerID string) {
 	h.viewerMu.Lock()
 	viewer, ok := h.viewers[viewerID]
 	if ok {
 		delete(h.viewers, viewerID)
 	}
+	remainingViewers := len(h.viewers)
+
+	// Start auto-suspend timer when last viewer disconnects.
+	if remainingViewers == 0 && h.config.IdleSuspendTimeout > 0 && h.suspendTimer == nil {
+		timeout := h.config.IdleSuspendTimeout
+		h.suspendTimer = time.AfterFunc(timeout, func() {
+			h.autoSuspend()
+		})
+		slog.Info("SessionHost: auto-suspend timer started", "sessionID", h.config.SessionID, "timeout", timeout)
+	}
 	h.viewerMu.Unlock()
 
 	if ok && viewer != nil {
 		viewer.once.Do(func() { close(viewer.done) })
-		slog.Info("SessionHost: viewer detached", "sessionID", h.config.SessionID, "viewerID", viewerID, "totalViewers", h.ViewerCount())
+		slog.Info("SessionHost: viewer detached", "sessionID", h.config.SessionID, "viewerID", viewerID, "totalViewers", remainingViewers)
 	}
+}
+
+// autoSuspend is called by the suspend timer. It re-checks conditions before
+// suspending to avoid interrupting work that started after the timer was set.
+func (h *SessionHost) autoSuspend() {
+	// Re-check conditions under lock: no viewers and not prompting.
+	h.viewerMu.Lock()
+	h.suspendTimer = nil // Timer has fired, clear reference.
+	if len(h.viewers) > 0 {
+		h.viewerMu.Unlock()
+		slog.Info("SessionHost: auto-suspend aborted (viewers present)", "sessionID", h.config.SessionID)
+		return
+	}
+	h.viewerMu.Unlock()
+
+	if h.IsPrompting() {
+		slog.Info("SessionHost: auto-suspend deferred (prompt in progress)", "sessionID", h.config.SessionID)
+		// Re-arm the timer to check again after the grace period.
+		h.viewerMu.Lock()
+		if h.suspendTimer == nil && len(h.viewers) == 0 {
+			h.suspendTimer = time.AfterFunc(h.config.IdleSuspendTimeout, func() {
+				h.autoSuspend()
+			})
+		}
+		h.viewerMu.Unlock()
+		return
+	}
+
+	slog.Info("SessionHost: auto-suspending idle viewerless session", "sessionID", h.config.SessionID)
+	h.reportLifecycle("info", "SessionHost auto-suspending (idle, no viewers)", map[string]interface{}{
+		"sessionId": h.config.SessionID,
+	})
+
+	acpSessionID, agentType := h.Suspend()
+
+	// Notify the server so it can update the session status.
+	if h.config.OnSuspend != nil {
+		h.config.OnSuspend(h.config.WorkspaceID, h.config.SessionID)
+	}
+
+	h.reportEvent("info", "agent_session.auto_suspended", "Session auto-suspended (idle, no viewers)", map[string]interface{}{
+		"sessionId":    h.config.SessionID,
+		"acpSessionId": acpSessionID,
+		"agentType":    agentType,
+	})
 }
 
 // SelectAgent handles agent selection requests from a browser.
@@ -431,6 +496,15 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 		h.persistLastPrompt(firstTextContent)
 	}
 
+	// Cancel any pending auto-suspend timer — agent is actively working.
+	h.viewerMu.Lock()
+	if h.suspendTimer != nil {
+		h.suspendTimer.Stop()
+		h.suspendTimer = nil
+		slog.Info("SessionHost: auto-suspend timer cancelled (prompt started)", "sessionID", h.config.SessionID)
+	}
+	h.viewerMu.Unlock()
+
 	promptTimeout := h.promptTimeout()
 	promptCtx, promptCancel := context.WithTimeout(ctx, promptTimeout)
 	promptID, ok := h.beginPrompt(promptCancel)
@@ -571,6 +645,14 @@ func (h *SessionHost) Stop() {
 	h.statusErr = ""
 	h.stopCurrentAgentLocked()
 	h.mu.Unlock()
+
+	// Cancel any pending auto-suspend timer.
+	h.viewerMu.Lock()
+	if h.suspendTimer != nil {
+		h.suspendTimer.Stop()
+		h.suspendTimer = nil
+	}
+	h.viewerMu.Unlock()
 
 	h.cancel()
 

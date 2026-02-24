@@ -181,6 +181,10 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	cfg.TabLastPromptStore = s.store
 	cfg.SessionLastPromptManager = s.agentSessions
 	cfg.EventAppender = &serverEventAppender{server: s}
+	cfg.IdleSuspendTimeout = s.config.ACPIdleSuspendTimeout
+	cfg.OnSuspend = func(wsID, sessID string) {
+		s.handleAutoSuspend(wsID, sessID)
+	}
 
 	if session.AcpSessionID != "" {
 		cfg.PreviousAcpSessionID = session.AcpSessionID

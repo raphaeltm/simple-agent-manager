@@ -597,6 +597,26 @@ func (s *Server) suspendSessionHost(workspaceID, sessionID string) (acpSessionID
 	return acpSessionID, agentType
 }
 
+// handleAutoSuspend is called by the SessionHost's OnSuspend callback when
+// auto-suspend fires. It removes the SessionHost from the map (the host has
+// already stopped itself) and transitions the session to suspended status.
+func (s *Server) handleAutoSuspend(workspaceID, sessionID string) {
+	// Remove the SessionHost from the map (it has already called Suspend() on itself).
+	hostKey := workspaceID + ":" + sessionID
+	s.sessionHostMu.Lock()
+	delete(s.sessionHosts, hostKey)
+	s.sessionHostMu.Unlock()
+
+	// Transition the in-memory session to suspended.
+	session, err := s.agentSessions.Suspend(workspaceID, sessionID)
+	if err != nil {
+		slog.Warn("Auto-suspend: failed to transition session", "workspace", workspaceID, "session", sessionID, "error", err)
+		return
+	}
+
+	slog.Info("Auto-suspend: session suspended", "workspace", workspaceID, "session", sessionID, "acpSessionId", session.AcpSessionID)
+}
+
 func (s *Server) handleSuspendAgentSession(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	sessionID := r.PathValue("sessionId")
