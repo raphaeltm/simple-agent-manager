@@ -381,3 +381,103 @@ func TestInsertOrReplace(t *testing.T) {
 		t.Errorf("expected label 'Updated', got %q", tabs[0].Label)
 	}
 }
+
+func TestUpdateTabLastPrompt(t *testing.T) {
+	store, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	_ = store.InsertTab(Tab{ID: "chat-1", WorkspaceID: "ws-1", Type: "chat", AgentID: "claude-code"})
+
+	// Verify initial LastPrompt is empty
+	tabs, _ := store.ListTabs("ws-1")
+	if tabs[0].LastPrompt != "" {
+		t.Errorf("expected empty LastPrompt initially, got %q", tabs[0].LastPrompt)
+	}
+
+	// Update last prompt
+	if err := store.UpdateTabLastPrompt("chat-1", "Help me fix the login bug"); err != nil {
+		t.Fatalf("UpdateTabLastPrompt: %v", err)
+	}
+
+	// Verify update
+	tabs, _ = store.ListTabs("ws-1")
+	if tabs[0].LastPrompt != "Help me fix the login bug" {
+		t.Errorf("expected LastPrompt 'Help me fix the login bug', got %q", tabs[0].LastPrompt)
+	}
+
+	// Update again (overwrite)
+	if err := store.UpdateTabLastPrompt("chat-1", "Now refactor the auth module"); err != nil {
+		t.Fatalf("UpdateTabLastPrompt overwrite: %v", err)
+	}
+
+	tabs, _ = store.ListTabs("ws-1")
+	if tabs[0].LastPrompt != "Now refactor the auth module" {
+		t.Errorf("expected overwritten LastPrompt, got %q", tabs[0].LastPrompt)
+	}
+}
+
+func TestLastPromptPersistedThroughInsert(t *testing.T) {
+	store, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	_ = store.InsertTab(Tab{
+		ID:          "chat-1",
+		WorkspaceID: "ws-1",
+		Type:        "chat",
+		LastPrompt:  "initial prompt text",
+	})
+
+	tabs, _ := store.ListTabs("ws-1")
+	if tabs[0].LastPrompt != "initial prompt text" {
+		t.Errorf("expected LastPrompt 'initial prompt text', got %q", tabs[0].LastPrompt)
+	}
+}
+
+func TestMigrationV3AddsLastPromptColumn(t *testing.T) {
+	dbPath := tempDBPath(t)
+
+	// Open store (runs all migrations including v3)
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Insert a tab and verify last_prompt column works
+	err = store.InsertTab(Tab{
+		ID:          "t1",
+		WorkspaceID: "ws-1",
+		Type:        "chat",
+		LastPrompt:  "test prompt",
+	})
+	if err != nil {
+		t.Fatalf("InsertTab with last_prompt: %v", err)
+	}
+
+	tabs, err := store.ListTabs("ws-1")
+	if err != nil {
+		t.Fatalf("ListTabs: %v", err)
+	}
+	if tabs[0].LastPrompt != "test prompt" {
+		t.Errorf("expected LastPrompt 'test prompt', got %q", tabs[0].LastPrompt)
+	}
+
+	store.Close()
+
+	// Reopen — should not fail (migration is idempotent)
+	store2, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Reopen after migration v3: %v", err)
+	}
+	defer store2.Close()
+
+	tabs, _ = store2.ListTabs("ws-1")
+	if tabs[0].LastPrompt != "test prompt" {
+		t.Errorf("expected LastPrompt persisted after reopen, got %q", tabs[0].LastPrompt)
+	}
+}

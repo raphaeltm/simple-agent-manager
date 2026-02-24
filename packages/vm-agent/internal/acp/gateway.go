@@ -48,6 +48,18 @@ type TabSessionUpdater interface {
 	UpdateTabAcpSessionID(tabID, acpSessionID string) error
 }
 
+// TabLastPromptUpdater persists the last user prompt for session discoverability.
+type TabLastPromptUpdater interface {
+	// UpdateTabLastPrompt updates the last user message for a tab.
+	UpdateTabLastPrompt(tabID, lastPrompt string) error
+}
+
+// SessionLastPromptUpdater persists the last user prompt in the in-memory session manager.
+type SessionLastPromptUpdater interface {
+	// UpdateLastPrompt stores the last user message for a session.
+	UpdateLastPrompt(workspaceID, sessionID, lastPrompt string) error
+}
+
 // GatewayConfig holds configuration for the ACP gateway and SessionHost.
 type GatewayConfig struct {
 	// InitTimeoutMs is the ACP initialization timeout in milliseconds.
@@ -104,6 +116,16 @@ type GatewayConfig struct {
 	PromptTimeout time.Duration
 	// PromptCancelGracePeriod waits after cancel before force-stopping unresponsive prompt.
 	PromptCancelGracePeriod time.Duration
+	// TabLastPromptStore persists the last user prompt to SQLite for session discoverability.
+	TabLastPromptStore TabLastPromptUpdater
+	// SessionLastPromptManager persists the last user prompt in the in-memory session manager.
+	SessionLastPromptManager SessionLastPromptUpdater
+	// IdleSuspendTimeout is how long a session can be idle with no viewers before
+	// being automatically suspended. Zero disables auto-suspend.
+	IdleSuspendTimeout time.Duration
+	// OnSuspend is called when auto-suspend triggers. The server uses this to
+	// update the agent session status and remove the SessionHost from the map.
+	OnSuspend func(workspaceID, sessionID string)
 }
 
 // Gateway is a thin per-WebSocket relay between a browser and a SessionHost.

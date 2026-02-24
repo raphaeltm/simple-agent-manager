@@ -71,7 +71,9 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 					if tab.ID == requestedSessionID && tab.AcpSessionID != "" {
 						session.AcpSessionID = tab.AcpSessionID
 						session.AgentType = tab.AgentID
-						_ = s.agentSessions.UpdateAcpSessionID(workspaceID, requestedSessionID, tab.AcpSessionID, tab.AgentID)
+						if updateErr := s.agentSessions.UpdateAcpSessionID(workspaceID, requestedSessionID, tab.AcpSessionID, tab.AgentID); updateErr != nil {
+							slog.Error("Failed to hydrate AcpSessionID in session manager", "workspace", workspaceID, "sessionId", requestedSessionID, "error", updateErr)
+						}
 						slog.Info("Hydrated AcpSessionID from SQLite",
 							"workspace", workspaceID, "acpSessionId", tab.AcpSessionID, "agentType", tab.AgentID, "sessionId", requestedSessionID)
 						break
@@ -178,7 +180,13 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	cfg.SessionID = sessionID
 	cfg.SessionManager = s.agentSessions
 	cfg.TabStore = s.store
+	cfg.TabLastPromptStore = s.store
+	cfg.SessionLastPromptManager = s.agentSessions
 	cfg.EventAppender = &serverEventAppender{server: s}
+	cfg.IdleSuspendTimeout = s.config.ACPIdleSuspendTimeout
+	cfg.OnSuspend = func(wsID, sessID string) {
+		s.handleAutoSuspend(wsID, sessID)
+	}
 
 	if session.AcpSessionID != "" {
 		cfg.PreviousAcpSessionID = session.AcpSessionID

@@ -131,6 +131,9 @@ type SessionHost struct {
 	stderrMu  sync.Mutex
 	stderrBuf strings.Builder
 
+	// Auto-suspend timer (guarded by viewerMu)
+	suspendTimer *time.Timer
+
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -208,9 +211,14 @@ func (h *SessionHost) AttachViewer(id string, conn *websocket.Conn) *Viewer {
 	// Start the viewer's write pump goroutine
 	go h.viewerWritePump(viewer)
 
-	// Register the viewer
+	// Register the viewer and cancel any pending auto-suspend timer.
 	h.viewerMu.Lock()
 	h.viewers[id] = viewer
+	if h.suspendTimer != nil {
+		h.suspendTimer.Stop()
+		h.suspendTimer = nil
+		slog.Info("SessionHost: auto-suspend timer cancelled (viewer attached)", "sessionID", h.config.SessionID)
+	}
 	h.viewerMu.Unlock()
 
 	slog.Info("SessionHost: viewer attached", "sessionID", h.config.SessionID, "viewerID", id, "totalViewers", h.ViewerCount())
@@ -237,18 +245,77 @@ func (h *SessionHost) AttachViewer(id string, conn *websocket.Conn) *Viewer {
 }
 
 // DetachViewer removes a viewer from the session. This does NOT stop the agent.
+// When the last viewer disconnects and IdleSuspendTimeout > 0, an auto-suspend
+// timer is started. The timer is cancelled if a viewer attaches before it fires.
 func (h *SessionHost) DetachViewer(viewerID string) {
 	h.viewerMu.Lock()
 	viewer, ok := h.viewers[viewerID]
 	if ok {
 		delete(h.viewers, viewerID)
 	}
+	remainingViewers := len(h.viewers)
+
+	// Start auto-suspend timer when last viewer disconnects.
+	if remainingViewers == 0 && h.config.IdleSuspendTimeout > 0 && h.suspendTimer == nil {
+		timeout := h.config.IdleSuspendTimeout
+		h.suspendTimer = time.AfterFunc(timeout, func() {
+			h.autoSuspend()
+		})
+		slog.Info("SessionHost: auto-suspend timer started", "sessionID", h.config.SessionID, "timeout", timeout)
+	}
 	h.viewerMu.Unlock()
 
 	if ok && viewer != nil {
 		viewer.once.Do(func() { close(viewer.done) })
-		slog.Info("SessionHost: viewer detached", "sessionID", h.config.SessionID, "viewerID", viewerID, "totalViewers", h.ViewerCount())
+		slog.Info("SessionHost: viewer detached", "sessionID", h.config.SessionID, "viewerID", viewerID, "totalViewers", remainingViewers)
 	}
+}
+
+// autoSuspend is called by the suspend timer. It re-checks conditions before
+// suspending to avoid interrupting work that started after the timer was set.
+func (h *SessionHost) autoSuspend() {
+	// Re-check conditions under lock: no viewers and not prompting.
+	// Hold viewerMu across both checks to prevent races with DetachViewer.
+	h.viewerMu.Lock()
+	h.suspendTimer = nil // Timer has fired, clear reference.
+	if len(h.viewers) > 0 {
+		h.viewerMu.Unlock()
+		slog.Info("SessionHost: auto-suspend aborted (viewers present)", "sessionID", h.config.SessionID)
+		return
+	}
+
+	// Check prompting status while still holding viewerMu to prevent race
+	// where a viewer detaches and also tries to start a timer.
+	if h.IsPrompting() {
+		// Re-arm the timer without releasing the lock.
+		if h.suspendTimer == nil {
+			h.suspendTimer = time.AfterFunc(h.config.IdleSuspendTimeout, func() {
+				h.autoSuspend()
+			})
+		}
+		h.viewerMu.Unlock()
+		slog.Info("SessionHost: auto-suspend deferred (prompt in progress)", "sessionID", h.config.SessionID)
+		return
+	}
+	h.viewerMu.Unlock()
+
+	slog.Info("SessionHost: auto-suspending idle viewerless session", "sessionID", h.config.SessionID)
+	h.reportLifecycle("info", "SessionHost auto-suspending (idle, no viewers)", map[string]interface{}{
+		"sessionId": h.config.SessionID,
+	})
+
+	acpSessionID, agentType := h.Suspend()
+
+	// Notify the server so it can update the session status.
+	if h.config.OnSuspend != nil {
+		h.config.OnSuspend(h.config.WorkspaceID, h.config.SessionID)
+	}
+
+	h.reportEvent("info", "agent_session.auto_suspended", "Session auto-suspended (idle, no viewers)", map[string]interface{}{
+		"sessionId":    h.config.SessionID,
+		"acpSessionId": acpSessionID,
+		"agentType":    agentType,
+	})
 }
 
 // SelectAgent handles agent selection requests from a browser.
@@ -407,15 +474,33 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 	}
 
 	var blocks []acpsdk.ContentBlock
+	var firstTextContent string
 	for _, p := range promptParams.Prompt {
 		if p.Type == "text" && p.Text != "" {
 			blocks = append(blocks, acpsdk.TextBlock(p.Text))
+			if firstTextContent == "" {
+				firstTextContent = p.Text
+			}
 		}
 	}
 	if len(blocks) == 0 {
 		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32602, "Empty prompt")
 		return
 	}
+
+	// Capture the last user message for session discoverability in history UI.
+	if firstTextContent != "" {
+		h.persistLastPrompt(firstTextContent)
+	}
+
+	// Cancel any pending auto-suspend timer — agent is actively working.
+	h.viewerMu.Lock()
+	if h.suspendTimer != nil {
+		h.suspendTimer.Stop()
+		h.suspendTimer = nil
+		slog.Info("SessionHost: auto-suspend timer cancelled (prompt started)", "sessionID", h.config.SessionID)
+	}
+	h.viewerMu.Unlock()
 
 	promptTimeout := h.promptTimeout()
 	promptCtx, promptCancel := context.WithTimeout(ctx, promptTimeout)
@@ -557,6 +642,14 @@ func (h *SessionHost) Stop() {
 	h.statusErr = ""
 	h.stopCurrentAgentLocked()
 	h.mu.Unlock()
+
+	// Cancel any pending auto-suspend timer.
+	h.viewerMu.Lock()
+	if h.suspendTimer != nil {
+		h.suspendTimer.Stop()
+		h.suspendTimer = nil
+	}
+	h.viewerMu.Unlock()
 
 	h.cancel()
 
@@ -977,6 +1070,88 @@ func (h *SessionHost) persistAcpSessionID(agentType string) {
 			slog.Info("ACP session ID persisted to tab store", "sessionID", sessionID)
 		}
 	}
+}
+
+// persistLastPrompt saves the last user message for session discoverability.
+// Truncates to 200 characters to keep storage reasonable.
+func (h *SessionHost) persistLastPrompt(text string) {
+	const maxLen = 200
+	if len(text) > maxLen {
+		text = text[:maxLen]
+	}
+
+	if h.config.SessionLastPromptManager != nil && h.config.WorkspaceID != "" && h.config.SessionID != "" {
+		if err := h.config.SessionLastPromptManager.UpdateLastPrompt(
+			h.config.WorkspaceID, h.config.SessionID, text,
+		); err != nil {
+			slog.Error("Failed to persist last prompt to session manager", "error", err)
+		}
+	}
+
+	if h.config.TabLastPromptStore != nil && h.config.SessionID != "" {
+		if err := h.config.TabLastPromptStore.UpdateTabLastPrompt(h.config.SessionID, text); err != nil {
+			slog.Error("Failed to persist last prompt to tab store", "error", err)
+		}
+	}
+}
+
+// Suspend stops the agent process and releases in-memory resources while
+// preserving the AcpSessionID for later resumption via LoadSession.
+// Unlike Stop(), the session is NOT marked as stopped — it enters a
+// "suspended" state where the process is freed but context is recoverable.
+//
+// Returns the preserved AcpSessionID and agent type for the caller to
+// use when transitioning the session status.
+func (h *SessionHost) Suspend() (acpSessionID string, agentType string) {
+	h.mu.Lock()
+	if h.status == HostStopped {
+		h.mu.Unlock()
+		return "", ""
+	}
+
+	// Capture the session state we need to preserve before stopping.
+	acpSessionID = string(h.sessionID)
+	agentType = h.agentType
+
+	// Stop the agent process to free resources.
+	h.stopCurrentAgentLocked()
+
+	// Mark the host as stopped so no further operations occur.
+	h.status = HostStopped
+	h.statusErr = ""
+	h.mu.Unlock()
+
+	h.cancel()
+
+	h.reportLifecycle("info", "SessionHost suspended", map[string]interface{}{
+		"sessionId":    h.config.SessionID,
+		"acpSessionId": acpSessionID,
+		"agentType":    agentType,
+	})
+
+	// Disconnect all viewers with a specific close reason.
+	h.viewerMu.Lock()
+	for id, viewer := range h.viewers {
+		viewer.once.Do(func() { close(viewer.done) })
+		_ = viewer.conn.WriteControl(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseGoingAway, "session suspended"),
+			time.Now().Add(5*time.Second),
+		)
+		_ = viewer.conn.Close()
+		delete(h.viewers, id)
+	}
+	h.viewerMu.Unlock()
+
+	return acpSessionID, agentType
+}
+
+// IsPrompting returns true if a prompt is currently in flight.
+// Used by the auto-suspend timer to avoid interrupting active work.
+func (h *SessionHost) IsPrompting() bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.status == HostPrompting
 }
 
 // --- Internal: message broadcasting ---

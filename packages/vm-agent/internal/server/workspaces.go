@@ -582,3 +582,107 @@ func (s *Server) handleStopAgentSession(w http.ResponseWriter, r *http.Request) 
 	s.appendNodeEvent(workspaceID, "info", "agent_session.stopped", "Agent session stopped", map[string]interface{}{"sessionId": sessionID})
 	writeJSON(w, http.StatusOK, session)
 }
+
+// suspendSessionHost suspends a SessionHost: stops the agent process but
+// preserves the AcpSessionID for later resumption via LoadSession.
+func (s *Server) suspendSessionHost(workspaceID, sessionID string) (acpSessionID string, agentType string) {
+	hostKey := workspaceID + ":" + sessionID
+	s.sessionHostMu.Lock()
+	existing := s.sessionHosts[hostKey]
+	if existing != nil {
+		acpSessionID, agentType = existing.Suspend()
+		delete(s.sessionHosts, hostKey)
+	}
+	s.sessionHostMu.Unlock()
+	return acpSessionID, agentType
+}
+
+// handleAutoSuspend is called by the SessionHost's OnSuspend callback when
+// auto-suspend fires. It removes the SessionHost from the map (the host has
+// already stopped itself) and transitions the session to suspended status.
+func (s *Server) handleAutoSuspend(workspaceID, sessionID string) {
+	// Remove the SessionHost from the map (it has already called Suspend() on itself).
+	hostKey := workspaceID + ":" + sessionID
+	s.sessionHostMu.Lock()
+	delete(s.sessionHosts, hostKey)
+	s.sessionHostMu.Unlock()
+
+	// Transition the in-memory session to suspended.
+	session, err := s.agentSessions.Suspend(workspaceID, sessionID)
+	if err != nil {
+		slog.Warn("Auto-suspend: failed to transition session", "workspace", workspaceID, "session", sessionID, "error", err)
+		return
+	}
+
+	slog.Info("Auto-suspend: session suspended", "workspace", workspaceID, "session", sessionID, "acpSessionId", session.AcpSessionID)
+}
+
+func (s *Server) handleSuspendAgentSession(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	sessionID := r.PathValue("sessionId")
+	if workspaceID == "" || sessionID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId and sessionId are required")
+		return
+	}
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+
+	// Suspend the SessionHost first (stops agent process, preserves AcpSessionID).
+	acpSessionID, agentType := s.suspendSessionHost(workspaceID, sessionID)
+
+	// Transition the in-memory session to suspended.
+	session, err := s.agentSessions.Suspend(workspaceID, sessionID)
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+
+	// Preserve AcpSessionID if the SessionHost provided one that the session
+	// doesn't already have (e.g. was set during this agent's lifecycle).
+	if acpSessionID != "" && session.AcpSessionID == "" {
+		_ = s.agentSessions.UpdateAcpSessionID(workspaceID, sessionID, acpSessionID, agentType)
+		session.AcpSessionID = acpSessionID
+		session.AgentType = agentType
+	}
+
+	s.appendNodeEvent(workspaceID, "info", "agent_session.suspended", "Agent session suspended", map[string]interface{}{
+		"sessionId":    sessionID,
+		"acpSessionId": session.AcpSessionID,
+		"agentType":    session.AgentType,
+	})
+
+	writeJSON(w, http.StatusOK, session)
+}
+
+func (s *Server) handleResumeAgentSession(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	sessionID := r.PathValue("sessionId")
+	if workspaceID == "" || sessionID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId and sessionId are required")
+		return
+	}
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+
+	// Transition the in-memory session back to running.
+	session, err := s.agentSessions.Resume(workspaceID, sessionID)
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+
+	// Note: we do NOT create a SessionHost here. The SessionHost will be
+	// created on-demand when a viewer connects via WebSocket (handleAgentWS).
+	// The hydrated AcpSessionID in the session record will trigger LoadSession
+	// when the SessionHost starts its agent.
+
+	s.appendNodeEvent(workspaceID, "info", "agent_session.resumed", "Agent session resumed", map[string]interface{}{
+		"sessionId":    sessionID,
+		"acpSessionId": session.AcpSessionID,
+		"agentType":    session.AgentType,
+	})
+
+	writeJSON(w, http.StatusOK, session)
+}

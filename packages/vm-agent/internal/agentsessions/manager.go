@@ -10,9 +10,10 @@ import (
 type Status string
 
 const (
-	StatusRunning Status = "running"
-	StatusStopped Status = "stopped"
-	StatusError   Status = "error"
+	StatusRunning   Status = "running"
+	StatusSuspended Status = "suspended"
+	StatusStopped   Status = "stopped"
+	StatusError     Status = "error"
 )
 
 type Session struct {
@@ -22,9 +23,11 @@ type Session struct {
 	Label        string     `json:"label,omitempty"`
 	AgentType    string     `json:"agentType,omitempty"`
 	AcpSessionID string     `json:"acpSessionId,omitempty"`
+	LastPrompt   string     `json:"lastPrompt,omitempty"`
 	CreatedAt    time.Time  `json:"createdAt"`
 	UpdatedAt    time.Time  `json:"updatedAt"`
 	StoppedAt    *time.Time `json:"stoppedAt,omitempty"`
+	SuspendedAt  *time.Time `json:"suspendedAt,omitempty"`
 	Error        string     `json:"errorMessage,omitempty"`
 }
 
@@ -110,6 +113,83 @@ func (m *Manager) Stop(workspaceID, sessionID string) (Session, error) {
 	session.StoppedAt = &now
 	workspaceMap[sessionID] = session
 	return session, nil
+}
+
+// Suspend transitions a session to suspended status. The AcpSessionID is
+// preserved so the session can later be resumed via LoadSession.
+func (m *Manager) Suspend(workspaceID, sessionID string) (Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	workspaceMap, ok := m.workspaceSessions[workspaceID]
+	if !ok {
+		return Session{}, fmt.Errorf("workspace not found: %s", workspaceID)
+	}
+
+	session, ok := workspaceMap[sessionID]
+	if !ok {
+		return Session{}, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	if session.Status != StatusRunning && session.Status != StatusError {
+		return Session{}, fmt.Errorf("session cannot be suspended from status %s", session.Status)
+	}
+
+	now := time.Now().UTC()
+	session.Status = StatusSuspended
+	session.SuspendedAt = &now
+	session.UpdatedAt = now
+	session.Error = ""
+	workspaceMap[sessionID] = session
+	return session, nil
+}
+
+// Resume transitions a session from suspended back to running.
+func (m *Manager) Resume(workspaceID, sessionID string) (Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	workspaceMap, ok := m.workspaceSessions[workspaceID]
+	if !ok {
+		return Session{}, fmt.Errorf("workspace not found: %s", workspaceID)
+	}
+
+	session, ok := workspaceMap[sessionID]
+	if !ok {
+		return Session{}, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	if session.Status != StatusSuspended {
+		return Session{}, fmt.Errorf("session cannot be resumed from status %s", session.Status)
+	}
+
+	now := time.Now().UTC()
+	session.Status = StatusRunning
+	session.SuspendedAt = nil
+	session.UpdatedAt = now
+	workspaceMap[sessionID] = session
+	return session, nil
+}
+
+// UpdateLastPrompt stores the last user message for discoverability in session history.
+func (m *Manager) UpdateLastPrompt(workspaceID, sessionID, lastPrompt string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	workspaceMap, ok := m.workspaceSessions[workspaceID]
+	if !ok {
+		return fmt.Errorf("workspace not found: %s", workspaceID)
+	}
+
+	session, ok := workspaceMap[sessionID]
+	if !ok {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	session.LastPrompt = lastPrompt
+	session.UpdatedAt = time.Now().UTC()
+	workspaceMap[sessionID] = session
+	return nil
 }
 
 func (m *Manager) List(workspaceID string) []Session {
