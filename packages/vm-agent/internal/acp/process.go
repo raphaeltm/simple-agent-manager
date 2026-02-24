@@ -10,7 +10,18 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+)
+
+const (
+	// DefaultStopGracePeriod is how long Stop() waits after SIGTERM before
+	// escalating to SIGKILL. Configurable via ProcessConfig.StopGracePeriod.
+	DefaultStopGracePeriod = 5 * time.Second
+
+	// DefaultStopTimeout is the total time Stop() is allowed to take before
+	// giving up. Configurable via ProcessConfig.StopTimeout.
+	DefaultStopTimeout = 10 * time.Second
 )
 
 // samEnvFiles are the paths inside the devcontainer where SAM and project
@@ -76,16 +87,22 @@ func hasEnvVar(envVars []string, key string) bool {
 
 // AgentProcess manages an ACP-compliant agent subprocess running inside the
 // devcontainer via docker exec. It pipes stdin/stdout for NDJSON communication.
+//
+// The process is started in its own process group (Setpgid) so that Stop()
+// can reliably kill the entire process tree (docker exec + child processes)
+// using a negative PGID signal.
 type AgentProcess struct {
-	agentType   string
-	cmd         *exec.Cmd
-	stdin       io.WriteCloser
-	stdout      io.ReadCloser
-	stderr      io.ReadCloser
-	containerID string
-	startTime   time.Time
-	mu          sync.Mutex
-	stopped     bool
+	agentType        string
+	cmd              *exec.Cmd
+	stdin            io.WriteCloser
+	stdout           io.ReadCloser
+	stderr           io.ReadCloser
+	containerID      string
+	startTime        time.Time
+	stopGracePeriod  time.Duration
+	stopTimeout      time.Duration
+	mu               sync.Mutex
+	stopped          bool
 }
 
 // ProcessConfig holds configuration for spawning an agent process.
@@ -102,10 +119,17 @@ type ProcessConfig struct {
 	EnvVars []string
 	// WorkDir is the working directory inside the container.
 	WorkDir string
+	// StopGracePeriod is how long Stop() waits after SIGTERM before SIGKILL.
+	// Zero uses DefaultStopGracePeriod.
+	StopGracePeriod time.Duration
+	// StopTimeout is the total time Stop() may take. Zero uses DefaultStopTimeout.
+	StopTimeout time.Duration
 }
 
 // StartProcess spawns an agent process inside the devcontainer.
 // The process communicates via NDJSON over stdin/stdout.
+// The process is placed in its own process group (Setpgid) so that Stop()
+// can signal the entire tree reliably.
 func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	// Build docker exec command: docker exec -i [-u user] [-w dir] [-e VAR=val...] container command args...
 	args := []string{"exec", "-i"}
@@ -124,6 +148,10 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	args = append(args, cfg.AcpArgs...)
 
 	cmd := exec.Command("docker", args...)
+
+	// Place the process in its own process group so we can signal the entire
+	// tree (docker exec CLI + its children) via negative PGID in Stop().
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -152,14 +180,25 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 
 	slog.Info("ACP agent process started", "command", cfg.AcpCommand, "container", cfg.ContainerID, "pid", cmd.Process.Pid)
 
+	gracePeriod := cfg.StopGracePeriod
+	if gracePeriod <= 0 {
+		gracePeriod = DefaultStopGracePeriod
+	}
+	stopTimeout := cfg.StopTimeout
+	if stopTimeout <= 0 {
+		stopTimeout = DefaultStopTimeout
+	}
+
 	return &AgentProcess{
-		agentType:   cfg.AcpCommand,
-		cmd:         cmd,
-		stdin:       stdin,
-		stdout:      stdout,
-		stderr:      stderr,
-		containerID: cfg.ContainerID,
-		startTime:   time.Now(),
+		agentType:       cfg.AcpCommand,
+		cmd:             cmd,
+		stdin:           stdin,
+		stdout:          stdout,
+		stderr:          stderr,
+		containerID:     cfg.ContainerID,
+		startTime:       time.Now(),
+		stopGracePeriod: gracePeriod,
+		stopTimeout:     stopTimeout,
 	}, nil
 }
 
@@ -178,7 +217,14 @@ func (p *AgentProcess) Stderr() io.Reader {
 	return p.stderr
 }
 
-// Stop kills the agent process and waits for it to exit.
+// Stop gracefully terminates the agent process using a three-stage sequence:
+//  1. Close stdin to signal the agent to exit on its own.
+//  2. Send SIGTERM to the process group (negative PGID) and wait up to
+//     stopGracePeriod for a clean exit.
+//  3. If still running, send SIGKILL to the process group.
+//
+// The entire operation is bounded by stopTimeout so Stop() never blocks
+// indefinitely.
 func (p *AgentProcess) Stop() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -188,18 +234,68 @@ func (p *AgentProcess) Stop() error {
 	}
 	p.stopped = true
 
-	slog.Info("Stopping ACP agent process", "agentType", p.agentType)
+	pid := 0
+	if p.cmd.Process != nil {
+		pid = p.cmd.Process.Pid
+	}
+	slog.Info("Stopping ACP agent process", "agentType", p.agentType, "pid", pid)
 
-	// Close stdin first to signal the agent to exit gracefully
+	// Close stdin first to signal the agent to exit gracefully.
 	p.stdin.Close()
 
-	// Kill the process if it hasn't exited
-	if p.cmd.Process != nil {
-		_ = p.cmd.Process.Kill()
+	if p.cmd.Process == nil {
+		return nil
 	}
 
-	// Wait for exit (ignore error since we killed it)
-	_ = p.cmd.Wait()
+	// waitCh is closed when cmd.Wait() returns. We use it to detect when the
+	// process has actually exited, avoiding busy-polling.
+	waitCh := make(chan struct{})
+	go func() {
+		_ = p.cmd.Wait()
+		close(waitCh)
+	}()
+
+	// Overall deadline — Stop() must not block longer than this.
+	deadline := time.NewTimer(p.stopTimeout)
+	defer deadline.Stop()
+
+	// Stage 1: SIGTERM to process group — gives the process a chance to
+	// clean up (flush buffers, write state, etc.).
+	pgid := pid
+	if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
+		slog.Warn("SIGTERM to process group failed", "pgid", pgid, "error", err)
+	}
+
+	// Wait for graceful exit or grace period expiry.
+	graceTimer := time.NewTimer(p.stopGracePeriod)
+	defer graceTimer.Stop()
+
+	select {
+	case <-waitCh:
+		slog.Info("Agent process exited after SIGTERM", "agentType", p.agentType, "pid", pid)
+		return nil
+	case <-graceTimer.C:
+		slog.Warn("Agent process did not exit within grace period, sending SIGKILL",
+			"agentType", p.agentType, "pid", pid, "gracePeriod", p.stopGracePeriod)
+	case <-deadline.C:
+		slog.Error("Agent process stop deadline reached during SIGTERM phase, sending SIGKILL",
+			"agentType", p.agentType, "pid", pid)
+	}
+
+	// Stage 2: SIGKILL to process group — forceful termination.
+	if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil {
+		slog.Warn("SIGKILL to process group failed", "pgid", pgid, "error", err)
+	}
+
+	// Wait for the process to actually exit (or deadline).
+	select {
+	case <-waitCh:
+		slog.Info("Agent process exited after SIGKILL", "agentType", p.agentType, "pid", pid)
+	case <-deadline.C:
+		slog.Error("Agent process did not exit after SIGKILL within deadline",
+			"agentType", p.agentType, "pid", pid, "timeout", p.stopTimeout)
+		return fmt.Errorf("agent process %d did not exit within %s", pid, p.stopTimeout)
+	}
 
 	return nil
 }
