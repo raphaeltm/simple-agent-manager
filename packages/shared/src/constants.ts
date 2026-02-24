@@ -121,6 +121,12 @@ export const DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT = 80;
 /** Default delay (ms) after task completion before cleanup. Override via TASK_RUN_CLEANUP_DELAY_MS env var. */
 export const DEFAULT_TASK_RUN_CLEANUP_DELAY_MS = 5000;
 
+/** Default poll interval (ms) when waiting for workspace to become ready. Override via WORKSPACE_READY_POLL_INTERVAL_MS env var. */
+export const DEFAULT_WORKSPACE_READY_POLL_INTERVAL_MS = 2000;
+
+/** Default max poll interval (ms) for workspace readiness polling (exponential backoff cap). Override via WORKSPACE_READY_MAX_POLL_INTERVAL_MS env var. */
+export const DEFAULT_WORKSPACE_READY_MAX_POLL_INTERVAL_MS = 10_000;
+
 // =============================================================================
 // Warm Node Pooling
 // =============================================================================

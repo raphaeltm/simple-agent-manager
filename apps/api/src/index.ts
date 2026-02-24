@@ -103,6 +103,8 @@ export interface Env {
   TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;
   TASK_RUN_CLEANUP_DELAY_MS?: string;
   WORKSPACE_READY_TIMEOUT_MS?: string;
+  WORKSPACE_READY_POLL_INTERVAL_MS?: string;
+  WORKSPACE_READY_MAX_POLL_INTERVAL_MS?: string;
   // Warm node pooling configuration
   NODE_WARM_TIMEOUT_MS?: string;
   MAX_AUTO_NODE_LIFETIME_MS?: string;

@@ -16,6 +16,8 @@ import type { TaskStatus, VMSize, VMLocation } from '@simple-agent-manager/share
 import {
   DEFAULT_TASK_RUN_CLEANUP_DELAY_MS,
   DEFAULT_VM_SIZE,
+  DEFAULT_WORKSPACE_READY_POLL_INTERVAL_MS,
+  DEFAULT_WORKSPACE_READY_MAX_POLL_INTERVAL_MS,
 } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import * as schema from '../db/schema';
@@ -445,7 +447,13 @@ async function waitForWorkspaceReady(
     ? Number.parseInt(env.WORKSPACE_READY_TIMEOUT_MS, 10)
     : 300_000; // 5 minutes default
   const deadline = Date.now() + timeoutMs;
-  let pollInterval = 2000;
+  const basePollInterval = env.WORKSPACE_READY_POLL_INTERVAL_MS
+    ? Number.parseInt(env.WORKSPACE_READY_POLL_INTERVAL_MS, 10)
+    : DEFAULT_WORKSPACE_READY_POLL_INTERVAL_MS;
+  const maxPollInterval = env.WORKSPACE_READY_MAX_POLL_INTERVAL_MS
+    ? Number.parseInt(env.WORKSPACE_READY_MAX_POLL_INTERVAL_MS, 10)
+    : DEFAULT_WORKSPACE_READY_MAX_POLL_INTERVAL_MS;
+  let pollInterval = basePollInterval;
 
   while (Date.now() < deadline) {
     const [ws] = await db
@@ -474,7 +482,7 @@ async function waitForWorkspaceReady(
     }
 
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
-    pollInterval = Math.min(pollInterval * 1.5, 10_000);
+    pollInterval = Math.min(pollInterval * 1.5, maxPollInterval);
   }
 
   throw new TaskRunError(
