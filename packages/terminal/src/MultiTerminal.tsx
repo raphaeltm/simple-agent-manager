@@ -631,10 +631,9 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       const instance = terminalsRef.current.get(activeSessionId);
       if (!instance || !instance.containerEl) return;
 
-      let outerRaf: number;
       let innerRaf: number;
 
-      outerRaf = requestAnimationFrame(() => {
+      const outerRaf = requestAnimationFrame(() => {
         innerRaf = requestAnimationFrame(() => {
           // Guard: terminal may have been disposed during the two frames
           if (!terminalsRef.current.has(activeSessionId)) return;

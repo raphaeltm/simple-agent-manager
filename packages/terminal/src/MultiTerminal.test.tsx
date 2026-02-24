@@ -145,6 +145,13 @@ class MockWebSocket {
 
 (global as any).WebSocket = MockWebSocket;
 
+// Mock ResizeObserver (not available in jsdom)
+(global as any).ResizeObserver = class MockResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+
 describe('MultiTerminal', () => {
   const defaultProps = {
     wsUrl: 'ws://localhost:8080/terminal/ws/multi',
