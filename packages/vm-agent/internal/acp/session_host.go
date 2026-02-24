@@ -412,14 +412,23 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 	}
 
 	var blocks []acpsdk.ContentBlock
+	var firstTextContent string
 	for _, p := range promptParams.Prompt {
 		if p.Type == "text" && p.Text != "" {
 			blocks = append(blocks, acpsdk.TextBlock(p.Text))
+			if firstTextContent == "" {
+				firstTextContent = p.Text
+			}
 		}
 	}
 	if len(blocks) == 0 {
 		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32602, "Empty prompt")
 		return
+	}
+
+	// Capture the last user message for session discoverability in history UI.
+	if firstTextContent != "" {
+		h.persistLastPrompt(firstTextContent)
 	}
 
 	promptTimeout := h.promptTimeout()
@@ -982,6 +991,88 @@ func (h *SessionHost) persistAcpSessionID(agentType string) {
 			slog.Info("ACP session ID persisted to tab store", "sessionID", sessionID)
 		}
 	}
+}
+
+// persistLastPrompt saves the last user message for session discoverability.
+// Truncates to 200 characters to keep storage reasonable.
+func (h *SessionHost) persistLastPrompt(text string) {
+	const maxLen = 200
+	if len(text) > maxLen {
+		text = text[:maxLen]
+	}
+
+	if h.config.SessionLastPromptManager != nil && h.config.WorkspaceID != "" && h.config.SessionID != "" {
+		if err := h.config.SessionLastPromptManager.UpdateLastPrompt(
+			h.config.WorkspaceID, h.config.SessionID, text,
+		); err != nil {
+			slog.Error("Failed to persist last prompt to session manager", "error", err)
+		}
+	}
+
+	if h.config.TabLastPromptStore != nil && h.config.SessionID != "" {
+		if err := h.config.TabLastPromptStore.UpdateTabLastPrompt(h.config.SessionID, text); err != nil {
+			slog.Error("Failed to persist last prompt to tab store", "error", err)
+		}
+	}
+}
+
+// Suspend stops the agent process and releases in-memory resources while
+// preserving the AcpSessionID for later resumption via LoadSession.
+// Unlike Stop(), the session is NOT marked as stopped — it enters a
+// "suspended" state where the process is freed but context is recoverable.
+//
+// Returns the preserved AcpSessionID and agent type for the caller to
+// use when transitioning the session status.
+func (h *SessionHost) Suspend() (acpSessionID string, agentType string) {
+	h.mu.Lock()
+	if h.status == HostStopped {
+		h.mu.Unlock()
+		return "", ""
+	}
+
+	// Capture the session state we need to preserve before stopping.
+	acpSessionID = string(h.sessionID)
+	agentType = h.agentType
+
+	// Stop the agent process to free resources.
+	h.stopCurrentAgentLocked()
+
+	// Mark the host as stopped so no further operations occur.
+	h.status = HostStopped
+	h.statusErr = ""
+	h.mu.Unlock()
+
+	h.cancel()
+
+	h.reportLifecycle("info", "SessionHost suspended", map[string]interface{}{
+		"sessionId":    h.config.SessionID,
+		"acpSessionId": acpSessionID,
+		"agentType":    agentType,
+	})
+
+	// Disconnect all viewers with a specific close reason.
+	h.viewerMu.Lock()
+	for id, viewer := range h.viewers {
+		viewer.once.Do(func() { close(viewer.done) })
+		_ = viewer.conn.WriteControl(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseGoingAway, "session suspended"),
+			time.Now().Add(5*time.Second),
+		)
+		_ = viewer.conn.Close()
+		delete(h.viewers, id)
+	}
+	h.viewerMu.Unlock()
+
+	return acpSessionID, agentType
+}
+
+// IsPrompting returns true if a prompt is currently in flight.
+// Used by the auto-suspend timer to avoid interrupting active work.
+func (h *SessionHost) IsPrompting() bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.status == HostPrompting
 }
 
 // --- Internal: message broadcasting ---

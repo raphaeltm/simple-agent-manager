@@ -178,6 +178,8 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	cfg.SessionID = sessionID
 	cfg.SessionManager = s.agentSessions
 	cfg.TabStore = s.store
+	cfg.TabLastPromptStore = s.store
+	cfg.SessionLastPromptManager = s.agentSessions
 	cfg.EventAppender = &serverEventAppender{server: s}
 
 	if session.AcpSessionID != "" {

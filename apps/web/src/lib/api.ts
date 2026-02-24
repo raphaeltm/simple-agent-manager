@@ -766,6 +766,18 @@ export async function stopAgentSession(
   );
 }
 
+export async function suspendAgentSession(
+  workspaceId: string,
+  sessionId: string
+): Promise<AgentSession> {
+  return request<AgentSession>(
+    `/api/workspaces/${workspaceId}/agent-sessions/${sessionId}/suspend`,
+    {
+      method: 'POST',
+    }
+  );
+}
+
 export async function resumeAgentSession(
   workspaceId: string,
   sessionId: string

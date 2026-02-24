@@ -30,6 +30,8 @@ import {
   rebuildWorkspaceOnNode,
   restartWorkspaceOnNode,
   stopAgentSessionOnNode,
+  suspendAgentSessionOnNode,
+  resumeAgentSessionOnNode,
   stopWorkspaceOnNode,
   waitForNodeAgentReady,
 } from '../services/node-agent';
@@ -97,9 +99,11 @@ function toAgentSessionResponse(session: schema.AgentSession): AgentSession {
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     stoppedAt: session.stoppedAt,
+    suspendedAt: session.suspendedAt,
     errorMessage: session.errorMessage,
     label: session.label,
     worktreePath: session.worktreePath,
+    lastPrompt: session.lastPrompt,
   };
 }
 
@@ -1039,6 +1043,66 @@ workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop', async (c) => {
   return c.json({ status: 'stopped' });
 });
 
+workspacesRoutes.post('/:id/agent-sessions/:sessionId/suspend', async (c) => {
+  const userId = getUserId(c);
+  const workspaceId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  if (!workspace.nodeId) {
+    throw errors.badRequest('Workspace is not attached to a node');
+  }
+
+  const rows = await db
+    .select()
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.id, sessionId),
+        eq(schema.agentSessions.workspaceId, workspace.id),
+        eq(schema.agentSessions.userId, userId)
+      )
+    )
+    .limit(1);
+
+  const session = rows[0];
+  if (!session) {
+    throw errors.notFound('Agent session');
+  }
+
+  if (session.status !== 'running' && session.status !== 'error') {
+    throw errors.badRequest(`Session cannot be suspended from status: ${session.status}`);
+  }
+
+  try {
+    await suspendAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
+  } catch {
+    // Best effort remote suspend; local state still transitions.
+  }
+
+  const now = new Date().toISOString();
+  await db
+    .update(schema.agentSessions)
+    .set({
+      status: 'suspended',
+      suspendedAt: now,
+      errorMessage: null,
+      updatedAt: now,
+    })
+    .where(eq(schema.agentSessions.id, session.id));
+
+  return c.json(
+    toAgentSessionResponse({
+      ...session,
+      status: 'suspended',
+      suspendedAt: now,
+      errorMessage: null,
+      updatedAt: now,
+    })
+  );
+});
+
 workspacesRoutes.post('/:id/agent-sessions/:sessionId/resume', async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
@@ -1046,6 +1110,9 @@ workspacesRoutes.post('/:id/agent-sessions/:sessionId/resume', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
 
   const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  if (!workspace.nodeId) {
+    throw errors.badRequest('Workspace is not attached to a node');
+  }
 
   const rows = await db
     .select()
@@ -1069,12 +1136,23 @@ workspacesRoutes.post('/:id/agent-sessions/:sessionId/resume', async (c) => {
     return c.json(toAgentSessionResponse(session));
   }
 
+  // Resume is allowed from suspended, stopped, or error states.
+  // For suspended sessions, also tell the VM agent to resume.
+  if (session.status === 'suspended') {
+    try {
+      await resumeAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
+    } catch {
+      // Best effort — the WebSocket connection will trigger SessionHost creation anyway.
+    }
+  }
+
   const now = new Date().toISOString();
   await db
     .update(schema.agentSessions)
     .set({
       status: 'running',
       stoppedAt: null,
+      suspendedAt: null,
       errorMessage: null,
       updatedAt: now,
     })
@@ -1085,6 +1163,7 @@ workspacesRoutes.post('/:id/agent-sessions/:sessionId/resume', async (c) => {
       ...session,
       status: 'running',
       stoppedAt: null,
+      suspendedAt: null,
       errorMessage: null,
       updatedAt: now,
     })

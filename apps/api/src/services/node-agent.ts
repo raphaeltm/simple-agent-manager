@@ -258,6 +258,44 @@ export async function stopAgentSessionOnNode(
   );
 }
 
+export async function suspendAgentSessionOnNode(
+  nodeId: string,
+  workspaceId: string,
+  sessionId: string,
+  env: Env,
+  userId: string
+): Promise<unknown> {
+  return nodeAgentRequest(
+    nodeId,
+    env,
+    `/workspaces/${workspaceId}/agent-sessions/${sessionId}/suspend`,
+    {
+      method: 'POST',
+      userId,
+      workspaceId,
+    }
+  );
+}
+
+export async function resumeAgentSessionOnNode(
+  nodeId: string,
+  workspaceId: string,
+  sessionId: string,
+  env: Env,
+  userId: string
+): Promise<unknown> {
+  return nodeAgentRequest(
+    nodeId,
+    env,
+    `/workspaces/${workspaceId}/agent-sessions/${sessionId}/resume`,
+    {
+      method: 'POST',
+      userId,
+      workspaceId,
+    }
+  );
+}
+
 export async function listAgentSessionsOnNode(
   nodeId: string,
   workspaceId: string,

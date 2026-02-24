@@ -615,7 +615,7 @@ export interface Event {
   createdAt: string;
 }
 
-export type AgentSessionStatus = 'running' | 'stopped' | 'error';
+export type AgentSessionStatus = 'running' | 'suspended' | 'stopped' | 'error';
 
 /** Live host status from the VM Agent's SessionHost (more granular than AgentSessionStatus). */
 export type AgentHostStatus = 'idle' | 'starting' | 'ready' | 'prompting' | 'error' | 'stopped';
@@ -651,9 +651,12 @@ export interface AgentSession {
   createdAt: string;
   updatedAt: string;
   stoppedAt?: string | null;
+  suspendedAt?: string | null;
   errorMessage?: string | null;
   label?: string | null;
   worktreePath?: string | null;
+  /** Last user message for session discoverability in history UI. */
+  lastPrompt?: string | null;
   /** Live host status from the VM Agent SessionHost (only present in live/enriched responses). */
   hostStatus?: AgentHostStatus | null;
   /** Number of connected browser viewers (only present in live/enriched responses). */

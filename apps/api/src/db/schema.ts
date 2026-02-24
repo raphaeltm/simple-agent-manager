@@ -468,7 +468,9 @@ export const agentSessions = sqliteTable(
     label: text('label'),
     worktreePath: text('worktree_path'),
     stoppedAt: text('stopped_at'),
+    suspendedAt: text('suspended_at'),
     errorMessage: text('error_message'),
+    lastPrompt: text('last_prompt'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),

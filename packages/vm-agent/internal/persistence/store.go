@@ -22,6 +22,7 @@ type Tab struct {
 	SortOrder    int    `json:"sortOrder"`
 	CreatedAt    string `json:"createdAt"`    // ISO 8601
 	AcpSessionID string `json:"acpSessionId"` // ACP session ID for LoadSession on reconnect
+	LastPrompt   string `json:"lastPrompt"`   // Last user message for session discoverability
 }
 
 // Store provides persistent session state backed by SQLite.
@@ -82,6 +83,7 @@ func (s *Store) migrate() error {
 	migrations := []func(*sql.DB) error{
 		migrateV1,
 		migrateV2,
+		migrateV3,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -120,6 +122,12 @@ func migrateV2(db *sql.DB) error {
 	return err
 }
 
+// migrateV3 adds last_prompt column for session discoverability in history UI.
+func migrateV3(db *sql.DB) error {
+	_, err := db.Exec(`ALTER TABLE tabs ADD COLUMN last_prompt TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
 // InsertTab adds a new tab to the store.
 func (s *Store) InsertTab(tab Tab) error {
 	s.mu.Lock()
@@ -130,8 +138,8 @@ func (s *Store) InsertTab(tab Tab) error {
 	}
 
 	_, err := s.db.Exec(
-		"INSERT OR REPLACE INTO tabs (id, workspace_id, type, label, agent_id, sort_order, created_at, acp_session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		tab.ID, tab.WorkspaceID, tab.Type, tab.Label, tab.AgentID, tab.SortOrder, tab.CreatedAt, tab.AcpSessionID,
+		"INSERT OR REPLACE INTO tabs (id, workspace_id, type, label, agent_id, sort_order, created_at, acp_session_id, last_prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		tab.ID, tab.WorkspaceID, tab.Type, tab.Label, tab.AgentID, tab.SortOrder, tab.CreatedAt, tab.AcpSessionID, tab.LastPrompt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert tab: %w", err)
@@ -157,7 +165,7 @@ func (s *Store) ListTabs(workspaceID string) ([]Tab, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(
-		"SELECT id, workspace_id, type, label, agent_id, sort_order, created_at, acp_session_id FROM tabs WHERE workspace_id = ? ORDER BY sort_order ASC, created_at ASC",
+		"SELECT id, workspace_id, type, label, agent_id, sort_order, created_at, acp_session_id, last_prompt FROM tabs WHERE workspace_id = ? ORDER BY sort_order ASC, created_at ASC",
 		workspaceID,
 	)
 	if err != nil {
@@ -168,7 +176,7 @@ func (s *Store) ListTabs(workspaceID string) ([]Tab, error) {
 	var tabs []Tab
 	for rows.Next() {
 		var t Tab
-		if err := rows.Scan(&t.ID, &t.WorkspaceID, &t.Type, &t.Label, &t.AgentID, &t.SortOrder, &t.CreatedAt, &t.AcpSessionID); err != nil {
+		if err := rows.Scan(&t.ID, &t.WorkspaceID, &t.Type, &t.Label, &t.AgentID, &t.SortOrder, &t.CreatedAt, &t.AcpSessionID, &t.LastPrompt); err != nil {
 			return nil, fmt.Errorf("scan tab: %w", err)
 		}
 		tabs = append(tabs, t)
@@ -215,6 +223,19 @@ func (s *Store) UpdateTabOrder(tabID string, sortOrder int) error {
 	_, err := s.db.Exec("UPDATE tabs SET sort_order = ? WHERE id = ?", sortOrder, tabID)
 	if err != nil {
 		return fmt.Errorf("update tab order: %w", err)
+	}
+	return nil
+}
+
+// UpdateTabLastPrompt updates the last user message for a tab.
+// Called during HandlePrompt to capture the prompt text for session discoverability.
+func (s *Store) UpdateTabLastPrompt(tabID, lastPrompt string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec("UPDATE tabs SET last_prompt = ? WHERE id = ?", lastPrompt, tabID)
+	if err != nil {
+		return fmt.Errorf("update tab last prompt: %w", err)
 	}
 	return nil
 }
