@@ -3,7 +3,7 @@
  *
  * Checks for tasks in 'queued', 'delegated', or 'in_progress' that have been
  * in that state longer than their configured timeout. Transitions them to 'failed'
- * with a descriptive error message so users see clear feedback.
+ * with a descriptive error message including the execution step where they stalled.
  *
  * Called from the cron handler alongside node cleanup.
  */
@@ -26,6 +26,22 @@ function parseMs(value: string | undefined, fallback: number): number {
   return parsed;
 }
 
+/** Human-readable descriptions for execution steps */
+const STEP_DESCRIPTIONS: Record<string, string> = {
+  node_selection: 'selecting a node',
+  node_provisioning: 'provisioning a new node',
+  node_agent_ready: 'waiting for node agent to start',
+  workspace_creation: 'creating workspace on node',
+  workspace_ready: 'waiting for workspace to become ready',
+  agent_session: 'creating agent session',
+  running: 'running (agent active)',
+};
+
+function describeStep(step: string | null): string {
+  if (!step) return '';
+  return STEP_DESCRIPTIONS[step] ?? step;
+}
+
 export interface StuckTaskResult {
   failedQueued: number;
   failedDelegated: number;
@@ -43,7 +59,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
 
   // Find stuck tasks via raw SQL (more efficient than Drizzle for multi-status queries)
   const stuckTasks = await env.DATABASE.prepare(
-    `SELECT id, project_id, user_id, status, updated_at, started_at
+    `SELECT id, project_id, user_id, status, execution_step, updated_at, started_at
      FROM tasks
      WHERE status IN ('queued', 'delegated', 'in_progress')
      ORDER BY updated_at ASC`
@@ -52,6 +68,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     project_id: string;
     user_id: string;
     status: string;
+    execution_step: string | null;
     updated_at: string;
     started_at: string | null;
   }>();
@@ -64,17 +81,21 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     let isStuck = false;
     let reason = '';
 
+    const stepInfo = task.execution_step
+      ? ` Last step: ${describeStep(task.execution_step)}.`
+      : '';
+
     switch (task.status) {
       case 'queued':
         if (elapsedMs > queuedTimeoutMs) {
           isStuck = true;
-          reason = `Task stuck in 'queued' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(queuedTimeoutMs / 1000)}s). Node provisioning may have failed silently.`;
+          reason = `Task stuck in 'queued' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(queuedTimeoutMs / 1000)}s).${stepInfo} Node provisioning may have failed silently.`;
         }
         break;
       case 'delegated':
         if (elapsedMs > delegatedTimeoutMs) {
           isStuck = true;
-          reason = `Task stuck in 'delegated' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(delegatedTimeoutMs / 1000)}s). Workspace may have failed to start.`;
+          reason = `Task stuck in 'delegated' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(delegatedTimeoutMs / 1000)}s).${stepInfo} Workspace may have failed to start.`;
         }
         break;
       case 'in_progress': {
@@ -82,7 +103,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         const executionMs = now.getTime() - startedAt;
         if (executionMs > maxExecutionMs) {
           isStuck = true;
-          reason = `Task exceeded max execution time of ${Math.round(maxExecutionMs / 60000)} minutes.`;
+          reason = `Task exceeded max execution time of ${Math.round(maxExecutionMs / 60000)} minutes.${stepInfo}`;
         }
         break;
       }
@@ -96,6 +117,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         projectId: task.project_id,
         userId: task.user_id,
         status: task.status,
+        executionStep: task.execution_step,
         elapsedMs,
         reason,
       });
@@ -105,6 +127,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         .update(schema.tasks)
         .set({
           status: 'failed',
+          executionStep: null,
           errorMessage: reason,
           completedAt: nowIso,
           updatedAt: nowIso,

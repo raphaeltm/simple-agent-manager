@@ -8,11 +8,20 @@
  * 4. Wait for completion (via callback mechanism)
  * 5. Create a PR from any file changes
  * 6. Clean up workspace and (optionally) node
+ *
+ * RESILIENCE: Each step is persisted to the task's `executionStep` column
+ * before performing the operation. If the Worker is killed mid-execution
+ * (waitUntil timeout), the stuck-task cron can identify WHERE it stalled
+ * and report a meaningful error.
+ *
+ * The `delegated` transition is deferred until AFTER the workspace is
+ * created on the node (not before), reducing the window where a silent
+ * Worker death leaves the task in a misleading state.
  */
 
 import { and, eq, count } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type { TaskStatus, VMSize, VMLocation } from '@simple-agent-manager/shared';
+import type { TaskStatus, TaskExecutionStep, VMSize, VMLocation } from '@simple-agent-manager/shared';
 import {
   DEFAULT_TASK_RUN_CLEANUP_DELAY_MS,
   DEFAULT_VM_SIZE,
@@ -117,10 +126,10 @@ export async function initiateTaskRun(
     throw new TaskRunError('Project not found', 'NOT_FOUND');
   }
 
-  // Transition task to queued
+  // Transition task to queued with initial execution step
   await db
     .update(schema.tasks)
-    .set({ status: 'queued', updatedAt: now })
+    .set({ status: 'queued', executionStep: 'node_selection', updatedAt: now })
     .where(eq(schema.tasks.id, task.id));
 
   await db.insert(schema.taskStatusEvents).values({
@@ -193,8 +202,27 @@ interface ExecuteTaskRunParams {
 }
 
 /**
+ * Persist the current execution step to the task record.
+ * This is the key resilience mechanism: if the Worker is killed,
+ * the stuck-task recovery cron can read this to know WHERE it stalled.
+ */
+async function setExecutionStep(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  taskId: string,
+  step: TaskExecutionStep
+): Promise<void> {
+  await db
+    .update(schema.tasks)
+    .set({ executionStep: step, updatedAt: new Date().toISOString() })
+    .where(eq(schema.tasks.id, taskId));
+}
+
+/**
  * Core async execution of a task run.
  * This runs inside waitUntil and handles the full lifecycle.
+ *
+ * Each step is persisted to `executionStep` BEFORE the long-running operation,
+ * providing a breadcrumb trail for debugging and stuck-task recovery.
  */
 async function executeTaskRun(
   db: ReturnType<typeof drizzle<typeof schema>>,
@@ -211,9 +239,13 @@ async function executeTaskRun(
   const ctx = { taskId: task.id, projectId: project.id, userId };
 
   try {
+    // =========================================================================
     // Step 1: Select or create a node
+    // =========================================================================
+    await setExecutionStep(db, task.id, 'node_selection');
     log.info('task_run.step.node_selection', { ...ctx, preferredNodeId: preferredNodeId ?? null });
     const stepStartMs = Date.now();
+
     if (preferredNodeId) {
       // Validate the preferred node
       const [node] = await db
@@ -240,6 +272,8 @@ async function executeTaskRun(
         log.info('task_run.step.node_selected', { ...ctx, nodeId, source: 'existing', durationMs: Date.now() - stepStartMs });
       } else {
         // Create a new node
+        await setExecutionStep(db, task.id, 'node_provisioning');
+
         const limits = getRuntimeLimits(env);
         const [userNodeCount] = await db
           .select({ count: count() })
@@ -289,12 +323,16 @@ async function executeTaskRun(
         }
 
         // Wait for node agent to be ready
+        await setExecutionStep(db, task.id, 'node_agent_ready');
         await waitForNodeAgentReady(nodeId, env);
         log.info('task_run.step.node_ready', { ...ctx, nodeId, source: 'auto_provisioned', durationMs: Date.now() - stepStartMs });
       }
     }
 
+    // =========================================================================
     // Step 2: Create workspace
+    // =========================================================================
+    await setExecutionStep(db, task.id, 'workspace_creation');
     log.info('task_run.step.workspace_creation', { ...ctx, nodeId });
     const workspaceName = `Task: ${task.title.slice(0, 50)}`;
     const uniqueName = await resolveUniqueWorkspaceDisplayName(db, nodeId, workspaceName);
@@ -318,26 +356,11 @@ async function executeTaskRun(
       updatedAt: now(),
     });
 
-    // Update task with workspace ID and transition to delegated
+    // Update task with workspace ID (but do NOT transition to delegated yet)
     await db
       .update(schema.tasks)
-      .set({
-        workspaceId,
-        status: 'delegated',
-        updatedAt: now(),
-      })
+      .set({ workspaceId, updatedAt: now() })
       .where(eq(schema.tasks.id, task.id));
-
-    await db.insert(schema.taskStatusEvents).values({
-      id: ulid(),
-      taskId: task.id,
-      fromStatus: 'queued',
-      toStatus: 'delegated',
-      actorType: 'system',
-      actorId: null,
-      reason: `Delegated to workspace ${workspaceId} on node ${nodeId}`,
-      createdAt: now(),
-    });
 
     // Create chat session in ProjectData DO for task message persistence.
     // Best-effort: session creation failure should not block workspace creation.
@@ -376,11 +399,32 @@ async function executeTaskRun(
       gitUserEmail: userEmail,
     });
 
+    // NOW transition to delegated — workspace is actually created on the node
+    await db
+      .update(schema.tasks)
+      .set({ status: 'delegated', updatedAt: now() })
+      .where(eq(schema.tasks.id, task.id));
+
+    await db.insert(schema.taskStatusEvents).values({
+      id: ulid(),
+      taskId: task.id,
+      fromStatus: 'queued',
+      toStatus: 'delegated',
+      actorType: 'system',
+      actorId: null,
+      reason: `Delegated to workspace ${workspaceId} on node ${nodeId}`,
+      createdAt: now(),
+    });
+
     // Wait for workspace to be ready (poll status)
+    await setExecutionStep(db, task.id, 'workspace_ready');
     await waitForWorkspaceReady(db, workspaceId, env);
     log.info('task_run.step.workspace_ready', { ...ctx, workspaceId, nodeId });
 
+    // =========================================================================
     // Step 3: Create agent session with task as initial prompt
+    // =========================================================================
+    await setExecutionStep(db, task.id, 'agent_session');
     log.info('task_run.step.agent_session_creation', { ...ctx, workspaceId, nodeId });
     const sessionId = ulid();
     const sessionLabel = `Task: ${task.title.slice(0, 40)}`;
@@ -404,7 +448,11 @@ async function executeTaskRun(
       userId
     );
 
-    // Transition task to in_progress
+    // =========================================================================
+    // Step 4: Mark as in_progress — agent is running
+    // =========================================================================
+    await setExecutionStep(db, task.id, 'running');
+
     await db
       .update(schema.tasks)
       .set({ status: 'in_progress', startedAt: now(), updatedAt: now() })
@@ -429,16 +477,6 @@ async function executeTaskRun(
       autoProvisioned,
       totalDurationMs: Date.now() - runStartMs,
     });
-
-    // Note: The actual task completion and PR creation are handled by the
-    // workspace callback mechanism. When the agent finishes:
-    // 1. The agent pushes changes to a branch (sam/task-{taskId})
-    // 2. The agent creates a PR via GitHub CLI
-    // 3. The workspace calls back to update the task status to completed
-    //    with outputBranch and outputPrUrl
-    //
-    // The cleanup is triggered by a separate polling mechanism or
-    // by the task status callback endpoint detecting completion.
 
   } catch (err) {
     // Transition task to failed
@@ -542,6 +580,7 @@ async function waitForWorkspaceReady(
 
 /**
  * Mark a task as failed with an error message.
+ * Clears executionStep since the task is in a terminal state.
  */
 async function failTask(
   db: ReturnType<typeof drizzle<typeof schema>>,
@@ -563,6 +602,7 @@ async function failTask(
     .update(schema.tasks)
     .set({
       status: 'failed',
+      executionStep: null,
       errorMessage,
       completedAt: now,
       updatedAt: now,

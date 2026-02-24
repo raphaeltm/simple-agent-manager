@@ -98,6 +98,7 @@ function toTaskResponse(task: schema.Task, blocked = false): Task {
     title: task.title,
     description: task.description,
     status: task.status as TaskStatus,
+    executionStep: (task.executionStep as Task['executionStep']) ?? null,
     priority: task.priority,
     agentProfileHint: task.agentProfileHint,
     blocked,
@@ -256,6 +257,7 @@ async function setTaskStatus(
 
   if (toStatus === 'completed' || toStatus === 'failed' || toStatus === 'cancelled') {
     nextValues.completedAt = now;
+    nextValues.executionStep = null;
   }
 
   if (toStatus === 'ready') {
@@ -263,6 +265,7 @@ async function setTaskStatus(
     nextValues.startedAt = null;
     nextValues.completedAt = null;
     nextValues.errorMessage = null;
+    nextValues.executionStep = null;
   }
 
   if (options.outputSummary !== undefined) {
