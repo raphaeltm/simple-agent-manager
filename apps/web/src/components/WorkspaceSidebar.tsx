@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { Button } from '@simple-agent-manager/ui';
 import { GitBranch, ExternalLink } from 'lucide-react';
 import { CollapsibleSection } from './CollapsibleSection';
+import { ResourceBar } from './node/ResourceBar';
+import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
 import type { WorkspaceResponse, Event } from '@simple-agent-manager/shared';
 import type { GitStatusData } from '../lib/api';
 import type { TokenUsage } from '@simple-agent-manager/acp-client';
@@ -65,6 +67,15 @@ function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const k = 1024;
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const val = bytes / Math.pow(k, i);
+  return `${val.toFixed(1)} ${units[i]}`;
 }
 
 const VM_SIZE_LABELS: Record<string, string> = {
@@ -198,6 +209,12 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
 }) => {
   const uptime = useRelativeTime(workspace?.createdAt);
   const countdown = useCountdown(workspace?.shutdownDeadline);
+
+  // Node resource polling — only when workspace is running
+  const { systemInfo, error: systemInfoError } = useNodeSystemInfo(
+    workspace?.nodeId ?? undefined,
+    isRunning ? 'running' : undefined
+  );
 
   const gitTotal = gitStatus
     ? gitStatus.staged.length + gitStatus.unstaged.length + gitStatus.untracked.length
@@ -395,6 +412,43 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
             )}
           </div>
         </CollapsibleSection>
+
+        {/* Node Resources */}
+        {isRunning && workspace?.nodeId && (
+          <CollapsibleSection
+            title="Node Resources"
+            defaultCollapsed
+            storageKey="sam-sidebar-node-resources"
+          >
+            {systemInfo ? (
+              <div style={{ display: 'grid', gap: 10 }}>
+                <ResourceBar
+                  label="CPU"
+                  percent={Math.min(100, (systemInfo.cpu.loadAvg1 / systemInfo.cpu.numCpu) * 100)}
+                  detail={`Load: ${systemInfo.cpu.loadAvg1.toFixed(2)} / ${systemInfo.cpu.numCpu} cores`}
+                />
+                <ResourceBar
+                  label="Memory"
+                  percent={systemInfo.memory.usedPercent}
+                  detail={`${formatBytes(systemInfo.memory.usedBytes)} / ${formatBytes(systemInfo.memory.totalBytes)}`}
+                />
+                <ResourceBar
+                  label="Disk"
+                  percent={systemInfo.disk.usedPercent}
+                  detail={`${formatBytes(systemInfo.disk.usedBytes)} / ${formatBytes(systemInfo.disk.totalBytes)}`}
+                />
+              </div>
+            ) : systemInfoError ? (
+              <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+                Unable to load resource data
+              </span>
+            ) : (
+              <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+                Loading...
+              </span>
+            )}
+          </CollapsibleSection>
+        )}
 
         {/* Sessions */}
         {workspaceTabs.length > 0 && (

@@ -35,18 +35,18 @@ Add a new "Node Resources" CollapsibleSection to the workspace sidebar that uses
 
 ## Detailed Tasklist
 
-- [ ] Read `apps/web/src/components/WorkspaceSidebar.tsx` to understand current sections
-- [ ] Read `apps/web/src/components/node/SystemResourcesSection.tsx` for display patterns
-- [ ] Read `apps/web/src/hooks/useNodeSystemInfo.ts` for data fetching
-- [ ] Add `useNodeSystemInfo(workspace.nodeId, nodeStatus)` hook call to WorkspaceSidebar
-- [ ] Determine node status from workspace data (running if workspace is running)
-- [ ] Add new `CollapsibleSection` titled "Node Resources" (default collapsed)
-- [ ] Display compact CPU, Memory, Disk usage inside the section — reuse `ResourceBar` or create inline compact bars
-- [ ] Use `formatBytes()` helper for human-readable sizes
-- [ ] Handle loading and error states gracefully
-- [ ] Add `storageKey` to CollapsibleSection for localStorage persistence
-- [ ] Run build: `pnpm --filter @simple-agent-manager/web build`
-- [ ] Run typecheck: `pnpm typecheck`
+- [x] Read `apps/web/src/components/WorkspaceSidebar.tsx` to understand current sections
+- [x] Read `apps/web/src/components/node/SystemResourcesSection.tsx` for display patterns
+- [x] Read `apps/web/src/hooks/useNodeSystemInfo.ts` for data fetching
+- [x] Add `useNodeSystemInfo(workspace.nodeId, nodeStatus)` hook call to WorkspaceSidebar
+- [x] Determine node status from workspace data (running if workspace is running)
+- [x] Add new `CollapsibleSection` titled "Node Resources" (default collapsed)
+- [x] Display compact CPU, Memory, Disk usage inside the section — reuse `ResourceBar` or create inline compact bars
+- [x] Use `formatBytes()` helper for human-readable sizes
+- [x] Handle loading and error states gracefully
+- [x] Add `storageKey` to CollapsibleSection for localStorage persistence
+- [x] Run build: `pnpm --filter @simple-agent-manager/web build`
+- [x] Run typecheck: `pnpm typecheck`
 
 ## Files to Modify
 
