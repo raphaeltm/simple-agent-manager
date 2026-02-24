@@ -15,6 +15,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { TaskStatus, VMSize, VMLocation } from '@simple-agent-manager/shared';
 import {
   DEFAULT_TASK_RUN_CLEANUP_DELAY_MS,
+  DEFAULT_VM_SIZE,
 } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import * as schema from '../db/schema';
@@ -131,7 +132,10 @@ export async function initiateTaskRun(
   });
 
   // Determine node strategy
-  const vmSize = input.vmSize ?? 'medium';
+  // Precedence: explicit override > project default > platform default
+  const vmSize = input.vmSize
+    ?? (project.defaultVmSize as VMSize | null)
+    ?? DEFAULT_VM_SIZE;
   const vmLocation = input.vmLocation ?? 'nbg1';
   const branch = input.branch ?? project.defaultBranch;
 
