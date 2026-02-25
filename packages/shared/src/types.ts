@@ -703,6 +703,10 @@ export interface RemoveWorktreeResponse {
   removed: string;
 }
 
+export interface GitBranchListResponse {
+  branches: Array<{ name: string }>;
+}
+
 export interface AgentSession {
   id: string;
   workspaceId: string;

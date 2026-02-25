@@ -33,6 +33,7 @@ import {
   createAgentSession,
   createWorktree,
   getFileIndex,
+  getGitBranches,
   getGitStatus,
   getWorktrees,
   getTerminalToken,
@@ -198,6 +199,8 @@ export function Workspace() {
   const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<string | null>(null);
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
   const [worktreeLoading, setWorktreeLoading] = useState(false);
+  const [remoteBranches, setRemoteBranches] = useState<Array<{ name: string }>>([]);
+  const [remoteBranchesLoading, setRemoteBranchesLoading] = useState(false);
   const [preferredAgentsBySession, setPreferredAgentsBySession] = useState<
     Record<string, AgentInfo['id']>
   >({});
@@ -427,6 +430,19 @@ export function Workspace() {
       setWorktrees([]);
     } finally {
       setWorktreeLoading(false);
+    }
+  }, [id, workspace?.url, terminalToken, isRunning]);
+
+  const fetchRemoteBranches = useCallback(async () => {
+    if (!id || !workspace?.url || !terminalToken || !isRunning) return;
+    try {
+      setRemoteBranchesLoading(true);
+      const response = await getGitBranches(workspace.url, id, terminalToken);
+      setRemoteBranches(response.branches ?? []);
+    } catch {
+      setRemoteBranches([]);
+    } finally {
+      setRemoteBranchesLoading(false);
     }
   }, [id, workspace?.url, terminalToken, isRunning]);
 
@@ -1801,9 +1817,12 @@ export function Workspace() {
             activeWorktree={activeWorktree}
             loading={worktreeLoading}
             isMobile={isMobile}
+            remoteBranches={remoteBranches}
+            remoteBranchesLoading={remoteBranchesLoading}
             onSelect={handleSelectWorktree}
             onCreate={handleCreateWorktree}
             onRemove={handleRemoveWorktree}
+            onRequestBranches={fetchRemoteBranches}
           />
         )}
 

@@ -2,12 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { WorktreeInfo } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { Check, GitFork, Plus, Trash2 } from 'lucide-react';
+import { BranchSelector } from './BranchSelector';
 
 interface WorktreeSelectorProps {
   worktrees: WorktreeInfo[];
   activeWorktree: string | null;
   loading?: boolean;
   isMobile?: boolean;
+  remoteBranches?: Array<{ name: string }>;
+  remoteBranchesLoading?: boolean;
   onSelect: (worktreePath: string | null) => void;
   onCreate: (request: {
     branch: string;
@@ -15,6 +18,7 @@ interface WorktreeSelectorProps {
     baseBranch?: string;
   }) => Promise<void>;
   onRemove: (path: string, force: boolean) => Promise<void>;
+  onRequestBranches?: () => void;
 }
 
 function worktreeLabel(worktree: WorktreeInfo): string {
@@ -29,9 +33,12 @@ export function WorktreeSelector({
   activeWorktree,
   loading = false,
   isMobile = false,
+  remoteBranches = [],
+  remoteBranchesLoading = false,
   onSelect,
   onCreate,
   onRemove,
+  onRequestBranches,
 }: WorktreeSelectorProps) {
   const [open, setOpen] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -203,7 +210,12 @@ export function WorktreeSelector({
               <button
                 type="button"
                 aria-label={showCreate ? 'Cancel new worktree' : 'New worktree'}
-                onClick={() => setShowCreate((v) => !v)}
+                onClick={() => {
+                  setShowCreate((v) => {
+                    if (!v) onRequestBranches?.();
+                    return !v;
+                  });
+                }}
                 style={{
                   width: 28,
                   height: 28,
@@ -346,23 +358,34 @@ export function WorktreeSelector({
                   gap: 6,
                 }}
               >
-                <input
-                  value={branch}
-                  onChange={(e) => setBranch(e.target.value)}
-                  placeholder="branch name"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void handleCreate();
-                  }}
-                  style={{
-                    minHeight: 36,
-                    borderRadius: 6,
-                    border: '1px solid var(--sam-color-border-default)',
-                    background: 'var(--sam-color-bg-canvas)',
-                    color: 'var(--sam-color-fg-primary)',
-                    padding: '0 10px',
-                    fontSize: 13,
-                  }}
-                />
+                {createBranch ? (
+                  <input
+                    value={branch}
+                    onChange={(e) => setBranch(e.target.value)}
+                    placeholder="new branch name"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void handleCreate();
+                    }}
+                    style={{
+                      minHeight: 36,
+                      borderRadius: 6,
+                      border: '1px solid var(--sam-color-border-default)',
+                      background: 'var(--sam-color-bg-canvas)',
+                      color: 'var(--sam-color-fg-primary)',
+                      padding: '0 10px',
+                      fontSize: 13,
+                    }}
+                  />
+                ) : (
+                  <BranchSelector
+                    branches={remoteBranches}
+                    value={branch}
+                    onChange={setBranch}
+                    loading={remoteBranchesLoading}
+                    placeholder="search branches"
+                    compact
+                  />
+                )}
                 <label
                   style={{
                     display: 'flex',
