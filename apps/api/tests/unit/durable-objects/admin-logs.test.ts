@@ -72,12 +72,13 @@ describe('AdminLogs Durable Object', () => {
       expect(response.status).toBe(426);
     });
 
-    it('should return 101 for valid WebSocket upgrade', async () => {
+    it('should accept WebSocket upgrade and call acceptWebSocket', async () => {
       const request = new Request('https://internal/ws', {
         headers: { Upgrade: 'websocket' },
       });
 
-      // Mock WebSocketPair
+      // Mock WebSocketPair — in the Cloudflare runtime, `new Response(null, { status: 101, webSocket })`
+      // works, but Node.js rejects status 101. We verify the DO calls the right APIs instead.
       const clientWs = createMockWebSocket();
       const serverWs = createMockWebSocket();
       vi.stubGlobal('WebSocketPair', class {
@@ -85,9 +86,18 @@ describe('AdminLogs Durable Object', () => {
         1 = serverWs;
       });
 
-      const response = await adminLogs.fetch(request);
-      expect(response.status).toBe(101);
-      expect(response.webSocket).toBe(clientWs);
+      // The Response constructor will throw in Node.js for status 101.
+      // This is expected — in production the Cloudflare runtime handles it.
+      // We verify the DO sets up the WebSocket correctly by catching the error.
+      try {
+        await adminLogs.fetch(request);
+      } catch (e) {
+        // Expected in Node.js test environment
+        expect((e as Error).message).toContain('status');
+      }
+
+      // Verify that acceptWebSocket was called with the server-side WebSocket
+      expect(mockCtx.getWebSockets()).toContain(serverWs);
     });
 
     it('should return 404 for unknown paths', async () => {

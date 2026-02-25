@@ -414,14 +414,15 @@ adminRoutes.post('/observability/logs/ingest', async (c) => {
   const doId = c.env.ADMIN_LOGS.idFromName('admin-logs');
   const doStub = c.env.ADMIN_LOGS.get(doId);
 
-  // Forward the request body to the DO's /ingest endpoint
+  // Read and forward the request body to the DO's /ingest endpoint
   const doUrl = new URL(c.req.url);
   doUrl.pathname = '/ingest';
+  const body = await c.req.text();
 
   const response = await doStub.fetch(new Request(doUrl.toString(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: c.req.raw.body,
+    body,
   }));
 
   return new Response(response.body, { status: response.status });

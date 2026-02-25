@@ -564,12 +564,15 @@ describe('Admin Observability Routes', () => {
     });
 
     it('should forward WebSocket upgrade to AdminLogs DO', async () => {
-      const mockDoResponse = new Response(null, { status: 101 });
+      // In the Cloudflare runtime, the DO returns status 101 for WebSocket upgrades.
+      // In Node.js, Response rejects status 101. Use status 200 as a stand-in
+      // and verify the DO stub was called correctly.
+      const mockDoResponse = new Response(null, { status: 200 });
       const mockDoStub = { fetch: vi.fn().mockResolvedValue(mockDoResponse) };
       const mockIdFromName = vi.fn().mockReturnValue('do-id');
       const mockGet = vi.fn().mockReturnValue(mockDoStub);
 
-      const res = await app.request('/api/admin/observability/logs/stream', {
+      await app.request('/api/admin/observability/logs/stream', {
         headers: { Upgrade: 'websocket' },
       }, createEnv({
         ADMIN_LOGS: { idFromName: mockIdFromName, get: mockGet } as unknown as DurableObjectNamespace,

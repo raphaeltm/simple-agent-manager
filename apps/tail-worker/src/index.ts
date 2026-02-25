@@ -28,7 +28,7 @@ export interface TailWorkerEvent {
 const ACCEPTED_LEVELS = new Set(['error', 'warn', 'info']);
 
 export default {
-  async tail(events: TraceItem[], _env: Env): Promise<void> {
+  async tail(events: TraceItem[], env: Env): Promise<void> {
     // Extract log-level events from trace items
     const logEntries: TailWorkerEvent[] = [];
 
