@@ -38,27 +38,30 @@ All URLs should be at `app.${BASE_DOMAIN}/blog/...` as a public (unauthenticated
 ### SEO Checklist
 
 - [ ] Semantic HTML (`<article>`, `<header>`, `<time>`, `<nav>`)
-- [ ] Open Graph meta tags (title, description, image, type)
-- [ ] Twitter Card meta tags
-- [ ] Structured data (JSON-LD `BlogPosting` schema)
-- [ ] Canonical URLs on every page
-- [ ] XML sitemap including blog posts
-- [ ] RSS feed (Atom or RSS 2.0)
-- [ ] `<meta name="description">` unique per post
+- [ ] Open Graph meta tags (title, description, image, type) -- OG image min 1200x630px, absolute URL
+- [ ] Twitter/X Card meta tags (`summary_large_image` for blog posts)
+- [ ] Structured data (JSON-LD `Article` schema + `Organization` schema site-wide)
+- [ ] Self-referencing canonical URLs on every page (absolute URLs including protocol)
+- [ ] XML sitemap including blog posts (only canonical URLs; add sitemap URL to `robots.txt`)
+- [ ] RSS feed (Atom or RSS 2.0) with full content, not just excerpts
+- [ ] `<meta name="description">` unique per post (155-160 chars)
+- [ ] Title tags with primary keyword near start, under 60 chars
 - [ ] Clean URL slugs (no dates in URLs -- use `/blog/slug` not `/blog/2026/02/slug`)
 - [ ] Auto-generated table of contents for posts >1000 words (jump links become rich snippets in Google)
-- [ ] Internal linking between related posts
+- [ ] Internal linking between related posts (vary anchor text, audit for broken links)
 - [ ] Image alt text on all images
 - [ ] `loading="lazy"` on below-fold images, explicit dimensions to prevent CLS
+- [ ] Do NOT lazy-load the hero image (it is the LCP element)
 - [ ] AVIF/WebP with JPEG fallback via `<picture>` element
+- [ ] Generative Engine Optimization (GEO): longer, structured content with clear headings performs better in AI-driven search (ChatGPT, Perplexity, Google AI Overviews)
 
 ### Browsability & Navigation
 
 - **Blog index**: Card grid with title, excerpt, date, category badge, estimated read time
 - **Pagination**: Traditional pagination (not infinite scroll) for SEO crawlability
 - **Category/tag filtering**: Client-side filtering on index, dedicated routes for each
-- **Search**: Consider a simple client-side search (Fuse.js or similar) over post metadata
-- **Related posts**: Show 2-3 related posts at the bottom of each post (same category or overlapping tags)
+- **Search**: Client-side search via Pagefind (lightweight, works with static content) or Fuse.js for small post counts
+- **Related posts**: Show 3-4 related posts at the bottom of each post (same category or overlapping tags; manual override via frontmatter)
 - **Table of contents**: Sticky/floating TOC for long posts, auto-generated from headings
 - **Reading progress**: Optional progress bar for long-form posts
 - **Series navigation**: Previous/next post links for series content
@@ -232,9 +235,13 @@ Based on analysis of 497 commits, 191+ merged PRs, 22 feature specs, and 5 ADRs.
 | Company | What Makes It Great |
 |---------|-------------------|
 | **Linear** | Changelogs as growth tool; benefit-driven language; rich GIFs/screenshots; public from day one |
-| **Cloudflare** | Deep engineering content; explains how things work under the hood; builds credibility |
-| **Vercel** | Clean hierarchy; connects changes to broader context; discoverable across platforms |
+| **Cloudflare** | Deep engineering content; explains how things work under the hood; "Birthday Week" themed series |
+| **Vercel** | Clean hierarchy; interactive demos embedded in posts; strong visual design |
+| **Stripe** | Legendary long-form engineering posts (idempotency, API design); universally applicable |
 | **Raycast** | Community-driven; reads every piece of feedback; API-focused content |
+| **Fly.io** | Conversational, opinionated tone; challenges conventional wisdom; strong POV |
+| **Planetscale** | Database internals transparency; "How We Shard" series; infrastructure honesty |
+| **Netlify** | Excellent tutorials useful beyond their platform; Jamstack architecture content |
 | **WorkOS** | Clarity-first changelogs; no jargon; immediate user comprehension |
 | **Mintlify** | Five principles framework: human impact, hierarchy, context, relevance, discoverability |
 
@@ -254,11 +261,13 @@ Based on analysis of 497 commits, 191+ merged PRs, 22 feature specs, and 5 ADRs.
 
 ### Phase 2: SEO & Polish
 - [ ] Add Open Graph and Twitter Card meta tags (react-helmet or similar)
-- [ ] Add JSON-LD structured data for BlogPosting
+- [ ] Add JSON-LD structured data for `Article` schema
 - [ ] Add auto-generated table of contents from headings
 - [ ] Add related posts component
 - [ ] Add reading time estimation
-- [ ] Add syntax highlighting theme that passes WCAG contrast
+- [ ] Evaluate Shiki (via `@shikijs/rehype`) vs Prism for syntax highlighting -- Shiki produces VS Code-quality output for TS/Go/YAML at build time with zero client JS; Prism is lighter but weaker on TS/JSX
+- [ ] Test syntax highlighting theme for WCAG contrast compliance
+- [ ] Consider Giscus for comments (GitHub Discussions-backed, free, threaded, authenticated via GitHub)
 
 ### Phase 3: Content
 - [ ] Write first 3-4 Tier 1 posts
@@ -268,8 +277,16 @@ Based on analysis of 497 commits, 191+ merged PRs, 22 feature specs, and 5 ADRs.
 ### Phase 4: Growth
 - [ ] Add blog link to main navigation (public section)
 - [ ] Set up RSS distribution
-- [ ] Cross-post strategy (dev.to, Hashnode, HN)
+- [ ] Cross-post strategy (dev.to, Hashnode, HN, Reddit r/devops r/cloudflare r/programming)
 - [ ] Social sharing buttons on posts
+- [ ] Repurpose blog content into short-form social posts and conference talks
+
+### Content Strategy Guidelines
+- **80/20 rule**: 80% genuinely educational content useful even without SAM, 20% product-specific
+- **Lead with the solution**: TL;DR at top, code examples early, philosophy later
+- **Be specific with numbers**: "12-second cold start" beats "dramatically faster"
+- **Named authors with bios**: Developers trust people, not brands
+- **Consistent cadence**: Weekly or biweekly minimum
 
 ---
 
