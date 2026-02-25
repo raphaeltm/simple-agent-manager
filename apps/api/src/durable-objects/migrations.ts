@@ -130,6 +130,12 @@ export const MIGRATIONS: Migration[] = [
       sql.exec(`CREATE INDEX idx_idle_cleanup_schedule_cleanup_at ON idle_cleanup_schedule(cleanup_at)`);
     },
   },
+  {
+    name: '006-idle-cleanup-retry-count',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`);
+    },
+  },
 ];
 
 /**

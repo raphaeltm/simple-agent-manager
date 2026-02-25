@@ -110,25 +110,25 @@
 
 ### Backend — Idle Timer
 
-- [ ] T031 [US5] Implement scheduleIdleCleanup(sessionId, workspaceId, taskId) method in ProjectData DO: insert into idle_cleanup_schedule, find MIN(cleanup_at), set DO alarm in apps/api/src/durable-objects/project-data.ts
-- [ ] T032 [US5] Implement cancelIdleCleanup(sessionId) and resetIdleCleanup(sessionId) methods in ProjectData DO: delete/update schedule rows, recalculate alarm in apps/api/src/durable-objects/project-data.ts
-- [ ] T033 [US5] Implement alarm() handler in ProjectData DO: find expired cleanup rows, check task.finalizedAt — if null retry git push via VM agent before cleanup, then trigger workspace cleanup (task → completed, session → stopped, cleanupTaskRun), retry on failure with IDLE_CLEANUP_RETRY_DELAY_MS, notify user via system message if push fails after retry in apps/api/src/durable-objects/project-data.ts
+- [x] T031 [US5] Implement scheduleIdleCleanup(sessionId, workspaceId, taskId) method in ProjectData DO: insert into idle_cleanup_schedule, find MIN(cleanup_at), set DO alarm in apps/api/src/durable-objects/project-data.ts
+- [x] T032 [US5] Implement cancelIdleCleanup(sessionId) and resetIdleCleanup(sessionId) methods in ProjectData DO: delete/update schedule rows, recalculate alarm in apps/api/src/durable-objects/project-data.ts
+- [x] T033 [US5] Implement alarm() handler in ProjectData DO: find expired cleanup rows, check task.finalizedAt — if null retry git push via VM agent before cleanup, then trigger workspace cleanup (task → completed, session → stopped, cleanupTaskRun), retry on failure with IDLE_CLEANUP_RETRY_DELAY_MS, notify user via system message if push fails after retry in apps/api/src/durable-objects/project-data.ts
 - [ ] T033a [US5] Write integration tests for idle cleanup alarm lifecycle: schedule fires at correct time, reset extends deadline, cancel removes schedule, concurrent sessions use earliest-alarm pattern, failed cleanup retries in apps/api/tests/integration/idle-cleanup.test.ts
 
 ### Backend — Enhanced Callback
 
-- [ ] T034 [US5] Extend the awaiting_followup callback handler (from T029a) to signal ProjectData DO to start idle cleanup timer: set agent_completed_at on chat session, call scheduleIdleCleanup, record 'task.agent_completed' activity event in apps/api/src/routes/tasks.ts
+- [x] T034 [US5] Extend the awaiting_followup callback handler (from T029a) to signal ProjectData DO to start idle cleanup timer: set agent_completed_at on chat session, call scheduleIdleCleanup, record 'task.agent_completed' activity event in apps/api/src/routes/tasks.ts
 - [ ] T034a [P] [US5] Write unit tests for finalization guard: verify finalizedAt set only once, verify skip when already finalized, verify set when gitPushResult.pushed=true in apps/api/tests/unit/finalization-guard.test.ts
 - [ ] T034b [US5] Write integration tests for enhanced callback: awaiting_followup keeps task in running status, starts idle timer in DO, backward-compatible toStatus:completed still works in apps/api/tests/integration/task-callback.test.ts
-- [ ] T035 [US5] Implement finalization guard in callback handler: check task.finalizedAt IS NULL before saving git push results, set finalizedAt=now if gitPushResult.pushed is true in apps/api/src/routes/tasks.ts
+- [x] T035 [US5] Implement finalization guard in callback handler: check task.finalizedAt IS NULL before saving git push results, set finalizedAt=now if gitPushResult.pushed is true in apps/api/src/routes/tasks.ts
 
 ### Backend — Idle Reset
 
-- [ ] T036 [US5] Implement POST /api/projects/:projectId/sessions/:sessionId/idle-reset endpoint: validate auth, call DO resetIdleCleanup, return new cleanup timestamp in apps/api/src/routes/chat.ts
+- [x] T036 [US5] Implement POST /api/projects/:projectId/sessions/:sessionId/idle-reset endpoint: validate auth, call DO resetIdleCleanup, return new cleanup timestamp in apps/api/src/routes/chat.ts
 
 ### Frontend — Idle Integration
 
-- [ ] T037 [US5] Add resetIdle(projectId, sessionId) API function in apps/web/src/lib/api.ts and call it from ProjectMessageView when user sends a follow-up message in an idle session in apps/web/src/components/chat/ProjectMessageView.tsx
+- [x] T037 [US5] Add resetIdle(projectId, sessionId) API function in apps/web/src/lib/api.ts and call it from ProjectMessageView when user sends a follow-up message in an idle session in apps/web/src/components/chat/ProjectMessageView.tsx
 
 **Checkpoint**: Idle safety net is active. Agent work is preserved via auto-push. Follow-ups reset the timer. Finalization is idempotent.
 

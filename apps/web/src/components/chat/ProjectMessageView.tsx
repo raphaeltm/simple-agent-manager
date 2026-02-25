@@ -1,6 +1,6 @@
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { getChatSession } from '../../lib/api';
+import { getChatSession, resetIdleTimer } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 
 interface ProjectMessageViewProps {
@@ -200,8 +200,17 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     const trimmed = followUp.trim();
     if (!trimmed || sendingFollowUp) return;
 
+    const currentState = session ? deriveSessionState(session) : 'terminated';
+
     setSendingFollowUp(true);
     try {
+      // Reset idle timer if session is idle (T037)
+      if (currentState === 'idle') {
+        resetIdleTimer(projectId, sessionId).catch(() => {
+          // Best-effort — timer reset failure shouldn't block sending
+        });
+      }
+
       // Try sending via the project DO WebSocket
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({

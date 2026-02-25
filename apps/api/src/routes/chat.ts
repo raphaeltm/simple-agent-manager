@@ -163,6 +163,23 @@ chatRoutes.post('/:sessionId/stop', async (c) => {
   return c.json({ status: 'stopped' });
 });
 
+/**
+ * POST /api/projects/:projectId/sessions/:sessionId/idle-reset
+ * Reset the idle cleanup timer for a session (user sent a follow-up).
+ */
+chatRoutes.post('/:sessionId/idle-reset', async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const sessionId = requireRouteParam(c, 'sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireOwnedProject(db, projectId, userId);
+
+  const result = await projectDataService.resetIdleCleanup(c.env, projectId, sessionId);
+
+  return c.json({ cleanupAt: result.cleanupAt });
+});
+
 // Browser-side POST /:sessionId/messages route removed — messages are now
 // persisted exclusively by the VM agent via POST /api/workspaces/:id/messages.
 // See: specs/021-task-chat-architecture (US1 — Agent-Side Chat Persistence).

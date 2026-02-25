@@ -723,6 +723,47 @@ tasksRoutes.post('/:taskId/status/callback', async (c) => {
       ).catch(() => { /* best-effort */ })
     );
 
+    // T034: When agent signals awaiting_followup, start idle cleanup timer
+    if (body.executionStep === 'awaiting_followup' && task.workspaceId) {
+      c.executionCtx.waitUntil(
+        (async () => {
+          // Look up the chat session linked to this workspace
+          const [ws] = await db
+            .select({ chatSessionId: schema.workspaces.chatSessionId })
+            .from(schema.workspaces)
+            .where(eq(schema.workspaces.id, task.workspaceId!))
+            .limit(1);
+
+          if (ws?.chatSessionId) {
+            // Set agent_completed_at on the session
+            await projectDataService.markAgentCompleted(c.env, projectId, ws.chatSessionId);
+
+            // Schedule idle cleanup timer
+            await projectDataService.scheduleIdleCleanup(
+              c.env,
+              projectId,
+              ws.chatSessionId,
+              task.workspaceId!,
+              taskId
+            );
+          }
+
+          // Record agent completion activity event
+          await projectDataService.recordActivityEvent(
+            c.env, projectId, 'task.agent_completed', 'workspace_callback', payload.workspace,
+            task.workspaceId, ws?.chatSessionId ?? null, taskId, {
+              title: task.title,
+              pushed: body.gitPushResult?.pushed ?? false,
+              branchName: body.gitPushResult?.branchName ?? null,
+              prUrl: body.gitPushResult?.prUrl ?? null,
+            }
+          );
+        })().catch((err) => {
+          console.error('Failed to schedule idle cleanup for task', taskId, err);
+        })
+      );
+    }
+
     const [refreshed] = await db
       .select()
       .from(schema.tasks)

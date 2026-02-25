@@ -524,6 +524,15 @@ export async function stopChatSession(
   });
 }
 
+export async function resetIdleTimer(
+  projectId: string,
+  sessionId: string
+): Promise<{ cleanupAt: number }> {
+  return request<{ cleanupAt: number }>(`/api/projects/${projectId}/sessions/${sessionId}/idle-reset`, {
+    method: 'POST',
+  });
+}
+
 // persistChatMessage removed — messages are now persisted exclusively by the
 // VM agent. See: specs/021-task-chat-architecture (US1).
 
