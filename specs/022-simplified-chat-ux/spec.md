@@ -29,6 +29,12 @@ This spec simplifies the user-facing experience to match how users actually thin
 - GitHub App installation tokens for repo access
 - Git credential helper for fresh tokens on every git operation
 
+## Clarifications
+
+### Session 2026-02-25
+
+- Q: Does every message create a new task, or can users send follow-up messages in active sessions? → A: Contextual input. New chat = new task + provisioning. Within an active session (workspace running), the user interacts like a current ACP chat: cancel agent execution, add context, ask questions, send follow-ups after agent finishes. Once the workspace is cleaned up (after idle timeout), the session becomes terminated/read-only (visually grayed out). Future: fork a terminated conversation into a new one with compacted context. For now, no forking — just new tasks for new chats.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Chat With a Project (Priority: P1)
@@ -48,6 +54,11 @@ A user navigates to a project and immediately sees a chat interface. Previous ch
 5. **Given** an agent is actively working, **When** the user watches the chat, **Then** messages appear in near-real-time without requiring page refresh.
 6. **Given** multiple sessions exist in the sidebar, **When** the user clicks a different session, **Then** the message area switches to show that session's history.
 7. **Given** a session is linked to a completed task, **When** the user views it, **Then** they can see what was accomplished (branch name, PR link if created) in the session header area.
+8. **Given** an active session where the agent is working, **When** the user types a message in the input field, **Then** the message is sent to the running agent as a follow-up (not a new task), and the agent incorporates it into its current work.
+9. **Given** an active session where the agent is working, **When** the user clicks a cancel/stop button, **Then** agent execution pauses, and the user can add more context or instructions before resuming.
+10. **Given** an agent has finished its work but the workspace is still alive (within the idle timeout window), **When** the user types a follow-up message, **Then** the message is sent to the same agent session and the idle timer resets.
+11. **Given** a session whose workspace has been cleaned up (after idle timeout), **When** the user views it in the sidebar, **Then** it appears visually distinct (e.g., grayed out) to indicate it is terminated and read-only.
+12. **Given** a terminated session, **When** the user selects it, **Then** they can read the full message history but the input field is disabled or hidden, with a prompt to start a new chat instead.
 
 ---
 
@@ -164,10 +175,15 @@ The agent running inside a workspace must be able to perform all GitHub operatio
 #### Chat Experience
 
 - **FR-007**: The chat input MUST accept freeform text describing what the user wants done.
-- **FR-008**: When a user submits a message, the system MUST create a task, provision infrastructure, and start an agent session without requiring additional user input.
-- **FR-009**: The session sidebar MUST show all chat sessions for the project, ordered by most recent first, with an indicator for active sessions.
+- **FR-008**: When a user submits a message in a new chat (no active session), the system MUST create a task, provision infrastructure, and start an agent session without requiring additional user input.
+- **FR-009**: The session sidebar MUST show all chat sessions for the project, ordered by most recent first, with an indicator for active sessions and visual distinction (e.g., grayed out) for terminated sessions.
 - **FR-010**: Clicking "New Chat" in the sidebar MUST clear the message area and present a fresh input, ready for a new task submission.
 - **FR-011**: The chat MUST display a brief, non-technical status indicator while infrastructure provisions (e.g., "Setting up..." or a spinner), rather than exposing internal task states.
+- **FR-024**: When a user submits a message in an active session (workspace running), the message MUST be sent to the running agent as a follow-up within the same session — NOT as a new task.
+- **FR-025**: Active sessions MUST support cancel/pause of agent execution, allowing the user to add context or instructions before the agent resumes.
+- **FR-026**: When an agent finishes work but the workspace is still alive (within the idle timeout window), the user MUST be able to send follow-up messages to the same session, resetting the idle timer.
+- **FR-027**: Sessions MUST transition to a terminated/read-only state once their workspace is cleaned up. Terminated sessions display full message history but do not accept new input.
+- **FR-028**: Terminated sessions MUST prompt the user to start a new chat rather than attempting to send messages to a non-existent workspace.
 
 #### Branch Naming and Git Operations
 
@@ -193,7 +209,7 @@ The agent running inside a workspace must be able to perform all GitHub operatio
 ### Key Entities
 
 - **Project**: A GitHub repository imported into the platform. Primary organizational unit linking to chat sessions and tasks.
-- **Chat Session**: A conversation between a user and an agent about a specific piece of work. Linked to a task under the hood. Displayed as the primary UI element.
+- **Chat Session**: A conversation between a user and an agent about a specific piece of work. Linked to a task under the hood. Displayed as the primary UI element. Has three user-facing states: **active** (workspace running, interactive), **idle** (agent finished, workspace alive, awaiting follow-up), and **terminated** (workspace cleaned up, read-only).
 - **Task** (internal): The execution unit behind a chat session. Manages infrastructure provisioning, agent lifecycle, and completion. Not directly exposed to users in the simplified UI.
 - **Branch**: A git branch created for each chat session's work, named descriptively from the chat content.
 
