@@ -44,13 +44,13 @@
 
 ### Backend — API
 
-- [ ] T008 [P] [US1] Create branch name generation service with slugification algorithm (lowercase, strip special chars, filter stop words, take first 4 words, append 6-char task ID suffix, prefix with configurable BRANCH_NAME_PREFIX, truncate to BRANCH_NAME_MAX_LENGTH) in apps/api/src/services/branch-name.ts
-- [ ] T009 [P] [US1] Write unit tests for branch name generation (long messages, special chars, unicode, empty input, stop-word-only messages, max length truncation, valid git ref names) in apps/api/tests/unit/branch-name.test.ts
-- [ ] T010 [US1] Implement POST /api/projects/:projectId/tasks/submit endpoint per contracts/task-submit.md: validate request, generate branch name, insert task as queued, create chat session in DO, record first user message, kick off executeTaskRun via waitUntil, return 202 in apps/api/src/routes/task-submit.ts
+- [x] T008 [P] [US1] Create branch name generation service with slugification algorithm (lowercase, strip special chars, filter stop words, take first 4 words, append 6-char task ID suffix, prefix with configurable BRANCH_NAME_PREFIX, truncate to BRANCH_NAME_MAX_LENGTH) in apps/api/src/services/branch-name.ts
+- [x] T009 [P] [US1] Write unit tests for branch name generation (long messages, special chars, unicode, empty input, stop-word-only messages, max length truncation, valid git ref names) in apps/api/tests/unit/branch-name.test.ts
+- [x] T010 [US1] Implement POST /api/projects/:projectId/tasks/submit endpoint per contracts/task-submit.md: validate request, generate branch name, insert task as queued, create chat session in DO, record first user message, kick off executeTaskRun via waitUntil, return 202 in apps/api/src/routes/task-submit.ts
 - [ ] T010a [US1] Write integration tests for submit endpoint: valid submission creates task+session+message, missing credentials returns 403, invalid message returns 400, branch name appears in response in apps/api/tests/integration/task-submit.test.ts
-- [ ] T011 [US1] Register task-submit route in apps/api/src/routes/index.ts
-- [ ] T012 [US1] Enhance session list response with computed fields: derive isIdle (status=active AND agentCompletedAt!=null), isTerminated (status=stopped), workspaceUrl (from workspaceId + BASE_DOMAIN env var) in apps/api/src/durable-objects/project-data.ts
-- [ ] T013 [US1] Add task embed (id, status, executionStep, outputBranch, outputPrUrl, finalizedAt) to session detail response via D1 lookup in apps/api/src/routes/chat.ts (or project-data.ts RPC)
+- [x] T011 [US1] Register task-submit route in apps/api/src/routes/index.ts
+- [x] T012 [US1] Enhance session list response with computed fields: derive isIdle (status=active AND agentCompletedAt!=null), isTerminated (status=stopped), workspaceUrl (from workspaceId + BASE_DOMAIN env var) in apps/api/src/durable-objects/project-data.ts
+- [x] T013 [US1] Add task embed (id, status, executionStep, outputBranch, outputPrUrl, finalizedAt) to session detail response via D1 lookup in apps/api/src/routes/chat.ts (or project-data.ts RPC)
 
 ### Frontend — Chat-First Layout
 

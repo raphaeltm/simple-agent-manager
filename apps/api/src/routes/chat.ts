@@ -7,7 +7,10 @@
  * See: specs/018-project-first-architecture/tasks.md (T027)
  */
 import { Hono } from 'hono';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
+import { isTaskExecutionStep } from '@simple-agent-manager/shared';
+import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
 import { requireOwnedProject } from '../middleware/project-auth';
@@ -15,6 +18,7 @@ import { errors } from '../middleware/error';
 import * as schema from '../db/schema';
 import * as chatPersistence from '../services/chat-persistence';
 import * as projectDataService from '../services/project-data';
+import { isTaskStatus } from '../services/task-status';
 
 const chatRoutes = new Hono<{ Bindings: Env }>();
 
@@ -102,8 +106,41 @@ chatRoutes.get('/:sessionId', async (c) => {
     before
   );
 
+  // Embed task summary if session is linked to a task (D1 lookup, best-effort)
+  let task: ChatSessionTaskEmbed | null = null;
+  const taskId = (session as Record<string, unknown>).taskId as string | null;
+  if (taskId) {
+    try {
+      const [taskRow] = await db
+        .select({
+          id: schema.tasks.id,
+          status: schema.tasks.status,
+          executionStep: schema.tasks.executionStep,
+          outputBranch: schema.tasks.outputBranch,
+          outputPrUrl: schema.tasks.outputPrUrl,
+          finalizedAt: schema.tasks.finalizedAt,
+        })
+        .from(schema.tasks)
+        .where(eq(schema.tasks.id, taskId))
+        .limit(1);
+
+      if (taskRow) {
+        task = {
+          id: taskRow.id,
+          status: isTaskStatus(taskRow.status) ? taskRow.status : 'draft',
+          executionStep: isTaskExecutionStep(taskRow.executionStep) ? taskRow.executionStep : null,
+          outputBranch: taskRow.outputBranch,
+          outputPrUrl: taskRow.outputPrUrl,
+          finalizedAt: taskRow.finalizedAt ?? null,
+        };
+      }
+    } catch {
+      // D1 lookup failure is non-fatal — return session without task
+    }
+  }
+
   return c.json({
-    session,
+    session: { ...session, task },
     messages: messagesResult.messages,
     hasMore: messagesResult.hasMore,
   });

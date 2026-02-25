@@ -189,7 +189,7 @@ export async function initiateTaskRun(
   };
 }
 
-interface ExecuteTaskRunParams {
+export interface ExecuteTaskRunParams {
   task: schema.Task;
   project: schema.Project;
   userId: string;
@@ -224,7 +224,7 @@ async function setExecutionStep(
  * Each step is persisted to `executionStep` BEFORE the long-running operation,
  * providing a breadcrumb trail for debugging and stuck-task recovery.
  */
-async function executeTaskRun(
+export async function executeTaskRun(
   db: ReturnType<typeof drizzle<typeof schema>>,
   env: Env,
   params: ExecuteTaskRunParams
