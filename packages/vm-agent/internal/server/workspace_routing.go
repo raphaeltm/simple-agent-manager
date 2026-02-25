@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/container"
+	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/pty"
 )
 
@@ -95,11 +97,14 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 
 	runtime, ok := s.workspaces[workspaceID]
 	if ok {
+		metadataChanged := false
 		if repository != "" {
 			runtime.Repository = repository
+			metadataChanged = true
 		}
 		if branch != "" {
 			runtime.Branch = branch
+			metadataChanged = true
 		}
 		if status != "" {
 			runtime.Status = status
@@ -109,31 +114,77 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		}
 		if runtime.WorkspaceDir == "" {
 			runtime.WorkspaceDir = s.workspaceDirForRepo(workspaceID, runtime.Repository)
+			metadataChanged = true
 		}
 		if runtime.ContainerLabelValue == "" {
 			runtime.ContainerLabelValue = runtime.WorkspaceDir
+			metadataChanged = true
 		}
 		if runtime.ContainerWorkDir == "" {
 			runtime.ContainerWorkDir = deriveContainerWorkDirForRepo(runtime.WorkspaceDir, runtime.Repository)
+			metadataChanged = true
 		}
 		if runtime.ContainerUser == "" {
 			runtime.ContainerUser = strings.TrimSpace(s.config.ContainerUser)
 		}
 		runtime.UpdatedAt = time.Now().UTC()
+
+		if metadataChanged && runtime.Repository != "" {
+			s.persistWorkspaceMetadata(runtime)
+		}
 		return runtime
 	}
 
-	workspaceDir := s.workspaceDirForRepo(workspaceID, repository)
-	containerLabelValue := workspaceDir
-	containerWorkDir := deriveContainerWorkDirForRepo(workspaceDir, repository)
-	containerUser := strings.TrimSpace(s.config.ContainerUser)
+	// Hydrate from SQLite persistence if available — this is the critical path
+	// for recovering workspace metadata after an agent restart.
+	effectiveRepo := repository
+	effectiveBranch := branch
+	var persistedWorkspaceDir, persistedContainerWorkDir, persistedContainerLabelValue, persistedContainerUser string
+
+	if s.store != nil {
+		meta, err := s.store.GetWorkspaceMetadata(workspaceID)
+		if err != nil {
+			slog.Warn("Failed to read persisted workspace metadata", "workspace", workspaceID, "error", err)
+		} else if meta != nil {
+			slog.Info("Hydrated workspace metadata from SQLite",
+				"workspace", workspaceID, "repository", meta.Repository,
+				"containerWorkDir", meta.ContainerWorkDir)
+			if effectiveRepo == "" && meta.Repository != "" {
+				effectiveRepo = meta.Repository
+			}
+			if effectiveBranch == "" && meta.Branch != "" {
+				effectiveBranch = meta.Branch
+			}
+			persistedWorkspaceDir = meta.WorkspaceDir
+			persistedContainerWorkDir = meta.ContainerWorkDir
+			persistedContainerLabelValue = meta.ContainerLabelVal
+			persistedContainerUser = meta.ContainerUser
+		}
+	}
+
+	workspaceDir := persistedWorkspaceDir
+	if workspaceDir == "" {
+		workspaceDir = s.workspaceDirForRepo(workspaceID, effectiveRepo)
+	}
+	containerLabelValue := persistedContainerLabelValue
+	if containerLabelValue == "" {
+		containerLabelValue = workspaceDir
+	}
+	containerWorkDir := persistedContainerWorkDir
+	if containerWorkDir == "" {
+		containerWorkDir = deriveContainerWorkDirForRepo(workspaceDir, effectiveRepo)
+	}
+	containerUser := persistedContainerUser
+	if containerUser == "" {
+		containerUser = strings.TrimSpace(s.config.ContainerUser)
+	}
 
 	manager := s.newPTYManagerForWorkspace(workspaceID, workspaceDir, containerWorkDir, containerLabelValue, containerUser)
 
 	runtime = &WorkspaceRuntime{
 		ID:                  workspaceID,
-		Repository:          repository,
-		Branch:              branch,
+		Repository:          effectiveRepo,
+		Branch:              effectiveBranch,
 		Status:              status,
 		CreatedAt:           time.Now().UTC(),
 		UpdatedAt:           time.Now().UTC(),
@@ -145,6 +196,10 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		PTY:                 manager,
 	}
 	s.workspaces[workspaceID] = runtime
+
+	if effectiveRepo != "" {
+		s.persistWorkspaceMetadata(runtime)
+	}
 	return runtime
 }
 
@@ -277,6 +332,32 @@ func (s *Server) removeWorkspaceRuntime(workspaceID string) {
 	}
 	delete(s.workspaceEvents, workspaceID)
 	s.agentSessions.RemoveWorkspace(workspaceID)
+
+	if s.store != nil {
+		if err := s.store.DeleteWorkspaceMetadata(workspaceID); err != nil {
+			slog.Warn("Failed to delete persisted workspace metadata", "workspace", workspaceID, "error", err)
+		}
+	}
+}
+
+// persistWorkspaceMetadata writes workspace runtime state to SQLite for
+// recovery after agent restarts. Called outside the workspace mutex since
+// the store has its own locking.
+func (s *Server) persistWorkspaceMetadata(runtime *WorkspaceRuntime) {
+	if s.store == nil || runtime == nil {
+		return
+	}
+	if err := s.store.UpsertWorkspaceMetadata(persistence.WorkspaceMetadata{
+		WorkspaceID:       runtime.ID,
+		Repository:        runtime.Repository,
+		Branch:            runtime.Branch,
+		ContainerWorkDir:  runtime.ContainerWorkDir,
+		ContainerUser:     runtime.ContainerUser,
+		ContainerLabelVal: runtime.ContainerLabelValue,
+		WorkspaceDir:      runtime.WorkspaceDir,
+	}); err != nil {
+		slog.Warn("Failed to persist workspace metadata", "workspace", runtime.ID, "error", err)
+	}
 }
 
 func (s *Server) workspaceSessionCount(workspaceID string) int {

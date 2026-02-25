@@ -12,6 +12,21 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// WorkspaceMetadata represents persisted workspace metadata that survives
+// agent restarts. This ensures the correct container working directory,
+// repository name, and other runtime state can be recovered without
+// re-fetching from the control plane.
+type WorkspaceMetadata struct {
+	WorkspaceID       string `json:"workspaceId"`
+	Repository        string `json:"repository"`
+	Branch            string `json:"branch"`
+	ContainerWorkDir  string `json:"containerWorkDir"`
+	ContainerUser     string `json:"containerUser"`
+	ContainerLabelVal string `json:"containerLabelValue"`
+	WorkspaceDir      string `json:"workspaceDir"`
+	UpdatedAt         string `json:"updatedAt"`
+}
+
 // Tab represents a persisted tab (terminal or chat session).
 type Tab struct {
 	ID           string `json:"id"`
@@ -84,6 +99,7 @@ func (s *Store) migrate() error {
 		migrateV1,
 		migrateV2,
 		migrateV3,
+		migrateV4,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -126,6 +142,82 @@ func migrateV2(db *sql.DB) error {
 func migrateV3(db *sql.DB) error {
 	_, err := db.Exec(`ALTER TABLE tabs ADD COLUMN last_prompt TEXT NOT NULL DEFAULT ''`)
 	return err
+}
+
+// migrateV4 creates the workspace_metadata table for persisting workspace
+// runtime state (repository, container work dir, etc.) across agent restarts.
+func migrateV4(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS workspace_metadata (
+			workspace_id TEXT PRIMARY KEY,
+			repository TEXT NOT NULL DEFAULT '',
+			branch TEXT NOT NULL DEFAULT '',
+			container_work_dir TEXT NOT NULL DEFAULT '',
+			container_user TEXT NOT NULL DEFAULT '',
+			container_label_value TEXT NOT NULL DEFAULT '',
+			workspace_dir TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL
+		)
+	`)
+	return err
+}
+
+// UpsertWorkspaceMetadata persists workspace metadata to SQLite.
+// Called when a workspace is created or its runtime state is updated with
+// meaningful values (non-empty repository, container work dir, etc.).
+func (s *Store) UpsertWorkspaceMetadata(meta WorkspaceMetadata) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if meta.UpdatedAt == "" {
+		meta.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+
+	_, err := s.db.Exec(
+		`INSERT OR REPLACE INTO workspace_metadata
+			(workspace_id, repository, branch, container_work_dir, container_user, container_label_value, workspace_dir, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		meta.WorkspaceID, meta.Repository, meta.Branch, meta.ContainerWorkDir,
+		meta.ContainerUser, meta.ContainerLabelVal, meta.WorkspaceDir, meta.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert workspace metadata: %w", err)
+	}
+	return nil
+}
+
+// GetWorkspaceMetadata retrieves persisted workspace metadata.
+// Returns nil, nil if no metadata exists for the given workspace ID.
+func (s *Store) GetWorkspaceMetadata(workspaceID string) (*WorkspaceMetadata, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var m WorkspaceMetadata
+	err := s.db.QueryRow(
+		`SELECT workspace_id, repository, branch, container_work_dir, container_user, container_label_value, workspace_dir, updated_at
+		FROM workspace_metadata WHERE workspace_id = ?`,
+		workspaceID,
+	).Scan(&m.WorkspaceID, &m.Repository, &m.Branch, &m.ContainerWorkDir,
+		&m.ContainerUser, &m.ContainerLabelVal, &m.WorkspaceDir, &m.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get workspace metadata: %w", err)
+	}
+	return &m, nil
+}
+
+// DeleteWorkspaceMetadata removes persisted metadata for a workspace.
+func (s *Store) DeleteWorkspaceMetadata(workspaceID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec("DELETE FROM workspace_metadata WHERE workspace_id = ?", workspaceID)
+	if err != nil {
+		return fmt.Errorf("delete workspace metadata: %w", err)
+	}
+	return nil
 }
 
 // InsertTab adds a new tab to the store.
