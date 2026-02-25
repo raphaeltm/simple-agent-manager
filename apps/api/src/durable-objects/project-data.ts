@@ -12,6 +12,7 @@ import { runMigrations } from './migrations';
 
 type Env = {
   DATABASE: D1Database;
+  BASE_DOMAIN?: string;
   DO_SUMMARY_SYNC_DEBOUNCE_MS?: string;
   MAX_SESSIONS_PER_PROJECT?: string;
   MAX_MESSAGES_PER_SESSION?: string;
@@ -586,16 +587,25 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   private mapSessionRow(row: Record<string, unknown>): Record<string, unknown> {
+    const status = row.status as string;
+    const agentCompletedAt = (row.agent_completed_at as number) ?? null;
+    const workspaceId = row.workspace_id as string | null;
+    const baseDomain = this.env.BASE_DOMAIN;
+
     return {
       id: row.id,
-      workspaceId: row.workspace_id,
+      workspaceId,
       taskId: row.task_id ?? null,
       topic: row.topic,
-      status: row.status,
+      status,
       messageCount: row.message_count,
       startedAt: row.started_at,
       endedAt: row.ended_at,
       createdAt: row.created_at,
+      agentCompletedAt,
+      isIdle: status === 'active' && agentCompletedAt != null,
+      isTerminated: status === 'stopped',
+      workspaceUrl: workspaceId && baseDomain ? `https://ws-${workspaceId}.${baseDomain}` : null,
     };
   }
 

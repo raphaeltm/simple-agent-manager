@@ -17,9 +17,9 @@
 
 **Purpose**: Shared types and schema definitions needed across multiple stories.
 
-- [ ] T001 Add `awaiting_followup` value to TaskExecutionStep type in packages/shared/src/types.ts (or wherever TaskExecutionStep is defined)
-- [ ] T002 [P] Add `finalizedAt` field to Task type and Drizzle schema `tasks` table in apps/api/src/db/schema.ts
-- [ ] T003 [P] Add `GitPushResult` type definition (pushed, commitSha, branchName, prUrl, prNumber, hasUncommittedChanges, error) in packages/shared/src/types.ts
+- [x] T001 Add `awaiting_followup` value to TaskExecutionStep type in packages/shared/src/types.ts (or wherever TaskExecutionStep is defined)
+- [x] T002 [P] Add `finalizedAt` field to Task type and Drizzle schema `tasks` table in apps/api/src/db/schema.ts
+- [x] T003 [P] Add `GitPushResult` type definition (pushed, commitSha, branchName, prUrl, prNumber, hasUncommittedChanges, error) in packages/shared/src/types.ts
 
 ---
 
@@ -27,10 +27,10 @@
 
 **Purpose**: Database migration and Durable Object schema changes that MUST be complete before any user story implementation.
 
-- [ ] T004 Create D1 migration file `NNNN_add_finalized_at.sql` with `ALTER TABLE tasks ADD COLUMN finalized_at TEXT` in apps/api/src/db/migrations/
-- [ ] T005 [P] Add `agent_completed_at TEXT` column to chat_sessions table in ProjectData DO init SQL in apps/api/src/durable-objects/project-data.ts (auto-migration pattern: ALTER TABLE IF column not exists)
-- [ ] T006 [P] Create `idle_cleanup_schedule` table (session_id, workspace_id, task_id, cleanup_at, created_at) in ProjectData DO init SQL in apps/api/src/durable-objects/project-data.ts
-- [ ] T007 [P] Export enhanced ChatSessionResponse type with computed fields (isIdle, isTerminated, workspaceUrl, agentCompletedAt) from packages/shared/src/types.ts
+- [x] T004 Create D1 migration file `NNNN_add_finalized_at.sql` with `ALTER TABLE tasks ADD COLUMN finalized_at TEXT` in apps/api/src/db/migrations/
+- [x] T005 [P] Add `agent_completed_at TEXT` column to chat_sessions table in ProjectData DO init SQL in apps/api/src/durable-objects/project-data.ts (auto-migration pattern: ALTER TABLE IF column not exists)
+- [x] T006 [P] Create `idle_cleanup_schedule` table (session_id, workspace_id, task_id, cleanup_at, created_at) in ProjectData DO init SQL in apps/api/src/durable-objects/project-data.ts
+- [x] T007 [P] Export enhanced ChatSessionResponse type with computed fields (isIdle, isTerminated, workspaceUrl, agentCompletedAt) from packages/shared/src/types.ts
 
 **Checkpoint**: Foundation ready — all schema changes applied, shared types available. User story implementation can begin.
 

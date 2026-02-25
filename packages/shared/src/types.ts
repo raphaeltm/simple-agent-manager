@@ -189,11 +189,28 @@ export interface ChatSession {
   startedAt: number;
   endedAt: number | null;
   createdAt: number;
+  agentCompletedAt: number | null;
+  /** Computed: true when status === 'active' && agentCompletedAt != null */
+  isIdle: boolean;
+  /** Computed: true when status === 'stopped' */
+  isTerminated: boolean;
+  /** Computed: derived from workspaceId + BASE_DOMAIN */
+  workspaceUrl: string | null;
+}
+
+export interface ChatSessionTaskEmbed {
+  id: string;
+  status: TaskStatus;
+  executionStep: TaskExecutionStep | null;
+  outputBranch: string | null;
+  outputPrUrl: string | null;
+  finalizedAt: string | null;
 }
 
 export interface ChatSessionDetail extends ChatSession {
   messages: ChatMessage[];
   hasMoreMessages: boolean;
+  task: ChatSessionTaskEmbed | null;
 }
 
 export interface ChatMessage {
@@ -359,6 +376,7 @@ export const TASK_EXECUTION_STEPS = [
   'workspace_ready',
   'agent_session',
   'running',
+  'awaiting_followup',
 ] as const;
 
 export type TaskExecutionStep = (typeof TASK_EXECUTION_STEPS)[number];
@@ -390,6 +408,7 @@ export interface Task {
   outputSummary: string | null;
   outputBranch: string | null;
   outputPrUrl: string | null;
+  finalizedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -432,12 +451,38 @@ export interface UpdateTaskRequest {
 }
 
 export interface UpdateTaskStatusRequest {
-  toStatus: TaskStatus;
+  toStatus?: TaskStatus;
+  executionStep?: TaskExecutionStep;
   reason?: string;
   outputSummary?: string;
   outputBranch?: string;
   outputPrUrl?: string;
   errorMessage?: string;
+  gitPushResult?: GitPushResult;
+}
+
+export interface GitPushResult {
+  pushed: boolean;
+  commitSha: string | null;
+  branchName: string | null;
+  prUrl: string | null;
+  prNumber: number | null;
+  hasUncommittedChanges: boolean;
+  error: string | null;
+}
+
+export interface SubmitTaskRequest {
+  message: string;
+  vmSize?: VMSize;
+  vmLocation?: VMLocation;
+  nodeId?: string;
+}
+
+export interface SubmitTaskResponse {
+  taskId: string;
+  sessionId: string;
+  branchName: string;
+  status: 'queued';
 }
 
 export interface CreateTaskDependencyRequest {

@@ -109,6 +109,27 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '004-add-agent-completed-at',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE chat_sessions ADD COLUMN agent_completed_at INTEGER`);
+    },
+  },
+  {
+    name: '005-idle-cleanup-schedule',
+    run: (sql) => {
+      sql.exec(`
+        CREATE TABLE idle_cleanup_schedule (
+          session_id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          task_id TEXT,
+          cleanup_at INTEGER NOT NULL,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+        )
+      `);
+      sql.exec(`CREATE INDEX idx_idle_cleanup_schedule_cleanup_at ON idle_cleanup_schedule(cleanup_at)`);
+    },
+  },
 ];
 
 /**

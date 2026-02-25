@@ -109,6 +109,7 @@ function toTaskResponse(task: schema.Task, blocked = false): Task {
     outputSummary: task.outputSummary,
     outputBranch: task.outputBranch,
     outputPrUrl: task.outputPrUrl,
+    finalizedAt: task.finalizedAt ?? null,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
   };
