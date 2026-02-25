@@ -493,6 +493,44 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 		h.persistLastPrompt(firstTextContent)
 	}
 
+	// Inject synthetic user_message_chunk notifications into the broadcast
+	// stream. Claude Code does NOT echo user input as session/update during
+	// live prompts — it only sends user_message_chunk during LoadSession
+	// replay. Without this, user messages are missing from both the replay
+	// buffer (page reload shows no user bubbles) and the message reporter
+	// (Durable Object has no user messages).
+	for _, block := range blocks {
+		notif := acpsdk.SessionNotification{
+			SessionId: sessionID,
+			Update:    acpsdk.UpdateUserMessage(block),
+		}
+		data, marshalErr := json.Marshal(map[string]interface{}{
+			"jsonrpc": "2.0",
+			"method":  "session/update",
+			"params":  notif,
+		})
+		if marshalErr != nil {
+			slog.Error("Failed to marshal synthetic user_message_chunk", "error", marshalErr)
+			continue
+		}
+		h.broadcastMessage(data)
+
+		// Enqueue to message reporter for Durable Object persistence.
+		if h.config.MessageReporter != nil {
+			for _, m := range ExtractMessages(notif) {
+				if err := h.config.MessageReporter.Enqueue(MessageReportEntry{
+					MessageID:    m.MessageID,
+					Role:         m.Role,
+					Content:      m.Content,
+					ToolMetadata: m.ToolMetadata,
+				}); err != nil {
+					slog.Warn("messagereport: enqueue synthetic user message failed (non-blocking)",
+						"messageId", m.MessageID, "error", err)
+				}
+			}
+		}
+	}
+
 	// Cancel any pending auto-suspend timer — agent is actively working.
 	h.viewerMu.Lock()
 	if h.suspendTimer != nil {

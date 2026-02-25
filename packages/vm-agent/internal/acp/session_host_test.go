@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1260,5 +1261,247 @@ func TestSessionHost_CancelPrompt_ForceStopsAfterGracePeriod(t *testing.T) {
 			t.Fatalf("expected prompt_done + error status messages, buffered=%d", buffered)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestHandlePrompt_InjectsSyntheticUserMessage(t *testing.T) {
+	t.Parallel()
+
+	reporter := &mockMessageReporter{}
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:       "test-session",
+			WorkspaceID:     "test-workspace",
+			MessageReporter: reporter,
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	// Create a minimal ACP connection backed by a pipe. We close both agent-
+	// side ends so that Prompt() fails immediately: agentWriter.Close causes
+	// the receive loop to exit (peer closed), agentReader.Close causes the
+	// sendMessage write to fail (broken pipe). The synthetic user message
+	// injection happens BEFORE Prompt() is called, so the buffer and reporter
+	// will have the user messages regardless.
+	agentReader, clientWriter := io.Pipe()
+	clientReader, agentWriter := io.Pipe()
+	agentWriter.Close()
+	agentReader.Close()
+
+	acpConn := acpsdk.NewClientSideConnection(
+		&sessionHostClient{host: host},
+		clientWriter,
+		clientReader,
+	)
+
+	// Set up host state so HandlePrompt passes the nil checks.
+	host.mu.Lock()
+	host.acpConn = acpConn
+	host.sessionID = "acp-session-123"
+	host.status = HostReady
+	host.mu.Unlock()
+
+	// Build a prompt request payload
+	promptParams, _ := json.Marshal(map[string]interface{}{
+		"prompt": []map[string]string{
+			{"type": "text", "text": "Hello, please fix the bug"},
+		},
+	})
+	reqID, _ := json.Marshal(42)
+
+	// HandlePrompt is blocking but will return quickly because Prompt() fails.
+	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1")
+
+	// Verify: the replay buffer should contain the synthetic user_message_chunk.
+	host.bufMu.RLock()
+	bufCopy := make([]BufferedMessage, len(host.messageBuf))
+	copy(bufCopy, host.messageBuf)
+	host.bufMu.RUnlock()
+
+	foundUserMessage := false
+	for _, bm := range bufCopy {
+		var envelope struct {
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(bm.Data, &envelope); err != nil {
+			continue
+		}
+		if envelope.Method != "session/update" {
+			continue
+		}
+
+		var notif struct {
+			Update struct {
+				SessionUpdate string `json:"sessionUpdate"`
+				Content       struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"update"`
+		}
+		if err := json.Unmarshal(envelope.Params, &notif); err != nil {
+			continue
+		}
+		if notif.Update.SessionUpdate == "user_message_chunk" &&
+			notif.Update.Content.Text == "Hello, please fix the bug" {
+			foundUserMessage = true
+			break
+		}
+	}
+
+	if !foundUserMessage {
+		var types []string
+		for _, bm := range bufCopy {
+			types = append(types, string(bm.Data[:min(len(bm.Data), 120)]))
+		}
+		t.Fatalf("replay buffer missing synthetic user_message_chunk; buffer contents (%d items): %v",
+			len(bufCopy), types)
+	}
+
+	// Verify: the message reporter should have the user message enqueued.
+	msgs := reporter.Messages()
+	foundReported := false
+	for _, m := range msgs {
+		if m.Role == "user" && m.Content == "Hello, please fix the bug" {
+			foundReported = true
+			break
+		}
+	}
+	if !foundReported {
+		t.Fatalf("message reporter missing user message; got %d messages: %+v", len(msgs), msgs)
+	}
+}
+
+func TestHandlePrompt_MultiBlockPrompt_InjectsAllBlocks(t *testing.T) {
+	t.Parallel()
+
+	reporter := &mockMessageReporter{}
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:       "test-session",
+			WorkspaceID:     "test-workspace",
+			MessageReporter: reporter,
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	agentReader, clientWriter := io.Pipe()
+	clientReader, agentWriter := io.Pipe()
+	agentWriter.Close()
+	agentReader.Close()
+
+	acpConn := acpsdk.NewClientSideConnection(
+		&sessionHostClient{host: host},
+		clientWriter,
+		clientReader,
+	)
+
+	host.mu.Lock()
+	host.acpConn = acpConn
+	host.sessionID = "acp-session-456"
+	host.status = HostReady
+	host.mu.Unlock()
+
+	promptParams, _ := json.Marshal(map[string]interface{}{
+		"prompt": []map[string]string{
+			{"type": "text", "text": "First block"},
+			{"type": "text", "text": "Second block"},
+		},
+	})
+	reqID, _ := json.Marshal(43)
+
+	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1")
+
+	// Both text blocks should be reported.
+	msgs := reporter.Messages()
+	userMsgs := []string{}
+	for _, m := range msgs {
+		if m.Role == "user" {
+			userMsgs = append(userMsgs, m.Content)
+		}
+	}
+
+	if len(userMsgs) != 2 {
+		t.Fatalf("expected 2 user messages, got %d: %v", len(userMsgs), userMsgs)
+	}
+	if userMsgs[0] != "First block" {
+		t.Fatalf("first user message = %q, want 'First block'", userMsgs[0])
+	}
+	if userMsgs[1] != "Second block" {
+		t.Fatalf("second user message = %q, want 'Second block'", userMsgs[1])
+	}
+}
+
+func TestHandlePrompt_NoReporter_StillBuffers(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:       "test-session",
+			WorkspaceID:     "test-workspace",
+			MessageReporter: nil, // no reporter
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	agentReader, clientWriter := io.Pipe()
+	clientReader, agentWriter := io.Pipe()
+	agentWriter.Close()
+	agentReader.Close()
+
+	acpConn := acpsdk.NewClientSideConnection(
+		&sessionHostClient{host: host},
+		clientWriter,
+		clientReader,
+	)
+
+	host.mu.Lock()
+	host.acpConn = acpConn
+	host.sessionID = "acp-session-789"
+	host.status = HostReady
+	host.mu.Unlock()
+
+	promptParams, _ := json.Marshal(map[string]interface{}{
+		"prompt": []map[string]string{
+			{"type": "text", "text": "test without reporter"},
+		},
+	})
+	reqID, _ := json.Marshal(44)
+
+	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1")
+
+	// Buffer should have the synthetic user message even without a reporter.
+	host.bufMu.RLock()
+	bufLen := len(host.messageBuf)
+	host.bufMu.RUnlock()
+
+	// At minimum: user_message_chunk + some control messages from prompt flow
+	if bufLen < 1 {
+		t.Fatalf("expected at least 1 buffered message, got %d", bufLen)
+	}
+
+	// Verify the user message is in the buffer.
+	host.bufMu.RLock()
+	var foundUser bool
+	for _, bm := range host.messageBuf {
+		if strings.Contains(string(bm.Data), "user_message_chunk") &&
+			strings.Contains(string(bm.Data), "test without reporter") {
+			foundUser = true
+			break
+		}
+	}
+	host.bufMu.RUnlock()
+
+	if !foundUser {
+		t.Fatal("expected user_message_chunk in buffer when no reporter is configured")
 	}
 }
