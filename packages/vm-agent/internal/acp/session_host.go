@@ -737,6 +737,16 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 	// during bootstrap but aren't available to docker exec without explicit -e flags.
 	envVars := ReadContainerEnvFiles(ctx, containerID)
 
+	// Merge fallback SAM env vars from the vm-agent config for any keys not
+	// already present in the file-based env. This defends against /etc/sam/env
+	// being empty or incomplete (e.g. bootstrap docker exec failure).
+	for _, fallback := range h.config.SAMEnvFallback {
+		key, _, ok := strings.Cut(fallback, "=")
+		if ok && !hasEnvVar(envVars, key) {
+			envVars = append(envVars, fallback)
+		}
+	}
+
 	// If GH_TOKEN is missing or empty from the env files (e.g. token wasn't
 	// available at provisioning time), fetch a fresh one from the control plane.
 	if h.config.GitTokenFetcher != nil && !hasEnvVar(envVars, "GH_TOKEN") {

@@ -80,6 +80,84 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 	}
 }
 
+func TestHasEnvVar(t *testing.T) {
+	t.Parallel()
+
+	envVars := []string{"GH_TOKEN=abc", "SAM_WORKSPACE_ID=ws-1"}
+
+	if !hasEnvVar(envVars, "GH_TOKEN") {
+		t.Error("hasEnvVar should find GH_TOKEN")
+	}
+	if !hasEnvVar(envVars, "SAM_WORKSPACE_ID") {
+		t.Error("hasEnvVar should find SAM_WORKSPACE_ID")
+	}
+	if hasEnvVar(envVars, "MISSING") {
+		t.Error("hasEnvVar should not find MISSING")
+	}
+	// Empty value should not count as present.
+	if hasEnvVar([]string{"KEY="}, "KEY") {
+		t.Error("hasEnvVar should not match empty-value entry")
+	}
+}
+
+func TestSAMEnvFallbackMerge(t *testing.T) {
+	t.Parallel()
+
+	// Simulate: file-based env has some vars, fallback has all.
+	fileEnv := []string{
+		"SAM_WORKSPACE_ID=ws-from-file",
+		"SAM_API_URL=https://api.example.com",
+	}
+	fallback := []string{
+		"SAM_WORKSPACE_ID=ws-from-fallback", // Should NOT override file value
+		"SAM_API_URL=https://api.other.com",  // Should NOT override file value
+		"SAM_NODE_ID=node-456",               // Missing from file, should be added
+		"SAM_PROJECT_ID=proj-789",            // Missing from file, should be added
+	}
+
+	// Merge: only add fallback vars not already present.
+	merged := append([]string{}, fileEnv...)
+	for _, fb := range fallback {
+		key, _, ok := cutString(fb, "=")
+		if ok && !hasEnvVar(merged, key) {
+			merged = append(merged, fb)
+		}
+	}
+
+	// File values should be preserved.
+	assertEnvContains(t, merged, "SAM_WORKSPACE_ID", "ws-from-file")
+	assertEnvContains(t, merged, "SAM_API_URL", "https://api.example.com")
+	// Fallback values should fill gaps.
+	assertEnvContains(t, merged, "SAM_NODE_ID", "node-456")
+	assertEnvContains(t, merged, "SAM_PROJECT_ID", "proj-789")
+}
+
+// cutString is a test helper matching strings.Cut behavior.
+func cutString(s, sep string) (string, string, bool) {
+	for i := 0; i <= len(s)-len(sep); i++ {
+		if s[i:i+len(sep)] == sep {
+			return s[:i], s[i+len(sep):], true
+		}
+	}
+	return s, "", false
+}
+
+// assertEnvContains checks that envVars contains KEY=expectedValue.
+func assertEnvContains(t *testing.T, envVars []string, key, expectedValue string) {
+	t.Helper()
+	prefix := key + "="
+	for _, entry := range envVars {
+		if len(entry) > len(prefix) && entry[:len(prefix)] == prefix {
+			got := entry[len(prefix):]
+			if got != expectedValue {
+				t.Errorf("env %s = %q, want %q", key, got, expectedValue)
+			}
+			return
+		}
+	}
+	t.Errorf("env missing key %s", key)
+}
+
 // Tests from main branch for backward compatibility
 func TestGetAgentCommandInfoClaudeCode(t *testing.T) {
 	t.Parallel()

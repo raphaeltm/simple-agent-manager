@@ -206,3 +206,81 @@ func TestDeriveBaseDomain(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildSAMEnvFallback(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+		NodeID:          "node-456",
+		Repository:      "octo/repo",
+		Branch:          "main",
+		ProjectID:       "proj-789",
+		ChatSessionID:   "session-abc",
+		TaskID:          "task-def",
+	}
+
+	fallback := cfg.BuildSAMEnvFallback()
+
+	want := map[string]string{
+		"SAM_API_URL":         "https://api.example.com",
+		"SAM_BRANCH":          "main",
+		"SAM_NODE_ID":         "node-456",
+		"SAM_PROJECT_ID":      "proj-789",
+		"SAM_CHAT_SESSION_ID": "session-abc",
+		"SAM_TASK_ID":         "task-def",
+		"SAM_REPOSITORY":      "octo/repo",
+		"SAM_WORKSPACE_ID":    "ws-123",
+		"SAM_WORKSPACE_URL":   "https://ws-ws-123.example.com",
+	}
+
+	got := make(map[string]string)
+	for _, entry := range fallback {
+		parts := splitFirst(entry, "=")
+		if len(parts) == 2 {
+			got[parts[0]] = parts[1]
+		}
+	}
+
+	for key, wantVal := range want {
+		if gotVal, ok := got[key]; !ok {
+			t.Errorf("fallback missing key %s", key)
+		} else if gotVal != wantVal {
+			t.Errorf("fallback[%s] = %q, want %q", key, gotVal, wantVal)
+		}
+	}
+}
+
+func TestBuildSAMEnvFallbackOmitsEmptyValues(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+		// ProjectID, ChatSessionID, TaskID left empty
+	}
+
+	fallback := cfg.BuildSAMEnvFallback()
+
+	for _, entry := range fallback {
+		parts := splitFirst(entry, "=")
+		if len(parts) == 2 {
+			switch parts[0] {
+			case "SAM_PROJECT_ID", "SAM_CHAT_SESSION_ID", "SAM_TASK_ID":
+				t.Errorf("fallback should not contain %s when empty", parts[0])
+			}
+		}
+	}
+}
+
+// splitFirst splits s on the first occurrence of sep.
+func splitFirst(s, sep string) []string {
+	idx := len(sep)
+	for i := 0; i <= len(s)-len(sep); i++ {
+		if s[i:i+len(sep)] == sep {
+			return []string{s[:i], s[i+idx:]}
+		}
+	}
+	return []string{s}
+}
