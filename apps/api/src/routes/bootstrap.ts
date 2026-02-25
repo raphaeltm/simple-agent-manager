@@ -94,6 +94,7 @@ bootstrapRoutes.post('/:token', async (c) => {
     githubToken,
     gitUserName: tokenData.gitUserName ?? null,
     gitUserEmail: tokenData.gitUserEmail ?? null,
+    githubId: tokenData.githubId ?? null,
     controlPlaneUrl: `https://api.${c.env.BASE_DOMAIN}`,
   };
 

@@ -91,12 +91,12 @@
 
 **Independent Test**: Start a workspace with a custom devcontainer, verify `gh --version` works. Wait > 1 hour in a session, verify `gh pr create` succeeds. Start a workspace for a user with no public email, verify `git commit` works. Let an agent finish work, verify changes are committed and pushed.
 
-- [ ] T026 [P] [US6] Implement ensureGitHubCLI() function: run `docker exec <container> which gh` after devcontainer build, if not found install via official install script for detected OS in packages/vm-agent/internal/bootstrap/bootstrap.go
-- [ ] T027 [P] [US6] Implement gh wrapper script installation in ensureGitCredentialHelper: move existing gh to gh.real, install wrapper that sets GH_TOKEN via git credential fill before exec gh.real in packages/vm-agent/internal/bootstrap/bootstrap.go
-- [ ] T028 [US6] Add githubId field to CreateWorkspaceRequest payload (API side: include in workspace creation call; VM agent side: read and pass to bootstrap) in apps/api/src/services/task-runner.ts and packages/vm-agent/internal/ types
-- [ ] T029 [US6] Add git identity noreply email fallback: when gitUserEmail is empty, use {githubId}+{sanitized-name}@users.noreply.github.com in ensureGitIdentity in packages/vm-agent/internal/bootstrap/bootstrap.go
-- [ ] T029a [US6] Enhance task status callback to accept executionStep field: when executionStep='awaiting_followup', update task executionStep without changing status and save gitPushResult outputs on the task record. This MUST be deployed before T030 so the API can handle the new callback payload. in apps/api/src/routes/tasks.ts
-- [ ] T030 [US6] Implement agent completion git push flow: on ACP session end, run git status --porcelain, if changes exist git add/commit/push, optionally create PR via gh, then POST callback with executionStep=awaiting_followup and gitPushResult — do NOT stop the container in packages/vm-agent/internal/acp/ (session handler)
+- [x] T026 [P] [US6] Implement ensureGitHubCLI() function: run `docker exec <container> which gh` after devcontainer build, if not found install via official install script for detected OS in packages/vm-agent/internal/bootstrap/bootstrap.go
+- [x] T027 [P] [US6] Implement gh wrapper script installation in ensureGitCredentialHelper: move existing gh to gh.real, install wrapper that sets GH_TOKEN via git credential fill before exec gh.real in packages/vm-agent/internal/bootstrap/bootstrap.go
+- [x] T028 [US6] Add githubId field to CreateWorkspaceRequest payload (API side: include in workspace creation call; VM agent side: read and pass to bootstrap) in apps/api/src/services/task-runner.ts and packages/vm-agent/internal/ types
+- [x] T029 [US6] Add git identity noreply email fallback: when gitUserEmail is empty, use {githubId}+{sanitized-name}@users.noreply.github.com in ensureGitIdentity in packages/vm-agent/internal/bootstrap/bootstrap.go
+- [x] T029a [US6] Enhance task status callback to accept executionStep field: when executionStep='awaiting_followup', update task executionStep without changing status and save gitPushResult outputs on the task record. This MUST be deployed before T030 so the API can handle the new callback payload. in apps/api/src/routes/tasks.ts
+- [x] T030 [US6] Implement agent completion git push flow: on ACP session end, run git status --porcelain, if changes exist git add/commit/push, optionally create PR via gh, then POST callback with executionStep=awaiting_followup and gitPushResult — do NOT stop the container in packages/vm-agent/internal/acp/ (session handler)
 
 **Checkpoint**: GitHub credentials are reliable across all workspace types. Agent pushes changes on completion. Git identity always configured. API accepts the new callback payload.
 

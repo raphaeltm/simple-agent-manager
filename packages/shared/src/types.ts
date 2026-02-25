@@ -818,6 +818,7 @@ export interface BootstrapTokenData {
   githubTokenIv: string | null;
   gitUserName?: string | null;
   gitUserEmail?: string | null;
+  githubId?: string | null;
   createdAt: string;
 }
 
@@ -829,6 +830,7 @@ export interface BootstrapResponse {
   githubToken: string | null;
   gitUserName?: string | null;
   gitUserEmail?: string | null;
+  githubId?: string | null;
   controlPlaneUrl: string;
 }
 

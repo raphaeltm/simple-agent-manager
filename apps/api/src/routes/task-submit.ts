@@ -232,6 +232,13 @@ taskSubmitRoutes.post('/', async (c) => {
     throw errors.internal('Failed to load newly created task');
   }
 
+  // Look up user's githubId for noreply email fallback
+  const [userRow] = await db
+    .select({ githubId: schema.users.githubId })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .limit(1);
+
   // Kick off async execution via waitUntil
   c.executionCtx.waitUntil(
     executeTaskRun(
@@ -247,6 +254,7 @@ taskSubmitRoutes.post('/', async (c) => {
         preferredNodeId: body.nodeId,
         userName: auth.user.name,
         userEmail: auth.user.email,
+        githubId: userRow?.githubId ?? null,
       }
     )
   );

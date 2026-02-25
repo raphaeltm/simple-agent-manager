@@ -669,6 +669,71 @@ tasksRoutes.post('/:taskId/status/callback', async (c) => {
     throw errors.forbidden('Token workspace mismatch');
   }
 
+  // --- Execution-step-only update (no status transition) ---
+  // When executionStep is provided without toStatus, update the step and
+  // optionally persist gitPushResult outputs without changing task status.
+  // This is used by the VM agent to report progress (e.g. awaiting_followup
+  // after the agent pushes code but the task stays running).
+  if (body.executionStep && !body.toStatus) {
+    if (!isTaskExecutionStep(body.executionStep)) {
+      throw errors.badRequest('Invalid executionStep value');
+    }
+
+    const now = new Date().toISOString();
+    const stepUpdate: Partial<schema.NewTask> = {
+      executionStep: body.executionStep,
+      updatedAt: now,
+    };
+
+    // Persist git push result fields into existing task columns
+    if (body.gitPushResult) {
+      // Finalization guard: only save git push results once
+      if (!task.finalizedAt && body.gitPushResult.pushed) {
+        stepUpdate.finalizedAt = now;
+      }
+      if (body.gitPushResult.branchName) {
+        stepUpdate.outputBranch = body.gitPushResult.branchName;
+      }
+      if (body.gitPushResult.prUrl) {
+        stepUpdate.outputPrUrl = body.gitPushResult.prUrl;
+      }
+    }
+
+    if (body.outputBranch !== undefined) {
+      stepUpdate.outputBranch = body.outputBranch?.trim() || null;
+    }
+    if (body.outputPrUrl !== undefined) {
+      stepUpdate.outputPrUrl = body.outputPrUrl?.trim() || null;
+    }
+
+    await db
+      .update(schema.tasks)
+      .set(stepUpdate)
+      .where(eq(schema.tasks.id, task.id));
+
+    // Record activity event for execution step update
+    c.executionCtx.waitUntil(
+      projectDataService.recordActivityEvent(
+        c.env, projectId, 'task.execution_step', 'workspace_callback', payload.workspace,
+        task.workspaceId, null, taskId, {
+          title: task.title,
+          executionStep: body.executionStep,
+          pushed: body.gitPushResult?.pushed ?? false,
+        }
+      ).catch(() => { /* best-effort */ })
+    );
+
+    const [refreshed] = await db
+      .select()
+      .from(schema.tasks)
+      .where(eq(schema.tasks.id, task.id))
+      .limit(1);
+
+    const blocked = await computeBlockedForTask(db, task.id);
+    return c.json(toTaskResponse(refreshed ?? task, blocked));
+  }
+
+  // --- Standard status transition ---
   if (!isTaskStatus(body.toStatus)) {
     throw errors.badRequest('Invalid toStatus value');
   }

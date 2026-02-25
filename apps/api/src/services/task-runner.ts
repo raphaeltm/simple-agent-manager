@@ -56,6 +56,7 @@ export interface TaskRunInput {
   branch?: string;
   userName?: string | null;
   userEmail?: string | null;
+  githubId?: string | null;
 }
 
 export interface TaskRunResult {
@@ -199,6 +200,7 @@ export interface ExecuteTaskRunParams {
   preferredNodeId?: string;
   userName?: string | null;
   userEmail?: string | null;
+  githubId?: string | null;
 }
 
 /**
@@ -229,7 +231,7 @@ export async function executeTaskRun(
   env: Env,
   params: ExecuteTaskRunParams
 ): Promise<void> {
-  const { task, project, userId, vmSize, vmLocation, branch, preferredNodeId, userName, userEmail } = params;
+  const { task, project, userId, vmSize, vmLocation, branch, preferredNodeId, userName, userEmail, githubId } = params;
   const now = () => new Date().toISOString();
   const runStartMs = Date.now();
   let nodeId: string | null = null;
@@ -397,6 +399,7 @@ export async function executeTaskRun(
       callbackToken,
       gitUserName: userName,
       gitUserEmail: userEmail,
+      githubId: githubId,
     });
 
     // NOW transition to delegated — workspace is actually created on the node.
