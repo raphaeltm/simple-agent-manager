@@ -1,8 +1,9 @@
 import { useCallback, useMemo, useState, type FormEvent } from 'react';
 import type { GitHubInstallation } from '@simple-agent-manager/shared';
-import { Button, Input, Spinner } from '@simple-agent-manager/ui';
+import { Button, Input } from '@simple-agent-manager/ui';
 import { listBranches } from '../../lib/api';
 import { RepoSelector } from '../RepoSelector';
+import { BranchSelector } from '../BranchSelector';
 
 export interface ProjectFormValues {
   name: string;
@@ -61,17 +62,18 @@ export function ProjectForm({
   const [branches, setBranches] = useState<Array<{ name: string }>>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [branchesError, setBranchesError] = useState<string | null>(null);
+  const [repoDefaultBranch, setRepoDefaultBranch] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
   const isEditMode = mode === 'edit';
 
-  const fetchBranches = useCallback(async (repository: string, installationId: string) => {
+  const fetchBranches = useCallback(async (repository: string, installationId: string, defBranch?: string) => {
     setBranchesLoading(true);
     setBranches([]);
     setBranchesError(null);
 
     try {
-      const result = await listBranches(repository, installationId || undefined);
+      const result = await listBranches(repository, installationId || undefined, defBranch);
       setBranches(result);
 
       if (result.length === 0) {
@@ -101,11 +103,13 @@ export function ProjectForm({
       if (!repo) {
         setBranches([]);
         setBranchesError(null);
+        setRepoDefaultBranch(undefined);
         return;
       }
 
+      setRepoDefaultBranch(repo.defaultBranch);
       setValues((current) => ({ ...current, defaultBranch: repo.defaultBranch, githubRepoId: repo.githubRepoId }));
-      void fetchBranches(repo.fullName, values.installationId);
+      void fetchBranches(repo.fullName, values.installationId, repo.defaultBranch);
     },
     [fetchBranches, values.installationId]
   );
@@ -246,41 +250,16 @@ export function ProjectForm({
 
       <label htmlFor="project-default-branch" style={{ display: 'grid', gap: '0.375rem' }}>
         <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Default branch</span>
-        <div style={{ position: 'relative' }}>
-          {!isEditMode && branches.length > 0 ? (
-            <select
-              id="project-default-branch"
-              value={values.defaultBranch}
-              onChange={(event) => handleChange('defaultBranch', event.currentTarget.value)}
-              disabled={submitting}
-              style={selectStyle}
-            >
-              {branches.map((branch) => (
-                <option key={branch.name} value={branch.name}>
-                  {branch.name}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <Input
-              id="project-default-branch"
-              value={values.defaultBranch}
-              onChange={(event) => handleChange('defaultBranch', event.currentTarget.value)}
-              placeholder="main"
-              disabled={submitting}
-            />
-          )}
-          {!isEditMode && branchesLoading && (
-            <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }}>
-              <Spinner size="sm" />
-            </div>
-          )}
-        </div>
-        {!isEditMode && branchesError && (
-          <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
-            {branchesError}
-          </span>
-        )}
+        <BranchSelector
+          id="project-default-branch"
+          branches={branches}
+          value={values.defaultBranch}
+          onChange={(val) => handleChange('defaultBranch', val)}
+          defaultBranch={repoDefaultBranch}
+          loading={!isEditMode && branchesLoading}
+          error={!isEditMode ? branchesError : null}
+          disabled={submitting}
+        />
       </label>
 
       {error && (

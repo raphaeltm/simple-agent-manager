@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { UserMenu } from '../components/UserMenu';
 import { RepoSelector } from '../components/RepoSelector';
+import { BranchSelector } from '../components/BranchSelector';
 import {
   createWorkspace,
   getProject,
@@ -121,6 +122,7 @@ export function CreateWorkspace() {
   const [branches, setBranches] = useState<Array<{ name: string }>>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [branchesError, setBranchesError] = useState<string | null>(null);
+  const [repoDefaultBranch, setRepoDefaultBranch] = useState<string | undefined>(undefined);
   const [installationId, setInstallationId] = useState('');
   const [vmSize, setVmSize] = useState('medium');
   const [vmLocation, setVmLocation] = useState('nbg1');
@@ -170,11 +172,15 @@ export function CreateWorkspace() {
         setLinkedProject(proj);
         setName(`${proj.name} Workspace`);
         setRepository(proj.repository);
-        setBranch(proj.defaultBranch ?? 'main');
+        const defBranch = proj.defaultBranch ?? 'main';
+        setBranch(defBranch);
+        setRepoDefaultBranch(defBranch);
         setInstallationId(proj.installationId);
         if (proj.defaultVmSize) {
           setVmSize(proj.defaultVmSize);
         }
+        // Fetch branches even when project-linked so the selector has data
+        void fetchBranches(proj.repository, proj.installationId, defBranch);
       })
       .catch(() => {
         // Project fetch failed — continue without project context
@@ -183,12 +189,12 @@ export function CreateWorkspace() {
 
   const checkingPrereqs = hetznerStatus === 'loading' || githubStatus === 'loading';
 
-  const fetchBranches = useCallback(async (fullName: string, instId: string) => {
+  const fetchBranches = useCallback(async (fullName: string, instId: string, defBranch?: string) => {
     setBranchesLoading(true);
     setBranches([]);
     setBranchesError(null);
     try {
-      const result = await listBranches(fullName, instId || undefined);
+      const result = await listBranches(fullName, instId || undefined, defBranch);
       setBranches(result);
 
       // If no branches returned (shouldn't happen), add common defaults
@@ -210,9 +216,11 @@ export function CreateWorkspace() {
     (repo: { fullName: string; defaultBranch: string } | null) => {
       if (repo) {
         setBranch(repo.defaultBranch);
-        void fetchBranches(repo.fullName, installationId);
+        setRepoDefaultBranch(repo.defaultBranch);
+        void fetchBranches(repo.fullName, installationId, repo.defaultBranch);
       } else {
         setBranches([]);
+        setRepoDefaultBranch(undefined);
       }
     },
     [fetchBranches, installationId]
@@ -391,47 +399,15 @@ export function CreateWorkspace() {
             <label htmlFor="branch" style={labelStyle}>
               Branch
             </label>
-            <div style={{ position: 'relative' }}>
-              {isProjectLinked ? (
-                <Input
-                  id="branch"
-                  type="text"
-                  value={branch}
-                  onChange={(e) => setBranch(e.target.value)}
-                  placeholder="main"
-                />
-              ) : branches.length > 0 ? (
-                <Select
-                  id="branch"
-                  value={branch}
-                  onChange={(e) => setBranch(e.target.value)}
-                >
-                  {branches.map((b) => (
-                    <option key={b.name} value={b.name}>
-                      {b.name}
-                    </option>
-                  ))}
-                </Select>
-              ) : (
-                <Input
-                  id="branch"
-                  type="text"
-                  value={branch}
-                  onChange={(e) => setBranch(e.target.value)}
-                  placeholder="main"
-                />
-              )}
-              {branchesLoading && (
-                <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }}>
-                  <Spinner size="sm" />
-                </div>
-              )}
-            </div>
-            {branchesError && (
-              <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
-                {branchesError}
-              </p>
-            )}
+            <BranchSelector
+              id="branch"
+              branches={branches}
+              value={branch}
+              onChange={setBranch}
+              defaultBranch={repoDefaultBranch}
+              loading={branchesLoading}
+              error={branchesError}
+            />
           </div>
 
           <div>
