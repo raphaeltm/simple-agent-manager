@@ -5,7 +5,16 @@ import { Alert, Button, PageLayout, Skeleton } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { useToast } from '../hooks/useToast';
 import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
-import { deleteNode, getNode, listNodeEvents, listWorkspaces, stopNode } from '../lib/api';
+import {
+  deleteNode,
+  deleteWorkspace,
+  getNode,
+  listNodeEvents,
+  listWorkspaces,
+  restartWorkspace,
+  stopNode,
+  stopWorkspace,
+} from '../lib/api';
 import { NodeOverviewSection } from '../components/node/NodeOverviewSection';
 import { SystemResourcesSection } from '../components/node/SystemResourcesSection';
 import { DockerSection } from '../components/node/DockerSection';
@@ -131,6 +140,48 @@ export function Node() {
     }).catch((err) => {
       setEventsError(err instanceof Error ? err.message : 'Failed to load events');
     });
+  };
+
+  const handleStopWorkspace = async (workspaceId: string) => {
+    try {
+      setWorkspaces((ws) =>
+        ws.map((w) => (w.id === workspaceId ? { ...w, status: 'stopping' as const } : w))
+      );
+      await stopWorkspace(workspaceId);
+      toast.success('Workspace stopping');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to stop workspace');
+      void loadNode();
+    }
+  };
+
+  const handleRestartWorkspace = async (workspaceId: string) => {
+    try {
+      setWorkspaces((ws) =>
+        ws.map((w) => (w.id === workspaceId ? { ...w, status: 'creating' as const } : w))
+      );
+      await restartWorkspace(workspaceId);
+      toast.success('Workspace restarting');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to restart workspace');
+      void loadNode();
+    }
+  };
+
+  const handleDeleteWorkspace = async (workspaceId: string) => {
+    const ws = workspaces.find((w) => w.id === workspaceId);
+    const confirmed = window.confirm(
+      `Delete workspace "${ws?.displayName || ws?.name || workspaceId}"? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await deleteWorkspace(workspaceId);
+      setWorkspaces((prev) => prev.filter((w) => w.id !== workspaceId));
+      toast.success('Workspace deleted');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete workspace');
+    }
   };
 
   return (
@@ -279,8 +330,10 @@ export function Node() {
 
           <NodeWorkspacesSection
             workspaces={workspaces}
-            onNavigate={(wsId) => navigate(`/workspaces/${wsId}`)}
             onCreateWorkspace={() => navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })}
+            onStop={handleStopWorkspace}
+            onRestart={handleRestartWorkspace}
+            onDelete={handleDeleteWorkspace}
           />
 
           <NodeEventsSection

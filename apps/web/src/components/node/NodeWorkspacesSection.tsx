@@ -1,20 +1,24 @@
 import type { FC } from 'react';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Monitor } from 'lucide-react';
-import { StatusBadge } from '@simple-agent-manager/ui';
 import { SectionHeader } from './SectionHeader';
 import { Section } from './Section';
+import { WorkspaceCard } from '../WorkspaceCard';
 
 interface NodeWorkspacesSectionProps {
   workspaces: WorkspaceResponse[];
-  onNavigate: (workspaceId: string) => void;
   onCreateWorkspace: () => void;
+  onStop?: (id: string) => void;
+  onRestart?: (id: string) => void;
+  onDelete?: (id: string) => void;
 }
 
 export const NodeWorkspacesSection: FC<NodeWorkspacesSectionProps> = ({
   workspaces,
-  onNavigate,
   onCreateWorkspace,
+  onStop,
+  onRestart,
+  onDelete,
 }) => {
   return (
     <Section>
@@ -56,51 +60,13 @@ export const NodeWorkspacesSection: FC<NodeWorkspacesSectionProps> = ({
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-2)' }}>
           {workspaces.map((ws) => (
-            <button
+            <WorkspaceCard
               key={ws.id}
-              onClick={() => onNavigate(ws.id)}
-              className="sam-hover-inset"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 'var(--sam-space-3)',
-                padding: 'var(--sam-space-3)',
-                border: '1px solid var(--sam-color-border-default)',
-                borderRadius: 'var(--sam-radius-md)',
-                backgroundColor: 'transparent',
-                cursor: 'pointer',
-                textAlign: 'left',
-                width: '100%',
-              }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 'var(--sam-type-secondary-size)',
-                    fontWeight: 500,
-                    color: 'var(--sam-color-fg-primary)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {ws.displayName || ws.name}
-                </div>
-                <div
-                  style={{
-                    fontSize: 'var(--sam-type-caption-size)',
-                    color: 'var(--sam-color-fg-muted)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {ws.repository}
-                  {ws.branch && ws.branch !== 'main' ? ` @ ${ws.branch}` : ''}
-                </div>
-              </div>
-              <StatusBadge status={ws.status} />
-            </button>
+              workspace={ws}
+              onStop={onStop}
+              onRestart={onRestart}
+              onDelete={onDelete}
+            />
           ))}
         </div>
       )}
