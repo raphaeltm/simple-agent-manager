@@ -543,4 +543,85 @@ describe('Admin Observability Routes', () => {
       expect(body.error).toBe('CF_API_ERROR');
     });
   });
+
+  // ===========================================================================
+  // GET /api/admin/observability/logs/stream (WebSocket upgrade)
+  // ===========================================================================
+  describe('GET /api/admin/observability/logs/stream', () => {
+    it('should return 400 when Upgrade header is missing', async () => {
+      const mockDoStub = { fetch: vi.fn() };
+      const mockIdFromName = vi.fn().mockReturnValue('do-id');
+      const mockGet = vi.fn().mockReturnValue(mockDoStub);
+
+      const res = await app.request('/api/admin/observability/logs/stream', {}, createEnv({
+        ADMIN_LOGS: { idFromName: mockIdFromName, get: mockGet } as unknown as DurableObjectNamespace,
+      }));
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.message).toContain('WebSocket upgrade required');
+      expect(mockDoStub.fetch).not.toHaveBeenCalled();
+    });
+
+    it('should forward WebSocket upgrade to AdminLogs DO', async () => {
+      const mockDoResponse = new Response(null, { status: 101 });
+      const mockDoStub = { fetch: vi.fn().mockResolvedValue(mockDoResponse) };
+      const mockIdFromName = vi.fn().mockReturnValue('do-id');
+      const mockGet = vi.fn().mockReturnValue(mockDoStub);
+
+      const res = await app.request('/api/admin/observability/logs/stream', {
+        headers: { Upgrade: 'websocket' },
+      }, createEnv({
+        ADMIN_LOGS: { idFromName: mockIdFromName, get: mockGet } as unknown as DurableObjectNamespace,
+      }));
+
+      expect(mockIdFromName).toHaveBeenCalledWith('admin-logs');
+      expect(mockGet).toHaveBeenCalledWith('do-id');
+      expect(mockDoStub.fetch).toHaveBeenCalledTimes(1);
+
+      // Verify the DO receives a request with /ws path
+      const doRequest = mockDoStub.fetch.mock.calls[0][0] as Request;
+      expect(new URL(doRequest.url).pathname).toBe('/ws');
+    });
+  });
+
+  // ===========================================================================
+  // POST /api/admin/observability/logs/ingest (Tail Worker ingestion)
+  // ===========================================================================
+  describe('POST /api/admin/observability/logs/ingest', () => {
+    it('should forward log entries to AdminLogs DO', async () => {
+      const mockDoResponse = new Response('OK', { status: 200 });
+      const mockDoStub = { fetch: vi.fn().mockResolvedValue(mockDoResponse) };
+      const mockIdFromName = vi.fn().mockReturnValue('do-id');
+      const mockGet = vi.fn().mockReturnValue(mockDoStub);
+
+      const logs = [{
+        type: 'log',
+        entry: {
+          timestamp: '2026-02-14T12:00:00Z',
+          level: 'info',
+          event: 'test',
+          message: 'test log',
+          details: {},
+          scriptName: 'test-worker',
+        },
+      }];
+
+      const res = await app.request('/api/admin/observability/logs/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ logs }),
+      }, createEnv({
+        ADMIN_LOGS: { idFromName: mockIdFromName, get: mockGet } as unknown as DurableObjectNamespace,
+      }));
+
+      expect(res.status).toBe(200);
+      expect(mockIdFromName).toHaveBeenCalledWith('admin-logs');
+      expect(mockDoStub.fetch).toHaveBeenCalledTimes(1);
+
+      // Verify the DO receives a request with /ingest path
+      const doRequest = mockDoStub.fetch.mock.calls[0][0] as Request;
+      expect(new URL(doRequest.url).pathname).toBe('/ingest');
+    });
+  });
 });

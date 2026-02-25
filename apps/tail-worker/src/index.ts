@@ -80,8 +80,17 @@ export default {
     if (logEntries.length === 0) return;
 
     // Forward to AdminLogs DO via the API Worker service binding
-    // Implementation will be completed in Phase 6 (US4) when AdminLogs DO exists
-    // For now, just log the count for verification
-    console.log(`[tail-worker] Processed ${logEntries.length} log entries`);
+    if (env.API_WORKER) {
+      try {
+        await env.API_WORKER.fetch('https://internal/api/admin/observability/logs/ingest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ logs: logEntries }),
+        });
+      } catch (err) {
+        // Fail silently — tail workers must not throw
+        console.error('[tail-worker] Failed to forward logs to AdminLogs DO:', err);
+      }
+    }
   },
 };

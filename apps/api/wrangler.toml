@@ -55,6 +55,11 @@ class_name = "ProjectData"
 name = "NODE_LIFECYCLE"
 class_name = "NodeLifecycle"
 
+# Durable Object for admin real-time log streaming (singleton — spec 023)
+[[durable_objects.bindings]]
+name = "ADMIN_LOGS"
+class_name = "AdminLogs"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ProjectData"]
@@ -62,6 +67,10 @@ new_sqlite_classes = ["ProjectData"]
 [[migrations]]
 tag = "v2"
 new_classes = ["NodeLifecycle"]
+
+[[migrations]]
+tag = "v3"
+new_classes = ["AdminLogs"]
 
 # Workers AI for speech-to-text transcription
 [ai]
@@ -94,6 +103,11 @@ bucket_name = "workspaces-staging-assets"
 
 [env.staging.ai]
 binding = "AI"
+
+# Tail Worker for real-time log streaming (spec 023 — US4)
+# NOTE: tail_consumers MUST NOT be in default config — it breaks Vitest (Cloudflare issue #9343)
+[[env.staging.tail_consumers]]
+service = "sam-tail-worker-staging"
 
 [env.production]
 name = "sam-api-prod"
@@ -128,6 +142,10 @@ bucket_name = "workspaces-assets"
 
 [env.production.ai]
 binding = "AI"
+
+# Tail Worker for real-time log streaming (spec 023 — US4)
+[[env.production.tail_consumers]]
+service = "sam-tail-worker-prod"
 
 # Cron trigger for provisioning timeout checks + warm node cleanup (every 5 minutes)
 [triggers]

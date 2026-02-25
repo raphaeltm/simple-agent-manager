@@ -1,6 +1,7 @@
 // Re-export Durable Object classes for Cloudflare Workers runtime
 export { ProjectData } from './durable-objects/project-data';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
+export { AdminLogs } from './durable-objects/admin-logs';
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';

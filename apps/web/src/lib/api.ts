@@ -1263,6 +1263,15 @@ export interface AdminLogQueryParams {
   cursor?: string | null;
 }
 
+/**
+ * Build the WebSocket URL for the admin real-time log stream.
+ * Auth cookie is sent automatically via the WebSocket connection.
+ */
+export function getAdminLogStreamUrl(): string {
+  const base = API_URL.replace(/^http/, 'ws');
+  return `${base}/api/admin/observability/logs/stream`;
+}
+
 export async function queryAdminLogs(
   params: AdminLogQueryParams
 ): Promise<LogQueryResponse> {

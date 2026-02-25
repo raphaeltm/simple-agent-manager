@@ -1,13 +1,5 @@
-import { Card, Body } from '@simple-agent-manager/ui';
+import { LogStream } from '../components/admin/LogStream';
 
 export function AdminStream() {
-  return (
-    <Card>
-      <div style={{ padding: 'var(--sam-space-6)', textAlign: 'center' }}>
-        <Body style={{ color: 'var(--sam-color-fg-muted)' }}>
-          Real-time log stream coming soon.
-        </Body>
-      </div>
-    </Card>
-  );
+  return <LogStream />;
 }

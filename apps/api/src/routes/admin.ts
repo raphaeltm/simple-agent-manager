@@ -380,4 +380,51 @@ adminRoutes.post('/observability/logs/query', async (c) => {
   }
 });
 
+/**
+ * GET /api/admin/observability/logs/stream - WebSocket upgrade for real-time log stream
+ *
+ * Auth is validated on the HTTP upgrade request. The WebSocket connection is
+ * forwarded to the AdminLogs DO singleton for hibernatable handling.
+ */
+adminRoutes.get('/observability/logs/stream', async (c) => {
+  const upgradeHeader = c.req.header('Upgrade');
+  if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
+    throw errors.badRequest('WebSocket upgrade required');
+  }
+
+  // Forward the upgrade request to the AdminLogs DO singleton
+  const doId = c.env.ADMIN_LOGS.idFromName('admin-logs');
+  const doStub = c.env.ADMIN_LOGS.get(doId);
+
+  // Rewrite the URL path to /ws for the DO handler
+  const doUrl = new URL(c.req.url);
+  doUrl.pathname = '/ws';
+
+  return doStub.fetch(new Request(doUrl.toString(), c.req.raw));
+});
+
+/**
+ * POST /api/admin/observability/logs/ingest - Internal endpoint for Tail Worker
+ *
+ * Receives batched log entries from the Tail Worker and forwards them
+ * to the AdminLogs DO for broadcasting to connected WebSocket clients.
+ * This endpoint is called via service binding, not external HTTP.
+ */
+adminRoutes.post('/observability/logs/ingest', async (c) => {
+  const doId = c.env.ADMIN_LOGS.idFromName('admin-logs');
+  const doStub = c.env.ADMIN_LOGS.get(doId);
+
+  // Forward the request body to the DO's /ingest endpoint
+  const doUrl = new URL(c.req.url);
+  doUrl.pathname = '/ingest';
+
+  const response = await doStub.fetch(new Request(doUrl.toString(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: c.req.raw.body,
+  }));
+
+  return new Response(response.body, { status: response.status });
+});
+
 export { adminRoutes };
