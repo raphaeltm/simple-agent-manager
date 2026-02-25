@@ -200,16 +200,16 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T069 [P] [US5] Unit test for `getErrorTrends()` service in `apps/api/tests/unit/services/observability-trends.test.ts` — test time bucketing (5m/1h/1d intervals), source grouping, auto-interval selection from range, empty bucket handling, boundary conditions
-- [ ] T070 [P] [US5] Unit test for trends route in `apps/api/tests/unit/routes/admin-observability.test.ts` — test `GET /api/admin/observability/errors/trends`: auth enforcement, query param validation (range, interval), response shape per contract
-- [ ] T071 [P] [US5] Unit test for `ErrorTrends` component in `apps/web/tests/unit/components/admin/error-trends.test.tsx` — test chart rendering with source breakdown, time range selector, empty state, loading state, data update on range change
+- [x] T069 [P] [US5] Unit test for `getErrorTrends()` service in `apps/api/tests/unit/services/observability-trends.test.ts` — test time bucketing (5m/1h/1d intervals), source grouping, auto-interval selection from range, empty bucket handling, boundary conditions
+- [x] T070 [P] [US5] Unit test for trends route in `apps/api/tests/unit/routes/admin-observability.test.ts` — test `GET /api/admin/observability/errors/trends`: auth enforcement, query param validation (range, interval), response shape per contract
+- [x] T071 [P] [US5] Unit test for `ErrorTrends` component in `apps/web/tests/unit/components/admin/error-trends.test.tsx` — test chart rendering with source breakdown, time range selector, empty state, loading state, data update on range change
 
 ### Implementation for User Story 5
 
-- [ ] T072 [US5] Implement `getErrorTrends()` function in `apps/api/src/services/observability.ts` — query `OBSERVABILITY_DATABASE` with GROUP BY time bucket and source, apply auto-interval mapping (1h→5m, 24h→1h, 7d→1d, 30d→1d), return `ErrorTrendResponse` with `{ range, interval, buckets }` per contract
-- [ ] T073 [US5] Add `GET /api/admin/observability/errors/trends` route in the observability sub-router in `apps/api/src/routes/admin.ts` — validate range/interval params, call `getErrorTrends()`, return response
-- [ ] T074 [P] [US5] Create `ErrorTrends` component in `apps/web/src/components/admin/ErrorTrends.tsx` — time range selector buttons (1h/24h/7d/30d), stacked bar chart or area chart showing error counts by source (client=blue, vm-agent=orange, api=red) per time bucket, responsive sizing, empty state
-- [ ] T075 [US5] Wire `ErrorTrends` into the "Overview" tab below `HealthOverview` in `apps/web/src/pages/Admin.tsx` or `apps/web/src/components/admin/AdminTabs.tsx` — trends chart appears below the health summary cards
+- [x] T072 [US5] Implement `getErrorTrends()` function in `apps/api/src/services/observability.ts` — query `OBSERVABILITY_DATABASE` with GROUP BY time bucket and source, apply auto-interval mapping (1h→5m, 24h→1h, 7d→1d, 30d→1d), return `ErrorTrendResponse` with `{ range, interval, buckets }` per contract
+- [x] T073 [US5] Add `GET /api/admin/observability/errors/trends` route in the observability sub-router in `apps/api/src/routes/admin.ts` — validate range/interval params, call `getErrorTrends()`, return response
+- [x] T074 [P] [US5] Create `ErrorTrends` component in `apps/web/src/components/admin/ErrorTrends.tsx` — time range selector buttons (1h/24h/7d/30d), stacked bar chart or area chart showing error counts by source (client=blue, vm-agent=orange, api=red) per time bucket, responsive sizing, empty state
+- [x] T075 [US5] Wire `ErrorTrends` into the "Overview" tab below `HealthOverview` in `apps/web/src/pages/Admin.tsx` or `apps/web/src/components/admin/AdminTabs.tsx` — trends chart appears below the health summary cards
 
 **Checkpoint**: Admin sees error trend chart on the Overview tab with source-colored bars/areas over time. Changing time range updates the chart.
 
