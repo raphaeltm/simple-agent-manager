@@ -152,10 +152,10 @@
 
 **Purpose**: Clean up old navigation, ensure type safety, verify no regressions.
 
-- [ ] T041 Hide old project tab routes from navigation: keep route handlers in App.tsx for direct URL access but remove tab UI and default redirects to old tabs in apps/web/src/App.tsx
-- [ ] T042 [P] Update CLAUDE.md Recent Changes section with 022-simplified-chat-ux feature summary in CLAUDE.md
-- [ ] T043 [P] Run pnpm typecheck across all packages and fix any type errors introduced by the changes
-- [ ] T044 Run pnpm test and pnpm lint across all packages and fix any regressions
+- [x] T041 Hide old project tab routes from navigation: keep route handlers in App.tsx for direct URL access but remove tab UI and default redirects to old tabs in apps/web/src/App.tsx
+- [x] T042 [P] Update CLAUDE.md Recent Changes section with 022-simplified-chat-ux feature summary in CLAUDE.md
+- [x] T043 [P] Run pnpm typecheck across all packages and fix any type errors introduced by the changes
+- [x] T044 Run pnpm test and pnpm lint across all packages and fix any regressions
 
 ---
 
