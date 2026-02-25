@@ -213,6 +213,82 @@ func (s *Server) handleGitFile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GitBranchListResponse contains remote branches available in the repository.
+type GitBranchListResponse struct {
+	Branches []GitBranchInfo `json:"branches"`
+}
+
+// GitBranchInfo represents a single branch name.
+type GitBranchInfo struct {
+	Name string `json:"name"`
+}
+
+// handleGitBranches returns the list of remote branches available in the workspace repository.
+// GET /workspaces/{workspaceId}/git/branches
+func (s *Server) handleGitBranches(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		return
+	}
+
+	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
+		return
+	}
+
+	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	workDir, err = s.resolveWorktreeWorkDir(r, workspaceID, containerID, user, workDir)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), s.config.GitExecTimeout)
+	defer cancel()
+
+	stdout, _, err := s.execInContainer(ctx, containerID, user, workDir, "git", "branch", "-r", "--format=%(refname:short)")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("git branch failed: %v", err))
+		return
+	}
+
+	branches := parseRemoteBranches(stdout)
+	writeJSON(w, http.StatusOK, GitBranchListResponse{Branches: branches})
+}
+
+// parseRemoteBranches parses the output of `git branch -r --format='%(refname:short)'`
+// and returns deduplicated, sorted branch names with the origin/ prefix stripped.
+func parseRemoteBranches(output string) []GitBranchInfo {
+	seen := make(map[string]bool)
+	var branches []GitBranchInfo
+
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Strip origin/ prefix
+		name := strings.TrimPrefix(line, "origin/")
+
+		// Skip HEAD pointer (e.g., "origin/HEAD -> origin/main")
+		if strings.HasPrefix(name, "HEAD") {
+			continue
+		}
+
+		if !seen[name] {
+			seen[name] = true
+			branches = append(branches, GitBranchInfo{Name: name})
+		}
+	}
+
+	return branches
+}
+
 // ---------- Helpers ----------
 
 // sanitizeFilePath validates that a file path is safe for use in git commands.
