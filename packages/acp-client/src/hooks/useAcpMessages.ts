@@ -252,13 +252,32 @@ export function useAcpMessages(): AcpMessagesHandle {
         }
 
         case 'user_message_chunk': {
-          // Replayed user messages from LoadSession — render as regular user bubbles
+          // User messages arrive here from two sources:
+          // 1. LoadSession replay (restoring conversation on reconnect)
+          // 2. Synthetic injection by the VM agent during live prompts
+          //    (so the replay buffer and Durable Object have user messages)
+          //
+          // In the live case, addUserMessage() has already added the message
+          // to the items list for instant UX. Deduplicate by checking if a
+          // recent user_message with matching text already exists.
           const content = update as { content?: { type: string; text?: string } };
           const text = content.content?.type === 'text' ? (content.content.text ?? '') : '';
           if (text) {
-            setItems((prev) =>
-              enforceItemCap([...prev, { kind: 'user_message', id: nextId(), text, timestamp: now }]),
-            );
+            setItems((prev) => {
+              // Deduplicate: check last few items for a matching user message.
+              // The addUserMessage call happens right before session/prompt is
+              // sent, so the matching item is typically the last one or close.
+              for (let i = prev.length - 1; i >= Math.max(0, prev.length - 5); i--) {
+                const item = prev[i]!;
+                if (item.kind === 'user_message' && item.text === text) {
+                  return prev; // Already present — skip duplicate
+                }
+                // Stop scanning once we hit a non-user item (agent response
+                // or tool call means the user message is from a prior turn).
+                if (item.kind !== 'user_message') break;
+              }
+              return enforceItemCap([...prev, { kind: 'user_message', id: nextId(), text, timestamp: now }]);
+            });
           }
           break;
         }

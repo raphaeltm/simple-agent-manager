@@ -640,4 +640,64 @@ describe('useAcpMessages user_message_chunk (LoadSession replay)', () => {
     expect(result.current.items[0]!.kind).toBe('user_message');
     expect(result.current.items[1]!.kind).toBe('agent_message');
   });
+
+  it('deduplicates user_message_chunk when addUserMessage was called first', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    // Simulate the live prompt flow: addUserMessage is called first for
+    // instant UX, then the synthetic user_message_chunk arrives from the
+    // VM agent via the WebSocket.
+    act(() => {
+      result.current.addUserMessage('Fix the bug');
+    });
+    expect(result.current.items).toHaveLength(1);
+
+    act(() => {
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: 'Fix the bug' },
+      }));
+    });
+
+    // Should still be 1 — the duplicate was suppressed.
+    expect(result.current.items).toHaveLength(1);
+    expect(result.current.items[0]!.kind).toBe('user_message');
+    if (result.current.items[0]!.kind === 'user_message') {
+      expect(result.current.items[0]!.text).toBe('Fix the bug');
+    }
+  });
+
+  it('allows user_message_chunk with different text through dedup', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    act(() => {
+      result.current.addUserMessage('First message');
+    });
+
+    // A different user_message_chunk should NOT be deduped.
+    act(() => {
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: 'Different message from replay' },
+      }));
+    });
+
+    expect(result.current.items).toHaveLength(2);
+  });
+
+  it('allows user_message_chunk during replay (no prior addUserMessage)', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    // During LoadSession replay, there's no prior addUserMessage call —
+    // user_message_chunk should go through normally.
+    act(() => {
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: 'Replayed user message' },
+      }));
+    });
+
+    expect(result.current.items).toHaveLength(1);
+    expect(result.current.items[0]!.kind).toBe('user_message');
+  });
 });
