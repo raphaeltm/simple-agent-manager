@@ -106,7 +106,7 @@ OBSERVABILITY_LOG_QUERY_RATE_LIMIT=30
 | `apps/api/wrangler.toml` | D1 binding, tail_consumers, DO binding |
 | `apps/web/src/pages/Admin.tsx` | Tab navigation |
 | `apps/web/src/lib/api.ts` | Admin observability API functions |
-| `packages/shared/src/types/admin.ts` | Observability types |
+| `packages/shared/src/types.ts` | Observability types |
 | `infra/resources/database.ts` | Observability D1 resource |
 | `infra/index.ts` | Export observability DB outputs |
 | `scripts/deploy/sync-wrangler-config.ts` | Sync both D1 bindings |

@@ -173,7 +173,7 @@
 - [x] T057 [P] [US4] Unit test for stream WebSocket upgrade route in `apps/api/tests/unit/routes/admin-observability.test.ts` — test `GET /api/admin/observability/logs/stream`: auth enforcement on upgrade, DO stub forwarding, non-WebSocket request rejection
 - [x] T058 [P] [US4] Unit test for `LogStream` component in `apps/web/tests/unit/components/admin/log-stream.test.tsx` — test connection status indicator (connected/reconnecting/disconnected), log entry rendering, pause/resume button, filter controls, auto-scroll behavior, buffer size limit
 - [x] T059 [P] [US4] Unit test for `useAdminLogStream` hook in `apps/web/tests/unit/hooks/useAdminLogStream.test.ts` — test WebSocket connection lifecycle, message parsing, filter message sending, pause/resume state, reconnection with exponential backoff, buffer management during pause
-- [ ] T060 [P] [US4] Workers integration test for AdminLogs DO in `apps/api/tests/workers/admin-logs-do.test.ts` — test real DO with Miniflare: WebSocket upgrade, event broadcast, multi-client filtering (uses `@cloudflare/vitest-pool-workers` with `isolatedStorage: false` per existing project-data-do.test.ts pattern)
+- [x] T060 [P] [US4] Workers integration test for AdminLogs DO in `apps/api/tests/workers/admin-logs-do.test.ts` — test real DO with Miniflare: WebSocket upgrade, event broadcast, multi-client filtering (uses `@cloudflare/vitest-pool-workers` with `isolatedStorage: false` per existing project-data-do.test.ts pattern)
 
 ### Implementation for User Story 4
 
@@ -219,15 +219,15 @@
 
 **Purpose**: E2E tests, documentation sync, deploy script validation, and final quality pass.
 
-- [ ] T076 [P] E2E test: admin observability errors flow in `apps/web/tests/e2e/admin-observability.spec.ts` — Playwright test: login as superadmin, navigate to Admin page, verify tabs render, switch to Errors tab, verify error list loads, apply filter, verify filtered results, paginate
-- [ ] T077 [P] E2E test: admin health overview in `apps/web/tests/e2e/admin-observability.spec.ts` — Playwright test: navigate to Overview tab, verify 4 health cards render with numeric values, verify error trends chart renders
-- [ ] T078 [P] E2E test: admin log viewer in `apps/web/tests/e2e/admin-observability.spec.ts` — Playwright test: navigate to Logs tab, verify log entries load from CF API proxy, apply level filter, verify filter takes effect
-- [ ] T079 [P] E2E test: admin log stream in `apps/web/tests/e2e/admin-observability.spec.ts` — Playwright test: navigate to Stream tab, verify connection status shows "Connected", verify pause/resume button works
-- [ ] T080 Update `CLAUDE.md` Active Technologies section to include Tail Workers and OBSERVABILITY_DATABASE
-- [ ] T081 Update `apps/api/.env.example` with new env vars: `CF_ACCOUNT_ID`, all `OBSERVABILITY_*` config vars with default values and comments
-- [ ] T082 [P] Verify CI pipeline runs all new tests: run `pnpm test` from repo root, confirm unit tests pass; run `pnpm test:workers` for DO integration tests; confirm no regressions
-- [ ] T083 Run `pnpm lint && pnpm typecheck && pnpm build` from repo root — fix any errors across all packages
-- [ ] T084 Run quickstart.md validation — verify each phase's "Verify" step can be executed against staging deployment
+- [x] T076 [P] E2E test: admin observability errors flow in `apps/web/tests/e2e/admin-observability.spec.ts` — Playwright test: login as superadmin, navigate to Admin page, verify tabs render, switch to Errors tab, verify error list loads, apply filter, verify filtered results, paginate
+- [x] T077 [P] E2E test: admin health overview in `apps/web/tests/e2e/admin-observability.spec.ts` — Playwright test: navigate to Overview tab, verify 4 health cards render with numeric values, verify error trends chart renders
+- [x] T078 [P] E2E test: admin log viewer in `apps/web/tests/e2e/admin-observability.spec.ts` — Playwright test: navigate to Logs tab, verify log entries load from CF API proxy, apply level filter, verify filter takes effect
+- [x] T079 [P] E2E test: admin log stream in `apps/web/tests/e2e/admin-observability.spec.ts` — Playwright test: navigate to Stream tab, verify connection status shows "Connected", verify pause/resume button works
+- [x] T080 Update `CLAUDE.md` Active Technologies section to include Tail Workers and OBSERVABILITY_DATABASE
+- [x] T081 Update `apps/api/.env.example` with new env vars: `CF_ACCOUNT_ID`, all `OBSERVABILITY_*` config vars with default values and comments
+- [x] T082 [P] Verify CI pipeline runs all new tests: run `pnpm test` from repo root, confirm unit tests pass; run `pnpm test:workers` for DO integration tests; confirm no regressions
+- [x] T083 Run `pnpm lint && pnpm typecheck && pnpm build` from repo root — fix any errors across all packages
+- [x] T084 Run quickstart.md validation — verify each phase's "Verify" step can be executed against staging deployment
 
 ---
 
