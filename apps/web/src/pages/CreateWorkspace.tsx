@@ -443,46 +443,48 @@ export function CreateWorkspace() {
             </div>
           )}
 
-          <div>
-            <label style={{ ...labelStyle, marginBottom: '0.5rem' }}>VM Size</label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--sam-space-3)' }}>
-              {VM_SIZES.map((size) => (
-                <button
-                  key={size.value}
-                  type="button"
-                  aria-pressed={vmSize === size.value}
-                  onClick={() => setVmSize(size.value)}
-                  style={{
-                    padding: 'var(--sam-space-3)',
-                    border:
-                      vmSize === size.value
-                        ? '2px solid var(--sam-color-accent-primary)'
-                        : '1px solid var(--sam-color-border-default)',
-                    borderRadius: 'var(--sam-radius-md)',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    backgroundColor:
-                      vmSize === size.value
-                        ? 'var(--sam-color-accent-primary-tint)'
-                        : 'var(--sam-color-bg-inset)',
-                    color: 'var(--sam-color-fg-primary)',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  <div style={{ fontWeight: 500 }}>{size.label}</div>
-                  <div
+          {!selectedNodeId && (
+            <div>
+              <label style={{ ...labelStyle, marginBottom: '0.5rem' }}>VM Size</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--sam-space-3)' }}>
+                {VM_SIZES.map((size) => (
+                  <button
+                    key={size.value}
+                    type="button"
+                    aria-pressed={vmSize === size.value}
+                    onClick={() => setVmSize(size.value)}
                     style={{
-                      fontSize: 'var(--sam-type-caption-size)',
-                      color: 'var(--sam-color-fg-muted)',
-                      marginTop: '0.125rem',
+                      padding: 'var(--sam-space-3)',
+                      border:
+                        vmSize === size.value
+                          ? '2px solid var(--sam-color-accent-primary)'
+                          : '1px solid var(--sam-color-border-default)',
+                      borderRadius: 'var(--sam-radius-md)',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      backgroundColor:
+                        vmSize === size.value
+                          ? 'var(--sam-color-accent-primary-tint)'
+                          : 'var(--sam-color-bg-inset)',
+                      color: 'var(--sam-color-fg-primary)',
+                      transition: 'all 0.15s ease',
                     }}
                   >
-                    {size.description}
-                  </div>
-                </button>
-              ))}
+                    <div style={{ fontWeight: 500 }}>{size.label}</div>
+                    <div
+                      style={{
+                        fontSize: 'var(--sam-type-caption-size)',
+                        color: 'var(--sam-color-fg-muted)',
+                        marginTop: '0.125rem',
+                      }}
+                    >
+                      {size.description}
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {!selectedNodeId && (
             <div>
