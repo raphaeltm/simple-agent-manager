@@ -140,9 +140,9 @@
 
 **Independent Test**: Click gear icon on project chat page, verify drawer slides in with node size, env vars, runtime files settings. Change a setting, save, close drawer. Reopen and verify persistence. Attempt to close with unsaved changes, verify confirmation prompt.
 
-- [ ] T038 [P] [US3] Create SettingsDrawer component: extract default node size selector, env vars editor, and runtime files editor from existing ProjectSettings page content into a slide-over panel component in apps/web/src/components/project/SettingsDrawer.tsx
-- [ ] T039 [US3] Integrate SettingsDrawer into Project page: wire gear icon in header to open/close drawer, pass project context in apps/web/src/pages/Project.tsx
-- [ ] T040 [US3] Add unsaved changes confirmation: track dirty state, prompt save/discard on close or click-outside in apps/web/src/components/project/SettingsDrawer.tsx
+- [x] T038 [P] [US3] Create SettingsDrawer component: extract default node size selector, env vars editor, and runtime files editor from existing ProjectSettings page content into a slide-over panel component in apps/web/src/components/project/SettingsDrawer.tsx
+- [x] T039 [US3] Integrate SettingsDrawer into Project page: wire gear icon in header to open/close drawer, pass project context in apps/web/src/pages/Project.tsx
+- [x] T040 [US3] Add unsaved changes confirmation: track dirty state, prompt save/discard on close or click-outside in apps/web/src/components/project/SettingsDrawer.tsx
 
 **Checkpoint**: Settings are accessible in-context without leaving the chat page.
 

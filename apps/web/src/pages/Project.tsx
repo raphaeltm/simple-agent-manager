@@ -3,6 +3,7 @@ import { Outlet, useParams } from 'react-router-dom';
 import type { GitHubInstallation, ProjectDetailResponse } from '@simple-agent-manager/shared';
 import { Alert, Breadcrumb, PageLayout, Spinner } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
+import { SettingsDrawer } from '../components/project/SettingsDrawer';
 import { getProject, listGitHubInstallations } from '../lib/api';
 import { ProjectContext } from './ProjectContext';
 
@@ -129,6 +130,7 @@ export function Project() {
           <div style={{ flex: 1, minHeight: 0 }}>
             <ProjectContext.Provider value={{ projectId, project, installations, reload: loadProject, settingsOpen, setSettingsOpen }}>
               <Outlet />
+              <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
             </ProjectContext.Provider>
           </div>
         </div>
