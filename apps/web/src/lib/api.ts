@@ -154,11 +154,15 @@ export async function listRepositories(installationId?: string): Promise<Reposit
 
 export async function listBranches(
   repository: string,
-  installationId?: string
+  installationId?: string,
+  defaultBranch?: string
 ): Promise<Array<{ name: string }>> {
   const params = new URLSearchParams({ repository });
   if (installationId) {
     params.set('installation_id', installationId);
+  }
+  if (defaultBranch) {
+    params.set('default_branch', defaultBranch);
   }
   return request<Array<{ name: string }>>(`/api/github/branches?${params.toString()}`);
 }
