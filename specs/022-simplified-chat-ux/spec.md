@@ -108,28 +108,29 @@ When a user starts a chat and the agent begins working, the system creates a git
 
 **Acceptance Scenarios**:
 
-1. **Given** a user submits a chat message like "Add dark mode toggle to settings," **When** the task is created and a branch name is generated, **Then** the branch name is a human-readable slug like `sam/add-dark-mode-toggle` (prefixed with `sam/` to identify platform-created branches).
+1. **Given** a user submits a chat message like "Add dark mode toggle to settings," **When** the task is created and a branch name is generated, **Then** the branch name is a human-readable slug with a short task ID suffix for uniqueness, like `sam/add-dark-mode-toggle-01jk9m` (prefixed with `sam/` to identify platform-created branches).
 2. **Given** a chat message is very long or contains special characters, **When** the branch name is generated, **Then** it is truncated and sanitized to a reasonable length (max 60 characters) with only alphanumeric characters, hyphens, and forward slashes.
-3. **Given** a branch with the same generated name already exists in the repo, **When** a new branch name is needed, **Then** a numeric suffix is appended (e.g., `sam/add-dark-mode-toggle-2`).
+3. **Given** two tasks are created with similar titles concurrently, **When** branch names are generated, **Then** the task ID suffix guarantees uniqueness without requiring a GitHub API check (avoiding TOCTOU race conditions).
 4. **Given** the task completes and the agent pushes to the branch, **When** the user views the completed chat session, **Then** the branch name is displayed in the session header as a clickable link to the branch on GitHub.
 
 ---
 
 ### User Story 5 - Idle Auto-Push Safety Net (Priority: P2)
 
-When an agent finishes working (or becomes idle), and the user does not respond within 15 minutes, the system automatically pushes all changes to a PR branch to preserve work. This is a safety net — not an auto-merge. The PR is created with the chat title as the PR title and a summary of what was done.
+When an agent finishes working, the system immediately attempts to commit and push all changes to a PR branch. If the user does not respond within 15 minutes, the system cleans up the workspace — but only after verifying changes are preserved. If the initial push failed, the idle cleanup retries the push before destroying the workspace. This is a safety net — not an auto-merge. The PR is created with the chat title as the PR title and a summary of what was done.
 
-**Why this priority**: Without this, work can be lost if a workspace is cleaned up before changes are pushed. This is a critical reliability feature, but it's P2 because the agent typically pushes changes as part of its workflow — this is a fallback for when it doesn't.
+**Why this priority**: Without this, work can be lost if a workspace is cleaned up before changes are pushed. This is a critical reliability feature, but it's P2 because it builds on the agent completion push (US6) — the idle cleanup is the fallback layer.
 
 **Independent Test**: Start a task, let the agent complete, wait 15 minutes without responding, verify a PR is automatically created with the agent's changes.
 
 **Acceptance Scenarios**:
 
-1. **Given** an agent sends its last message in a chat session, **When** the user does not send any message for 15 minutes, **Then** the system automatically commits any uncommitted changes and pushes to the chat's branch.
-2. **Given** the auto-push is triggered, **When** there are changes on the branch that aren't in a PR, **Then** the system creates a pull request with the chat title as the PR title and a summary of the work done.
-3. **Given** the auto-push is triggered, **When** there are no uncommitted changes and no unpushed commits, **Then** the system skips the push (no empty commits or PRs).
-4. **Given** the user responds before the 15-minute timeout, **When** the message is sent, **Then** the idle timer resets and auto-push is deferred.
-5. **Given** auto-push completes and a PR is created, **When** the user views the chat session, **Then** the PR link is displayed in the session, and the workspace enters cleanup.
+1. **Given** an agent finishes its work in a chat session, **When** the ACP session ends, **Then** the system immediately attempts to commit any uncommitted changes, push to the chat's branch, and create a PR. The idle cleanup timer (default 15 minutes) starts simultaneously.
+2. **Given** the initial push succeeded and the user does not respond within 15 minutes, **When** the idle timer fires, **Then** the system cleans up the workspace (session becomes terminated/read-only).
+3. **Given** the initial push failed and the idle timer fires, **When** the workspace is still alive, **Then** the system retries the push once before cleanup. If the retry also fails, the system keeps the workspace alive for an additional grace period (configurable, default 5 minutes), notifies the user via a system message, and then cleans up regardless.
+4. **Given** the auto-push is triggered (at agent completion or idle cleanup), **When** there are no uncommitted changes and no unpushed commits, **Then** the system skips the push (no empty commits or PRs).
+5. **Given** the user responds before the 15-minute timeout, **When** the message is sent, **Then** the idle timer resets and cleanup is deferred.
+6. **Given** a push completes and a PR is created, **When** the user views the chat session, **Then** the PR link is displayed in the session header.
 
 ---
 
@@ -188,13 +189,13 @@ The agent running inside a workspace must be able to perform all GitHub operatio
 #### Branch Naming and Git Operations
 
 - **FR-012**: When a task is created from a chat message, the system MUST generate a human-readable branch name derived from the message content, prefixed with `sam/`.
-- **FR-013**: Branch names MUST be sanitized (lowercase, alphanumeric and hyphens only, max 60 characters) and deduplicated with numeric suffixes if a branch already exists.
+- **FR-013**: Branch names MUST be sanitized (lowercase, alphanumeric and hyphens only, max 60 characters) and guaranteed unique via a short task ID suffix (first 6 characters of the task ULID).
 - **FR-014**: The generated branch name MUST be stored on the task record and displayed in the chat session header once the agent begins working.
 
 #### Idle Auto-Push
 
-- **FR-015**: The system MUST track the time since the last agent message in each active session.
-- **FR-016**: If 15 minutes elapse after the agent's last message with no user response, the system MUST trigger an auto-push sequence: commit uncommitted changes, push to the branch, and create a PR.
+- **FR-015**: The system MUST track when an agent completes its work in each active session and start an idle cleanup timer.
+- **FR-016**: The system MUST use a two-stage push strategy: (1) the VM agent attempts to commit and push changes immediately when the ACP session ends (primary path), and (2) if the idle timer fires and the initial push failed (finalizedAt is null), the idle cleanup MUST retry the push before destroying the workspace (fallback path).
 - **FR-017**: The idle timeout MUST be configurable via environment variable (default: 15 minutes).
 - **FR-018**: If the user sends a message before the timeout, the idle timer MUST reset.
 - **FR-019**: The auto-push MUST be skipped if there are no changes to commit or push.

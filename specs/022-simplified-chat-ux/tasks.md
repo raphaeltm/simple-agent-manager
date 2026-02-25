@@ -47,6 +47,7 @@
 - [ ] T008 [P] [US1] Create branch name generation service with slugification algorithm (lowercase, strip special chars, filter stop words, take first 4 words, append 6-char task ID suffix, prefix with configurable BRANCH_NAME_PREFIX, truncate to BRANCH_NAME_MAX_LENGTH) in apps/api/src/services/branch-name.ts
 - [ ] T009 [P] [US1] Write unit tests for branch name generation (long messages, special chars, unicode, empty input, stop-word-only messages, max length truncation, valid git ref names) in apps/api/tests/unit/branch-name.test.ts
 - [ ] T010 [US1] Implement POST /api/projects/:projectId/tasks/submit endpoint per contracts/task-submit.md: validate request, generate branch name, insert task as queued, create chat session in DO, record first user message, kick off executeTaskRun via waitUntil, return 202 in apps/api/src/routes/task-submit.ts
+- [ ] T010a [US1] Write integration tests for submit endpoint: valid submission creates task+session+message, missing credentials returns 403, invalid message returns 400, branch name appears in response in apps/api/tests/integration/task-submit.test.ts
 - [ ] T011 [US1] Register task-submit route in apps/api/src/routes/index.ts
 - [ ] T012 [US1] Enhance session list response with computed fields: derive isIdle (status=active AND agentCompletedAt!=null), isTerminated (status=stopped), workspaceUrl (from workspaceId + BASE_DOMAIN env var) in apps/api/src/durable-objects/project-data.ts
 - [ ] T013 [US1] Add task embed (id, status, executionStep, outputBranch, outputPrUrl, finalizedAt) to session detail response via D1 lookup in apps/api/src/routes/chat.ts (or project-data.ts RPC)
@@ -60,9 +61,9 @@
 ### Frontend — Chat Experience
 
 - [ ] T017 [US1] Simplify task input: replace TaskSubmitForm split-button with single text field, enter-to-submit, no visible "Save to Backlog" or advanced options by default in apps/web/src/pages/ProjectChat.tsx
-- [ ] T018 [US1] Update SessionSidebar with visual state indicators: green dot for active (agent working), amber dot for idle (isIdle=true), gray/muted for terminated (isTerminated=true) in apps/web/src/components/chat/SessionSidebar.tsx
+- [ ] T018 [US1] Update SessionSidebar with visual state indicators (green dot for active, amber for idle, gray for terminated) and ensure "New Chat" button is prominent at the top, clearing the message area and presenting a fresh input on click in apps/web/src/components/chat/SessionSidebar.tsx
 - [ ] T019 [US1] Handle session lifecycle states in ProjectMessageView: active shows input with "Send a message..." placeholder, idle shows input with "Send a follow-up..." placeholder, terminated disables input and shows "Start a new chat" button in apps/web/src/components/chat/ProjectMessageView.tsx
-- [ ] T020 [US1] Implement direct WebSocket connection to VM agent (wss://ws-{workspaceId}.{BASE_DOMAIN}/acp/{sessionId}) for active/idle sessions; user messages sent via WebSocket not HTTP in apps/web/src/components/chat/ProjectMessageView.tsx
+- [ ] T020 [US1] Implement direct WebSocket connection to VM agent (wss://ws-{workspaceId}.{BASE_DOMAIN}/acp/{sessionId}) for active/idle sessions; user messages sent via WebSocket not HTTP; preserve existing cancel/pause button from ACP chat protocol so users can interrupt agent execution in apps/web/src/components/chat/ProjectMessageView.tsx
 - [ ] T021 [US1] Display branch name and PR link in session header area when task has outputBranch/outputPrUrl (clickable link to GitHub) in apps/web/src/components/chat/ProjectMessageView.tsx
 - [ ] T022 [US1] Show inline non-technical provisioning progress (spinner + "Setting up...") in chat area while task is queued/delegated, replacing TaskExecutionProgress banner with a more integrated chat-native indicator in apps/web/src/pages/ProjectChat.tsx
 
@@ -94,9 +95,10 @@
 - [ ] T027 [P] [US6] Implement gh wrapper script installation in ensureGitCredentialHelper: move existing gh to gh.real, install wrapper that sets GH_TOKEN via git credential fill before exec gh.real in packages/vm-agent/internal/bootstrap/bootstrap.go
 - [ ] T028 [US6] Add githubId field to CreateWorkspaceRequest payload (API side: include in workspace creation call; VM agent side: read and pass to bootstrap) in apps/api/src/services/task-runner.ts and packages/vm-agent/internal/ types
 - [ ] T029 [US6] Add git identity noreply email fallback: when gitUserEmail is empty, use {githubId}+{sanitized-name}@users.noreply.github.com in ensureGitIdentity in packages/vm-agent/internal/bootstrap/bootstrap.go
+- [ ] T029a [US6] Enhance task status callback to accept executionStep field: when executionStep='awaiting_followup', update task executionStep without changing status and save gitPushResult outputs on the task record. This MUST be deployed before T030 so the API can handle the new callback payload. in apps/api/src/routes/tasks.ts
 - [ ] T030 [US6] Implement agent completion git push flow: on ACP session end, run git status --porcelain, if changes exist git add/commit/push, optionally create PR via gh, then POST callback with executionStep=awaiting_followup and gitPushResult — do NOT stop the container in packages/vm-agent/internal/acp/ (session handler)
 
-**Checkpoint**: GitHub credentials are reliable across all workspace types. Agent pushes changes on completion. Git identity always configured.
+**Checkpoint**: GitHub credentials are reliable across all workspace types. Agent pushes changes on completion. Git identity always configured. API accepts the new callback payload.
 
 ---
 
@@ -110,11 +112,14 @@
 
 - [ ] T031 [US5] Implement scheduleIdleCleanup(sessionId, workspaceId, taskId) method in ProjectData DO: insert into idle_cleanup_schedule, find MIN(cleanup_at), set DO alarm in apps/api/src/durable-objects/project-data.ts
 - [ ] T032 [US5] Implement cancelIdleCleanup(sessionId) and resetIdleCleanup(sessionId) methods in ProjectData DO: delete/update schedule rows, recalculate alarm in apps/api/src/durable-objects/project-data.ts
-- [ ] T033 [US5] Implement alarm() handler in ProjectData DO: find expired cleanup rows, trigger workspace cleanup via API call (task → completed, session → stopped, cleanupTaskRun), retry on failure with IDLE_CLEANUP_RETRY_DELAY_MS in apps/api/src/durable-objects/project-data.ts
+- [ ] T033 [US5] Implement alarm() handler in ProjectData DO: find expired cleanup rows, check task.finalizedAt — if null retry git push via VM agent before cleanup, then trigger workspace cleanup (task → completed, session → stopped, cleanupTaskRun), retry on failure with IDLE_CLEANUP_RETRY_DELAY_MS, notify user via system message if push fails after retry in apps/api/src/durable-objects/project-data.ts
+- [ ] T033a [US5] Write integration tests for idle cleanup alarm lifecycle: schedule fires at correct time, reset extends deadline, cancel removes schedule, concurrent sessions use earliest-alarm pattern, failed cleanup retries in apps/api/tests/integration/idle-cleanup.test.ts
 
 ### Backend — Enhanced Callback
 
-- [ ] T034 [US5] Enhance task status callback to handle executionStep: 'awaiting_followup': update task executionStep without changing status, save gitPushResult outputs, signal DO to start idle cleanup timer in apps/api/src/routes/tasks.ts
+- [ ] T034 [US5] Extend the awaiting_followup callback handler (from T029a) to signal ProjectData DO to start idle cleanup timer: set agent_completed_at on chat session, call scheduleIdleCleanup, record 'task.agent_completed' activity event in apps/api/src/routes/tasks.ts
+- [ ] T034a [P] [US5] Write unit tests for finalization guard: verify finalizedAt set only once, verify skip when already finalized, verify set when gitPushResult.pushed=true in apps/api/tests/unit/finalization-guard.test.ts
+- [ ] T034b [US5] Write integration tests for enhanced callback: awaiting_followup keeps task in running status, starts idle timer in DO, backward-compatible toStatus:completed still works in apps/api/tests/integration/task-callback.test.ts
 - [ ] T035 [US5] Implement finalization guard in callback handler: check task.finalizedAt IS NULL before saving git push results, set finalizedAt=now if gitPushResult.pushed is true in apps/api/src/routes/tasks.ts
 
 ### Backend — Idle Reset
@@ -190,7 +195,7 @@ Phase 3 (US1+US4)    Phase 4 (US2)  Phase 5 (US6)   Phase 7 (US3)
 - **US1+US4 (P1)**: After Foundational — no dependency on other stories
 - **US2 (P1)**: After Foundational — independent of all other stories
 - **US6 (P1)**: After Foundational — independent (VM agent only, separate package)
-- **US5 (P2)**: After US1 + US6 — needs submit flow (US1) and agent completion callback (US6)
+- **US5 (P2)**: After US1 + US6 — needs submit flow (US1) and the callback handler base (T029a in US6)
 - **US3 (P2)**: After US1 — needs the restructured project page header from Phase 3
 
 ### Within Each User Story
@@ -283,5 +288,5 @@ After Phase 3+5 complete:
 - US4 (Branch Naming) is merged into US1 because the branch name service is consumed by the submit endpoint — they share the same implementation path
 - The existing 3-call task creation flow (POST /tasks → status → run) is preserved for programmatic/advanced use. The submit endpoint is the chat UI's simplified path
 - Old tab routes are kept in the router for direct URL access but hidden from project navigation (Phase 8, T041)
-- The enhanced callback (Phase 6, T034) changes how the VM agent signals completion. Until Phase 6 is implemented, the existing `toStatus: 'completed'` callback path continues to work
+- The callback handler base (T029a in Phase 5) MUST be deployed before the VM agent sends `awaiting_followup` (T030). Phase 6 (T034) then extends the handler to start idle timers. The existing `toStatus: 'completed'` callback path remains available as fallback
 - Commit after each task or logical group. Push after each phase checkpoint.
