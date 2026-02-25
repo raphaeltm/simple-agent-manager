@@ -56,17 +56,17 @@ describe('WorktreeSelector', () => {
     fireEvent.click(screen.getByRole('button', { name: /Switch worktree \(main\)/i }));
 
     // Creation form should be hidden
-    expect(screen.queryByPlaceholderText('branch name')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('search branches')).not.toBeInTheDocument();
 
     // Click the plus button to show creation form
     fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
 
-    // Creation form should now be visible
-    expect(screen.getByPlaceholderText('branch name')).toBeInTheDocument();
+    // Creation form should now be visible (BranchSelector with search placeholder)
+    expect(screen.getByPlaceholderText('search branches')).toBeInTheDocument();
 
     // Click plus again to hide
     fireEvent.click(screen.getByRole('button', { name: 'Cancel new worktree' }));
-    expect(screen.queryByPlaceholderText('branch name')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('search branches')).not.toBeInTheDocument();
   });
 
   it('calls onCreate with branch and createBranch option', async () => {
@@ -78,10 +78,12 @@ describe('WorktreeSelector', () => {
     // Expand creation form
     fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
 
-    fireEvent.change(screen.getByPlaceholderText('branch name'), {
+    // Check "Create new branch" to switch to plain input
+    fireEvent.click(screen.getByLabelText('Create new branch'));
+
+    fireEvent.change(screen.getByPlaceholderText('new branch name'), {
       target: { value: 'feature/new-panel' },
     });
-    fireEvent.click(screen.getByLabelText('Create new branch'));
     fireEvent.click(screen.getByRole('button', { name: 'Create Worktree' }));
 
     await waitFor(() => {
@@ -98,7 +100,7 @@ describe('WorktreeSelector', () => {
     fireEvent.click(screen.getByRole('button', { name: /Switch worktree \(main\)/i }));
     fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
 
-    fireEvent.change(screen.getByPlaceholderText('branch name'), {
+    fireEvent.change(screen.getByPlaceholderText('search branches'), {
       target: { value: 'feature/test' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Create Worktree' }));
@@ -109,7 +111,7 @@ describe('WorktreeSelector', () => {
 
     // Form should be collapsed after successful creation
     await waitFor(() => {
-      expect(screen.queryByPlaceholderText('branch name')).not.toBeInTheDocument();
+      expect(screen.queryByPlaceholderText('search branches')).not.toBeInTheDocument();
     });
   });
 

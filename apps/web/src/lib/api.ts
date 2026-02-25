@@ -44,6 +44,7 @@ import type {
   WorktreeListResponse,
   CreateWorktreeRequest,
   RemoveWorktreeResponse,
+  GitBranchListResponse,
   AgentSettingsResponse,
   SaveAgentSettingsRequest,
   NodeSystemInfo,
@@ -154,11 +155,15 @@ export async function listRepositories(installationId?: string): Promise<Reposit
 
 export async function listBranches(
   repository: string,
-  installationId?: string
+  installationId?: string,
+  defaultBranch?: string
 ): Promise<Array<{ name: string }>> {
   const params = new URLSearchParams({ repository });
   if (installationId) {
     params.set('installation_id', installationId);
+  }
+  if (defaultBranch) {
+    params.set('default_branch', defaultBranch);
   }
   return request<Array<{ name: string }>>(`/api/github/branches?${params.toString()}`);
 }
@@ -1117,6 +1122,21 @@ export async function getWorktrees(
     throw new Error(`Worktree list failed: ${text}`);
   }
   return res.json() as Promise<WorktreeListResponse>;
+}
+
+export async function getGitBranches(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string
+): Promise<GitBranchListResponse> {
+  const params = new URLSearchParams({ token });
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/git/branches?${params.toString()}`;
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Git branch list failed: ${text}`);
+  }
+  return res.json() as Promise<GitBranchListResponse>;
 }
 
 export async function createWorktree(

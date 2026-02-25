@@ -240,37 +240,70 @@ export async function getInstallationRepositories(
   return allRepos;
 }
 
+const DEFAULT_MAX_BRANCHES_PER_REPO = 5000;
+
 /**
  * List branches for a repository via an installation token.
+ * Paginates through all pages to support repos with many branches.
  */
 export async function getRepositoryBranches(
   installationId: string,
   owner: string,
   repo: string,
-  env: Env
+  env: Env,
+  defaultBranch?: string
 ): Promise<Array<{ name: string }>> {
   const { token } = await getInstallationToken(installationId, env);
 
+  const maxBranches = parseInt(env.MAX_BRANCHES_PER_REPO || '', 10) || DEFAULT_MAX_BRANCHES_PER_REPO;
+  const allBranches: Array<{ name: string }> = [];
+  let page = 1;
   const perPage = 100;
-  const response = await fetch(
-    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?per_page=${perPage}`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'Simple-Agent-Manager',
-      },
-    }
-  );
+  let hasMore = true;
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({})) as { message?: string };
-    throw new Error(error.message || `Failed to list branches: ${response.status}`);
+  while (hasMore) {
+    const response = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?per_page=${perPage}&page=${page}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'User-Agent': 'Simple-Agent-Manager',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({})) as { message?: string };
+      throw new Error(error.message || `Failed to list branches: ${response.status}`);
+    }
+
+    const data = await response.json() as Array<{ name: string }>;
+    allBranches.push(...data.map((b) => ({ name: b.name })));
+
+    hasMore = data.length === perPage;
+    page++;
+
+    if (allBranches.length >= maxBranches) {
+      console.warn(`Hit safety limit of ${maxBranches} branches for ${owner}/${repo}`);
+      break;
+    }
   }
 
-  const data = await response.json() as Array<{ name: string }>;
-  return data.map((b) => ({ name: b.name }));
+  // Ensure default branch is always present and first in the list
+  if (defaultBranch) {
+    const hasDefault = allBranches.some((b) => b.name === defaultBranch);
+    if (!hasDefault) {
+      allBranches.unshift({ name: defaultBranch });
+    } else {
+      // Move default branch to front
+      const filtered = allBranches.filter((b) => b.name !== defaultBranch);
+      return [{ name: defaultBranch }, ...filtered];
+    }
+  }
+
+  return allBranches;
 }
 
 /**

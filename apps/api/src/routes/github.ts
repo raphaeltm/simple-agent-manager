@@ -149,11 +149,13 @@ githubRoutes.get('/branches', requireAuth(), requireApproved(), async (c) => {
   }
 
   try {
+    const defaultBranch = c.req.query('default_branch') || undefined;
     const branches = await getRepositoryBranches(
       targetInstallation.installationId,
       owner!,
       repo!,
-      c.env
+      c.env,
+      defaultBranch
     );
     return c.json(branches);
   } catch (err) {

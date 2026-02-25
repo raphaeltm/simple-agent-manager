@@ -271,6 +271,88 @@ func containsStr(s, substr string) bool {
 	return false
 }
 
+func TestParseRemoteBranches(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   []GitBranchInfo
+	}{
+		{
+			name:   "empty output",
+			output: "",
+			want:   nil,
+		},
+		{
+			name:   "single branch",
+			output: "origin/main\n",
+			want:   []GitBranchInfo{{Name: "main"}},
+		},
+		{
+			name:   "multiple branches",
+			output: "origin/develop\norigin/feature/auth\norigin/main\n",
+			want: []GitBranchInfo{
+				{Name: "develop"},
+				{Name: "feature/auth"},
+				{Name: "main"},
+			},
+		},
+		{
+			name:   "filters HEAD pointer",
+			output: "origin/HEAD -> origin/main\norigin/develop\norigin/main\n",
+			want: []GitBranchInfo{
+				{Name: "develop"},
+				{Name: "main"},
+			},
+		},
+		{
+			name:   "strips origin prefix",
+			output: "origin/main\norigin/release/v1.0\n",
+			want: []GitBranchInfo{
+				{Name: "main"},
+				{Name: "release/v1.0"},
+			},
+		},
+		{
+			name:   "handles whitespace and empty lines",
+			output: "  origin/main  \n\n  origin/develop  \n\n",
+			want: []GitBranchInfo{
+				{Name: "main"},
+				{Name: "develop"},
+			},
+		},
+		{
+			name:   "deduplicates branches",
+			output: "origin/main\norigin/main\norigin/develop\n",
+			want: []GitBranchInfo{
+				{Name: "main"},
+				{Name: "develop"},
+			},
+		},
+		{
+			name:   "handles branches without origin prefix",
+			output: "main\ndevelop\n",
+			want: []GitBranchInfo{
+				{Name: "main"},
+				{Name: "develop"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseRemoteBranches(tt.output)
+			if len(got) != len(tt.want) {
+				t.Fatalf("parseRemoteBranches() returned %d branches, want %d. got=%+v", len(got), len(tt.want), got)
+			}
+			for i := range tt.want {
+				if got[i].Name != tt.want[i].Name {
+					t.Errorf("branch[%d].Name = %q, want %q", i, got[i].Name, tt.want[i].Name)
+				}
+			}
+		})
+	}
+}
+
 func TestGitWorktreeQueryResolvesToValidatedWorkDir(t *testing.T) {
 	t.Parallel()
 
