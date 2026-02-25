@@ -8,7 +8,6 @@ const {
   mockSelectFrom,
   mockSelect,
   mockDelete,
-  mockDeleteWhere,
 } = vi.hoisted(() => {
   const mockInsertValues = vi.fn().mockResolvedValue(undefined);
   const mockInsert = vi.fn().mockReturnValue({ values: mockInsertValues });
@@ -24,7 +23,7 @@ const {
   const mockDeleteWhere = vi.fn().mockResolvedValue(undefined);
   const mockDelete = vi.fn().mockReturnValue({ where: mockDeleteWhere });
 
-  return { mockInsertValues, mockInsert, mockSelectFrom, mockSelect, mockDelete, mockDeleteWhere, mockSelectGet, mockSelectAll };
+  return { mockInsertValues, mockInsert, mockSelectFrom, mockSelect, mockDelete, mockSelectGet, mockSelectAll };
 });
 
 vi.mock('drizzle-orm/d1', () => ({

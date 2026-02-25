@@ -4,7 +4,6 @@ import type { Env } from '../../../src/index';
 // Use vi.hoisted() so mock functions are available when vi.mock factories run
 const {
   mockDelete,
-  mockDeleteWhere,
   mockSelect,
   mockSelectFrom,
 } = vi.hoisted(() => {
@@ -18,7 +17,7 @@ const {
   const mockSelectFrom = vi.fn();
   const mockSelect = vi.fn().mockReturnValue({ from: mockSelectFrom });
 
-  return { mockDelete, mockDeleteWhere, mockSelect, mockSelectFrom };
+  return { mockDelete, mockSelect, mockSelectFrom };
 });
 
 vi.mock('drizzle-orm/d1', () => ({
