@@ -77,9 +77,9 @@
 
 **Independent Test**: Log in, verify dashboard shows project cards with name/repo/last activity. Click a project card and verify it navigates to /projects/:id (chat interface). Verify no workspace or node elements are visible.
 
-- [ ] T023 [P] [US2] Remove workspace cards, unlinked workspaces section, and node-related elements from Dashboard in apps/web/src/pages/Dashboard.tsx
-- [ ] T024 [P] [US2] Update project card click handler to navigate to /projects/:id (chat) instead of /projects/:id/overview in apps/web/src/pages/Dashboard.tsx
-- [ ] T025 [US2] Simplify empty state: replace onboarding checklist with a clean "Import your first project" call-to-action with prominent Import Project button in apps/web/src/pages/Dashboard.tsx
+- [x] T023 [P] [US2] Remove workspace cards, unlinked workspaces section, and node-related elements from Dashboard in apps/web/src/pages/Dashboard.tsx
+- [x] T024 [P] [US2] Update project card click handler to navigate to /projects/:id (chat) instead of /projects/:id/overview in apps/web/src/pages/Dashboard.tsx
+- [x] T025 [US2] Simplify empty state: replace onboarding checklist with a clean "Import your first project" call-to-action with prominent Import Project button in apps/web/src/pages/Dashboard.tsx
 
 **Checkpoint**: Dashboard is clean and project-focused. Users go from login to chat in two clicks.
 
