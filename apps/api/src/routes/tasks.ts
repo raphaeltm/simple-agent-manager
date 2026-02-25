@@ -109,6 +109,7 @@ function toTaskResponse(task: schema.Task, blocked = false): Task {
     outputSummary: task.outputSummary,
     outputBranch: task.outputBranch,
     outputPrUrl: task.outputPrUrl,
+    finalizedAt: task.finalizedAt ?? null,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
   };
@@ -668,6 +669,112 @@ tasksRoutes.post('/:taskId/status/callback', async (c) => {
     throw errors.forbidden('Token workspace mismatch');
   }
 
+  // --- Execution-step-only update (no status transition) ---
+  // When executionStep is provided without toStatus, update the step and
+  // optionally persist gitPushResult outputs without changing task status.
+  // This is used by the VM agent to report progress (e.g. awaiting_followup
+  // after the agent pushes code but the task stays running).
+  if (body.executionStep && !body.toStatus) {
+    if (!isTaskExecutionStep(body.executionStep)) {
+      throw errors.badRequest('Invalid executionStep value');
+    }
+
+    const now = new Date().toISOString();
+    const stepUpdate: Partial<schema.NewTask> = {
+      executionStep: body.executionStep,
+      updatedAt: now,
+    };
+
+    // Persist git push result fields into existing task columns
+    if (body.gitPushResult) {
+      // Finalization guard: only save git push results once
+      if (!task.finalizedAt && body.gitPushResult.pushed) {
+        stepUpdate.finalizedAt = now;
+      }
+      if (body.gitPushResult.branchName) {
+        stepUpdate.outputBranch = body.gitPushResult.branchName;
+      }
+      if (body.gitPushResult.prUrl) {
+        stepUpdate.outputPrUrl = body.gitPushResult.prUrl;
+      }
+    }
+
+    if (body.outputBranch !== undefined) {
+      stepUpdate.outputBranch = body.outputBranch?.trim() || null;
+    }
+    if (body.outputPrUrl !== undefined) {
+      stepUpdate.outputPrUrl = body.outputPrUrl?.trim() || null;
+    }
+
+    await db
+      .update(schema.tasks)
+      .set(stepUpdate)
+      .where(eq(schema.tasks.id, task.id));
+
+    // Record activity event for execution step update
+    c.executionCtx.waitUntil(
+      projectDataService.recordActivityEvent(
+        c.env, projectId, 'task.execution_step', 'workspace_callback', payload.workspace,
+        task.workspaceId, null, taskId, {
+          title: task.title,
+          executionStep: body.executionStep,
+          pushed: body.gitPushResult?.pushed ?? false,
+        }
+      ).catch(() => { /* best-effort */ })
+    );
+
+    // T034: When agent signals awaiting_followup, start idle cleanup timer
+    if (body.executionStep === 'awaiting_followup' && task.workspaceId) {
+      c.executionCtx.waitUntil(
+        (async () => {
+          // Look up the chat session linked to this workspace
+          const [ws] = await db
+            .select({ chatSessionId: schema.workspaces.chatSessionId })
+            .from(schema.workspaces)
+            .where(eq(schema.workspaces.id, task.workspaceId!))
+            .limit(1);
+
+          if (ws?.chatSessionId) {
+            // Set agent_completed_at on the session
+            await projectDataService.markAgentCompleted(c.env, projectId, ws.chatSessionId);
+
+            // Schedule idle cleanup timer
+            await projectDataService.scheduleIdleCleanup(
+              c.env,
+              projectId,
+              ws.chatSessionId,
+              task.workspaceId!,
+              taskId
+            );
+          }
+
+          // Record agent completion activity event
+          await projectDataService.recordActivityEvent(
+            c.env, projectId, 'task.agent_completed', 'workspace_callback', payload.workspace,
+            task.workspaceId, ws?.chatSessionId ?? null, taskId, {
+              title: task.title,
+              pushed: body.gitPushResult?.pushed ?? false,
+              branchName: body.gitPushResult?.branchName ?? null,
+              prUrl: body.gitPushResult?.prUrl ?? null,
+            }
+          );
+        })().catch((err) => {
+          console.error('Failed to schedule idle cleanup for task', taskId, err);
+        })
+      );
+    }
+
+    const [refreshed] = await db
+      .select()
+      .from(schema.tasks)
+      .where(eq(schema.tasks.id, task.id))
+      .limit(1);
+
+    const blocked = await computeBlockedForTask(db, task.id);
+    return c.json(toTaskResponse(refreshed ?? task, blocked));
+  }
+
+  // --- Standard status transition ---
   if (!isTaskStatus(body.toStatus)) {
     throw errors.badRequest('Invalid toStatus value');
   }

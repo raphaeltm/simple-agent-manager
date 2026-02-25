@@ -103,6 +103,7 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 		GitHubToken:    gitToken,
 		GitUserName:    runtime.GitUserName,
 		GitUserEmail:   runtime.GitUserEmail,
+		GitHubID:       runtime.GitHubID,
 		ProjectEnvVars: runtimeAssets.EnvVars,
 		ProjectFiles:   runtimeAssets.Files,
 	}, reporter)

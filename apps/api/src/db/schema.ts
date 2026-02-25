@@ -294,6 +294,7 @@ export const tasks = sqliteTable(
     outputSummary: text('output_summary'),
     outputBranch: text('output_branch'),
     outputPrUrl: text('output_pr_url'),
+    finalizedAt: text('finalized_at'),
     autoProvisionedNodeId: text('auto_provisioned_node_id').references(() => nodes.id, {
       onDelete: 'set null',
     }),

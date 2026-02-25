@@ -265,6 +265,36 @@ export interface ListProjectTasksParams {
   cursor?: string;
 }
 
+// =============================================================================
+// Task Submit (single-action chat flow)
+// =============================================================================
+export interface SubmitTaskRequest {
+  message: string;
+  vmSize?: string;
+  vmLocation?: string;
+  nodeId?: string;
+}
+
+export interface SubmitTaskResponse {
+  taskId: string;
+  sessionId: string;
+  branchName: string;
+  status: 'queued';
+}
+
+export async function submitTask(
+  projectId: string,
+  data: SubmitTaskRequest
+): Promise<SubmitTaskResponse> {
+  return request<SubmitTaskResponse>(`/api/projects/${projectId}/tasks/submit`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+// =============================================================================
+// Tasks (CRUD)
+// =============================================================================
 export async function listProjectTasks(
   projectId: string,
   params: ListProjectTasksParams = {}
@@ -490,6 +520,15 @@ export async function stopChatSession(
   sessionId: string
 ): Promise<{ status: string }> {
   return request<{ status: string }>(`/api/projects/${projectId}/sessions/${sessionId}/stop`, {
+    method: 'POST',
+  });
+}
+
+export async function resetIdleTimer(
+  projectId: string,
+  sessionId: string
+): Promise<{ cleanupAt: number }> {
+  return request<{ cleanupAt: number }>(`/api/projects/${projectId}/sessions/${sessionId}/idle-reset`, {
     method: 'POST',
   });
 }

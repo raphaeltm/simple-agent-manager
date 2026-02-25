@@ -56,6 +56,7 @@ export interface TaskRunInput {
   branch?: string;
   userName?: string | null;
   userEmail?: string | null;
+  githubId?: string | null;
 }
 
 export interface TaskRunResult {
@@ -189,7 +190,7 @@ export async function initiateTaskRun(
   };
 }
 
-interface ExecuteTaskRunParams {
+export interface ExecuteTaskRunParams {
   task: schema.Task;
   project: schema.Project;
   userId: string;
@@ -199,6 +200,7 @@ interface ExecuteTaskRunParams {
   preferredNodeId?: string;
   userName?: string | null;
   userEmail?: string | null;
+  githubId?: string | null;
 }
 
 /**
@@ -224,12 +226,12 @@ async function setExecutionStep(
  * Each step is persisted to `executionStep` BEFORE the long-running operation,
  * providing a breadcrumb trail for debugging and stuck-task recovery.
  */
-async function executeTaskRun(
+export async function executeTaskRun(
   db: ReturnType<typeof drizzle<typeof schema>>,
   env: Env,
   params: ExecuteTaskRunParams
 ): Promise<void> {
-  const { task, project, userId, vmSize, vmLocation, branch, preferredNodeId, userName, userEmail } = params;
+  const { task, project, userId, vmSize, vmLocation, branch, preferredNodeId, userName, userEmail, githubId } = params;
   const now = () => new Date().toISOString();
   const runStartMs = Date.now();
   let nodeId: string | null = null;
@@ -397,6 +399,7 @@ async function executeTaskRun(
       callbackToken,
       gitUserName: userName,
       gitUserEmail: userEmail,
+      githubId: githubId,
     });
 
     // NOW transition to delegated — workspace is actually created on the node.

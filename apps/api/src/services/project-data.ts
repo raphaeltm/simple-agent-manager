@@ -122,6 +122,48 @@ export async function getMessages(
   return stub.getMessages(sessionId, limit, before);
 }
 
+export async function markAgentCompleted(
+  env: Env,
+  projectId: string,
+  sessionId: string
+): Promise<void> {
+  const stub = await getStub(env, projectId);
+  return stub.markAgentCompleted(sessionId);
+}
+
+// =========================================================================
+// Idle Cleanup Schedule
+// =========================================================================
+
+export async function scheduleIdleCleanup(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  workspaceId: string,
+  taskId: string | null
+): Promise<{ cleanupAt: number }> {
+  const stub = await getStub(env, projectId);
+  return stub.scheduleIdleCleanup(sessionId, workspaceId, taskId);
+}
+
+export async function cancelIdleCleanup(
+  env: Env,
+  projectId: string,
+  sessionId: string
+): Promise<void> {
+  const stub = await getStub(env, projectId);
+  return stub.cancelIdleCleanup(sessionId);
+}
+
+export async function resetIdleCleanup(
+  env: Env,
+  projectId: string,
+  sessionId: string
+): Promise<{ cleanupAt: number }> {
+  const stub = await getStub(env, projectId);
+  return stub.resetIdleCleanup(sessionId);
+}
+
 // =========================================================================
 // Activity Events
 // =========================================================================

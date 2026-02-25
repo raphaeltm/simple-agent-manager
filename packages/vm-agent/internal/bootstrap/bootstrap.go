@@ -48,6 +48,7 @@ type bootstrapResponse struct {
 	GitHubToken     *string `json:"githubToken"`
 	GitUserName     *string `json:"gitUserName"`
 	GitUserEmail    *string `json:"gitUserEmail"`
+	GitHubID        *string `json:"githubId"`
 	ControlPlaneURL string  `json:"controlPlaneUrl"`
 }
 
@@ -57,6 +58,7 @@ type bootstrapState struct {
 	GitHubToken   string `json:"githubToken,omitempty"`
 	GitUserName   string `json:"gitUserName,omitempty"`
 	GitUserEmail  string `json:"gitUserEmail,omitempty"`
+	GitHubID      string `json:"githubId,omitempty"`
 }
 
 type ProjectRuntimeEnvVar struct {
@@ -75,6 +77,7 @@ type ProvisionState struct {
 	GitHubToken    string
 	GitUserName    string
 	GitUserEmail   string
+	GitHubID       string
 	ProjectEnvVars []ProjectRuntimeEnvVar
 	ProjectFiles   []ProjectRuntimeFile
 }
@@ -151,6 +154,16 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 		reporter.Log("devcontainer_up", "completed", "Devcontainer ready")
 	}
 
+	// Ensure gh CLI is available (install if missing from custom devcontainers).
+	// Non-fatal: workspace still works without gh, just can't create PRs.
+	reporter.Log("gh_cli", "started", "Checking GitHub CLI availability")
+	if err := ensureGitHubCLI(ctx, cfg); err != nil {
+		reporter.Log("gh_cli", "failed", "GitHub CLI install failed (non-fatal)", err.Error())
+		slog.Warn("GitHub CLI install failed (non-fatal)", "error", err)
+	} else {
+		reporter.Log("gh_cli", "completed", "GitHub CLI available")
+	}
+
 	reporter.Log("git_creds", "started", "Configuring git credentials")
 	if err := ensureGitCredentialHelper(ctx, cfg); err != nil {
 		reporter.Log("git_creds", "failed", "Git credential setup failed", err.Error())
@@ -213,6 +226,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 		GitHubToken:   strings.TrimSpace(state.GitHubToken),
 		GitUserName:   strings.TrimSpace(state.GitUserName),
 		GitUserEmail:  strings.TrimSpace(state.GitUserEmail),
+		GitHubID:      strings.TrimSpace(state.GitHubID),
 	}
 
 	// Create a named Docker volume for container-mode workspaces.
@@ -252,6 +266,15 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 		slog.Warn("Failed to inspect build error marker", "workspaceID", cfg.WorkspaceID, "error", markerErr)
 	} else if markerFound {
 		recoveryMode = true
+	}
+
+	// Ensure gh CLI is available (install if missing from custom devcontainers).
+	reporter.Log("gh_cli", "started", "Checking GitHub CLI availability")
+	if err := ensureGitHubCLI(ctx, cfg); err != nil {
+		reporter.Log("gh_cli", "failed", "GitHub CLI install failed (non-fatal)", err.Error())
+		slog.Warn("GitHub CLI install failed (non-fatal)", "error", err)
+	} else {
+		reporter.Log("gh_cli", "completed", "GitHub CLI available")
 	}
 
 	reporter.Log("git_creds", "started", "Configuring git credentials")
@@ -549,6 +572,10 @@ func redeemBootstrapToken(ctx context.Context, cfg *config.Config) (*bootstrapSt
 	if payload.GitUserEmail != nil {
 		gitUserEmail = *payload.GitUserEmail
 	}
+	githubID := ""
+	if payload.GitHubID != nil {
+		githubID = *payload.GitHubID
+	}
 
 	return &bootstrapState{
 		WorkspaceID:   payload.WorkspaceID,
@@ -556,6 +583,7 @@ func redeemBootstrapToken(ctx context.Context, cfg *config.Config) (*bootstrapSt
 		GitHubToken:   githubToken,
 		GitUserName:   strings.TrimSpace(gitUserName),
 		GitUserEmail:  strings.TrimSpace(gitUserEmail),
+		GitHubID:      strings.TrimSpace(githubID),
 	}, false, nil
 }
 
@@ -1363,6 +1391,63 @@ func waitForCommand(ctx context.Context, name string) error {
 	}
 }
 
+// ensureGitHubCLI checks whether the gh CLI is available inside the devcontainer.
+// If it isn't (common for repos with custom devcontainer configs that don't include
+// the github-cli feature), it installs gh via the official install script.
+// This is non-fatal — if installation fails the workspace still works, just without gh.
+func ensureGitHubCLI(ctx context.Context, cfg *config.Config) error {
+	if cfg.Repository == "" {
+		return nil
+	}
+	if !isGitHubRepo(cfg.Repository) {
+		return nil
+	}
+
+	containerID, err := findDevcontainerID(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to locate devcontainer for gh CLI check: %w", err)
+	}
+
+	// Check if gh is already available
+	checkCmd := exec.CommandContext(ctx, "docker", "exec", containerID, "which", "gh")
+	if err := checkCmd.Run(); err == nil {
+		slog.Info("gh CLI already available in devcontainer", "containerID", containerID)
+		return nil
+	}
+
+	slog.Info("gh CLI not found in devcontainer, installing", "containerID", containerID)
+
+	// Install gh using the official method: add the apt repo and install.
+	// This works on Debian/Ubuntu-based images (the vast majority of devcontainers).
+	// For Alpine or other distros, we fall back to a direct binary download.
+	installScript := `set -e
+# Try apt-based install first (Debian/Ubuntu)
+if command -v apt-get >/dev/null 2>&1; then
+  (type -p wget >/dev/null || (apt-get update && apt-get install -y wget)) && \
+  mkdir -p -m 755 /etc/apt/keyrings && \
+  out=$(wget -nv -O- https://cli.github.com/packages/githubcli-archive-keyring.gpg) && \
+  echo "$out" | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && \
+  chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
+  apt-get update && apt-get install -y gh
+# Try apk (Alpine)
+elif command -v apk >/dev/null 2>&1; then
+  apk add --no-cache github-cli
+else
+  echo "Unsupported package manager, skipping gh CLI install" >&2
+  exit 0
+fi
+`
+	installCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "sh", "-c", installScript)
+	output, err := installCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to install gh CLI in devcontainer: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	slog.Info("gh CLI installed in devcontainer", "containerID", containerID)
+	return nil
+}
+
 func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 	if cfg.Repository == "" {
 		return nil
@@ -1422,6 +1507,70 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 	}
 
 	slog.Info("Configured git credential helper in devcontainer", "containerID", containerID)
+
+	// Install gh wrapper script that refreshes GH_TOKEN before every gh invocation.
+	// This ensures gh CLI works even for sessions longer than 1 hour when the
+	// initial GH_TOKEN has expired. The wrapper fetches a fresh token from the
+	// git credential helper (which calls back to the VM agent for a new token).
+	if err := installGhWrapper(ctx, cfg, containerID); err != nil {
+		// Non-fatal: gh still works with the static GH_TOKEN from /etc/sam/env,
+		// just won't auto-refresh for long sessions.
+		slog.Warn("gh wrapper install failed (non-fatal)", "error", err)
+	}
+
+	return nil
+}
+
+// installGhWrapper moves the real gh binary to gh.real and installs a wrapper
+// script that refreshes GH_TOKEN via git credential fill before every invocation.
+func installGhWrapper(ctx context.Context, cfg *config.Config, containerID string) error {
+	// Find where gh is installed
+	whichCmd := exec.CommandContext(ctx, "docker", "exec", containerID, "which", "gh")
+	whichOutput, err := whichCmd.Output()
+	if err != nil {
+		return fmt.Errorf("gh not found in container: %w", err)
+	}
+	ghPath := strings.TrimSpace(string(whichOutput))
+	if ghPath == "" {
+		return fmt.Errorf("gh path is empty")
+	}
+	ghRealPath := ghPath + ".real"
+
+	// Check if wrapper is already installed (gh.real exists)
+	checkCmd := exec.CommandContext(ctx, "docker", "exec", containerID, "test", "-f", ghRealPath)
+	if checkCmd.Run() == nil {
+		slog.Info("gh wrapper already installed", "containerID", containerID)
+		return nil
+	}
+
+	// Move real gh to gh.real
+	moveCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "mv", ghPath, ghRealPath)
+	if output, err := moveCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to move gh to gh.real: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	// Write wrapper script
+	wrapperScript := fmt.Sprintf(`#!/bin/sh
+# gh wrapper — refreshes GH_TOKEN from git credential helper before each invocation.
+# This ensures gh CLI works for sessions longer than 1 hour.
+_token=$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill 2>/dev/null | sed -n 's/^password=//p')
+if [ -n "$_token" ]; then
+  export GH_TOKEN="$_token"
+fi
+exec "%s" "$@"
+`, ghRealPath)
+
+	writeCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", "-i", containerID, "sh", "-c",
+		fmt.Sprintf("cat > %s && chmod 0755 %s", ghPath, ghPath))
+	writeCmd.Stdin = strings.NewReader(wrapperScript)
+	if output, err := writeCmd.CombinedOutput(); err != nil {
+		// Restore original gh on failure
+		restoreCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "root", containerID, "mv", ghRealPath, ghPath)
+		_ = restoreCmd.Run()
+		return fmt.Errorf("failed to write gh wrapper script: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	slog.Info("gh wrapper installed", "containerID", containerID, "ghPath", ghPath, "ghRealPath", ghRealPath)
 	return nil
 }
 
@@ -1527,11 +1676,25 @@ func resolveGitIdentity(state *bootstrapState) (name string, email string, ok bo
 	}
 
 	email = strings.TrimSpace(state.GitUserEmail)
+	name = strings.TrimSpace(state.GitUserName)
+
+	// Noreply email fallback: when the user has no public email, construct a
+	// GitHub noreply address from their GitHub ID and login name. This ensures
+	// git commit always works even for users with private email settings.
 	if email == "" {
-		return "", "", false
+		githubID := strings.TrimSpace(state.GitHubID)
+		if githubID == "" {
+			return "", "", false
+		}
+		// Derive a safe login from the name or fall back to "user"
+		login := "user"
+		if name != "" {
+			login = strings.ToLower(strings.ReplaceAll(name, " ", "-"))
+		}
+		email = githubID + "+" + login + "@users.noreply.github.com"
+		slog.Info("Using noreply email fallback for git identity", "email", email)
 	}
 
-	name = strings.TrimSpace(state.GitUserName)
 	if name != "" {
 		return name, email, true
 	}

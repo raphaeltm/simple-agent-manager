@@ -39,16 +39,18 @@ vi.mock('../../src/lib/api', () => ({
   listGitHubInstallations: vi.fn().mockResolvedValue([]),
 }));
 
-function renderProject(path = '/projects/proj-1/overview') {
+// Mock SettingsDrawer
+vi.mock('../../src/components/project/SettingsDrawer', () => ({
+  SettingsDrawer: () => null,
+}));
+
+function renderProject(path = '/projects/proj-1/chat') {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/projects/:id" element={<Project />}>
-          <Route path="overview" element={<div data-testid="overview-content">Overview</div>} />
-          <Route path="tasks" element={<div data-testid="tasks-content">Tasks</div>} />
-          <Route path="sessions" element={<div data-testid="sessions-content">Sessions</div>} />
-          <Route path="settings" element={<div data-testid="settings-content">Settings</div>} />
-          <Route path="activity" element={<div data-testid="activity-content">Activity</div>} />
+          <Route path="chat" element={<div data-testid="chat-content">Chat</div>} />
+          <Route path="chat/:sessionId" element={<div data-testid="chat-session">Session</div>} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -66,41 +68,29 @@ describe('Project shell', () => {
     await screen.findByRole('heading', { name: 'My Project' });
     expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument();
     expect(screen.getByText('Dashboard')).toBeInTheDocument();
-    expect(screen.getByText('Projects')).toBeInTheDocument();
   });
 
-  it('renders repository and branch info', async () => {
+  it('renders repository link', async () => {
     renderProject();
     await screen.findByRole('heading', { name: 'My Project' });
-    expect(screen.getByText('owner/repo@main')).toBeInTheDocument();
+    expect(screen.getByText('owner/repo')).toBeInTheDocument();
   });
 
-  it('renders tab navigation with 5 tabs', async () => {
+  it('does not render tab navigation (chat-first layout)', async () => {
     renderProject();
     await screen.findByRole('heading', { name: 'My Project' });
-    const tablist = screen.getByRole('tablist');
-    expect(tablist).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Tasks' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Sessions' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Settings' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Activity' })).toBeInTheDocument();
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
   });
 
   it('renders child route content via Outlet', async () => {
-    renderProject('/projects/proj-1/overview');
-    expect(await screen.findByTestId('overview-content')).toBeInTheDocument();
+    renderProject('/projects/proj-1/chat');
+    expect(await screen.findByTestId('chat-content')).toBeInTheDocument();
   });
 
-  it('marks the active tab based on current route', async () => {
-    renderProject('/projects/proj-1/tasks');
-    await screen.findByRole('heading', { name: 'My Project' });
-    const tasksTab = screen.getByRole('tab', { name: 'Tasks' });
-    expect(tasksTab).toHaveAttribute('aria-selected', 'true');
-  });
-
-  it('renders description when present', async () => {
+  it('renders settings gear button', async () => {
     renderProject();
-    expect(await screen.findByText('A test project')).toBeInTheDocument();
+    await screen.findByRole('heading', { name: 'My Project' });
+    expect(screen.getByRole('button', { name: 'Project settings' })).toBeInTheDocument();
   });
 });

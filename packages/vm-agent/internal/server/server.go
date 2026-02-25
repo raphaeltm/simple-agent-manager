@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -81,6 +82,7 @@ type WorkspaceRuntime struct {
 	CallbackToken       string
 	GitUserName         string
 	GitUserEmail        string
+	GitHubID            string
 	PTY                 *pty.Manager
 }
 
@@ -222,14 +224,12 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	// Wire task completion callback for task-driven workspaces.
-	// When TaskID is set, the VM agent POSTs to the task status callback endpoint
-	// after the ACP prompt completes.
-	if cfg.TaskID != "" && cfg.ProjectID != "" {
-		acpGatewayConfig.OnPromptComplete = makeTaskCompletionCallback(
-			cfg.ControlPlaneURL, cfg.ProjectID, cfg.TaskID, &acpGatewayConfig,
-		)
-		slog.Info("Task completion callback enabled", "taskId", cfg.TaskID, "projectId", cfg.ProjectID)
-	}
+	// When TaskID is set, the VM agent pushes uncommitted changes and POSTs
+	// to the task status callback endpoint after the ACP prompt completes.
+	// The callback is wired after server construction so it has access to the
+	// server's workspace runtime for git operations.
+	deferredTaskCallback := cfg.TaskID != "" && cfg.ProjectID != ""
+	_ = deferredTaskCallback // used below after server creation
 
 	// Create system info collector for metrics and version reporting.
 	sysInfoCollector := sysinfo.NewCollector(sysinfo.CollectorConfig{
@@ -261,6 +261,14 @@ func New(cfg *config.Config) (*Server, error) {
 
 	// Wire the git token fetcher now that the server exists.
 	s.acpConfig.GitTokenFetcher = s.fetchGitToken
+
+	// Wire task completion callback now that server and workspace runtime exist.
+	if deferredTaskCallback {
+		s.acpConfig.OnPromptComplete = s.makeTaskCompletionCallback(
+			cfg.ControlPlaneURL, cfg.ProjectID, cfg.TaskID, cfg.WorkspaceID,
+		)
+		slog.Info("Task completion callback enabled", "taskId", cfg.TaskID, "projectId", cfg.ProjectID)
+	}
 
 	if cfg.WorkspaceID != "" {
 		s.workspaces[cfg.WorkspaceID] = &WorkspaceRuntime{
@@ -565,76 +573,258 @@ func (a *messageReporterAdapter) Enqueue(entry acp.MessageReportEntry) error {
 	})
 }
 
-// makeTaskCompletionCallback returns an OnPromptComplete callback that POSTs
-// the task status to the control plane. It maps ACP stop reasons to task statuses:
-//   - "end_turn" → completed
-//   - "error" or prompt failure → failed
+// makeTaskCompletionCallback returns an OnPromptComplete callback that:
+// 1. On success: runs git add/commit/push inside the workspace container,
+//    optionally creates a PR via gh, then POSTs executionStep=awaiting_followup
+//    with the gitPushResult to the control plane (leaving the task running for
+//    follow-up messages).
+// 2. On failure: POSTs toStatus=failed to the control plane.
 //
-// The callback reads CallbackToken from the GatewayConfig pointer so it picks
-// up the token set after bootstrap.
-func makeTaskCompletionCallback(
-	controlPlaneURL, projectID, taskID string,
-	gwCfg *acp.GatewayConfig,
+// The callback reads CallbackToken from the server's ACP config pointer so it
+// picks up the token set after bootstrap.
+func (s *Server) makeTaskCompletionCallback(
+	controlPlaneURL, projectID, taskID, workspaceID string,
 ) func(stopReason string, promptErr error) {
 	callbackURL := fmt.Sprintf("%s/api/projects/%s/tasks/%s/status/callback",
 		strings.TrimRight(controlPlaneURL, "/"), projectID, taskID)
 
 	return func(stopReason string, promptErr error) {
-		toStatus := "completed"
-		reason := "Agent prompt completed"
-		errorMessage := ""
-
+		// On error, send terminal failure immediately.
 		if promptErr != nil || stopReason == "error" {
-			toStatus = "failed"
-			reason = "Agent prompt failed"
+			reason := "Agent prompt failed"
+			errorMessage := ""
 			if promptErr != nil {
 				errorMessage = promptErr.Error()
 			}
+			s.postTaskCallback(callbackURL, taskID, map[string]interface{}{
+				"toStatus":     "failed",
+				"reason":       reason,
+				"errorMessage": errorMessage,
+			})
+			return
 		}
 
-		body := map[string]string{
-			"toStatus": toStatus,
-			"reason":   reason,
+		// On success, push changes and report awaiting_followup.
+		pushResult := s.gitPushWorkspaceChanges(workspaceID)
+
+		slog.Info("Agent completion git push result",
+			"taskId", taskID,
+			"workspaceId", workspaceID,
+			"pushed", pushResult.Pushed,
+			"commitSha", pushResult.CommitSha,
+			"prUrl", pushResult.PrURL,
+			"error", pushResult.Error,
+		)
+
+		// Send executionStep=awaiting_followup with git push results.
+		// The task stays in running status, waiting for user follow-up.
+		// The idle timer (Phase 6) will eventually clean up if no follow-up.
+		body := map[string]interface{}{
+			"executionStep": "awaiting_followup",
+			"gitPushResult": map[string]interface{}{
+				"pushed":                pushResult.Pushed,
+				"commitSha":             pushResult.CommitSha,
+				"branchName":            pushResult.BranchName,
+				"prUrl":                 pushResult.PrURL,
+				"prNumber":              pushResult.PrNumber,
+				"hasUncommittedChanges": pushResult.HasUncommittedChanges,
+				"error":                 pushResult.Error,
+			},
 		}
-		if errorMessage != "" {
-			body["errorMessage"] = errorMessage
+		s.postTaskCallback(callbackURL, taskID, body)
+	}
+}
+
+// postTaskCallback sends a JSON payload to the task status callback endpoint.
+func (s *Server) postTaskCallback(callbackURL, taskID string, body map[string]interface{}) {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		slog.Error("Task callback: marshal error", "error", err)
+		return
+	}
+
+	token := s.acpConfig.CallbackToken
+	if token == "" {
+		slog.Warn("Task callback: no callback token available, skipping")
+		return
+	}
+
+	req, err := http.NewRequest("POST", callbackURL, bytes.NewReader(payload))
+	if err != nil {
+		slog.Error("Task callback: request creation error", "error", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		slog.Error("Task callback: request failed", "error", err, "url", callbackURL)
+		return
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		slog.Info("Task callback sent", "taskId", taskID, "body", string(payload))
+	} else {
+		slog.Error("Task callback: unexpected status", "statusCode", resp.StatusCode, "taskId", taskID)
+	}
+}
+
+// gitPushResult holds the outcome of a git push attempt inside a workspace.
+type gitPushResult struct {
+	Pushed                bool
+	CommitSha             string
+	BranchName            string
+	PrURL                 string
+	PrNumber              int
+	HasUncommittedChanges bool
+	Error                 string
+}
+
+// gitPushWorkspaceChanges runs git status/add/commit/push inside the workspace
+// container and optionally creates a PR. Returns the result for callback reporting.
+func (s *Server) gitPushWorkspaceChanges(workspaceID string) gitPushResult {
+	result := gitPushResult{}
+
+	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
+	if err != nil {
+		result.Error = fmt.Sprintf("resolve container: %s", err)
+		return result
+	}
+
+	// Helper to run git commands in the container
+	runGit := func(args ...string) (string, error) {
+		cmdArgs := []string{"exec"}
+		if user != "" {
+			cmdArgs = append(cmdArgs, "-u", user)
+		}
+		cmdArgs = append(cmdArgs, "-w", workDir, containerID, "git")
+		cmdArgs = append(cmdArgs, args...)
+		cmd := exec.Command("docker", cmdArgs...)
+		output, err := cmd.CombinedOutput()
+		return strings.TrimSpace(string(output)), err
+	}
+
+	// Check for uncommitted changes
+	statusOutput, err := runGit("status", "--porcelain")
+	if err != nil {
+		result.Error = fmt.Sprintf("git status failed: %s", err)
+		return result
+	}
+
+	if statusOutput == "" {
+		// No changes — nothing to push. Check if there are unpushed commits.
+		logOutput, logErr := runGit("log", "--oneline", "@{push}..", "--")
+		if logErr != nil || strings.TrimSpace(logOutput) == "" {
+			slog.Info("No changes or unpushed commits", "workspaceId", workspaceID)
+			return result
+		}
+		// There are unpushed commits — push them
+	} else {
+		result.HasUncommittedChanges = true
+
+		// Stage all changes
+		if _, err := runGit("add", "-A"); err != nil {
+			result.Error = fmt.Sprintf("git add failed: %s", err)
+			return result
 		}
 
-		payload, err := json.Marshal(body)
+		// Commit
+		commitOutput, err := runGit("commit", "-m", "chore: save agent work\n\nAuto-committed by SAM on agent completion.")
 		if err != nil {
-			slog.Error("Task completion callback: marshal error", "error", err)
-			return
-		}
-
-		token := gwCfg.CallbackToken
-		if token == "" {
-			slog.Warn("Task completion callback: no callback token available, skipping")
-			return
-		}
-
-		req, err := http.NewRequest("POST", callbackURL, bytes.NewReader(payload))
-		if err != nil {
-			slog.Error("Task completion callback: request creation error", "error", err)
-			return
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+token)
-
-		client := &http.Client{Timeout: 30 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			slog.Error("Task completion callback: request failed", "error", err, "url", callbackURL)
-			return
-		}
-		defer resp.Body.Close()
-		io.Copy(io.Discard, resp.Body)
-
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			slog.Info("Task completion callback sent", "taskId", taskID, "toStatus", toStatus)
-		} else {
-			slog.Error("Task completion callback: unexpected status", "statusCode", resp.StatusCode, "taskId", taskID)
+			result.Error = fmt.Sprintf("git commit failed: %s: %s", err, commitOutput)
+			return result
 		}
 	}
+
+	// Get the commit SHA
+	sha, _ := runGit("rev-parse", "HEAD")
+	result.CommitSha = sha
+
+	// Get the current branch name
+	branchOutput, _ := runGit("rev-parse", "--abbrev-ref", "HEAD")
+	result.BranchName = branchOutput
+
+	// Push
+	pushOutput, err := runGit("push", "--set-upstream", "origin", "HEAD")
+	if err != nil {
+		result.Error = fmt.Sprintf("git push failed: %s: %s", err, pushOutput)
+		return result
+	}
+	result.Pushed = true
+
+	slog.Info("Git push succeeded", "workspaceId", workspaceID, "branch", result.BranchName, "sha", result.CommitSha)
+
+	// Try to create a PR via gh (best-effort)
+	prURL, prNumber := s.tryCreatePR(containerID, workDir, user)
+	result.PrURL = prURL
+	result.PrNumber = prNumber
+
+	return result
+}
+
+// tryCreatePR attempts to create a GitHub PR using gh CLI inside the container.
+// Returns (prURL, prNumber) on success, or ("", 0) on failure.
+func (s *Server) tryCreatePR(containerID, workDir, user string) (string, int) {
+	cmdArgs := []string{"exec"}
+	if user != "" {
+		cmdArgs = append(cmdArgs, "-u", user)
+	}
+	cmdArgs = append(cmdArgs, "-w", workDir, containerID,
+		"gh", "pr", "create",
+		"--fill",
+		"--head", "HEAD",
+	)
+
+	cmd := exec.Command("docker", cmdArgs...)
+	output, err := cmd.CombinedOutput()
+	outputStr := strings.TrimSpace(string(output))
+	if err != nil {
+		// Check if a PR already exists
+		if strings.Contains(outputStr, "already exists") {
+			slog.Info("PR already exists for this branch", "output", outputStr)
+			// Try to get the existing PR URL
+			return s.getExistingPRURL(containerID, workDir, user)
+		}
+		slog.Warn("gh pr create failed (non-fatal)", "error", err, "output", outputStr)
+		return "", 0
+	}
+
+	// gh pr create outputs the PR URL on success
+	prURL := outputStr
+	if !strings.HasPrefix(prURL, "https://") {
+		// Try to extract URL from output
+		for _, line := range strings.Split(outputStr, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "https://") {
+				prURL = strings.TrimSpace(line)
+				break
+			}
+		}
+	}
+
+	slog.Info("PR created", "url", prURL)
+	return prURL, 0
+}
+
+// getExistingPRURL looks up the existing PR URL for the current branch.
+func (s *Server) getExistingPRURL(containerID, workDir, user string) (string, int) {
+	cmdArgs := []string{"exec"}
+	if user != "" {
+		cmdArgs = append(cmdArgs, "-u", user)
+	}
+	cmdArgs = append(cmdArgs, "-w", workDir, containerID,
+		"gh", "pr", "view", "--json", "url,number", "--jq", ".url",
+	)
+
+	cmd := exec.Command("docker", cmdArgs...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", 0
+	}
+	return strings.TrimSpace(string(output)), 0
 }
 
 // openSQLiteDB opens a SQLite database connection with WAL mode and

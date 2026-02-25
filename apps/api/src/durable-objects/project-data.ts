@@ -12,11 +12,14 @@ import { runMigrations } from './migrations';
 
 type Env = {
   DATABASE: D1Database;
+  BASE_DOMAIN?: string;
   DO_SUMMARY_SYNC_DEBOUNCE_MS?: string;
   MAX_SESSIONS_PER_PROJECT?: string;
   MAX_MESSAGES_PER_SESSION?: string;
   ACTIVITY_RETENTION_DAYS?: string;
   SESSION_IDLE_TIMEOUT_MINUTES?: string;
+  IDLE_CLEANUP_RETRY_DELAY_MS?: string;
+  IDLE_CLEANUP_MAX_RETRIES?: string;
 };
 
 interface SummaryData {
@@ -480,6 +483,262 @@ export class ProjectData extends DurableObject<Env> {
     };
   }
 
+  /**
+   * Mark the agent as completed on a session. Sets agent_completed_at timestamp.
+   */
+  async markAgentCompleted(sessionId: string): Promise<void> {
+    const now = Date.now();
+    this.sql.exec(
+      `UPDATE chat_sessions SET agent_completed_at = ?, updated_at = ? WHERE id = ? AND agent_completed_at IS NULL`,
+      now,
+      now,
+      sessionId
+    );
+    this.broadcastEvent('session.agent_completed', { sessionId, agentCompletedAt: now });
+  }
+
+  // =========================================================================
+  // Idle Cleanup Schedule (T031-T033)
+  // =========================================================================
+
+  /**
+   * Schedule idle cleanup for a session after agent completion.
+   * Inserts/replaces a row in idle_cleanup_schedule and sets the DO alarm
+   * to fire at the earliest scheduled cleanup time.
+   */
+  async scheduleIdleCleanup(
+    sessionId: string,
+    workspaceId: string,
+    taskId: string | null
+  ): Promise<{ cleanupAt: number }> {
+    const timeoutMinutes = parseInt(this.env.SESSION_IDLE_TIMEOUT_MINUTES || '15', 10);
+    const cleanupAt = Date.now() + timeoutMinutes * 60 * 1000;
+
+    this.sql.exec(
+      `INSERT OR REPLACE INTO idle_cleanup_schedule (session_id, workspace_id, task_id, cleanup_at, created_at, retry_count)
+       VALUES (?, ?, ?, ?, ?, 0)`,
+      sessionId,
+      workspaceId,
+      taskId,
+      cleanupAt,
+      Date.now()
+    );
+
+    await this.recalculateAlarm();
+    return { cleanupAt };
+  }
+
+  /**
+   * Cancel idle cleanup for a session (e.g., when manually stopped).
+   */
+  async cancelIdleCleanup(sessionId: string): Promise<void> {
+    this.sql.exec('DELETE FROM idle_cleanup_schedule WHERE session_id = ?', sessionId);
+    await this.recalculateAlarm();
+  }
+
+  /**
+   * Reset idle cleanup timer for a session (e.g., user sent a follow-up).
+   * Returns the new cleanup timestamp.
+   */
+  async resetIdleCleanup(sessionId: string): Promise<{ cleanupAt: number }> {
+    const timeoutMinutes = parseInt(this.env.SESSION_IDLE_TIMEOUT_MINUTES || '15', 10);
+    const cleanupAt = Date.now() + timeoutMinutes * 60 * 1000;
+
+    const existing = this.sql
+      .exec('SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ?', sessionId)
+      .toArray();
+
+    if (existing.length === 0) {
+      return { cleanupAt: 0 };
+    }
+
+    this.sql.exec(
+      'UPDATE idle_cleanup_schedule SET cleanup_at = ?, retry_count = 0 WHERE session_id = ?',
+      cleanupAt,
+      sessionId
+    );
+
+    await this.recalculateAlarm();
+    return { cleanupAt };
+  }
+
+  /**
+   * DO alarm handler — fires when the earliest idle cleanup is due.
+   * Processes all expired rows: completes tasks, stops sessions, marks
+   * workspaces for cron cleanup in D1. Retries on failure.
+   */
+  async alarm(): Promise<void> {
+    const now = Date.now();
+    const maxRetries = parseInt(this.env.IDLE_CLEANUP_MAX_RETRIES || '1', 10);
+    const retryDelay = parseInt(this.env.IDLE_CLEANUP_RETRY_DELAY_MS || '300000', 10);
+
+    const expired = this.sql
+      .exec(
+        'SELECT session_id, workspace_id, task_id, retry_count FROM idle_cleanup_schedule WHERE cleanup_at <= ?',
+        now
+      )
+      .toArray();
+
+    for (const row of expired) {
+      const sessionId = row.session_id as string;
+      const workspaceId = row.workspace_id as string;
+      const taskId = row.task_id as string | null;
+      const retryCount = (row.retry_count as number) || 0;
+
+      try {
+        // Stop the session in DO SQLite
+        this.stopSessionInternal(sessionId);
+
+        // Update D1: task → completed, workspace → stopped
+        if (taskId) {
+          await this.completeTaskInD1(taskId);
+        }
+        await this.stopWorkspaceInD1(workspaceId);
+
+        // Remove from schedule
+        this.sql.exec('DELETE FROM idle_cleanup_schedule WHERE session_id = ?', sessionId);
+
+        // Record activity
+        this.recordActivityEventInternal(
+          'session.idle_cleanup',
+          'system',
+          null,
+          workspaceId,
+          sessionId,
+          taskId,
+          JSON.stringify({ retryCount })
+        );
+        this.broadcastEvent('session.idle_cleanup', { sessionId, workspaceId, taskId });
+        this.scheduleSummarySync();
+      } catch (err) {
+        console.error('Idle cleanup failed for session', sessionId, err);
+
+        if (retryCount >= maxRetries) {
+          // Exhausted retries — remove from schedule, let cron sweep handle it
+          this.sql.exec('DELETE FROM idle_cleanup_schedule WHERE session_id = ?', sessionId);
+          this.recordActivityEventInternal(
+            'session.idle_cleanup_failed',
+            'system',
+            null,
+            workspaceId,
+            sessionId,
+            taskId,
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+              retryCount,
+            })
+          );
+          // Insert a system message into the session to notify the user
+          this.persistSystemMessage(
+            sessionId,
+            'Idle cleanup failed after retries. Your work has been preserved — please check the workspace manually.'
+          );
+        } else {
+          // Schedule retry
+          this.sql.exec(
+            'UPDATE idle_cleanup_schedule SET cleanup_at = ?, retry_count = ? WHERE session_id = ?',
+            now + retryDelay,
+            retryCount + 1,
+            sessionId
+          );
+        }
+      }
+    }
+
+    // Recalculate alarm for remaining/rescheduled rows
+    await this.recalculateAlarm();
+  }
+
+  /**
+   * Recalculate the DO alarm based on the earliest scheduled cleanup.
+   */
+  private async recalculateAlarm(): Promise<void> {
+    const row = this.sql
+      .exec('SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule')
+      .toArray()[0];
+
+    if (row?.earliest) {
+      await this.ctx.storage.setAlarm(row.earliest as number);
+    } else {
+      await this.ctx.storage.deleteAlarm();
+    }
+  }
+
+  /**
+   * Stop a session directly in DO SQLite (internal, no broadcast).
+   */
+  private stopSessionInternal(sessionId: string): void {
+    const now = Date.now();
+    this.sql.exec(
+      `UPDATE chat_sessions SET status = 'stopped', ended_at = ?, updated_at = ? WHERE id = ? AND status = 'active'`,
+      now,
+      now,
+      sessionId
+    );
+  }
+
+  /**
+   * Transition a task to 'completed' in D1. Best-effort — the cron
+   * sweep will catch anything missed.
+   */
+  private async completeTaskInD1(taskId: string): Promise<void> {
+    const now = new Date().toISOString();
+    try {
+      await this.env.DATABASE.prepare(
+        `UPDATE tasks SET status = 'completed', execution_step = NULL, completed_at = ?, updated_at = ? WHERE id = ? AND status IN ('running', 'delegated')`
+      )
+        .bind(now, now, taskId)
+        .run();
+    } catch (err) {
+      console.error('D1 task completion failed for', taskId, err);
+      throw err;
+    }
+  }
+
+  /**
+   * Mark a workspace as 'stopped' in D1. The cron sweep handles actual
+   * node cleanup (same pattern as NodeLifecycle DO).
+   */
+  private async stopWorkspaceInD1(workspaceId: string): Promise<void> {
+    const now = new Date().toISOString();
+    try {
+      await this.env.DATABASE.prepare(
+        `UPDATE workspaces SET status = 'stopped', updated_at = ? WHERE id = ? AND status IN ('running', 'recovery')`
+      )
+        .bind(now, workspaceId)
+        .run();
+    } catch (err) {
+      console.error('D1 workspace stop failed for', workspaceId, err);
+      throw err;
+    }
+  }
+
+  /**
+   * Persist a system message into a session (for user notification).
+   */
+  private persistSystemMessage(sessionId: string, content: string): void {
+    try {
+      const id = generateId();
+      const now = Date.now();
+      this.sql.exec(
+        `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at)
+         VALUES (?, ?, 'system', ?, NULL, ?)`,
+        id,
+        sessionId,
+        content,
+        now
+      );
+      this.sql.exec(
+        `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ? WHERE id = ?`,
+        now,
+        sessionId
+      );
+      this.broadcastEvent('message.new', { sessionId, messageId: id, role: 'system' });
+    } catch {
+      // Best-effort notification
+    }
+  }
+
   // =========================================================================
   // Summary (for D1 sync and dashboard display)
   // =========================================================================
@@ -586,16 +845,25 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   private mapSessionRow(row: Record<string, unknown>): Record<string, unknown> {
+    const status = row.status as string;
+    const agentCompletedAt = (row.agent_completed_at as number) ?? null;
+    const workspaceId = row.workspace_id as string | null;
+    const baseDomain = this.env.BASE_DOMAIN;
+
     return {
       id: row.id,
-      workspaceId: row.workspace_id,
+      workspaceId,
       taskId: row.task_id ?? null,
       topic: row.topic,
-      status: row.status,
+      status,
       messageCount: row.message_count,
       startedAt: row.started_at,
       endedAt: row.ended_at,
       createdAt: row.created_at,
+      agentCompletedAt,
+      isIdle: status === 'active' && agentCompletedAt != null,
+      isTerminated: status === 'stopped',
+      workspaceUrl: workspaceId && baseDomain ? `https://ws-${workspaceId}.${baseDomain}` : null,
     };
   }
 

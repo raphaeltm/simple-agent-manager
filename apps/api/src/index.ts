@@ -27,6 +27,7 @@ import { tasksRoutes } from './routes/tasks';
 import { chatRoutes } from './routes/chat';
 import { activityRoutes } from './routes/activity';
 import { taskRunsRoutes } from './routes/task-runs';
+import { taskSubmitRoutes } from './routes/task-submit';
 import { adminRoutes } from './routes/admin';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
@@ -149,6 +150,12 @@ export interface Env {
   ACTIVITY_RETENTION_DAYS?: string;
   SESSION_IDLE_TIMEOUT_MINUTES?: string;
   DO_SUMMARY_SYNC_DEBOUNCE_MS?: string;
+  // Branch name generation (chat-first submit)
+  BRANCH_NAME_PREFIX?: string;
+  BRANCH_NAME_MAX_LENGTH?: string;
+  // Idle cleanup configuration
+  IDLE_CLEANUP_RETRY_DELAY_MS?: string;
+  IDLE_CLEANUP_MAX_RETRIES?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -368,6 +375,7 @@ app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
 app.route('/api/projects/:projectId/tasks', taskRunsRoutes);
+app.route('/api/projects/:projectId/tasks', taskSubmitRoutes);
 app.route('/api/admin', adminRoutes);
 
 // 404 handler

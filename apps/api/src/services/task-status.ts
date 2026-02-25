@@ -24,8 +24,8 @@ const TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   cancelled: ['ready'],
 };
 
-export function isTaskStatus(value: string): value is TaskStatus {
-  return TASK_STATUSES.includes(value as TaskStatus);
+export function isTaskStatus(value: unknown): value is TaskStatus {
+  return typeof value === 'string' && TASK_STATUSES.includes(value as TaskStatus);
 }
 
 export function getAllowedTaskTransitions(from: TaskStatus): TaskStatus[] {

@@ -231,17 +231,12 @@ describe('ProjectKanban page', () => {
   });
 });
 
-describe('ProjectChat task submit integration', () => {
+describe('ProjectChat chat-first submit integration', () => {
   const source = readSource('pages/ProjectChat.tsx');
 
-  it('imports TaskSubmitForm', () => {
-    expect(source).toContain("from '../components/task/TaskSubmitForm'");
-  });
-
-  it('renders TaskSubmitForm in the chat view', () => {
-    expect(source).toContain('<TaskSubmitForm');
-    expect(source).toContain('projectId={projectId}');
-    expect(source).toContain('hasCloudCredentials={hasCloudCredentials}');
+  it('uses submitTask API for chat input', () => {
+    expect(source).toContain('submitTask');
+    expect(source).toContain("from '../lib/api'");
   });
 
   it('checks cloud credentials on mount', () => {
@@ -250,19 +245,25 @@ describe('ProjectChat task submit integration', () => {
     expect(source).toContain("provider === 'hetzner'");
   });
 
-  it('implements handleRunNow: create task + transition to ready + run', () => {
-    expect(source).toContain('handleRunNow');
-    expect(source).toContain('createProjectTask(projectId');
-    expect(source).toContain("toStatus: 'ready'");
-    expect(source).toContain('runProjectTask(projectId');
+  it('implements handleSubmit with message trimming', () => {
+    expect(source).toContain('handleSubmit');
+    expect(source).toContain('message.trim()');
+    expect(source).toContain('submitTask(projectId');
   });
 
-  it('implements handleSaveToBacklog: create draft task', () => {
-    expect(source).toContain('handleSaveToBacklog');
-    expect(source).toContain('createProjectTask(projectId');
+  it('validates cloud credentials before submit', () => {
+    expect(source).toContain('hasCloudCredentials');
+    expect(source).toContain('Cloud credentials required');
   });
 
-  it('reloads sessions after run', () => {
+  it('tracks provisioning state after submit', () => {
+    expect(source).toContain('ProvisioningState');
+    expect(source).toContain('setProvisioning');
+    expect(source).toContain('result.taskId');
+    expect(source).toContain('result.sessionId');
+  });
+
+  it('reloads sessions after submit', () => {
     expect(source).toContain('void loadSessions()');
   });
 });
@@ -279,16 +280,11 @@ describe('Kanban routing integration', () => {
     expect(appSource).toContain('<Route path="kanban" element={<ProjectKanban />} />');
   });
 
-  it('adds Kanban tab to project tabs', () => {
-    expect(projectSource).toContain("{ id: 'kanban', label: 'Kanban', path: 'kanban' }");
-  });
-
-  it('Kanban tab appears between Chat and Tasks', () => {
-    const chatIdx = projectSource.indexOf("id: 'chat'");
-    const kanbanIdx = projectSource.indexOf("id: 'kanban'");
-    const tasksIdx = projectSource.indexOf("id: 'tasks'");
-    expect(chatIdx).toBeLessThan(kanbanIdx);
-    expect(kanbanIdx).toBeLessThan(tasksIdx);
+  it('project page has no tab navigation (chat-first layout)', () => {
+    // Tabs removed in 022 — kanban route exists but is not shown in project nav
+    expect(projectSource).not.toContain("id: 'kanban'");
+    expect(projectSource).not.toContain("id: 'tasks'");
+    expect(projectSource).not.toContain("id: 'chat'");
   });
 });
 

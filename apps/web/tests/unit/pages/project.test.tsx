@@ -296,13 +296,10 @@ describe('Project page', () => {
     });
   });
 
-  it('renders 5 tabs in the project shell', async () => {
+  it('renders chat-first layout without tabs', async () => {
     renderProjectPage();
     await screen.findByRole('heading', { name: 'Project One' });
-    expect(screen.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Tasks' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Sessions' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Settings' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Activity' })).toBeInTheDocument();
+    // Tabs were removed in 022 — project page is now chat-first
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
   });
 });
