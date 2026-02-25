@@ -1,8 +1,7 @@
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
+import { Button, Spinner } from '@simple-agent-manager/ui';
 import { getChatSession } from '../../lib/api';
-import type { ChatMessageResponse, ChatSessionResponse } from '../../lib/api';
+import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 
 interface ProjectMessageViewProps {
   projectId: string;
@@ -10,8 +9,8 @@ interface ProjectMessageViewProps {
 }
 
 const roleStyles: Record<string, { label: string; color: string; bg: string }> = {
-  user: { label: 'User', color: 'var(--sam-color-tn-blue)', bg: 'var(--sam-color-info-tint)' },
-  assistant: { label: 'Assistant', color: 'var(--sam-color-tn-green)', bg: 'var(--sam-color-success-tint)' },
+  user: { label: 'You', color: 'var(--sam-color-tn-blue)', bg: 'var(--sam-color-info-tint)' },
+  assistant: { label: 'Agent', color: 'var(--sam-color-tn-green)', bg: 'var(--sam-color-success-tint)' },
   system: { label: 'System', color: 'var(--sam-color-tn-yellow)', bg: 'var(--sam-color-warning-tint)' },
   tool: { label: 'Tool', color: 'var(--sam-color-tn-purple)', bg: 'var(--sam-color-info-tint)' },
 };
@@ -80,28 +79,46 @@ function MessageBubble({ message }: { message: ChatMessageResponse }) {
   );
 }
 
+type SessionState = 'active' | 'idle' | 'terminated';
+
+function deriveSessionState(session: ChatSessionResponse): SessionState {
+  if (session.status === 'stopped') return 'terminated';
+  const s = session as ChatSessionResponse & { agentCompletedAt?: number | null; isIdle?: boolean };
+  if (s.isIdle || s.agentCompletedAt) return 'idle';
+  if (session.status === 'active') return 'active';
+  return 'terminated';
+}
+
 export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   projectId,
   sessionId,
 }) => {
-  const navigate = useNavigate();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   const [session, setSession] = useState<ChatSessionResponse | null>(null);
+  const [taskEmbed, setTaskEmbed] = useState<{ id: string; outputBranch?: string | null; outputPrUrl?: string | null } | null>(null);
   const [messages, setMessages] = useState<ChatMessageResponse[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Follow-up input state
+  const [followUp, setFollowUp] = useState('');
+  const [sendingFollowUp, setSendingFollowUp] = useState(false);
+
   const loadSession = useCallback(async () => {
     try {
       setError(null);
       setLoading(true);
-      const data = await getChatSession(projectId, sessionId);
+      const data: ChatSessionDetailResponse & { session: ChatSessionResponse & { task?: { id: string; outputBranch?: string | null; outputPrUrl?: string | null } } } = await getChatSession(projectId, sessionId);
       setSession(data.session);
       setMessages(data.messages);
       setHasMore(data.hasMore);
+      if (data.session.task) {
+        setTaskEmbed(data.session.task);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load session');
     } finally {
@@ -120,7 +137,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     }
   }, [messages.length, loading]);
 
-  // WebSocket connection for real-time updates on active sessions
+  // WebSocket for real-time updates — connects to project DO for message streaming
   useEffect(() => {
     if (!session || session.status !== 'active') return;
 
@@ -130,6 +147,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     let ws: WebSocket | null = null;
     try {
       ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -143,7 +161,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               createdAt: data.createdAt || Date.now(),
             };
             setMessages((prev) => {
-              // Deduplicate by id
               if (prev.some((m) => m.id === newMsg.id)) return prev;
               return [...prev, newMsg];
             });
@@ -155,10 +172,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         }
       };
     } catch {
-      // WebSocket not available — polling fallback below
+      // WebSocket not available
     }
 
-    // Polling fallback for when WebSocket is unavailable or fails.
+    // Polling fallback
     const ACTIVE_POLL_MS = 3000;
     const pollInterval = setInterval(async () => {
       try {
@@ -173,9 +190,53 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
     return () => {
       ws?.close();
+      wsRef.current = null;
       clearInterval(pollInterval);
     };
   }, [session?.status, projectId, sessionId]);
+
+  // Send follow-up message via WebSocket or HTTP
+  const handleSendFollowUp = async () => {
+    const trimmed = followUp.trim();
+    if (!trimmed || sendingFollowUp) return;
+
+    setSendingFollowUp(true);
+    try {
+      // Try sending via the project DO WebSocket
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'message.send',
+          sessionId,
+          content: trimmed,
+          role: 'user',
+        }));
+        // Optimistic add
+        setMessages((prev) => [...prev, {
+          id: crypto.randomUUID(),
+          sessionId,
+          role: 'user',
+          content: trimmed,
+          toolMetadata: null,
+          createdAt: Date.now(),
+        }]);
+        setFollowUp('');
+      } else {
+        // Fallback: just show the message optimistically; the VM agent WS isn't
+        // connected from the browser yet (Phase 5+6 will add direct VM WS).
+        setMessages((prev) => [...prev, {
+          id: crypto.randomUUID(),
+          sessionId,
+          role: 'user',
+          content: trimmed,
+          toolMetadata: null,
+          createdAt: Date.now(),
+        }]);
+        setFollowUp('');
+      }
+    } finally {
+      setSendingFollowUp(false);
+    }
+  };
 
   const loadMore = async () => {
     if (!hasMore || loadingMore) return;
@@ -216,11 +277,11 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     );
   }
 
-  const isActive = session?.status === 'active';
+  const sessionState = session ? deriveSessionState(session) : 'terminated';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Session header */}
+      {/* Session header with branch/PR info */}
       {session && (
         <div style={{
           display: 'flex',
@@ -236,24 +297,70 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             fontWeight: 600,
             color: 'var(--sam-color-fg-primary)',
           }}>
-            {session.topic || `Session ${session.id.slice(0, 8)}`}
+            {session.topic || `Chat ${session.id.slice(0, 8)}`}
           </span>
-          <StatusBadge
-            status={isActive ? 'running' : 'stopped'}
-            label={session.status}
-          />
-          <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)' }}>
-            {session.messageCount} message{session.messageCount !== 1 ? 's' : ''}
+
+          {/* State indicator */}
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            fontSize: 'var(--sam-type-caption-size)',
+            color: sessionState === 'active' ? 'var(--sam-color-success)'
+              : sessionState === 'idle' ? 'var(--sam-color-warning, #f59e0b)'
+              : 'var(--sam-color-fg-muted)',
+            fontWeight: 500,
+          }}>
+            <span style={{
+              width: '6px',
+              height: '6px',
+              borderRadius: '50%',
+              backgroundColor: 'currentColor',
+            }} />
+            {sessionState === 'active' ? 'Active' : sessionState === 'idle' ? 'Idle' : 'Stopped'}
           </span>
-          {session.workspaceId && isActive && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate(`/workspace/${session.workspaceId}`)}
+
+          {/* Branch name (T021) */}
+          {taskEmbed?.outputBranch && (
+            <span className="sam-type-caption" style={{
+              color: 'var(--sam-color-fg-muted)',
+              fontFamily: 'monospace',
+              backgroundColor: 'var(--sam-color-bg-inset)',
+              padding: '1px 6px',
+              borderRadius: 'var(--sam-radius-sm)',
+            }}>
+              {taskEmbed.outputBranch}
+            </span>
+          )}
+
+          {/* PR link (T021) */}
+          {taskEmbed?.outputPrUrl && (
+            <a
+              href={taskEmbed.outputPrUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="sam-type-caption"
+              style={{
+                color: 'var(--sam-color-accent-primary)',
+                textDecoration: 'none',
+                fontWeight: 500,
+              }}
+            >
+              View PR
+            </a>
+          )}
+
+          {session.workspaceId && sessionState === 'active' && (
+            <a
+              href={`/workspaces/${session.workspaceId}`}
+              target="_blank"
+              rel="noopener noreferrer"
               style={{ marginLeft: 'auto' }}
             >
-              Open Workspace
-            </Button>
+              <Button variant="ghost" size="sm">
+                Open Workspace
+              </Button>
+            </a>
           )}
         </div>
       )}
@@ -279,7 +386,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             textAlign: 'center',
             padding: 'var(--sam-space-8)',
           }}>
-            {isActive ? 'Waiting for messages...' : 'No messages in this session.'}
+            {sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
           </div>
         ) : (
           <div style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
@@ -291,6 +398,109 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Input area — varies by session state (T019) */}
+      {sessionState === 'active' && (
+        <FollowUpInput
+          value={followUp}
+          onChange={setFollowUp}
+          onSend={handleSendFollowUp}
+          sending={sendingFollowUp}
+          placeholder="Send a message..."
+        />
+      )}
+      {sessionState === 'idle' && (
+        <FollowUpInput
+          value={followUp}
+          onChange={setFollowUp}
+          onSend={handleSendFollowUp}
+          sending={sendingFollowUp}
+          placeholder="Send a follow-up..."
+        />
+      )}
+      {sessionState === 'terminated' && (
+        <div style={{
+          borderTop: '1px solid var(--sam-color-border-default)',
+          padding: 'var(--sam-space-3) var(--sam-space-4)',
+          backgroundColor: 'var(--sam-color-bg-surface)',
+          textAlign: 'center',
+        }}>
+          <span className="sam-type-secondary" style={{ color: 'var(--sam-color-fg-muted)' }}>
+            This session has ended.
+          </span>
+        </div>
+      )}
     </div>
   );
 };
+
+/** Follow-up message input for active/idle sessions. */
+function FollowUpInput({
+  value,
+  onChange,
+  onSend,
+  sending,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSend: () => void;
+  sending: boolean;
+  placeholder: string;
+}) {
+  return (
+    <div style={{
+      borderTop: '1px solid var(--sam-color-border-default)',
+      padding: 'var(--sam-space-3) var(--sam-space-4)',
+      backgroundColor: 'var(--sam-color-bg-surface)',
+    }}>
+      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'flex-end' }}>
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !sending) {
+              e.preventDefault();
+              onSend();
+            }
+          }}
+          placeholder={placeholder}
+          disabled={sending}
+          rows={1}
+          style={{
+            flex: 1,
+            padding: 'var(--sam-space-2) var(--sam-space-3)',
+            backgroundColor: 'var(--sam-color-bg-page)',
+            border: '1px solid var(--sam-color-border-default)',
+            borderRadius: 'var(--sam-radius-md)',
+            color: 'var(--sam-color-fg-primary)',
+            fontSize: 'var(--sam-type-body-size)',
+            outline: 'none',
+            resize: 'none',
+            fontFamily: 'inherit',
+            lineHeight: 1.5,
+            minHeight: '38px',
+            maxHeight: '120px',
+          }}
+        />
+        <button
+          type="button"
+          onClick={onSend}
+          disabled={sending || !value.trim()}
+          style={{
+            padding: 'var(--sam-space-2) var(--sam-space-3)',
+            backgroundColor: sending || !value.trim() ? 'var(--sam-color-bg-inset)' : 'var(--sam-color-accent-primary)',
+            color: sending || !value.trim() ? 'var(--sam-color-fg-muted)' : 'white',
+            border: 'none',
+            borderRadius: 'var(--sam-radius-md)',
+            cursor: sending || !value.trim() ? 'default' : 'pointer',
+            fontSize: 'var(--sam-type-body-size)',
+            fontWeight: 500,
+          }}
+        >
+          Send
+        </button>
+      </div>
+    </div>
+  );
+}

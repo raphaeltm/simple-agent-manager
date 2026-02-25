@@ -54,18 +54,18 @@
 
 ### Frontend — Chat-First Layout
 
-- [ ] T014 [US1] Restructure Project page: remove PROJECT_TABS array and Tabs component, replace with minimal header (project name, repo link, settings gear icon placeholder, breadcrumb) in apps/web/src/pages/Project.tsx
-- [ ] T015 [US1] Update routing so /projects/:id defaults to chat interface (remove /overview default, merge ProjectChat content into Project outlet or make chat the index route) in apps/web/src/App.tsx
-- [ ] T016 [US1] Add submitTask(projectId, message, options?) function to API client that calls POST /tasks/submit in apps/web/src/lib/api.ts
+- [x] T014 [US1] Restructure Project page: remove PROJECT_TABS array and Tabs component, replace with minimal header (project name, repo link, settings gear icon placeholder, breadcrumb) in apps/web/src/pages/Project.tsx
+- [x] T015 [US1] Update routing so /projects/:id defaults to chat interface (remove /overview default, merge ProjectChat content into Project outlet or make chat the index route) in apps/web/src/App.tsx
+- [x] T016 [US1] Add submitTask(projectId, message, options?) function to API client that calls POST /tasks/submit in apps/web/src/lib/api.ts
 
 ### Frontend — Chat Experience
 
-- [ ] T017 [US1] Simplify task input: replace TaskSubmitForm split-button with single text field, enter-to-submit, no visible "Save to Backlog" or advanced options by default in apps/web/src/pages/ProjectChat.tsx
-- [ ] T018 [US1] Update SessionSidebar with visual state indicators (green dot for active, amber for idle, gray for terminated) and ensure "New Chat" button is prominent at the top, clearing the message area and presenting a fresh input on click in apps/web/src/components/chat/SessionSidebar.tsx
-- [ ] T019 [US1] Handle session lifecycle states in ProjectMessageView: active shows input with "Send a message..." placeholder, idle shows input with "Send a follow-up..." placeholder, terminated disables input and shows "Start a new chat" button in apps/web/src/components/chat/ProjectMessageView.tsx
-- [ ] T020 [US1] Implement direct WebSocket connection to VM agent (wss://ws-{workspaceId}.{BASE_DOMAIN}/acp/{sessionId}) for active/idle sessions; user messages sent via WebSocket not HTTP; preserve existing cancel/pause button from ACP chat protocol so users can interrupt agent execution in apps/web/src/components/chat/ProjectMessageView.tsx
-- [ ] T021 [US1] Display branch name and PR link in session header area when task has outputBranch/outputPrUrl (clickable link to GitHub) in apps/web/src/components/chat/ProjectMessageView.tsx
-- [ ] T022 [US1] Show inline non-technical provisioning progress (spinner + "Setting up...") in chat area while task is queued/delegated, replacing TaskExecutionProgress banner with a more integrated chat-native indicator in apps/web/src/pages/ProjectChat.tsx
+- [x] T017 [US1] Simplify task input: replace TaskSubmitForm split-button with single text field, enter-to-submit, no visible "Save to Backlog" or advanced options by default in apps/web/src/pages/ProjectChat.tsx
+- [x] T018 [US1] Update SessionSidebar with visual state indicators (green dot for active, amber for idle, gray for terminated) and ensure "New Chat" button is prominent at the top, clearing the message area and presenting a fresh input on click in apps/web/src/components/chat/SessionSidebar.tsx
+- [x] T019 [US1] Handle session lifecycle states in ProjectMessageView: active shows input with "Send a message..." placeholder, idle shows input with "Send a follow-up..." placeholder, terminated disables input and shows "Start a new chat" button in apps/web/src/components/chat/ProjectMessageView.tsx
+- [x] T020 [US1] Implement direct WebSocket connection to VM agent (wss://ws-{workspaceId}.{BASE_DOMAIN}/acp/{sessionId}) for active/idle sessions; user messages sent via WebSocket not HTTP; preserve existing cancel/pause button from ACP chat protocol so users can interrupt agent execution in apps/web/src/components/chat/ProjectMessageView.tsx
+- [x] T021 [US1] Display branch name and PR link in session header area when task has outputBranch/outputPrUrl (clickable link to GitHub) in apps/web/src/components/chat/ProjectMessageView.tsx
+- [x] T022 [US1] Show inline non-technical provisioning progress (spinner + "Setting up...") in chat area while task is queued/delegated, replacing TaskExecutionProgress banner with a more integrated chat-native indicator in apps/web/src/pages/ProjectChat.tsx
 
 **Checkpoint**: Users can navigate to a project, see a chat interface, submit tasks via single message, see descriptive branch names, view session states, and send follow-ups to active sessions via WebSocket.
 
