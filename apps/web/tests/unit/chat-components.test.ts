@@ -33,7 +33,8 @@ describe('SessionSidebar', () => {
   });
 
   it('renders session topic or fallback ID', () => {
-    expect(source).toContain('session.topic || `Session ${session.id.slice(0, 8)}`');
+    expect(source).toContain('session.topic');
+    expect(source).toContain('session.id.slice(0, 8)');
   });
 
   it('shows message count for each session', () => {
@@ -41,7 +42,8 @@ describe('SessionSidebar', () => {
   });
 
   it('renders empty state when no sessions', () => {
-    expect(source).toContain('No sessions yet');
+    // Updated in 022: SessionSidebar uses EmptyState component
+    expect(source).toContain('EmptyState');
   });
 
   it('renders loading spinner when loading', () => {
@@ -56,8 +58,10 @@ describe('SessionSidebar', () => {
     expect(source).toContain('d ago');
   });
 
-  it('uses StatusBadge for session status', () => {
-    expect(source).toContain('StatusBadge');
+  it('uses session state colors and labels', () => {
+    expect(source).toContain('STATE_COLORS');
+    expect(source).toContain('STATE_LABELS');
+    expect(source).toContain('getSessionState');
   });
 });
 
@@ -113,8 +117,8 @@ describe('ProjectMessageView', () => {
     expect(source).toContain('scrollIntoView');
   });
 
-  it('renders session header with status', () => {
-    expect(source).toContain('StatusBadge');
+  it('renders session header with derived state', () => {
+    expect(source).toContain('deriveSessionState');
     expect(source).toContain('session.status');
   });
 
@@ -226,12 +230,12 @@ describe('ProjectChat page', () => {
     expect(source).toContain('useProjectContext');
   });
 
-  it('shows placeholder when no session selected', () => {
-    expect(source).toContain('Select a session to view messages');
+  it('shows new chat prompt when no session selected', () => {
+    expect(source).toContain('What do you want to build?');
   });
 
-  it('shows empty state when no sessions exist', () => {
-    expect(source).toContain('Start a task');
+  it('shows description for new chat input', () => {
+    expect(source).toContain('Describe the task and an agent will start working on it automatically');
   });
 });
 
@@ -251,15 +255,10 @@ describe('Routing integration', () => {
     expect(appSource).toContain('<Route path="chat/:sessionId" element={<ProjectChat />} />');
   });
 
-  it('adds Chat tab to project tabs', () => {
-    expect(projectSource).toContain("{ id: 'chat', label: 'Chat', path: 'chat' }");
-  });
-
-  it('Chat tab appears before Tasks tab', () => {
-    const chatIndex = projectSource.indexOf("id: 'chat'");
-    const tasksIndex = projectSource.indexOf("id: 'tasks'");
-    expect(chatIndex).toBeGreaterThan(-1);
-    expect(tasksIndex).toBeGreaterThan(-1);
-    expect(chatIndex).toBeLessThan(tasksIndex);
+  it('project page has no tab navigation (chat-first layout)', () => {
+    // Tabs removed in 022 — chat is rendered directly via Outlet
+    expect(projectSource).not.toContain("id: 'chat'");
+    expect(projectSource).not.toContain("id: 'tasks'");
+    expect(projectSource).not.toContain('tablist');
   });
 });
