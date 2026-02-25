@@ -51,8 +51,8 @@ export function BranchSelector({
     if (defaultBranch) {
       const defIndex = matching.findIndex((b) => b.name === defaultBranch);
       if (defIndex > 0) {
-        const [def] = matching.splice(defIndex, 1);
-        matching.unshift(def);
+        const removed = matching.splice(defIndex, 1);
+        if (removed[0]) matching.unshift(removed[0]);
       }
     }
 
@@ -85,7 +85,10 @@ export function BranchSelector({
   useEffect(() => {
     if (highlightIndex < 0 || !dropdownRef.current) return;
     const items = dropdownRef.current.querySelectorAll('[data-branch-item]');
-    items[highlightIndex]?.scrollIntoView({ block: 'nearest' });
+    const el = items[highlightIndex];
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ block: 'nearest' });
+    }
   }, [highlightIndex]);
 
   const handleSelect = (branchName: string) => {
@@ -119,7 +122,8 @@ export function BranchSelector({
       case 'Enter':
         e.preventDefault();
         if (highlightIndex >= 0 && highlightIndex < filteredBranches.length) {
-          handleSelect(filteredBranches[highlightIndex].name);
+          const branch = filteredBranches[highlightIndex];
+          if (branch) handleSelect(branch.name);
         }
         break;
       case 'Escape':

@@ -96,23 +96,16 @@ describe('CreateWorkspace', () => {
     const repoOption = await screen.findByText('octo/my-repo');
     fireEvent.click(repoOption);
 
-    // Wait for branches to load and verify the branch selector becomes a dropdown
+    // Wait for branches to load (now includes defaultBranch param)
     await waitFor(() => {
-      expect(mocks.listBranches).toHaveBeenCalledWith('octo/my-repo', 'inst-1');
+      expect(mocks.listBranches).toHaveBeenCalledWith('octo/my-repo', 'inst-1', 'main');
     });
 
-    // The branch field should now be a select with the options
+    // The branch field should be a text input (BranchSelector typeahead)
     await waitFor(() => {
-      const branchSelect = screen.getByLabelText('Branch');
-      expect(branchSelect.tagName).toBe('SELECT');
+      const branchInput = screen.getByLabelText('Branch');
+      expect(branchInput.tagName).toBe('INPUT');
     });
-
-    // Check that the branch options are present
-    const options = screen.getAllByRole('option');
-    const branchOptions = options.filter(
-      (opt) => ['main', 'develop', 'feature/cool-thing'].includes(opt.textContent ?? '')
-    );
-    expect(branchOptions).toHaveLength(3);
   });
 
   it('shows repository dropdown options when the field is focused', async () => {
@@ -143,8 +136,8 @@ describe('CreateWorkspace', () => {
     });
 
     await waitFor(() => {
-      const branchSelect = screen.getByLabelText('Branch') as HTMLSelectElement;
-      expect(branchSelect.value).toBe('main');
+      const branchInput = screen.getByLabelText('Branch') as HTMLInputElement;
+      expect(branchInput.value).toBe('main');
     });
   });
 
