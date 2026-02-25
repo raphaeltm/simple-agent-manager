@@ -349,6 +349,8 @@ export const DNS_RECORDS = ['api', 'app', '*'] as const;
 export interface PulumiOutputs {
   d1DatabaseId: string;
   d1DatabaseName: string;
+  observabilityD1DatabaseId: string;
+  observabilityD1DatabaseName: string;
   kvId: string;
   kvName: string;
   r2Name: string;

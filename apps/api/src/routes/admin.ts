@@ -5,7 +5,8 @@ import * as schema from '../db/schema';
 import type { Env } from '../index';
 import { requireAuth, requireApproved, requireSuperadmin, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
+import { queryErrors, getHealthSummary, getErrorTrends, queryCloudflareLogs, checkRateLimit, CfApiError } from '../services/observability';
+import type { UserRole, UserStatus, PlatformErrorSource, PlatformErrorLevel } from '@simple-agent-manager/shared';
 
 const adminRoutes = new Hono<{ Bindings: Env }>();
 
@@ -202,6 +203,181 @@ adminRoutes.get('/tasks/recent-failures', async (c) => {
     .limit(limit);
 
   return c.json({ tasks: failures });
+});
+
+// =============================================================================
+// Admin Observability Routes (spec 023)
+// =============================================================================
+
+const VALID_ERROR_SOURCES = new Set<string>(['client', 'vm-agent', 'api']);
+const VALID_ERROR_LEVELS = new Set<string>(['error', 'warn', 'info']);
+
+/**
+ * GET /api/admin/observability/errors - Query platform errors
+ *
+ * Query params: source, level, search, startTime, endTime, limit, cursor
+ */
+adminRoutes.get('/observability/errors', async (c) => {
+  if (!c.env.OBSERVABILITY_DATABASE) {
+    return c.json({ errors: [], cursor: null, hasMore: false, total: 0 });
+  }
+
+  const source = c.req.query('source');
+  const level = c.req.query('level');
+  const search = c.req.query('search');
+  const startTime = c.req.query('startTime');
+  const endTime = c.req.query('endTime');
+  const limitParam = c.req.query('limit');
+  const cursor = c.req.query('cursor');
+
+  // Validate source
+  if (source && source !== 'all' && !VALID_ERROR_SOURCES.has(source)) {
+    throw errors.badRequest(`Invalid source: ${source}. Must be one of: client, vm-agent, api`);
+  }
+
+  // Validate level
+  if (level && level !== 'all' && !VALID_ERROR_LEVELS.has(level)) {
+    throw errors.badRequest(`Invalid level: ${level}. Must be one of: error, warn, info`);
+  }
+
+  // Validate limit
+  const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+  if (limit !== undefined && (isNaN(limit) || limit < 1 || limit > 200)) {
+    throw errors.badRequest('limit must be between 1 and 200');
+  }
+
+  const result = await queryErrors(c.env.OBSERVABILITY_DATABASE, {
+    source: source && source !== 'all' ? source as PlatformErrorSource : undefined,
+    level: level && level !== 'all' ? level as PlatformErrorLevel : undefined,
+    search: search || undefined,
+    startTime: startTime ? new Date(startTime).getTime() : undefined,
+    endTime: endTime ? new Date(endTime).getTime() : undefined,
+    limit,
+    cursor: cursor || undefined,
+  });
+
+  return c.json(result);
+});
+
+/**
+ * GET /api/admin/observability/health - Platform health summary
+ */
+adminRoutes.get('/observability/health', async (c) => {
+  if (!c.env.OBSERVABILITY_DATABASE) {
+    return c.json({
+      activeNodes: 0,
+      activeWorkspaces: 0,
+      inProgressTasks: 0,
+      errorCount24h: 0,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  const result = await getHealthSummary(c.env.DATABASE, c.env.OBSERVABILITY_DATABASE);
+  return c.json(result);
+});
+
+/**
+ * GET /api/admin/observability/trends - Error trends over time
+ *
+ * Query params: range (1h|24h|7d|30d)
+ */
+adminRoutes.get('/observability/trends', async (c) => {
+  if (!c.env.OBSERVABILITY_DATABASE) {
+    return c.json({ range: '24h', interval: '1h', buckets: [] });
+  }
+
+  const range = c.req.query('range') || '24h';
+  const validRanges = new Set(['1h', '24h', '7d', '30d']);
+  if (!validRanges.has(range)) {
+    throw errors.badRequest(`Invalid range: ${range}. Must be one of: 1h, 24h, 7d, 30d`);
+  }
+
+  const result = await getErrorTrends(c.env.OBSERVABILITY_DATABASE, range);
+  return c.json(result);
+});
+
+/**
+ * POST /api/admin/observability/logs/query - Query Cloudflare Workers Observability API
+ *
+ * Body: { timeRange: { start, end }, levels?, search?, limit?, cursor? }
+ */
+adminRoutes.post('/observability/logs/query', async (c) => {
+  if (!c.env.CF_API_TOKEN || !c.env.CF_ACCOUNT_ID) {
+    throw errors.badRequest('Cloudflare API credentials not configured. Set CF_API_TOKEN and CF_ACCOUNT_ID.');
+  }
+
+  // Per-admin rate limiting
+  const userId = getUserId(c);
+  const rateLimit = checkRateLimit(userId, c.env);
+
+  c.header('X-RateLimit-Remaining', String(rateLimit.remaining));
+  c.header('X-RateLimit-Reset', String(Math.ceil(rateLimit.resetMs / 1000)));
+
+  if (!rateLimit.allowed) {
+    return c.json(
+      { error: 'RATE_LIMITED', message: 'Too many log queries. Please wait before trying again.' },
+      429
+    );
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.json();
+  } catch {
+    throw errors.badRequest('Invalid JSON body');
+  }
+
+  // Validate timeRange
+  const timeRange = body.timeRange as { start?: string; end?: string } | undefined;
+  if (!timeRange || !timeRange.start || !timeRange.end) {
+    throw errors.badRequest('timeRange with start and end is required');
+  }
+
+  const startDate = new Date(timeRange.start);
+  const endDate = new Date(timeRange.end);
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+    throw errors.badRequest('timeRange start and end must be valid ISO 8601 dates');
+  }
+
+  // Validate levels
+  const levels = body.levels as string[] | undefined;
+  if (levels !== undefined) {
+    if (!Array.isArray(levels)) {
+      throw errors.badRequest('levels must be an array');
+    }
+    const validLogLevels = new Set(['error', 'warn', 'info', 'debug', 'log']);
+    for (const level of levels) {
+      if (!validLogLevels.has(level)) {
+        throw errors.badRequest(`Invalid level: ${level}. Must be one of: error, warn, info, debug, log`);
+      }
+    }
+  }
+
+  // Validate limit
+  const limit = body.limit as number | undefined;
+  if (limit !== undefined && (typeof limit !== 'number' || limit < 1 || limit > 500)) {
+    throw errors.badRequest('limit must be between 1 and 500');
+  }
+
+  try {
+    const result = await queryCloudflareLogs({
+      cfApiToken: c.env.CF_API_TOKEN,
+      cfAccountId: c.env.CF_ACCOUNT_ID,
+      timeRange: { start: timeRange.start, end: timeRange.end },
+      levels: levels ?? undefined,
+      search: (body.search as string) || undefined,
+      limit,
+      cursor: (body.cursor as string) || undefined,
+    });
+
+    return c.json(result);
+  } catch (err) {
+    if (err instanceof CfApiError) {
+      return c.json({ error: 'CF_API_ERROR', message: err.message }, 502);
+    }
+    throw err;
+  }
 });
 
 export { adminRoutes };

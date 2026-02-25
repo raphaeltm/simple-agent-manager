@@ -27,6 +27,13 @@ database_name = "workspaces-dev"
 database_id = "your-d1-database-id"
 migrations_dir = "src/db/migrations"
 
+# D1 Observability Database (error storage, isolated from main DB — spec 023)
+[[d1_databases]]
+binding = "OBSERVABILITY_DATABASE"
+database_name = "observability-dev"
+database_id = "your-observability-d1-id"
+migrations_dir = "src/db/migrations/observability"
+
 # KV for sessions
 [[kv_namespaces]]
 binding = "KV"
@@ -71,6 +78,12 @@ database_name = "workspaces-staging"
 database_id = "your-staging-d1-id"
 migrations_dir = "src/db/migrations"
 
+[[env.staging.d1_databases]]
+binding = "OBSERVABILITY_DATABASE"
+database_name = "observability-staging"
+database_id = "your-staging-observability-d1-id"
+migrations_dir = "src/db/migrations/observability"
+
 [[env.staging.kv_namespaces]]
 binding = "KV"
 id = "your-staging-kv-id"
@@ -99,6 +112,12 @@ database_name = "workspaces"
 database_id = "your-production-d1-id"
 migrations_dir = "src/db/migrations"
 
+[[env.production.d1_databases]]
+binding = "OBSERVABILITY_DATABASE"
+database_name = "observability"
+database_id = "your-production-observability-d1-id"
+migrations_dir = "src/db/migrations/observability"
+
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "your-production-kv-id"
@@ -121,6 +140,7 @@ crons = ["*/5 * * * *"]
 # - GITHUB_APP_PRIVATE_KEY
 # - CF_API_TOKEN
 # - CF_ZONE_ID
+# - CF_ACCOUNT_ID (required for admin observability log viewer)
 # - JWT_PRIVATE_KEY
 # - JWT_PUBLIC_KEY
 # - ENCRYPTION_KEY

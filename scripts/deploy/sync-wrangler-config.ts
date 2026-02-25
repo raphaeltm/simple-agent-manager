@@ -86,6 +86,12 @@ function updateEnvironmentBindings(
         database_id: outputs.d1DatabaseId,
         migrations_dir: "src/db/migrations",
       },
+      {
+        binding: "OBSERVABILITY_DATABASE",
+        database_name: outputs.observabilityD1DatabaseName,
+        database_id: outputs.observabilityD1DatabaseId,
+        migrations_dir: "src/db/migrations/observability",
+      },
     ],
     kv_namespaces: [
       {
@@ -118,6 +124,7 @@ async function main(): Promise<void> {
   console.log(`✅ Got Pulumi outputs:`);
   console.log(`   Base Domain: ${outputs.stackSummary.baseDomain}`);
   console.log(`   D1 Database: ${outputs.d1DatabaseName} (${outputs.d1DatabaseId})`);
+  console.log(`   D1 Observability: ${outputs.observabilityD1DatabaseName} (${outputs.observabilityD1DatabaseId})`);
   console.log(`   KV Namespace: ${outputs.kvName} (${outputs.kvId})`);
   console.log(`   R2 Bucket: ${outputs.r2Name}`);
   console.log("");
