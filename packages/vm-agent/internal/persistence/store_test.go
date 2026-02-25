@@ -439,6 +439,158 @@ func TestLastPromptPersistedThroughInsert(t *testing.T) {
 	}
 }
 
+func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
+	store, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	// Initially no metadata
+	meta, err := store.GetWorkspaceMetadata("ws-1")
+	if err != nil {
+		t.Fatalf("GetWorkspaceMetadata: %v", err)
+	}
+	if meta != nil {
+		t.Fatal("expected nil for non-existent workspace metadata")
+	}
+
+	// Upsert metadata
+	err = store.UpsertWorkspaceMetadata(WorkspaceMetadata{
+		WorkspaceID:       "ws-1",
+		Repository:        "octo/my-repo",
+		Branch:            "main",
+		ContainerWorkDir:  "/workspaces/my-repo",
+		ContainerUser:     "vscode",
+		ContainerLabelVal: "/workspace/ws-1",
+		WorkspaceDir:      "/workspace/ws-1",
+	})
+	if err != nil {
+		t.Fatalf("UpsertWorkspaceMetadata: %v", err)
+	}
+
+	// Read back
+	meta, err = store.GetWorkspaceMetadata("ws-1")
+	if err != nil {
+		t.Fatalf("GetWorkspaceMetadata: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("expected non-nil metadata")
+	}
+	if meta.Repository != "octo/my-repo" {
+		t.Errorf("expected repository 'octo/my-repo', got %q", meta.Repository)
+	}
+	if meta.Branch != "main" {
+		t.Errorf("expected branch 'main', got %q", meta.Branch)
+	}
+	if meta.ContainerWorkDir != "/workspaces/my-repo" {
+		t.Errorf("expected ContainerWorkDir '/workspaces/my-repo', got %q", meta.ContainerWorkDir)
+	}
+	if meta.ContainerUser != "vscode" {
+		t.Errorf("expected ContainerUser 'vscode', got %q", meta.ContainerUser)
+	}
+	if meta.ContainerLabelVal != "/workspace/ws-1" {
+		t.Errorf("expected ContainerLabelVal '/workspace/ws-1', got %q", meta.ContainerLabelVal)
+	}
+	if meta.WorkspaceDir != "/workspace/ws-1" {
+		t.Errorf("expected WorkspaceDir '/workspace/ws-1', got %q", meta.WorkspaceDir)
+	}
+	if meta.UpdatedAt == "" {
+		t.Error("expected non-empty UpdatedAt")
+	}
+
+	// Upsert again — should overwrite
+	err = store.UpsertWorkspaceMetadata(WorkspaceMetadata{
+		WorkspaceID:       "ws-1",
+		Repository:        "octo/my-repo",
+		Branch:            "feature-branch",
+		ContainerWorkDir:  "/workspaces/my-repo",
+		ContainerUser:     "root",
+		ContainerLabelVal: "/workspace/ws-1",
+		WorkspaceDir:      "/workspace/ws-1",
+	})
+	if err != nil {
+		t.Fatalf("UpsertWorkspaceMetadata overwrite: %v", err)
+	}
+
+	meta, err = store.GetWorkspaceMetadata("ws-1")
+	if err != nil {
+		t.Fatalf("GetWorkspaceMetadata after overwrite: %v", err)
+	}
+	if meta.Branch != "feature-branch" {
+		t.Errorf("expected branch 'feature-branch' after overwrite, got %q", meta.Branch)
+	}
+	if meta.ContainerUser != "root" {
+		t.Errorf("expected ContainerUser 'root' after overwrite, got %q", meta.ContainerUser)
+	}
+}
+
+func TestDeleteWorkspaceMetadata(t *testing.T) {
+	store, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	_ = store.UpsertWorkspaceMetadata(WorkspaceMetadata{
+		WorkspaceID:      "ws-1",
+		Repository:       "octo/repo",
+		ContainerWorkDir: "/workspaces/repo",
+	})
+
+	if err := store.DeleteWorkspaceMetadata("ws-1"); err != nil {
+		t.Fatalf("DeleteWorkspaceMetadata: %v", err)
+	}
+
+	meta, _ := store.GetWorkspaceMetadata("ws-1")
+	if meta != nil {
+		t.Fatal("expected nil after delete")
+	}
+
+	// Deleting non-existent should not error
+	if err := store.DeleteWorkspaceMetadata("ws-999"); err != nil {
+		t.Fatalf("DeleteWorkspaceMetadata non-existent: %v", err)
+	}
+}
+
+func TestWorkspaceMetadataPersistedAcrossReopen(t *testing.T) {
+	dbPath := tempDBPath(t)
+
+	store1, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open 1: %v", err)
+	}
+
+	_ = store1.UpsertWorkspaceMetadata(WorkspaceMetadata{
+		WorkspaceID:      "ws-persist",
+		Repository:       "owner/repo-name",
+		Branch:           "develop",
+		ContainerWorkDir: "/workspaces/repo-name",
+		WorkspaceDir:     "/workspace/ws-persist",
+	})
+	store1.Close()
+
+	store2, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open 2: %v", err)
+	}
+	defer store2.Close()
+
+	meta, err := store2.GetWorkspaceMetadata("ws-persist")
+	if err != nil {
+		t.Fatalf("GetWorkspaceMetadata after reopen: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("expected metadata to survive reopen")
+	}
+	if meta.Repository != "owner/repo-name" {
+		t.Errorf("expected repository 'owner/repo-name', got %q", meta.Repository)
+	}
+	if meta.ContainerWorkDir != "/workspaces/repo-name" {
+		t.Errorf("expected ContainerWorkDir '/workspaces/repo-name', got %q", meta.ContainerWorkDir)
+	}
+}
+
 func TestMigrationV3AddsLastPromptColumn(t *testing.T) {
 	dbPath := tempDBPath(t)
 

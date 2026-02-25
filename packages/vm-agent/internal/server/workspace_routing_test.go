@@ -1,10 +1,12 @@
 package server
 
 import (
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/pty"
 )
 
@@ -320,5 +322,126 @@ func TestNewPTYManagerForWorkspaceSkipsLegacyReuseAfterRuntimeUpdate(t *testing.
 	)
 	if migratedManager == legacyManager {
 		t.Fatal("expected migrated runtime to receive a workspace-specific PTY manager")
+	}
+}
+
+func TestUpsertWorkspaceRuntimeHydratesFromSQLite(t *testing.T) {
+	t.Parallel()
+
+	// Open a real SQLite store with persisted workspace metadata.
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	store, err := persistence.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open store: %v", err)
+	}
+	defer store.Close()
+
+	// Pre-populate metadata as if the workspace was previously created.
+	err = store.UpsertWorkspaceMetadata(persistence.WorkspaceMetadata{
+		WorkspaceID:       "WS_RECONNECT",
+		Repository:        "octo/my-cool-repo",
+		Branch:            "main",
+		ContainerWorkDir:  "/workspaces/my-cool-repo",
+		ContainerUser:     "vscode",
+		ContainerLabelVal: "/workspace/WS_RECONNECT",
+		WorkspaceDir:      "/workspace/WS_RECONNECT",
+	})
+	if err != nil {
+		t.Fatalf("UpsertWorkspaceMetadata: %v", err)
+	}
+
+	s := &Server{
+		config: &config.Config{
+			WorkspaceDir: "/workspace",
+		},
+		workspaces:      map[string]*WorkspaceRuntime{},
+		workspaceEvents: map[string][]EventRecord{},
+		store:           store,
+	}
+
+	// Simulate the reconnection path: handleAgentWS calls upsertWorkspaceRuntime
+	// with empty repository and branch after an agent restart.
+	runtime := s.upsertWorkspaceRuntime("WS_RECONNECT", "", "", "running", "")
+
+	// Verify that metadata was hydrated from SQLite.
+	if runtime.Repository != "octo/my-cool-repo" {
+		t.Errorf("expected repository 'octo/my-cool-repo', got %q", runtime.Repository)
+	}
+	if runtime.Branch != "main" {
+		t.Errorf("expected branch 'main', got %q", runtime.Branch)
+	}
+	if runtime.ContainerWorkDir != "/workspaces/my-cool-repo" {
+		t.Errorf("expected ContainerWorkDir '/workspaces/my-cool-repo', got %q", runtime.ContainerWorkDir)
+	}
+	if runtime.ContainerUser != "vscode" {
+		t.Errorf("expected ContainerUser 'vscode', got %q", runtime.ContainerUser)
+	}
+	if runtime.WorkspaceDir != "/workspace/WS_RECONNECT" {
+		t.Errorf("expected WorkspaceDir '/workspace/WS_RECONNECT', got %q", runtime.WorkspaceDir)
+	}
+}
+
+func TestUpsertWorkspaceRuntimeWithoutStoreFallsBackToDerivation(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		config: &config.Config{
+			WorkspaceDir: "/workspace",
+		},
+		workspaces:      map[string]*WorkspaceRuntime{},
+		workspaceEvents: map[string][]EventRecord{},
+		store:           nil, // No store available
+	}
+
+	// Without a store, empty repo should fall back to workspace-ID-based derivation.
+	runtime := s.upsertWorkspaceRuntime("WS_NOSTORE", "", "", "running", "")
+
+	if runtime.Repository != "" {
+		t.Errorf("expected empty repository, got %q", runtime.Repository)
+	}
+	// Without repo, ContainerWorkDir derives from workspace ID via filepath.Base
+	if runtime.ContainerWorkDir != "/workspaces/WS_NOSTORE" {
+		t.Errorf("expected ContainerWorkDir '/workspaces/WS_NOSTORE', got %q", runtime.ContainerWorkDir)
+	}
+}
+
+func TestUpsertWorkspaceRuntimePersistsMetadata(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	store, err := persistence.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open store: %v", err)
+	}
+	defer store.Close()
+
+	s := &Server{
+		config: &config.Config{
+			WorkspaceDir: "/workspace",
+		},
+		workspaces:      map[string]*WorkspaceRuntime{},
+		workspaceEvents: map[string][]EventRecord{},
+		store:           store,
+	}
+
+	// Create workspace with repo info — should persist to SQLite.
+	s.upsertWorkspaceRuntime("WS_NEW", "octo/fresh-repo", "develop", "creating", "token-abc")
+
+	// Verify metadata was persisted.
+	meta, err := store.GetWorkspaceMetadata("WS_NEW")
+	if err != nil {
+		t.Fatalf("GetWorkspaceMetadata: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("expected metadata to be persisted")
+	}
+	if meta.Repository != "octo/fresh-repo" {
+		t.Errorf("expected repository 'octo/fresh-repo', got %q", meta.Repository)
+	}
+	if meta.Branch != "develop" {
+		t.Errorf("expected branch 'develop', got %q", meta.Branch)
+	}
+	if meta.ContainerWorkDir != "/workspaces/fresh-repo" {
+		t.Errorf("expected ContainerWorkDir '/workspaces/fresh-repo', got %q", meta.ContainerWorkDir)
 	}
 }

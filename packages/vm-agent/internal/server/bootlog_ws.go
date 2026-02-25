@@ -42,7 +42,12 @@ func NewBootLogBroadcaster() *BootLogBroadcaster {
 
 // Broadcast appends a log entry to the buffer and sends it to all connected clients.
 // Implements the bootlog.Broadcaster interface.
+// Nil-safe: no-ops when called on a nil receiver (which can happen when a nil
+// *BootLogBroadcaster is stored in a non-nil Broadcaster interface).
 func (b *BootLogBroadcaster) Broadcast(step, status, message string, detail ...string) {
+	if b == nil {
+		return
+	}
 	entry := BootLogWSEntry{
 		Type:      "log",
 		Step:      step,
