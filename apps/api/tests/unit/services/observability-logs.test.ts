@@ -60,6 +60,81 @@ describe('queryCloudflareLogs()', () => {
     expect(options.headers['Content-Type']).toBe('application/json');
   });
 
+  it('should include a queryId string in the request body', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
+    });
+    globalThis.fetch = mockFetch;
+
+    await queryCloudflareLogs(baseInput);
+
+    const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(requestBody.queryId).toBeDefined();
+    expect(typeof requestBody.queryId).toBe('string');
+    expect(requestBody.queryId.length).toBeGreaterThan(0);
+  });
+
+  it('should generate a unique queryId per request when not provided', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
+    });
+    globalThis.fetch = mockFetch;
+
+    await queryCloudflareLogs(baseInput);
+    await queryCloudflareLogs(baseInput);
+
+    const body1 = JSON.parse(mockFetch.mock.calls[0][1].body);
+    const body2 = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(body1.queryId).not.toBe(body2.queryId);
+  });
+
+  it('should use caller-supplied queryId when provided', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
+    });
+    globalThis.fetch = mockFetch;
+
+    await queryCloudflareLogs({
+      ...baseInput,
+      queryId: 'my-custom-query-id',
+    });
+
+    const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(requestBody.queryId).toBe('my-custom-query-id');
+  });
+
+  it('should return queryId in the response', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const result = await queryCloudflareLogs(baseInput);
+
+    expect(result.queryId).toBeDefined();
+    expect(typeof result.queryId).toBe('string');
+    expect(result.queryId.length).toBeGreaterThan(0);
+  });
+
+  it('should return the same queryId in the response when caller-supplied', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const result = await queryCloudflareLogs({
+      ...baseInput,
+      queryId: 'pagination-query-id',
+    });
+
+    expect(result.queryId).toBe('pagination-query-id');
+  });
+
   it('should send timeframe with epoch milliseconds', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,

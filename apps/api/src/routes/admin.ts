@@ -366,6 +366,7 @@ adminRoutes.post('/observability/logs/query',
       search: (body.search as string) || undefined,
       limit,
       cursor: (body.cursor as string) || undefined,
+      queryId: (body.queryId as string) || undefined,
     });
 
     return c.json(result);
