@@ -1,6 +1,7 @@
 package pty
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -398,5 +399,75 @@ func TestCreateSessionWithID_UsesProvidedWorkDir(t *testing.T) {
 	}
 	if session.Cmd.Dir != customDir {
 		t.Fatalf("expected custom workdir, got %q", session.Cmd.Dir)
+	}
+}
+
+func TestSetContainerUser_AffectsNewSessions(t *testing.T) {
+	// This test would have caught the regression in 6f08afe where
+	// server.New() was moved before bootstrap.Run() but the detected
+	// container user was never propagated to the PTY manager.
+
+	m := NewManager(ManagerConfig{
+		DefaultShell: "/bin/sh",
+		DefaultRows:  24,
+		DefaultCols:  80,
+		ContainerResolver: func() (string, error) {
+			return "test-container-abc", nil
+		},
+		// ContainerUser is intentionally empty — simulates pre-bootstrap state
+	})
+
+	// Session created before SetContainerUser should have no -u flag
+	session1, err := m.CreateSession("user1", 24, 80)
+	if err != nil {
+		t.Fatalf("CreateSession (before SetContainerUser) failed: %v", err)
+	}
+	defer m.CloseAllSessions()
+
+	args1 := strings.Join(session1.Cmd.Args, " ")
+	if strings.Contains(args1, " -u ") {
+		t.Errorf("session before SetContainerUser should not have -u flag, got: %s", args1)
+	}
+
+	// Simulate bootstrap detecting the container user
+	m.SetContainerUser("node")
+
+	// Session created after SetContainerUser should include -u node
+	session2, err := m.CreateSessionWithID("sess-after", "user1", 24, 80, "")
+	if err != nil {
+		t.Fatalf("CreateSession (after SetContainerUser) failed: %v", err)
+	}
+
+	args2 := strings.Join(session2.Cmd.Args, " ")
+	if !strings.Contains(args2, "-u node") {
+		t.Errorf("session after SetContainerUser should have '-u node', got: %s", args2)
+	}
+}
+
+func TestSetContainerUser_DoesNotAffectExistingSessions(t *testing.T) {
+	m := NewManager(ManagerConfig{
+		DefaultShell: "/bin/sh",
+		DefaultRows:  24,
+		DefaultCols:  80,
+		ContainerResolver: func() (string, error) {
+			return "test-container-xyz", nil
+		},
+	})
+
+	session1, err := m.CreateSession("user1", 24, 80)
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	defer m.CloseAllSessions()
+
+	argsBefore := strings.Join(session1.Cmd.Args, " ")
+
+	// Change user after session is created
+	m.SetContainerUser("newuser")
+
+	// Existing session's command should be unchanged
+	argsAfter := strings.Join(session1.Cmd.Args, " ")
+	if argsBefore != argsAfter {
+		t.Errorf("SetContainerUser modified existing session args:\n  before: %s\n  after:  %s", argsBefore, argsAfter)
 	}
 }
