@@ -88,6 +88,33 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
     }
   }, [open, loadRuntimeConfig]);
 
+  // Close with unsaved changes confirmation (T040)
+  const handleClose = useCallback(() => {
+    if (isDirty) {
+      const confirmed = window.confirm('You have unsaved changes. Discard them?');
+      if (!confirmed) return;
+    }
+    setIsDirty(false);
+    onClose();
+  }, [isDirty, onClose]);
+
+  // Prevent body scroll when open
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [open]);
+
+  // Focus drawer when opened
+  useEffect(() => {
+    if (open && drawerRef.current) {
+      drawerRef.current.focus();
+    }
+  }, [open]);
+
   // Close on Escape key
   useEffect(() => {
     if (!open) return;
@@ -98,17 +125,7 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  });
-
-  // Close with unsaved changes confirmation (T040)
-  const handleClose = () => {
-    if (isDirty) {
-      const confirmed = window.confirm('You have unsaved changes. Discard them?');
-      if (!confirmed) return;
-    }
-    setIsDirty(false);
-    onClose();
-  };
+  }, [open, handleClose]);
 
   // Click outside to close
   const handleBackdropClick = (e: React.MouseEvent) => {
@@ -255,6 +272,10 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
         {/* Drawer panel */}
         <div
           ref={drawerRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-drawer-title"
+          tabIndex={-1}
           style={{
             position: 'fixed',
             top: 0,
@@ -267,6 +288,7 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
             zIndex: 'var(--sam-z-drawer)' as unknown as number,
             display: 'flex',
             flexDirection: 'column',
+            outline: 'none',
           }}
         >
           {/* Header */}
@@ -278,7 +300,7 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
             borderBottom: '1px solid var(--sam-color-border-default)',
             flexShrink: 0,
           }}>
-            <h2 style={{
+            <h2 id="settings-drawer-title" style={{
               margin: 0,
               fontSize: 'var(--sam-type-section-heading-size)',
               fontWeight: 600,

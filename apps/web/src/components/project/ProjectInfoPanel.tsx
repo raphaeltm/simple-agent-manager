@@ -58,6 +58,16 @@ export const ProjectInfoPanel: FC<ProjectInfoPanelProps> = ({ projectId, open, o
     if (open) void loadData();
   }, [open, loadData]);
 
+  // Prevent body scroll when open
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [open]);
+
   // Close on Escape
   useEffect(() => {
     if (!open) return;
@@ -88,8 +98,9 @@ export const ProjectInfoPanel: FC<ProjectInfoPanelProps> = ({ projectId, open, o
       {/* Panel */}
       <div
         ref={panelRef}
-        role="complementary"
-        aria-label="Project status"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="info-panel-title"
         tabIndex={-1}
         style={{
           position: 'fixed',
@@ -115,7 +126,7 @@ export const ProjectInfoPanel: FC<ProjectInfoPanelProps> = ({ projectId, open, o
           borderBottom: '1px solid var(--sam-color-border-default)',
           flexShrink: 0,
         }}>
-          <h2 style={{
+          <h2 id="info-panel-title" style={{
             margin: 0,
             fontSize: 'var(--sam-type-section-heading-size)',
             fontWeight: 600,

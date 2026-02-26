@@ -341,4 +341,35 @@ describe('Project page', () => {
     expect(screen.getByText('Tasks')).toBeInTheDocument();
     expect(screen.getByText('Activity')).toBeInTheDocument();
   });
+
+  it('settings drawer has dialog ARIA role', async () => {
+    renderProjectPage();
+    await screen.findByRole('heading', { name: 'Project One' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Project settings' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Project Settings' })).toBeInTheDocument();
+    });
+  });
+
+  it('navigates when Project Views link is clicked in settings drawer', async () => {
+    renderProjectPage('/projects/proj-1/overview');
+    await screen.findByRole('heading', { name: 'Project One' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Project settings' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Project Views')).toBeInTheDocument();
+    });
+
+    // Click "Tasks" link
+    const tasksButton = screen.getByRole('button', { name: /Tasks/ });
+    fireEvent.click(tasksButton);
+
+    // Drawer should close (no longer visible)
+    await waitFor(() => {
+      expect(screen.queryByText('Project Views')).not.toBeInTheDocument();
+    });
+  });
 });
