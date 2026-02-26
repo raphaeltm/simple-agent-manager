@@ -131,8 +131,8 @@ After the frontend calls `/run`, it:
 ### 2.6 Failure and Recovery
 
 **Stuck task recovery** (`apps/api/src/scheduled/stuck-tasks.ts`) runs on cron and detects tasks that have been in transient states too long:
-- `queued` for > 5 minutes (default `DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS`)
-- `delegated` for > 10 minutes (default `DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS`)
+- `queued` for > 10 minutes (default `DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS`)
+- `delegated` for > 16 minutes (default `DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS`)
 - `in_progress` for > 2 hours (default `DEFAULT_TASK_RUN_MAX_EXECUTION_MS`)
 
 Stuck tasks are transitioned to `failed` with a descriptive error message. Note: stuck task recovery does NOT clean up the associated workspace or node — it only changes the task status.

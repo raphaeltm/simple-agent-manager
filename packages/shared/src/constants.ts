@@ -121,6 +121,11 @@ export const DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT = 80;
 /** Default delay (ms) after task completion before cleanup. Override via TASK_RUN_CLEANUP_DELAY_MS env var. */
 export const DEFAULT_TASK_RUN_CLEANUP_DELAY_MS = 5000;
 
+/** Default timeout (ms) for workspace to become ready after creation. Override via WORKSPACE_READY_TIMEOUT_MS env var.
+ * Set to 15 minutes to accommodate dev containers that take 7-10 minutes to build on cold nodes.
+ * Must be <= TASK_STUCK_DELEGATED_TIMEOUT_MS to avoid stuck-task recovery killing legitimate startups. */
+export const DEFAULT_WORKSPACE_READY_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+
 /** Default poll interval (ms) when waiting for workspace to become ready. Override via WORKSPACE_READY_POLL_INTERVAL_MS env var. */
 export const DEFAULT_WORKSPACE_READY_POLL_INTERVAL_MS = 2000;
 
@@ -151,11 +156,14 @@ export const DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS = 60 * 1000; // 1 minute
 export const DEFAULT_TASK_RUN_MAX_EXECUTION_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 /** Default threshold (ms) for a task stuck in 'queued' status. Override via TASK_STUCK_QUEUED_TIMEOUT_MS env var.
- * Must be >= node provisioning time + agent ready timeout (~3-4 min) to avoid false positives. */
-export const DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+ * Must be >= node provisioning time + agent ready timeout (~3-4 min) to avoid false positives.
+ * Set to 10 minutes to account for cold-start node provisioning + agent bootstrap. */
+export const DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
-/** Default threshold (ms) for a task stuck in 'delegated' status. Override via TASK_STUCK_DELEGATED_TIMEOUT_MS env var. */
-export const DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+/** Default threshold (ms) for a task stuck in 'delegated' status. Override via TASK_STUCK_DELEGATED_TIMEOUT_MS env var.
+ * Must be > WORKSPACE_READY_TIMEOUT_MS (15 min) to avoid stuck-task recovery killing legitimate workspace startups.
+ * Set to 16 minutes (1 min buffer above workspace ready timeout). */
+export const DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS = 16 * 60 * 1000; // 16 minutes
 
 // =============================================================================
 // Hetzner Configuration
