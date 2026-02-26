@@ -358,6 +358,9 @@ func (s *Server) UpdateAfterBootstrap(cfg *config.Config) {
 	// devcontainer read-configuration / metadata / docker exec fallback, but
 	// this happens after server.New() has already captured an empty value.
 	if detectedUser := strings.TrimSpace(cfg.ContainerUser); detectedUser != "" {
+		if strings.TrimSpace(s.config.ContainerUser) == "" {
+			s.config.ContainerUser = detectedUser
+		}
 		if s.acpConfig.ContainerUser == "" {
 			s.acpConfig.ContainerUser = detectedUser
 		}

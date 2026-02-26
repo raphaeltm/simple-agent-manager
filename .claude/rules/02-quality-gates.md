@@ -36,6 +36,65 @@ Before marking feature work complete:
 - Use Miniflare for Worker integration tests
 - Critical paths require >90% coverage
 
+## Regression Test Requirements (Mandatory for Bug Fixes)
+
+When fixing a bug, you MUST write **two categories of tests**:
+
+### 1. Tests That Prove the Fix Works
+
+Standard tests that verify the new/corrected behavior functions as intended.
+
+### 2. Tests That Would Have Caught the Regression
+
+Ask: "What test, if it existed before the breaking change was introduced, would have failed and alerted us?" Write that test. This is the more important of the two.
+
+- **Trace the regression to its root cause commit.** Understand exactly what change broke the behavior.
+- **Write a test that exercises the contract that was violated.** Not just the symptom — the invariant that should always hold.
+- **If mocks hid the bug**, the right response is often an integration or E2E test that uses real (or more realistic) dependencies. Shallow unit tests with overly permissive mocks can give false confidence.
+- **If the bug was a missing propagation** (value set in A but never forwarded to B), write a test that constructs the real lifecycle (A then B) and asserts the value arrives.
+
+### Evaluating Test Realism
+
+Before finalizing tests, ask:
+- Do these mocks accurately represent the real system? Would a broken invariant actually cause a test failure here?
+- Is there a cross-component boundary that unit tests can't cover? If so, add an integration test.
+- Would a developer introducing the original regression have seen a red CI from these tests? If not, the tests aren't defensive enough.
+
+## Pre-Merge PR Review (Required)
+
+Before merging ANY pull request, dispatch a team of skeptical subagents to review the PR. Each reviewer should be adversarial — their job is to find problems, not confirm the code works.
+
+### Review Team Composition
+
+Dispatch reviewers **in parallel** covering each language and discipline touched by the PR:
+
+| PR touches | Required reviewer agent |
+|------------|----------------------|
+| Go code (`packages/vm-agent/`) | `go-specialist` — concurrency, resource leaks, Go idioms |
+| TypeScript API (`apps/api/`) | `cloudflare-specialist` — D1, KV, Workers patterns |
+| UI code (`apps/web/`, `packages/ui/`) | `ui-ux-specialist` — accessibility, layout, interactions |
+| Auth, credentials, tokens | `security-auditor` — credential safety, OWASP, JWT |
+| Environment variables | `env-validator` — GH_ vs GITHUB_, deployment mapping |
+| Documentation changes | `doc-sync-validator` — docs match code reality |
+| Business logic, config | `constitution-validator` — no hardcoded values |
+| Tests added/changed | `test-engineer` — coverage, realism, TDD compliance |
+
+### What Reviewers Must Check
+
+Each reviewer should:
+1. **Read every changed file** in the PR diff
+2. **Challenge assumptions** — what could go wrong? What edge cases are missed?
+3. **Check test adequacy** — do the tests actually prove the fix/feature works, or are they too shallow?
+4. **Identify missing tests** — what regression test would catch this if it broke again?
+5. **Flag any concern**, even minor ones — it's cheaper to address them now
+
+### Acting on Review Findings
+
+- Fix ALL issues rated as bugs or correctness problems before merging
+- Address style/improvement suggestions unless there's a clear reason to defer
+- If a reviewer identifies a missing test category (e.g., "this needs an integration test, not just unit tests"), add it
+- Push fixes and re-run reviewers if changes are substantial
+
 ## Post-Push CI Procedure (Required)
 
 After every push, check GitHub Actions runs for the pushed commit/branch. If any workflow fails, inspect the failing job logs immediately and implement fixes. Push follow-up commits and repeat until all required workflows are green.
