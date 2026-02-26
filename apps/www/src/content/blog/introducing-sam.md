@@ -1,10 +1,10 @@
 ---
-title: Introducing SAM: AI Coding Environments on Your Own Cloud
+title: "Introducing SAM: AI Coding Environments on Your Own Cloud"
 date: 2026-02-25
 author: SAM Team
 category: announcement
-tags: launch, open-source, ai-agents, cloudflare-workers
-excerpt: SAM gives you ephemeral AI coding environments backed by your own Hetzner cloud account. Spin up Claude Code in a devcontainer, chat with your agent, and tear it down when you're done.
+tags: ["launch", "open-source", "ai-agents", "cloudflare-workers"]
+excerpt: "SAM gives you ephemeral AI coding environments backed by your own Hetzner cloud account. Spin up Claude Code in a devcontainer, chat with your agent, and tear it down when you're done."
 ---
 
 We've been building SAM — Simple Agent Manager — over the past month, and today we're sharing what it is and why we built it.
@@ -37,7 +37,7 @@ SAM never has cloud provider credentials. Your Hetzner token is encrypted with a
 
 ### Hybrid storage: D1 + Durable Objects
 
-We use Cloudflare D1 for cross-project queries (dashboard, user settings, task lists) and per-project Durable Objects with embedded SQLite for write-heavy data (chat sessions, messages, activity streams). This gives us the query flexibility of a relational database and the single-writer guarantees of DOs. We wrote about the tradeoffs in [ADR 004](https://github.com/simple-agent-manager/simple-agent-manager/blob/main/docs/adr/004-hybrid-d1-do-storage.md).
+We use Cloudflare D1 for cross-project queries (dashboard, user settings, task lists) and per-project Durable Objects with embedded SQLite for write-heavy data (chat sessions, messages, activity streams). This gives us the query flexibility of a relational database and the single-writer guarantees of DOs. We wrote about the tradeoffs in [ADR 004](https://github.com/raphaeltm/simple-agent-manager/blob/main/docs/adr/004-hybrid-d1-do-storage.md).
 
 ### Warm node pooling
 

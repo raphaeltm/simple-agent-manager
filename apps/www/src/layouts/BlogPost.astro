@@ -1,0 +1,220 @@
+---
+import Base from './Base.astro';
+import Header from '../components/Header.astro';
+import CtaFooter from '../components/CtaFooter.astro';
+
+interface Props {
+  title: string;
+  description: string;
+  date: Date;
+  author: string;
+  category: string;
+  tags: string[];
+}
+
+const { title, description, date, author, category, tags } = Astro.props;
+
+const categoryColors: Record<string, string> = {
+  announcement: 'var(--color-accent)',
+  engineering: 'var(--color-success)',
+  tutorial: '#a855f7',
+  devlog: 'var(--color-warning)',
+};
+
+const categoryColor = categoryColors[category] ?? 'var(--color-fg-dim)';
+
+const formattedDate = date.toLocaleDateString('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+});
+---
+
+<Base title={`${title} | SAM Blog`} description={description}>
+  <Header />
+  <main class="blog-post">
+    <div class="container">
+      <a href="/blog" class="back-link">&larr; All posts</a>
+
+      <article>
+        <header class="post-header">
+          <div class="post-meta">
+            <span class="category" style={`color: ${categoryColor}`}>{category}</span>
+            <span class="dot">&middot;</span>
+            <time datetime={date.toISOString().split('T')[0]}>{formattedDate}</time>
+          </div>
+          <h1 class="post-title">{title}</h1>
+          <p class="post-author">By {author}</p>
+        </header>
+
+        <div class="post-body">
+          <slot />
+        </div>
+
+        {tags.length > 0 && (
+          <div class="post-tags">
+            {tags.map((tag) => (
+              <span class="tag">{tag}</span>
+            ))}
+          </div>
+        )}
+      </article>
+    </div>
+  </main>
+  <CtaFooter />
+</Base>
+
+<style>
+  .blog-post {
+    padding-top: calc(var(--header-height) + 48px);
+    padding-bottom: 80px;
+  }
+
+  .blog-post .container {
+    max-width: 720px;
+  }
+
+  .back-link {
+    display: inline-block;
+    font-size: 0.875rem;
+    color: var(--color-fg-muted);
+    margin-bottom: 32px;
+  }
+
+  .back-link:hover {
+    color: var(--color-fg-primary);
+  }
+
+  .post-header {
+    margin-bottom: 40px;
+  }
+
+  .post-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 0.8125rem;
+  }
+
+  .category {
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .dot {
+    color: var(--color-fg-dim);
+  }
+
+  time {
+    color: var(--color-fg-muted);
+  }
+
+  .post-title {
+    font-family: var(--font-display);
+    font-size: clamp(1.75rem, 5vw, 2.5rem);
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--color-fg-primary);
+    margin-bottom: 8px;
+  }
+
+  .post-author {
+    font-size: 0.9375rem;
+    color: var(--color-fg-muted);
+  }
+
+  .post-body {
+    font-size: 1.0625rem;
+    line-height: 1.75;
+    color: var(--color-fg-primary);
+  }
+
+  .post-body :global(h2) {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 48px 0 16px;
+    color: var(--color-fg-primary);
+  }
+
+  .post-body :global(h3) {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin: 32px 0 12px;
+    color: var(--color-fg-primary);
+  }
+
+  .post-body :global(p) {
+    margin-bottom: 20px;
+  }
+
+  .post-body :global(ul),
+  .post-body :global(ol) {
+    margin-bottom: 20px;
+    padding-left: 24px;
+  }
+
+  .post-body :global(li) {
+    margin-bottom: 8px;
+  }
+
+  .post-body :global(strong) {
+    color: var(--color-fg-primary);
+    font-weight: 600;
+  }
+
+  .post-body :global(a) {
+    color: var(--color-accent);
+  }
+
+  .post-body :global(a:hover) {
+    color: var(--color-success);
+  }
+
+  .post-body :global(blockquote) {
+    margin: 24px 0;
+    padding: 12px 20px;
+    border-left: 3px solid var(--color-border);
+    background: var(--color-bg-surface);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  }
+
+  .post-body :global(pre) {
+    margin: 24px 0;
+    padding: 20px;
+    border-radius: var(--radius-md);
+    overflow-x: auto;
+    font-size: 0.875rem;
+    line-height: 1.6;
+  }
+
+  .post-body :global(code:not(pre code)) {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+  }
+
+  .post-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--color-border-subtle);
+  }
+
+  .tag {
+    font-size: 0.75rem;
+    padding: 4px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-surface);
+    color: var(--color-fg-muted);
+    border: 1px solid var(--color-border-subtle);
+  }
+</style>

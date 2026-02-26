@@ -4,9 +4,9 @@ This guide is for AI agents (and humans) writing blog posts for the SAM develope
 
 ## File Location & Naming
 
-- Blog posts live in `apps/web/src/content/blog/`
+- Blog posts live in `apps/www/src/content/blog/`
 - Use kebab-case slugs: `building-warm-node-pooling.md`
-- The filename (minus `.md`) becomes the URL slug: `/blog/building-warm-node-pooling`
+- The filename (minus `.md`) becomes the URL slug: `/blog/building-warm-node-pooling/`
 - Do NOT include dates in filenames — the date goes in frontmatter
 
 ## Frontmatter Format
@@ -15,12 +15,12 @@ Every post must start with a YAML frontmatter block:
 
 ```yaml
 ---
-title: Your Post Title Here
+title: "Your Post Title Here"
 date: 2026-02-25
 author: Author Name
 category: engineering
-tags: cloudflare-workers, durable-objects, performance
-excerpt: One or two sentences that appear on the blog index card and in meta description tags. Keep under 160 characters.
+tags: ["cloudflare-workers", "durable-objects", "performance"]
+excerpt: "One or two sentences that appear on the blog index card and in meta description tags. Keep under 160 characters."
 ---
 ```
 
@@ -32,8 +32,14 @@ excerpt: One or two sentences that appear on the blog index card and in meta des
 | `date` | Publication date in `YYYY-MM-DD` format. |
 | `author` | Author name as it should appear on the post. |
 | `category` | Exactly one of: `announcement`, `engineering`, `tutorial`, `devlog` |
-| `tags` | Comma-separated list of tags. Use existing tags when possible (see below). |
+| `tags` | YAML array of tags. Use existing tags when possible (see below). |
 | `excerpt` | 1-2 sentences for the blog index card and `<meta description>`. Under 160 characters. |
+
+### Optional fields
+
+| Field | Description |
+|-------|-------------|
+| `draft` | Set to `true` to exclude from the published blog. Defaults to `false`. |
 
 ### Categories
 
@@ -76,7 +82,7 @@ If you need a new tag, use lowercase kebab-case.
 
 - **Headings**: Use `##` for main sections, `###` for subsections. Never use `#` (the title comes from frontmatter).
 - **Code blocks**: Always specify the language for syntax highlighting (` ```typescript `, ` ```go `, ` ```yaml `, etc.).
-- **Inline code**: Use backticks for function names, file paths, env vars, CLI commands (`getPostBySlug()`, `apps/web/src/`, `NODE_WARM_TIMEOUT_MS`, `pnpm build`).
+- **Inline code**: Use backticks for function names, file paths, env vars, CLI commands (`getPostBySlug()`, `apps/www/src/`, `NODE_WARM_TIMEOUT_MS`, `pnpm build`).
 - **Bold**: Use for key terms on first introduction or emphasis. Don't overuse.
 - **Links**: Link to source code, docs, ADRs, and specs when referencing them. Use relative links for internal content, absolute URLs for external.
 - **Lists**: Use bullet lists for unordered items, numbered lists for sequences/steps.
@@ -136,8 +142,8 @@ These topics have strong source material and broad developer appeal:
 
 ## Process
 
-1. Write the post as a `.md` file in `apps/web/src/content/blog/`
-2. Preview locally with `pnpm dev` and navigate to `/blog`
-3. Run `pnpm typecheck && pnpm lint && pnpm build` to verify no build issues
+1. Write the post as a `.md` file in `apps/www/src/content/blog/`
+2. Preview locally with `pnpm --filter @simple-agent-manager/www dev` and navigate to `/blog/`
+3. Run `pnpm --filter @simple-agent-manager/www build` to verify no build issues
 4. Commit and push on a feature branch
 5. Open a PR for review
