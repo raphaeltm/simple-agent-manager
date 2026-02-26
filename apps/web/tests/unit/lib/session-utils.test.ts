@@ -79,6 +79,26 @@ describe('isSessionActive', () => {
       isSessionActive(makeSession({ status: 'error', hostStatus: 'ready' }))
     ).toBe(true);
   });
+
+  // Suspended session tests — isSessionActive returns false for suspended,
+  // but the tab strip includes them separately via explicit status check.
+  it('returns false when status is suspended and no hostStatus', () => {
+    expect(
+      isSessionActive(makeSession({ status: 'suspended' }))
+    ).toBe(false);
+  });
+
+  it('returns false when status is suspended and hostStatus is null', () => {
+    expect(
+      isSessionActive(makeSession({ status: 'suspended', hostStatus: null }))
+    ).toBe(false);
+  });
+
+  it('returns true when status is suspended but hostStatus is ready (orphan recovery)', () => {
+    expect(
+      isSessionActive(makeSession({ status: 'suspended', hostStatus: 'ready' }))
+    ).toBe(true);
+  });
 });
 
 describe('isOrphanedSession', () => {
@@ -115,6 +135,18 @@ describe('isOrphanedSession', () => {
   it('returns false when status is running (regardless of hostStatus)', () => {
     expect(
       isOrphanedSession(makeSession({ status: 'running' }))
+    ).toBe(false);
+  });
+
+  it('returns true when status is suspended but hostStatus is ready', () => {
+    expect(
+      isOrphanedSession(makeSession({ status: 'suspended', hostStatus: 'ready' }))
+    ).toBe(true);
+  });
+
+  it('returns false when status is suspended and hostStatus is null', () => {
+    expect(
+      isOrphanedSession(makeSession({ status: 'suspended', hostStatus: null }))
     ).toBe(false);
   });
 });

@@ -55,11 +55,38 @@ The failure likely occurs in one of these areas:
 
 ## Investigation Steps
 
-- [ ] Add logging/error capture to the resume flow to identify the exact failure point
-- [ ] Check if `LoadSession` with the preserved `AcpSessionID` actually succeeds on the VM agent
-- [ ] Verify the ACP session state survives agent process termination during suspend
-- [ ] Check if the ChatSession WebSocket connection receives an error that triggers cleanup
-- [ ] Test whether the 5-second polling cycle interferes with the resume flow
+- [x] Add logging/error capture to the resume flow to identify the exact failure point
+- [x] Check if `LoadSession` with the preserved `AcpSessionID` actually succeeds on the VM agent
+- [x] Verify the ACP session state survives agent process termination during suspend
+- [x] Check if the ChatSession WebSocket connection receives an error that triggers cleanup
+- [x] Test whether the 5-second polling cycle interferes with the resume flow
+
+## Root Causes Found
+
+### 1. Process Stop Bug (Critical — causes memory leaks)
+`AgentProcess.Stop()` sent SIGTERM/SIGKILL to the host-side `docker exec` process group,
+but the `claude-code-acp` and `claude` processes run inside the container in a separate PID
+namespace. Killing `docker exec` just breaks the pipe — container processes keep running and
+consuming memory indefinitely.
+
+**Fix**: Added `killContainerProcesses()` method that uses `docker exec <container> pkill -<signal> -f <agentType>` to kill processes inside the container before host-side signals.
+
+### 2. Tab Disappearance (UX)
+`isSessionActive()` returns false for `suspended` sessions (no `hostStatus`), so auto-suspended
+tabs vanished entirely from the tab strip. Users had to find them in the sidebar session history.
+
+**Fix**: Tab strip now includes suspended sessions as dimmed tabs (opacity 0.55, yellow status dot).
+Clicking a suspended tab auto-triggers resume. Suspended sessions no longer appear in sidebar history.
+
+### 3. Resume Fragility (Root cause of the reported bug)
+The control plane resume API calls `resumeAgentSessionOnNode()` best-effort (swallows errors).
+If this fails, the VM agent's in-memory session stays `suspended`. When the browser opens a
+WebSocket, `handleAgentWS` checks `session.Status != StatusRunning` and rejects the connection
+with "session_not_running".
+
+**Fix**: Added auto-resume logic in `handleAgentWS` — if the session is `suspended` when a
+WebSocket connects, it automatically calls `agentSessions.Resume()` to transition it to `running`
+before proceeding with SessionHost creation.
 
 ## Key Code Paths
 

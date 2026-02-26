@@ -20,6 +20,8 @@ export interface WorkspaceTabItem {
   title: string;
   statusColor: string;
   badge?: string;
+  /** When true, the tab is rendered with reduced opacity (e.g., suspended sessions). */
+  dimmed?: boolean;
 }
 
 interface WorkspaceTabStripProps {
@@ -299,7 +301,7 @@ function SortableTabWrapper({
   const sortableStyle = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.4 : 1,
+    opacity: isDragging ? 0.4 : tab.dimmed ? 0.55 : 1,
   };
 
   return (

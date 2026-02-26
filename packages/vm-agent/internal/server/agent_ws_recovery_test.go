@@ -65,6 +65,80 @@ func dialAgentWS(t *testing.T, ts *httptest.Server, cookieSessionID, workspaceID
 	return conn
 }
 
+func TestHandleAgentWS_AutoResumesSuspendedSession(t *testing.T) {
+	s, ts, cookieSessionID := newAgentWSTestServer(t)
+
+	const (
+		workspaceID = "WS_TEST"
+		sessionID   = "sess-suspended"
+	)
+
+	// Pre-create the session and suspend it
+	_, _, err := s.agentSessions.Create(workspaceID, sessionID, "Suspended Chat", "")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	_, err = s.agentSessions.Suspend(workspaceID, sessionID)
+	if err != nil {
+		t.Fatalf("suspend session: %v", err)
+	}
+
+	// Verify it's suspended before the WebSocket connect
+	preSession, exists := s.agentSessions.Get(workspaceID, sessionID)
+	if !exists {
+		t.Fatal("expected session to exist before WebSocket connect")
+	}
+	if preSession.Status != agentsessions.StatusSuspended {
+		t.Fatalf("expected suspended status before connect, got %s", preSession.Status)
+	}
+
+	// Connect via WebSocket — this should auto-resume the session
+	conn := dialAgentWS(t, ts, cookieSessionID, workspaceID, sessionID)
+	_ = conn.Close()
+
+	// Verify the session was auto-resumed to running
+	postSession, exists := s.agentSessions.Get(workspaceID, sessionID)
+	if !exists {
+		t.Fatal("expected session to exist after WebSocket connect")
+	}
+	if postSession.Status != agentsessions.StatusRunning {
+		t.Fatalf("expected running status after auto-resume, got %s", postSession.Status)
+	}
+}
+
+func TestHandleAgentWS_RejectsStoppedSession(t *testing.T) {
+	s, ts, cookieSessionID := newAgentWSTestServer(t)
+
+	const (
+		workspaceID = "WS_TEST"
+		sessionID   = "sess-stopped"
+	)
+
+	// Pre-create the session and stop it
+	_, _, err := s.agentSessions.Create(workspaceID, sessionID, "Stopped Chat", "")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	_, err = s.agentSessions.Stop(workspaceID, sessionID)
+	if err != nil {
+		t.Fatalf("stop session: %v", err)
+	}
+
+	// Attempt WebSocket connect — should fail because stopped sessions can't be auto-resumed
+	url := "ws" + strings.TrimPrefix(ts.URL, "http") + "?sessionId=" + sessionID
+	header := http.Header{}
+	header.Set("Cookie", "session="+cookieSessionID)
+	header.Set("X-SAM-Workspace-Id", workspaceID)
+
+	_, resp, err := websocket.DefaultDialer.Dial(url, header)
+	if err == nil {
+		t.Fatal("expected WebSocket dial to fail for stopped session")
+	}
+	if resp != nil && resp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected HTTP 409 Conflict, got %d", resp.StatusCode)
+	}
+}
+
 func TestHandleAgentWS_RecreatesMissingRequestedSession(t *testing.T) {
 	s, ts, cookieSessionID := newAgentWSTestServer(t)
 
