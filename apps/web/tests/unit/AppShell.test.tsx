@@ -1,14 +1,21 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { AppShell } from '../../src/components/AppShell';
 
+// Mutable auth state so individual tests can override
+let mockAuthState: Record<string, unknown> = {
+  user: { name: 'Test User', email: 'test@example.com', image: null },
+  isSuperadmin: false,
+};
+
 // jsdom does not implement window.matchMedia — stub it for useIsMobile hook
+let matchMediaMatches = false;
 beforeAll(() => {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
     value: vi.fn().mockImplementation((query: string) => ({
-      matches: false,
+      get matches() { return matchMediaMatches; },
       media: query,
       onchange: null,
       addListener: vi.fn(),
@@ -22,15 +29,21 @@ beforeAll(() => {
 
 // Mock AuthProvider
 vi.mock('../../src/components/AuthProvider', () => ({
-  useAuth: () => ({
-    user: { name: 'Test User', email: 'test@example.com', image: null },
-  }),
+  useAuth: () => mockAuthState,
 }));
 
 // Mock auth lib
 vi.mock('../../src/lib/auth', () => ({
   signOut: vi.fn(),
 }));
+
+beforeEach(() => {
+  matchMediaMatches = false;
+  mockAuthState = {
+    user: { name: 'Test User', email: 'test@example.com', image: null },
+    isSuperadmin: false,
+  };
+});
 
 function renderAppShell(path = '/dashboard') {
   return render(
@@ -83,5 +96,64 @@ describe('AppShell', () => {
     renderAppShell('/projects/123');
     const projectsLink = screen.getByText('Projects').closest('a');
     expect(projectsLink).toHaveClass('is-active');
+  });
+
+  it('shows Admin nav item in sidebar for superadmins', () => {
+    mockAuthState = {
+      ...mockAuthState,
+      isSuperadmin: true,
+    };
+    renderAppShell();
+    expect(screen.getByText('Admin')).toBeInTheDocument();
+  });
+
+  it('does not show Admin nav item for non-superadmins', () => {
+    mockAuthState = {
+      ...mockAuthState,
+      isSuperadmin: false,
+    };
+    renderAppShell();
+    expect(screen.queryByText('Admin')).not.toBeInTheDocument();
+  });
+});
+
+describe('AppShell (mobile)', () => {
+  beforeEach(() => {
+    matchMediaMatches = true;
+  });
+
+  it('renders mobile header with hamburger menu', () => {
+    renderAppShell();
+    expect(screen.getByLabelText('Open navigation menu')).toBeInTheDocument();
+  });
+
+  it('shows Admin in mobile drawer for superadmins', () => {
+    mockAuthState = {
+      ...mockAuthState,
+      isSuperadmin: true,
+    };
+    renderAppShell();
+
+    // Open drawer
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+
+    // Admin should be in the drawer nav
+    const drawer = screen.getByRole('dialog', { name: 'Navigation menu' });
+    expect(drawer).toBeInTheDocument();
+    const adminButton = screen.getByRole('button', { name: 'Admin' });
+    expect(adminButton).toBeInTheDocument();
+  });
+
+  it('does not show Admin in mobile drawer for non-superadmins', () => {
+    mockAuthState = {
+      ...mockAuthState,
+      isSuperadmin: false,
+    };
+    renderAppShell();
+
+    // Open drawer
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+
+    expect(screen.queryByRole('button', { name: 'Admin' })).not.toBeInTheDocument();
   });
 });

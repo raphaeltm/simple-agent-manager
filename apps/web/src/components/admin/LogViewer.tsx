@@ -46,7 +46,7 @@ const LogEntryRow: FC<LogEntryRowProps> = ({ log }) => {
       tabIndex={hasDetails ? 0 : undefined}
       aria-expanded={hasDetails ? expanded : undefined}
     >
-      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'baseline' }}>
+      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'baseline', flexWrap: 'wrap' }}>
         <span
           style={{
             color: LEVEL_COLORS[log.level] ?? 'var(--sam-color-fg-muted)',
@@ -64,9 +64,9 @@ const LogEntryRow: FC<LogEntryRowProps> = ({ log }) => {
         <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.7rem', opacity: 0.7 }}>
           {log.event}
         </span>
-        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {log.message}
-        </span>
+      </div>
+      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
+        {log.message}
       </div>
 
       {expanded && hasDetails && (
@@ -198,7 +198,7 @@ export const LogViewer: FC = () => {
           </div>
 
           {/* Search */}
-          <div style={{ display: 'flex', gap: 'var(--sam-space-1)', flex: 1, minWidth: '150px' }}>
+          <div style={{ display: 'flex', gap: 'var(--sam-space-1)', flex: 1, minWidth: 0 }}>
             <input
               type="text"
               placeholder="Search logs..."

@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Button, Card, Spinner, StatusBadge, Body } from '@simple-agent-manager/ui';
 import { useAuth } from '../components/AuthProvider';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { listAdminUsers, approveOrSuspendUser, changeUserRole } from '../lib/api';
 import type { AdminUser, UserStatus } from '@simple-agent-manager/shared';
 
@@ -8,6 +9,7 @@ type StatusFilter = 'all' | UserStatus;
 
 export function AdminUsers() {
   const { user: currentUser } = useAuth();
+  const isMobile = useIsMobile();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -134,167 +136,131 @@ export function AdminUsers() {
         </Card>
       ) : (
         <Card>
-          <div style={{ overflow: 'auto' }}>
-            <table
-              style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                fontSize: 'var(--sam-type-secondary-size)',
-              }}
-            >
-              <thead>
-                <tr
-                  style={{
-                    borderBottom: '1px solid var(--sam-color-border-default)',
-                    textAlign: 'left',
-                  }}
-                >
-                  <th style={thStyle}>User</th>
-                  <th style={thStyle}>Role</th>
-                  <th style={thStyle}>Status</th>
-                  <th style={thStyle}>Joined</th>
-                  <th style={{ ...thStyle, textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u) => {
-                  const isCurrentUser = u.id === currentUser?.id;
-                  const isSuperadminUser = u.role === 'superadmin';
-                  const isLoading = actionLoading === u.id;
+          {isMobile ? (
+            /* Mobile: stacked card layout */
+            <div>
+              {users.map((u) => {
+                const isCurrentUser = u.id === currentUser?.id;
+                const isSuperadminUser = u.role === 'superadmin';
+                const isLoading = actionLoading === u.id;
 
-                  return (
-                    <tr
-                      key={u.id}
-                      style={{ borderBottom: '1px solid var(--sam-color-border-default)' }}
-                    >
-                      <td style={tdStyle}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
-                          {u.avatarUrl ? (
-                            <img
-                              src={u.avatarUrl}
-                              alt=""
-                              style={{
-                                width: 32,
-                                height: 32,
-                                borderRadius: 'var(--sam-radius-full)',
-                              }}
-                            />
-                          ) : (
-                            <div
-                              style={{
-                                width: 32,
-                                height: 32,
-                                borderRadius: 'var(--sam-radius-full)',
-                                backgroundColor: 'var(--sam-color-bg-surface-hover)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '0.75rem',
-                                fontWeight: 600,
-                                color: 'var(--sam-color-fg-muted)',
-                              }}
-                            >
-                              {(u.name || u.email)[0]?.toUpperCase()}
+                return (
+                  <div
+                    key={u.id}
+                    style={{
+                      padding: 'var(--sam-space-3) var(--sam-space-4)',
+                      borderBottom: '1px solid var(--sam-color-border-default)',
+                    }}
+                  >
+                    {/* User info row */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
+                      <UserAvatar user={u} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 500, color: 'var(--sam-color-fg-primary)', fontSize: 'var(--sam-type-secondary-size)' }}>
+                          {u.name || 'Unnamed'}
+                          {isCurrentUser && (
+                            <span style={{ color: 'var(--sam-color-fg-muted)', fontWeight: 400 }}> (you)</span>
+                          )}
+                        </div>
+                        <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {u.email}
+                        </div>
+                      </div>
+                    </div>
+                    {/* Badges + date row */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', marginTop: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+                      <UserRoleBadge role={u.role} />
+                      <UserStatusBadge status={u.status} />
+                      <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: 'var(--sam-type-caption-size)', marginLeft: 'auto' }}>
+                        {new Date(u.createdAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                    {/* Actions row */}
+                    {!isSuperadminUser && !isCurrentUser && (
+                      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', marginTop: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+                        <UserActions user={u} isLoading={isLoading} onAction={handleAction} onRoleChange={handleRoleChange} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            /* Desktop: table layout */
+            <div style={{ overflow: 'auto' }}>
+              <table
+                style={{
+                  width: '100%',
+                  borderCollapse: 'collapse',
+                  fontSize: 'var(--sam-type-secondary-size)',
+                }}
+              >
+                <thead>
+                  <tr
+                    style={{
+                      borderBottom: '1px solid var(--sam-color-border-default)',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <th style={thStyle}>User</th>
+                    <th style={thStyle}>Role</th>
+                    <th style={thStyle}>Status</th>
+                    <th style={thStyle}>Joined</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => {
+                    const isCurrentUser = u.id === currentUser?.id;
+                    const isSuperadminUser = u.role === 'superadmin';
+                    const isLoading = actionLoading === u.id;
+
+                    return (
+                      <tr
+                        key={u.id}
+                        style={{ borderBottom: '1px solid var(--sam-color-border-default)' }}
+                      >
+                        <td style={tdStyle}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
+                            <UserAvatar user={u} />
+                            <div>
+                              <div style={{ fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>
+                                {u.name || 'Unnamed'}
+                                {isCurrentUser && (
+                                  <span style={{ color: 'var(--sam-color-fg-muted)', fontWeight: 400 }}> (you)</span>
+                                )}
+                              </div>
+                              <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.75rem' }}>
+                                {u.email}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={tdStyle}>
+                          <UserRoleBadge role={u.role} />
+                        </td>
+                        <td style={tdStyle}>
+                          <UserStatusBadge status={u.status} />
+                        </td>
+                        <td style={tdStyle}>
+                          <span style={{ color: 'var(--sam-color-fg-muted)' }}>
+                            {new Date(u.createdAt).toLocaleDateString()}
+                          </span>
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: 'right' }}>
+                          {!isSuperadminUser && !isCurrentUser && (
+                            <div style={{ display: 'flex', gap: 'var(--sam-space-2)', justifyContent: 'flex-end' }}>
+                              <UserActions user={u} isLoading={isLoading} onAction={handleAction} onRoleChange={handleRoleChange} />
                             </div>
                           )}
-                          <div>
-                            <div style={{ fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>
-                              {u.name || 'Unnamed'}
-                              {isCurrentUser && (
-                                <span style={{ color: 'var(--sam-color-fg-muted)', fontWeight: 400 }}> (you)</span>
-                              )}
-                            </div>
-                            <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.75rem' }}>
-                              {u.email}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td style={tdStyle}>
-                        {isSuperadminUser ? (
-                          <StatusBadge status="running" label="Superadmin" />
-                        ) : u.role === 'admin' ? (
-                          <StatusBadge status="creating" label="Admin" />
-                        ) : (
-                          <span style={{ color: 'var(--sam-color-fg-muted)' }}>User</span>
-                        )}
-                      </td>
-                      <td style={tdStyle}>
-                        {u.status === 'active' ? (
-                          <StatusBadge status="running" label="Active" />
-                        ) : u.status === 'pending' ? (
-                          <StatusBadge status="pending" label="Pending" />
-                        ) : (
-                          <StatusBadge status="error" label="Suspended" />
-                        )}
-                      </td>
-                      <td style={tdStyle}>
-                        <span style={{ color: 'var(--sam-color-fg-muted)' }}>
-                          {new Date(u.createdAt).toLocaleDateString()}
-                        </span>
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: 'right' }}>
-                        {!isSuperadminUser && !isCurrentUser && (
-                          <div style={{ display: 'flex', gap: 'var(--sam-space-2)', justifyContent: 'flex-end' }}>
-                            {u.status === 'pending' && (
-                              <Button
-                                size="sm"
-                                variant="primary"
-                                onClick={() => handleAction(u.id, 'approve')}
-                                disabled={isLoading}
-                              >
-                                {isLoading ? 'Approving...' : 'Approve'}
-                              </Button>
-                            )}
-                            {u.status === 'active' && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleAction(u.id, 'suspend')}
-                                disabled={isLoading}
-                              >
-                                Suspend
-                              </Button>
-                            )}
-                            {u.status === 'suspended' && (
-                              <Button
-                                size="sm"
-                                variant="primary"
-                                onClick={() => handleAction(u.id, 'approve')}
-                                disabled={isLoading}
-                              >
-                                {isLoading ? 'Restoring...' : 'Restore'}
-                              </Button>
-                            )}
-                            {u.status === 'active' && u.role === 'user' && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleRoleChange(u.id, 'admin')}
-                                disabled={isLoading}
-                              >
-                                Make Admin
-                              </Button>
-                            )}
-                            {u.status === 'active' && u.role === 'admin' && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleRoleChange(u.id, 'user')}
-                                disabled={isLoading}
-                              >
-                                Remove Admin
-                              </Button>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Card>
       )}
     </div>
@@ -313,3 +279,83 @@ const thStyle = {
 const tdStyle = {
   padding: 'var(--sam-space-3) var(--sam-space-4)',
 };
+
+function UserAvatar({ user }: { user: AdminUser }) {
+  if (user.avatarUrl) {
+    return (
+      <img
+        src={user.avatarUrl}
+        alt=""
+        style={{ width: 32, height: 32, borderRadius: 'var(--sam-radius-full)', flexShrink: 0 }}
+      />
+    );
+  }
+  return (
+    <div
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: 'var(--sam-radius-full)',
+        backgroundColor: 'var(--sam-color-bg-surface-hover)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: '0.75rem',
+        fontWeight: 600,
+        color: 'var(--sam-color-fg-muted)',
+        flexShrink: 0,
+      }}
+    >
+      {(user.name || user.email)[0]?.toUpperCase()}
+    </div>
+  );
+}
+
+function UserRoleBadge({ role }: { role: string }) {
+  if (role === 'superadmin') return <StatusBadge status="running" label="Superadmin" />;
+  if (role === 'admin') return <StatusBadge status="creating" label="Admin" />;
+  return <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: 'var(--sam-type-secondary-size)' }}>User</span>;
+}
+
+function UserStatusBadge({ status }: { status: string }) {
+  if (status === 'active') return <StatusBadge status="running" label="Active" />;
+  if (status === 'pending') return <StatusBadge status="pending" label="Pending" />;
+  return <StatusBadge status="error" label="Suspended" />;
+}
+
+function UserActions({ user, isLoading, onAction, onRoleChange }: {
+  user: AdminUser;
+  isLoading: boolean;
+  onAction: (id: string, action: 'approve' | 'suspend') => void;
+  onRoleChange: (id: string, role: 'admin' | 'user') => void;
+}) {
+  return (
+    <>
+      {user.status === 'pending' && (
+        <Button size="sm" variant="primary" onClick={() => onAction(user.id, 'approve')} disabled={isLoading}>
+          {isLoading ? 'Approving...' : 'Approve'}
+        </Button>
+      )}
+      {user.status === 'active' && (
+        <Button size="sm" variant="ghost" onClick={() => onAction(user.id, 'suspend')} disabled={isLoading}>
+          Suspend
+        </Button>
+      )}
+      {user.status === 'suspended' && (
+        <Button size="sm" variant="primary" onClick={() => onAction(user.id, 'approve')} disabled={isLoading}>
+          {isLoading ? 'Restoring...' : 'Restore'}
+        </Button>
+      )}
+      {user.status === 'active' && user.role === 'user' && (
+        <Button size="sm" variant="ghost" onClick={() => onRoleChange(user.id, 'admin')} disabled={isLoading}>
+          Make Admin
+        </Button>
+      )}
+      {user.status === 'active' && user.role === 'admin' && (
+        <Button size="sm" variant="ghost" onClick={() => onRoleChange(user.id, 'user')} disabled={isLoading}>
+          Remove Admin
+        </Button>
+      )}
+    </>
+  );
+}
