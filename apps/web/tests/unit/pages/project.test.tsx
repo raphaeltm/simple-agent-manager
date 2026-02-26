@@ -302,4 +302,43 @@ describe('Project page', () => {
     // Tabs were removed in 022 — project page is now chat-first
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
   });
+
+  it('renders Status button next to Settings button', async () => {
+    renderProjectPage();
+    await screen.findByRole('heading', { name: 'Project One' });
+
+    const statusBtn = screen.getByRole('button', { name: 'Project status' });
+    const settingsBtn = screen.getByRole('button', { name: 'Project settings' });
+    expect(statusBtn).toBeInTheDocument();
+    expect(settingsBtn).toBeInTheDocument();
+  });
+
+  it('opens project info panel when Status button is clicked', async () => {
+    renderProjectPage();
+    await screen.findByRole('heading', { name: 'Project One' });
+
+    const statusBtn = screen.getByRole('button', { name: 'Project status' });
+    expect(statusBtn).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(statusBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Project Status')).toBeInTheDocument();
+    });
+  });
+
+  it('shows Project Views section in settings drawer', async () => {
+    renderProjectPage();
+    await screen.findByRole('heading', { name: 'Project One' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Project settings' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Project Views')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Overview')).toBeInTheDocument();
+    expect(screen.getByText('Tasks')).toBeInTheDocument();
+    expect(screen.getByText('Activity')).toBeInTheDocument();
+  });
 });
