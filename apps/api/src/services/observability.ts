@@ -561,7 +561,7 @@ export async function queryCloudflareLogs(
   if (!response.ok) {
     if (response.status === 403) {
       throw new CfApiError(
-        'Cloudflare Observability API returned 403: The CF_API_TOKEN is missing the "Account: Workers Logs (Read)" permission. ' +
+        'Cloudflare Observability API returned 403: The CF_API_TOKEN is missing the "Account: Workers Observability (Read)" permission. ' +
         'Edit the API token in Cloudflare Dashboard to add this permission.'
       );
     }
