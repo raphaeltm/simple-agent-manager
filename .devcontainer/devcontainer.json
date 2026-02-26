@@ -1,6 +1,9 @@
 {
 	"name": "Simple Agent Manager",
 	"image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm",
+	// Run as the non-root "node" user provided by the base image.
+	// Without this, the devcontainer defaults to root.
+	"remoteUser": "node",
 	// Persist Codex state under the repo so MCP config survives container rebuilds.
 	// Note: the stateful files in `.codex/` are gitignored.
 	"containerEnv": {
