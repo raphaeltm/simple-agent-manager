@@ -527,9 +527,9 @@ export async function queryCloudflareLogs(
   }
 
   const body: Record<string, unknown> = {
-    timeRange: {
-      start: input.timeRange.start,
-      end: input.timeRange.end,
+    timeframe: {
+      from: new Date(input.timeRange.start).getTime(),
+      to: new Date(input.timeRange.end).getTime(),
     },
     filters,
     limit,
@@ -571,7 +571,12 @@ export async function queryCloudflareLogs(
         'Regenerate the token in Cloudflare Dashboard.'
       );
     }
-    throw new CfApiError(`Cloudflare Observability API returned ${response.status}`);
+    let detail = '';
+    try {
+      const errBody = await response.text();
+      if (errBody) detail = `: ${errBody.slice(0, 200)}`;
+    } catch { /* ignore */ }
+    throw new CfApiError(`Cloudflare Observability API returned ${response.status}${detail}`);
   }
 
   let data: Record<string, unknown>;
