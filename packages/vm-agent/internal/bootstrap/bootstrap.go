@@ -1774,6 +1774,9 @@ func buildSAMEnvScript(cfg *config.Config, githubToken string) string {
 		{"SAM_API_URL", strings.TrimRight(cfg.ControlPlaneURL, "/")},
 		{"SAM_BRANCH", cfg.Branch},
 		{"SAM_NODE_ID", cfg.NodeID},
+		{"SAM_PROJECT_ID", cfg.ProjectID},
+		{"SAM_CHAT_SESSION_ID", cfg.ChatSessionID},
+		{"SAM_TASK_ID", cfg.TaskID},
 		{"SAM_REPOSITORY", cfg.Repository},
 		{"SAM_WORKSPACE_ID", cfg.WorkspaceID},
 	}
@@ -1818,6 +1821,9 @@ func buildSAMStaticEnv(cfg *config.Config, githubToken string) string {
 		{"SAM_API_URL", strings.TrimRight(cfg.ControlPlaneURL, "/")},
 		{"SAM_BRANCH", cfg.Branch},
 		{"SAM_NODE_ID", cfg.NodeID},
+		{"SAM_PROJECT_ID", cfg.ProjectID},
+		{"SAM_CHAT_SESSION_ID", cfg.ChatSessionID},
+		{"SAM_TASK_ID", cfg.TaskID},
 		{"SAM_REPOSITORY", cfg.Repository},
 		{"SAM_WORKSPACE_ID", cfg.WorkspaceID},
 	}
@@ -1853,7 +1859,7 @@ func ensureSAMEnvironment(ctx context.Context, cfg *config.Config, githubToken s
 	// The two files are written separately because /etc/sam/env must be a
 	// simple parseable format without shell command substitution.
 	writeCmd := exec.CommandContext(
-		ctx, "docker", "exec", "-u", "root", containerID,
+		ctx, "docker", "exec", "-u", "root", "-i", containerID,
 		"sh", "-c", "mkdir -p /etc/sam && cat > /etc/profile.d/sam-env.sh",
 	)
 	writeCmd.Stdin = strings.NewReader(shellScript)
@@ -1864,7 +1870,7 @@ func ensureSAMEnvironment(ctx context.Context, cfg *config.Config, githubToken s
 	// Write static-only env file (strip the dynamic fallback block).
 	staticEnv := buildSAMStaticEnv(cfg, githubToken)
 	writeEnvCmd := exec.CommandContext(
-		ctx, "docker", "exec", "-u", "root", containerID,
+		ctx, "docker", "exec", "-u", "root", "-i", containerID,
 		"sh", "-c", "cat > /etc/sam/env",
 	)
 	writeEnvCmd.Stdin = strings.NewReader(staticEnv)
@@ -1948,7 +1954,7 @@ func ensureProjectRuntimeAssets(
 		}
 
 		writeCmd := exec.CommandContext(
-			ctx, "docker", "exec", "-u", "root", containerID,
+			ctx, "docker", "exec", "-u", "root", "-i", containerID,
 			"sh", "-c", "mkdir -p /etc/sam && cat > /etc/profile.d/sam-project-env.sh && cp /etc/profile.d/sam-project-env.sh /etc/sam/project-env",
 		)
 		writeCmd.Stdin = strings.NewReader(script)

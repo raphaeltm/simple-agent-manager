@@ -466,6 +466,101 @@ func TestBuildSAMEnvScriptWhitespaceOnlyTokenOmitted(t *testing.T) {
 	}
 }
 
+func TestBuildSAMStaticEnv(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+		NodeID:          "node-456",
+		Repository:      "octo/repo",
+		Branch:          "main",
+	}
+
+	env := buildSAMStaticEnv(cfg, "ghs_token")
+
+	for _, want := range []string{
+		`export GH_TOKEN="ghs_token"`,
+		`export SAM_API_URL="https://api.example.com"`,
+		`export SAM_BRANCH="main"`,
+		`export SAM_NODE_ID="node-456"`,
+		`export SAM_REPOSITORY="octo/repo"`,
+		`export SAM_WORKSPACE_ID="ws-123"`,
+		`export SAM_WORKSPACE_URL="https://ws-ws-123.example.com"`,
+	} {
+		if !strings.Contains(env, want) {
+			t.Errorf("static env missing %q\ngot:\n%s", want, env)
+		}
+	}
+}
+
+func TestBuildSAMStaticEnvIncludesProjectContext(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+		NodeID:          "node-456",
+		ProjectID:       "proj-789",
+		ChatSessionID:   "session-abc",
+		TaskID:          "task-def",
+	}
+
+	env := buildSAMStaticEnv(cfg, "")
+
+	for _, want := range []string{
+		`export SAM_PROJECT_ID="proj-789"`,
+		`export SAM_CHAT_SESSION_ID="session-abc"`,
+		`export SAM_TASK_ID="task-def"`,
+	} {
+		if !strings.Contains(env, want) {
+			t.Errorf("static env missing %q\ngot:\n%s", want, env)
+		}
+	}
+}
+
+func TestBuildSAMStaticEnvOmitsEmptyProjectContext(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+		// ProjectID, ChatSessionID, TaskID left empty
+	}
+
+	env := buildSAMStaticEnv(cfg, "")
+
+	for _, key := range []string{"SAM_PROJECT_ID", "SAM_CHAT_SESSION_ID", "SAM_TASK_ID"} {
+		if strings.Contains(env, key) {
+			t.Errorf("static env should not contain %s when empty, got:\n%s", key, env)
+		}
+	}
+}
+
+func TestBuildSAMEnvScriptIncludesProjectContext(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+		ProjectID:       "proj-789",
+		ChatSessionID:   "session-abc",
+		TaskID:          "task-def",
+	}
+
+	script := buildSAMEnvScript(cfg, "")
+
+	for _, want := range []string{
+		`export SAM_PROJECT_ID="proj-789"`,
+		`export SAM_CHAT_SESSION_ID="session-abc"`,
+		`export SAM_TASK_ID="task-def"`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script missing %q\ngot:\n%s", want, script)
+		}
+	}
+}
+
 func TestBuildProjectRuntimeEnvScript(t *testing.T) {
 	t.Parallel()
 

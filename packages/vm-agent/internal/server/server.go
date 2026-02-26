@@ -178,6 +178,7 @@ func New(cfg *config.Config) (*Server, error) {
 		PongTimeout:             cfg.ACPPongTimeout,
 		PromptTimeout:           cfg.ACPPromptTimeout,
 		PromptCancelGracePeriod: cfg.ACPPromptCancelGrace,
+		SAMEnvFallback:          cfg.BuildSAMEnvFallback(),
 	}
 
 	// Open persistence store for cross-device session state.

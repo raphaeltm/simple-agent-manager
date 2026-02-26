@@ -438,6 +438,36 @@ func DeriveBaseDomain(controlPlaneURL string) string {
 	return host
 }
 
+// BuildSAMEnvFallback returns KEY=value pairs for SAM environment variables
+// derived from the vm-agent config. Used as fallback injection into ACP sessions
+// when the bootstrap-written /etc/sam/env file is missing or incomplete.
+func (c *Config) BuildSAMEnvFallback() []string {
+	baseDomain := DeriveBaseDomain(c.ControlPlaneURL)
+
+	type entry struct{ key, value string }
+	entries := []entry{
+		{"SAM_API_URL", strings.TrimRight(c.ControlPlaneURL, "/")},
+		{"SAM_BRANCH", c.Branch},
+		{"SAM_NODE_ID", c.NodeID},
+		{"SAM_PROJECT_ID", c.ProjectID},
+		{"SAM_CHAT_SESSION_ID", c.ChatSessionID},
+		{"SAM_TASK_ID", c.TaskID},
+		{"SAM_REPOSITORY", c.Repository},
+		{"SAM_WORKSPACE_ID", c.WorkspaceID},
+	}
+	if baseDomain != "" && c.WorkspaceID != "" {
+		entries = append(entries, entry{"SAM_WORKSPACE_URL", fmt.Sprintf("https://ws-%s.%s", c.WorkspaceID, baseDomain)})
+	}
+
+	var result []string
+	for _, e := range entries {
+		if e.value != "" {
+			result = append(result, e.key+"="+e.value)
+		}
+	}
+	return result
+}
+
 // deriveAllowedOrigins extracts allowed origins from the control plane URL.
 // This allows the control plane domain and workspace subdomains.
 func deriveAllowedOrigins(controlPlaneURL string) []string {
