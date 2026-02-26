@@ -44,7 +44,7 @@ taskSubmitRoutes.use('/*', requireAuth(), requireApproved());
  * Single-action task submission. Creates task, session, and kicks off execution.
  * Returns 202 immediately — frontend tracks progress via WebSocket/polling.
  */
-taskSubmitRoutes.post('/', async (c) => {
+taskSubmitRoutes.post('/submit', async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
   const projectId = c.req.param('projectId');
