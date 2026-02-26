@@ -245,6 +245,14 @@ func (m *Manager) GetAllSessions() map[string]*Session {
 	return sessionsCopy
 }
 
+// SetContainerUser updates the container user for new sessions.
+// Existing sessions are not affected.
+func (m *Manager) SetContainerUser(user string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.containerUser = user
+}
+
 // GetLastActivity returns the most recent activity time across all sessions.
 func (m *Manager) GetLastActivity() time.Time {
 	m.mu.RLock()

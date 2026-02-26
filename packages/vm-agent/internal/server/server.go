@@ -333,9 +333,14 @@ func (s *Server) GetBootLogBroadcasterForWorkspace(workspaceID string) *BootLogB
 	return s.bootLogBroadcasters.GetOrCreate(workspaceID)
 }
 
-// UpdateAfterBootstrap propagates the callback token (obtained during bootstrap)
-// to subsystems that were created before the token was available, and signals
-// that bootstrap is complete.
+// UpdateAfterBootstrap propagates bootstrap-discovered state (callback token,
+// container user, etc.) to subsystems that were created before bootstrap ran,
+// and signals that bootstrap is complete.
+//
+// The server is created before bootstrap so that /health and /boot-log/ws are
+// available during provisioning. This means the PTY manager and ACP gateway
+// config are initially constructed with empty values for fields that bootstrap
+// populates (e.g. ContainerUser, CallbackToken). This method back-fills them.
 func (s *Server) UpdateAfterBootstrap(cfg *config.Config) {
 	// Propagate callback token to error reporter.
 	s.errorReporter.SetToken(cfg.CallbackToken)
@@ -347,6 +352,20 @@ func (s *Server) UpdateAfterBootstrap(cfg *config.Config) {
 
 	// Update ACP gateway config with the callback token.
 	s.acpConfig.CallbackToken = cfg.CallbackToken
+
+	// Propagate the detected devcontainer user to the PTY manager and ACP
+	// gateway config. Bootstrap detects the container user (e.g. "node") via
+	// devcontainer read-configuration / metadata / docker exec fallback, but
+	// this happens after server.New() has already captured an empty value.
+	if detectedUser := strings.TrimSpace(cfg.ContainerUser); detectedUser != "" {
+		if s.acpConfig.ContainerUser == "" {
+			s.acpConfig.ContainerUser = detectedUser
+		}
+		if s.ptyManager != nil {
+			s.ptyManager.SetContainerUser(detectedUser)
+		}
+		slog.Info("Propagated bootstrap container user", "user", detectedUser)
+	}
 
 	// Update workspace runtime with the callback token.
 	s.workspaceMu.Lock()
