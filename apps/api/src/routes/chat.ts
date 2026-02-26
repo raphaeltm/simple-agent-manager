@@ -78,6 +78,29 @@ chatRoutes.post('/', async (c) => {
 });
 
 /**
+ * GET /api/projects/:projectId/sessions/ws
+ * WebSocket upgrade — streams real-time events (new messages, session changes, activity)
+ * from the project's Durable Object to the connected client.
+ *
+ * NOTE: This route MUST be defined before /:sessionId to avoid 'ws' being
+ * captured as a sessionId parameter.
+ */
+chatRoutes.get('/ws', async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireOwnedProject(db, projectId, userId);
+
+  const upgradeHeader = c.req.header('Upgrade');
+  if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
+    throw errors.badRequest('Expected WebSocket upgrade');
+  }
+
+  return projectDataService.forwardWebSocket(c.env, projectId, c.req.raw);
+});
+
+/**
  * GET /api/projects/:projectId/sessions/:sessionId
  * Get a single session with its messages (cursor-paginated).
  */
@@ -183,25 +206,5 @@ chatRoutes.post('/:sessionId/idle-reset', async (c) => {
 // Browser-side POST /:sessionId/messages route removed — messages are now
 // persisted exclusively by the VM agent via POST /api/workspaces/:id/messages.
 // See: specs/021-task-chat-architecture (US1 — Agent-Side Chat Persistence).
-
-/**
- * GET /api/projects/:projectId/sessions/ws
- * WebSocket upgrade — streams real-time events (new messages, session changes, activity)
- * from the project's Durable Object to the connected client.
- */
-chatRoutes.get('/ws', async (c) => {
-  const userId = getUserId(c);
-  const projectId = requireRouteParam(c, 'projectId');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  await requireOwnedProject(db, projectId, userId);
-
-  const upgradeHeader = c.req.header('Upgrade');
-  if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
-    throw errors.badRequest('Expected WebSocket upgrade');
-  }
-
-  return projectDataService.forwardWebSocket(c.env, projectId, c.req.raw);
-});
 
 export { chatRoutes };
