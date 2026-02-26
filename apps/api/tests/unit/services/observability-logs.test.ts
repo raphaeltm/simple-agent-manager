@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { queryCloudflareLogs, checkRateLimit, CfApiError } from '../../../src/services/observability';
-import type { Env } from '../../../src/index';
+import { queryCloudflareLogs, CfApiError } from '../../../src/services/observability';
 
 // Mock drizzle-orm for schema import
 vi.mock('drizzle-orm/d1', () => ({
@@ -258,57 +257,4 @@ describe('queryCloudflareLogs()', () => {
   });
 });
 
-describe('checkRateLimit()', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    // Clear the internal rate limit map by checking lots of new users
-    // (the map is module-scoped, so we just test behavior)
-  });
 
-  it('should allow first request', () => {
-    const uniqueUser = `user-${Date.now()}-${Math.random()}`;
-    const result = checkRateLimit(uniqueUser);
-    expect(result.allowed).toBe(true);
-    expect(result.remaining).toBeGreaterThanOrEqual(0);
-  });
-
-  it('should track remaining count', () => {
-    const uniqueUser = `user-remaining-${Date.now()}`;
-    const first = checkRateLimit(uniqueUser);
-    const second = checkRateLimit(uniqueUser);
-    expect(second.remaining).toBe(first.remaining - 1);
-  });
-
-  it('should deny after exceeding limit', () => {
-    const uniqueUser = `user-deny-${Date.now()}`;
-    const env = { OBSERVABILITY_LOG_QUERY_RATE_LIMIT: '3' } as unknown as Env;
-
-    // Make 3 allowed requests
-    checkRateLimit(uniqueUser, env);
-    checkRateLimit(uniqueUser, env);
-    checkRateLimit(uniqueUser, env);
-
-    // 4th should be denied
-    const result = checkRateLimit(uniqueUser, env);
-    expect(result.allowed).toBe(false);
-    expect(result.remaining).toBe(0);
-  });
-
-  it('should return resetMs > 0', () => {
-    const uniqueUser = `user-reset-${Date.now()}`;
-    const result = checkRateLimit(uniqueUser);
-    expect(result.resetMs).toBeGreaterThan(0);
-    expect(result.resetMs).toBeLessThanOrEqual(60_000);
-  });
-
-  it('should use configurable rate limit from env', () => {
-    const uniqueUser = `user-config-${Date.now()}`;
-    const env = { OBSERVABILITY_LOG_QUERY_RATE_LIMIT: '2' } as unknown as Env;
-
-    checkRateLimit(uniqueUser, env);
-    checkRateLimit(uniqueUser, env);
-
-    const result = checkRateLimit(uniqueUser, env);
-    expect(result.allowed).toBe(false);
-  });
-});

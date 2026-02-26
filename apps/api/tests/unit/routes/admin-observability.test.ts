@@ -37,7 +37,6 @@ const mockQueryErrors = vi.fn();
 const mockGetHealthSummary = vi.fn();
 const mockGetErrorTrends = vi.fn();
 const mockQueryCloudflareLogs = vi.fn();
-const mockCheckRateLimit = vi.fn().mockReturnValue({ allowed: true, remaining: 29, resetMs: 60000 });
 
 class MockCfApiError extends Error {
   constructor(message: string) {
@@ -51,8 +50,14 @@ vi.mock('../../../src/services/observability', () => ({
   getHealthSummary: (...args: unknown[]) => mockGetHealthSummary(...args),
   getErrorTrends: (...args: unknown[]) => mockGetErrorTrends(...args),
   queryCloudflareLogs: (...args: unknown[]) => mockQueryCloudflareLogs(...args),
-  checkRateLimit: (...args: unknown[]) => mockCheckRateLimit(...args),
+  getLogQueryRateLimit: () => 30,
   CfApiError: MockCfApiError,
+}));
+
+// Mock rate-limit middleware (allow all by default)
+const mockRateLimitMiddleware = vi.fn((_c: any, next: any) => next());
+vi.mock('../../../src/middleware/rate-limit', () => ({
+  rateLimit: () => mockRateLimitMiddleware,
 }));
 
 // We need to import after mocks are set up
@@ -515,22 +520,26 @@ describe('Admin Observability Routes', () => {
     });
 
     it('should return 429 when rate limited', async () => {
-      mockCheckRateLimit.mockReturnValueOnce({ allowed: false, remaining: 0, resetMs: 30000 });
+      // Mock the rate limit middleware to throw a rate limit error
+      mockRateLimitMiddleware.mockImplementationOnce(() => {
+        const err = new Error('Too many requests. Please try again later.') as Error & { statusCode: number; error: string; retryAfter: number };
+        err.statusCode = 429;
+        err.error = 'RATE_LIMIT_EXCEEDED';
+        err.retryAfter = 30;
+        throw err;
+      });
 
       const res = await postLogs(validBody);
 
       expect(res.status).toBe(429);
-      const body = await res.json();
-      expect(body.error).toBe('RATE_LIMITED');
     });
 
-    it('should include rate limit headers', async () => {
+    it('should apply rate limit middleware to log query route', async () => {
       mockQueryCloudflareLogs.mockResolvedValue({ logs: [], cursor: null, hasMore: false });
 
-      const res = await postLogs(validBody);
+      await postLogs(validBody);
 
-      expect(res.headers.get('X-RateLimit-Remaining')).toBe('29');
-      expect(res.headers.get('X-RateLimit-Reset')).toBeTruthy();
+      expect(mockRateLimitMiddleware).toHaveBeenCalled();
     });
 
     it('should return 502 when CF API fails', async () => {

@@ -466,46 +466,17 @@ export async function purgeExpiredErrors(
 // Cloudflare Workers Observability API Proxy (T049 — Phase 5, US3)
 // =============================================================================
 
-const DEFAULT_LOG_QUERY_RATE_LIMIT = 30; // requests per minute
 const DEFAULT_LOG_QUERY_LIMIT = 100;
 const MAX_LOG_QUERY_LIMIT = 500;
+const DEFAULT_LOG_QUERY_RATE_LIMIT = 30;
 
 const CF_OBSERVABILITY_API_BASE = 'https://api.cloudflare.com/client/v4/accounts';
 
 /**
- * Per-admin rate limiter for CF log queries.
- * Uses a sliding window counter (in-memory, resets per Worker isolate).
+ * Get the configured rate limit for CF log queries (per minute).
  */
-const rateLimitMap = new Map<string, { count: number; windowStart: number }>();
-
-export function checkRateLimit(
-  userId: string,
-  env?: Env
-): { allowed: boolean; remaining: number; resetMs: number } {
-  const maxPerMinute = env
-    ? getConfigNumber(env, 'OBSERVABILITY_LOG_QUERY_RATE_LIMIT', DEFAULT_LOG_QUERY_RATE_LIMIT)
-    : DEFAULT_LOG_QUERY_RATE_LIMIT;
-
-  const now = Date.now();
-  const windowMs = 60_000;
-
-  let entry = rateLimitMap.get(userId);
-
-  if (!entry || now - entry.windowStart >= windowMs) {
-    entry = { count: 0, windowStart: now };
-    rateLimitMap.set(userId, entry);
-  }
-
-  entry.count++;
-
-  const remaining = Math.max(0, maxPerMinute - entry.count);
-  const resetMs = entry.windowStart + windowMs - now;
-
-  return {
-    allowed: entry.count <= maxPerMinute,
-    remaining,
-    resetMs,
-  };
+export function getLogQueryRateLimit(env: Env): number {
+  return getConfigNumber(env, 'OBSERVABILITY_LOG_QUERY_RATE_LIMIT', DEFAULT_LOG_QUERY_RATE_LIMIT);
 }
 
 export interface QueryCloudflarLogsInput {

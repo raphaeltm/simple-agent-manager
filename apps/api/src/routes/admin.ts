@@ -5,7 +5,8 @@ import * as schema from '../db/schema';
 import type { Env } from '../index';
 import { requireAuth, requireApproved, requireSuperadmin, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { queryErrors, getHealthSummary, getErrorTrends, queryCloudflareLogs, checkRateLimit, CfApiError } from '../services/observability';
+import { queryErrors, getHealthSummary, getErrorTrends, queryCloudflareLogs, getLogQueryRateLimit, CfApiError } from '../services/observability';
+import { rateLimit } from '../middleware/rate-limit';
 import type { UserRole, UserStatus, PlatformErrorSource, PlatformErrorLevel } from '@simple-agent-manager/shared';
 
 const adminRoutes = new Hono<{ Bindings: Env }>();
@@ -302,23 +303,19 @@ adminRoutes.get('/observability/trends', async (c) => {
  *
  * Body: { timeRange: { start, end }, levels?, search?, limit?, cursor? }
  */
-adminRoutes.post('/observability/logs/query', async (c) => {
+adminRoutes.post('/observability/logs/query',
+  // Per-admin KV-based rate limiting (1-minute window)
+  async (c, next) => {
+    const limiter = rateLimit({
+      limit: getLogQueryRateLimit(c.env),
+      keyPrefix: 'cf-log-query',
+      windowSeconds: 60,
+    });
+    return limiter(c, next);
+  },
+  async (c) => {
   if (!c.env.CF_API_TOKEN || !c.env.CF_ACCOUNT_ID) {
     throw errors.badRequest('Cloudflare API credentials not configured. Set CF_API_TOKEN and CF_ACCOUNT_ID.');
-  }
-
-  // Per-admin rate limiting
-  const userId = getUserId(c);
-  const rateLimit = checkRateLimit(userId, c.env);
-
-  c.header('X-RateLimit-Remaining', String(rateLimit.remaining));
-  c.header('X-RateLimit-Reset', String(Math.ceil(rateLimit.resetMs / 1000)));
-
-  if (!rateLimit.allowed) {
-    return c.json(
-      { error: 'RATE_LIMITED', message: 'Too many log queries. Please wait before trying again.' },
-      429
-    );
   }
 
   let body: Record<string, unknown>;
