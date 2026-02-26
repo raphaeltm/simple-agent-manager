@@ -4,11 +4,13 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const mocks = vi.hoisted(() => ({
   listNodes: vi.fn(),
+  listWorkspaces: vi.fn(),
   createNode: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
   listNodes: mocks.listNodes,
+  listWorkspaces: mocks.listWorkspaces,
   createNode: mocks.createNode,
 }));
 
@@ -37,6 +39,7 @@ describe('Nodes page', () => {
         updatedAt: '2026-01-01T00:00:00.000Z',
       },
     ]);
+    mocks.listWorkspaces.mockResolvedValue([]);
     mocks.createNode.mockResolvedValue({
       id: 'node-2',
       name: 'Node 2',
