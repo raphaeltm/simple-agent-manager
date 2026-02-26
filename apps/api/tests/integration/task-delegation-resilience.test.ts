@@ -182,12 +182,12 @@ describe('task delegation resilience integration', () => {
       expect(stuckTasksFile).toContain('DEFAULT_TASK_RUN_MAX_EXECUTION_MS');
     });
 
-    it('queued timeout set to 5 minutes (>= provisioning time)', () => {
-      expect(constantsFile).toContain('DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS = 5 * 60 * 1000');
+    it('queued timeout set to 10 minutes (>= provisioning time + agent bootstrap)', () => {
+      expect(constantsFile).toContain('DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS = 10 * 60 * 1000');
     });
 
-    it('delegated timeout tightened to 5 minutes', () => {
-      expect(constantsFile).toContain('DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS = 5 * 60 * 1000');
+    it('delegated timeout set to 16 minutes (> workspace ready timeout)', () => {
+      expect(constantsFile).toContain('DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS = 16 * 60 * 1000');
     });
   });
 

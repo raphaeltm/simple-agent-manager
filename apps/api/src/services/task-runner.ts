@@ -25,6 +25,7 @@ import type { TaskStatus, TaskExecutionStep, VMSize, VMLocation } from '@simple-
 import {
   DEFAULT_TASK_RUN_CLEANUP_DELAY_MS,
   DEFAULT_VM_SIZE,
+  DEFAULT_WORKSPACE_READY_TIMEOUT_MS,
   DEFAULT_WORKSPACE_READY_POLL_INTERVAL_MS,
   DEFAULT_WORKSPACE_READY_MAX_POLL_INTERVAL_MS,
 } from '@simple-agent-manager/shared';
@@ -548,7 +549,7 @@ async function waitForWorkspaceReady(
   env: Env
 ): Promise<void> {
   const parsedTimeout = env.WORKSPACE_READY_TIMEOUT_MS ? Number.parseInt(env.WORKSPACE_READY_TIMEOUT_MS, 10) : NaN;
-  const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 300_000;
+  const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : DEFAULT_WORKSPACE_READY_TIMEOUT_MS;
   const deadline = Date.now() + timeoutMs;
   const parsedPoll = env.WORKSPACE_READY_POLL_INTERVAL_MS ? Number.parseInt(env.WORKSPACE_READY_POLL_INTERVAL_MS, 10) : NaN;
   const basePollInterval = Number.isFinite(parsedPoll) && parsedPoll > 0 ? parsedPoll : DEFAULT_WORKSPACE_READY_POLL_INTERVAL_MS;
