@@ -113,6 +113,7 @@ Full env var reference: use the `env-reference` skill or see `apps/api/.env.exam
 
 - **Fix all build/lint errors** before pushing — even pre-existing ones
 - **No dead code** — if code is no longer referenced, remove it in the same change
+- **Diagrams in markdown** — use Mermaid (`\`\`\`mermaid`) for all diagrams in `.md` files. The markdown renderer supports Mermaid natively.
 - **Subagents** live in `.claude/agents/`; Codex skills in `.agents/skills/`
 - **Playwright screenshots** go in `.codex/tmp/playwright-screenshots/` (gitignored)
 
