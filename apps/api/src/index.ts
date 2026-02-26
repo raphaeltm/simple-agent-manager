@@ -1,6 +1,7 @@
 // Re-export Durable Object classes for Cloudflare Workers runtime
 export { ProjectData } from './durable-objects/project-data';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
+export { AdminLogs } from './durable-objects/admin-logs';
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -33,6 +34,7 @@ import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
 import { recoverStuckTasks } from './scheduled/stuck-tasks';
+import { runObservabilityPurge } from './scheduled/observability-purge';
 import { getRuntimeLimits } from './services/limits';
 import { recordNodeRoutingMetric } from './services/telemetry';
 
@@ -46,9 +48,12 @@ export interface Env {
   R2: R2Bucket;
   // Workers AI for speech-to-text transcription
   AI: Ai;
+  // Observability D1 (error storage — spec 023)
+  OBSERVABILITY_DATABASE: D1Database;
   // Durable Objects
   PROJECT_DATA: DurableObjectNamespace;
   NODE_LIFECYCLE: DurableObjectNamespace;
+  ADMIN_LOGS: DurableObjectNamespace;
   // Environment variables
   BASE_DOMAIN: string;
   VERSION: string;
@@ -60,6 +65,7 @@ export interface Env {
   GITHUB_APP_SLUG?: string; // GitHub App slug for install URL
   CF_API_TOKEN: string;
   CF_ZONE_ID: string;
+  CF_ACCOUNT_ID: string;
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
   ENCRYPTION_KEY: string;
@@ -136,6 +142,16 @@ export interface Env {
   // VM agent error reporting
   MAX_VM_AGENT_ERROR_BODY_BYTES?: string;
   MAX_VM_AGENT_ERROR_BATCH_SIZE?: string;
+  // Observability configuration (spec 023)
+  OBSERVABILITY_ERROR_RETENTION_DAYS?: string;
+  OBSERVABILITY_ERROR_MAX_ROWS?: string;
+  OBSERVABILITY_ERROR_BATCH_SIZE?: string;
+  OBSERVABILITY_ERROR_BODY_BYTES?: string;
+  OBSERVABILITY_LOG_QUERY_RATE_LIMIT?: string;
+  OBSERVABILITY_STREAM_BUFFER_SIZE?: string;
+  OBSERVABILITY_STREAM_RECONNECT_DELAY_MS?: string;
+  OBSERVABILITY_STREAM_RECONNECT_MAX_DELAY_MS?: string;
+  OBSERVABILITY_TREND_DEFAULT_RANGE_HOURS?: string;
   // Node log configuration (cloud-init journal settings)
   LOG_JOURNAL_MAX_USE?: string;
   LOG_JOURNAL_KEEP_FREE?: string;
@@ -419,6 +435,9 @@ export default {
     // Recover stuck tasks (queued/delegated/in_progress past timeout)
     const stuckTasks = await recoverStuckTasks(env);
 
+    // Purge expired observability errors (retention + row count limits)
+    const observabilityPurge = await runObservabilityPurge(env);
+
     console.log(JSON.stringify({
       timestamp: new Date().toISOString(),
       level: 'info',
@@ -432,6 +451,8 @@ export default {
       stuckTasksFailedDelegated: stuckTasks.failedDelegated,
       stuckTasksFailedInProgress: stuckTasks.failedInProgress,
       stuckTaskErrors: stuckTasks.errors,
+      observabilityPurgedByAge: observabilityPurge.deletedByAge,
+      observabilityPurgedByCount: observabilityPurge.deletedByCount,
     }));
   },
 };

@@ -35,6 +35,9 @@ export default defineWorkersConfig({
               className: 'ProjectData',
               useSQLite: true,
             },
+            ADMIN_LOGS: {
+              className: 'AdminLogs',
+            },
           },
           bindings: {
             BASE_DOMAIN: 'test.example.com',

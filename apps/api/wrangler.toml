@@ -1,6 +1,6 @@
 name = "workspaces-api"
 main = "src/index.ts"
-compatibility_date = "2024-01-01"
+compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 port = 8787
 
@@ -27,6 +27,13 @@ database_name = "workspaces-dev"
 database_id = "your-d1-database-id"
 migrations_dir = "src/db/migrations"
 
+# D1 Observability Database (error storage, isolated from main DB — spec 023)
+[[d1_databases]]
+binding = "OBSERVABILITY_DATABASE"
+database_name = "observability-dev"
+database_id = "your-observability-d1-id"
+migrations_dir = "src/db/migrations/observability"
+
 # KV for sessions
 [[kv_namespaces]]
 binding = "KV"
@@ -48,6 +55,11 @@ class_name = "ProjectData"
 name = "NODE_LIFECYCLE"
 class_name = "NodeLifecycle"
 
+# Durable Object for admin real-time log streaming (singleton — spec 023)
+[[durable_objects.bindings]]
+name = "ADMIN_LOGS"
+class_name = "AdminLogs"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ProjectData"]
@@ -55,6 +67,10 @@ new_sqlite_classes = ["ProjectData"]
 [[migrations]]
 tag = "v2"
 new_classes = ["NodeLifecycle"]
+
+[[migrations]]
+tag = "v3"
+new_classes = ["AdminLogs"]
 
 # Workers AI for speech-to-text transcription
 [ai]
@@ -71,6 +87,12 @@ database_name = "workspaces-staging"
 database_id = "your-staging-d1-id"
 migrations_dir = "src/db/migrations"
 
+[[env.staging.d1_databases]]
+binding = "OBSERVABILITY_DATABASE"
+database_name = "observability-staging"
+database_id = "your-staging-observability-d1-id"
+migrations_dir = "src/db/migrations/observability"
+
 [[env.staging.kv_namespaces]]
 binding = "KV"
 id = "your-staging-kv-id"
@@ -81,6 +103,11 @@ bucket_name = "workspaces-staging-assets"
 
 [env.staging.ai]
 binding = "AI"
+
+# Tail Worker for real-time log streaming (spec 023 — US4)
+# NOTE: tail_consumers MUST NOT be in default config — it breaks Vitest (Cloudflare issue #9343)
+[[env.staging.tail_consumers]]
+service = "sam-tail-worker-staging"
 
 [env.production]
 name = "sam-api-prod"
@@ -99,6 +126,12 @@ database_name = "workspaces"
 database_id = "your-production-d1-id"
 migrations_dir = "src/db/migrations"
 
+[[env.production.d1_databases]]
+binding = "OBSERVABILITY_DATABASE"
+database_name = "observability"
+database_id = "your-production-observability-d1-id"
+migrations_dir = "src/db/migrations/observability"
+
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "your-production-kv-id"
@@ -109,6 +142,10 @@ bucket_name = "workspaces-assets"
 
 [env.production.ai]
 binding = "AI"
+
+# Tail Worker for real-time log streaming (spec 023 — US4)
+[[env.production.tail_consumers]]
+service = "sam-tail-worker-prod"
 
 # Cron trigger for provisioning timeout checks + warm node cleanup (every 5 minutes)
 [triggers]
@@ -121,6 +158,7 @@ crons = ["*/5 * * * *"]
 # - GITHUB_APP_PRIVATE_KEY
 # - CF_API_TOKEN
 # - CF_ZONE_ID
+# - CF_ACCOUNT_ID (required for admin observability log viewer)
 # - JWT_PRIVATE_KEY
 # - JWT_PUBLIC_KEY
 # - ENCRYPTION_KEY

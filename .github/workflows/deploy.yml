@@ -309,6 +309,13 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
+      - name: Deploy Tail Worker
+        if: ${{ inputs.dry_run != true }}
+        run: pnpm --filter @simple-agent-manager/tail-worker exec wrangler deploy --env production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
       - name: Deploy Web UI
         if: ${{ inputs.dry_run != true }}
         run: |
@@ -323,8 +330,10 @@ jobs:
         working-directory: infra
         run: |
           DB_NAME=$(pulumi stack output d1DatabaseName)
+          OBS_DB_NAME=$(pulumi stack output observabilityD1DatabaseName)
           cd ../apps/api
           pnpm exec wrangler d1 migrations apply $DB_NAME --remote --env production
+          pnpm exec wrangler d1 migrations apply $OBS_DB_NAME --remote --env production
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -338,6 +347,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
           GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
           GH_APP_ID: ${{ secrets.GH_APP_ID }}
@@ -430,6 +440,7 @@ jobs:
             echo "### What Was Deployed" >> $GITHUB_STEP_SUMMARY
             echo "- ✅ Infrastructure (Pulumi): D1, KV, R2, DNS" >> $GITHUB_STEP_SUMMARY
             echo "- ✅ API Worker" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Tail Worker (log streaming)" >> $GITHUB_STEP_SUMMARY
             echo "- ✅ Web UI (Pages)" >> $GITHUB_STEP_SUMMARY
             echo "- ✅ Database migrations" >> $GITHUB_STEP_SUMMARY
             if [ "${{ inputs.skip_agent }}" != "true" ]; then

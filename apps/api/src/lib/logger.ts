@@ -11,7 +11,14 @@
  *   import { log } from '../lib/logger';
  *   log.info('task_run.state_change', { taskId, fromStatus, toStatus });
  *   log.error('node_provisioning_failed', { nodeId, error: err.message });
+ *
+ * Instrumented logger (persists error-level entries to observability D1):
+ *   import { createInstrumentedLogger } from '../lib/logger';
+ *   const ilog = createInstrumentedLogger(env.OBSERVABILITY_DATABASE, ctx.waitUntil.bind(ctx));
+ *   ilog.error('api_failure', { path: '/api/test' }); // also writes to D1
  */
+
+import { persistError } from '../services/observability';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -51,3 +58,34 @@ export const log = {
   warn: (event: string, details?: Record<string, unknown>) => emit('warn', event, details),
   error: (event: string, details?: Record<string, unknown>) => emit('error', event, details),
 };
+
+/**
+ * Create a logger that also persists error-level entries to the observability D1 database.
+ * Non-error entries are logged to console only. D1 writes are fire-and-forget via waitUntil.
+ * If db or waitUntil is null, behaves identically to the standard `log` object.
+ */
+export function createInstrumentedLogger(
+  db: D1Database | null,
+  waitUntil: ((promise: Promise<unknown>) => void) | null
+) {
+  return {
+    debug: (event: string, details?: Record<string, unknown>) => emit('debug', event, details),
+    info: (event: string, details?: Record<string, unknown>) => emit('info', event, details),
+    warn: (event: string, details?: Record<string, unknown>) => emit('warn', event, details),
+    error: (event: string, details?: Record<string, unknown>) => {
+      emit('error', event, details);
+
+      // Persist error-level entries to observability D1 (fire-and-forget)
+      if (db && waitUntil) {
+        waitUntil(
+          persistError(db, {
+            source: 'api',
+            level: 'error',
+            message: event,
+            context: details ?? null,
+          })
+        );
+      }
+    },
+  };
+}

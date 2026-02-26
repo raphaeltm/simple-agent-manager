@@ -29,6 +29,11 @@ import { ProjectChat } from './pages/ProjectChat';
 import { ProjectKanban } from './pages/ProjectKanban';
 import { ProjectCreate } from './pages/ProjectCreate';
 import { Admin } from './pages/Admin';
+import { AdminUsers } from './pages/AdminUsers';
+import { AdminErrors } from './pages/AdminErrors';
+import { AdminOverview } from './pages/AdminOverview';
+import { AdminLogs } from './pages/AdminLogs';
+import { AdminStream } from './pages/AdminStream';
 
 function ProtectedLayout() {
   return (
@@ -82,7 +87,14 @@ export default function App() {
               <Route path="agent-config" element={<SettingsAgentConfig />} />
             </Route>
             <Route path="/ui-standards" element={<UiStandards />} />
-            <Route path="/admin" element={<Admin />} />
+            <Route path="/admin" element={<Admin />}>
+              <Route index element={<Navigate to="users" replace />} />
+              <Route path="users" element={<AdminUsers />} />
+              <Route path="errors" element={<AdminErrors />} />
+              <Route path="overview" element={<AdminOverview />} />
+              <Route path="logs" element={<AdminLogs />} />
+              <Route path="stream" element={<AdminStream />} />
+            </Route>
           </Route>
 
           {/* Workspace — NO AppShell (full-width terminal) */}

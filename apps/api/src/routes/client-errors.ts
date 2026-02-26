@@ -3,6 +3,7 @@ import type { Env } from '../index';
 import { optionalAuth } from '../middleware/auth';
 import { rateLimit, getRateLimit } from '../middleware/rate-limit';
 import { errors } from '../middleware/error';
+import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
 
 /** Default max body size: 64 KB (configurable via MAX_CLIENT_ERROR_BODY_BYTES) */
 const DEFAULT_MAX_BODY_BYTES = 65_536;
@@ -96,6 +97,9 @@ clientErrorsRoutes.post('/', async (c) => {
   const userId = auth?.user?.id ?? null;
   const ip = getClientIp(c);
 
+  // Collect validated entries for D1 persistence
+  const persistInputs: PersistErrorInput[] = [];
+
   // Log each entry individually for CF observability searchability
   for (const entry of entries) {
     if (!entry || typeof entry !== 'object') continue;
@@ -124,6 +128,26 @@ clientErrorsRoutes.post('/', async (c) => {
       userId,
       ip,
     });
+
+    // Collect for D1 persistence
+    persistInputs.push({
+      source: 'client',
+      level: level as PersistErrorInput['level'],
+      message,
+      stack: typeof e.stack === 'string' ? e.stack : null,
+      context: e.context && typeof e.context === 'object' ? e.context as Record<string, unknown> : null,
+      userId,
+      ipAddress: ip,
+      userAgent: typeof e.userAgent === 'string' ? e.userAgent : null,
+      timestamp: typeof e.timestamp === 'string' ? new Date(e.timestamp).getTime() || Date.now() : Date.now(),
+    });
+  }
+
+  // Persist to observability D1 (fire-and-forget, fail-silent)
+  if (persistInputs.length > 0 && c.env.OBSERVABILITY_DATABASE) {
+    const promise = persistErrorBatch(c.env.OBSERVABILITY_DATABASE, persistInputs, c.env)
+      .catch(() => {}); // Never let D1 writes impact the response
+    try { c.executionCtx.waitUntil(promise); } catch { /* no exec ctx (e.g. tests) */ }
   }
 
   return c.body(null, 204);

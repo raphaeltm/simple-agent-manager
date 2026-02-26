@@ -5,7 +5,9 @@ import * as schema from '../db/schema';
 import type { Env } from '../index';
 import { requireAuth, requireApproved, requireSuperadmin, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
+import { queryErrors, getHealthSummary, getErrorTrends, queryCloudflareLogs, getLogQueryRateLimit, CfApiError } from '../services/observability';
+import { rateLimit } from '../middleware/rate-limit';
+import type { UserRole, UserStatus, PlatformErrorSource, PlatformErrorLevel } from '@simple-agent-manager/shared';
 
 const adminRoutes = new Hono<{ Bindings: Env }>();
 
@@ -202,6 +204,225 @@ adminRoutes.get('/tasks/recent-failures', async (c) => {
     .limit(limit);
 
   return c.json({ tasks: failures });
+});
+
+// =============================================================================
+// Admin Observability Routes (spec 023)
+// =============================================================================
+
+const VALID_ERROR_SOURCES = new Set<string>(['client', 'vm-agent', 'api']);
+const VALID_ERROR_LEVELS = new Set<string>(['error', 'warn', 'info']);
+
+/**
+ * GET /api/admin/observability/errors - Query platform errors
+ *
+ * Query params: source, level, search, startTime, endTime, limit, cursor
+ */
+adminRoutes.get('/observability/errors', async (c) => {
+  if (!c.env.OBSERVABILITY_DATABASE) {
+    return c.json({ errors: [], cursor: null, hasMore: false, total: 0 });
+  }
+
+  const source = c.req.query('source');
+  const level = c.req.query('level');
+  const search = c.req.query('search');
+  const startTime = c.req.query('startTime');
+  const endTime = c.req.query('endTime');
+  const limitParam = c.req.query('limit');
+  const cursor = c.req.query('cursor');
+
+  // Validate source
+  if (source && source !== 'all' && !VALID_ERROR_SOURCES.has(source)) {
+    throw errors.badRequest(`Invalid source: ${source}. Must be one of: client, vm-agent, api`);
+  }
+
+  // Validate level
+  if (level && level !== 'all' && !VALID_ERROR_LEVELS.has(level)) {
+    throw errors.badRequest(`Invalid level: ${level}. Must be one of: error, warn, info`);
+  }
+
+  // Validate limit
+  const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+  if (limit !== undefined && (isNaN(limit) || limit < 1 || limit > 200)) {
+    throw errors.badRequest('limit must be between 1 and 200');
+  }
+
+  const result = await queryErrors(c.env.OBSERVABILITY_DATABASE, {
+    source: source && source !== 'all' ? source as PlatformErrorSource : undefined,
+    level: level && level !== 'all' ? level as PlatformErrorLevel : undefined,
+    search: search || undefined,
+    startTime: startTime ? new Date(startTime).getTime() : undefined,
+    endTime: endTime ? new Date(endTime).getTime() : undefined,
+    limit,
+    cursor: cursor || undefined,
+  });
+
+  return c.json(result);
+});
+
+/**
+ * GET /api/admin/observability/health - Platform health summary
+ */
+adminRoutes.get('/observability/health', async (c) => {
+  if (!c.env.OBSERVABILITY_DATABASE) {
+    return c.json({
+      activeNodes: 0,
+      activeWorkspaces: 0,
+      inProgressTasks: 0,
+      errorCount24h: 0,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  const result = await getHealthSummary(c.env.DATABASE, c.env.OBSERVABILITY_DATABASE);
+  return c.json(result);
+});
+
+/**
+ * GET /api/admin/observability/trends - Error trends over time
+ *
+ * Query params: range (1h|24h|7d|30d)
+ */
+adminRoutes.get('/observability/trends', async (c) => {
+  if (!c.env.OBSERVABILITY_DATABASE) {
+    return c.json({ range: '24h', interval: '1h', buckets: [] });
+  }
+
+  const range = c.req.query('range') || '24h';
+  const validRanges = new Set(['1h', '24h', '7d', '30d']);
+  if (!validRanges.has(range)) {
+    throw errors.badRequest(`Invalid range: ${range}. Must be one of: 1h, 24h, 7d, 30d`);
+  }
+
+  const result = await getErrorTrends(c.env.OBSERVABILITY_DATABASE, range);
+  return c.json(result);
+});
+
+/**
+ * POST /api/admin/observability/logs/query - Query Cloudflare Workers Observability API
+ *
+ * Body: { timeRange: { start, end }, levels?, search?, limit?, cursor? }
+ */
+adminRoutes.post('/observability/logs/query',
+  // Per-admin KV-based rate limiting (1-minute window)
+  async (c, next) => {
+    const limiter = rateLimit({
+      limit: getLogQueryRateLimit(c.env),
+      keyPrefix: 'cf-log-query',
+      windowSeconds: 60,
+    });
+    return limiter(c, next);
+  },
+  async (c) => {
+  if (!c.env.CF_API_TOKEN || !c.env.CF_ACCOUNT_ID) {
+    throw errors.badRequest('Cloudflare API credentials not configured. Set CF_API_TOKEN and CF_ACCOUNT_ID.');
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.json();
+  } catch {
+    throw errors.badRequest('Invalid JSON body');
+  }
+
+  // Validate timeRange
+  const timeRange = body.timeRange as { start?: string; end?: string } | undefined;
+  if (!timeRange || !timeRange.start || !timeRange.end) {
+    throw errors.badRequest('timeRange with start and end is required');
+  }
+
+  const startDate = new Date(timeRange.start);
+  const endDate = new Date(timeRange.end);
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+    throw errors.badRequest('timeRange start and end must be valid ISO 8601 dates');
+  }
+
+  // Validate levels
+  const levels = body.levels as string[] | undefined;
+  if (levels !== undefined) {
+    if (!Array.isArray(levels)) {
+      throw errors.badRequest('levels must be an array');
+    }
+    const validLogLevels = new Set(['error', 'warn', 'info', 'debug', 'log']);
+    for (const level of levels) {
+      if (!validLogLevels.has(level)) {
+        throw errors.badRequest(`Invalid level: ${level}. Must be one of: error, warn, info, debug, log`);
+      }
+    }
+  }
+
+  // Validate limit
+  const limit = body.limit as number | undefined;
+  if (limit !== undefined && (typeof limit !== 'number' || limit < 1 || limit > 500)) {
+    throw errors.badRequest('limit must be between 1 and 500');
+  }
+
+  try {
+    const result = await queryCloudflareLogs({
+      cfApiToken: c.env.CF_API_TOKEN,
+      cfAccountId: c.env.CF_ACCOUNT_ID,
+      timeRange: { start: timeRange.start, end: timeRange.end },
+      levels: levels ?? undefined,
+      search: (body.search as string) || undefined,
+      limit,
+      cursor: (body.cursor as string) || undefined,
+    });
+
+    return c.json(result);
+  } catch (err) {
+    if (err instanceof CfApiError) {
+      return c.json({ error: 'CF_API_ERROR', message: err.message }, 502);
+    }
+    throw err;
+  }
+});
+
+/**
+ * GET /api/admin/observability/logs/stream - WebSocket upgrade for real-time log stream
+ *
+ * Auth is validated on the HTTP upgrade request. The WebSocket connection is
+ * forwarded to the AdminLogs DO singleton for hibernatable handling.
+ */
+adminRoutes.get('/observability/logs/stream', async (c) => {
+  const upgradeHeader = c.req.header('Upgrade');
+  if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
+    throw errors.badRequest('WebSocket upgrade required');
+  }
+
+  // Forward the upgrade request to the AdminLogs DO singleton
+  const doId = c.env.ADMIN_LOGS.idFromName('admin-logs');
+  const doStub = c.env.ADMIN_LOGS.get(doId);
+
+  // Rewrite the URL path to /ws for the DO handler
+  const doUrl = new URL(c.req.url);
+  doUrl.pathname = '/ws';
+
+  return doStub.fetch(new Request(doUrl.toString(), c.req.raw));
+});
+
+/**
+ * POST /api/admin/observability/logs/ingest - Internal endpoint for Tail Worker
+ *
+ * Receives batched log entries from the Tail Worker and forwards them
+ * to the AdminLogs DO for broadcasting to connected WebSocket clients.
+ * This endpoint is called via service binding, not external HTTP.
+ */
+adminRoutes.post('/observability/logs/ingest', async (c) => {
+  const doId = c.env.ADMIN_LOGS.idFromName('admin-logs');
+  const doStub = c.env.ADMIN_LOGS.get(doId);
+
+  // Read and forward the request body to the DO's /ingest endpoint
+  const doUrl = new URL(c.req.url);
+  doUrl.pathname = '/ingest';
+  const body = await c.req.text();
+
+  const response = await doStub.fetch(new Request(doUrl.toString(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  }));
+
+  return new Response(response.body, { status: response.status });
 });
 
 export { adminRoutes };

@@ -1,7 +1,24 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { AppShell } from '../../src/components/AppShell';
+
+// jsdom does not implement window.matchMedia — stub it for useIsMobile hook
+beforeAll(() => {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+});
 
 // Mock AuthProvider
 vi.mock('../../src/components/AuthProvider', () => ({

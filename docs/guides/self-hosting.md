@@ -66,7 +66,7 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | Secret | Description |
 |--------|-------------|
 | `CF_API_TOKEN` | Cloudflare API token with D1, KV, R2, DNS, Workers permissions |
-| `CF_ACCOUNT_ID` | Your Cloudflare account ID (32-char hex) |
+| `CF_ACCOUNT_ID` | Your Cloudflare account ID (32-char hex). Also used as a Worker secret for the admin observability log viewer. |
 | `CF_ZONE_ID` | Your domain's zone ID (32-char hex) |
 | `R2_ACCESS_KEY_ID` | R2 API token access key |
 | `R2_SECRET_ACCESS_KEY` | R2 API token secret key |
@@ -711,14 +711,25 @@ wrangler r2 object put workspaces-assets/agents/version.json --file bin/version.
 
 ### Database Migrations
 
+SAM uses two D1 databases:
+- **DATABASE** (`workspaces`): Core platform data (users, nodes, workspaces, projects, tasks)
+- **OBSERVABILITY_DATABASE** (`observability`): Error storage for the admin observability dashboard (spec 023). Isolated from the main database to prevent error volume from affecting core queries.
+
 When schema changes are needed:
 
 ```bash
-# Create a new migration
+# Create a new migration for the main database
 wrangler d1 migrations create workspaces your-migration-name
 
-# Apply to production
+# Create a new migration for the observability database
+wrangler d1 migrations create observability your-migration-name
+
+# Apply all migrations to production (run-migrations.ts handles both databases)
+pnpm tsx scripts/deploy/run-migrations.ts --env production
+
+# Or apply individually
 wrangler d1 migrations apply workspaces --remote
+wrangler d1 migrations apply observability --remote
 ```
 
 **Note**: Durable Object (DO) SQLite migrations are managed automatically. Each project's DO runs pending migrations in its constructor via `blockConcurrencyWhile()`. No manual migration step is needed for DO schemas.

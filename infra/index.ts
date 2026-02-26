@@ -1,7 +1,14 @@
 import * as pulumi from "@pulumi/pulumi";
 
 // Import all resource modules
-import { database, databaseId, databaseName } from "./resources/database";
+import {
+  database,
+  databaseId,
+  databaseName,
+  observabilityDatabase,
+  observabilityDatabaseId,
+  observabilityDatabaseName,
+} from "./resources/database";
 import { kvNamespace, kvNamespaceId, kvNamespaceName } from "./resources/kv";
 import { r2Bucket, r2BucketName } from "./resources/storage";
 import {
@@ -21,6 +28,7 @@ import { pagesProject, pagesProjectName, pagesCustomDomain } from "./resources/p
 // Export resource references for internal use
 export {
   database,
+  observabilityDatabase,
   kvNamespace,
   r2Bucket,
   pagesProject,
@@ -33,6 +41,8 @@ export {
 // Export outputs for use by deployment scripts (sync-wrangler-config.ts)
 export const d1DatabaseId = databaseId;
 export const d1DatabaseName = databaseName;
+export const observabilityD1DatabaseId = observabilityDatabaseId;
+export const observabilityD1DatabaseName = observabilityDatabaseName;
 export const kvId = kvNamespaceId;
 export const kvName = kvNamespaceName;
 export const r2Name = r2BucketName;

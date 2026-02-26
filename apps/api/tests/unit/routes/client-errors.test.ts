@@ -14,6 +14,13 @@ vi.mock('../../../src/middleware/rate-limit', () => ({
   getRateLimit: () => 30,
 }));
 
+// Mock observability service
+const mockPersistErrorBatch = vi.fn().mockResolvedValue(undefined);
+vi.mock('../../../src/services/observability', () => ({
+  persistErrorBatch: (...args: unknown[]) => mockPersistErrorBatch(...args),
+  persistError: vi.fn().mockResolvedValue(undefined),
+}));
+
 describe('Client Errors Routes', () => {
   let app: Hono<{ Bindings: Env }>;
 
@@ -328,6 +335,130 @@ describe('Client Errors Routes', () => {
 
       // Only the valid entry should be logged
       expect(spy).toHaveBeenCalledTimes(1);
+
+      spy.mockRestore();
+    });
+
+    // ==========================================
+    // D1 Observability Persistence Tests (T014)
+    // ==========================================
+
+    it('should call persistErrorBatch with client source when OBSERVABILITY_DATABASE is set', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const entries = [validEntry({ message: 'D1 test error' })];
+      const mockObsDb = {} as D1Database;
+
+      await app.request('/api/client-errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: makeBody(entries),
+      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+
+      // persistErrorBatch should have been called
+      expect(mockPersistErrorBatch).toHaveBeenCalledTimes(1);
+      expect(mockPersistErrorBatch).toHaveBeenCalledWith(
+        mockObsDb,
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: 'client',
+            message: 'D1 test error',
+          }),
+        ]),
+        expect.anything() // env
+      );
+
+      spy.mockRestore();
+    });
+
+    it('should NOT call persistErrorBatch when OBSERVABILITY_DATABASE is not set', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const entries = [validEntry()];
+
+      await app.request('/api/client-errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: makeBody(entries),
+      }, createEnv()); // No OBSERVABILITY_DATABASE
+
+      // persistErrorBatch should NOT be called
+      expect(mockPersistErrorBatch).not.toHaveBeenCalled();
+
+      spy.mockRestore();
+    });
+
+    it('should persist multiple valid entries and skip malformed ones', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const mockObsDb = {} as D1Database;
+
+      const entries = [
+        validEntry({ message: 'Error 1' }),
+        { source: 'NoMessage' }, // malformed — no message
+        validEntry({ message: 'Error 2' }),
+      ];
+
+      await app.request('/api/client-errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: makeBody(entries),
+      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+
+      // Only 2 valid entries should be persisted
+      expect(mockPersistErrorBatch).toHaveBeenCalledTimes(1);
+      const persistedInputs = mockPersistErrorBatch.mock.calls[0][1];
+      expect(persistedInputs).toHaveLength(2);
+      expect(persistedInputs[0].message).toBe('Error 1');
+      expect(persistedInputs[1].message).toBe('Error 2');
+
+      spy.mockRestore();
+    });
+
+    it('should still return 204 even if persistErrorBatch rejects', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      // Make persistErrorBatch reject — but the .catch() in the route should handle it
+      mockPersistErrorBatch.mockImplementationOnce(() => Promise.reject(new Error('D1 down')));
+      const mockObsDb = {} as D1Database;
+
+      const res = await app.request('/api/client-errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: makeBody([validEntry()]),
+      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+
+      // Response should still be 204 (fire-and-forget)
+      expect(res.status).toBe(204);
+
+      spy.mockRestore();
+    });
+
+    it('should map client error fields to PersistErrorInput shape', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const mockObsDb = {} as D1Database;
+
+      const entries = [validEntry({
+        level: 'warn',
+        message: 'A warning',
+        stack: 'Stack trace here',
+        context: { phase: 'upload' },
+        userAgent: 'TestBrowser/1.0',
+        timestamp: '2026-02-14T12:00:00Z',
+      })];
+
+      await app.request('/api/client-errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: makeBody(entries),
+      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+
+      const persistedInput = mockPersistErrorBatch.mock.calls[0][1][0];
+      expect(persistedInput.source).toBe('client');
+      expect(persistedInput.level).toBe('warn');
+      expect(persistedInput.message).toBe('A warning');
+      expect(persistedInput.stack).toBe('Stack trace here');
+      expect(persistedInput.context).toEqual({ phase: 'upload' });
+      expect(persistedInput.userAgent).toBe('TestBrowser/1.0');
+      expect(persistedInput.timestamp).toBeTypeOf('number');
 
       spy.mockRestore();
     });

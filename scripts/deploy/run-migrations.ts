@@ -22,14 +22,19 @@ function loadWranglerToml(): WranglerToml {
   return TOML.parse(content) as WranglerToml;
 }
 
-function getDatabaseName(config: WranglerToml, environment?: string): string {
-  if (environment && config.env?.[environment]?.d1_databases?.[0]) {
-    return config.env[environment].d1_databases[0].database_name;
+function getDatabaseNames(config: WranglerToml, environment?: string): Array<{ binding: string; name: string }> {
+  const databases = environment && config.env?.[environment]?.d1_databases
+    ? config.env[environment].d1_databases
+    : config.d1_databases;
+
+  if (!databases || databases.length === 0) {
+    throw new Error("No D1 database configuration found");
   }
-  if (config.d1_databases?.[0]) {
-    return config.d1_databases[0].database_name;
-  }
-  throw new Error("No D1 database configuration found");
+
+  return databases.map((db) => ({
+    binding: db.binding,
+    name: db.database_name,
+  }));
 }
 
 async function main(): Promise<void> {
@@ -39,26 +44,33 @@ async function main(): Promise<void> {
   const isLocal = args.includes("--local");
 
   const config = loadWranglerToml();
-  const dbName = getDatabaseName(config, environment);
+  const databases = getDatabaseNames(config, environment);
 
-  console.log(`🚀 Running migrations for database: ${dbName}`);
+  console.log(`🚀 Running migrations for ${databases.length} database(s)`);
   console.log(`   Environment: ${environment || "development"}`);
-  console.log(`   Mode: ${isLocal ? "local" : "remote"}\n`);
+  console.log(`   Mode: ${isLocal ? "local" : "remote"}`);
+  console.log(`   Databases: ${databases.map((db) => `${db.binding} (${db.name})`).join(", ")}\n`);
 
-  const command = `npx wrangler d1 migrations apply ${dbName} ${isLocal ? "--local" : "--remote"}${environment ? ` --env ${environment}` : ""}`;
+  for (const db of databases) {
+    console.log(`\n📦 Migrating ${db.binding} (${db.name})...\n`);
 
-  console.log(`Executing: ${command}\n`);
+    const command = `npx wrangler d1 migrations apply ${db.name} ${isLocal ? "--local" : "--remote"}${environment ? ` --env ${environment}` : ""}`;
 
-  try {
-    execSync(command, {
-      stdio: "inherit",
-      cwd: resolve(import.meta.dirname, "../../apps/api"),
-    });
-    console.log("\n✅ Migrations applied successfully!");
-  } catch (error) {
-    console.error("\n❌ Failed to apply migrations");
-    process.exit(1);
+    console.log(`Executing: ${command}\n`);
+
+    try {
+      execSync(command, {
+        stdio: "inherit",
+        cwd: resolve(import.meta.dirname, "../../apps/api"),
+      });
+      console.log(`\n✅ ${db.binding} migrations applied successfully!`);
+    } catch (error) {
+      console.error(`\n❌ Failed to apply migrations for ${db.binding} (${db.name})`);
+      process.exit(1);
+    }
   }
+
+  console.log(`\n✅ All migrations applied successfully!`);
 }
 
 main().catch((error) => {

@@ -327,6 +327,7 @@ export const REQUIRED_SECRETS = [
   'GITHUB_APP_SLUG',
   'CF_API_TOKEN',
   'CF_ZONE_ID',
+  'CF_ACCOUNT_ID',
   'ENCRYPTION_KEY',
   'JWT_PRIVATE_KEY',
   'JWT_PUBLIC_KEY',
@@ -349,6 +350,8 @@ export const DNS_RECORDS = ['api', 'app', '*'] as const;
 export interface PulumiOutputs {
   d1DatabaseId: string;
   d1DatabaseName: string;
+  observabilityD1DatabaseId: string;
+  observabilityD1DatabaseName: string;
   kvId: string;
   kvName: string;
   r2Name: string;

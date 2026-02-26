@@ -1,4 +1,21 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// jsdom does not implement window.matchMedia — stub it for hooks that check media queries
+beforeAll(() => {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+});
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 

@@ -13,6 +13,7 @@ import { getRuntimeLimits } from '../services/limits';
 import { createNodeRecord, deleteNodeResources, provisionNode, stopNodeResources } from '../services/nodes';
 import { signCallbackToken, signNodeManagementToken, verifyCallbackToken } from '../services/jwt';
 import { recordNodeRoutingMetric } from '../services/telemetry';
+import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
 import {
   createWorkspaceOnNode,
   getNodeLogsFromNode,
@@ -624,6 +625,9 @@ nodesRoutes.post('/:id/errors', async (c) => {
     throw errors.badRequest(`Batch too large (max ${maxBatchSize} entries)`);
   }
 
+  // Collect validated entries for D1 persistence
+  const persistInputs: PersistErrorInput[] = [];
+
   // Log each entry individually for CF observability searchability
   for (const entry of entries) {
     if (!entry || typeof entry !== 'object') continue;
@@ -650,6 +654,25 @@ nodesRoutes.post('/:id/errors', async (c) => {
       context: e.context && typeof e.context === 'object' ? e.context : null,
       nodeId,
     });
+
+    // Collect for D1 persistence
+    persistInputs.push({
+      source: 'vm-agent',
+      level: level as PersistErrorInput['level'],
+      message,
+      stack: typeof e.stack === 'string' ? e.stack : null,
+      context: e.context && typeof e.context === 'object' ? e.context as Record<string, unknown> : null,
+      nodeId,
+      workspaceId: typeof e.workspaceId === 'string' ? e.workspaceId : null,
+      timestamp: typeof e.timestamp === 'string' ? new Date(e.timestamp).getTime() || Date.now() : Date.now(),
+    });
+  }
+
+  // Persist to observability D1 (fire-and-forget, fail-silent)
+  if (persistInputs.length > 0 && c.env.OBSERVABILITY_DATABASE) {
+    const promise = persistErrorBatch(c.env.OBSERVABILITY_DATABASE, persistInputs, c.env)
+      .catch(() => {}); // Never let D1 writes impact the response
+    try { c.executionCtx.waitUntil(promise); } catch { /* no exec ctx (e.g. tests) */ }
   }
 
   return c.body(null, 204);

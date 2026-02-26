@@ -922,6 +922,106 @@ export interface ContainerInfo {
 }
 
 // =============================================================================
+// Admin Observability (spec 023)
+// =============================================================================
+
+export type PlatformErrorSource = 'client' | 'vm-agent' | 'api';
+export type PlatformErrorLevel = 'error' | 'warn' | 'info';
+
+export interface PlatformError {
+  id: string;
+  source: PlatformErrorSource;
+  level: PlatformErrorLevel;
+  message: string;
+  stack: string | null;
+  context: Record<string, unknown> | null;
+  userId: string | null;
+  nodeId: string | null;
+  workspaceId: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  timestamp: string; // ISO 8601
+}
+
+export interface ErrorListResponse {
+  errors: PlatformError[];
+  cursor: string | null;
+  hasMore: boolean;
+  total: number;
+}
+
+export interface HealthSummary {
+  activeNodes: number;
+  activeWorkspaces: number;
+  inProgressTasks: number;
+  errorCount24h: number;
+  timestamp: string; // ISO 8601
+}
+
+export interface ErrorTrendBucket {
+  timestamp: string; // ISO 8601
+  total: number;
+  bySource: Record<PlatformErrorSource, number>;
+}
+
+export interface ErrorTrendResponse {
+  range: string;
+  interval: string;
+  buckets: ErrorTrendBucket[];
+}
+
+export interface AdminLogEntry {
+  timestamp: string; // ISO 8601
+  level: string;
+  event: string;
+  message: string;
+  details: Record<string, unknown>;
+  invocationId?: string;
+}
+
+export interface LogQueryParams {
+  timeRange: {
+    start: string; // ISO 8601
+    end: string;   // ISO 8601
+  };
+  levels?: string[];
+  search?: string;
+  limit?: number;
+  cursor?: string | null;
+}
+
+export interface LogQueryResponse {
+  logs: AdminLogEntry[];
+  cursor: string | null;
+  hasMore: boolean;
+}
+
+export type LogStreamMessageType = 'log' | 'pong' | 'status' | 'error';
+
+export interface LogStreamMessage {
+  type: LogStreamMessageType;
+  entry?: {
+    timestamp: string;
+    level: string;
+    event: string;
+    message: string;
+    details: Record<string, unknown>;
+    scriptName: string;
+  };
+  connected?: boolean;
+  clientCount?: number;
+  message?: string;
+}
+
+export type LogStreamClientMessageType = 'ping' | 'filter' | 'pause' | 'resume';
+
+export interface LogStreamClientMessage {
+  type: LogStreamClientMessageType;
+  levels?: string[];
+  search?: string;
+}
+
+// =============================================================================
 // API Error
 // =============================================================================
 export interface ApiError {

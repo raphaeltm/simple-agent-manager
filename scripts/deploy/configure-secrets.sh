@@ -88,9 +88,10 @@ set_worker_secret "ENCRYPTION_KEY" "$ENCRYPTION_KEY" "$ENVIRONMENT" "true" || FA
 set_worker_secret "JWT_PRIVATE_KEY" "$JWT_PRIVATE_KEY" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "JWT_PUBLIC_KEY" "$JWT_PUBLIC_KEY" "$ENVIRONMENT" "true" || FAILED=true
 
-# Configure Cloudflare secrets (required for DNS operations)
+# Configure Cloudflare secrets (required for DNS and observability operations)
 set_worker_secret "CF_API_TOKEN" "${CF_API_TOKEN:-}" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "CF_ZONE_ID" "${CF_ZONE_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "CF_ACCOUNT_ID" "${CF_ACCOUNT_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
 
 # Configure GitHub secrets (required - platform is useless without authentication)
 set_worker_secret "GITHUB_CLIENT_ID" "${GH_CLIENT_ID:-}" "$ENVIRONMENT" "true" || FAILED=true

@@ -73,6 +73,13 @@ vi.mock('../../../src/services/telemetry', () => ({
   recordNodeRoutingMetric: vi.fn(),
 }));
 
+// Mock observability service
+const mockPersistErrorBatch = vi.fn().mockResolvedValue(undefined);
+vi.mock('../../../src/services/observability', () => ({
+  persistErrorBatch: (...args: unknown[]) => mockPersistErrorBatch(...args),
+  persistError: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Import after mocking
 import { nodesRoutes } from '../../../src/routes/nodes';
 
@@ -407,6 +414,100 @@ describe('VM Agent Errors Route', () => {
         (call) => call[0] === '[vm-agent-error]'
       );
       expect(vmAgentCalls.length).toBe(1);
+
+      spy.mockRestore();
+    });
+
+    // ==========================================
+    // D1 Observability Persistence Tests (T015)
+    // ==========================================
+
+    it('should call persistErrorBatch with vm-agent source when OBSERVABILITY_DATABASE is set', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const mockObsDb = {} as D1Database;
+
+      const entries = [validEntry({ message: 'D1 vm-agent test' })];
+
+      await app.request('/api/nodes/node-123/errors', {
+        method: 'POST',
+        headers: authHeaders,
+        body: makeBody(entries),
+      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+
+      expect(mockPersistErrorBatch).toHaveBeenCalledTimes(1);
+      expect(mockPersistErrorBatch).toHaveBeenCalledWith(
+        mockObsDb,
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: 'vm-agent',
+            message: 'D1 vm-agent test',
+            nodeId: 'node-123',
+          }),
+        ]),
+        expect.anything()
+      );
+
+      spy.mockRestore();
+    });
+
+    it('should NOT call persistErrorBatch when OBSERVABILITY_DATABASE is not set', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await app.request('/api/nodes/node-123/errors', {
+        method: 'POST',
+        headers: authHeaders,
+        body: makeBody([validEntry()]),
+      }, createEnv()); // No OBSERVABILITY_DATABASE
+
+      expect(mockPersistErrorBatch).not.toHaveBeenCalled();
+
+      spy.mockRestore();
+    });
+
+    it('should include nodeId from URL param in persisted entries', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const mockObsDb = {} as D1Database;
+
+      await app.request('/api/nodes/node-123/errors', {
+        method: 'POST',
+        headers: authHeaders,
+        body: makeBody([validEntry()]),
+      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+
+      const persistedInput = mockPersistErrorBatch.mock.calls[0][1][0];
+      expect(persistedInput.nodeId).toBe('node-123');
+
+      spy.mockRestore();
+    });
+
+    it('should include workspaceId in persisted entries when provided', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const mockObsDb = {} as D1Database;
+
+      await app.request('/api/nodes/node-123/errors', {
+        method: 'POST',
+        headers: authHeaders,
+        body: makeBody([validEntry({ workspaceId: 'ws-abc' })]),
+      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+
+      const persistedInput = mockPersistErrorBatch.mock.calls[0][1][0];
+      expect(persistedInput.workspaceId).toBe('ws-abc');
+
+      spy.mockRestore();
+    });
+
+    it('should still return 204 even if persistErrorBatch fails', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockPersistErrorBatch.mockRejectedValueOnce(new Error('D1 down'));
+      const mockObsDb = {} as D1Database;
+
+      const res = await app.request('/api/nodes/node-123/errors', {
+        method: 'POST',
+        headers: authHeaders,
+        body: makeBody([validEntry()]),
+      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+
+      expect(res.status).toBe(204);
 
       spy.mockRestore();
     });
