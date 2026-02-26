@@ -488,6 +488,8 @@ export interface QueryCloudflarLogsInput {
   limit?: number;
   cursor?: string | null;
   scriptName?: string;
+  /** Optional caller-supplied queryId for pagination consistency. Generated per-request if omitted. */
+  queryId?: string;
 }
 
 /**
@@ -496,8 +498,9 @@ export interface QueryCloudflarLogsInput {
  */
 export async function queryCloudflareLogs(
   input: QueryCloudflarLogsInput
-): Promise<{ logs: Array<{ timestamp: string; level: string; event: string; message: string; details: Record<string, unknown>; invocationId?: string }>; cursor: string | null; hasMore: boolean }> {
+): Promise<{ logs: Array<{ timestamp: string; level: string; event: string; message: string; details: Record<string, unknown>; invocationId?: string }>; cursor: string | null; hasMore: boolean; queryId: string }> {
   const limit = Math.min(input.limit ?? DEFAULT_LOG_QUERY_LIMIT, MAX_LOG_QUERY_LIMIT);
+  const queryId = input.queryId || crypto.randomUUID();
 
   // Build the CF Observability API query
   const filters: Array<{ key: string; operation: string; value: unknown }> = [];
@@ -527,6 +530,7 @@ export async function queryCloudflareLogs(
   }
 
   const body: Record<string, unknown> = {
+    queryId,
     timeframe: {
       from: new Date(input.timeRange.start).getTime(),
       to: new Date(input.timeRange.end).getTime(),
@@ -607,6 +611,7 @@ export async function queryCloudflareLogs(
     logs,
     cursor: nextCursor,
     hasMore: nextCursor !== null && logs.length >= limit,
+    queryId,
   };
 }
 

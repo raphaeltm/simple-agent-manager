@@ -1261,6 +1261,8 @@ export interface AdminLogQueryParams {
   search?: string;
   limit?: number;
   cursor?: string | null;
+  /** Caller-supplied queryId for pagination consistency across paginated requests. */
+  queryId?: string;
 }
 
 /**

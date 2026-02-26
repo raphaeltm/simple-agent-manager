@@ -43,6 +43,7 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
   });
 
   const cursorRef = useRef<string | null>(null);
+  const queryIdRef = useRef<string | undefined>(undefined);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -70,6 +71,7 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
         search: filter.search || undefined,
         limit: 100,
         cursor: append ? cursorRef.current : undefined,
+        queryId: append ? queryIdRef.current : undefined,
       });
 
       if (!mountedRef.current) return;
@@ -81,6 +83,7 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
       }
 
       cursorRef.current = result.cursor;
+      queryIdRef.current = result.queryId;
       setHasMore(result.hasMore);
     } catch (err) {
       if (mountedRef.current) {
@@ -96,6 +99,7 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
   // Don't auto-fetch on mount — user triggers query manually or we fetch once
   useEffect(() => {
     cursorRef.current = null;
+    queryIdRef.current = undefined;
     fetchLogs(false);
   }, [fetchLogs]);
 
@@ -119,6 +123,7 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
 
   const refresh = useCallback(() => {
     cursorRef.current = null;
+    queryIdRef.current = undefined;
     fetchLogs(false);
   }, [fetchLogs]);
 

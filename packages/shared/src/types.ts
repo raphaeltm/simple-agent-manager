@@ -988,12 +988,16 @@ export interface LogQueryParams {
   search?: string;
   limit?: number;
   cursor?: string | null;
+  /** Caller-supplied queryId for pagination consistency. Generated server-side if omitted. */
+  queryId?: string;
 }
 
 export interface LogQueryResponse {
   logs: AdminLogEntry[];
   cursor: string | null;
   hasMore: boolean;
+  /** The queryId used for this query, returned for pagination consistency. */
+  queryId?: string;
 }
 
 export type LogStreamMessageType = 'log' | 'pong' | 'status' | 'error';
