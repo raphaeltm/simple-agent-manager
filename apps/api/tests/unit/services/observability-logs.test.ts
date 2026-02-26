@@ -60,6 +60,23 @@ describe('queryCloudflareLogs()', () => {
     expect(options.headers['Content-Type']).toBe('application/json');
   });
 
+  it('should send timeframe with epoch milliseconds', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
+    });
+    globalThis.fetch = mockFetch;
+
+    await queryCloudflareLogs(baseInput);
+
+    const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(requestBody.timeframe).toEqual({
+      from: new Date('2026-02-14T00:00:00Z').getTime(),
+      to: new Date('2026-02-14T23:59:59Z').getTime(),
+    });
+    expect(requestBody).not.toHaveProperty('timeRange');
+  });
+
   it('should build filter for levels', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -224,14 +241,15 @@ describe('queryCloudflareLogs()', () => {
     await expect(queryCloudflareLogs(baseInput)).rejects.toThrow('invalid or expired');
   });
 
-  it('should throw generic CfApiError on other error status codes', async () => {
+  it('should throw generic CfApiError with response body on other error status codes', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 500,
+      text: () => Promise.resolve('internal server error'),
     });
 
     await expect(queryCloudflareLogs(baseInput)).rejects.toThrow(CfApiError);
-    await expect(queryCloudflareLogs(baseInput)).rejects.toThrow('500');
+    await expect(queryCloudflareLogs(baseInput)).rejects.toThrow('500: internal server error');
   });
 
   it('should throw CfApiError on invalid JSON response', async () => {
