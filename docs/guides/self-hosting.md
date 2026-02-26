@@ -15,7 +15,7 @@ For the fastest deployment experience, use the automated GitHub Actions workflow
 1. **Fork this repository**
 2. **Have a domain configured in Cloudflare** with nameservers pointing to Cloudflare
 3. **Create a Cloudflare API Token** with these permissions:
-   - Account: D1, Workers KV Storage, Workers R2 Storage, Workers Scripts, Cloudflare Pages (Edit)
+   - Account: D1, Workers KV Storage, Workers R2 Storage, Workers Scripts, Cloudflare Pages (Edit), Workers Logs (Read)
    - Zone: DNS (Edit), Workers Routes (Edit), Zone (Read)
 4. **Note your Account ID and Zone ID** from the Cloudflare dashboard (domain overview, right sidebar)
 5. **Create an R2 API Token** (separate from above - for Pulumi state storage):
@@ -65,7 +65,7 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 
 | Secret | Description |
 |--------|-------------|
-| `CF_API_TOKEN` | Cloudflare API token with D1, KV, R2, DNS, Workers permissions |
+| `CF_API_TOKEN` | Cloudflare API token with D1, KV, R2, DNS, Workers Scripts, Workers Logs permissions |
 | `CF_ACCOUNT_ID` | Your Cloudflare account ID (32-char hex). Also used as a Worker secret for the admin observability log viewer. |
 | `CF_ZONE_ID` | Your domain's zone ID (32-char hex) |
 | `R2_ACCESS_KEY_ID` | R2 API token access key |
@@ -241,6 +241,7 @@ SAM needs a Cloudflare API token with specific permissions:
 | **Account** | Workers KV Storage | Edit |
 | **Account** | Workers R2 Storage | Edit |
 | **Account** | Workers Scripts | Edit |
+| **Account** | Workers Logs | Read |
 | **Account** | Cloudflare Pages | Edit |
 | **Zone** | DNS | Edit |
 | **Zone** | Workers Routes | Edit |
@@ -866,6 +867,19 @@ wrangler secret put ENCRYPTION_KEY
 3. Check D1 migrations were applied
 
 ---
+
+### Admin Logs show "Cloudflare Observability API returned 403"
+
+**Cause**: The `CF_API_TOKEN` is missing the "Workers Logs (Read)" permission, which is required for the admin log viewer.
+
+**Fix**:
+1. Go to **Cloudflare Dashboard** → **My Profile** → **API Tokens**
+2. Edit the token used for SAM
+3. Add permission: **Account → Workers Logs → Read**
+4. Save the token
+5. If the token was regenerated, update the `CF_API_TOKEN` secret in your GitHub Environment and redeploy
+
+**Note**: This permission was added to the Cloudflare API in late 2025. Tokens created before this date will not have it and must be updated.
 
 ### "OAuth callback failed" or BetterAuth "unknown" error
 

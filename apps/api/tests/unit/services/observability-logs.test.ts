@@ -204,14 +204,34 @@ describe('queryCloudflareLogs()', () => {
     await expect(queryCloudflareLogs(baseInput)).rejects.toThrow('unreachable');
   });
 
-  it('should throw CfApiError on non-200 response', async () => {
+  it('should throw CfApiError with permission hint on 403 response', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 403,
     });
 
     await expect(queryCloudflareLogs(baseInput)).rejects.toThrow(CfApiError);
-    await expect(queryCloudflareLogs(baseInput)).rejects.toThrow('403');
+    await expect(queryCloudflareLogs(baseInput)).rejects.toThrow('Workers Logs (Read)');
+  });
+
+  it('should throw CfApiError with token hint on 401 response', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+    });
+
+    await expect(queryCloudflareLogs(baseInput)).rejects.toThrow(CfApiError);
+    await expect(queryCloudflareLogs(baseInput)).rejects.toThrow('invalid or expired');
+  });
+
+  it('should throw generic CfApiError on other error status codes', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+    });
+
+    await expect(queryCloudflareLogs(baseInput)).rejects.toThrow(CfApiError);
+    await expect(queryCloudflareLogs(baseInput)).rejects.toThrow('500');
   });
 
   it('should throw CfApiError on invalid JSON response', async () => {

@@ -1,4 +1,4 @@
-import { useState, useEffect, type CSSProperties, type ReactNode } from 'react';
+import { useState, useEffect, useMemo, type CSSProperties, type ReactNode } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Menu } from 'lucide-react';
 import { useAuth } from './AuthProvider';
@@ -68,11 +68,19 @@ const contentStyle: CSSProperties = {
 };
 
 export function AppShell({ children }: AppShellProps) {
-  const { user } = useAuth();
+  const { user, isSuperadmin } = useAuth();
   const isMobile = useIsMobile();
   const location = useLocation();
   const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const mobileNavItems = useMemo(() => {
+    const items = NAV_ITEMS.map((item) => ({ label: item.label, path: item.path }));
+    if (isSuperadmin) {
+      items.push({ label: 'Admin', path: '/admin' });
+    }
+    return items;
+  }, [isSuperadmin]);
 
   // Close drawer on route change
   useEffect(() => {
@@ -145,7 +153,7 @@ export function AppShell({ children }: AppShellProps) {
           <MobileNavDrawer
             onClose={() => setDrawerOpen(false)}
             user={{ name: user.name, email: user.email, image: user.image }}
-            navItems={NAV_ITEMS.map((item) => ({ label: item.label, path: item.path }))}
+            navItems={mobileNavItems}
             currentPath={location.pathname}
             onNavigate={(path) => { navigate(path); setDrawerOpen(false); }}
             onSignOut={handleSignOut}

@@ -45,7 +45,7 @@ const LogEntryRow: FC<LogEntryRowProps> = ({ entry }) => {
       tabIndex={hasDetails ? 0 : undefined}
       aria-expanded={hasDetails ? expanded : undefined}
     >
-      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'baseline' }}>
+      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'baseline', flexWrap: 'wrap' }}>
         <span
           style={{
             color: LEVEL_COLORS[entry.level] ?? 'var(--sam-color-fg-muted)',
@@ -63,9 +63,9 @@ const LogEntryRow: FC<LogEntryRowProps> = ({ entry }) => {
         <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.7rem', opacity: 0.7 }}>
           {entry.event}
         </span>
-        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {entry.message}
-        </span>
+      </div>
+      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
+        {entry.message}
       </div>
 
       {expanded && hasDetails && (
@@ -200,7 +200,7 @@ export const LogStream: FC = () => {
           </div>
 
           {/* Search */}
-          <div style={{ display: 'flex', gap: 'var(--sam-space-1)', flex: 1, minWidth: '120px' }}>
+          <div style={{ display: 'flex', gap: 'var(--sam-space-1)', flex: 1, minWidth: 0 }}>
             <input
               type="text"
               placeholder="Search..."

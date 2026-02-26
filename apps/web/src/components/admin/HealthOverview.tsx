@@ -13,7 +13,7 @@ const MetricCard: FC<MetricCardProps> = ({ label, value, metricKey, warning }) =
   <div
     data-metric={metricKey}
     style={{
-      flex: '1 1 200px',
+      flex: '1 1 140px',
       padding: 'var(--sam-space-4)',
       borderRadius: 'var(--sam-radius-sm)',
       border: '1px solid var(--sam-color-border-default)',

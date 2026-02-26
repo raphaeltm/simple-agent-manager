@@ -56,8 +56,10 @@ export const ErrorTrends: FC = () => {
         <div
           style={{
             display: 'flex',
+            flexWrap: 'wrap',
             justifyContent: 'space-between',
             alignItems: 'center',
+            gap: 'var(--sam-space-2)',
             marginBottom: 'var(--sam-space-4)',
           }}
         >

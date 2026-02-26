@@ -68,21 +68,9 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({ error: e
       aria-expanded={hasDetails ? expanded : undefined}
     >
       {/* Main row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', minWidth: 0 }}>
         <span style={badgeStyle(levelColor)}>{entry.level}</span>
         <span style={badgeStyle(sourceColor)}>{entry.source}</span>
-        <span
-          style={{
-            flex: 1,
-            fontSize: 'var(--sam-type-secondary-size)',
-            color: 'var(--sam-color-fg-primary)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {entry.message}
-        </span>
         <span
           style={{
             fontSize: 'var(--sam-type-caption-size)',
@@ -101,11 +89,25 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({ error: e
               transition: 'transform 150ms ease',
               transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
               flexShrink: 0,
+              marginLeft: 'auto',
             }}
           >
             ▶
           </span>
         )}
+      </div>
+      {/* Message on its own line for better mobile readability */}
+      <div
+        style={{
+          fontSize: 'var(--sam-type-secondary-size)',
+          color: 'var(--sam-color-fg-primary)',
+          marginTop: 'var(--sam-space-1)',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {entry.message}
       </div>
 
       {/* Metadata row */}
