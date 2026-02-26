@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { NodeResponse, VMSize, VMLocation } from '@simple-agent-manager/shared';
-import { Alert, Button, PageLayout, Select, Skeleton, StatusBadge, EmptyState } from '@simple-agent-manager/ui';
+import type { NodeResponse, WorkspaceResponse, VMSize, VMLocation } from '@simple-agent-manager/shared';
+import { Alert, Button, PageLayout, Select, SkeletonCard, EmptyState } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
-import { DropdownMenu, type DropdownMenuItem } from '@simple-agent-manager/ui';
-import { createNode, listNodes, deleteNode, stopNode } from '../lib/api';
+import { NodeCard } from '../components/node/NodeCard';
+import { createNode, listNodes, listWorkspaces, deleteNode, stopNode } from '../lib/api';
 import { Server } from 'lucide-react';
 
 const VM_SIZES: { value: VMSize; label: string; description: string }[] = [
@@ -19,43 +19,10 @@ const VM_LOCATIONS: { value: VMLocation; label: string }[] = [
   { value: 'hel1', label: 'Helsinki, FI' },
 ];
 
-function formatHeartbeat(value: string | null): string {
-  if (!value) return 'No heartbeat yet';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Invalid heartbeat timestamp';
-  return date.toLocaleDateString();
-}
-
-function getNodeActions(
-  node: NodeResponse,
-  handlers: { onStop: (id: string) => void; onDelete: (id: string) => void },
-): DropdownMenuItem[] {
-  const items: DropdownMenuItem[] = [];
-  const isTransitional = node.status === 'creating' || node.status === 'stopping';
-
-  if (node.status === 'running') {
-    items.push({
-      id: 'stop',
-      label: 'Stop',
-      onClick: () => handlers.onStop(node.id),
-    });
-  }
-
-  items.push({
-    id: 'delete',
-    label: 'Delete',
-    variant: 'danger',
-    onClick: () => handlers.onDelete(node.id),
-    disabled: isTransitional,
-    disabledReason: 'Cannot delete while node is transitioning',
-  });
-
-  return items;
-}
-
 export function Nodes() {
   const navigate = useNavigate();
   const [nodes, setNodes] = useState<NodeResponse[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -63,11 +30,15 @@ export function Nodes() {
   const [newNodeLocation, setNewNodeLocation] = useState<VMLocation>('nbg1');
   const [error, setError] = useState<string | null>(null);
 
-  const loadNodes = useCallback(async () => {
+  const loadData = useCallback(async () => {
     try {
       setError(null);
-      const response = await listNodes();
-      setNodes(response);
+      const [nodesResponse, workspacesResponse] = await Promise.all([
+        listNodes(),
+        listWorkspaces(),
+      ]);
+      setNodes(nodesResponse);
+      setWorkspaces(workspacesResponse);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load nodes');
     } finally {
@@ -76,12 +47,12 @@ export function Nodes() {
   }, []);
 
   useEffect(() => {
-    void loadNodes();
+    void loadData();
     const interval = window.setInterval(() => {
-      void loadNodes();
+      void loadData();
     }, 10000);
     return () => window.clearInterval(interval);
-  }, [loadNodes]);
+  }, [loadData]);
 
   const handleCreateNode = async () => {
     try {
@@ -105,7 +76,7 @@ export function Nodes() {
   const handleStopNode = async (id: string) => {
     try {
       await stopNode(id);
-      void loadNodes();
+      void loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to stop node');
     }
@@ -114,10 +85,14 @@ export function Nodes() {
   const handleDeleteNode = async (id: string) => {
     try {
       await deleteNode(id);
-      void loadNodes();
+      void loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete node');
     }
+  };
+
+  const handleCreateWorkspace = (nodeId: string) => {
+    navigate(`/nodes/${nodeId}`);
   };
 
   const sortedNodes = useMemo(
@@ -125,8 +100,25 @@ export function Nodes() {
     [nodes]
   );
 
+  const workspacesByNode = useMemo(() => {
+    const map = new Map<string, WorkspaceResponse[]>();
+    for (const ws of workspaces) {
+      if (ws.nodeId) {
+        const existing = map.get(ws.nodeId) ?? [];
+        existing.push(ws);
+        map.set(ws.nodeId, existing);
+      }
+    }
+    return map;
+  }, [workspaces]);
+
   return (
     <PageLayout title="Nodes" maxWidth="xl" headerRight={<UserMenu />}>
+      <style>{`
+        .sam-node-grid { grid-template-columns: 1fr; }
+        @media (min-width: 768px) { .sam-node-grid { grid-template-columns: repeat(2, 1fr); } }
+      `}</style>
+
       <div
         style={{
           display: 'flex',
@@ -214,26 +206,9 @@ export function Nodes() {
       )}
 
       {loading ? (
-        <div style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
+        <div className="sam-node-grid" style={{ display: 'grid', gap: 'var(--sam-space-4)' }}>
           {Array.from({ length: 3 }, (_, i) => (
-            <div
-              key={i}
-              aria-hidden="true"
-              style={{
-                border: '1px solid var(--sam-color-border-default)',
-                borderRadius: 'var(--sam-radius-md)',
-                padding: 'var(--sam-space-4)',
-                background: 'var(--sam-color-bg-surface)',
-                display: 'grid',
-                gap: 'var(--sam-space-2)',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Skeleton width="40%" height="1.125rem" />
-                <Skeleton width="60px" height="1.25rem" borderRadius="9999px" />
-              </div>
-              <Skeleton width="50%" height="0.875rem" />
-            </div>
+            <SkeletonCard key={i} lines={3} />
           ))}
         </div>
       ) : sortedNodes.length === 0 ? (
@@ -244,59 +219,17 @@ export function Nodes() {
           action={{ label: 'Create Node', onClick: () => setShowCreateForm(true) }}
         />
       ) : (
-        <div style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
-          {sortedNodes.map((node) => {
-            const overflowItems = getNodeActions(node, {
-              onStop: handleStopNode,
-              onDelete: handleDeleteNode,
-            });
-            return (
-              <div
-                key={node.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--sam-space-3)',
-                  border: '1px solid var(--sam-color-border-default)',
-                  borderRadius: 'var(--sam-radius-md)',
-                  padding: 'var(--sam-space-3) var(--sam-space-4)',
-                  background: 'var(--sam-color-bg-surface)',
-                }}
-              >
-                <StatusBadge status={node.status} />
-
-                <button
-                  onClick={() => navigate(`/nodes/${node.id}`)}
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    textAlign: 'left',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: 'var(--sam-color-fg-primary)',
-                    padding: 0,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--sam-space-2)' }}>
-                    <span className="sam-type-card-title">{node.name}</span>
-                    <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)' }}>
-                      {node.vmSize} &middot; {node.vmLocation}
-                    </span>
-                  </div>
-                  <div className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', marginTop: 2 }}>
-                    {formatHeartbeat(node.lastHeartbeatAt)}
-                  </div>
-                </button>
-
-                <StatusBadge status={node.healthStatus || 'stale'} />
-
-                {overflowItems.length > 0 && (
-                  <DropdownMenu items={overflowItems} aria-label={`Actions for ${node.name}`} />
-                )}
-              </div>
-            );
-          })}
+        <div className="sam-node-grid" style={{ display: 'grid', gap: 'var(--sam-space-4)', alignItems: 'start' }}>
+          {sortedNodes.map((node) => (
+            <NodeCard
+              key={node.id}
+              node={node}
+              workspaces={workspacesByNode.get(node.id) ?? []}
+              onStop={handleStopNode}
+              onDelete={handleDeleteNode}
+              onCreateWorkspace={handleCreateWorkspace}
+            />
+          ))}
         </div>
       )}
     </PageLayout>
