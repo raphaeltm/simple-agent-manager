@@ -74,6 +74,21 @@ describe('RenderedMarkdown', () => {
     });
   });
 
+  it('does not wrap mermaid diagrams in a <pre> tag', async () => {
+    const svgOutput = '<svg><text>Diagram</text></svg>';
+    mocks.mermaidRender.mockResolvedValue({ svg: svgOutput });
+
+    const content = '```mermaid\ngraph TD\n  A-->B\n```';
+    render(<RenderedMarkdown content={content} />);
+
+    await waitFor(() => {
+      const diagram = screen.getByTestId('mermaid-diagram');
+      expect(diagram.innerHTML).toContain('Diagram');
+      // The mermaid div must NOT be inside a <pre> element
+      expect(diagram.closest('pre')).toBeNull();
+    });
+  });
+
   it('renders inline code without mermaid treatment', () => {
     render(<RenderedMarkdown content="Use `graph TD` for diagrams" />);
     expect(screen.getByText('graph TD')).toBeInTheDocument();

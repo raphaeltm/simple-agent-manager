@@ -4,7 +4,6 @@ import {
   type HTMLAttributes,
   type ReactNode,
   useEffect,
-  useId,
   useRef,
   useState,
 } from 'react';
@@ -49,14 +48,16 @@ function ensureMermaidInit() {
 
 // ---------- Mermaid Diagram Component ----------
 
+let mermaidCounter = 0;
+
 const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const reactId = useId();
-  const diagramId = `mermaid-${reactId.replace(/:/g, '')}`;
+  const idRef = useRef(`mermaid-${Date.now()}-${++mermaidCounter}`);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    const diagramId = idRef.current;
 
     async function render() {
       ensureMermaidInit();
@@ -75,12 +76,16 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
     render();
     return () => {
       cancelled = true;
+      // Clean up mermaid's temp element if it was left in the DOM
+      document.getElementById(diagramId)?.remove();
+      document.getElementById('d' + diagramId)?.remove();
     };
-  }, [code, diagramId]);
+  }, [code]);
 
   if (error) {
     return (
       <div
+        data-testid="mermaid-diagram"
         style={{
           marginBottom: 12,
           padding: '12px 16px',
@@ -107,8 +112,6 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
       data-testid="mermaid-diagram"
       style={{
         marginBottom: 12,
-        display: 'flex',
-        justifyContent: 'center',
         overflow: 'auto',
       }}
     />
@@ -257,6 +260,19 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties }> = 
               {children}
             </td>
           ),
+          // react-markdown wraps fenced code in <pre><code>. Our `code` override
+          // replaces <code class="language-mermaid"> with <MermaidDiagram>,
+          // producing <pre><MermaidDiagram/></pre>. The <pre> applies monospace
+          // font and whitespace rules that break SVG layout. Unwrap it.
+          // We detect mermaid by inspecting the HAST node's code child className.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          pre: ({ node, children }: { node?: any; children?: ReactNode }) => {
+            const codeChild = node?.children?.find((c: any) => c.tagName === 'code');
+            if (codeChild?.properties?.className?.includes('language-mermaid')) {
+              return <>{children}</>;
+            }
+            return <pre style={{ margin: 0 }}>{children}</pre>;
+          },
           code: ({
             className,
             children,
