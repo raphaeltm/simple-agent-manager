@@ -33,7 +33,7 @@ A few decisions that shaped the project:
 
 ### Bring Your Own Cloud (BYOC)
 
-SAM never has cloud provider credentials. Your Hetzner token is encrypted with a per-user key derived from your identity and stored in D1. The platform's encryption key is a Cloudflare Worker secret — it never touches application code as a variable.
+SAM never has cloud provider credentials. Your Hetzner token is encrypted at rest using AES-256-GCM with a unique initialization vector per credential, then stored in D1 scoped to your user account. The platform encryption key is a Cloudflare Worker secret — it never touches application code as a variable.
 
 ### Hybrid storage: D1 + Durable Objects
 
