@@ -20,6 +20,8 @@ export interface WorkspaceTabItem {
   title: string;
   statusColor: string;
   badge?: string;
+  /** When true, the tab is rendered with reduced opacity (e.g., suspended sessions). */
+  dimmed?: boolean;
 }
 
 interface WorkspaceTabStripProps {
@@ -299,7 +301,7 @@ function SortableTabWrapper({
   const sortableStyle = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.4 : 1,
+    opacity: isDragging ? 0.4 : tab.dimmed ? 0.7 : 1,
   };
 
   return (
@@ -348,10 +350,10 @@ function SortableTabWrapper({
       }}
       role="tab"
       aria-selected={active}
-      aria-label={`${tab.kind === 'terminal' ? 'Terminal' : 'Chat'} tab: ${tab.title}`}
+      aria-label={`${tab.kind === 'terminal' ? 'Terminal' : 'Chat'} tab: ${tab.title}${tab.dimmed ? ' (suspended — click to resume)' : ''}`}
       aria-roledescription="sortable"
       tabIndex={0}
-      title={tab.title}
+      title={tab.dimmed ? `${tab.title} (suspended — click to resume)` : tab.title}
     >
       {active && (
         <span

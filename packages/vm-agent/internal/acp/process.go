@@ -217,11 +217,14 @@ func (p *AgentProcess) Stderr() io.Reader {
 	return p.stderr
 }
 
-// Stop gracefully terminates the agent process using a three-stage sequence:
+// Stop gracefully terminates the agent process using a multi-stage sequence:
 //  1. Close stdin to signal the agent to exit on its own.
-//  2. Send SIGTERM to the process group (negative PGID) and wait up to
-//     stopGracePeriod for a clean exit.
-//  3. If still running, send SIGKILL to the process group.
+//  2. Send SIGTERM inside the container to the actual agent processes.
+//     Killing only the host-side `docker exec` process (via PGID signals)
+//     does NOT terminate the processes inside the container — they run in
+//     a separate PID namespace and will keep consuming resources.
+//  3. Send SIGTERM to the host-side process group to clean up docker exec.
+//  4. If still running after grace period, SIGKILL both inside and outside.
 //
 // The entire operation is bounded by stopTimeout so Stop() never blocks
 // indefinitely.
@@ -238,12 +241,14 @@ func (p *AgentProcess) Stop() error {
 	if p.cmd.Process != nil {
 		pid = p.cmd.Process.Pid
 	}
-	slog.Info("Stopping ACP agent process", "agentType", p.agentType, "pid", pid)
+	slog.Info("Stopping ACP agent process", "agentType", p.agentType, "pid", pid, "container", p.containerID)
 
 	// Close stdin first to signal the agent to exit gracefully.
 	p.stdin.Close()
 
 	if p.cmd.Process == nil {
+		// No host process, but container processes may still be running.
+		p.killContainerProcesses(syscall.SIGKILL)
 		return nil
 	}
 
@@ -259,8 +264,12 @@ func (p *AgentProcess) Stop() error {
 	deadline := time.NewTimer(p.stopTimeout)
 	defer deadline.Stop()
 
-	// Stage 1: SIGTERM to process group — gives the process a chance to
-	// clean up (flush buffers, write state, etc.).
+	// Stage 1: SIGTERM inside the container. This is the critical step —
+	// the agent processes (claude-code-acp, claude) run inside the container's
+	// PID namespace. Host-side PGID signals only affect docker exec itself.
+	p.killContainerProcesses(syscall.SIGTERM)
+
+	// Stage 2: SIGTERM to host-side process group — cleans up the docker exec CLI.
 	pgid := pid
 	if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
 		slog.Warn("SIGTERM to process group failed", "pgid", pgid, "error", err)
@@ -282,7 +291,8 @@ func (p *AgentProcess) Stop() error {
 			"agentType", p.agentType, "pid", pid)
 	}
 
-	// Stage 2: SIGKILL to process group — forceful termination.
+	// Stage 3: SIGKILL inside the container, then to host-side process group.
+	p.killContainerProcesses(syscall.SIGKILL)
 	if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil {
 		slog.Warn("SIGKILL to process group failed", "pgid", pgid, "error", err)
 	}
@@ -298,6 +308,42 @@ func (p *AgentProcess) Stop() error {
 	}
 
 	return nil
+}
+
+// killContainerProcesses sends a signal to the agent processes running inside
+// the Docker container. This is necessary because killing the host-side
+// `docker exec` process does NOT terminate the processes inside the container —
+// they run in a separate PID namespace.
+//
+// Targets both the ACP adapter (claude-code-acp) and the underlying agent
+// (claude) to ensure nothing leaks.
+func (p *AgentProcess) killContainerProcesses(sig syscall.Signal) {
+	if p.containerID == "" {
+		return
+	}
+
+	sigName := "TERM"
+	if sig == syscall.SIGKILL {
+		sigName = "KILL"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// Kill the ACP adapter process and all its children inside the container.
+	// Using pkill with -f matches the full command line.
+	cmd := exec.CommandContext(ctx, "docker", "exec", p.containerID,
+		"pkill", fmt.Sprintf("-%s", sigName), "-f", p.agentType)
+	if err := cmd.Run(); err != nil {
+		// Exit code 1 means no processes matched — that's fine, they already exited.
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			slog.Debug("No container processes matched for kill", "signal", sigName, "pattern", p.agentType)
+		} else {
+			slog.Warn("Failed to kill container processes", "signal", sigName, "pattern", p.agentType, "error", err)
+		}
+	} else {
+		slog.Info("Sent signal to container processes", "signal", sigName, "pattern", p.agentType, "container", p.containerID)
+	}
 }
 
 // Wait waits for the agent process to exit and returns the error (if any).

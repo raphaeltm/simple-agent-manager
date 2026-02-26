@@ -132,6 +132,8 @@ function workspaceTabStatusColor(tab: WorkspaceTab): string {
   switch (tab.status) {
     case 'running':
       return 'var(--sam-color-tn-green)';
+    case 'suspended':
+      return 'var(--sam-color-tn-yellow)';
     case 'error':
       return 'var(--sam-color-tn-red)';
     default:
@@ -1042,6 +1044,12 @@ export function Workspace() {
       return;
     }
 
+    // Auto-resume suspended sessions when their tab is clicked.
+    if (tab.status === 'suspended') {
+      void handleResumeSession(tab.sessionId);
+      return;
+    }
+
     handleAttachSession(tab.sessionId);
   };
 
@@ -1091,7 +1099,11 @@ export function Workspace() {
     }));
 
     const chatSessionTabs: WorkspaceTab[] = agentSessions
-      .filter((session) => isSessionActive(session) && !recentlyStopped.has(session.id))
+      .filter(
+        (session) =>
+          (isSessionActive(session) || session.status === 'suspended') &&
+          !recentlyStopped.has(session.id)
+      )
       .map((session) => {
         const preferredAgent = preferredAgentsBySession[session.id];
         const preferredName = preferredAgent ? agentNameById.get(preferredAgent) : undefined;
@@ -1182,6 +1194,7 @@ export function Workspace() {
         title: tab.title,
         statusColor: workspaceTabStatusColor(tab),
         badge: tab.badge,
+        dimmed: tab.kind === 'chat' && tab.status === 'suspended',
       })),
     [workspaceTabs]
   );
@@ -1198,11 +1211,13 @@ export function Workspace() {
     [agentSessions, recentlyStopped]
   );
 
-  // Session history: suspended and stopped sessions for the sidebar history panel
+  // Session history: stopped sessions for the sidebar history panel.
+  // Suspended sessions are now shown as dimmed tabs in the tab strip
+  // (with click-to-resume), so they no longer appear here.
   const historySessions = useMemo(
     () =>
       agentSessions
-        .filter((s) => s.status === 'suspended' || (s.status === 'stopped' && !recentlyStopped.has(s.id)))
+        .filter((s) => s.status === 'stopped' && !recentlyStopped.has(s.id))
         .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
     [agentSessions, recentlyStopped]
   );

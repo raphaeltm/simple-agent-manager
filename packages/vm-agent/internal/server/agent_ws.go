@@ -93,6 +93,29 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Auto-resume suspended sessions on WebSocket attach. This handles the case
+	// where the control plane's resumeAgentSessionOnNode() call failed (best-effort)
+	// but the browser is now trying to connect via WebSocket.
+	if session.Status == agentsessions.StatusSuspended {
+		resumed, resumeErr := s.agentSessions.Resume(workspaceID, requestedSessionID)
+		if resumeErr != nil {
+			// A concurrent WebSocket may have already resumed. Re-read and continue
+			// if the session is now running.
+			refreshed, exists := s.agentSessions.Get(workspaceID, requestedSessionID)
+			if exists && refreshed.Status == agentsessions.StatusRunning {
+				session = refreshed
+				slog.Info("Session already resumed by concurrent connection", "workspace", workspaceID, "session", requestedSessionID)
+			} else {
+				slog.Warn("Auto-resume on WebSocket attach failed", "workspace", workspaceID, "session", requestedSessionID, "error", resumeErr)
+				writeSessionError(w, http.StatusConflict, "session_not_running", "Requested session is suspended and could not be resumed")
+				return
+			}
+		} else {
+			session = resumed
+			slog.Info("Auto-resumed suspended session on WebSocket attach", "workspace", workspaceID, "session", requestedSessionID)
+		}
+	}
+
 	if session.Status != agentsessions.StatusRunning {
 		writeSessionError(w, http.StatusConflict, "session_not_running", "Requested session is not running")
 		return
