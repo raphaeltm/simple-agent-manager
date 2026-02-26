@@ -8,6 +8,7 @@
  * See: specs/022-simplified-chat-ux/tasks.md (T038-T040)
  */
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { ProjectRuntimeConfigResponse, VMSize } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import {
@@ -34,6 +35,7 @@ interface SettingsDrawerProps {
 
 export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
   const toast = useToast();
+  const navigate = useNavigate();
   const { projectId, project, reload } = useProjectContext();
   const drawerRef = useRef<HTMLDivElement>(null);
 
@@ -86,6 +88,33 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
     }
   }, [open, loadRuntimeConfig]);
 
+  // Close with unsaved changes confirmation (T040)
+  const handleClose = useCallback(() => {
+    if (isDirty) {
+      const confirmed = window.confirm('You have unsaved changes. Discard them?');
+      if (!confirmed) return;
+    }
+    setIsDirty(false);
+    onClose();
+  }, [isDirty, onClose]);
+
+  // Prevent body scroll when open
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [open]);
+
+  // Focus drawer when opened
+  useEffect(() => {
+    if (open && drawerRef.current) {
+      drawerRef.current.focus();
+    }
+  }, [open]);
+
   // Close on Escape key
   useEffect(() => {
     if (!open) return;
@@ -96,17 +125,7 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  });
-
-  // Close with unsaved changes confirmation (T040)
-  const handleClose = () => {
-    if (isDirty) {
-      const confirmed = window.confirm('You have unsaved changes. Discard them?');
-      if (!confirmed) return;
-    }
-    setIsDirty(false);
-    onClose();
-  };
+  }, [open, handleClose]);
 
   // Click outside to close
   const handleBackdropClick = (e: React.MouseEvent) => {
@@ -246,25 +265,30 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
         style={{
           position: 'fixed',
           inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.3)',
-          zIndex: 1000,
+          backgroundColor: 'var(--sam-color-bg-overlay)',
+          zIndex: 'var(--sam-z-drawer-backdrop)' as unknown as number,
         }}
       >
         {/* Drawer panel */}
         <div
           ref={drawerRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-drawer-title"
+          tabIndex={-1}
           style={{
             position: 'fixed',
             top: 0,
             right: 0,
             bottom: 0,
             width: 'min(480px, 90vw)',
-            backgroundColor: 'var(--sam-color-bg-page)',
-            boxShadow: '-4px 0 24px rgba(0, 0, 0, 0.15)',
+            backgroundColor: 'var(--sam-color-bg-surface)',
+            boxShadow: 'var(--sam-shadow-overlay)',
             overflowY: 'auto',
-            zIndex: 1001,
+            zIndex: 'var(--sam-z-drawer)' as unknown as number,
             display: 'flex',
             flexDirection: 'column',
+            outline: 'none',
           }}
         >
           {/* Header */}
@@ -276,7 +300,7 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
             borderBottom: '1px solid var(--sam-color-border-default)',
             flexShrink: 0,
           }}>
-            <h2 style={{
+            <h2 id="settings-drawer-title" style={{
               margin: 0,
               fontSize: 'var(--sam-type-section-heading-size)',
               fontWeight: 600,
@@ -501,6 +525,56 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
                   </div>
                 </div>
               )}
+            </section>
+
+            {/* Project Views — power-user links to hidden routes */}
+            <section style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
+              <div>
+                <h3 className="sam-type-card-title" style={{ margin: 0, color: 'var(--sam-color-fg-primary)' }}>
+                  Project Views
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+                  Advanced views for managing workspaces, tasks, and activity.
+                </p>
+              </div>
+              <div style={{ display: 'grid', gap: 'var(--sam-space-1)' }}>
+                {[
+                  { label: 'Overview', description: 'Workspaces & launch controls', path: `/projects/${projectId}/overview` },
+                  { label: 'Tasks', description: 'Task list & management', path: `/projects/${projectId}/tasks` },
+                  { label: 'Activity', description: 'Project event feed', path: `/projects/${projectId}/activity` },
+                ].map((link) => (
+                  <button
+                    key={link.path}
+                    type="button"
+                    onClick={() => { onClose(); navigate(link.path); }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 'var(--sam-space-2)',
+                      width: '100%',
+                      padding: 'var(--sam-space-2) var(--sam-space-3)',
+                      background: 'none',
+                      border: '1px solid var(--sam-color-border-default)',
+                      borderRadius: 'var(--sam-radius-sm)',
+                      cursor: 'pointer',
+                      color: 'var(--sam-color-fg-primary)',
+                      textAlign: 'left',
+                    }}
+                    className="sam-hover-surface"
+                  >
+                    <div>
+                      <div style={{ fontSize: '0.8125rem', fontWeight: 500 }}>{link.label}</div>
+                      <div style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+                        {link.description}
+                      </div>
+                    </div>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: 'var(--sam-color-fg-muted)' }}>
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                  </button>
+                ))}
+              </div>
             </section>
           </div>
         </div>
