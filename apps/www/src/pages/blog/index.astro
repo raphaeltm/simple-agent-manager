@@ -1,0 +1,150 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+import CtaFooter from '../../components/CtaFooter.astro';
+
+const posts = (await getCollection('blog', ({ data }) => !data.draft))
+  .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+
+const categoryColors: Record<string, string> = {
+  announcement: 'var(--color-accent)',
+  engineering: 'var(--color-success)',
+  tutorial: '#a855f7',
+  devlog: 'var(--color-warning)',
+};
+---
+
+<Base
+  title="Blog | Simple Agent Manager"
+  description="Engineering updates, tutorials, and announcements from the SAM team."
+>
+  <Header />
+  <main class="blog-index">
+    <div class="container">
+      <div class="page-header animate-on-scroll">
+        <p class="section-label">Blog</p>
+        <h1 class="section-title">Engineering updates, tutorials, and announcements</h1>
+      </div>
+
+      {posts.length === 0 && (
+        <p class="empty">No posts yet. Check back soon!</p>
+      )}
+
+      <div class="post-grid">
+        {posts.map((post) => (
+          <a href={`/blog/${post.id}/`} class="post-card animate-on-scroll">
+            <div class="card-meta">
+              <span class="category" style={`color: ${categoryColors[post.data.category] ?? 'var(--color-fg-dim)'}`}>
+                {post.data.category}
+              </span>
+              <span class="dot">&middot;</span>
+              <time datetime={post.data.date.toISOString().split('T')[0]}>
+                {post.data.date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+              </time>
+            </div>
+            <h2 class="card-title">{post.data.title}</h2>
+            <p class="card-excerpt">{post.data.excerpt}</p>
+            <div class="card-tags">
+              {post.data.tags.map((tag) => (
+                <span class="tag">{tag}</span>
+              ))}
+            </div>
+          </a>
+        ))}
+      </div>
+    </div>
+  </main>
+  <CtaFooter />
+</Base>
+
+<style>
+  .blog-index {
+    padding-top: calc(var(--header-height) + 48px);
+    padding-bottom: 80px;
+  }
+
+  .page-header {
+    margin-bottom: 48px;
+  }
+
+  .empty {
+    text-align: center;
+    color: var(--color-fg-muted);
+    padding: 80px 0;
+  }
+
+  .post-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 24px;
+  }
+
+  .post-card {
+    display: block;
+    padding: 24px;
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    transition: border-color 0.2s, transform 0.2s;
+    color: inherit;
+  }
+
+  .post-card:hover {
+    border-color: var(--color-fg-dim);
+    transform: translateY(-2px);
+    color: inherit;
+  }
+
+  .card-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8125rem;
+    margin-bottom: 12px;
+  }
+
+  .category {
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .dot {
+    color: var(--color-fg-dim);
+  }
+
+  time {
+    color: var(--color-fg-muted);
+  }
+
+  .card-title {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--color-fg-primary);
+    margin-bottom: 8px;
+  }
+
+  .card-excerpt {
+    font-size: 0.9375rem;
+    color: var(--color-fg-muted);
+    line-height: 1.5;
+    margin-bottom: 16px;
+  }
+
+  .card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .tag {
+    font-size: 0.6875rem;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-inset);
+    color: var(--color-fg-dim);
+  }
+</style>
