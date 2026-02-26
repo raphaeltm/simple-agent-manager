@@ -211,7 +211,7 @@ describe('queryCloudflareLogs()', () => {
     });
 
     await expect(queryCloudflareLogs(baseInput)).rejects.toThrow(CfApiError);
-    await expect(queryCloudflareLogs(baseInput)).rejects.toThrow('Workers Logs (Read)');
+    await expect(queryCloudflareLogs(baseInput)).rejects.toThrow('Workers Observability (Read)');
   });
 
   it('should throw CfApiError with token hint on 401 response', async () => {
