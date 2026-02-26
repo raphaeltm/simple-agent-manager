@@ -3,10 +3,117 @@ import {
   type FC,
   type HTMLAttributes,
   type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+  useState,
 } from 'react';
 import { Highlight, themes } from 'prism-react-renderer';
+import mermaid from 'mermaid';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+
+// ---------- Mermaid Initialization ----------
+
+let mermaidInitialized = false;
+
+function ensureMermaidInit() {
+  if (mermaidInitialized) return;
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'dark',
+    themeVariables: {
+      darkMode: true,
+      background: '#13201d',
+      primaryColor: '#1a3a32',
+      primaryTextColor: '#e6f2ee',
+      primaryBorderColor: '#29423b',
+      secondaryColor: '#1a2e3a',
+      tertiaryColor: '#2a1a3a',
+      lineColor: '#9fb7ae',
+      textColor: '#e6f2ee',
+      mainBkg: '#1a3a32',
+      nodeBorder: '#29423b',
+      clusterBkg: '#13201d',
+      clusterBorder: '#29423b',
+      titleColor: '#e6f2ee',
+      edgeLabelBackground: '#13201d',
+      nodeTextColor: '#e6f2ee',
+    },
+    fontFamily: 'monospace',
+    securityLevel: 'loose',
+    logLevel: 5,
+  });
+  mermaidInitialized = true;
+}
+
+// ---------- Mermaid Diagram Component ----------
+
+const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const reactId = useId();
+  const diagramId = `mermaid-${reactId.replace(/:/g, '')}`;
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function render() {
+      ensureMermaidInit();
+      try {
+        const { svg } = await mermaid.render(diagramId, code);
+        if (!cancelled && containerRef.current) {
+          containerRef.current.innerHTML = svg;
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to render diagram');
+        }
+      }
+    }
+
+    render();
+    return () => {
+      cancelled = true;
+    };
+  }, [code, diagramId]);
+
+  if (error) {
+    return (
+      <div
+        style={{
+          marginBottom: 12,
+          padding: '12px 16px',
+          backgroundColor: 'var(--sam-color-danger-tint)',
+          border: '1px solid var(--sam-color-border-default)',
+          borderRadius: 6,
+          fontFamily: 'monospace',
+          fontSize: '0.8125rem',
+          color: 'var(--sam-color-fg-muted)',
+          whiteSpace: 'pre-wrap',
+        }}
+      >
+        <div style={{ marginBottom: 8, color: 'var(--sam-color-fg-primary)' }}>
+          Mermaid diagram error
+        </div>
+        {error}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      data-testid="mermaid-diagram"
+      style={{
+        marginBottom: 12,
+        display: 'flex',
+        justifyContent: 'center',
+        overflow: 'auto',
+      }}
+    />
+  );
+};
 
 // ---------- Syntax Highlighted Code ----------
 
@@ -74,7 +181,8 @@ export const SyntaxHighlightedCode: FC<{ content: string; language: string }> = 
 // ---------- Markdown Rendering ----------
 
 const markdownContainerStyle: CSSProperties = {
-  maxWidth: '100%',
+  maxWidth: 900,
+  margin: '0 auto',
   overflowX: 'hidden',
   padding: '16px',
   color: 'var(--sam-color-fg-primary)',
@@ -158,6 +266,10 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties }> = 
             const code = String(children ?? '').replace(/\n$/, '');
 
             if (match) {
+              if (match[1] === 'mermaid') {
+                return <MermaidDiagram code={code} />;
+              }
+
               return (
                 <div style={{ marginBottom: 12 }}>
                   <SyntaxHighlightedCode content={code} language={match[1] ?? ''} />
