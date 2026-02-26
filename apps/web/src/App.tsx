@@ -29,6 +29,9 @@ import { ProjectChat } from './pages/ProjectChat';
 import { ProjectKanban } from './pages/ProjectKanban';
 import { ProjectCreate } from './pages/ProjectCreate';
 import { Admin } from './pages/Admin';
+import { BlogLayout } from './components/BlogLayout';
+import { BlogIndex } from './pages/BlogIndex';
+import { BlogPost } from './pages/BlogPost';
 
 function ProtectedLayout() {
   return (
@@ -49,6 +52,10 @@ export default function App() {
         <Routes>
           {/* Public routes */}
           <Route path="/" element={<Landing />} />
+          <Route path="/blog" element={<BlogLayout />}>
+            <Route index element={<BlogIndex />} />
+            <Route path=":slug" element={<BlogPost />} />
+          </Route>
 
           {/* Protected routes with AppShell (persistent navigation) */}
           <Route element={<ProtectedLayout />}>
