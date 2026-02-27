@@ -1,104 +1,84 @@
 /**
- * Unit tests for TaskRunner DO helper functions.
+ * Source contract tests for TaskRunner DO helper functions.
  *
- * Tests the pure utility functions used internally by the DO:
- * - parseEnvInt: environment variable parsing with fallback
- * - computeBackoffMs: exponential backoff calculation
- * - isTransientError: error classification for retry decisions
+ * Verifies the helper functions exist in the extracted helpers module
+ * and that the DO imports them.
+ *
+ * For behavioral tests, see task-runner-do-pure-functions.test.ts.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-// Read source to verify function behavior via source contract tests
+// Read both files to verify extraction and import relationship
+const helpersSource = readFileSync(
+  resolve(process.cwd(), 'src/durable-objects/task-runner-helpers.ts'),
+  'utf8'
+);
 const doSource = readFileSync(
   resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),
   'utf8'
 );
 
-describe('parseEnvInt', () => {
-  it('exists in TaskRunner DO source', () => {
-    expect(doSource).toContain('function parseEnvInt(');
+describe('helper function extraction', () => {
+  it('DO imports helpers from task-runner-helpers', () => {
+    expect(doSource).toContain("from './task-runner-helpers'");
   });
 
+  it('helpers module exports parseEnvInt', () => {
+    expect(helpersSource).toContain('export function parseEnvInt(');
+  });
+
+  it('helpers module exports computeBackoffMs', () => {
+    expect(helpersSource).toContain('export function computeBackoffMs(');
+  });
+
+  it('helpers module exports isTransientError', () => {
+    expect(helpersSource).toContain('export function isTransientError(');
+  });
+});
+
+describe('parseEnvInt source contract', () => {
   it('returns fallback for undefined input', () => {
-    expect(doSource).toContain("if (!value) return fallback");
-  });
-
-  it('returns fallback for non-positive parsed values', () => {
-    expect(doSource).toContain('parsed > 0 ? parsed : fallback');
+    expect(helpersSource).toContain("if (!value) return fallback");
   });
 
   it('uses parseInt with radix 10', () => {
-    expect(doSource).toContain("parseInt(value, 10)");
+    expect(helpersSource).toContain("parseInt(value, 10)");
   });
 
   it('checks Number.isFinite to catch NaN/Infinity', () => {
-    expect(doSource).toContain('Number.isFinite(parsed)');
+    expect(helpersSource).toContain('Number.isFinite(parsed)');
   });
 });
 
-describe('computeBackoffMs', () => {
-  it('exists in TaskRunner DO source', () => {
-    expect(doSource).toContain('function computeBackoffMs(');
-  });
-
+describe('computeBackoffMs source contract', () => {
   it('uses exponential formula (base * 2^retry)', () => {
-    expect(doSource).toContain('baseDelayMs * Math.pow(2, retryCount)');
+    expect(helpersSource).toContain('baseDelayMs * Math.pow(2, retryCount)');
   });
 
   it('caps at maxDelayMs', () => {
-    expect(doSource).toContain('Math.min(delay, maxDelayMs)');
+    expect(helpersSource).toContain('Math.min(delay, maxDelayMs)');
   });
 });
 
-describe('isTransientError', () => {
-  it('exists in TaskRunner DO source', () => {
-    expect(doSource).toContain('function isTransientError(');
-  });
-
-  it('returns false for non-Error values', () => {
-    expect(doSource).toContain('if (!(err instanceof Error)) return false');
+describe('isTransientError source contract', () => {
+  it('checks permanent flag before message matching', () => {
+    expect(helpersSource).toContain('.permanent === true');
   });
 
   it('classifies network errors as transient', () => {
-    expect(doSource).toContain("'fetch failed'");
-    expect(doSource).toContain("'network'");
-    expect(doSource).toContain("'timeout'");
-    expect(doSource).toContain("'econnrefused'");
-  });
-
-  it('classifies 429/rate limit as transient', () => {
-    expect(doSource).toContain("'429'");
-    expect(doSource).toContain("'rate limit'");
+    expect(helpersSource).toContain("'fetch failed'");
+    expect(helpersSource).toContain("'network'");
+    expect(helpersSource).toContain("'timeout'");
   });
 
   it('classifies 5xx errors as transient', () => {
-    expect(doSource).toContain('5\\d{2}');
+    expect(helpersSource).toContain('5\\d{2}');
   });
 
   it('classifies not_found as permanent', () => {
-    expect(doSource).toContain("'not found'");
-    expect(doSource).toContain("'not_found'");
-  });
-
-  it('classifies limit_exceeded as permanent', () => {
-    expect(doSource).toContain("'limit_exceeded'");
-  });
-
-  it('classifies forbidden/unauthorized as permanent', () => {
-    expect(doSource).toContain("'forbidden'");
-    expect(doSource).toContain("'unauthorized'");
-  });
-
-  it('defaults to transient for unknown errors', () => {
-    // The function returns true at the end
-    const fnBody = doSource.slice(
-      doSource.indexOf('function isTransientError'),
-      doSource.indexOf('// =====', doSource.indexOf('function isTransientError'))
-    );
-    // Last return statement should be true (default to transient)
-    const lastReturn = fnBody.lastIndexOf('return true');
-    expect(lastReturn).toBeGreaterThan(-1);
+    expect(helpersSource).toContain("'not found'");
+    expect(helpersSource).toContain("'not_found'");
   });
 });

@@ -124,51 +124,10 @@ export interface StartTaskInput {
 }
 
 // =============================================================================
-// Helpers
+// Helpers (pure functions extracted to task-runner-helpers.ts for testability)
 // =============================================================================
 
-function parseEnvInt(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function computeBackoffMs(
-  retryCount: number,
-  baseDelayMs: number,
-  maxDelayMs: number,
-): number {
-  // Exponential backoff: base * 2^retry, capped at max
-  const delay = baseDelayMs * Math.pow(2, retryCount);
-  return Math.min(delay, maxDelayMs);
-}
-
-/**
- * Determines whether an error is transient (retryable) or permanent.
- * Transient: network errors, timeouts, 5xx responses, rate limits
- * Permanent: 4xx errors (except 429), validation failures, NOT_FOUND
- */
-function isTransientError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const msg = err.message.toLowerCase();
-
-  // Network / timeout errors — always transient
-  if (msg.includes('fetch failed') || msg.includes('network') || msg.includes('timeout') || msg.includes('econnrefused') || msg.includes('enotfound')) {
-    return true;
-  }
-
-  // HTTP status based errors
-  if (msg.includes('429') || msg.includes('rate limit')) return true;
-  if (msg.match(/\b5\d{2}\b/)) return true; // 5xx
-
-  // Explicit permanent errors
-  if (msg.includes('not found') || msg.includes('not_found') || msg.includes('limit_exceeded') || msg.includes('invalid') || msg.includes('forbidden') || msg.includes('unauthorized')) {
-    return false;
-  }
-
-  // Default to transient for unknown errors
-  return true;
-}
+import { parseEnvInt, computeBackoffMs, isTransientError } from './task-runner-helpers';
 
 // =============================================================================
 // TaskRunner Durable Object
@@ -531,7 +490,27 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       throw new Error('No nodeId in state — cannot create workspace');
     }
 
-    // If workspace already created (retry), skip to delegated transition
+    // If workspace already created (retry or crash recovery), skip creation.
+    // Check both DO state AND D1 to handle the crash window between D1 insert
+    // and storage.put — if D1 has a workspace_id for this task but the DO
+    // state doesn't, recover it.
+    if (!state.stepResults.workspaceId) {
+      const existingTask = await this.env.DATABASE.prepare(
+        `SELECT workspace_id, status FROM tasks WHERE id = ?`
+      ).bind(state.taskId).first<{ workspace_id: string | null; status: string }>();
+
+      if (existingTask?.workspace_id) {
+        // D1 has a workspace — recover it into DO state (crash recovery)
+        state.stepResults.workspaceId = existingTask.workspace_id;
+        await this.ctx.storage.put('state', state);
+
+        log.info('task_runner_do.workspace_recovered_from_d1', {
+          taskId: state.taskId,
+          workspaceId: existingTask.workspace_id,
+        });
+      }
+    }
+
     if (state.stepResults.workspaceId) {
       // Check if we already transitioned to delegated
       const task = await this.env.DATABASE.prepare(
@@ -939,6 +918,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
   private async cleanupOnFailure(state: TaskRunnerState): Promise<void> {
     const now = new Date().toISOString();
 
+    // Stop workspace if one was created
     if (state.stepResults.workspaceId && state.stepResults.nodeId) {
       try {
         const { stopWorkspaceOnNode } = await import('../services/node-agent');
@@ -960,18 +940,42 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       ).bind(now, state.stepResults.workspaceId).run();
     }
 
+    // Clean up auto-provisioned node. If a workspace exists, cleanupTaskRun
+    // handles checking for other workspaces and marking the node warm.
+    // If no workspace was created (failure during provisioning), we still need
+    // to mark the auto-provisioned node as warm directly via NodeLifecycle DO.
     if (state.stepResults.autoProvisioned && state.stepResults.nodeId) {
-      try {
-        const { cleanupTaskRun } = await import('../services/task-runner');
-        // cleanupTaskRun handles the logic of checking for other workspaces
-        // and marking the node warm via NodeLifecycle DO
-        await cleanupTaskRun(state.taskId, this.env as any);
-      } catch (err) {
-        log.error('task_runner_do.cleanup.node_cleanup_failed', {
-          taskId: state.taskId,
-          nodeId: state.stepResults.nodeId,
-          error: err instanceof Error ? err.message : String(err),
-        });
+      if (state.stepResults.workspaceId) {
+        try {
+          const { cleanupTaskRun } = await import('../services/task-runner');
+          await cleanupTaskRun(state.taskId, this.env as any);
+        } catch (err) {
+          log.error('task_runner_do.cleanup.node_cleanup_failed', {
+            taskId: state.taskId,
+            nodeId: state.stepResults.nodeId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      } else {
+        // No workspace — mark node warm directly since cleanupTaskRun
+        // expects a workspace_id on the task to work properly.
+        // Use markIdle(nodeId, userId) which transitions to warm state.
+        try {
+          const doId = this.env.NODE_LIFECYCLE.idFromName(state.stepResults.nodeId);
+          const stub = this.env.NODE_LIFECYCLE.get(doId) as DurableObjectStub<NodeLifecycle>;
+          await stub.markIdle(state.stepResults.nodeId, state.userId);
+
+          log.info('task_runner_do.cleanup.node_marked_warm_direct', {
+            taskId: state.taskId,
+            nodeId: state.stepResults.nodeId,
+          });
+        } catch (err) {
+          log.error('task_runner_do.cleanup.node_warm_failed', {
+            taskId: state.taskId,
+            nodeId: state.stepResults.nodeId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     }
   }

@@ -14,7 +14,6 @@
  * thresholds and the cron will fail it. The DO uses optimistic locking
  * (`WHERE status = X`) to detect cron intervention and abort gracefully.
  */
-import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import {
   DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS,
@@ -131,16 +130,23 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       });
 
       const nowIso = now.toISOString();
-      await db
-        .update(schema.tasks)
-        .set({
-          status: 'failed',
-          executionStep: null,
-          errorMessage: reason,
-          completedAt: nowIso,
-          updatedAt: nowIso,
-        })
-        .where(eq(schema.tasks.id, task.id));
+      // Use optimistic locking: only fail the task if it's still in the
+      // same status we observed. This prevents TOCTOU races with the
+      // TaskRunner DO which may have advanced the task in between our
+      // SELECT and this UPDATE.
+      const updateResult = await env.DATABASE.prepare(
+        `UPDATE tasks SET status = 'failed', execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
+         WHERE id = ? AND status = ?`
+      ).bind(reason, nowIso, nowIso, task.id, task.status).run();
+
+      if (!updateResult.meta.changes || updateResult.meta.changes === 0) {
+        // Task was advanced by the DO between our SELECT and UPDATE — skip
+        log.info('stuck_task.skipped_optimistic_lock', {
+          taskId: task.id,
+          expectedStatus: task.status,
+        });
+        continue;
+      }
 
       await db.insert(schema.taskStatusEvents).values({
         id: ulid(),
