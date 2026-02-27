@@ -166,6 +166,31 @@ export const DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS = 10 * 60 * 1000; // 10 minute
 export const DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS = 16 * 60 * 1000; // 16 minutes
 
 // =============================================================================
+// TaskRunner DO Defaults (Alarm-Driven Orchestration — TDF-2)
+// =============================================================================
+
+/** Default max retries per step before failing the task. Override via TASK_RUNNER_STEP_MAX_RETRIES env var. */
+export const DEFAULT_TASK_RUNNER_STEP_MAX_RETRIES = 3;
+
+/** Default base delay (ms) for retry backoff. Override via TASK_RUNNER_RETRY_BASE_DELAY_MS env var. */
+export const DEFAULT_TASK_RUNNER_RETRY_BASE_DELAY_MS = 5_000;
+
+/** Default max delay (ms) for retry backoff. Override via TASK_RUNNER_RETRY_MAX_DELAY_MS env var. */
+export const DEFAULT_TASK_RUNNER_RETRY_MAX_DELAY_MS = 60_000;
+
+/** Default health check poll interval (ms) for agent readiness. Override via TASK_RUNNER_AGENT_POLL_INTERVAL_MS env var. */
+export const DEFAULT_TASK_RUNNER_AGENT_POLL_INTERVAL_MS = 5_000;
+
+/** Default timeout (ms) for VM agent to become healthy. Override via TASK_RUNNER_AGENT_READY_TIMEOUT_MS env var. */
+export const DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS = 120_000;
+
+/** Default timeout (ms) for workspace-ready callback. Override via TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS env var. */
+export const DEFAULT_TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+
+/** Default poll interval (ms) for provisioning status checks. Override via TASK_RUNNER_PROVISION_POLL_INTERVAL_MS env var. */
+export const DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS = 10_000;
+
+// =============================================================================
 // Hetzner Configuration
 // =============================================================================
 

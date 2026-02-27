@@ -2,6 +2,7 @@
 export { ProjectData } from './durable-objects/project-data';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
 export { AdminLogs } from './durable-objects/admin-logs';
+export { TaskRunner } from './durable-objects/task-runner';
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -54,6 +55,7 @@ export interface Env {
   PROJECT_DATA: DurableObjectNamespace;
   NODE_LIFECYCLE: DurableObjectNamespace;
   ADMIN_LOGS: DurableObjectNamespace;
+  TASK_RUNNER: DurableObjectNamespace;
   // Environment variables
   BASE_DOMAIN: string;
   VERSION: string;
@@ -173,6 +175,14 @@ export interface Env {
   // Idle cleanup configuration
   IDLE_CLEANUP_RETRY_DELAY_MS?: string;
   IDLE_CLEANUP_MAX_RETRIES?: string;
+  // TaskRunner DO configuration (TDF-2: alarm-driven orchestration)
+  TASK_RUNNER_STEP_MAX_RETRIES?: string;
+  TASK_RUNNER_RETRY_BASE_DELAY_MS?: string;
+  TASK_RUNNER_RETRY_MAX_DELAY_MS?: string;
+  TASK_RUNNER_AGENT_POLL_INTERVAL_MS?: string;
+  TASK_RUNNER_AGENT_READY_TIMEOUT_MS?: string;
+  TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS?: string;
+  TASK_RUNNER_PROVISION_POLL_INTERVAL_MS?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
