@@ -130,12 +130,17 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     void loadSession();
   }, [loadSession]);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom only when new messages are appended (not on
+  // every poll cycle, and not when "Load More" prepends older messages).
+  // Tracks previous count via ref; skips while loadingMore to avoid
+  // yanking the user to the bottom when they asked for older messages.
+  const prevMessageCountRef = useRef(0);
   useEffect(() => {
-    if (messages.length > 0 && !loading) {
+    if (messages.length > prevMessageCountRef.current && !loading && !loadingMore) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages.length, loading]);
+    prevMessageCountRef.current = messages.length;
+  }, [messages.length, loading, loadingMore]);
 
   // WebSocket for real-time updates — connects to project DO for message streaming
   useEffect(() => {
@@ -175,14 +180,23 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       // WebSocket not available
     }
 
-    // Polling fallback
+    // Polling fallback — only updates state when the server has new data.
+    // Uses a fingerprint (count + last ID + session status) to avoid
+    // replacing state with identical data, which would trigger unnecessary
+    // re-renders and fight with auto-scroll logic.
     const ACTIVE_POLL_MS = 3000;
+    let lastPollFingerprint = '';
     const pollInterval = setInterval(async () => {
       try {
         const data = await getChatSession(projectId, sessionId);
-        setSession(data.session);
-        setMessages(data.messages);
-        setHasMore(data.hasMore);
+        const newLastId = data.messages[data.messages.length - 1]?.id ?? '';
+        const fingerprint = `${data.messages.length}:${newLastId}:${data.session.status}:${data.hasMore}`;
+        if (fingerprint !== lastPollFingerprint) {
+          lastPollFingerprint = fingerprint;
+          setSession(data.session);
+          setHasMore(data.hasMore);
+          setMessages(data.messages);
+        }
       } catch {
         // Silently fail on poll errors
       }

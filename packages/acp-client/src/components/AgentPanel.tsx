@@ -451,8 +451,14 @@ function ErrorBanner({ session }: { session: AcpSessionHandle }) {
   );
 }
 
-/** Routes a ConversationItem to the appropriate component */
-function ConversationItemView({ item }: { item: ConversationItem }) {
+/**
+ * Routes a ConversationItem to the appropriate component.
+ *
+ * Wrapped in React.memo so that parent re-renders (input changes, scroll
+ * state toggles, palette visibility) don't cascade into every conversation
+ * item. Only re-renders when the item object itself changes.
+ */
+const ConversationItemView = React.memo(function ConversationItemView({ item }: { item: ConversationItem }) {
   switch (item.kind) {
     case 'user_message':
       return <MessageBubble text={item.text} role="user" />;
@@ -493,7 +499,7 @@ function ConversationItemView({ item }: { item: ConversationItem }) {
     default:
       return null;
   }
-}
+});
 
 // =============================================================================
 // Helpers for client commands
