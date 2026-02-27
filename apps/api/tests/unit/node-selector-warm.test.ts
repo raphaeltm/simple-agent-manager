@@ -10,7 +10,6 @@ import { resolve } from 'node:path';
 
 describe('warm node selection source contract', () => {
   const selectorFile = readFileSync(resolve(process.cwd(), 'src/services/node-selector.ts'), 'utf8');
-  const taskRunnerFile = readFileSync(resolve(process.cwd(), 'src/services/task-runner.ts'), 'utf8');
 
   describe('warm node query', () => {
     it('queries D1 for nodes with non-null warm_since', () => {
@@ -62,9 +61,6 @@ describe('warm node selection source contract', () => {
       expect(selectorFile).toContain('if (taskId && env.NODE_LIFECYCLE)');
     });
 
-    it('task runner passes task.id to selectNodeForTaskRun', () => {
-      expect(taskRunnerFile).toContain('selectNodeForTaskRun(db, userId, env, vmLocation, vmSize, task.id)');
-    });
   });
 
   describe('NodeSelectorEnv includes NODE_LIFECYCLE', () => {

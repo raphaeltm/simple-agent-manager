@@ -29,38 +29,35 @@ describe('Project default VM size — API endpoint', () => {
   });
 });
 
-describe('Project default VM size — task runner', () => {
-  const taskRunnerSource = readSource('services/task-runner.ts');
+describe('Project default VM size — task run routes', () => {
+  const taskRunsSource = readSource('routes/task-runs.ts');
+  const taskSubmitSource = readSource('routes/task-submit.ts');
 
-  it('imports DEFAULT_VM_SIZE from shared constants', () => {
-    expect(taskRunnerSource).toContain('DEFAULT_VM_SIZE');
-    expect(taskRunnerSource).toContain("from '@simple-agent-manager/shared'");
+  it('task-runs imports DEFAULT_VM_SIZE from shared constants', () => {
+    expect(taskRunsSource).toContain('DEFAULT_VM_SIZE');
+    expect(taskRunsSource).toContain("from '@simple-agent-manager/shared'");
   });
 
-  it('implements VM size precedence: explicit > project default > platform default', () => {
-    // The three-level fallback chain
-    expect(taskRunnerSource).toContain('input.vmSize');
-    expect(taskRunnerSource).toContain('project.defaultVmSize');
-    expect(taskRunnerSource).toContain('DEFAULT_VM_SIZE');
+  it('task-submit imports DEFAULT_VM_SIZE from shared constants', () => {
+    expect(taskSubmitSource).toContain('DEFAULT_VM_SIZE');
+    expect(taskSubmitSource).toContain("from '@simple-agent-manager/shared'");
   });
 
-  it('uses nullish coalescing for the fallback chain', () => {
-    // Should have the pattern: input.vmSize ?? project.defaultVmSize ?? DEFAULT_VM_SIZE
-    expect(taskRunnerSource).toContain('input.vmSize\n    ?? (project.defaultVmSize');
-    expect(taskRunnerSource).toContain('?? DEFAULT_VM_SIZE');
+  it('task-runs implements VM size precedence: explicit > project default > platform default', () => {
+    expect(taskRunsSource).toContain('body.vmSize');
+    expect(taskRunsSource).toContain('project.defaultVmSize');
+    expect(taskRunsSource).toContain('DEFAULT_VM_SIZE');
+  });
+
+  it('task-submit implements VM size precedence: explicit > project default > platform default', () => {
+    expect(taskSubmitSource).toContain('body.vmSize');
+    expect(taskSubmitSource).toContain('project.defaultVmSize');
+    expect(taskSubmitSource).toContain('DEFAULT_VM_SIZE');
   });
 
   it('casts project.defaultVmSize to VMSize | null', () => {
-    expect(taskRunnerSource).toContain('as VMSize | null');
-  });
-
-  it('reads project data before determining VM size', () => {
-    // project is loaded from DB
-    const projectLoadIdx = taskRunnerSource.indexOf('schema.projects.id, input.projectId');
-    const vmSizeIdx = taskRunnerSource.indexOf('project.defaultVmSize');
-    expect(projectLoadIdx).toBeGreaterThan(-1);
-    expect(vmSizeIdx).toBeGreaterThan(-1);
-    expect(projectLoadIdx).toBeLessThan(vmSizeIdx);
+    expect(taskRunsSource).toContain('as VMSize | null');
+    expect(taskSubmitSource).toContain('as VMSize | null');
   });
 });
 
