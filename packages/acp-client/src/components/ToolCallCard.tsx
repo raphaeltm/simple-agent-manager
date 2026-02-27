@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import type { ToolCallItem, ToolCallContentItem } from '../hooks/useAcpMessages';
 import { FileDiffView } from './FileDiffView';
 import { TerminalBlock } from './TerminalBlock';
@@ -33,8 +33,11 @@ function StatusIcon({ status }: { status: ToolCallItem['status'] }) {
 /**
  * Visual card for an agent tool execution.
  * Shows tool name, status, and collapsible output.
+ *
+ * Wrapped in React.memo to prevent re-renders when parent state changes
+ * don't affect this component's props.
  */
-export function ToolCallCard({ toolCall }: ToolCallCardProps) {
+export const ToolCallCard = React.memo(function ToolCallCard({ toolCall }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
   const hasContent = toolCall.content.some(hasRenderableContent);
 
@@ -81,7 +84,7 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
       )}
     </div>
   );
-}
+});
 
 function ToolCallContentView({ content }: { content: ToolCallContentItem }) {
   const fallbackJson = getRenderableFallback(content.data);

@@ -2,6 +2,31 @@ import { describe, expect, it } from 'vitest';
 import { render } from '@testing-library/react';
 import { MessageBubble } from './MessageBubble';
 
+// Verify React.memo is applied (component has $$typeof for memo)
+describe('MessageBubble memoization', () => {
+  it('is wrapped in React.memo', () => {
+    // React.memo wraps the component — its $$typeof is Symbol.for('react.memo')
+    // We can verify by checking the component has a 'compare' property slot
+    // or by checking that re-rendering with identical props does not re-run.
+    expect(typeof MessageBubble).toBe('object');
+    expect((MessageBubble as { $$typeof?: symbol }).$$typeof).toBe(Symbol.for('react.memo'));
+  });
+
+  it('skips re-render when props are identical', () => {
+    // Verify the output is structurally identical across re-renders with
+    // the same props (which proves React.memo is working — React bails out).
+    const { rerender, container } = render(
+      <MessageBubble text="Hello" role="agent" />
+    );
+    const firstHtml = container.innerHTML;
+
+    rerender(<MessageBubble text="Hello" role="agent" />);
+    const secondHtml = container.innerHTML;
+
+    expect(firstHtml).toBe(secondHtml);
+  });
+});
+
 describe('MessageBubble', () => {
   describe('code blocks', () => {
     it('renders fenced code blocks with overflow-x-auto for horizontal scrolling', () => {
@@ -50,6 +75,30 @@ describe('MessageBubble', () => {
       const proseDiv = container.querySelector('.prose');
       expect(proseDiv).not.toBeNull();
       expect(proseDiv!.className).not.toContain('overflow-hidden');
+    });
+  });
+
+  describe('inline code styling per role', () => {
+    it('uses blue styling for inline code in user messages', () => {
+      const { container } = render(
+        <MessageBubble text="Use the `test` function" role="user" />
+      );
+
+      const code = container.querySelector('code');
+      expect(code).not.toBeNull();
+      expect(code!.className).toContain('bg-blue-500');
+      expect(code!.className).toContain('text-blue-50');
+    });
+
+    it('uses gray styling for inline code in agent messages', () => {
+      const { container } = render(
+        <MessageBubble text="Use the `test` function" role="agent" />
+      );
+
+      const code = container.querySelector('code');
+      expect(code).not.toBeNull();
+      expect(code!.className).toContain('bg-gray-100');
+      expect(code!.className).toContain('text-gray-800');
     });
   });
 

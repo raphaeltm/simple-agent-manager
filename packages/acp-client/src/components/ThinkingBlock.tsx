@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 
 interface ThinkingBlockProps {
   text: string;
@@ -8,8 +8,11 @@ interface ThinkingBlockProps {
 /**
  * Collapsible thinking/reasoning section.
  * Shows animated indicator while active, collapsed by default when complete.
+ *
+ * Wrapped in React.memo to prevent re-renders when parent state changes
+ * don't affect this component's props.
  */
-export function ThinkingBlock({ text, active }: ThinkingBlockProps) {
+export const ThinkingBlock = React.memo(function ThinkingBlock({ text, active }: ThinkingBlockProps) {
   const [expanded, setExpanded] = useState(active);
 
   return (
@@ -39,4 +42,4 @@ export function ThinkingBlock({ text, active }: ThinkingBlockProps) {
       )}
     </div>
   );
-}
+});
