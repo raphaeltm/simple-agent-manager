@@ -13,13 +13,16 @@
 import { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type { RunTaskRequest, RunTaskResponse, TaskStatus } from '@simple-agent-manager/shared';
+import type { RunTaskRequest, RunTaskResponse, TaskStatus, VMSize, VMLocation } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import * as schema from '../db/schema';
+import { ulid } from '../lib/ulid';
 import { getAuth, requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireOwnedProject, requireOwnedTask } from '../middleware/project-auth';
-import { initiateTaskRun, cleanupTaskRun, TaskRunError } from '../services/task-runner';
+import { startTaskRunnerDO } from '../services/task-runner-do';
+import { cleanupTaskRun } from '../services/task-runner';
 import { isTaskBlocked } from '../services/task-graph';
 
 const taskRunsRoutes = new Hono<{ Bindings: Env }>();
@@ -125,49 +128,82 @@ taskRunsRoutes.post('/:taskId/run', async (c) => {
     throw errors.badRequest('vmLocation must be nbg1, fsn1, or hel1');
   }
 
-  try {
-    const result = await initiateTaskRun(
-      {
-        taskId: task.id,
-        projectId,
-        userId,
-        vmSize: body.vmSize,
-        vmLocation: body.vmLocation,
-        nodeId: body.nodeId,
-        branch: body.branch,
-        userName: auth.user.name,
-        userEmail: auth.user.email,
-      },
-      c.env,
-      (promise) => c.executionCtx.waitUntil(promise)
-    );
+  // Load project for repository/installationId
+  const [project] = await db
+    .select()
+    .from(schema.projects)
+    .where(
+      and(
+        eq(schema.projects.id, projectId),
+        eq(schema.projects.userId, userId)
+      )
+    )
+    .limit(1);
 
-    const response: RunTaskResponse = {
-      taskId: result.taskId,
-      status: result.status,
-      workspaceId: result.workspaceId,
-      nodeId: result.nodeId,
-      autoProvisionedNode: result.autoProvisionedNode,
-    };
-
-    return c.json(response, 202);
-  } catch (err) {
-    if (err instanceof TaskRunError) {
-      switch (err.code) {
-        case 'NOT_FOUND':
-          throw errors.notFound('Task');
-        case 'INVALID_STATUS':
-          throw errors.conflict(err.message);
-        case 'NODE_UNAVAILABLE':
-          throw errors.badRequest(err.message);
-        case 'LIMIT_EXCEEDED':
-          throw errors.badRequest(err.message);
-        default:
-          throw errors.internal(err.message);
-      }
-    }
-    throw err;
+  if (!project) {
+    throw errors.notFound('Project');
   }
+
+  // Determine VM config (precedence: explicit override > project default > platform default)
+  const vmSize: VMSize = body.vmSize
+    ?? (project.defaultVmSize as VMSize | null)
+    ?? DEFAULT_VM_SIZE;
+  const vmLocation: VMLocation = (body.vmLocation as VMLocation) ?? 'nbg1';
+  const branch = body.branch ?? project.defaultBranch;
+
+  // Look up user's githubId for noreply email fallback
+  const [userRow] = await db
+    .select({ githubId: schema.users.githubId })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .limit(1);
+
+  // Transition task to queued with initial execution step
+  const now = new Date().toISOString();
+  await db
+    .update(schema.tasks)
+    .set({ status: 'queued', executionStep: 'node_selection', updatedAt: now })
+    .where(eq(schema.tasks.id, task.id));
+
+  await db.insert(schema.taskStatusEvents).values({
+    id: ulid(),
+    taskId: task.id,
+    fromStatus: 'ready',
+    toStatus: 'queued',
+    actorType: 'system',
+    actorId: null,
+    reason: 'Autonomous task run initiated',
+    createdAt: now,
+  });
+
+  // Start TaskRunner DO — alarm-driven orchestration (TDF-2)
+  await startTaskRunnerDO(c.env, {
+    taskId: task.id,
+    projectId,
+    userId,
+    vmSize,
+    vmLocation,
+    branch,
+    preferredNodeId: body.nodeId,
+    userName: auth.user.name,
+    userEmail: auth.user.email,
+    githubId: userRow?.githubId ?? null,
+    taskTitle: task.title,
+    taskDescription: task.description,
+    repository: project.repository,
+    installationId: project.installationId,
+    projectDefaultVmSize: project.defaultVmSize as VMSize | null,
+  });
+
+  const response: RunTaskResponse = {
+    taskId: task.id,
+    status: 'queued',
+    workspaceId: null,
+    nodeId: null,
+    autoProvisionedNode: false,
+  };
+
+  return c.json(response, 202);
 });
 
 /**

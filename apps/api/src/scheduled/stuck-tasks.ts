@@ -6,6 +6,13 @@
  * with a descriptive error message including the execution step where they stalled.
  *
  * Called from the cron handler alongside node cleanup.
+ *
+ * TDF-2 compatibility: The TaskRunner DO manages orchestration via alarms and
+ * updates `execution_step` + `updated_at` on each step progression in D1.
+ * This cron serves as the outer safety net — if the DO dies or its alarms
+ * stop firing, the task's `updated_at` will eventually exceed the timeout
+ * thresholds and the cron will fail it. The DO uses optimistic locking
+ * (`WHERE status = X`) to detect cron intervention and abort gracefully.
  */
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';

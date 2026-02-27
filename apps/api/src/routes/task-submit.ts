@@ -27,7 +27,7 @@ import { getAuth, requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
 import { generateBranchName } from '../services/branch-name';
-import { executeTaskRun } from '../services/task-runner';
+import { startTaskRunnerDO } from '../services/task-runner-do';
 import * as projectDataService from '../services/project-data';
 
 const MAX_MESSAGE_LENGTH = 2000;
@@ -221,17 +221,6 @@ taskSubmitRoutes.post('/submit', async (c) => {
     vmLocation,
   });
 
-  // Load the task record for executeTaskRun (it expects a full schema.Task)
-  const [task] = await db
-    .select()
-    .from(schema.tasks)
-    .where(eq(schema.tasks.id, taskId))
-    .limit(1);
-
-  if (!task) {
-    throw errors.internal('Failed to load newly created task');
-  }
-
   // Look up user's githubId for noreply email fallback
   const [userRow] = await db
     .select({ githubId: schema.users.githubId })
@@ -239,25 +228,27 @@ taskSubmitRoutes.post('/submit', async (c) => {
     .where(eq(schema.users.id, userId))
     .limit(1);
 
-  // Kick off async execution via waitUntil
-  c.executionCtx.waitUntil(
-    executeTaskRun(
-      db,
-      c.env,
-      {
-        task,
-        project,
-        userId,
-        vmSize,
-        vmLocation,
-        branch,
-        preferredNodeId: body.nodeId,
-        userName: auth.user.name,
-        userEmail: auth.user.email,
-        githubId: userRow?.githubId ?? null,
-      }
-    )
-  );
+  // Start TaskRunner DO — alarm-driven orchestration (TDF-2).
+  // The DO handles the full lifecycle: node selection, provisioning,
+  // workspace creation, agent session, and transition to in_progress.
+  await startTaskRunnerDO(c.env, {
+    taskId,
+    projectId,
+    userId,
+    vmSize,
+    vmLocation,
+    branch,
+    preferredNodeId: body.nodeId,
+    userName: auth.user.name,
+    userEmail: auth.user.email,
+    githubId: userRow?.githubId ?? null,
+    taskTitle,
+    taskDescription: message,
+    repository: project.repository,
+    installationId: project.installationId,
+    outputBranch: branchName,
+    projectDefaultVmSize: project.defaultVmSize as VMSize | null,
+  });
 
   const response: SubmitTaskResponse = {
     taskId,

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { and, count, desc, eq } from 'drizzle-orm';
+import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { ulid } from '../lib/ulid';
 import type { Env } from '../index';
@@ -1204,6 +1204,31 @@ workspacesRoutes.post('/:id/ready', async (c) => {
     })
     .where(eq(schema.workspaces.id, workspaceId));
 
+  // Notify TaskRunner DO if a task is associated with this workspace (TDF-2).
+  // This is the callback-driven advancement that replaces D1 polling.
+  c.executionCtx.waitUntil(
+    (async () => {
+      const [task] = await db
+        .select({ id: schema.tasks.id, status: schema.tasks.status })
+        .from(schema.tasks)
+        .where(
+          and(
+            eq(schema.tasks.workspaceId, workspaceId),
+            inArray(schema.tasks.status, ['queued', 'delegated'])
+          )
+        )
+        .limit(1);
+
+      if (task) {
+        const { advanceTaskRunnerWorkspaceReady } = await import('../services/task-runner-do');
+        const readyStatus = nextStatus === 'running' ? 'running'
+          : nextStatus === 'recovery' ? 'recovery'
+          : 'error';
+        await advanceTaskRunnerWorkspaceReady(c.env, task.id, readyStatus, null);
+      }
+    })().catch(() => { /* best-effort — DO fallback polls D1 */ })
+  );
+
   return c.json({ success: true });
 });
 
@@ -1239,6 +1264,27 @@ workspacesRoutes.post('/:id/provisioning-failed', async (c) => {
       updatedAt: new Date().toISOString(),
     })
     .where(eq(schema.workspaces.id, workspaceId));
+
+  // Notify TaskRunner DO of workspace error (TDF-2)
+  c.executionCtx.waitUntil(
+    (async () => {
+      const [task] = await db
+        .select({ id: schema.tasks.id })
+        .from(schema.tasks)
+        .where(
+          and(
+            eq(schema.tasks.workspaceId, workspaceId),
+            inArray(schema.tasks.status, ['queued', 'delegated'])
+          )
+        )
+        .limit(1);
+
+      if (task) {
+        const { advanceTaskRunnerWorkspaceReady } = await import('../services/task-runner-do');
+        await advanceTaskRunnerWorkspaceReady(c.env, task.id, 'error', errorMessage);
+      }
+    })().catch(() => { /* best-effort */ })
+  );
 
   return c.json({ success: true });
 });

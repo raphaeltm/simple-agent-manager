@@ -60,6 +60,11 @@ class_name = "NodeLifecycle"
 name = "ADMIN_LOGS"
 class_name = "AdminLogs"
 
+# Durable Object for alarm-driven task orchestration (TDF-2 — one DO per task)
+[[durable_objects.bindings]]
+name = "TASK_RUNNER"
+class_name = "TaskRunner"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ProjectData"]
@@ -71,6 +76,10 @@ new_classes = ["NodeLifecycle"]
 [[migrations]]
 tag = "v3"
 new_classes = ["AdminLogs"]
+
+[[migrations]]
+tag = "v4"
+new_classes = ["TaskRunner"]
 
 # Workers AI for speech-to-text transcription
 [ai]
