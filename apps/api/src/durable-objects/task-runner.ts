@@ -67,6 +67,7 @@ type TaskRunnerEnv = {
   NODE_AGENT_REQUEST_TIMEOUT_MS?: string;
   NODE_WARM_TIMEOUT_MS?: string;
   TASK_RUN_CLEANUP_DELAY_MS?: string;
+  DEFAULT_TASK_AGENT_TYPE?: string;
   KV: KVNamespace;
 };
 
@@ -76,6 +77,7 @@ interface StepResults {
   workspaceId: string | null;
   chatSessionId: string | null;
   agentSessionId: string | null;
+  agentStarted: boolean;
 }
 
 interface TaskRunConfig {
@@ -169,6 +171,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         workspaceId: null,
         chatSessionId: input.config.chatSessionId ?? null,
         agentSessionId: null,
+        agentStarted: false,
       },
       config: input.config,
       retryCount: 0,
@@ -698,57 +701,91 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       throw new Error('Missing nodeId or workspaceId for agent session creation');
     }
 
-    // If agent session already created (retry), skip
-    if (state.stepResults.agentSessionId) {
+    let sessionId = state.stepResults.agentSessionId;
+
+    // Step 1: Create the agent session (skip if already created on a previous attempt)
+    if (sessionId) {
       const existing = await this.env.DATABASE.prepare(
         `SELECT id FROM agent_sessions WHERE id = ?`
-      ).bind(state.stepResults.agentSessionId).first<{ id: string }>();
+      ).bind(sessionId).first<{ id: string }>();
 
-      if (existing) {
-        // Already created — just advance
-        await this.transitionToInProgress(state);
-        return;
+      if (!existing) {
+        // StepResults had a sessionId but it's gone from D1 — reset and recreate
+        sessionId = null;
+        state.stepResults.agentSessionId = null;
+        state.stepResults.agentStarted = false;
+        await this.ctx.storage.put('state', state);
       }
     }
 
-    const { ulid } = await import('../lib/ulid');
-    const { createAgentSessionOnNode } = await import('../services/node-agent');
-    const { drizzle } = await import('drizzle-orm/d1');
-    const schema = await import('../db/schema');
+    if (!sessionId) {
+      const { ulid } = await import('../lib/ulid');
+      const { createAgentSessionOnNode } = await import('../services/node-agent');
+      const { drizzle } = await import('drizzle-orm/d1');
+      const schema = await import('../db/schema');
 
-    const db = drizzle(this.env.DATABASE, { schema });
-    const sessionId = ulid();
-    const sessionLabel = `Task: ${state.config.taskTitle.slice(0, 40)}`;
-    const now = new Date().toISOString();
+      const db = drizzle(this.env.DATABASE, { schema });
+      sessionId = ulid();
+      const sessionLabel = `Task: ${state.config.taskTitle.slice(0, 40)}`;
+      const now = new Date().toISOString();
 
-    await db.insert(schema.agentSessions).values({
-      id: sessionId,
-      workspaceId: state.stepResults.workspaceId,
-      userId: state.userId,
-      status: 'running',
-      label: sessionLabel,
-      createdAt: now,
-      updatedAt: now,
-    });
+      await db.insert(schema.agentSessions).values({
+        id: sessionId,
+        workspaceId: state.stepResults.workspaceId,
+        userId: state.userId,
+        status: 'running',
+        label: sessionLabel,
+        createdAt: now,
+        updatedAt: now,
+      });
 
-    state.stepResults.agentSessionId = sessionId;
-    await this.ctx.storage.put('state', state);
+      state.stepResults.agentSessionId = sessionId;
+      await this.ctx.storage.put('state', state);
 
-    await createAgentSessionOnNode(
-      state.stepResults.nodeId,
-      state.stepResults.workspaceId,
-      sessionId,
-      sessionLabel,
-      this.env as any,
-      state.userId,
-    );
+      await createAgentSessionOnNode(
+        state.stepResults.nodeId,
+        state.stepResults.workspaceId,
+        sessionId,
+        sessionLabel,
+        this.env as any,
+        state.userId,
+      );
 
-    log.info('task_runner_do.step.agent_session_created', {
-      taskId: state.taskId,
-      agentSessionId: sessionId,
-      workspaceId: state.stepResults.workspaceId,
-      nodeId: state.stepResults.nodeId,
-    });
+      log.info('task_runner_do.step.agent_session_created', {
+        taskId: state.taskId,
+        agentSessionId: sessionId,
+        workspaceId: state.stepResults.workspaceId,
+        nodeId: state.stepResults.nodeId,
+      });
+    }
+
+    // Step 2: Start the agent with the initial prompt (skip if already started)
+    // This two-step approach ensures that if create succeeds but start fails,
+    // a retry will skip creation and retry only the start call.
+    if (!state.stepResults.agentStarted) {
+      const { startAgentSessionOnNode } = await import('../services/node-agent');
+      const agentType = this.env.DEFAULT_TASK_AGENT_TYPE || 'claude-code';
+      const initialPrompt = state.config.taskDescription || state.config.taskTitle;
+
+      await startAgentSessionOnNode(
+        state.stepResults.nodeId,
+        state.stepResults.workspaceId,
+        sessionId,
+        agentType,
+        initialPrompt,
+        this.env as any,
+        state.userId,
+      );
+
+      state.stepResults.agentStarted = true;
+      await this.ctx.storage.put('state', state);
+
+      log.info('task_runner_do.step.agent_session_started', {
+        taskId: state.taskId,
+        agentSessionId: sessionId,
+        agentType,
+      });
+    }
 
     await this.transitionToInProgress(state);
   }

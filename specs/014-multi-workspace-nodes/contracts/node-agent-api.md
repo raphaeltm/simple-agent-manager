@@ -56,6 +56,13 @@
 - Creates a new agent session.
 - The VM agent handles session deduplication in-memory (no control-plane KV layer).
 
+- `POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/start`
+- Starts the agent process and sends an initial prompt for a previously created session.
+- Body: `{ "agentType": "claude-code", "initialPrompt": "..." }`
+- Returns 202 with `{ "status": "starting", "sessionId": "..." }`.
+- The agent runs asynchronously — no browser WebSocket is required.
+- Used by the TaskRunner DO to deliver the task description after creating the session.
+
 - `POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/stop`
 - Stops a running agent session.
 

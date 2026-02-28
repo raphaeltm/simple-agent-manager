@@ -3,11 +3,13 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os/exec"
 	"strings"
 
+	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/persistence"
@@ -553,6 +555,133 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusCreated, session)
+}
+
+// handleStartAgentSession starts an agent process and sends an initial prompt
+// for a previously created agent session. This is the missing link for task-driven
+// workspaces: the control plane creates the session (handleCreateAgentSession),
+// then starts the agent with the task description as the initial prompt.
+//
+// The agent starts and runs headlessly — no browser WebSocket is required.
+// When a browser connects later, it receives full message replay.
+// The OnPromptComplete callback handles git push and task status updates.
+func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	sessionID := r.PathValue("sessionId")
+	if workspaceID == "" || sessionID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId and sessionId are required")
+		return
+	}
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+
+	var body struct {
+		AgentType     string `json:"agentType"`
+		InitialPrompt string `json:"initialPrompt"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(body.AgentType) == "" {
+		writeError(w, http.StatusBadRequest, "agentType is required")
+		return
+	}
+	if strings.TrimSpace(body.InitialPrompt) == "" {
+		writeError(w, http.StatusBadRequest, "initialPrompt is required")
+		return
+	}
+
+	session, exists := s.agentSessions.Get(workspaceID, sessionID)
+	if !exists {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	if session.Status != agentsessions.StatusRunning {
+		writeError(w, http.StatusConflict, "session is not running")
+		return
+	}
+
+	runtime, ok := s.getWorkspaceRuntime(workspaceID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+
+	// Create or retrieve the SessionHost for this session.
+	hostKey := workspaceID + ":" + sessionID
+	host := s.getOrCreateSessionHost(hostKey, workspaceID, sessionID, session, runtime, "")
+
+	s.appendNodeEvent(workspaceID, "info", "agent_session.starting", "Starting agent with initial prompt", map[string]interface{}{
+		"sessionId": sessionID,
+		"agentType": body.AgentType,
+	})
+
+	// Start agent and send initial prompt in a background goroutine.
+	// The endpoint returns 202 immediately — the agent runs asynchronously.
+	go s.startAgentWithPrompt(host, workspaceID, sessionID, body.AgentType, body.InitialPrompt)
+
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{
+		"status":    "starting",
+		"sessionId": sessionID,
+	})
+}
+
+// startAgentWithPrompt runs SelectAgent and then sends the initial prompt.
+// Called as a goroutine from handleStartAgentSession.
+func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt string) {
+	ctx := context.Background()
+
+	// Idempotency: if the host is already prompting, a prompt is in progress —
+	// do not send a duplicate. If already ready, skip agent selection.
+	currentStatus := host.Status()
+	if currentStatus == acp.HostPrompting {
+		slog.Info("Agent already processing a prompt, skipping duplicate",
+			"workspace", workspaceID, "session", sessionID)
+		return
+	}
+	if currentStatus == acp.HostReady {
+		slog.Info("Agent already running, skipping SelectAgent",
+			"workspace", workspaceID, "session", sessionID)
+	} else {
+		host.SelectAgent(ctx, agentType)
+
+		if host.Status() != acp.HostReady {
+			errMsg := "Agent failed to start for task-driven session"
+			slog.Error(errMsg, "workspace", workspaceID, "session", sessionID, "status", string(host.Status()))
+			s.appendNodeEvent(workspaceID, "error", "agent_session.start_failed", errMsg, map[string]interface{}{
+				"sessionId": sessionID,
+				"agentType": agentType,
+			})
+
+			// Fire the completion callback with error so the control plane
+			// can transition the task to failed.
+			if cb := host.OnPromptCompleteCallback(); cb != nil {
+				cb("error", fmt.Errorf("%s: agent status is %s", errMsg, host.Status()))
+			}
+			return
+		}
+	}
+
+	slog.Info("Agent ready, sending initial prompt",
+		"workspace", workspaceID, "session", sessionID, "agentType", agentType)
+	s.appendNodeEvent(workspaceID, "info", "agent_session.prompt_sent", "Sending initial task prompt to agent", map[string]interface{}{
+		"sessionId": sessionID,
+		"agentType": agentType,
+	})
+
+	// Build JSON-RPC params matching what HandlePrompt expects.
+	promptParams, _ := json.Marshal(map[string]interface{}{
+		"prompt": []map[string]string{
+			{"type": "text", "text": initialPrompt},
+		},
+	})
+	syntheticReqID, _ := json.Marshal("server-initiated-1")
+
+	// HandlePrompt blocks until the agent completes. The OnPromptComplete
+	// callback fires automatically, handling git push and task status updates.
+	host.HandlePrompt(ctx, syntheticReqID, promptParams, "server")
 }
 
 func (s *Server) handleStopAgentSession(w http.ResponseWriter, r *http.Request) {

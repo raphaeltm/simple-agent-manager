@@ -301,6 +301,170 @@ func TestAgentSessionResponseShape(t *testing.T) {
 }
 
 // =============================================================================
+// POST /workspaces/:id/agent-sessions/:sessionId/start — Request/Response Contract
+// =============================================================================
+
+func TestStartAgentSessionRequestParsing(t *testing.T) {
+	t.Parallel()
+
+	body := map[string]interface{}{
+		"agentType":     "claude-code",
+		"initialPrompt": "Fix the login timeout bug in auth.ts",
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	var parsed struct {
+		AgentType     string `json:"agentType"`
+		InitialPrompt string `json:"initialPrompt"`
+	}
+	if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&parsed); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+
+	if parsed.AgentType != "claude-code" {
+		t.Fatalf("agentType mismatch: got %s", parsed.AgentType)
+	}
+	if parsed.InitialPrompt != "Fix the login timeout bug in auth.ts" {
+		t.Fatalf("initialPrompt mismatch: got %s", parsed.InitialPrompt)
+	}
+}
+
+func TestStartAgentSessionResponseShape(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	writeJSON(rec, http.StatusAccepted, map[string]interface{}{
+		"status":    "starting",
+		"sessionId": "sess-abc",
+	})
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["status"] != "starting" {
+		t.Fatalf("expected status=starting, got %v", resp["status"])
+	}
+	if resp["sessionId"] != "sess-abc" {
+		t.Fatalf("expected sessionId=sess-abc, got %v", resp["sessionId"])
+	}
+}
+
+// =============================================================================
+// POST /workspaces/:id/agent-sessions/:sessionId/start — Handler-Level Tests
+// =============================================================================
+
+func TestStartAgentSessionHandler_MissingPathParams(t *testing.T) {
+	t.Parallel()
+	s := newContractTestServer()
+
+	// Both params empty — handler checks workspaceID == "" || sessionID == ""
+	body := `{"agentType":"claude-code","initialPrompt":"do stuff"}`
+	req := httptest.NewRequest(http.MethodPost, "/workspaces//agent-sessions//start", strings.NewReader(body))
+	// SetPathValue with empty strings to simulate missing path params
+	req.SetPathValue("workspaceId", "")
+	req.SetPathValue("sessionId", "")
+	rec := httptest.NewRecorder()
+
+	s.handleStartAgentSession(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing path params, got %d", rec.Code)
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["error"] != "workspaceId and sessionId are required" {
+		t.Fatalf("unexpected error message: %q", resp["error"])
+	}
+}
+
+func TestStartAgentSessionHandler_MissingAuth(t *testing.T) {
+	t.Parallel()
+	s := newContractTestServer()
+
+	body := `{"agentType":"claude-code","initialPrompt":"do stuff"}`
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/ws-existing/agent-sessions/sess-1/start", strings.NewReader(body))
+	req.SetPathValue("workspaceId", "ws-existing")
+	req.SetPathValue("sessionId", "sess-1")
+	// No Authorization header
+	rec := httptest.NewRecorder()
+
+	s.handleStartAgentSession(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for missing auth, got %d", rec.Code)
+	}
+}
+
+func TestStartAgentSessionHandler_EmptyBearerToken(t *testing.T) {
+	t.Parallel()
+	s := newContractTestServer()
+
+	body := `{"agentType":"claude-code","initialPrompt":"do stuff"}`
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/ws-existing/agent-sessions/sess-1/start", strings.NewReader(body))
+	req.SetPathValue("workspaceId", "ws-existing")
+	req.SetPathValue("sessionId", "sess-1")
+	req.Header.Set("Authorization", "Bearer ")
+	rec := httptest.NewRecorder()
+
+	s.handleStartAgentSession(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for empty bearer token, got %d", rec.Code)
+	}
+}
+
+func TestStartAgentSessionSourceValidation(t *testing.T) {
+	t.Parallel()
+
+	// Verify the handler source contains all required validation checks.
+	// Handler-level tests with real HTTP require JWT auth setup, so we verify
+	// the validation logic exists in the source code via contract.
+	content, err := os.ReadFile("workspaces.go")
+	if err != nil {
+		t.Fatalf("read workspaces.go: %v", err)
+	}
+	src := string(content)
+
+	validationChecks := []string{
+		// Path param validation
+		`workspaceID == "" || sessionID == ""`,
+		// Auth check
+		"requireNodeManagementAuth",
+		// Body field validation
+		`AgentType`,
+		`InitialPrompt`,
+		`"agentType is required"`,
+		`"initialPrompt is required"`,
+		// Session existence check
+		"agentSessions.Get",
+		"session not found",
+		// Session status check
+		"StatusRunning",
+		"session is not running",
+		// Workspace runtime check
+		"getWorkspaceRuntime",
+		"workspace not found",
+		// Async goroutine launch
+		"go s.startAgentWithPrompt",
+		// 202 response
+		"StatusAccepted",
+	}
+
+	for _, check := range validationChecks {
+		if !strings.Contains(src, check) {
+			t.Fatalf("missing validation logic in handleStartAgentSession: %q", check)
+		}
+	}
+}
+
+// =============================================================================
 // Error Response Format Contract
 // =============================================================================
 
@@ -444,6 +608,7 @@ func TestContractEndpointRegistration(t *testing.T) {
 		`"POST /workspaces"`,
 		`"DELETE /workspaces/{workspaceId}"`,
 		`"POST /workspaces/{workspaceId}/agent-sessions"`,
+		`"POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/start"`,
 		`"POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/stop"`,
 		`"GET /workspaces/{workspaceId}/agent-sessions"`,
 	}

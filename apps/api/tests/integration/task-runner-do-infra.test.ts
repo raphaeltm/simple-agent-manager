@@ -174,3 +174,105 @@ describe('Constitution Principle XI compliance', () => {
     }
   });
 });
+
+// =============================================================================
+// Initial Prompt Delivery (post-mortem fix)
+// =============================================================================
+
+const nodeAgentSource = readFileSync(
+  resolve(process.cwd(), 'src/services/node-agent.ts'),
+  'utf8'
+);
+
+describe('Initial prompt delivery: startAgentSessionOnNode', () => {
+  it('exports startAgentSessionOnNode function', () => {
+    expect(nodeAgentSource).toContain('export async function startAgentSessionOnNode');
+  });
+
+  it('accepts agentType and initialPrompt parameters', () => {
+    // Verify the function signature includes the required params
+    expect(nodeAgentSource).toContain('agentType: string');
+    expect(nodeAgentSource).toContain('initialPrompt: string');
+  });
+
+  it('POSTs to the /start endpoint', () => {
+    expect(nodeAgentSource).toContain('/agent-sessions/${sessionId}/start');
+  });
+
+  it('sends agentType and initialPrompt in the request body', () => {
+    expect(nodeAgentSource).toContain('JSON.stringify({ agentType, initialPrompt })');
+  });
+});
+
+describe('Initial prompt delivery: TaskRunner DO wiring', () => {
+  it('handleAgentSession calls startAgentSessionOnNode', () => {
+    expect(doSource).toContain('startAgentSessionOnNode');
+  });
+
+  it('passes taskDescription as the initial prompt', () => {
+    expect(doSource).toContain('state.config.taskDescription');
+  });
+
+  it('falls back to taskTitle when description is missing', () => {
+    expect(doSource).toContain('state.config.taskDescription || state.config.taskTitle');
+  });
+
+  it('uses DEFAULT_TASK_AGENT_TYPE env var with claude-code fallback', () => {
+    expect(doSource).toContain('DEFAULT_TASK_AGENT_TYPE');
+    expect(doSource).toContain("'claude-code'");
+  });
+
+  it('logs agent_session_started event', () => {
+    expect(doSource).toContain('task_runner_do.step.agent_session_started');
+  });
+});
+
+describe('Initial prompt delivery: two-step idempotency', () => {
+  it('StepResults interface includes agentStarted boolean', () => {
+    expect(doSource).toContain('agentStarted: boolean');
+  });
+
+  it('agentStarted is initialized to false', () => {
+    expect(doSource).toContain('agentStarted: false');
+  });
+
+  it('agentStarted is set to true after successful start', () => {
+    // After startAgentSessionOnNode succeeds, state.stepResults.agentStarted = true
+    expect(doSource).toContain('state.stepResults.agentStarted = true');
+  });
+
+  it('skips start call when agentStarted is already true', () => {
+    // The retry guard: if (!state.stepResults.agentStarted)
+    expect(doSource).toContain('!state.stepResults.agentStarted');
+  });
+
+  it('persists state between create and start steps', () => {
+    // Both steps call ctx.storage.put after their respective flag changes
+    // Count storage.put calls in handleAgentSession
+    const handleAgentSection = doSource.slice(
+      doSource.indexOf('private async handleAgentSession('),
+      doSource.indexOf('private async', doSource.indexOf('private async handleAgentSession(') + 50)
+    );
+    const storagePuts = handleAgentSection.match(/this\.ctx\.storage\.put\('state'/g);
+    expect(storagePuts).not.toBeNull();
+    // At least 3: after sessionId set, after reset (edge case), and after agentStarted
+    expect(storagePuts!.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('Initial prompt delivery: Env and config', () => {
+  it('Env interface declares DEFAULT_TASK_AGENT_TYPE', () => {
+    expect(indexSource).toContain('DEFAULT_TASK_AGENT_TYPE?: string');
+  });
+
+  it('wrangler.toml top-level has DEFAULT_TASK_AGENT_TYPE', () => {
+    expect(wranglerConfig).toContain('DEFAULT_TASK_AGENT_TYPE = "claude-code"');
+  });
+
+  it('DEFAULT_TASK_AGENT_TYPE appears in all environment vars sections', () => {
+    const matches = wranglerConfig.match(/DEFAULT_TASK_AGENT_TYPE/g);
+    expect(matches).not.toBeNull();
+    // top-level + staging + production = at least 3
+    expect(matches!.length).toBeGreaterThanOrEqual(3);
+  });
+});

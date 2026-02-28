@@ -240,6 +240,28 @@ export async function createAgentSessionOnNode(
   });
 }
 
+export async function startAgentSessionOnNode(
+  nodeId: string,
+  workspaceId: string,
+  sessionId: string,
+  agentType: string,
+  initialPrompt: string,
+  env: Env,
+  userId: string
+): Promise<unknown> {
+  return nodeAgentRequest(
+    nodeId,
+    env,
+    `/workspaces/${workspaceId}/agent-sessions/${sessionId}/start`,
+    {
+      method: 'POST',
+      userId,
+      workspaceId,
+      body: JSON.stringify({ agentType, initialPrompt }),
+    }
+  );
+}
+
 export async function stopAgentSessionOnNode(
   nodeId: string,
   workspaceId: string,

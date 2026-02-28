@@ -269,9 +269,18 @@ VM Agent receives POST /workspaces:
 
 VM Agent receives POST /workspaces/:id/agent-sessions:
     |
-    |-- Start ACP (Agent Communication Protocol) session
-    |-- Task description is the initial prompt
-    |-- Agent (Claude Code) executes autonomously
+    |-- Register session in memory + persist tab record
+    |-- (Does NOT start the agent — session registration only)
+
+VM Agent receives POST /workspaces/:id/agent-sessions/:sessionId/start:
+    |
+    |-- { agentType: "claude-code", initialPrompt: "Fix the bug..." }
+    |-- Creates SessionHost (getOrCreateSessionHost)
+    |-- Launches background goroutine:
+    |   |-- SelectAgent() — fetch creds, install binary, ACP handshake, NewSession
+    |   |-- HandlePrompt() — sends initialPrompt as first ACP prompt
+    |-- Returns 202 Accepted immediately (async execution)
+    |-- Agent (Claude Code) executes autonomously (headless, no browser required)
     |
     |-- Message persistence (during execution):
     |   VM agent buffers messages locally
