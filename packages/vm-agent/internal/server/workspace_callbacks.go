@@ -70,11 +70,16 @@ func (s *Server) notifyWorkspaceProvisioningFailed(
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
-			return fmt.Errorf(
+			err := fmt.Errorf(
 				"provisioning-failed callback returned HTTP %d: %s",
 				resp.StatusCode,
 				strings.TrimSpace(string(responseBody)),
 			)
+			// 4xx errors are permanent — retrying won't help
+			if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+				return callbackretry.Permanent(err)
+			}
+			return err
 		}
 
 		return nil

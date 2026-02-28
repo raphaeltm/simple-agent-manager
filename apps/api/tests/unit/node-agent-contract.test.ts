@@ -328,7 +328,7 @@ describe('Contract schemas: VM Agent -> Control Plane', () => {
             sessionId: 'sess-abc',
             role: 'assistant',
             content: 'Hi there!',
-            toolMetadata: { tool: 'bash', target: 'ls', status: 'success' },
+            toolMetadata: '{"tool":"bash","target":"ls","status":"success"}',
             timestamp: '2024-01-01T00:00:01Z',
           },
         ],

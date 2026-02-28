@@ -4,12 +4,32 @@ package callbackretry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
 	"math/rand"
 	"time"
 )
+
+// PermanentError wraps an error that should not be retried.
+// Return Permanent(err) from the fn callback to stop retries immediately.
+type PermanentError struct {
+	Err error
+}
+
+func (e *PermanentError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *PermanentError) Unwrap() error {
+	return e.Err
+}
+
+// Permanent wraps err as a PermanentError to stop retries.
+func Permanent(err error) error {
+	return &PermanentError{Err: err}
+}
 
 // Config configures the retry behavior.
 type Config struct {
@@ -34,9 +54,7 @@ func DefaultConfig() Config {
 }
 
 // Do executes fn with exponential backoff and jitter.
-// It retries on any non-nil error. The caller can wrap fn to skip retries
-// on permanent errors by returning nil.
-//
+// It stops retrying if fn returns a PermanentError (use Permanent() to wrap).
 // Returns the last error if all retries are exhausted.
 func Do(ctx context.Context, cfg Config, operationName string, fn func(ctx context.Context) error) error {
 	if cfg.InitialDelay <= 0 {
@@ -64,6 +82,17 @@ func Do(ctx context.Context, cfg Config, operationName string, fn func(ctx conte
 				)
 			}
 			return nil
+		}
+
+		// Check for permanent (non-retryable) error
+		var permErr *PermanentError
+		if errors.As(err, &permErr) {
+			slog.Warn("Callback returned permanent error, not retrying",
+				"operation", operationName,
+				"attempt", attempt,
+				"error", permErr.Err,
+			)
+			return permErr.Err
 		}
 
 		lastErr = err

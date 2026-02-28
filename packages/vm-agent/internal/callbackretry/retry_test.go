@@ -208,3 +208,64 @@ func TestDoIncludesOperationNameInError(t *testing.T) {
 		t.Fatalf("expected operation name in error, got %v", err)
 	}
 }
+
+func TestDoStopsOnPermanentError(t *testing.T) {
+	t.Parallel()
+
+	var attempts int32
+	cfg := Config{
+		InitialDelay: 5 * time.Millisecond,
+		MaxDelay:     10 * time.Millisecond,
+		MaxElapsed:   10 * time.Second,
+		MaxAttempts:  10,
+	}
+
+	originalErr := errors.New("bad request: invalid workspace ID")
+	err := Do(context.Background(), cfg, "test-permanent", func(_ context.Context) error {
+		atomic.AddInt32(&attempts, 1)
+		return Permanent(originalErr)
+	})
+
+	if err == nil {
+		t.Fatal("expected error on permanent failure")
+	}
+	// PermanentError should be unwrapped — the returned error is the original
+	if !errors.Is(err, originalErr) {
+		t.Fatalf("expected original error to be returned, got %v", err)
+	}
+	// Should NOT have retried
+	if atomic.LoadInt32(&attempts) != 1 {
+		t.Fatalf("expected 1 attempt (no retry), got %d", atomic.LoadInt32(&attempts))
+	}
+}
+
+func TestDoRetriesThenHitsPermanentError(t *testing.T) {
+	t.Parallel()
+
+	var attempts int32
+	cfg := Config{
+		InitialDelay: 5 * time.Millisecond,
+		MaxDelay:     10 * time.Millisecond,
+		MaxElapsed:   10 * time.Second,
+		MaxAttempts:  10,
+	}
+
+	err := Do(context.Background(), cfg, "test-transient-then-permanent", func(_ context.Context) error {
+		n := atomic.AddInt32(&attempts, 1)
+		if n < 3 {
+			return errors.New("transient 503")
+		}
+		// On 3rd attempt, return permanent error
+		return Permanent(errors.New("permanent 401 unauthorized"))
+	})
+
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "permanent 401 unauthorized") {
+		t.Fatalf("expected permanent error message, got %v", err)
+	}
+	if atomic.LoadInt32(&attempts) != 3 {
+		t.Fatalf("expected 3 attempts, got %d", atomic.LoadInt32(&attempts))
+	}
+}

@@ -2018,7 +2018,11 @@ func markWorkspaceReady(ctx context.Context, cfg *config.Config, status string) 
 	endpoint := fmt.Sprintf("%s/api/workspaces/%s/ready", strings.TrimRight(cfg.ControlPlaneURL, "/"), cfg.WorkspaceID)
 
 	return callbackretry.Do(ctx, callbackretry.DefaultConfig(), "workspace-ready", func(retryCtx context.Context) error {
-		req, err := http.NewRequestWithContext(retryCtx, http.MethodPost, endpoint, bytes.NewReader(body))
+		// Per-request timeout to prevent a single hung request from consuming the entire retry budget
+		requestCtx, cancel := context.WithTimeout(retryCtx, 30*time.Second)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {
 			return fmt.Errorf("failed to create ready request: %w", err)
 		}
@@ -2033,7 +2037,12 @@ func markWorkspaceReady(ctx context.Context, cfg *config.Config, status string) 
 
 		if res.StatusCode < 200 || res.StatusCode >= 300 {
 			respBody, _ := io.ReadAll(io.LimitReader(res.Body, 8*1024))
-			return fmt.Errorf("ready endpoint returned HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(respBody)))
+			err := fmt.Errorf("ready endpoint returned HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(respBody)))
+			// 4xx errors are permanent — retrying won't help
+			if res.StatusCode >= 400 && res.StatusCode < 500 {
+				return callbackretry.Permanent(err)
+			}
+			return err
 		}
 
 		slog.Info("Workspace marked ready", "workspaceID", cfg.WorkspaceID, "status", status)

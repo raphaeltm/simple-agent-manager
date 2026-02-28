@@ -162,10 +162,7 @@ export const PersistMessageItemSchema = z.object({
   sessionId: z.string().min(1),
   role: MessageRoleSchema,
   content: z.string().min(1),
-  toolMetadata: z.union([
-    z.record(z.unknown()),
-    z.null(),
-  ]).optional(),
+  toolMetadata: z.string().nullable().optional(),
   timestamp: z.string().min(1),
 });
 
