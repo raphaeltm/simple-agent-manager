@@ -1601,8 +1601,12 @@ func TestPrepareWorkspaceReturnsReadyEndpointError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected PrepareWorkspace to fail when /ready returns non-2xx")
 	}
-	if !strings.Contains(err.Error(), "ready endpoint returned HTTP 500") {
-		t.Fatalf("expected ready endpoint error, got: %v", err)
+	// With retry logic, the error may be wrapped by callbackretry.Do
+	// or terminated by context cancellation
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "ready endpoint returned HTTP 500") &&
+		!strings.Contains(errMsg, "workspace-ready") {
+		t.Fatalf("expected ready endpoint error or retry wrapper, got: %v", err)
 	}
 }
 
