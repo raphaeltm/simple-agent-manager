@@ -433,7 +433,7 @@ export default {
     }));
 
     // Check for stuck provisioning workspaces
-    const timedOut = await checkProvisioningTimeouts(env.DATABASE);
+    const timedOut = await checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE);
 
     // Migrate orphaned workspaces (those with NULL projectId) to projects
     const db = drizzle(env.DATABASE, { schema });
@@ -457,10 +457,13 @@ export default {
       staleNodesDestroyed: nodeCleanup.staleDestroyed,
       lifetimeNodesDestroyed: nodeCleanup.lifetimeDestroyed,
       nodeCleanupErrors: nodeCleanup.errors,
+      orphanedWorkspacesFlagged: nodeCleanup.orphanedWorkspacesFlagged,
+      orphanedNodesFlagged: nodeCleanup.orphanedNodesFlagged,
       stuckTasksFailedQueued: stuckTasks.failedQueued,
       stuckTasksFailedDelegated: stuckTasks.failedDelegated,
       stuckTasksFailedInProgress: stuckTasks.failedInProgress,
       stuckTaskErrors: stuckTasks.errors,
+      stuckTaskDoHealthChecked: stuckTasks.doHealthChecked,
       observabilityPurgedByAge: observabilityPurge.deletedByAge,
       observabilityPurgedByCount: observabilityPurge.deletedByCount,
     }));
