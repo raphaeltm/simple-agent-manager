@@ -302,8 +302,19 @@ describe('TaskRunner DO step handlers', () => {
       expect(doSource).toContain('this.getWorkspaceReadyTimeoutMs()');
     });
 
-    it('falls back to D1 polling', () => {
-      expect(doSource).toContain('workspace_ready_from_d1');
+    it('does NOT poll D1 for workspace status (TDF-5: pure callback-driven)', () => {
+      expect(doSource).not.toContain('workspace_ready_from_d1');
+    });
+
+    it('schedules timeout alarm when waiting for callback', () => {
+      // After TDF-5, the alarm is scheduled at the remaining timeout boundary
+      // instead of polling D1 at a fixed interval
+      const section = doSource.slice(
+        doSource.indexOf('private async handleWorkspaceReady('),
+        doSource.indexOf('private async handleAgentSession(')
+      );
+      expect(section).toContain('const remaining = timeoutMs - elapsed');
+      expect(section).toContain('setAlarm(Date.now() + remaining)');
     });
 
     it('advances to agent_session on ready', () => {

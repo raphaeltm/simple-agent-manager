@@ -154,13 +154,15 @@ describe('workspace ready callback notifies TaskRunner DO', () => {
     expect(workspacesSource).toContain("inArray(schema.tasks.status, ['queued', 'delegated'])");
   });
 
-  it('wraps in waitUntil for best-effort (non-blocking)', () => {
+  it('notifies DO inline (not waitUntil) per TDF-5', () => {
     const readySection = workspacesSource.slice(
       workspacesSource.indexOf("/:id/ready'"),
       workspacesSource.indexOf("/:id/provisioning-failed'")
     );
-    expect(readySection).toContain('c.executionCtx.waitUntil');
+    // TDF-5: moved from waitUntil to inline await
+    expect(readySection).not.toContain('c.executionCtx.waitUntil(');
     expect(readySection).toContain('advanceTaskRunnerWorkspaceReady');
+    expect(readySection).toContain('await advanceTaskRunnerWorkspaceReady');
   });
 
   it('provisioning-failed route also notifies DO', () => {
