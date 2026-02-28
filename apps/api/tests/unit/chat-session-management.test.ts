@@ -65,7 +65,7 @@ describe('TDF-6 Fix 1: Single session creation point', () => {
     expect(wsCreationSection).not.toContain('projectDataService.createSession');
   });
 
-  it('TaskRunner DO calls linkSessionToWorkspace instead of createSession', () => {
+  it('TaskRunner DO calls ensureSessionLinked (which calls linkSessionToWorkspace)', () => {
     const wsCreationStart = taskRunnerDoSource.indexOf(
       'private async handleWorkspaceCreation('
     );
@@ -74,7 +74,10 @@ describe('TDF-6 Fix 1: Single session creation point', () => {
     );
     const wsCreationSection = taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
 
-    expect(wsCreationSection).toContain('linkSessionToWorkspace');
+    // handleWorkspaceCreation delegates to ensureSessionLinked
+    expect(wsCreationSection).toContain('ensureSessionLinked');
+    // ensureSessionLinked calls linkSessionToWorkspace
+    expect(taskRunnerDoSource).toContain('linkSessionToWorkspace');
   });
 
   it('task-submit passes sessionId to TaskRunner DO via chatSessionId', () => {
@@ -186,7 +189,12 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
     );
   });
 
-  it('TaskRunner DO updates workspace.chatSessionId in D1 with existing sessionId', () => {
+  it('TaskRunner DO updates workspace.chatSessionId via ensureSessionLinked', () => {
+    // The D1 update is in ensureSessionLinked (called from handleWorkspaceCreation)
+    expect(taskRunnerDoSource).toContain('UPDATE workspaces SET chat_session_id = ?');
+    expect(taskRunnerDoSource).toContain('state.stepResults.chatSessionId');
+
+    // handleWorkspaceCreation calls ensureSessionLinked
     const wsCreationStart = taskRunnerDoSource.indexOf(
       'private async handleWorkspaceCreation('
     );
@@ -194,15 +202,20 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
       'private async handleWorkspaceReady('
     );
     const wsCreationSection = taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
-
-    // The section should reference the existing chatSessionId from state
-    expect(wsCreationSection).toContain('state.stepResults.chatSessionId');
-    expect(wsCreationSection).toContain(
-      'UPDATE workspaces SET chat_session_id = ?'
-    );
+    expect(wsCreationSection).toContain('this.ensureSessionLinked(');
   });
 
-  it('TaskRunner DO has separate D1 and DO session linking steps', () => {
+  it('TaskRunner DO has separate D1 and DO session linking via ensureSessionLinked', () => {
+    // Session linking is now in a dedicated helper method (ensureSessionLinked)
+    // that is called from both fresh creation and crash recovery paths.
+    expect(taskRunnerDoSource).toContain('private async ensureSessionLinked(');
+    expect(taskRunnerDoSource).toContain('session_d1_linked');
+    expect(taskRunnerDoSource).toContain('session_d1_link_failed');
+    expect(taskRunnerDoSource).toContain('session_linked_to_workspace');
+    expect(taskRunnerDoSource).toContain('session_do_link_failed');
+  });
+
+  it('handleWorkspaceCreation calls ensureSessionLinked', () => {
     const wsCreationStart = taskRunnerDoSource.indexOf(
       'private async handleWorkspaceCreation('
     );
@@ -211,11 +224,9 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
     );
     const wsCreationSection = taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
 
-    // D1 link (critical) and DO link (best-effort) should be separate try-catch blocks
-    expect(wsCreationSection).toContain('session_d1_linked');
-    expect(wsCreationSection).toContain('session_d1_link_failed');
-    expect(wsCreationSection).toContain('session_linked_to_workspace');
-    expect(wsCreationSection).toContain('session_do_link_failed');
+    // Both fresh creation and crash recovery call ensureSessionLinked
+    const calls = wsCreationSection.split('ensureSessionLinked').length - 1;
+    expect(calls).toBeGreaterThanOrEqual(2); // once in recovery, once in fresh creation
   });
 });
 

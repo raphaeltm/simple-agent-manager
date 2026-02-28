@@ -714,7 +714,7 @@ export class ProjectData extends DurableObject<Env> {
     const now = new Date().toISOString();
     try {
       await this.env.DATABASE.prepare(
-        `UPDATE tasks SET status = 'completed', execution_step = NULL, completed_at = ?, updated_at = ? WHERE id = ? AND status IN ('running', 'delegated')`
+        `UPDATE tasks SET status = 'completed', execution_step = NULL, completed_at = ?, updated_at = ? WHERE id = ? AND status IN ('in_progress', 'delegated')`
       )
         .bind(now, now, taskId)
         .run();

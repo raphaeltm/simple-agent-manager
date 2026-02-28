@@ -520,6 +520,9 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       ).bind(state.taskId).first<{ status: string }>();
 
       if (task?.status === 'delegated') {
+        // TDF-6: Ensure session linking on crash recovery — the DO may have crashed
+        // after creating the workspace but before linking the session.
+        await this.ensureSessionLinked(state, state.stepResults.workspaceId);
         await this.advanceToStep(state, 'workspace_ready');
         return;
       }
@@ -564,61 +567,9 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       await this.ctx.storage.put('state', state);
 
       // TDF-6: Link existing chat session to workspace (session created at submit time).
-      // No new session creation here — one session per task.
-      //
-      // D1 update is done FIRST and separately from the DO call because:
-      // - D1 chat_session_id on workspace is used by idle cleanup and task completion hooks
-      // - The DO link is for the session's internal workspace_id field
-      // - Even if the DO call fails, D1 must have the link for downstream correctness
-      if (state.stepResults.chatSessionId) {
-        // Step 1: Update D1 workspace record (critical — used by idle cleanup, task hooks)
-        try {
-          await this.env.DATABASE.prepare(
-            `UPDATE workspaces SET chat_session_id = ?, updated_at = ? WHERE id = ?`
-          ).bind(state.stepResults.chatSessionId, now, workspaceId).run();
-
-          log.info('task_runner_do.session_d1_linked', {
-            taskId: state.taskId,
-            sessionId: state.stepResults.chatSessionId,
-            workspaceId,
-          });
-        } catch (err) {
-          // D1 link failure is serious — log as error but don't block task execution.
-          // The cron sweep catches orphaned sessions without workspace links.
-          log.error('task_runner_do.session_d1_link_failed', {
-            taskId: state.taskId,
-            sessionId: state.stepResults.chatSessionId,
-            workspaceId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-
-        // Step 2: Update ProjectData DO session record (best-effort — enriches session data)
-        try {
-          const projectDataService = await import('../services/project-data');
-          await projectDataService.linkSessionToWorkspace(
-            this.env as any,
-            state.projectId,
-            state.stepResults.chatSessionId,
-            workspaceId,
-          );
-
-          log.info('task_runner_do.session_linked_to_workspace', {
-            taskId: state.taskId,
-            sessionId: state.stepResults.chatSessionId,
-            workspaceId,
-          });
-        } catch (err) {
-          // DO link failure is best-effort — session still works without workspace_id
-          // in the DO's SQLite. The D1 link above handles downstream needs.
-          log.error('task_runner_do.session_do_link_failed', {
-            taskId: state.taskId,
-            sessionId: state.stepResults.chatSessionId,
-            workspaceId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
+      // No new session creation here — one session per task. Uses shared helper
+      // so crash recovery path also gets session linking (MEDIUM #1 fix).
+      await this.ensureSessionLinked(state, workspaceId);
 
       // Set output_branch
       const outputBranch = state.config.outputBranch || `task/${state.taskId}`;
@@ -815,6 +766,72 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
   // =========================================================================
   // State machine helpers
   // =========================================================================
+
+  /**
+   * TDF-6: Ensure the chat session is linked to the workspace in both D1 and the
+   * ProjectData DO. This is idempotent — safe to call on every retry/recovery.
+   *
+   * D1 update is done FIRST and separately because:
+   * - D1 chat_session_id on workspace is used by idle cleanup and task completion hooks
+   * - Even if the DO call fails, D1 must have the link for downstream correctness
+   */
+  private async ensureSessionLinked(
+    state: TaskRunnerState,
+    workspaceId: string,
+  ): Promise<void> {
+    if (!state.stepResults.chatSessionId) return;
+
+    const now = new Date().toISOString();
+
+    // Step 1: Update D1 workspace record (critical — used by idle cleanup, task hooks)
+    // This is idempotent: setting chat_session_id to the same value is fine.
+    try {
+      await this.env.DATABASE.prepare(
+        `UPDATE workspaces SET chat_session_id = ?, updated_at = ? WHERE id = ?`
+      ).bind(state.stepResults.chatSessionId, now, workspaceId).run();
+
+      log.info('task_runner_do.session_d1_linked', {
+        taskId: state.taskId,
+        sessionId: state.stepResults.chatSessionId,
+        workspaceId,
+      });
+    } catch (err) {
+      // D1 link failure is serious — log as error but don't block task execution.
+      log.error('task_runner_do.session_d1_link_failed', {
+        taskId: state.taskId,
+        sessionId: state.stepResults.chatSessionId,
+        workspaceId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // Step 2: Update ProjectData DO session record (best-effort — enriches session data)
+    // linkSessionToWorkspace in the DO is also idempotent (updates workspace_id).
+    try {
+      const projectDataService = await import('../services/project-data');
+      await projectDataService.linkSessionToWorkspace(
+        this.env as any,
+        state.projectId,
+        state.stepResults.chatSessionId,
+        workspaceId,
+      );
+
+      log.info('task_runner_do.session_linked_to_workspace', {
+        taskId: state.taskId,
+        sessionId: state.stepResults.chatSessionId,
+        workspaceId,
+      });
+    } catch (err) {
+      // DO link failure is best-effort — session still works without workspace_id
+      // in the DO's SQLite. The D1 link above handles downstream needs.
+      log.error('task_runner_do.session_do_link_failed', {
+        taskId: state.taskId,
+        sessionId: state.stepResults.chatSessionId,
+        workspaceId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   /**
    * Advance to the next step: persist state, reset retry count, schedule alarm.

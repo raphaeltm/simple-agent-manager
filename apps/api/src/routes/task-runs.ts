@@ -160,13 +160,16 @@ taskRunsRoutes.post('/:taskId/run', async (c) => {
     .where(eq(schema.users.id, userId))
     .limit(1);
 
-  // Transition task to queued with initial execution step
+  // Transition task to queued with initial execution step (optimistic lock on 'ready')
   const now = new Date().toISOString();
-  await db
-    .update(schema.tasks)
-    .set({ status: 'queued', executionStep: 'node_selection', updatedAt: now })
-    .where(eq(schema.tasks.id, task.id));
+  const transitionResult = await c.env.DATABASE.prepare(
+    `UPDATE tasks SET status = 'queued', execution_step = 'node_selection', updated_at = ? WHERE id = ? AND status = 'ready'`
+  ).bind(now, task.id).run();
 
+  // If another request already transitioned this task, reject (double-click protection)
+  if (!transitionResult.meta.changes || transitionResult.meta.changes === 0) {
+    throw errors.conflict('Task has already been queued for execution');
+  }
   await db.insert(schema.taskStatusEvents).values({
     id: ulid(),
     taskId: task.id,
@@ -253,6 +256,8 @@ taskRunsRoutes.post('/:taskId/run', async (c) => {
       createdAt: failedAt,
     });
     log.error('task_run.do_startup_failed', { taskId: task.id, projectId, error: errorMsg });
+    // Stop the orphaned session (best-effort — it has no workspace and will never be cleaned up otherwise)
+    await projectDataService.stopSession(c.env, projectId, sessionId).catch(() => {});
     throw err;
   }
 

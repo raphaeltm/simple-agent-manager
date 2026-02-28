@@ -271,9 +271,10 @@ describe('TaskRunner DO step handlers', () => {
     });
 
     it('links existing chat session to workspace (TDF-6: no duplicate session creation)', () => {
+      // Session linking is in ensureSessionLinked helper (shared by fresh + recovery paths)
+      expect(doSource).toContain('private async ensureSessionLinked(');
       expect(doSource).toContain('linkSessionToWorkspace');
       expect(doSource).toContain('session_linked_to_workspace');
-      // TDF-6 fix: D1 and DO linking are now separate steps with separate error handling
       expect(doSource).toContain('session_d1_linked');
       expect(doSource).toContain('session_d1_link_failed');
       expect(doSource).toContain('session_do_link_failed');
