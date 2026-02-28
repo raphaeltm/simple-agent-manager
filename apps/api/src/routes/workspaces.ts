@@ -1249,18 +1249,21 @@ workspacesRoutes.post('/:id/provisioning-failed', async (c) => {
     throw errors.notFound('Workspace');
   }
 
-  if (workspace.status !== 'creating') {
+  // Allow retries: if the workspace is already in 'error' state (from a previous
+  // attempt where D1 was updated but the DO notification failed), skip the D1
+  // update and retry the DO notification. Any other non-'creating' status is invalid.
+  if (workspace.status === 'creating') {
+    await db
+      .update(schema.workspaces)
+      .set({
+        status: 'error',
+        errorMessage,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.workspaces.id, workspaceId));
+  } else if (workspace.status !== 'error') {
     return c.json({ success: false, reason: 'workspace_not_creating' });
   }
-
-  await db
-    .update(schema.workspaces)
-    .set({
-      status: 'error',
-      errorMessage,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(schema.workspaces.id, workspaceId));
 
   // Notify TaskRunner DO of workspace error inline.
   // TDF-5: moved from waitUntil() to inline await so the VM agent gets an error

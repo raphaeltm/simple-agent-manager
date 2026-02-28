@@ -35,7 +35,7 @@ The D1 polling fallback introduces three problems:
 
 ### Target Architecture (Pure Callback-Driven)
 
-```
+```text
 VM Agent                    API Worker                  TaskRunner DO
    |                            |                            |
    |-- POST /ready ----------->|                            |

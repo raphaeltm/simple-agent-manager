@@ -22,7 +22,7 @@ The existing `TaskRunnerState` fields used by the workspace-ready flow remain un
 ### Behavioral Changes
 
 **Before (Hybrid)**:
-```
+```text
 handleWorkspaceReady alarm fires:
   1. Check workspaceReadyReceived flag -> advance if set
   2. Check timeout -> fail if exceeded
@@ -31,7 +31,7 @@ handleWorkspaceReady alarm fires:
 ```
 
 **After (Pure Callback)**:
-```
+```text
 handleWorkspaceReady alarm fires:
   1. Check workspaceReadyReceived flag -> advance if set
   2. Check timeout -> fail if exceeded

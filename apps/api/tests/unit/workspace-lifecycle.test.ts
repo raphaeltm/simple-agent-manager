@@ -74,7 +74,7 @@ describe('handleWorkspaceReady — pure callback-driven (TDF-5)', () => {
   });
 
   it('schedules alarm at remaining timeout boundary (not fixed poll interval)', () => {
-    expect(wsReadySection).toContain('const remaining = timeoutMs - elapsed');
+    expect(wsReadySection).toContain('const remaining = Math.max(timeoutMs - elapsed, 0)');
     expect(wsReadySection).toContain('setAlarm(Date.now() + remaining)');
   });
 
@@ -286,8 +286,9 @@ describe('/provisioning-failed route — inline DO notification (TDF-5)', () => 
     expect(doNotifyIdx).toBeGreaterThan(updateIdx);
   });
 
-  it('only processes workspaces in creating status', () => {
-    expect(failedHandler).toContain("workspace.status !== 'creating'");
+  it('only processes workspaces in creating or error status (allows retries)', () => {
+    expect(failedHandler).toContain("workspace.status === 'creating'");
+    expect(failedHandler).toContain("workspace.status !== 'error'");
     expect(failedHandler).toContain("reason: 'workspace_not_creating'");
   });
 
@@ -406,8 +407,8 @@ describe('workspace ready timeout alarm strategy', () => {
     doSource.indexOf('private async handleAgentSession(')
   );
 
-  it('calculates remaining time until timeout', () => {
-    expect(wsReadySection).toContain('const remaining = timeoutMs - elapsed');
+  it('calculates remaining time until timeout (clamped to 0)', () => {
+    expect(wsReadySection).toContain('const remaining = Math.max(timeoutMs - elapsed, 0)');
   });
 
   it('schedules alarm at remaining time boundary', () => {

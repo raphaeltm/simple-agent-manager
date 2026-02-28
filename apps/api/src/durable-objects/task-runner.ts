@@ -699,7 +699,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     // mechanism; D1 polling has been removed (TDF-5). The VM agent retries the
     // callback with exponential backoff (TDF-4), so the timeout alarm is only
     // a safety net for the case where all retries are exhausted.
-    const remaining = timeoutMs - elapsed;
+    const remaining = Math.max(timeoutMs - elapsed, 0);
     await this.ctx.storage.setAlarm(Date.now() + remaining);
   }
 

@@ -702,10 +702,6 @@ describe('JWT Token Contract', () => {
 // =============================================================================
 
 describe('Node Agent client functions send correct payloads', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it('createWorkspaceOnNode sends correct JSON body', async () => {
     // Mock the JWT signing
     vi.doMock('../../src/services/jwt', () => ({

@@ -75,8 +75,11 @@ func (s *Server) notifyWorkspaceProvisioningFailed(
 				resp.StatusCode,
 				strings.TrimSpace(string(responseBody)),
 			)
-			// 4xx errors are permanent — retrying won't help
-			if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			// Most 4xx errors are permanent — retrying won't help.
+			// Exceptions: 408 (Request Timeout) and 429 (Too Many Requests) are transient.
+			if resp.StatusCode >= 400 && resp.StatusCode < 500 &&
+				resp.StatusCode != http.StatusRequestTimeout &&
+				resp.StatusCode != http.StatusTooManyRequests {
 				return callbackretry.Permanent(err)
 			}
 			return err

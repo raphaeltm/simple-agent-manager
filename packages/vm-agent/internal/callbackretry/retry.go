@@ -119,8 +119,11 @@ func Do(ctx context.Context, cfg Config, operationName string, fn func(ctx conte
 			return fmt.Errorf("%s: retries exhausted after %v: %w", operationName, time.Since(start).Round(time.Millisecond), lastErr)
 		}
 
-		// Compute jittered delay
-		jitter := time.Duration(rand.Int63n(int64(delay) / 2))
+		// Compute jittered delay (guard against zero/negative delay)
+		var jitter time.Duration
+		if maxN := int64(delay) / 2; maxN > 0 {
+			jitter = time.Duration(rand.Int63n(maxN))
+		}
 		sleepDur := delay + jitter
 
 		slog.Info("Callback failed, retrying",
