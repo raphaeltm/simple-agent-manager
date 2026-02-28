@@ -115,6 +115,22 @@ binding = "AI"
 
 # Tail Worker for real-time log streaming (spec 023 — US4)
 # NOTE: tail_consumers MUST NOT be in default config — it breaks Vitest (Cloudflare issue #9343)
+[[env.staging.durable_objects.bindings]]
+name = "PROJECT_DATA"
+class_name = "ProjectData"
+
+[[env.staging.durable_objects.bindings]]
+name = "NODE_LIFECYCLE"
+class_name = "NodeLifecycle"
+
+[[env.staging.durable_objects.bindings]]
+name = "ADMIN_LOGS"
+class_name = "AdminLogs"
+
+[[env.staging.durable_objects.bindings]]
+name = "TASK_RUNNER"
+class_name = "TaskRunner"
+
 [[env.staging.tail_consumers]]
 service = "sam-tail-worker-staging"
 
@@ -153,6 +169,22 @@ bucket_name = "workspaces-assets"
 binding = "AI"
 
 # Tail Worker for real-time log streaming (spec 023 — US4)
+[[env.production.durable_objects.bindings]]
+name = "PROJECT_DATA"
+class_name = "ProjectData"
+
+[[env.production.durable_objects.bindings]]
+name = "NODE_LIFECYCLE"
+class_name = "NodeLifecycle"
+
+[[env.production.durable_objects.bindings]]
+name = "ADMIN_LOGS"
+class_name = "AdminLogs"
+
+[[env.production.durable_objects.bindings]]
+name = "TASK_RUNNER"
+class_name = "TaskRunner"
+
 [[env.production.tail_consumers]]
 service = "sam-tail-worker-prod"
 
