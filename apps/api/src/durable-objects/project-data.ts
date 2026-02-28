@@ -329,6 +329,35 @@ export class ProjectData extends DurableObject<Env> {
     return { persisted, duplicates };
   }
 
+  /**
+   * Link an existing session to a workspace. Called by TaskRunner DO when
+   * a workspace is created for a task that already has a session (TDF-6).
+   * This ensures one session per task — the session is created at submit
+   * time with workspaceId=null, then linked here when the workspace exists.
+   */
+  async linkSessionToWorkspace(
+    sessionId: string,
+    workspaceId: string
+  ): Promise<void> {
+    const session = this.sql
+      .exec('SELECT id, status FROM chat_sessions WHERE id = ?', sessionId)
+      .toArray()[0];
+
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+
+    const now = Date.now();
+    this.sql.exec(
+      'UPDATE chat_sessions SET workspace_id = ?, updated_at = ? WHERE id = ?',
+      workspaceId,
+      now,
+      sessionId
+    );
+
+    this.broadcastEvent('session.updated', { sessionId, workspaceId });
+  }
+
   async listSessions(
     status: string | null,
     limit: number = 20,

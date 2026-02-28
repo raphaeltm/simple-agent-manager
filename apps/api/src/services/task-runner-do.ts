@@ -42,6 +42,8 @@ export async function startTaskRunnerDO(
     installationId: string;
     outputBranch?: string | null;
     projectDefaultVmSize?: VMSize | null;
+    /** Chat session ID created at task submit time (TDF-6) */
+    chatSessionId?: string | null;
   },
 ): Promise<void> {
   const stub = getStub(env, input.taskId);
@@ -64,6 +66,7 @@ export async function startTaskRunnerDO(
       installationId: input.installationId,
       outputBranch: input.outputBranch ?? null,
       projectDefaultVmSize: input.projectDefaultVmSize ?? null,
+      chatSessionId: input.chatSessionId ?? null,
     },
   };
 

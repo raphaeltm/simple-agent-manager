@@ -92,6 +92,8 @@ interface TaskRunConfig {
   installationId: string;
   outputBranch: string | null;
   projectDefaultVmSize: VMSize | null;
+  /** Chat session ID created at task submit time (TDF-6: single session per task) */
+  chatSessionId: string | null;
 }
 
 export interface TaskRunnerState {
@@ -165,7 +167,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         nodeId: null,
         autoProvisioned: false,
         workspaceId: null,
-        chatSessionId: null,
+        chatSessionId: input.config.chatSessionId ?? null,
         agentSessionId: null,
       },
       config: input.config,
@@ -561,26 +563,37 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       state.stepResults.workspaceId = workspaceId;
       await this.ctx.storage.put('state', state);
 
-      // Create chat session (best-effort)
-      try {
-        const projectDataService = await import('../services/project-data');
-        const chatSessionId = await projectDataService.createSession(
-          this.env as any,
-          state.projectId,
-          workspaceId,
-          state.config.taskTitle,
-          state.taskId,
-        );
-        state.stepResults.chatSessionId = chatSessionId;
+      // TDF-6: Link existing chat session to workspace (session created at submit time).
+      // No new session creation here — one session per task.
+      if (state.stepResults.chatSessionId) {
+        try {
+          const projectDataService = await import('../services/project-data');
+          await projectDataService.linkSessionToWorkspace(
+            this.env as any,
+            state.projectId,
+            state.stepResults.chatSessionId,
+            workspaceId,
+          );
 
-        await this.env.DATABASE.prepare(
-          `UPDATE workspaces SET chat_session_id = ?, updated_at = ? WHERE id = ?`
-        ).bind(chatSessionId, now, workspaceId).run();
-      } catch (err) {
-        log.error('task_runner_do.chat_session_create_failed', {
-          taskId: state.taskId,
-          error: err instanceof Error ? err.message : String(err),
-        });
+          await this.env.DATABASE.prepare(
+            `UPDATE workspaces SET chat_session_id = ?, updated_at = ? WHERE id = ?`
+          ).bind(state.stepResults.chatSessionId, now, workspaceId).run();
+
+          log.info('task_runner_do.session_linked_to_workspace', {
+            taskId: state.taskId,
+            sessionId: state.stepResults.chatSessionId,
+            workspaceId,
+          });
+        } catch (err) {
+          // Session linking is best-effort — session still works without workspace link,
+          // but idle cleanup will degrade. The cron sweep catches orphans.
+          log.error('task_runner_do.session_link_failed', {
+            taskId: state.taskId,
+            sessionId: state.stepResults.chatSessionId,
+            workspaceId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
 
       // Set output_branch

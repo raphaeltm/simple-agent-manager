@@ -270,9 +270,15 @@ describe('TaskRunner DO step handlers', () => {
       expect(doSource).toContain('db.insert(schema.workspaces)');
     });
 
-    it('creates chat session (best-effort)', () => {
-      expect(doSource).toContain('projectDataService.createSession');
-      expect(doSource).toContain('chat_session_create_failed');
+    it('links existing chat session to workspace (TDF-6: no duplicate session creation)', () => {
+      expect(doSource).toContain('linkSessionToWorkspace');
+      expect(doSource).toContain('session_linked_to_workspace');
+      expect(doSource).toContain('session_link_failed');
+      // Must NOT create a new session — session is created at submit time
+      const wsCreationStart = doSource.indexOf('private async handleWorkspaceCreation(');
+      const wsCreationEnd = doSource.indexOf('private async handleWorkspaceReady(');
+      const wsCreationSection = doSource.slice(wsCreationStart, wsCreationEnd);
+      expect(wsCreationSection).not.toContain('createSession(');
     });
 
     it('creates workspace on VM agent', () => {

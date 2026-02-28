@@ -159,43 +159,27 @@ taskSubmitRoutes.post('/submit', async (c) => {
     createdAt: now,
   });
 
-  // Create chat session in ProjectData DO (best-effort)
-  let sessionId: string;
-  try {
-    sessionId = await projectDataService.createSession(
-      c.env,
-      projectId,
-      null, // workspaceId — not yet known
-      taskTitle,
-      taskId
-    );
-  } catch (err) {
-    log.error('task_submit.session_create_failed', {
-      taskId,
-      projectId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    // Session creation is best-effort — task still runs
-    sessionId = `sess-fallback-${taskId}`;
-  }
+  // TDF-6: Create chat session — REQUIRED (no fallback IDs).
+  // If session creation fails, the entire task submission fails. This prevents
+  // phantom session IDs and ensures the frontend always has a real session.
+  const sessionId = await projectDataService.createSession(
+    c.env,
+    projectId,
+    null, // workspaceId — linked later by TaskRunner DO when workspace is created
+    taskTitle,
+    taskId
+  );
 
-  // Record first user message (best-effort)
-  try {
-    await projectDataService.persistMessage(
-      c.env,
-      projectId,
-      sessionId,
-      'user',
-      message,
-      null
-    );
-  } catch (err) {
-    log.error('task_submit.message_persist_failed', {
-      taskId,
-      sessionId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  // TDF-6: Persist initial user message — REQUIRED.
+  // The user's message must be in the session before we return.
+  await projectDataService.persistMessage(
+    c.env,
+    projectId,
+    sessionId,
+    'user',
+    message,
+    null
+  );
 
   // Record activity event (best-effort)
   c.executionCtx.waitUntil(
@@ -231,6 +215,7 @@ taskSubmitRoutes.post('/submit', async (c) => {
   // Start TaskRunner DO — alarm-driven orchestration (TDF-2).
   // The DO handles the full lifecycle: node selection, provisioning,
   // workspace creation, agent session, and transition to in_progress.
+  // TDF-6: Pass sessionId so the DO links it to the workspace instead of creating a new one.
   await startTaskRunnerDO(c.env, {
     taskId,
     projectId,
@@ -248,6 +233,7 @@ taskSubmitRoutes.post('/submit', async (c) => {
     installationId: project.installationId,
     outputBranch: branchName,
     projectDefaultVmSize: project.defaultVmSize as VMSize | null,
+    chatSessionId: sessionId,
   });
 
   const response: SubmitTaskResponse = {
