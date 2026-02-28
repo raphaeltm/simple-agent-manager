@@ -302,8 +302,15 @@ describe('TaskRunner DO step handlers', () => {
       expect(doSource).toContain('this.getWorkspaceReadyTimeoutMs()');
     });
 
-    it('does NOT poll D1 for workspace status (TDF-5: pure callback-driven)', () => {
-      expect(doSource).not.toContain('workspace_ready_from_d1');
+    it('does NOT poll D1 periodically in handleWorkspaceReady (TDF-5)', () => {
+      // D1 periodic polling removed from handleWorkspaceReady;
+      // single D1 check at timeout boundary for defense-in-depth
+      const wsReadySection = doSource.slice(
+        doSource.indexOf('private async handleWorkspaceReady('),
+        doSource.indexOf('private async handleAgentSession(')
+      );
+      expect(wsReadySection).not.toContain('getAgentPollIntervalMs');
+      expect(wsReadySection).toContain('workspace_ready_from_d1_at_timeout');
     });
 
     it('schedules timeout alarm when waiting for callback', () => {

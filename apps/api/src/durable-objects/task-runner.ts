@@ -671,6 +671,23 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     const timeoutMs = this.getWorkspaceReadyTimeoutMs();
     const elapsed = Date.now() - state.workspaceReadyStartedAt;
     if (elapsed > timeoutMs) {
+      // Last-resort D1 check: the /ready handler updates D1 before notifying
+      // the DO. If all callback retries failed but D1 has the correct status,
+      // advance instead of failing (defense-in-depth safety net).
+      const wsRow = await this.env.DATABASE.prepare(
+        `SELECT status, error_message FROM workspaces WHERE id = ?`
+      ).bind(state.stepResults.workspaceId).first<{ status: string; error_message: string | null }>();
+
+      if (wsRow?.status === 'running' || wsRow?.status === 'recovery') {
+        log.info('task_runner_do.step.workspace_ready_from_d1_at_timeout', {
+          taskId: state.taskId,
+          workspaceId: state.stepResults.workspaceId,
+          status: wsRow.status,
+        });
+        await this.advanceToStep(state, 'agent_session');
+        return;
+      }
+
       throw Object.assign(
         new Error(`Workspace did not become ready within ${timeoutMs}ms`),
         { permanent: true },

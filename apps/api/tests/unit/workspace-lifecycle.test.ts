@@ -31,11 +31,12 @@ describe('handleWorkspaceReady — pure callback-driven (TDF-5)', () => {
     doSource.indexOf('private async handleAgentSession(')
   );
 
-  it('does NOT query D1 for workspace status', () => {
-    // The D1 fallback poll has been removed in TDF-5
-    expect(wsReadySection).not.toContain('workspace_ready_from_d1');
-    expect(wsReadySection).not.toContain('SELECT status, error_message FROM workspaces');
-    expect(wsReadySection).not.toContain('this.env.DATABASE.prepare');
+  it('does NOT poll D1 for workspace status on a schedule', () => {
+    // TDF-5: D1 periodic polling removed. A single D1 check at timeout
+    // boundary provides defense-in-depth without active polling.
+    expect(wsReadySection).not.toContain('getAgentPollIntervalMs');
+    // D1 check exists only inside the timeout block (safety net)
+    expect(wsReadySection).toContain('workspace_ready_from_d1_at_timeout');
   });
 
   it('checks callback-received flag (workspaceReadyReceived)', () => {
@@ -362,31 +363,35 @@ describe('workspace lifecycle race condition handling', () => {
 // No Residual D1 Polling in DO
 // ============================================================================
 
-describe('no residual D1 polling in handleWorkspaceReady', () => {
+describe('no D1 polling in handleWorkspaceReady (single timeout check only)', () => {
   const wsReadySection = doSource.slice(
     doSource.indexOf('private async handleWorkspaceReady('),
     doSource.indexOf('private async handleAgentSession(')
   );
 
-  it('does not reference SELECT statements', () => {
-    expect(wsReadySection).not.toContain('SELECT');
-  });
-
-  it('does not reference this.env.DATABASE.prepare', () => {
-    expect(wsReadySection).not.toContain('this.env.DATABASE.prepare');
-  });
-
-  it('does not reference workspace_ready_from_d1 log key', () => {
-    expect(wsReadySection).not.toContain('workspace_ready_from_d1');
-  });
-
-  it('does not reference getAgentPollIntervalMs', () => {
+  it('does not poll D1 in a loop or on a schedule', () => {
+    // No getAgentPollIntervalMs or setInterval-style polling
     expect(wsReadySection).not.toContain('getAgentPollIntervalMs');
   });
 
-  it('only uses updateD1ExecutionStep as the sole D1 interaction', () => {
-    // The only D1 call from handleWorkspaceReady should be the execution step update
-    // which happens at the top of every step handler
+  it('has a single D1 safety check only at timeout boundary', () => {
+    // The only D1 query (besides updateD1ExecutionStep) should be the
+    // last-resort check inside the timeout block
+    expect(wsReadySection).toContain('workspace_ready_from_d1_at_timeout');
+    expect(wsReadySection).toContain('SELECT status, error_message FROM workspaces');
+  });
+
+  it('uses D1 status to recover at timeout instead of failing', () => {
+    // If D1 says running/recovery, advance instead of throwing
+    const timeoutBlock = wsReadySection.slice(
+      wsReadySection.indexOf('if (elapsed > timeoutMs)'),
+      wsReadySection.indexOf('// No callback yet')
+    );
+    expect(timeoutBlock).toContain("wsRow?.status === 'running'");
+    expect(timeoutBlock).toContain('advanceToStep');
+  });
+
+  it('uses updateD1ExecutionStep at step entry', () => {
     expect(wsReadySection).toContain("updateD1ExecutionStep(state.taskId, 'workspace_ready')");
   });
 });
