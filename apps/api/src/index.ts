@@ -120,6 +120,8 @@ export interface Env {
   NODE_WARM_TIMEOUT_MS?: string;
   MAX_AUTO_NODE_LIFETIME_MS?: string;
   NODE_WARM_GRACE_PERIOD_MS?: string;
+  // Task agent configuration
+  DEFAULT_TASK_AGENT_TYPE?: string;
   // Task execution timeout (stuck task recovery)
   TASK_RUN_MAX_EXECUTION_MS?: string;
   TASK_STUCK_QUEUED_TIMEOUT_MS?: string;

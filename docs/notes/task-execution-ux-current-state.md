@@ -86,10 +86,11 @@ The `executeTaskRun` function (`task-runner.ts:121-380`) runs entirely inside `w
 6. Call VM agent `POST /workspaces` with repository, branch, callback token, git credentials
 7. Poll D1 workspace status until it becomes `running` or `recovery` (2s intervals, exponential backoff to 10s, 5-minute timeout)
 
-**Stage 3 — Agent Session** (`task-runner.ts:267-300`)
-1. Create agent session record (`status: running`)
-2. Call VM agent `POST /workspaces/:id/agent-sessions` to start ACP session
-3. Transition task: `delegated → in_progress`
+**Stage 3 — Agent Session** (`task-runner.ts handleAgentSession`)
+1. Create agent session record in D1 (`status: running`)
+2. Call VM agent `POST /workspaces/:id/agent-sessions` to create the ACP session
+3. Call VM agent `POST /workspaces/:id/agent-sessions/:sessionId/start` to start the agent with the task description as the initial prompt
+4. Transition task: `delegated → in_progress`
 
 At this point the task runner is done. The agent runs autonomously.
 

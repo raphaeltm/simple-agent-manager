@@ -1212,6 +1212,13 @@ func (h *SessionHost) IsPrompting() bool {
 	return h.status == HostPrompting
 }
 
+// OnPromptCompleteCallback returns the OnPromptComplete callback, if configured.
+// Used by server-initiated prompt flows to report agent start failures back to
+// the control plane without going through HandlePrompt.
+func (h *SessionHost) OnPromptCompleteCallback() func(string, error) {
+	return h.config.OnPromptComplete
+}
+
 // --- Internal: message broadcasting ---
 
 // appendMessage appends a message to the replay buffer.

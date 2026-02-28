@@ -761,6 +761,7 @@ new_sqlite_classes = ["ProjectData"]
 | `ACTIVITY_RETENTION_DAYS` | Days to retain activity events | `90` |
 | `SESSION_IDLE_TIMEOUT_MINUTES` | Idle session timeout | `60` |
 | `DO_SUMMARY_SYNC_DEBOUNCE_MS` | Debounce for DO-to-D1 summary sync | `5000` |
+| `DEFAULT_TASK_AGENT_TYPE` | Agent used for autonomous task execution | `claude-code` |
 
 See `apps/api/.env.example` for the full list of configurable variables.
 

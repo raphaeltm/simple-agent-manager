@@ -3,7 +3,7 @@
 **Date**: 2026-02-28
 **Author**: Claude (analysis session)
 **Severity**: Critical — the core feature (autonomous task execution) does not work
-**Status**: Root cause identified, fix not yet implemented
+**Status**: Fixed — see feat/initial-prompt-delivery branch
 
 ---
 
