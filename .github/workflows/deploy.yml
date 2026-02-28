@@ -312,7 +312,20 @@ jobs:
 
       - name: Deploy API Worker
         if: ${{ inputs.dry_run != true }}
-        run: pnpm --filter @simple-agent-manager/api exec wrangler deploy --env production
+        run: |
+          # Capture output to check for non-inherited binding warnings
+          OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env production 2>&1) || {
+            echo "$OUTPUT"
+            exit 1
+          }
+          echo "$OUTPUT"
+          # Fail if wrangler warns about non-inherited bindings
+          if echo "$OUTPUT" | grep -q "not inherited by environments"; then
+            echo ""
+            echo "::error::Wrangler detected non-inherited bindings. Add missing bindings to [env.production] in wrangler.toml."
+            echo "See: .claude/rules/07-env-and-urls.md"
+            exit 1
+          fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
@@ -399,10 +412,23 @@ jobs:
           echo "Waiting for API to be ready at $API_URL..."
 
           for i in {1..30}; do
-            if curl -sf "$API_URL/health" > /dev/null 2>&1; then
+            RESPONSE=$(curl -sf "$API_URL/health" 2>/dev/null) || {
+              echo "Waiting for API... ($i/30)"
+              sleep 10
+              continue
+            }
+
+            STATUS=$(echo "$RESPONSE" | jq -r '.status // empty')
+            if [ "$STATUS" = "healthy" ]; then
               echo "✅ API is healthy"
+              echo "$RESPONSE" | jq .
               exit 0
+            elif [ "$STATUS" = "degraded" ]; then
+              echo "::error::API reports degraded status — missing bindings detected"
+              echo "$RESPONSE" | jq .
+              exit 1
             fi
+
             echo "Waiting for API... ($i/30)"
             sleep 10
           done

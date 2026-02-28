@@ -34,6 +34,7 @@
     "setup:github": "tsx scripts/deploy/setup-github.ts",
     "setup:local": "tsx scripts/deploy/setup-local-dev.ts",
     "quality:preflight": "tsx scripts/quality/check-preflight-evidence.ts",
+    "quality:wrangler-bindings": "tsx scripts/quality/check-wrangler-bindings.ts",
     "test:infra": "pnpm --filter @simple-agent-manager/infra test",
     "prepare": "husky"
   },

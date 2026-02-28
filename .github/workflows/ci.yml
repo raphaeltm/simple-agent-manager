@@ -185,6 +185,9 @@ jobs:
           npx tsx --check scripts/deploy/sync-wrangler-config.ts
           npx tsx --check scripts/deploy/generate-keys.ts
 
+      - name: Validate wrangler binding consistency
+        run: pnpm quality:wrangler-bindings
+
   pulumi-infra:
     name: Pulumi Infrastructure Tests
     runs-on: ubuntu-latest

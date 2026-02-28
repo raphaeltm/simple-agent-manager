@@ -365,11 +365,38 @@ app.use('*', cors({
 // Health check
 app.get('/health', (c) => {
   const limits = getRuntimeLimits(c.env);
+
+  // Verify critical bindings are available (catches wrangler.toml misconfiguration)
+  const bindings: Record<string, boolean> = {
+    DATABASE: !!c.env.DATABASE,
+    KV: !!c.env.KV,
+    PROJECT_DATA: !!c.env.PROJECT_DATA,
+    NODE_LIFECYCLE: !!c.env.NODE_LIFECYCLE,
+    TASK_RUNNER: !!c.env.TASK_RUNNER,
+    ADMIN_LOGS: !!c.env.ADMIN_LOGS,
+  };
+
+  const missingBindings = Object.entries(bindings)
+    .filter(([, available]) => !available)
+    .map(([name]) => name);
+
+  if (missingBindings.length > 0) {
+    return c.json({
+      status: 'degraded',
+      version: c.env.VERSION,
+      timestamp: new Date().toISOString(),
+      limits,
+      bindings,
+      missingBindings,
+    }, 503);
+  }
+
   return c.json({
     status: 'healthy',
     version: c.env.VERSION,
     timestamp: new Date().toISOString(),
     limits,
+    bindings,
   });
 });
 
