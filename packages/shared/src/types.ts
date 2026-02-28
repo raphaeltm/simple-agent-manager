@@ -385,6 +385,23 @@ export function isTaskExecutionStep(value: unknown): value is TaskExecutionStep 
   return typeof value === 'string' && (TASK_EXECUTION_STEPS as readonly string[]).includes(value);
 }
 
+/** Human-readable labels for each execution step (TDF-8). */
+export const EXECUTION_STEP_LABELS: Record<TaskExecutionStep, string> = {
+  node_selection: 'Finding a server...',
+  node_provisioning: 'Setting up a new server...',
+  node_agent_ready: 'Waiting for server to start...',
+  workspace_creation: 'Creating workspace...',
+  workspace_ready: 'Setting up development environment...',
+  agent_session: 'Starting AI agent...',
+  running: 'Agent is working...',
+  awaiting_followup: 'Waiting for follow-up...',
+};
+
+/** Ordered index for execution step progress — derived from TASK_EXECUTION_STEPS array position (TDF-8). */
+export const EXECUTION_STEP_ORDER = Object.fromEntries(
+  TASK_EXECUTION_STEPS.map((step, i) => [step, i])
+) as Record<TaskExecutionStep, number>;
+
 export type TaskActorType = 'user' | 'system' | 'workspace_callback';
 
 export type TaskSortOrder = 'createdAtDesc' | 'updatedAtDesc' | 'priorityDesc';

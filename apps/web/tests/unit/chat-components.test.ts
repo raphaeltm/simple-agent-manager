@@ -91,10 +91,12 @@ describe('ProjectMessageView', () => {
     expect(source).toContain('tool:');
   });
 
-  it('establishes WebSocket for real-time updates on active sessions', () => {
-    expect(source).toContain('new WebSocket(wsUrl)');
-    expect(source).toContain('message.new');
-    expect(source).toContain('session.stopped');
+  it('uses useChatWebSocket hook for real-time updates (TDF-8)', () => {
+    expect(source).toContain('useChatWebSocket');
+    expect(source).toContain('connectionState');
+    expect(source).toContain('onMessage');
+    expect(source).toContain('onSessionStopped');
+    expect(source).toContain('onCatchUp');
   });
 
   it('has polling fallback for WebSocket failures', () => {
@@ -103,7 +105,7 @@ describe('ProjectMessageView', () => {
   });
 
   it('deduplicates messages by id', () => {
-    expect(source).toContain('prev.some((m) => m.id === newMsg.id)');
+    expect(source).toContain('prev.some((m) => m.id === msg.id)');
   });
 
   it('supports loading earlier messages (pagination)', () => {
@@ -133,9 +135,28 @@ describe('ProjectMessageView', () => {
     expect(source).toContain('Tool metadata');
   });
 
-  it('cleans up WebSocket and polling on unmount', () => {
-    expect(source).toContain('ws?.close()');
+  it('cleans up polling on unmount', () => {
     expect(source).toContain('clearInterval(pollInterval)');
+  });
+
+  it('shows connection status banner (TDF-8)', () => {
+    expect(source).toContain('ConnectionBanner');
+    expect(source).toContain('connectionState');
+    expect(source).toContain('Reconnecting');
+    expect(source).toContain('Disconnected');
+  });
+
+  it('shows idle timer countdown (TDF-8)', () => {
+    expect(source).toContain('idleCountdownMs');
+    expect(source).toContain('formatCountdown');
+    expect(source).toContain('Cleanup in');
+  });
+
+  it('displays task error and summary for terminated sessions (TDF-8)', () => {
+    expect(source).toContain('taskEmbed?.errorMessage');
+    expect(source).toContain('taskEmbed?.outputSummary');
+    expect(source).toContain('Error:');
+    expect(source).toContain('Summary:');
   });
 });
 
