@@ -118,7 +118,8 @@ describe('task-runs route uses TaskRunner DO', () => {
       taskRunsSource.indexOf("'/:taskId/run'"),
       taskRunsSource.indexOf("'/:taskId/run/cleanup'")
     );
-    const queuedIdx = runSection.indexOf("status: 'queued'");
+    // Raw D1 query uses status = 'queued' (with optimistic lock on status = 'ready')
+    const queuedIdx = runSection.indexOf("status = 'queued'");
     const doIdx = runSection.indexOf('startTaskRunnerDO');
     expect(queuedIdx).toBeGreaterThan(-1);
     expect(doIdx).toBeGreaterThan(queuedIdx);
