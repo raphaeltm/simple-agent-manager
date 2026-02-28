@@ -13,6 +13,10 @@
  * stop firing, the task's `updated_at` will eventually exceed the timeout
  * thresholds and the cron will fail it. The DO uses optimistic locking
  * (`WHERE status = X`) to detect cron intervention and abort gracefully.
+ *
+ * TDF-7: Enhanced with OBSERVABILITY_DATABASE recording, diagnostic context
+ * capture (workspace/node status at recovery time), and TaskRunner DO health
+ * checks for post-TDF-2 defense-in-depth.
  */
 import { drizzle } from 'drizzle-orm/d1';
 import {
@@ -25,6 +29,8 @@ import * as schema from '../db/schema';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { cleanupTaskRun } from '../services/task-runner';
+import { persistError } from '../services/observability';
+import type { TaskRunner } from '../durable-objects/task-runner';
 
 function parseMs(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
@@ -53,20 +59,141 @@ export interface StuckTaskResult {
   failedQueued: number;
   failedDelegated: number;
   failedInProgress: number;
+  doHealthChecked: number;
   errors: number;
+}
+
+/**
+ * Diagnostic context captured at recovery time for a stuck task.
+ * Recorded in the OBSERVABILITY_DATABASE to enable post-mortem analysis
+ * without manual investigation.
+ */
+export interface RecoveryDiagnostics {
+  taskId: string;
+  taskStatus: string;
+  executionStep: string | null;
+  elapsedMs: number;
+  reason: string;
+  workspaceId: string | null;
+  workspaceStatus: string | null;
+  nodeId: string | null;
+  nodeStatus: string | null;
+  nodeHealthStatus: string | null;
+  autoProvisionedNodeId: string | null;
+  doState: {
+    exists: boolean;
+    completed: boolean | null;
+    currentStep: string | null;
+    retryCount: number | null;
+    lastStepAt: number | null;
+  } | null;
+}
+
+/**
+ * Query diagnostic context for a stuck task — workspace status, node status,
+ * and TaskRunner DO state. Best-effort: returns whatever context is available.
+ */
+export async function gatherDiagnostics(
+  env: Env,
+  task: {
+    id: string;
+    status: string;
+    execution_step: string | null;
+    workspace_id: string | null;
+    auto_provisioned_node_id: string | null;
+  },
+  elapsedMs: number,
+  reason: string
+): Promise<RecoveryDiagnostics> {
+  const diagnostics: RecoveryDiagnostics = {
+    taskId: task.id,
+    taskStatus: task.status,
+    executionStep: task.execution_step,
+    elapsedMs,
+    reason,
+    workspaceId: task.workspace_id,
+    workspaceStatus: null,
+    nodeId: null,
+    nodeStatus: null,
+    nodeHealthStatus: null,
+    autoProvisionedNodeId: task.auto_provisioned_node_id,
+    doState: null,
+  };
+
+  // Query workspace status
+  if (task.workspace_id) {
+    try {
+      const wsResult = await env.DATABASE.prepare(
+        `SELECT id, node_id, status FROM workspaces WHERE id = ?`
+      ).bind(task.workspace_id).first<{ id: string; node_id: string | null; status: string }>();
+
+      if (wsResult) {
+        diagnostics.workspaceStatus = wsResult.status;
+        diagnostics.nodeId = wsResult.node_id;
+      }
+    } catch {
+      // Best-effort
+    }
+  }
+
+  // Query node status (use workspace's node if available, else auto-provisioned node)
+  const nodeIdToCheck = diagnostics.nodeId ?? task.auto_provisioned_node_id;
+  if (nodeIdToCheck) {
+    try {
+      const nodeResult = await env.DATABASE.prepare(
+        `SELECT id, status, health_status FROM nodes WHERE id = ?`
+      ).bind(nodeIdToCheck).first<{ id: string; status: string; health_status: string | null }>();
+
+      if (nodeResult) {
+        diagnostics.nodeId = nodeResult.id;
+        diagnostics.nodeStatus = nodeResult.status;
+        diagnostics.nodeHealthStatus = nodeResult.health_status;
+      }
+    } catch {
+      // Best-effort
+    }
+  }
+
+  // Query TaskRunner DO state
+  try {
+    const doId = env.TASK_RUNNER.idFromName(task.id);
+    const stub = env.TASK_RUNNER.get(doId) as DurableObjectStub<TaskRunner>;
+    const doStatus = await stub.getStatus();
+
+    diagnostics.doState = {
+      exists: doStatus !== null,
+      completed: doStatus?.completed ?? null,
+      currentStep: doStatus?.currentStep ?? null,
+      retryCount: doStatus?.retryCount ?? null,
+      lastStepAt: doStatus?.lastStepAt ?? null,
+    };
+  } catch {
+    // DO may not exist or may be unreachable
+    diagnostics.doState = { exists: false, completed: null, currentStep: null, retryCount: null, lastStepAt: null };
+  }
+
+  return diagnostics;
 }
 
 export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
   const now = new Date();
-  const result: StuckTaskResult = { failedQueued: 0, failedDelegated: 0, failedInProgress: 0, errors: 0 };
+  const result: StuckTaskResult = {
+    failedQueued: 0,
+    failedDelegated: 0,
+    failedInProgress: 0,
+    doHealthChecked: 0,
+    errors: 0,
+  };
 
   const queuedTimeoutMs = parseMs(env.TASK_STUCK_QUEUED_TIMEOUT_MS, DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS);
   const delegatedTimeoutMs = parseMs(env.TASK_STUCK_DELEGATED_TIMEOUT_MS, DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS);
   const maxExecutionMs = parseMs(env.TASK_RUN_MAX_EXECUTION_MS, DEFAULT_TASK_RUN_MAX_EXECUTION_MS);
 
-  // Find stuck tasks via raw SQL (more efficient than Drizzle for multi-status queries)
+  // Find stuck tasks via raw SQL — include workspace_id and auto_provisioned_node_id
+  // for diagnostic context capture.
   const stuckTasks = await env.DATABASE.prepare(
-    `SELECT id, project_id, user_id, status, execution_step, updated_at, started_at
+    `SELECT id, project_id, user_id, status, execution_step, updated_at, started_at,
+            workspace_id, auto_provisioned_node_id
      FROM tasks
      WHERE status IN ('queued', 'delegated', 'in_progress')
      ORDER BY updated_at ASC`
@@ -78,6 +205,8 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     execution_step: string | null;
     updated_at: string;
     started_at: string | null;
+    workspace_id: string | null;
+    auto_provisioned_node_id: string | null;
   }>();
 
   const db = drizzle(env.DATABASE, { schema });
@@ -116,9 +245,58 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       }
     }
 
-    if (!isStuck) continue;
+    // For non-stuck tasks, check DO health as defense-in-depth (TDF-7).
+    // If the task has been sitting for at least half its threshold time,
+    // proactively verify the DO is still alive and making progress.
+    if (!isStuck) {
+      const halfThreshold = task.status === 'queued' ? queuedTimeoutMs / 2
+        : task.status === 'delegated' ? delegatedTimeoutMs / 2
+        : maxExecutionMs / 2;
+
+      if (elapsedMs > halfThreshold) {
+        try {
+          const doId = env.TASK_RUNNER.idFromName(task.id);
+          const stub = env.TASK_RUNNER.get(doId) as DurableObjectStub<TaskRunner>;
+          const doStatus = await stub.getStatus();
+
+          if (doStatus && doStatus.completed && task.status !== 'failed' && task.status !== 'completed') {
+            // DO thinks it's done but D1 status is still transient — log for investigation
+            log.warn('stuck_task.do_completed_but_task_active', {
+              taskId: task.id,
+              taskStatus: task.status,
+              doCurrentStep: doStatus.currentStep,
+              doRetryCount: doStatus.retryCount,
+            });
+
+            await persistError(env.OBSERVABILITY_DATABASE, {
+              source: 'api',
+              level: 'warn',
+              message: `TaskRunner DO completed but task still in '${task.status}' — possible D1 update failure`,
+              context: {
+                recoveryType: 'do_task_status_mismatch',
+                taskId: task.id,
+                taskStatus: task.status,
+                executionStep: task.execution_step,
+                doCurrentStep: doStatus.currentStep,
+                doRetryCount: doStatus.retryCount,
+                elapsedMs,
+              },
+              userId: task.user_id,
+            });
+          }
+
+          result.doHealthChecked++;
+        } catch {
+          // DO unreachable — not necessarily an error (may not have been created yet)
+        }
+      }
+      continue;
+    }
 
     try {
+      // Gather diagnostic context before recovery
+      const diagnostics = await gatherDiagnostics(env, task, elapsedMs, reason);
+
       log.warn('stuck_task.recovering', {
         taskId: task.id,
         projectId: task.project_id,
@@ -127,6 +305,32 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         executionStep: task.execution_step,
         elapsedMs,
         reason,
+        workspaceStatus: diagnostics.workspaceStatus,
+        nodeStatus: diagnostics.nodeStatus,
+        doState: diagnostics.doState,
+      });
+
+      // Record recovery in OBSERVABILITY_DATABASE for admin visibility (TDF-7)
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'warn',
+        message: reason,
+        context: {
+          recoveryType: 'stuck_task',
+          taskStatus: task.status,
+          executionStep: task.execution_step,
+          elapsedMs,
+          workspaceId: diagnostics.workspaceId,
+          workspaceStatus: diagnostics.workspaceStatus,
+          nodeId: diagnostics.nodeId,
+          nodeStatus: diagnostics.nodeStatus,
+          nodeHealthStatus: diagnostics.nodeHealthStatus,
+          autoProvisionedNodeId: diagnostics.autoProvisionedNodeId,
+          doState: diagnostics.doState,
+        },
+        userId: task.user_id,
+        nodeId: diagnostics.nodeId,
+        workspaceId: diagnostics.workspaceId,
       });
 
       const nowIso = now.toISOString();
@@ -168,6 +372,23 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           taskId: task.id,
           error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
         });
+
+        // Record cleanup failure in OBSERVABILITY_DATABASE (TDF-7)
+        await persistError(env.OBSERVABILITY_DATABASE, {
+          source: 'api',
+          level: 'error',
+          message: `Stuck task cleanup failed: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`,
+          stack: cleanupErr instanceof Error ? cleanupErr.stack : undefined,
+          context: {
+            recoveryType: 'stuck_task_cleanup_failure',
+            taskId: task.id,
+            taskStatus: task.status,
+            executionStep: task.execution_step,
+          },
+          userId: task.user_id,
+          nodeId: diagnostics.nodeId,
+          workspaceId: diagnostics.workspaceId,
+        });
       }
 
       switch (task.status) {
@@ -180,6 +401,22 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         taskId: task.id,
         error: err instanceof Error ? err.message : String(err),
       });
+
+      // Record recovery failure in OBSERVABILITY_DATABASE (TDF-7)
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'error',
+        message: `Stuck task recovery failed: ${err instanceof Error ? err.message : String(err)}`,
+        stack: err instanceof Error ? err.stack : undefined,
+        context: {
+          recoveryType: 'stuck_task_recovery_failure',
+          taskId: task.id,
+          taskStatus: task.status,
+          executionStep: task.execution_step,
+        },
+        userId: task.user_id,
+      });
+
       result.errors++;
     }
   }

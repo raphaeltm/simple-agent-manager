@@ -3,11 +3,16 @@
  *
  * Handles detection and marking of workspaces stuck in 'creating' status.
  * Called by cron trigger every 5 minutes.
+ *
+ * TDF-7: Enhanced with OBSERVABILITY_DATABASE recording and structured
+ * logging for admin visibility of provisioning timeout recoveries.
  */
 
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, and, lt } from 'drizzle-orm';
 import * as schema from '../db/schema';
+import { log } from '../lib/logger';
+import { persistError } from './observability';
 
 /** Default provisioning timeout in milliseconds (15 minutes).
  * Must be >= WORKSPACE_READY_TIMEOUT_MS to avoid marking workspaces as timed out
@@ -33,11 +38,13 @@ export function getProvisioningTimeoutMs(env?: { PROVISIONING_TIMEOUT_MS?: strin
  *
  * @param database - D1 database binding
  * @param env - Environment for reading configurable timeout
+ * @param observabilityDb - Optional OBSERVABILITY_DATABASE for recording timeouts (TDF-7)
  * @returns Number of workspaces that timed out
  */
 export async function checkProvisioningTimeouts(
   database: D1Database,
-  env?: { PROVISIONING_TIMEOUT_MS?: string }
+  env?: { PROVISIONING_TIMEOUT_MS?: string },
+  observabilityDb?: D1Database
 ): Promise<number> {
   const db = drizzle(database, { schema });
   const now = new Date();
@@ -46,8 +53,14 @@ export async function checkProvisioningTimeouts(
   const timeoutMinutes = Math.round(timeoutMs / 60000);
 
   // Find workspaces stuck in 'creating' status past timeout threshold
+  // Include node_id and user_id for diagnostic context (TDF-7)
   const stuckWorkspaces = await db
-    .select({ id: schema.workspaces.id })
+    .select({
+      id: schema.workspaces.id,
+      nodeId: schema.workspaces.nodeId,
+      userId: schema.workspaces.userId,
+      createdAt: schema.workspaces.createdAt,
+    })
     .from(schema.workspaces)
     .where(
       and(
@@ -71,11 +84,39 @@ export async function checkProvisioningTimeouts(
         updatedAt: now.toISOString(),
       })
       .where(eq(schema.workspaces.id, workspace.id));
+
+    log.warn('provisioning_timeout.workspace_timed_out', {
+      workspaceId: workspace.id,
+      nodeId: workspace.nodeId,
+      userId: workspace.userId,
+      createdAt: workspace.createdAt,
+      timeoutMinutes,
+    });
+
+    // Record in OBSERVABILITY_DATABASE (TDF-7)
+    if (observabilityDb) {
+      await persistError(observabilityDb, {
+        source: 'api',
+        level: 'warn',
+        message: timeoutMessage,
+        context: {
+          recoveryType: 'provisioning_timeout',
+          workspaceId: workspace.id,
+          nodeId: workspace.nodeId,
+          createdAt: workspace.createdAt,
+          timeoutMs,
+        },
+        userId: workspace.userId,
+        nodeId: workspace.nodeId,
+        workspaceId: workspace.id,
+      });
+    }
   }
 
-  console.log(
-    `Provisioning timeout: marked ${stuckWorkspaces.length} workspace(s) as error`
-  );
+  log.info('provisioning_timeout.summary', {
+    timedOutCount: stuckWorkspaces.length,
+    timeoutMinutes,
+  });
 
   return stuckWorkspaces.length;
 }
