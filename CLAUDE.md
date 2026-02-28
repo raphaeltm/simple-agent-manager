@@ -94,6 +94,10 @@ GitHub Actions reserves `GITHUB_*`, so GitHub secrets use `GH_*` prefix. The dep
 
 Full env var reference: use the `env-reference` skill or see `apps/api/.env.example`.
 
+## Wrangler Binding Rule (CRITICAL)
+
+Wrangler does NOT inherit `durable_objects`, `d1_databases`, `kv_namespaces`, `r2_buckets`, `ai`, or `tail_consumers` from top-level config into `[env.*]` sections. When adding ANY new binding to `wrangler.toml`, add it to **all three places**: top-level, `[env.staging]`, and `[env.production]`. Miniflare tests won't catch this — they configure bindings independently. See `.claude/rules/07-env-and-urls.md` for details.
+
 ## Architecture Principles
 
 1. **BYOC (Bring-Your-Own-Cloud)**: Users provide their own Hetzner tokens. The platform does NOT have cloud provider credentials.

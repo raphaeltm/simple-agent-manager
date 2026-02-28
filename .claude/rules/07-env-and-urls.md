@@ -38,6 +38,33 @@ GH_APP_SLUG            ->  GITHUB_APP_SLUG
 - **Code reading from env**: Use `env.GITHUB_CLIENT_ID`
 - **Local development**: Use `GITHUB_CLIENT_ID` in `.env`
 
+## Wrangler Non-Inheritable Bindings
+
+Wrangler does NOT inherit certain binding types from the top-level config into `[env.*]` sections. When deploying with `--env production` or `--env staging`, bindings defined only at the top level will be **undefined** at runtime.
+
+### Non-inheritable binding types (MUST be duplicated per environment)
+
+- `durable_objects.bindings` — Durable Object bindings
+- `ai` — Workers AI binding
+- `d1_databases` — D1 database bindings
+- `kv_namespaces` — KV namespace bindings
+- `r2_buckets` — R2 bucket bindings
+- `tail_consumers` — Tail Worker consumers
+
+### Required action when adding ANY new binding
+
+When adding a new binding to `wrangler.toml`, you MUST add it to ALL THREE places:
+
+1. **Top-level** — used by local dev and Miniflare tests
+2. **`[env.staging]`** — used by `wrangler deploy --env staging`
+3. **`[env.production]`** — used by `wrangler deploy --env production`
+
+Failure to do this causes `env.BINDING_NAME` to be `undefined` at runtime, producing `Cannot read properties of undefined (reading 'idFromName')` or similar errors that only appear in deployed environments, never in local tests.
+
+### Why tests don't catch this
+
+Miniflare (used in Vitest worker tests) configures bindings directly in `vitest.workers.config.ts`, NOT from `wrangler.toml`. Tests will pass even when wrangler.toml is misconfigured.
+
 ### Workers Secrets
 
 ```bash
