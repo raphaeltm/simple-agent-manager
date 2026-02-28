@@ -154,4 +154,57 @@ describe('ProjectChat new chat button', () => {
       expect(screen.getByTestId('message-view')).toHaveTextContent('session-2');
     });
   });
+
+  it('clears new chat intent and navigates to new session after task submission', async () => {
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [SESSION_1],
+      total: 1,
+    });
+    mocks.listCredentials.mockResolvedValue([
+      { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
+    ]);
+    mocks.submitTask.mockResolvedValue({
+      taskId: 'task-new',
+      sessionId: 'session-new',
+      branchName: 'sam/task-new',
+      status: 'queued',
+    });
+    mocks.getProjectTask.mockResolvedValue({
+      id: 'task-new',
+      status: 'queued',
+      executionStep: null,
+      errorMessage: null,
+    });
+
+    // Start on existing session
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_1.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByText('First chat')).toBeInTheDocument();
+    });
+
+    // Click "+ New"
+    fireEvent.click(screen.getByRole('button', { name: '+ New' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
+    });
+
+    // Type a message and submit
+    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
+    fireEvent.change(textarea, { target: { value: 'Build a todo app' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    // Should submit the task and navigate to the new session
+    await waitFor(() => {
+      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, {
+        message: 'Build a todo app',
+      });
+    });
+
+    // Should navigate to the new session's message view
+    await waitFor(() => {
+      expect(screen.getByTestId('message-view')).toHaveTextContent('session-new');
+    });
+  });
 });

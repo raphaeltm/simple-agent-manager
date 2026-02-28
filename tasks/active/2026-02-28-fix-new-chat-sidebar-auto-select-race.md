@@ -104,17 +104,18 @@ Add a `useRef` flag (`newChatIntentRef`) that tracks whether the user explicitly
 | File | Change |
 |------|--------|
 | `apps/web/src/pages/ProjectChat.tsx` | Add `newChatIntentRef` guard to auto-select effect |
-| `apps/web/tests/unit/pages/project-chat.test.tsx` | New test file with 4 test cases |
+| `apps/web/tests/unit/pages/project-chat.test.tsx` | New test file with 5 test cases |
 
 ## Test Plan
 
 - [x] Research and root cause analysis
-- [ ] Implement the ref-based guard in `ProjectChat.tsx`
-- [ ] Add unit tests covering:
-  - [ ] No sessions -> shows new chat input
-  - [ ] Auto-selects most recent session on initial load
-  - [ ] "+ New" click shows new chat input (does NOT redirect back)
-  - [ ] Selecting a session after "+ New" clears the intent flag
-- [ ] Run `pnpm typecheck` and `pnpm lint`
-- [ ] Run unit tests
+- [x] Implement the ref-based guard in `ProjectChat.tsx`
+- [x] Add unit tests covering:
+  - [x] No sessions -> shows new chat input
+  - [x] Auto-selects most recent session on initial load
+  - [x] "+ New" click shows new chat input (does NOT redirect back)
+  - [x] Selecting a session after "+ New" clears the intent flag
+  - [x] Task submission clears intent and navigates to new session
+- [x] Run `pnpm typecheck` and `pnpm lint`
+- [x] Run unit tests
 - [ ] Push and verify CI passes
