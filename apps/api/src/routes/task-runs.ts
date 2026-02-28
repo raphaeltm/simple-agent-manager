@@ -24,6 +24,8 @@ import { requireOwnedProject, requireOwnedTask } from '../middleware/project-aut
 import { startTaskRunnerDO } from '../services/task-runner-do';
 import { cleanupTaskRun } from '../services/task-runner';
 import { isTaskBlocked } from '../services/task-graph';
+import * as projectDataService from '../services/project-data';
+import { log } from '../lib/logger';
 
 const taskRunsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -158,13 +160,16 @@ taskRunsRoutes.post('/:taskId/run', async (c) => {
     .where(eq(schema.users.id, userId))
     .limit(1);
 
-  // Transition task to queued with initial execution step
+  // Transition task to queued with initial execution step (optimistic lock on 'ready')
   const now = new Date().toISOString();
-  await db
-    .update(schema.tasks)
-    .set({ status: 'queued', executionStep: 'node_selection', updatedAt: now })
-    .where(eq(schema.tasks.id, task.id));
+  const transitionResult = await c.env.DATABASE.prepare(
+    `UPDATE tasks SET status = 'queued', execution_step = 'node_selection', updated_at = ? WHERE id = ? AND status = 'ready'`
+  ).bind(now, task.id).run();
 
+  // If another request already transitioned this task, reject (double-click protection)
+  if (!transitionResult.meta.changes || transitionResult.meta.changes === 0) {
+    throw errors.conflict('Task has already been queued for execution');
+  }
   await db.insert(schema.taskStatusEvents).values({
     id: ulid(),
     taskId: task.id,
@@ -176,24 +181,85 @@ taskRunsRoutes.post('/:taskId/run', async (c) => {
     createdAt: now,
   });
 
-  // Start TaskRunner DO — alarm-driven orchestration (TDF-2)
-  await startTaskRunnerDO(c.env, {
+  // TDF-6: Create chat session — REQUIRED (same pattern as task-submit.ts).
+  // Tasks from the kanban board "Run" action also need a session.
+  // If session creation or DO startup fails, mark the task as failed.
+  let sessionId: string;
+  try {
+    sessionId = await projectDataService.createSession(
+      c.env,
+      projectId,
+      null, // workspaceId — linked later by TaskRunner DO when workspace is created
+      task.title,
+      task.id
+    );
+  } catch (err) {
+    const failedAt = new Date().toISOString();
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    await db.update(schema.tasks)
+      .set({ status: 'failed', errorMessage: `Session creation failed: ${errorMsg}`, updatedAt: failedAt })
+      .where(eq(schema.tasks.id, task.id));
+    await db.insert(schema.taskStatusEvents).values({
+      id: ulid(),
+      taskId: task.id,
+      fromStatus: 'queued',
+      toStatus: 'failed',
+      actorType: 'system',
+      actorId: null,
+      reason: `Session creation failed: ${errorMsg}`,
+      createdAt: failedAt,
+    });
+    log.error('task_run.session_failed', { taskId: task.id, projectId, error: errorMsg });
+    throw err;
+  }
+
+  log.info('task_run.session_created', {
     taskId: task.id,
     projectId,
-    userId,
-    vmSize,
-    vmLocation,
-    branch,
-    preferredNodeId: body.nodeId,
-    userName: auth.user.name,
-    userEmail: auth.user.email,
-    githubId: userRow?.githubId ?? null,
-    taskTitle: task.title,
-    taskDescription: task.description,
-    repository: project.repository,
-    installationId: project.installationId,
-    projectDefaultVmSize: project.defaultVmSize as VMSize | null,
+    sessionId,
   });
+
+  // Start TaskRunner DO — alarm-driven orchestration (TDF-2)
+  try {
+    await startTaskRunnerDO(c.env, {
+      taskId: task.id,
+      projectId,
+      userId,
+      vmSize,
+      vmLocation,
+      branch,
+      preferredNodeId: body.nodeId,
+      userName: auth.user.name,
+      userEmail: auth.user.email,
+      githubId: userRow?.githubId ?? null,
+      taskTitle: task.title,
+      taskDescription: task.description,
+      repository: project.repository,
+      installationId: project.installationId,
+      projectDefaultVmSize: project.defaultVmSize as VMSize | null,
+      chatSessionId: sessionId,
+    });
+  } catch (err) {
+    const failedAt = new Date().toISOString();
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    await db.update(schema.tasks)
+      .set({ status: 'failed', errorMessage: `Task runner startup failed: ${errorMsg}`, updatedAt: failedAt })
+      .where(eq(schema.tasks.id, task.id));
+    await db.insert(schema.taskStatusEvents).values({
+      id: ulid(),
+      taskId: task.id,
+      fromStatus: 'queued',
+      toStatus: 'failed',
+      actorType: 'system',
+      actorId: null,
+      reason: `Task runner startup failed: ${errorMsg}`,
+      createdAt: failedAt,
+    });
+    log.error('task_run.do_startup_failed', { taskId: task.id, projectId, error: errorMsg });
+    // Stop the orphaned session (best-effort — it has no workspace and will never be cleaned up otherwise)
+    await projectDataService.stopSession(c.env, projectId, sessionId).catch(() => {});
+    throw err;
+  }
 
   const response: RunTaskResponse = {
     taskId: task.id,

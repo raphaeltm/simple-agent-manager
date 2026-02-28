@@ -39,6 +39,16 @@ export async function createSession(
   return stub.createSession(workspaceId, topic, taskId);
 }
 
+export async function linkSessionToWorkspace(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  workspaceId: string
+): Promise<void> {
+  const stub = await getStub(env, projectId);
+  return stub.linkSessionToWorkspace(sessionId, workspaceId);
+}
+
 export async function stopSession(
   env: Env,
   projectId: string,

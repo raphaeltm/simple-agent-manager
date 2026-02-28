@@ -92,6 +92,8 @@ interface TaskRunConfig {
   installationId: string;
   outputBranch: string | null;
   projectDefaultVmSize: VMSize | null;
+  /** Chat session ID created at task submit time (TDF-6: single session per task) */
+  chatSessionId: string | null;
 }
 
 export interface TaskRunnerState {
@@ -165,7 +167,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         nodeId: null,
         autoProvisioned: false,
         workspaceId: null,
-        chatSessionId: null,
+        chatSessionId: input.config.chatSessionId ?? null,
         agentSessionId: null,
       },
       config: input.config,
@@ -518,6 +520,9 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       ).bind(state.taskId).first<{ status: string }>();
 
       if (task?.status === 'delegated') {
+        // TDF-6: Ensure session linking on crash recovery — the DO may have crashed
+        // after creating the workspace but before linking the session.
+        await this.ensureSessionLinked(state, state.stepResults.workspaceId);
         await this.advanceToStep(state, 'workspace_ready');
         return;
       }
@@ -561,27 +566,10 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       state.stepResults.workspaceId = workspaceId;
       await this.ctx.storage.put('state', state);
 
-      // Create chat session (best-effort)
-      try {
-        const projectDataService = await import('../services/project-data');
-        const chatSessionId = await projectDataService.createSession(
-          this.env as any,
-          state.projectId,
-          workspaceId,
-          state.config.taskTitle,
-          state.taskId,
-        );
-        state.stepResults.chatSessionId = chatSessionId;
-
-        await this.env.DATABASE.prepare(
-          `UPDATE workspaces SET chat_session_id = ?, updated_at = ? WHERE id = ?`
-        ).bind(chatSessionId, now, workspaceId).run();
-      } catch (err) {
-        log.error('task_runner_do.chat_session_create_failed', {
-          taskId: state.taskId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+      // TDF-6: Link existing chat session to workspace (session created at submit time).
+      // No new session creation here — one session per task. Uses shared helper
+      // so crash recovery path also gets session linking (MEDIUM #1 fix).
+      await this.ensureSessionLinked(state, workspaceId);
 
       // Set output_branch
       const outputBranch = state.config.outputBranch || `task/${state.taskId}`;
@@ -671,46 +659,36 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     const timeoutMs = this.getWorkspaceReadyTimeoutMs();
     const elapsed = Date.now() - state.workspaceReadyStartedAt;
     if (elapsed > timeoutMs) {
+      // Last-resort D1 check: the /ready handler updates D1 before notifying
+      // the DO. If all callback retries failed but D1 has the correct status,
+      // advance instead of failing (defense-in-depth safety net).
+      const wsRow = await this.env.DATABASE.prepare(
+        `SELECT status, error_message FROM workspaces WHERE id = ?`
+      ).bind(state.stepResults.workspaceId).first<{ status: string; error_message: string | null }>();
+
+      if (wsRow?.status === 'running' || wsRow?.status === 'recovery') {
+        log.info('task_runner_do.step.workspace_ready_from_d1_at_timeout', {
+          taskId: state.taskId,
+          workspaceId: state.stepResults.workspaceId,
+          status: wsRow.status,
+        });
+        await this.advanceToStep(state, 'agent_session');
+        return;
+      }
+
       throw Object.assign(
         new Error(`Workspace did not become ready within ${timeoutMs}ms`),
         { permanent: true },
       );
     }
 
-    // Also check D1 as fallback (in case callback was processed by old code path
-    // or the advanceWorkspaceReady RPC was lost)
-    if (state.stepResults.workspaceId) {
-      const ws = await this.env.DATABASE.prepare(
-        `SELECT status, error_message FROM workspaces WHERE id = ?`
-      ).bind(state.stepResults.workspaceId).first<{ status: string; error_message: string | null }>();
-
-      if (ws) {
-        if (ws.status === 'running' || ws.status === 'recovery') {
-          log.info('task_runner_do.step.workspace_ready_from_d1', {
-            taskId: state.taskId,
-            workspaceId: state.stepResults.workspaceId,
-          });
-          await this.advanceToStep(state, 'agent_session');
-          return;
-        }
-        if (ws.status === 'error') {
-          throw Object.assign(
-            new Error(ws.error_message || 'Workspace creation failed'),
-            { permanent: true },
-          );
-        }
-        if (ws.status === 'stopped') {
-          throw Object.assign(
-            new Error('Workspace was stopped during creation'),
-            { permanent: true },
-          );
-        }
-      }
-    }
-
-    // Still waiting — schedule another poll as fallback
-    // (Primary advancement is via advanceWorkspaceReady callback)
-    await this.ctx.storage.setAlarm(Date.now() + this.getAgentPollIntervalMs());
+    // No callback yet and not timed out — schedule alarm at remaining timeout
+    // boundary. The callback (advanceWorkspaceReady RPC) is the sole advancement
+    // mechanism; D1 polling has been removed (TDF-5). The VM agent retries the
+    // callback with exponential backoff (TDF-4), so the timeout alarm is only
+    // a safety net for the case where all retries are exhausted.
+    const remaining = Math.max(timeoutMs - elapsed, 0);
+    await this.ctx.storage.setAlarm(Date.now() + remaining);
   }
 
   private async handleAgentSession(state: TaskRunnerState): Promise<void> {
@@ -778,6 +756,72 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
   // =========================================================================
   // State machine helpers
   // =========================================================================
+
+  /**
+   * TDF-6: Ensure the chat session is linked to the workspace in both D1 and the
+   * ProjectData DO. This is idempotent — safe to call on every retry/recovery.
+   *
+   * D1 update is done FIRST and separately because:
+   * - D1 chat_session_id on workspace is used by idle cleanup and task completion hooks
+   * - Even if the DO call fails, D1 must have the link for downstream correctness
+   */
+  private async ensureSessionLinked(
+    state: TaskRunnerState,
+    workspaceId: string,
+  ): Promise<void> {
+    if (!state.stepResults.chatSessionId) return;
+
+    const now = new Date().toISOString();
+
+    // Step 1: Update D1 workspace record (critical — used by idle cleanup, task hooks)
+    // This is idempotent: setting chat_session_id to the same value is fine.
+    try {
+      await this.env.DATABASE.prepare(
+        `UPDATE workspaces SET chat_session_id = ?, updated_at = ? WHERE id = ?`
+      ).bind(state.stepResults.chatSessionId, now, workspaceId).run();
+
+      log.info('task_runner_do.session_d1_linked', {
+        taskId: state.taskId,
+        sessionId: state.stepResults.chatSessionId,
+        workspaceId,
+      });
+    } catch (err) {
+      // D1 link failure is serious — log as error but don't block task execution.
+      log.error('task_runner_do.session_d1_link_failed', {
+        taskId: state.taskId,
+        sessionId: state.stepResults.chatSessionId,
+        workspaceId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // Step 2: Update ProjectData DO session record (best-effort — enriches session data)
+    // linkSessionToWorkspace in the DO is also idempotent (updates workspace_id).
+    try {
+      const projectDataService = await import('../services/project-data');
+      await projectDataService.linkSessionToWorkspace(
+        this.env as any,
+        state.projectId,
+        state.stepResults.chatSessionId,
+        workspaceId,
+      );
+
+      log.info('task_runner_do.session_linked_to_workspace', {
+        taskId: state.taskId,
+        sessionId: state.stepResults.chatSessionId,
+        workspaceId,
+      });
+    } catch (err) {
+      // DO link failure is best-effort — session still works without workspace_id
+      // in the DO's SQLite. The D1 link above handles downstream needs.
+      log.error('task_runner_do.session_do_link_failed', {
+        taskId: state.taskId,
+        sessionId: state.stepResults.chatSessionId,
+        workspaceId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   /**
    * Advance to the next step: persist state, reset retry count, schedule alarm.

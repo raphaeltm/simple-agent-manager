@@ -1,5 +1,6 @@
 import { type FC } from 'react';
 import type { Task, TaskStatus } from '@simple-agent-manager/shared';
+import { EXECUTION_STEP_LABELS } from '@simple-agent-manager/shared';
 import { Spinner, StatusBadge } from '@simple-agent-manager/ui';
 
 export interface TaskKanbanCardProps {
@@ -70,7 +71,9 @@ export const TaskKanbanCard: FC<TaskKanbanCardProps> = ({ task, onClick }) => {
               color: 'var(--sam-color-fg-muted)',
             }}>
               <Spinner size="sm" />
-              {task.status}
+              {task.executionStep
+                ? EXECUTION_STEP_LABELS[task.executionStep]
+                : task.status}
             </span>
           )}
 
@@ -83,7 +86,9 @@ export const TaskKanbanCard: FC<TaskKanbanCardProps> = ({ task, onClick }) => {
               color: 'var(--sam-color-success)',
             }}>
               <Spinner size="sm" />
-              Running
+              {task.executionStep && task.executionStep !== 'running'
+                ? EXECUTION_STEP_LABELS[task.executionStep]
+                : 'Running'}
             </span>
           )}
 

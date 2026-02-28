@@ -3,7 +3,12 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Spinner } from '@simple-agent-manager/ui';
 import { SessionSidebar } from '../components/chat/SessionSidebar';
 import { ProjectMessageView } from '../components/chat/ProjectMessageView';
-import type { TaskStatus } from '@simple-agent-manager/shared';
+import type { TaskStatus, TaskExecutionStep } from '@simple-agent-manager/shared';
+import {
+  EXECUTION_STEP_LABELS,
+  EXECUTION_STEP_ORDER,
+  TASK_EXECUTION_STEPS,
+} from '@simple-agent-manager/shared';
 import {
   listChatSessions,
   listCredentials,
@@ -23,6 +28,7 @@ interface ProvisioningState {
   sessionId: string;
   branchName: string;
   status: TaskStatus;
+  executionStep: TaskExecutionStep | null;
   errorMessage: string | null;
   startedAt: number;
 }
@@ -75,7 +81,7 @@ export function ProjectChat() {
     const poll = async () => {
       try {
         const task = await getProjectTask(projectId, provisioning.taskId);
-        setProvisioning((prev) => prev ? { ...prev, status: task.status, errorMessage: task.errorMessage ?? null } : null);
+        setProvisioning((prev) => prev ? { ...prev, status: task.status, executionStep: task.executionStep ?? null, errorMessage: task.errorMessage ?? null } : null);
 
         // When task reaches in_progress and has a workspace, navigate to its session
         if (task.status === 'in_progress' && task.workspaceId) {
@@ -132,6 +138,7 @@ export function ProjectChat() {
         sessionId: result.sessionId,
         branchName: result.branchName,
         status: 'queued',
+        executionStep: null,
         errorMessage: null,
         startedAt: Date.now(),
       });
@@ -280,7 +287,12 @@ function isTerminal(status: TaskStatus): boolean {
   return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
 
-/** Inline provisioning progress — replaces the old TaskExecutionProgress banner. */
+/** Steps shown in the provisioning progress bar (setup steps only, not running/followup). */
+const PROVISIONING_STEPS: TaskExecutionStep[] = TASK_EXECUTION_STEPS.filter(
+  (s) => s !== 'running' && s !== 'awaiting_followup'
+);
+
+/** Inline provisioning progress with granular execution step display (TDF-8). */
 function ProvisioningIndicator({ state }: { state: ProvisioningState }) {
   const [elapsed, setElapsed] = useState(0);
 
@@ -293,40 +305,91 @@ function ProvisioningIndicator({ state }: { state: ProvisioningState }) {
   const seconds = Math.floor(elapsed / 1000);
   const elapsedDisplay = seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds}s`;
 
-  const statusLabel =
-    state.status === 'queued' ? 'Setting up...' :
-    state.status === 'delegated' ? 'Provisioning workspace...' :
-    state.status === 'failed' ? 'Setup failed' :
-    state.status === 'cancelled' ? 'Cancelled' :
-    'Starting agent...';
+  // Use execution step label if available, otherwise fall back to status-based label
+  const statusLabel = state.status === 'failed' ? 'Setup failed'
+    : state.status === 'cancelled' ? 'Cancelled'
+    : state.executionStep ? EXECUTION_STEP_LABELS[state.executionStep]
+    : 'Starting...';
+
+  const currentStepOrder = state.executionStep ? EXECUTION_STEP_ORDER[state.executionStep] : -1;
+  const isFailed = state.status === 'failed';
 
   return (
     <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 'var(--sam-space-2)',
       padding: 'var(--sam-space-3) var(--sam-space-4)',
-      backgroundColor: state.status === 'failed' ? 'var(--sam-color-danger-tint)' : 'var(--sam-color-info-tint)',
+      backgroundColor: isFailed ? 'var(--sam-color-danger-tint)' : 'var(--sam-color-info-tint)',
       borderBottom: '1px solid var(--sam-color-border-default)',
     }}>
-      {!isTerminal(state.status) && <Spinner size="sm" />}
-      <span className="sam-type-secondary" style={{
-        color: state.status === 'failed' ? 'var(--sam-color-danger)' : 'var(--sam-color-fg-primary)',
+      {/* Status header */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--sam-space-2)',
+        marginBottom: 'var(--sam-space-2)',
       }}>
-        {statusLabel}
-      </span>
-      {state.branchName && !isTerminal(state.status) && (
-        <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)' }}>
-          {state.branchName}
+        {!isTerminal(state.status) && <Spinner size="sm" />}
+        <span className="sam-type-secondary" style={{
+          color: isFailed ? 'var(--sam-color-danger)' : 'var(--sam-color-fg-primary)',
+          fontWeight: 500,
+        }}>
+          {statusLabel}
         </span>
+        {state.branchName && !isTerminal(state.status) && (
+          <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)' }}>
+            {state.branchName}
+          </span>
+        )}
+        <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', marginLeft: 'auto' }}>
+          {elapsedDisplay}
+        </span>
+      </div>
+
+      {/* Step progress bar (only during active provisioning) */}
+      {!isTerminal(state.status) && (
+        <div style={{
+          display: 'flex',
+          gap: '2px',
+          height: '3px',
+          borderRadius: '2px',
+          overflow: 'hidden',
+        }}>
+          {PROVISIONING_STEPS.map((step) => {
+            const stepOrder = EXECUTION_STEP_ORDER[step];
+            const isComplete = stepOrder < currentStepOrder;
+            const isCurrent = stepOrder === currentStepOrder;
+
+            return (
+              <div
+                key={step}
+                title={EXECUTION_STEP_LABELS[step]}
+                style={{
+                  flex: 1,
+                  backgroundColor: isComplete
+                    ? 'var(--sam-color-success)'
+                    : isCurrent
+                    ? 'var(--sam-color-accent-primary)'
+                    : 'var(--sam-color-border-default)',
+                  transition: 'background-color 0.3s ease',
+                }}
+              />
+            );
+          })}
+        </div>
       )}
-      <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', marginLeft: 'auto' }}>
-        {elapsedDisplay}
-      </span>
+
+      {/* Error message */}
       {state.errorMessage && (
-        <span className="sam-type-caption" style={{ color: 'var(--sam-color-danger)' }}>
+        <div className="sam-type-caption" style={{
+          color: 'var(--sam-color-danger)',
+          marginTop: 'var(--sam-space-2)',
+          padding: 'var(--sam-space-2) var(--sam-space-3)',
+          backgroundColor: 'var(--sam-color-bg-surface)',
+          borderRadius: 'var(--sam-radius-sm)',
+          border: '1px solid var(--sam-color-danger-tint)',
+          wordBreak: 'break-word',
+        }}>
           {state.errorMessage}
-        </span>
+        </div>
       )}
     </div>
   );

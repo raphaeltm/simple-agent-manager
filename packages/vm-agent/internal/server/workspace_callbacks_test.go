@@ -65,7 +65,7 @@ func TestNotifyWorkspaceProvisioningFailed(t *testing.T) {
 		}
 	})
 
-	t.Run("returns error when callback endpoint fails", func(t *testing.T) {
+	t.Run("returns error when callback endpoint fails after retries", func(t *testing.T) {
 		t.Parallel()
 
 		controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -81,12 +81,17 @@ func TestNotifyWorkspaceProvisioningFailed(t *testing.T) {
 			},
 		}
 
-		err := s.notifyWorkspaceProvisioningFailed(context.Background(), "ws-123", "token", "")
+		// Use a short-lived context to limit retry duration in tests
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+
+		err := s.notifyWorkspaceProvisioningFailed(ctx, "ws-123", "token", "")
 		if err == nil {
 			t.Fatal("expected error for non-2xx callback response")
 		}
-		if !strings.Contains(err.Error(), "HTTP 500") {
-			t.Fatalf("expected HTTP 500 in error, got %v", err)
+		// Error could be from context cancellation or retry exhaustion
+		if !strings.Contains(err.Error(), "HTTP 500") && !strings.Contains(err.Error(), "context") {
+			t.Fatalf("expected HTTP 500 or context error, got %v", err)
 		}
 	})
 }
