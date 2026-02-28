@@ -320,7 +320,7 @@ describe('TaskRunner DO step handlers', () => {
         doSource.indexOf('private async handleWorkspaceReady('),
         doSource.indexOf('private async handleAgentSession(')
       );
-      expect(section).toContain('const remaining = timeoutMs - elapsed');
+      expect(section).toContain('const remaining = Math.max(timeoutMs - elapsed, 0)');
       expect(section).toContain('setAlarm(Date.now() + remaining)');
     });
 
