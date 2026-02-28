@@ -37,6 +37,26 @@ Spec files are historical records tied to a specific feature context. Apply thes
 2. **Working within a specific spec**: You MUST NOT edit docs under any other spec directory.
 3. **Working outside spec context**: You MUST NOT edit `specs/` documentation at all.
 
+## Behavioral Claims Must Cite Code Paths
+
+When writing documentation that describes what the system **does** (flow maps, architecture docs, system analysis), every behavioral claim must cite a specific code path.
+
+### Rules
+
+1. **Never write "X happens" without citing the function that does X.** If you cannot find the function, the behavior may not be implemented.
+   - Good: "The VM agent starts Claude Code (`session_host.go:SelectAgent()`)"
+   - Bad: "The VM agent starts Claude Code"
+
+2. **Mark claims as verified or intended.** Use present tense only for behavior you have confirmed exists in code. Use future tense or explicit markers for planned behavior.
+   - Verified: "The task runner creates an agent session (`task-runner.ts:handleAgentSession()`, verified)"
+   - Intended: "The VM agent WILL send the initial prompt (not yet implemented — see issue #XX)"
+
+3. **Never mix aspirational and factual claims** in the same section without clear markers. A reader must be able to distinguish "this is what the code does today" from "this is what we want the code to do."
+
+### Why This Matters
+
+The TDF post-mortem (`docs/notes/2026-02-28-missing-initial-prompt-postmortem.md`) showed that flow maps and analysis documents containing uncited aspirational claims were treated as ground truth by downstream work. Eight tasks and seven PRs built on the assumption that "the VM agent starts an ACP session" because a document said so — but no code existed for it.
+
 ## No Legacy / Dead Code
 
 This project is pre-production. Do not keep "legacy" code paths that are not used.

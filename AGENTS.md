@@ -41,6 +41,7 @@ All behavioral rules for agents are in `.claude/rules/`:
 - `07-env-and-urls.md` — Environment variable naming, URL construction
 - `08-architecture.md` — Architecture research requirements
 - `09-task-tracking.md` — Task tracking system
+- `10-e2e-verification.md` — End-to-end capability verification, data flow tracing, assumption verification
 
 ## Durable Object Patterns
 

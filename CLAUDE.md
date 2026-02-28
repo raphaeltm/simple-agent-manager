@@ -117,6 +117,9 @@ Wrangler does NOT inherit `durable_objects`, `d1_databases`, `kv_namespaces`, `r
 
 - **Fix all build/lint errors** before pushing — even pre-existing ones
 - **No dead code** — if code is no longer referenced, remove it in the same change
+- **Capability tests required** — every multi-component feature needs at least one test that exercises the complete happy path across system boundaries. Component tests alone are not sufficient. See `.claude/rules/10-e2e-verification.md`.
+- **Verify assumptions, don't trust documentation** — when specs or docs say "existing X works," verify with a test or manual check before building on it. See post-mortem: `docs/notes/2026-02-28-missing-initial-prompt-postmortem.md`.
+- **Cite code paths in behavioral docs** — when documenting what the system does, cite specific functions. Never write "X happens" without a code reference. Mark unimplemented behavior as "intended" not present tense.
 - **Diagrams in markdown** — use Mermaid (`\`\`\`mermaid`) for all diagrams in `.md` files. The markdown renderer supports Mermaid natively.
 - **Subagents** live in `.claude/agents/`; Codex skills in `.agents/skills/`
 - **Playwright screenshots** go in `.codex/tmp/playwright-screenshots/` (gitignored)

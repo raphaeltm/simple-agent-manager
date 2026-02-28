@@ -17,6 +17,23 @@
 - [ ] Accessibility checks completed
 - [ ] Shared UI components used or exception documented
 
+## End-to-End Verification (Required for multi-component changes)
+
+- [ ] Data flow traced from user input to final outcome with code path citations (see `.claude/rules/10-e2e-verification.md`)
+- [ ] Capability test exercises the complete happy path across system boundaries
+- [ ] All spec/doc assumptions about existing behavior verified against code (not just "read the code")
+- [ ] If any gap exists between automated test coverage and full E2E, manual verification steps documented below
+
+### Data Flow Trace
+
+<!-- For multi-component features, paste your data flow trace here. Each step should cite a specific file:function. -->
+<!-- If not applicable, write `N/A: <reason>` -->
+
+### Untested Gaps
+
+<!-- Document any gaps between automated test coverage and the full user flow. Include manual verification steps performed. -->
+<!-- If not applicable, write `N/A: full flow covered by automated tests` -->
+
 ## Exceptions (If any)
 
 - Scope:
