@@ -397,17 +397,10 @@ export const EXECUTION_STEP_LABELS: Record<TaskExecutionStep, string> = {
   awaiting_followup: 'Waiting for follow-up...',
 };
 
-/** Ordered index for execution step progress (TDF-8). */
-export const EXECUTION_STEP_ORDER: Record<TaskExecutionStep, number> = {
-  node_selection: 0,
-  node_provisioning: 1,
-  node_agent_ready: 2,
-  workspace_creation: 3,
-  workspace_ready: 4,
-  agent_session: 5,
-  running: 6,
-  awaiting_followup: 7,
-};
+/** Ordered index for execution step progress — derived from TASK_EXECUTION_STEPS array position (TDF-8). */
+export const EXECUTION_STEP_ORDER = Object.fromEntries(
+  TASK_EXECUTION_STEPS.map((step, i) => [step, i])
+) as Record<TaskExecutionStep, number>;
 
 export type TaskActorType = 'user' | 'system' | 'workspace_callback';
 

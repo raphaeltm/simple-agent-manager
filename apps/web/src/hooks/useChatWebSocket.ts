@@ -115,7 +115,7 @@ export function useChatWebSocket({
       };
 
       ws.onmessage = (event) => {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || wsRef.current !== ws) return;
 
         try {
           const data = JSON.parse(event.data);
@@ -139,6 +139,9 @@ export function useChatWebSocket({
 
       ws.onclose = (event) => {
         if (!mountedRef.current) return;
+        // Guard: only handle close if this is still the active socket.
+        // A newer connect() call may have already replaced wsRef.current.
+        if (wsRef.current !== ws) return;
         wsRef.current = null;
         if (event.code !== 1000) {
           scheduleReconnect();
@@ -172,8 +175,9 @@ export function useChatWebSocket({
   useEffect(() => {
     if (!enabled) return;
     const interval = setInterval(() => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'ping' }));
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ping' }));
       }
     }, PING_INTERVAL_MS);
     return () => clearInterval(interval);

@@ -211,15 +211,16 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   }, [session?.status, projectId, sessionId]);
 
   // Idle timer countdown (TDF-8)
+  // Extract primitive values to avoid re-firing on every session object change
+  const ext = session as ExtendedSession | null;
+  const cleanupAt = ext?.cleanupAt ?? null;
+  const agentCompletedAt = ext?.agentCompletedAt ?? null;
+
   useEffect(() => {
     if (sessionState !== 'idle') {
       setIdleCountdownMs(null);
       return;
     }
-
-    const ext = session as ExtendedSession | null;
-    const cleanupAt = ext?.cleanupAt;
-    const agentCompletedAt = ext?.agentCompletedAt;
 
     if (cleanupAt) {
       // Server told us the exact cleanup time
@@ -237,7 +238,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     }
     // No timing info available — don't show countdown
     return;
-  }, [sessionState, session]);
+  }, [sessionState, cleanupAt, agentCompletedAt]);
 
   // Send follow-up message via WebSocket or HTTP
   const handleSendFollowUp = async () => {
@@ -252,10 +253,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           .then((result) => {
             // Update countdown with server-provided cleanup time
             if (result.cleanupAt) {
-              const ext = session as ExtendedSession | null;
-              if (ext) {
-                setSession({ ...ext, cleanupAt: result.cleanupAt, isIdle: false, agentCompletedAt: null } as ChatSessionResponse);
-              }
+              setSession((prev) => {
+                if (!prev) return prev;
+                return { ...prev, cleanupAt: result.cleanupAt, isIdle: false, agentCompletedAt: null } as ChatSessionResponse;
+              });
             }
           })
           .catch(() => {
