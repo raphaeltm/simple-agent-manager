@@ -95,11 +95,13 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     try {
       log.info('node_cleanup.destroying_stale_warm', { nodeId: node.id, userId: node.user_id, warmSince: node.warm_since });
 
-      // Record in OBSERVABILITY_DATABASE (TDF-7)
+      await deleteNodeResources(node.id, node.user_id, env);
+
+      // Record successful cleanup in OBSERVABILITY_DATABASE (TDF-7)
       await persistError(env.OBSERVABILITY_DATABASE, {
         source: 'api',
         level: 'info',
-        message: `Destroying stale warm node (Layer 2 defense)`,
+        message: `Destroyed stale warm node (Layer 2 defense)`,
         context: {
           recoveryType: 'stale_warm_node_cleanup',
           nodeId: node.id,
@@ -109,8 +111,6 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
         userId: node.user_id,
         nodeId: node.id,
       });
-
-      await deleteNodeResources(node.id, node.user_id, env);
       await db
         .update(schema.nodes)
         .set({ status: 'stopped', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
@@ -175,11 +175,13 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     try {
       log.info('node_cleanup.destroying_max_lifetime', { nodeId: node.id, userId: node.userId, createdAt: node.createdAt });
 
-      // Record in OBSERVABILITY_DATABASE (TDF-7)
+      await deleteNodeResources(node.id, node.userId, env);
+
+      // Record successful cleanup in OBSERVABILITY_DATABASE (TDF-7)
       await persistError(env.OBSERVABILITY_DATABASE, {
         source: 'api',
         level: 'warn',
-        message: `Destroying auto-provisioned node exceeding max lifetime (Layer 3 defense)`,
+        message: `Destroyed auto-provisioned node exceeding max lifetime (Layer 3 defense)`,
         context: {
           recoveryType: 'max_lifetime_node_cleanup',
           nodeId: node.id,
@@ -189,8 +191,6 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
         userId: node.userId,
         nodeId: node.id,
       });
-
-      await deleteNodeResources(node.id, node.userId, env);
       await db
         .update(schema.nodes)
         .set({ status: 'stopped', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
@@ -222,13 +222,19 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     }
   }
 
-  // 3. Orphan detection: workspaces running with no associated active task (TDF-7)
-  //    A workspace is orphaned if it's in 'running' status but no task in
-  //    'queued'/'delegated'/'in_progress' references it via workspace_id.
+  // 3. Orphan detection: task-created workspaces still running after task ended (TDF-7)
+  //    Only checks workspaces that were EVER associated with a task (via tasks.workspace_id).
+  //    User-created workspaces (never referenced by any task) are excluded — they are
+  //    intentionally long-lived and not orphans.
   const orphanedWorkspaces = await env.DATABASE.prepare(
     `SELECT w.id, w.node_id, w.user_id, w.status, w.created_at
      FROM workspaces w
      WHERE w.status = 'running'
+       AND EXISTS (
+         SELECT 1 FROM tasks t
+         WHERE t.workspace_id = w.id
+           AND t.status IN ('completed', 'failed', 'cancelled')
+       )
        AND NOT EXISTS (
          SELECT 1 FROM tasks t
          WHERE t.workspace_id = w.id

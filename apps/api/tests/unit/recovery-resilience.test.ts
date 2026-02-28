@@ -154,7 +154,17 @@ describe('stuck-tasks DO health checks (TDF-7)', () => {
 
   it('checks DO health for non-stuck tasks at half threshold', () => {
     expect(stuckTasksSource).toContain('halfThreshold');
-    expect(stuckTasksSource).toContain('elapsedMs > halfThreshold');
+    expect(stuckTasksSource).toContain('timeForCheck > halfThreshold');
+  });
+
+  it('uses started_at for in_progress tasks (consistent time base)', () => {
+    // The half-threshold check must use the same time base as stuck detection
+    const healthCheckSection = stuckTasksSource.slice(
+      stuckTasksSource.indexOf('// Use the correct time base per status'),
+      stuckTasksSource.indexOf('if (timeForCheck > halfThreshold)')
+    );
+    expect(healthCheckSection).toContain('started_at');
+    expect(healthCheckSection).toContain('timeForCheck');
   });
 
   it('detects DO-completed-but-task-active mismatch', () => {
@@ -164,6 +174,12 @@ describe('stuck-tasks DO health checks (TDF-7)', () => {
 
   it('records DO mismatch in OBSERVABILITY_DATABASE', () => {
     expect(stuckTasksSource).toContain("recoveryType: 'do_task_status_mismatch'");
+  });
+
+  it('deduplicates DO mismatch records (30 min window)', () => {
+    expect(stuckTasksSource).toContain('recentMismatch');
+    expect(stuckTasksSource).toContain('do_task_status_mismatch');
+    expect(stuckTasksSource).toContain('30 * 60 * 1000');
   });
 
   it('tracks doHealthChecked count in result', () => {
@@ -189,6 +205,18 @@ describe('node-cleanup OBSERVABILITY_DATABASE recording (TDF-7)', () => {
     expect(nodeCleanupSource).toContain("recoveryType: 'stale_warm_node_cleanup'");
   });
 
+  it('writes success records AFTER deleteNodeResources (M1 fix)', () => {
+    // Stale warm: success record comes after deleteNodeResources
+    const staleSection = nodeCleanupSource.slice(
+      nodeCleanupSource.indexOf('destroying_stale_warm'),
+      nodeCleanupSource.indexOf('staleDestroyed++')
+    );
+    const deleteIdx = staleSection.indexOf('deleteNodeResources');
+    const recordIdx = staleSection.indexOf("recoveryType: 'stale_warm_node_cleanup'");
+    expect(deleteIdx).toBeGreaterThan(-1);
+    expect(recordIdx).toBeGreaterThan(deleteIdx);
+  });
+
   it('records stale warm node destruction failure in OBSERVABILITY_DATABASE', () => {
     expect(nodeCleanupSource).toContain("recoveryType: 'stale_warm_node_cleanup_failure'");
   });
@@ -202,20 +230,18 @@ describe('node-cleanup OBSERVABILITY_DATABASE recording (TDF-7)', () => {
   });
 
   it('uses "info" for successful cleanups and "error" for failures', () => {
-    // Successful cleanup of stale nodes is routine — info level
-    const staleSection = nodeCleanupSource.slice(
-      nodeCleanupSource.indexOf('destroying_stale_warm'),
-      nodeCleanupSource.indexOf('deleteNodeResources(node.id, node.user_id, env)')
-    );
-    expect(staleSection).toContain("level: 'info'");
+    // The success record (with recoveryType: 'stale_warm_node_cleanup') uses info level.
+    // Slice backward 100 chars to capture the level field.
+    const idx = nodeCleanupSource.indexOf("recoveryType: 'stale_warm_node_cleanup'");
+    const staleRecordSection = nodeCleanupSource.slice(Math.max(0, idx - 200), idx + 50);
+    expect(staleRecordSection).toContain("level: 'info'");
   });
 
   it('uses "warn" for max lifetime (more severe)', () => {
-    const lifetimeSection = nodeCleanupSource.slice(
-      nodeCleanupSource.indexOf('destroying_max_lifetime'),
-      nodeCleanupSource.indexOf('deleteNodeResources(node.id, node.userId, env)')
-    );
-    expect(lifetimeSection).toContain("level: 'warn'");
+    // The success record uses warn level for max lifetime.
+    const idx = nodeCleanupSource.indexOf("recoveryType: 'max_lifetime_node_cleanup'");
+    const lifetimeRecordSection = nodeCleanupSource.slice(Math.max(0, idx - 200), idx + 50);
+    expect(lifetimeRecordSection).toContain("level: 'warn'");
   });
 });
 
@@ -224,8 +250,11 @@ describe('node-cleanup OBSERVABILITY_DATABASE recording (TDF-7)', () => {
 // =========================================================================
 
 describe('node-cleanup orphan detection (TDF-7)', () => {
-  it('detects orphaned workspaces (running with no active task)', () => {
+  it('detects orphaned task-created workspaces (running after task ended)', () => {
     expect(nodeCleanupSource).toContain("w.status = 'running'");
+    // Must have been associated with a completed/failed/cancelled task
+    expect(nodeCleanupSource).toContain("t.status IN ('completed', 'failed', 'cancelled')");
+    // Must NOT have any active task still referencing it
     expect(nodeCleanupSource).toContain('NOT EXISTS');
     expect(nodeCleanupSource).toContain("t.status IN ('queued', 'delegated', 'in_progress')");
     expect(nodeCleanupSource).toContain('t.workspace_id = w.id');
@@ -260,13 +289,14 @@ describe('node-cleanup orphan detection (TDF-7)', () => {
   });
 
   it('uses grace period to avoid flagging recently created resources', () => {
-    // Both orphan queries use the grace period to avoid false positives
-    // (e.g., workspace just created but task creation hasn't completed)
-    const orphanWsSection = nodeCleanupSource.slice(
-      nodeCleanupSource.indexOf('// 3. Orphan detection: workspaces'),
-      nodeCleanupSource.indexOf('// 4. Orphan detection: running nodes')
+    // Both orphan queries filter by created_at/updated_at to avoid false positives
+    const orphanSection = nodeCleanupSource.slice(
+      nodeCleanupSource.indexOf('// 3. Orphan detection:'),
     );
-    expect(orphanWsSection).toContain('gracePeriodMs');
+    // Orphan workspace query uses gracePeriodMs cutoff on created_at
+    expect(orphanSection).toContain('w.created_at < ?');
+    // Orphan node query uses gracePeriodMs cutoff on updated_at
+    expect(orphanSection).toContain('n.updated_at < ?');
   });
 });
 

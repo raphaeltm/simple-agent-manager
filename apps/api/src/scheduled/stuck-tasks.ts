@@ -249,18 +249,32 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     // If the task has been sitting for at least half its threshold time,
     // proactively verify the DO is still alive and making progress.
     if (!isStuck) {
-      const halfThreshold = task.status === 'queued' ? queuedTimeoutMs / 2
-        : task.status === 'delegated' ? delegatedTimeoutMs / 2
-        : maxExecutionMs / 2;
+      // Use the correct time base per status:
+      // - queued/delegated: elapsedMs (time since last updated_at)
+      // - in_progress: executionMs (time since started_at, consistent with stuck detection)
+      let timeForCheck = elapsedMs;
+      let halfThreshold: number;
+      if (task.status === 'queued') {
+        halfThreshold = queuedTimeoutMs / 2;
+      } else if (task.status === 'delegated') {
+        halfThreshold = delegatedTimeoutMs / 2;
+      } else {
+        // in_progress — use started_at for consistent time base
+        const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
+        timeForCheck = now.getTime() - startedAt;
+        halfThreshold = maxExecutionMs / 2;
+      }
 
-      if (elapsedMs > halfThreshold) {
+      if (timeForCheck > halfThreshold) {
         try {
           const doId = env.TASK_RUNNER.idFromName(task.id);
           const stub = env.TASK_RUNNER.get(doId) as DurableObjectStub<TaskRunner>;
           const doStatus = await stub.getStatus();
 
           if (doStatus && doStatus.completed && task.status !== 'failed' && task.status !== 'completed') {
-            // DO thinks it's done but D1 status is still transient — log for investigation
+            // DO thinks it's done but D1 status is still transient — log for investigation.
+            // Only record once: check if we already have a recent mismatch record for this task.
+            // The stuck timeout will eventually fail the task, so this is informational only.
             log.warn('stuck_task.do_completed_but_task_active', {
               taskId: task.id,
               taskStatus: task.status,
@@ -268,21 +282,30 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
               doRetryCount: doStatus.retryCount,
             });
 
-            await persistError(env.OBSERVABILITY_DATABASE, {
-              source: 'api',
-              level: 'warn',
-              message: `TaskRunner DO completed but task still in '${task.status}' — possible D1 update failure`,
-              context: {
-                recoveryType: 'do_task_status_mismatch',
-                taskId: task.id,
-                taskStatus: task.status,
-                executionStep: task.execution_step,
-                doCurrentStep: doStatus.currentStep,
-                doRetryCount: doStatus.retryCount,
-                elapsedMs,
-              },
-              userId: task.user_id,
-            });
+            // Deduplicate: only persist if no recent mismatch record exists for this task
+            const recentMismatch = await env.OBSERVABILITY_DATABASE.prepare(
+              `SELECT id FROM platform_errors
+               WHERE context LIKE ? AND timestamp > ?
+               LIMIT 1`
+            ).bind(`%do_task_status_mismatch%${task.id}%`, Date.now() - 30 * 60 * 1000).first();
+
+            if (!recentMismatch) {
+              await persistError(env.OBSERVABILITY_DATABASE, {
+                source: 'api',
+                level: 'warn',
+                message: `TaskRunner DO completed but task still in '${task.status}' — possible D1 update failure`,
+                context: {
+                  recoveryType: 'do_task_status_mismatch',
+                  taskId: task.id,
+                  taskStatus: task.status,
+                  executionStep: task.execution_step,
+                  doCurrentStep: doStatus.currentStep,
+                  doRetryCount: doStatus.retryCount,
+                  timeForCheck,
+                },
+                userId: task.user_id,
+              });
+            }
           }
 
           result.doHealthChecked++;
