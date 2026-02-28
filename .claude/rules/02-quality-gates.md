@@ -25,6 +25,7 @@ If you build or modify a feature, you MUST add tests that prove it works before 
 Before marking feature work complete:
 - [ ] Unit tests added/updated for all changed behavior
 - [ ] Integration tests added where cross-layer behavior exists
+- [ ] Capability test verifies complete happy path across system boundaries (see `10-e2e-verification.md`)
 - [ ] E2E coverage added or explicitly justified as not applicable
 - [ ] Local test run passes for impacted packages
 - [ ] CI test checks are expected to pass with the changes
@@ -85,8 +86,9 @@ Each reviewer should:
 1. **Read every changed file** in the PR diff
 2. **Challenge assumptions** — what could go wrong? What edge cases are missed?
 3. **Check test adequacy** — do the tests actually prove the fix/feature works, or are they too shallow?
-4. **Identify missing tests** — what regression test would catch this if it broke again?
-5. **Flag any concern**, even minor ones — it's cheaper to address them now
+4. **Verify data flow completeness** — for multi-component changes, trace the primary data path from input to output. Ask: "Does the data actually arrive at its destination?" (see `10-e2e-verification.md`)
+5. **Identify missing tests** — what regression test would catch this if it broke again?
+6. **Flag any concern**, even minor ones — it's cheaper to address them now
 
 ### Acting on Review Findings
 
