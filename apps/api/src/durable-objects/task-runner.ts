@@ -565,7 +565,35 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
 
       // TDF-6: Link existing chat session to workspace (session created at submit time).
       // No new session creation here — one session per task.
+      //
+      // D1 update is done FIRST and separately from the DO call because:
+      // - D1 chat_session_id on workspace is used by idle cleanup and task completion hooks
+      // - The DO link is for the session's internal workspace_id field
+      // - Even if the DO call fails, D1 must have the link for downstream correctness
       if (state.stepResults.chatSessionId) {
+        // Step 1: Update D1 workspace record (critical — used by idle cleanup, task hooks)
+        try {
+          await this.env.DATABASE.prepare(
+            `UPDATE workspaces SET chat_session_id = ?, updated_at = ? WHERE id = ?`
+          ).bind(state.stepResults.chatSessionId, now, workspaceId).run();
+
+          log.info('task_runner_do.session_d1_linked', {
+            taskId: state.taskId,
+            sessionId: state.stepResults.chatSessionId,
+            workspaceId,
+          });
+        } catch (err) {
+          // D1 link failure is serious — log as error but don't block task execution.
+          // The cron sweep catches orphaned sessions without workspace links.
+          log.error('task_runner_do.session_d1_link_failed', {
+            taskId: state.taskId,
+            sessionId: state.stepResults.chatSessionId,
+            workspaceId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+
+        // Step 2: Update ProjectData DO session record (best-effort — enriches session data)
         try {
           const projectDataService = await import('../services/project-data');
           await projectDataService.linkSessionToWorkspace(
@@ -575,19 +603,15 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
             workspaceId,
           );
 
-          await this.env.DATABASE.prepare(
-            `UPDATE workspaces SET chat_session_id = ?, updated_at = ? WHERE id = ?`
-          ).bind(state.stepResults.chatSessionId, now, workspaceId).run();
-
           log.info('task_runner_do.session_linked_to_workspace', {
             taskId: state.taskId,
             sessionId: state.stepResults.chatSessionId,
             workspaceId,
           });
         } catch (err) {
-          // Session linking is best-effort — session still works without workspace link,
-          // but idle cleanup will degrade. The cron sweep catches orphans.
-          log.error('task_runner_do.session_link_failed', {
+          // DO link failure is best-effort — session still works without workspace_id
+          // in the DO's SQLite. The D1 link above handles downstream needs.
+          log.error('task_runner_do.session_do_link_failed', {
             taskId: state.taskId,
             sessionId: state.stepResults.chatSessionId,
             workspaceId,

@@ -15,6 +15,10 @@ const taskSubmitSource = readFileSync(
   resolve(process.cwd(), 'src/routes/task-submit.ts'),
   'utf8'
 );
+const taskRunsSource = readFileSync(
+  resolve(process.cwd(), 'src/routes/task-runs.ts'),
+  'utf8'
+);
 const taskRunnerDoSource = readFileSync(
   resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),
   'utf8'
@@ -97,20 +101,14 @@ describe('TDF-6 Fix 2: No fallback session IDs', () => {
     expect(taskSubmitSource).not.toContain('sess-fallback');
   });
 
-  it('task-submit does NOT have try-catch around session creation', () => {
-    // Session creation should be a direct await, not wrapped in try-catch
-    // Find the createSession call and verify it's not inside a catch block
-    const sessionCreateLine = taskSubmitSource.indexOf('projectDataService.createSession(');
-    const nearbyCode = taskSubmitSource.slice(
-      Math.max(0, sessionCreateLine - 200),
-      sessionCreateLine
-    );
-    expect(nearbyCode).not.toContain('try {');
-    expect(nearbyCode).not.toContain('catch');
+  it('task-submit wraps session creation in try-catch that fails the task on error', () => {
+    // Session creation failure should mark the task as failed (not orphan it)
+    expect(taskSubmitSource).toContain('Session creation failed:');
+    expect(taskSubmitSource).toContain("status: 'failed'");
   });
 
-  it('session creation uses const (required, single assignment)', () => {
-    expect(taskSubmitSource).toContain('const sessionId = await projectDataService.createSession(');
+  it('session creation uses let with try-catch for error cleanup', () => {
+    expect(taskSubmitSource).toContain('sessionId = await projectDataService.createSession(');
   });
 
   it('no fallback ID generation anywhere in task-submit', () => {
@@ -127,6 +125,11 @@ describe('TDF-6 Fix 2: No fallback session IDs', () => {
     );
     expect(sessionArea).not.toContain('best-effort');
     expect(sessionArea).toContain('REQUIRED');
+  });
+
+  it('task-submit marks task as failed if DO startup fails', () => {
+    expect(taskSubmitSource).toContain('Task runner startup failed:');
+    expect(taskSubmitSource).toContain('task_submit.do_startup_failed');
   });
 });
 
@@ -199,7 +202,7 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
     );
   });
 
-  it('TaskRunner DO session linking is best-effort (does not block task)', () => {
+  it('TaskRunner DO has separate D1 and DO session linking steps', () => {
     const wsCreationStart = taskRunnerDoSource.indexOf(
       'private async handleWorkspaceCreation('
     );
@@ -208,9 +211,11 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
     );
     const wsCreationSection = taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
 
-    // Linking should be wrapped in try-catch (best-effort)
-    expect(wsCreationSection).toContain('session_link_failed');
-    expect(wsCreationSection).toContain('best-effort');
+    // D1 link (critical) and DO link (best-effort) should be separate try-catch blocks
+    expect(wsCreationSection).toContain('session_d1_linked');
+    expect(wsCreationSection).toContain('session_d1_link_failed');
+    expect(wsCreationSection).toContain('session_linked_to_workspace');
+    expect(wsCreationSection).toContain('session_do_link_failed');
   });
 });
 
@@ -228,26 +233,58 @@ describe('TDF-6 Fix 4: Required session and message persistence', () => {
     expect(messageArea).not.toContain('best-effort');
   });
 
-  it('initial message persistence is a direct await (no try-catch)', () => {
-    // Find the persistMessage call and verify it's not wrapped in catch
-    const persistLine = taskSubmitSource.indexOf(
-      'await projectDataService.persistMessage('
-    );
-    const nearbyCode = taskSubmitSource.slice(
-      Math.max(0, persistLine - 200),
-      persistLine
-    );
-    // The only try-catch should be gone; the await should be at the top level
-    expect(nearbyCode).not.toContain('try {');
+  it('message persistence failure marks task as failed (not silently dropped)', () => {
+    // The old code silently swallowed errors. Now session creation + message
+    // persistence failures mark the task as failed and re-throw.
+    expect(taskSubmitSource).toContain('Session creation failed:');
+    expect(taskSubmitSource).toContain('task_submit.session_failed');
   });
 
-  it('no error logging for message persistence failure (propagates naturally)', () => {
+  it('no old-style error logging for message persistence failure', () => {
     // The old code had task_submit.message_persist_failed — should be removed
     expect(taskSubmitSource).not.toContain('task_submit.message_persist_failed');
   });
 
-  it('no error logging for session creation failure (propagates naturally)', () => {
+  it('no old-style error logging for session creation failure', () => {
     expect(taskSubmitSource).not.toContain('task_submit.session_create_failed');
+  });
+});
+
+// =========================================================================
+// Fix 5: task-runs.ts route creates session (regression prevention)
+// =========================================================================
+
+describe('TDF-6 Fix 5: task-runs route creates session (no regression)', () => {
+  it('task-runs imports projectDataService', () => {
+    expect(taskRunsSource).toContain("import * as projectDataService from '../services/project-data'");
+  });
+
+  it('task-runs creates a session via projectDataService.createSession', () => {
+    expect(taskRunsSource).toContain('projectDataService.createSession(');
+  });
+
+  it('task-runs passes chatSessionId to startTaskRunnerDO', () => {
+    expect(taskRunsSource).toContain('chatSessionId: sessionId');
+  });
+
+  it('task-runs does NOT contain sess-fallback pattern', () => {
+    expect(taskRunsSource).not.toContain('sess-fallback');
+  });
+
+  it('task-runs marks task as failed if session creation fails', () => {
+    expect(taskRunsSource).toContain('Session creation failed:');
+    expect(taskRunsSource).toContain('task_run.session_failed');
+  });
+
+  it('task-runs marks task as failed if DO startup fails', () => {
+    expect(taskRunsSource).toContain('Task runner startup failed:');
+    expect(taskRunsSource).toContain('task_run.do_startup_failed');
+  });
+
+  it('task-runs creates session with workspaceId=null (linked later)', () => {
+    expect(taskRunsSource).toContain(
+      'null, // workspaceId — linked later by TaskRunner DO when workspace is created'
+    );
   });
 });
 

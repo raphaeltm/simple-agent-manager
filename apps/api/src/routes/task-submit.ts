@@ -159,27 +159,52 @@ taskSubmitRoutes.post('/submit', async (c) => {
     createdAt: now,
   });
 
-  // TDF-6: Create chat session — REQUIRED (no fallback IDs).
-  // If session creation fails, the entire task submission fails. This prevents
-  // phantom session IDs and ensures the frontend always has a real session.
-  const sessionId = await projectDataService.createSession(
-    c.env,
-    projectId,
-    null, // workspaceId — linked later by TaskRunner DO when workspace is created
-    taskTitle,
-    taskId
-  );
+  // TDF-6: Create chat session and start TaskRunner DO.
+  // If either fails, mark the task as failed to avoid orphaned 'queued' records.
+  let sessionId: string;
+  try {
+    // Create chat session — REQUIRED (no fallback IDs).
+    // If session creation fails, the task submission fails. This prevents
+    // phantom session IDs and ensures the frontend always has a real session.
+    sessionId = await projectDataService.createSession(
+      c.env,
+      projectId,
+      null, // workspaceId — linked later by TaskRunner DO when workspace is created
+      taskTitle,
+      taskId
+    );
 
-  // TDF-6: Persist initial user message — REQUIRED.
-  // The user's message must be in the session before we return.
-  await projectDataService.persistMessage(
-    c.env,
-    projectId,
-    sessionId,
-    'user',
-    message,
-    null
-  );
+    // Persist initial user message — REQUIRED.
+    // The user's message must be in the session before we return.
+    await projectDataService.persistMessage(
+      c.env,
+      projectId,
+      sessionId,
+      'user',
+      message,
+      null
+    );
+  } catch (err) {
+    // Session creation or message persistence failed — mark task as failed
+    // to prevent orphaned 'queued' records that the task runner can't process.
+    const failedAt = new Date().toISOString();
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    await db.update(schema.tasks)
+      .set({ status: 'failed', errorMessage: `Session creation failed: ${errorMsg}`, updatedAt: failedAt })
+      .where(eq(schema.tasks.id, taskId));
+    await db.insert(schema.taskStatusEvents).values({
+      id: ulid(),
+      taskId,
+      fromStatus: 'queued',
+      toStatus: 'failed',
+      actorType: 'system',
+      actorId: null,
+      reason: `Session creation failed: ${errorMsg}`,
+      createdAt: failedAt,
+    });
+    log.error('task_submit.session_failed', { taskId, projectId, error: errorMsg });
+    throw err; // Re-throw to return 500 to the frontend
+  }
 
   // Record activity event (best-effort)
   c.executionCtx.waitUntil(
@@ -216,25 +241,46 @@ taskSubmitRoutes.post('/submit', async (c) => {
   // The DO handles the full lifecycle: node selection, provisioning,
   // workspace creation, agent session, and transition to in_progress.
   // TDF-6: Pass sessionId so the DO links it to the workspace instead of creating a new one.
-  await startTaskRunnerDO(c.env, {
-    taskId,
-    projectId,
-    userId,
-    vmSize,
-    vmLocation,
-    branch,
-    preferredNodeId: body.nodeId,
-    userName: auth.user.name,
-    userEmail: auth.user.email,
-    githubId: userRow?.githubId ?? null,
-    taskTitle,
-    taskDescription: message,
-    repository: project.repository,
-    installationId: project.installationId,
-    outputBranch: branchName,
-    projectDefaultVmSize: project.defaultVmSize as VMSize | null,
-    chatSessionId: sessionId,
-  });
+  try {
+    await startTaskRunnerDO(c.env, {
+      taskId,
+      projectId,
+      userId,
+      vmSize,
+      vmLocation,
+      branch,
+      preferredNodeId: body.nodeId,
+      userName: auth.user.name,
+      userEmail: auth.user.email,
+      githubId: userRow?.githubId ?? null,
+      taskTitle,
+      taskDescription: message,
+      repository: project.repository,
+      installationId: project.installationId,
+      outputBranch: branchName,
+      projectDefaultVmSize: project.defaultVmSize as VMSize | null,
+      chatSessionId: sessionId,
+    });
+  } catch (err) {
+    // TaskRunner DO startup failed — mark task as failed.
+    const failedAt = new Date().toISOString();
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    await db.update(schema.tasks)
+      .set({ status: 'failed', errorMessage: `Task runner startup failed: ${errorMsg}`, updatedAt: failedAt })
+      .where(eq(schema.tasks.id, taskId));
+    await db.insert(schema.taskStatusEvents).values({
+      id: ulid(),
+      taskId,
+      fromStatus: 'queued',
+      toStatus: 'failed',
+      actorType: 'system',
+      actorId: null,
+      reason: `Task runner startup failed: ${errorMsg}`,
+      createdAt: failedAt,
+    });
+    log.error('task_submit.do_startup_failed', { taskId, projectId, error: errorMsg });
+    throw err; // Re-throw to return 500 to the frontend
+  }
 
   const response: SubmitTaskResponse = {
     taskId,
