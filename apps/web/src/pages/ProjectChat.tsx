@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { List } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
 import { SessionSidebar } from '../components/chat/SessionSidebar';
 import { ProjectMessageView } from '../components/chat/ProjectMessageView';
+import { useIsMobile } from '../hooks/useIsMobile';
 import type { TaskStatus, TaskExecutionStep } from '@simple-agent-manager/shared';
 import {
   EXECUTION_STEP_LABELS,
@@ -37,10 +39,12 @@ export function ProjectChat() {
   const navigate = useNavigate();
   const { sessionId } = useParams<{ sessionId: string }>();
   const { projectId } = useProjectContext();
+  const isMobile = useIsMobile();
 
   const [sessions, setSessions] = useState<ChatSessionResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasCloudCredentials, setHasCloudCredentials] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Simple text input state
   const [message, setMessage] = useState('');
@@ -179,6 +183,7 @@ export function ProjectChat() {
 
   const handleSelect = (id: string) => {
     setProvisioning(null);
+    setSidebarOpen(false);
     navigate(`/projects/${projectId}/chat/${id}`);
   };
 
@@ -192,20 +197,24 @@ export function ProjectChat() {
 
   // Determine if we're showing the "new chat" input (no session selected, or empty state)
   const showNewChatInput = !sessionId || sessions.length === 0;
+  const hasSessions = sessions.length > 0;
+  const showInlineSidebar = hasSessions && !isMobile;
 
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: sessions.length > 0 ? '280px 1fr' : '1fr',
-      border: '1px solid var(--sam-color-border-default)',
-      borderRadius: 'var(--sam-radius-md)',
+      gridTemplateColumns: showInlineSidebar ? '280px 1fr' : '1fr',
+      border: isMobile ? 'none' : '1px solid var(--sam-color-border-default)',
+      borderRadius: isMobile ? 0 : 'var(--sam-radius-md)',
       backgroundColor: 'var(--sam-color-bg-surface)',
       overflow: 'hidden',
-      minHeight: '500px',
-      maxHeight: 'calc(100vh - 240px)',
+      ...(isMobile
+        ? { flex: 1, minHeight: 0 }
+        : { minHeight: '500px', maxHeight: 'calc(100vh - 240px)' }
+      ),
     }}>
-      {/* Sidebar — only when sessions exist */}
-      {sessions.length > 0 && (
+      {/* Desktop sidebar — inline when sessions exist */}
+      {showInlineSidebar && (
         <div style={{
           borderRight: '1px solid var(--sam-color-border-default)',
           display: 'flex',
@@ -222,8 +231,46 @@ export function ProjectChat() {
         </div>
       )}
 
+      {/* Mobile session drawer overlay */}
+      {isMobile && sidebarOpen && hasSessions && (
+        <MobileSessionDrawer
+          sessions={sessions}
+          selectedSessionId={sessionId ?? null}
+          onSelect={handleSelect}
+          onNewChat={() => { setSidebarOpen(false); handleNewChat(); }}
+          onClose={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Main content */}
       <div style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {/* Mobile session toggle bar */}
+        {isMobile && hasSessions && !showNewChatInput && (
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--sam-space-2)',
+              padding: 'var(--sam-space-2) var(--sam-space-3)',
+              backgroundColor: 'var(--sam-color-bg-surface)',
+              border: 'none',
+              borderBottom: '1px solid var(--sam-color-border-default)',
+              cursor: 'pointer',
+              color: 'var(--sam-color-fg-muted)',
+              fontSize: 'var(--sam-type-caption-size)',
+              fontWeight: 500,
+              width: '100%',
+              textAlign: 'left',
+              minHeight: '44px',
+            }}
+          >
+            <List size={16} />
+            <span>{sessions.length} chat{sessions.length !== 1 ? 's' : ''}</span>
+          </button>
+        )}
+
         {showNewChatInput ? (
           /* New chat / empty state */
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -233,7 +280,7 @@ export function ProjectChat() {
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: 'var(--sam-space-8)',
+              padding: isMobile ? 'var(--sam-space-4)' : 'var(--sam-space-8)',
               gap: 'var(--sam-space-3)',
             }}>
               {provisioning ? (
@@ -280,6 +327,94 @@ export function ProjectChat() {
         )}
       </div>
     </div>
+  );
+}
+
+/** Mobile drawer overlay for the session sidebar. */
+function MobileSessionDrawer({
+  sessions,
+  selectedSessionId,
+  onSelect,
+  onNewChat,
+  onClose,
+}: {
+  sessions: ChatSessionResponse[];
+  selectedSessionId: string | null;
+  onSelect: (id: string) => void;
+  onNewChat: () => void;
+  onClose: () => void;
+}) {
+  // Escape key to close
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  // Lock body scroll while drawer is open
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = ''; };
+  }, []);
+
+  return (
+    <>
+      <style>{`
+        @keyframes sam-session-drawer-slide-in {
+          from { transform: translateX(-100%); }
+          to { transform: translateX(0); }
+        }
+        @keyframes sam-session-drawer-fade-in {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+      `}</style>
+
+      {/* Backdrop */}
+      <div
+        role="presentation"
+        onClick={onClose}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'var(--sam-color-bg-overlay)',
+          zIndex: 'var(--sam-z-drawer-backdrop)' as unknown as number,
+          animation: 'sam-session-drawer-fade-in 0.15s ease-out',
+        }}
+      />
+
+      {/* Panel — slides from left */}
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Chat sessions"
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: '85vw',
+          maxWidth: 320,
+          backgroundColor: 'var(--sam-color-bg-surface)',
+          borderRight: '1px solid var(--sam-color-border-default)',
+          zIndex: 'var(--sam-z-drawer)' as unknown as number,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          animation: 'sam-session-drawer-slide-in 0.2s ease-out',
+        }}
+      >
+        <SessionSidebar
+          sessions={sessions}
+          selectedSessionId={selectedSessionId}
+          loading={false}
+          onSelect={onSelect}
+          onNewChat={onNewChat}
+        />
+      </div>
+    </>
   );
 }
 

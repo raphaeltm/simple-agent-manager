@@ -65,6 +65,8 @@ const mobileHeaderStyle: CSSProperties = {
 const contentStyle: CSSProperties = {
   flex: 1,
   overflowY: 'auto',
+  display: 'flex',
+  flexDirection: 'column',
 };
 
 export function AppShell({ children }: AppShellProps) {
@@ -122,6 +124,11 @@ export function AppShell({ children }: AppShellProps) {
     return (
       <div style={shellMobileStyle}>
         <header style={mobileHeaderStyle}>
+          {/* Title on the left */}
+          <span style={{ fontSize: 'var(--sam-type-card-title-size)', fontWeight: 600, color: 'var(--sam-color-fg-primary)' }}>
+            SAM
+          </span>
+          {/* Hamburger on the right — matches drawer slide-in direction */}
           <button
             onClick={() => setDrawerOpen(true)}
             aria-label="Open navigation menu"
@@ -139,10 +146,6 @@ export function AppShell({ children }: AppShellProps) {
           >
             <Menu size={20} />
           </button>
-          <span style={{ fontSize: 'var(--sam-type-card-title-size)', fontWeight: 600, color: 'var(--sam-color-fg-primary)' }}>
-            SAM
-          </span>
-          {avatarElement}
         </header>
 
         <main style={contentStyle}>
