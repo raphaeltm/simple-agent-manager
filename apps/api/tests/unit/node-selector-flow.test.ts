@@ -268,11 +268,8 @@ describe('parseMetrics (internal)', () => {
 // =============================================================================
 
 describe('selectNodeForTaskRun edge cases', () => {
-  it('skips warm pool entirely when taskId is undefined', () => {
-    expect(selectorSource).toContain('if (taskId && env.NODE_LIFECYCLE)');
-  });
-
-  it('skips warm pool entirely when NODE_LIFECYCLE binding is missing', () => {
+  it('skips warm pool when taskId is undefined or NODE_LIFECYCLE binding is missing', () => {
+    // Both conditions must be truthy for the warm pool path
     expect(selectorSource).toContain('if (taskId && env.NODE_LIFECYCLE)');
   });
 

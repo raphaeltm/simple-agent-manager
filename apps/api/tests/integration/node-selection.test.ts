@@ -13,6 +13,19 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+/**
+ * Extract a section of source code between two marker strings.
+ * Throws if either marker is not found or if end precedes start.
+ */
+function extractSection(source: string, startMarker: string, endMarker: string): string {
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf(endMarker, start + 1);
+  if (start === -1) throw new Error(`Start marker not found: ${startMarker}`);
+  if (end === -1) throw new Error(`End marker not found: ${endMarker}`);
+  if (end <= start) throw new Error(`End marker "${endMarker}" precedes start marker "${startMarker}"`);
+  return source.slice(start, end);
+}
+
 const selectorSource = readFileSync(
   resolve(process.cwd(), 'src/services/node-selector.ts'),
   'utf8'
@@ -37,39 +50,27 @@ const taskRunnerSource = readFileSync(
 describe('concurrent warm pool claiming safety', () => {
   describe('NodeLifecycle DO tryClaim is the single point of truth', () => {
     it('tryClaim only succeeds when status is warm', () => {
-      const tryClaimSection = doSource.slice(
-        doSource.indexOf('async tryClaim('),
-        doSource.indexOf('async getStatus(')
-      );
+      const tryClaimSection = extractSection(doSource, 'async tryClaim(', 'async getStatus(');
       expect(tryClaimSection).toContain("state.status !== 'warm'");
       expect(tryClaimSection).toContain('claimed: false');
     });
 
     it('tryClaim transitions warm -> active atomically via DO storage', () => {
-      const tryClaimSection = doSource.slice(
-        doSource.indexOf('async tryClaim('),
-        doSource.indexOf('async getStatus(')
-      );
+      const tryClaimSection = extractSection(doSource, 'async tryClaim(', 'async getStatus(');
       // State update via storage.put is atomic within a DO
       expect(tryClaimSection).toContain("state.status = 'active'");
       expect(tryClaimSection).toContain("this.ctx.storage.put('state', state)");
     });
 
     it('tryClaim sets claimedByTask for traceability', () => {
-      const tryClaimSection = doSource.slice(
-        doSource.indexOf('async tryClaim('),
-        doSource.indexOf('async getStatus(')
-      );
+      const tryClaimSection = extractSection(doSource, 'async tryClaim(', 'async getStatus(');
       expect(tryClaimSection).toContain('state.claimedByTask = taskId');
     });
 
     it('second claim on same node returns claimed: false (already active)', () => {
       // Once tryClaim succeeds, status is 'active'. Next tryClaim sees
       // status !== 'warm' and returns false.
-      const tryClaimSection = doSource.slice(
-        doSource.indexOf('async tryClaim('),
-        doSource.indexOf('async getStatus(')
-      );
+      const tryClaimSection = extractSection(doSource, 'async tryClaim(', 'async getStatus(');
       expect(tryClaimSection).toContain("state.status !== 'warm'");
       expect(tryClaimSection).toContain('{ claimed: false, state: this.toPublicState(state) }');
     });
