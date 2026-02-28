@@ -263,6 +263,7 @@ export function ProjectChat() {
               fontWeight: 500,
               width: '100%',
               textAlign: 'left',
+              minHeight: '44px',
             }}
           >
             <List size={16} />
@@ -343,6 +344,7 @@ function MobileSessionDrawer({
   onNewChat: () => void;
   onClose: () => void;
 }) {
+  // Escape key to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -350,6 +352,12 @@ function MobileSessionDrawer({
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
+
+  // Lock body scroll while drawer is open
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = ''; };
+  }, []);
 
   return (
     <>
@@ -366,6 +374,7 @@ function MobileSessionDrawer({
 
       {/* Backdrop */}
       <div
+        role="presentation"
         onClick={onClose}
         style={{
           position: 'fixed',
@@ -379,6 +388,7 @@ function MobileSessionDrawer({
       {/* Panel — slides from left */}
       <div
         role="dialog"
+        aria-modal="true"
         aria-label="Chat sessions"
         style={{
           position: 'fixed',

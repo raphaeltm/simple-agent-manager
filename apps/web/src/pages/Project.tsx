@@ -54,7 +54,7 @@ export function Project() {
     border: '1px solid var(--sam-color-border-default)',
     borderRadius: 'var(--sam-radius-sm)',
     padding: 'var(--sam-space-1) var(--sam-space-2)',
-    minHeight: isMobile ? '32px' : '36px',
+    minHeight: isMobile ? '44px' : '36px',
     cursor: 'pointer',
     color: 'var(--sam-color-fg-muted)',
     fontSize: 'var(--sam-type-secondary-size)',
@@ -71,7 +71,7 @@ export function Project() {
       hideHeader={isMobile}
       compact={isMobile}
     >
-      {/* Breadcrumb — compact on mobile */}
+      {/* Breadcrumb */}
       <Breadcrumb
         segments={[
           { label: 'Dashboard', path: '/dashboard' },
@@ -108,7 +108,7 @@ export function Project() {
             display: 'flex',
             alignItems: 'center',
             gap: 'var(--sam-space-2)',
-            minHeight: isMobile ? '28px' : '36px',
+            minHeight: isMobile ? '36px' : '36px',
             flexWrap: 'nowrap',
           }}>
             <h1 style={{
