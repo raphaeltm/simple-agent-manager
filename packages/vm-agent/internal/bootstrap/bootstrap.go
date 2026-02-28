@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/workspace/vm-agent/internal/bootlog"
+	"github.com/workspace/vm-agent/internal/callbackretry"
 	"github.com/workspace/vm-agent/internal/config"
 )
 
@@ -2015,26 +2016,29 @@ func markWorkspaceReady(ctx context.Context, cfg *config.Config, status string) 
 	}
 
 	endpoint := fmt.Sprintf("%s/api/workspaces/%s/ready", strings.TrimRight(cfg.ControlPlaneURL, "/"), cfg.WorkspaceID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("failed to create ready request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+cfg.CallbackToken)
 
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to call ready endpoint: %w", err)
-	}
-	defer res.Body.Close()
+	return callbackretry.Do(ctx, callbackretry.DefaultConfig(), "workspace-ready", func(retryCtx context.Context) error {
+		req, err := http.NewRequestWithContext(retryCtx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if err != nil {
+			return fmt.Errorf("failed to create ready request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+cfg.CallbackToken)
 
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(res.Body, 8*1024))
-		return fmt.Errorf("ready endpoint returned HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
-	}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to call ready endpoint: %w", err)
+		}
+		defer res.Body.Close()
 
-	slog.Info("Workspace marked ready", "workspaceID", cfg.WorkspaceID, "status", status)
-	return nil
+		if res.StatusCode < 200 || res.StatusCode >= 300 {
+			respBody, _ := io.ReadAll(io.LimitReader(res.Body, 8*1024))
+			return fmt.Errorf("ready endpoint returned HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(respBody)))
+		}
+
+		slog.Info("Workspace marked ready", "workspaceID", cfg.WorkspaceID, "status", status)
+		return nil
+	})
 }
 
 func normalizeRepoURL(repo string) string {
