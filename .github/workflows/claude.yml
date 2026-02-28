@@ -1,0 +1,85 @@
+name: Claude Code
+
+on:
+  # Interactive: respond to @claude mentions in PR/issue comments
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  # Automated: run on PR open/update with deployment-safety review
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - 'apps/api/**'
+      - 'packages/**'
+      - '.github/workflows/**'
+      - 'infra/**'
+      - 'scripts/deploy/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  # Interactive mode: respond to @claude mentions
+  claude-interactive:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: "--max-turns 10 --model claude-sonnet-4-5-20250929"
+
+  # Automated: deployment-safety review on PRs touching infrastructure
+  claude-deployment-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: "--max-turns 5 --model claude-sonnet-4-5-20250929"
+          prompt: |
+            You are a deployment-safety reviewer for a Cloudflare Workers project.
+            Review this PR diff for deployment risks that static analysis can't catch.
+
+            Check these specific concerns:
+
+            1. **Wrangler binding consistency**: If any new bindings are added to
+               wrangler.toml at the top level, verify they are also added to BOTH
+               [env.staging] and [env.production]. Wrangler does NOT inherit
+               durable_objects, d1_databases, kv_namespaces, r2_buckets, ai, or
+               tail_consumers into environment sections. This has caused production
+               outages before.
+
+            2. **Durable Object migrations**: If a new DO class is added, verify
+               there is a corresponding [[migrations]] entry with the correct tag.
+               Check that the class is exported from the worker entrypoint (index.ts).
+
+            3. **Environment variable usage**: If new env vars are read from
+               c.env or env.*, verify they are documented in .env.example and
+               that any secrets are listed in the deploy workflow or
+               configure-secrets.sh.
+
+            4. **Cross-component contract changes**: If shared types in
+               packages/shared are modified, check that all consumers
+               (apps/api, apps/web, packages/vm-agent) are updated accordingly.
+
+            5. **Database schema changes**: If new D1 migrations are added,
+               verify they are backward-compatible (no column drops without
+               migration strategy).
+
+            6. **Constitution compliance**: Check for hardcoded URLs (should
+               derive from BASE_DOMAIN), hardcoded timeouts (should be
+               configurable), or hardcoded limits.
+
+            Only report genuine risks. Do not flag style issues or minor concerns.
+            If everything looks safe, say so briefly.
