@@ -213,7 +213,7 @@ export function useChatWebSocket({
 
   const retry = useCallback(() => {
     retriesRef.current = 0;
-    hadConnectionRef.current = false;
+    // Keep hadConnectionRef.current = true so catch-up fires on reconnect
     clearTimeout(reconnectTimerRef.current);
     connectRef.current();
   }, []);

@@ -282,6 +282,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           content: trimmed,
           role: 'user',
         }));
+      } else {
+        // WebSocket not connected — message shown optimistically but may not
+        // be delivered until the next poll cycle or WS reconnects.
+        console.warn('[ProjectMessageView] WebSocket not connected, message delivery deferred');
       }
 
       setFollowUp('');

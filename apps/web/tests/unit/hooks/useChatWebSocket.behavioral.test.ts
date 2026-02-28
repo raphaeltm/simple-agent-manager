@@ -359,6 +359,37 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(result.current.connectionState).toBe('connected');
   });
 
+  it('retry triggers message catch-up (CodeRabbit fix)', async () => {
+    const onCatchUp = vi.fn();
+    const { result } = renderHook(() => useChatWebSocket({ ...defaultProps, onCatchUp }));
+
+    // First connect
+    await act(async () => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      await Promise.resolve();
+    });
+    expect(onCatchUp).not.toHaveBeenCalled();
+
+    // Disconnect
+    act(() => {
+      MockWebSocket.instances[0]!.simulateClose(1006);
+    });
+
+    // Retry (manual) — should still trigger catch-up because
+    // hadConnectionRef stays true
+    act(() => {
+      result.current.retry();
+    });
+
+    await act(async () => {
+      MockWebSocket.instances[MockWebSocket.instances.length - 1]!.simulateOpen();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onCatchUp).toHaveBeenCalledOnce();
+  });
+
   it('sends ping every 30 seconds when connected', () => {
     renderHook(() => useChatWebSocket({ ...defaultProps }));
 

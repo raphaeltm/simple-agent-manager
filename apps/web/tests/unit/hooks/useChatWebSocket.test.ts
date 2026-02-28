@@ -64,10 +64,13 @@ describe('useChatWebSocket hook', () => {
     expect(hookSource).toContain('ws.close(1000)');
   });
 
-  it('provides retry function that resets state', () => {
+  it('provides retry function that resets retries but preserves catch-up flag', () => {
     expect(hookSource).toContain('const retry = useCallback');
     expect(hookSource).toContain('retriesRef.current = 0');
-    expect(hookSource).toContain('hadConnectionRef.current = false');
+    // retry should NOT reset hadConnectionRef — catch-up should fire on reconnect
+    // (hadConnectionRef.current = false only appears in the enabled=false cleanup path)
+    const retrySection = hookSource.split('const retry = useCallback')[1]?.split('}, [])')[0] ?? '';
+    expect(retrySection).not.toContain('hadConnectionRef.current = false');
   });
 
   it('disconnects when enabled changes to false', () => {
