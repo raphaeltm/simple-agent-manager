@@ -2,6 +2,8 @@
 
 *Date: 2026-02-28*
 
+> **Correction (2026-02-28):** An earlier version of this document described SAM's BYOC credential model with misleading language, including claims that "the platform never holds cloud provider keys" and that "credential material never leaves the encrypted D1 row except during an active API call." While credentials are encrypted at rest (AES-256-GCM, per-user IV), the platform *does* decrypt them server-side during validation and every VM operation (provisioning, stopping, deleting). The plaintext token exists in Worker memory during these operations and is sent to the Hetzner API over HTTPS. The platform operator with access to `ENCRYPTION_KEY` could decrypt any user's token — this is not a zero-knowledge system. The sections below have been corrected to reflect the actual code behavior. See `apps/api/src/services/encryption.ts` and `apps/api/src/services/nodes.ts` for the implementation.
+
 ## Executive Summary
 
 Combined research into the AI coding agent competitive landscape and SAM's own codebase to identify blog topics with the strongest potential for developer traction. This document merges two analyses: a broad competitive survey of what platforms are publishing, and a codebase-driven audit of SAM's unique, hard-won technical stories.
@@ -96,7 +98,7 @@ Blogs about purpose-built platforms for AI agents, multi-agent orchestration for
 Nobody is blogging about using serverless platforms (Cloudflare Workers, Durable Objects) as the control plane while running agent workloads on cost-effective bare metal/VPS (Hetzner). Everyone is either fully serverless (Railway, Render) or fully VM-based (Coder, Fly.io). The hybrid approach is architecturally unique and undocumented publicly.
 
 ### B. True BYOC for AI Agent Platforms
-While BYOC is trending in data infrastructure (Databricks, Zilliz, groundcover), almost no AI coding agent platform offers genuine BYOC where users provide their own cloud credentials. SAM's model -- users bring their own Hetzner tokens, credentials encrypted per-user, platform never holds cloud provider keys -- is genuinely differentiated. Nobody is writing about this pattern for AI agents.
+While BYOC is trending in data infrastructure (Databricks, Zilliz, groundcover), almost no AI coding agent platform offers genuine BYOC where users provide their own cloud credentials. SAM's model -- users bring their own Hetzner tokens, credentials encrypted at rest per-user (AES-256-GCM) -- is genuinely differentiated. The platform does not maintain its own cloud provider account; it provisions infrastructure using the user's credentials, which are decrypted server-side only during active operations. Nobody is writing about this credential vault pattern for AI agents.
 
 ### C. Cost Transparency for AI Agent Infrastructure
 Nobody transparently breaks down the actual infrastructure cost of running an AI agent (VM cost, token cost, idle cost, warm pool economics). SAM could own the "here's what an AI coding session actually costs on Hetzner vs. AWS" narrative.
@@ -141,11 +143,11 @@ Topics ranked by a combination of audience reach, SAM differentiation, and readi
 
 ### 2. "Why Your AI Agent Platform Should Be BYOC (And How We Built It)"
 
-**Why it's strong**: BYOC is a hot topic (Medium-High intensity in the landscape) -- Northflank, Confluent, and The New Stack all have recent posts framing it as the future of SaaS. But most content focuses on "run our code in your VPC." Our model is different: users provide their own Hetzner tokens, which are encrypted per-user in D1. The platform never has cloud provider credentials.
+**Why it's strong**: BYOC is a hot topic (Medium-High intensity in the landscape) -- Northflank, Confluent, and The New Stack all have recent posts framing it as the future of SaaS. But most content focuses on "run our code in your VPC." Our model is different: users provide their own Hetzner tokens, which are encrypted at rest per-user in D1 (AES-256-GCM, unique IV per credential). The platform does not maintain its own cloud provider account.
 
-**What we have**: The BYOC credential model where user tokens are encrypted at rest per-user, never stored as environment variables or Worker secrets. The platform provisions infrastructure using the user's own credentials, but the credential material never leaves the encrypted D1 row except during an active API call.
+**What we have**: A credential vault model where user tokens are encrypted at rest, never stored as environment variables or Worker secrets. Tokens are decrypted server-side only when needed for active operations (provisioning, stopping, deleting VMs) and exist in plaintext only in Worker memory during the API call. The platform operator with access to `ENCRYPTION_KEY` could technically decrypt any user's token -- this is a standard credential vault, not a zero-knowledge system. Being honest about this tradeoff in a blog post would itself be a differentiator, since most platforms hand-wave their credential model.
 
-**Angle**: "BYOC without a data plane in the customer's account." Most BYOC architectures deploy a control plane + data plane split. Ours is simpler: we call cloud APIs using the customer's encrypted credentials. Compare the tradeoffs (simplicity vs. control plane isolation, latency vs. security surface area). Cite the BYOC trend in data infrastructure and explain why it matters even more for AI agents executing arbitrary code.
+**Angle**: "BYOC without a data plane in the customer's account." Most BYOC architectures deploy a control plane + data plane split. Ours is simpler: we call cloud APIs using the customer's encrypted credentials, decrypted on demand. Compare the tradeoffs honestly -- simplicity vs. control plane isolation, credential vault vs. zero-knowledge, latency vs. security surface area. Cite the BYOC trend in data infrastructure and explain why it matters even more for AI agents executing arbitrary code. The honesty about what the model is *and isn't* will build more trust than overclaiming.
 
 **Competition**: Heavy on the enterprise BYOC side (Confluent, Redpanda, Aiven) but focused on data infrastructure. DevPod is the closest competitor in this space but they don't write about the credential model. Nobody is writing about BYOC for dev tooling platforms or the "credential vault" approach vs. the "data plane" approach.
 
