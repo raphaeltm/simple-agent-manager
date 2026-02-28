@@ -2,6 +2,8 @@ import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { getChatSession, resetIdleTimer } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
+import { useChatWebSocket } from '../../hooks/useChatWebSocket';
+import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
 
 interface ProjectMessageViewProps {
   projectId: string;
@@ -15,8 +17,19 @@ const roleStyles: Record<string, { label: string; color: string; bg: string }> =
   tool: { label: 'Tool', color: 'var(--sam-color-tn-purple)', bg: 'var(--sam-color-info-tint)' },
 };
 
+/** Default idle timeout in ms — matches the server-side default (NODE_WARM_TIMEOUT_MS). */
+const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+
 function formatTimestamp(ts: number): string {
   return new Date(ts).toLocaleString();
+}
+
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return '0:00';
+  const totalSec = Math.ceil(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}:${sec.toString().padStart(2, '0')}`;
 }
 
 function MessageBubble({ message }: { message: ChatMessageResponse }) {
@@ -81,9 +94,16 @@ function MessageBubble({ message }: { message: ChatMessageResponse }) {
 
 type SessionState = 'active' | 'idle' | 'terminated';
 
+interface ExtendedSession extends ChatSessionResponse {
+  agentCompletedAt?: number | null;
+  isIdle?: boolean;
+  cleanupAt?: number | null;
+  task?: { id: string; outputBranch?: string | null; outputPrUrl?: string | null; errorMessage?: string | null; outputSummary?: string | null };
+}
+
 function deriveSessionState(session: ChatSessionResponse): SessionState {
   if (session.status === 'stopped') return 'terminated';
-  const s = session as ChatSessionResponse & { agentCompletedAt?: number | null; isIdle?: boolean };
+  const s = session as ExtendedSession;
   if (s.isIdle || s.agentCompletedAt) return 'idle';
   if (session.status === 'active') return 'active';
   return 'terminated';
@@ -94,10 +114,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   sessionId,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
 
   const [session, setSession] = useState<ChatSessionResponse | null>(null);
-  const [taskEmbed, setTaskEmbed] = useState<{ id: string; outputBranch?: string | null; outputPrUrl?: string | null } | null>(null);
+  const [taskEmbed, setTaskEmbed] = useState<ExtendedSession['task'] | null>(null);
   const [messages, setMessages] = useState<ChatMessageResponse[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -108,11 +127,37 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [followUp, setFollowUp] = useState('');
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
 
+  // Idle timer state (TDF-8)
+  const [idleCountdownMs, setIdleCountdownMs] = useState<number | null>(null);
+
+  const sessionState = session ? deriveSessionState(session) : 'terminated';
+
+  // WebSocket with reconnection (TDF-8)
+  const { connectionState, wsRef, retry: retryWs } = useChatWebSocket({
+    projectId,
+    sessionId,
+    enabled: session?.status === 'active',
+    onMessage: useCallback((msg: ChatMessageResponse) => {
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
+    }, []),
+    onSessionStopped: useCallback(() => {
+      setSession((prev) => prev ? { ...prev, status: 'stopped' } : prev);
+    }, []),
+    onCatchUp: useCallback((catchUpMessages: ChatMessageResponse[], catchUpSession: ChatSessionResponse, catchUpHasMore: boolean) => {
+      setSession(catchUpSession);
+      setMessages(catchUpMessages);
+      setHasMore(catchUpHasMore);
+    }, []),
+  });
+
   const loadSession = useCallback(async () => {
     try {
       setError(null);
       setLoading(true);
-      const data: ChatSessionDetailResponse & { session: ChatSessionResponse & { task?: { id: string; outputBranch?: string | null; outputPrUrl?: string | null } } } = await getChatSession(projectId, sessionId);
+      const data: ChatSessionDetailResponse & { session: ExtendedSession } = await getChatSession(projectId, sessionId);
       setSession(data.session);
       setMessages(data.messages);
       setHasMore(data.hasMore);
@@ -130,10 +175,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     void loadSession();
   }, [loadSession]);
 
-  // Auto-scroll to bottom only when new messages are appended (not on
-  // every poll cycle, and not when "Load More" prepends older messages).
-  // Tracks previous count via ref; skips while loadingMore to avoid
-  // yanking the user to the bottom when they asked for older messages.
+  // Auto-scroll to bottom only when new messages are appended
   const prevMessageCountRef = useRef(0);
   useEffect(() => {
     if (messages.length > prevMessageCountRef.current && !loading && !loadingMore) {
@@ -142,48 +184,11 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     prevMessageCountRef.current = messages.length;
   }, [messages.length, loading, loadingMore]);
 
-  // WebSocket for real-time updates — connects to project DO for message streaming
+  // Polling fallback — keeps running alongside WebSocket for reliability.
+  // Only updates state when the server has new data (fingerprint-based).
   useEffect(() => {
     if (!session || session.status !== 'active') return;
 
-    const API_URL = import.meta.env.VITE_API_URL || '';
-    const wsUrl = API_URL.replace(/^http/, 'ws') + `/api/projects/${projectId}/sessions/ws`;
-
-    let ws: WebSocket | null = null;
-    try {
-      ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'message.new' && data.sessionId === sessionId) {
-            const newMsg: ChatMessageResponse = {
-              id: data.id || crypto.randomUUID(),
-              sessionId: data.sessionId,
-              role: data.role,
-              content: data.content,
-              toolMetadata: data.toolMetadata || null,
-              createdAt: data.createdAt || Date.now(),
-            };
-            setMessages((prev) => {
-              if (prev.some((m) => m.id === newMsg.id)) return prev;
-              return [...prev, newMsg];
-            });
-          } else if (data.type === 'session.stopped' && data.sessionId === sessionId) {
-            setSession((prev) => prev ? { ...prev, status: 'stopped' } : prev);
-          }
-        } catch {
-          // Ignore malformed messages
-        }
-      };
-    } catch {
-      // WebSocket not available
-    }
-
-    // Polling fallback — only updates state when the server has new data.
-    // Uses a fingerprint (count + last ID + session status) to avoid
-    // replacing state with identical data, which would trigger unnecessary
-    // re-renders and fight with auto-scroll logic.
     const ACTIVE_POLL_MS = 3000;
     let lastPollFingerprint = '';
     const pollInterval = setInterval(async () => {
@@ -202,30 +207,73 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       }
     }, ACTIVE_POLL_MS);
 
-    return () => {
-      ws?.close();
-      wsRef.current = null;
-      clearInterval(pollInterval);
-    };
+    return () => clearInterval(pollInterval);
   }, [session?.status, projectId, sessionId]);
+
+  // Idle timer countdown (TDF-8)
+  useEffect(() => {
+    if (sessionState !== 'idle') {
+      setIdleCountdownMs(null);
+      return;
+    }
+
+    const ext = session as ExtendedSession | null;
+    const cleanupAt = ext?.cleanupAt;
+    const agentCompletedAt = ext?.agentCompletedAt;
+
+    if (cleanupAt) {
+      // Server told us the exact cleanup time
+      const tick = () => setIdleCountdownMs(Math.max(0, cleanupAt - Date.now()));
+      tick();
+      const interval = setInterval(tick, 1000);
+      return () => clearInterval(interval);
+    } else if (agentCompletedAt) {
+      // Estimate from agentCompletedAt + default timeout
+      const estimatedCleanup = agentCompletedAt + DEFAULT_IDLE_TIMEOUT_MS;
+      const tick = () => setIdleCountdownMs(Math.max(0, estimatedCleanup - Date.now()));
+      tick();
+      const interval = setInterval(tick, 1000);
+      return () => clearInterval(interval);
+    }
+    // No timing info available — don't show countdown
+    return;
+  }, [sessionState, session]);
 
   // Send follow-up message via WebSocket or HTTP
   const handleSendFollowUp = async () => {
     const trimmed = followUp.trim();
     if (!trimmed || sendingFollowUp) return;
 
-    const currentState = session ? deriveSessionState(session) : 'terminated';
-
     setSendingFollowUp(true);
     try {
       // Reset idle timer if session is idle (T037)
-      if (currentState === 'idle') {
-        resetIdleTimer(projectId, sessionId).catch(() => {
-          // Best-effort — timer reset failure shouldn't block sending
-        });
+      if (sessionState === 'idle') {
+        resetIdleTimer(projectId, sessionId)
+          .then((result) => {
+            // Update countdown with server-provided cleanup time
+            if (result.cleanupAt) {
+              const ext = session as ExtendedSession | null;
+              if (ext) {
+                setSession({ ...ext, cleanupAt: result.cleanupAt, isIdle: false, agentCompletedAt: null } as ChatSessionResponse);
+              }
+            }
+          })
+          .catch(() => {
+            // Best-effort — timer reset failure shouldn't block sending
+          });
       }
 
-      // Try sending via the project DO WebSocket
+      // Optimistic add
+      setMessages((prev) => [...prev, {
+        id: crypto.randomUUID(),
+        sessionId,
+        role: 'user',
+        content: trimmed,
+        toolMetadata: null,
+        createdAt: Date.now(),
+      }]);
+
+      // Try sending via WebSocket
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({
           type: 'message.send',
@@ -233,29 +281,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           content: trimmed,
           role: 'user',
         }));
-        // Optimistic add
-        setMessages((prev) => [...prev, {
-          id: crypto.randomUUID(),
-          sessionId,
-          role: 'user',
-          content: trimmed,
-          toolMetadata: null,
-          createdAt: Date.now(),
-        }]);
-        setFollowUp('');
-      } else {
-        // Fallback: just show the message optimistically; the VM agent WS isn't
-        // connected from the browser yet (Phase 5+6 will add direct VM WS).
-        setMessages((prev) => [...prev, {
-          id: crypto.randomUUID(),
-          sessionId,
-          role: 'user',
-          content: trimmed,
-          toolMetadata: null,
-          createdAt: Date.now(),
-        }]);
-        setFollowUp('');
       }
+
+      setFollowUp('');
     } finally {
       setSendingFollowUp(false);
     }
@@ -300,10 +328,13 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     );
   }
 
-  const sessionState = session ? deriveSessionState(session) : 'terminated';
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Connection indicator (TDF-8) */}
+      {sessionState === 'active' && connectionState !== 'connected' && (
+        <ConnectionBanner state={connectionState} onRetry={retryWs} />
+      )}
+
       {/* Session header with branch/PR info */}
       {session && (
         <div style={{
@@ -342,6 +373,18 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             }} />
             {sessionState === 'active' ? 'Active' : sessionState === 'idle' ? 'Idle' : 'Stopped'}
           </span>
+
+          {/* Idle countdown (TDF-8) */}
+          {sessionState === 'idle' && idleCountdownMs !== null && (
+            <span className="sam-type-caption" style={{
+              color: idleCountdownMs < 5 * 60 * 1000
+                ? 'var(--sam-color-danger)'
+                : 'var(--sam-color-warning, #f59e0b)',
+              fontFamily: 'monospace',
+            }}>
+              Cleanup in {formatCountdown(idleCountdownMs)}
+            </span>
+          )}
 
           {/* Branch name (T021) */}
           {taskEmbed?.outputBranch && (
@@ -388,6 +431,48 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
 
+      {/* Task error/summary display (TDF-8) */}
+      {taskEmbed?.errorMessage && sessionState === 'terminated' && (
+        <div style={{
+          padding: 'var(--sam-space-2) var(--sam-space-4)',
+          backgroundColor: 'var(--sam-color-danger-tint)',
+          borderBottom: '1px solid var(--sam-color-border-default)',
+        }}>
+          <span className="sam-type-caption" style={{
+            color: 'var(--sam-color-danger)',
+            fontWeight: 500,
+          }}>
+            Error:
+          </span>{' '}
+          <span className="sam-type-caption" style={{
+            color: 'var(--sam-color-danger)',
+            wordBreak: 'break-word',
+          }}>
+            {taskEmbed.errorMessage}
+          </span>
+        </div>
+      )}
+      {taskEmbed?.outputSummary && sessionState === 'terminated' && (
+        <div style={{
+          padding: 'var(--sam-space-2) var(--sam-space-4)',
+          backgroundColor: 'var(--sam-color-success-tint)',
+          borderBottom: '1px solid var(--sam-color-border-default)',
+        }}>
+          <span className="sam-type-caption" style={{
+            color: 'var(--sam-color-success)',
+            fontWeight: 500,
+          }}>
+            Summary:
+          </span>{' '}
+          <span className="sam-type-caption" style={{
+            color: 'var(--sam-color-fg-primary)',
+            wordBreak: 'break-word',
+          }}>
+            {taskEmbed.outputSummary}
+          </span>
+        </div>
+      )}
+
       {/* Messages area */}
       <div style={{
         flex: 1,
@@ -422,7 +507,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input area — varies by session state (T019) */}
+      {/* Input area — varies by session state */}
       {sessionState === 'active' && (
         <FollowUpInput
           value={followUp}
@@ -438,7 +523,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           onChange={setFollowUp}
           onSend={handleSendFollowUp}
           sending={sendingFollowUp}
-          placeholder="Send a follow-up..."
+          placeholder="Send a follow-up to keep the session alive..."
         />
       )}
       {sessionState === 'terminated' && (
@@ -456,6 +541,52 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     </div>
   );
 };
+
+/** WebSocket connection status banner (TDF-8). */
+function ConnectionBanner({ state, onRetry }: { state: ChatConnectionState; onRetry: () => void }) {
+  const label = state === 'connecting' ? 'Connecting...'
+    : state === 'reconnecting' ? 'Reconnecting...'
+    : 'Disconnected';
+
+  const isRecoverable = state === 'disconnected';
+
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 'var(--sam-space-2)',
+      padding: 'var(--sam-space-1) var(--sam-space-4)',
+      backgroundColor: isRecoverable ? 'var(--sam-color-danger-tint)' : 'var(--sam-color-warning-tint, var(--sam-color-info-tint))',
+      borderBottom: '1px solid var(--sam-color-border-default)',
+      fontSize: 'var(--sam-type-caption-size)',
+    }}>
+      {!isRecoverable && <Spinner size="sm" />}
+      <span style={{
+        color: isRecoverable ? 'var(--sam-color-danger)' : 'var(--sam-color-fg-muted)',
+      }}>
+        {label}
+      </span>
+      {isRecoverable && (
+        <button
+          type="button"
+          onClick={onRetry}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            color: 'var(--sam-color-accent-primary)',
+            fontSize: 'var(--sam-type-caption-size)',
+            fontWeight: 500,
+            textDecoration: 'underline',
+            padding: 0,
+          }}
+        >
+          Retry
+        </button>
+      )}
+    </div>
+  );
+}
 
 /** Follow-up message input for active/idle sessions. */
 function FollowUpInput({
