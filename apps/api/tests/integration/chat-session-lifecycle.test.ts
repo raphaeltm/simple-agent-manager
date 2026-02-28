@@ -207,7 +207,7 @@ class InMemorySqlStorage {
 
   private handleCountSelect(
     query: string,
-    params: unknown[]
+    _params: unknown[]
   ): { toArray: () => Record<string, unknown>[] } {
     const upper = query.toUpperCase();
 
