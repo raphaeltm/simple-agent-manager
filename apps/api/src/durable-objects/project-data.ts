@@ -214,7 +214,14 @@ export class ProjectData extends DurableObject<Env> {
     }
 
     this.scheduleSummarySync();
-    this.broadcastEvent('message.new', { sessionId, messageId: id, role });
+    this.broadcastEvent('message.new', {
+      sessionId,
+      messageId: id,
+      role,
+      content,
+      toolMetadata: toolMetadata ? JSON.parse(toolMetadata) : null,
+      createdAt: now,
+    });
     return id;
   }
 

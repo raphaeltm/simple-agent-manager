@@ -151,6 +151,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       setMessages(catchUpMessages);
       setHasMore(catchUpHasMore);
     }, []),
+    onAgentCompleted: useCallback((agentCompletedAt: number) => {
+      setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);
+    }, []),
   });
 
   const loadSession = useCallback(async () => {
