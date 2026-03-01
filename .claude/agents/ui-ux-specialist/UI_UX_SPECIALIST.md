@@ -67,6 +67,29 @@ Store development screenshots in `.codex/tmp/playwright-screenshots/`.
 3. Verify no clipping, overflow, overlap, or unreadable controls.
 4. If auth-gated, use a mock harness or authenticated flow as applicable.
 
+## Effect Collision Check (Required for Interactive Changes)
+
+When a PR adds or modifies interactive handlers (click, submit, navigate) in a component that has `useEffect` hooks, you MUST verify that no effect will fire in a way that undoes or conflicts with the user's intended action.
+
+### Check Procedure
+
+1. **List all `useEffect` hooks** in the component being changed
+2. **For each new/modified handler**, identify what state it changes
+3. **Trace each effect's dependency array** — does it include the state being changed?
+4. **If an effect reacts to the same state the handler sets**, verify the effect has a guard that distinguishes "user action" from other triggers (initial load, data refresh, etc.)
+5. **If no guard exists**, flag it as a potential interaction-effect collision
+
+### What to Flag
+
+- An effect that auto-navigates based on a state that a click handler also sets
+- An effect that resets a form field that a user action just populated
+- An effect that toggles a UI element that a handler just toggled
+- Any case where `useEffect` and a handler produce competing state transitions on the same render cycle
+
+### Reference
+
+See `docs/notes/2026-03-01-new-chat-button-postmortem.md` and `.claude/rules/06-technical-patterns.md` (React Interaction-Effect Analysis) for the incident that motivated this check.
+
 ## Output Format
 
 ```markdown

@@ -55,6 +55,8 @@ export function ProjectChat() {
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
   const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Track when user explicitly clicked "New Chat" so auto-select does not override it
+  const newChatIntentRef = useRef(false);
   // Check for Hetzner credentials
   useEffect(() => {
     void listCredentials()
@@ -147,6 +149,7 @@ export function ProjectChat() {
         startedAt: Date.now(),
       });
       // Navigate to the new session immediately
+      newChatIntentRef.current = false;
       navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
       // Reload sessions to include the new one
       void loadSessions();
@@ -158,6 +161,7 @@ export function ProjectChat() {
   };
 
   const handleNewChat = useCallback(() => {
+    newChatIntentRef.current = true;
     navigate(`/projects/${projectId}/chat`, { replace: true });
     setMessage('');
     setSubmitError(null);
@@ -171,9 +175,10 @@ export function ProjectChat() {
     };
   }, []);
 
-  // Auto-select the most recent session if none is selected and not provisioning
+  // Auto-select the most recent session on initial load (skip if user clicked "New Chat")
   useEffect(() => {
     if (!sessionId && sessions.length > 0 && !loading && !provisioning) {
+      if (newChatIntentRef.current) return;
       const mostRecent = sessions[0];
       if (mostRecent) {
         navigate(`/projects/${projectId}/chat/${mostRecent.id}`, { replace: true });
@@ -182,6 +187,7 @@ export function ProjectChat() {
   }, [sessionId, sessions, loading, projectId, navigate, provisioning]);
 
   const handleSelect = (id: string) => {
+    newChatIntentRef.current = false;
     setProvisioning(null);
     setSidebarOpen(false);
     navigate(`/projects/${projectId}/chat/${id}`);

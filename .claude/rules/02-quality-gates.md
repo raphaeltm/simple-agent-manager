@@ -37,6 +37,23 @@ Before marking feature work complete:
 - Use Miniflare for Worker integration tests
 - Critical paths require >90% coverage
 
+### Prohibited Test Patterns
+
+**Source-contract tests (`readFileSync` + `toContain()`) are NOT valid behavioral tests.** Reading a component's source code as a string and asserting substrings exist proves that code is *present*, not that it *works*. This pattern creates false confidence — tests pass while the feature is broken.
+
+- Any component with user interactions (click handlers, navigation, form submission, state changes) MUST have tests that **render** the component and **simulate** those interactions.
+- Source-contract tests may only be used for static configuration or structural verification (e.g., "does this config file export certain keys", "does this theme file define required tokens").
+- When reviewing existing tests, if a test file uses `readFileSync` / `readSource` on a component with interactive behavior, flag it for migration to a behavioral test.
+
+### Interactive Element Test Requirement
+
+Every new button, link, form, or interactive element MUST ship with at least one behavioral test that:
+1. **Renders** the component (using `render()` from a test framework)
+2. **Simulates** the user interaction (click, submit, type, navigate)
+3. **Asserts** the user-visible outcome (DOM change, navigation, displayed text)
+
+A test that only checks the element exists in the DOM is insufficient. The test must exercise what happens when the user interacts with it.
+
 ## Regression Test Requirements (Mandatory for Bug Fixes)
 
 When fixing a bug, you MUST write **two categories of tests**:
@@ -60,6 +77,35 @@ Before finalizing tests, ask:
 - Do these mocks accurately represent the real system? Would a broken invariant actually cause a test failure here?
 - Is there a cross-component boundary that unit tests can't cover? If so, add an integration test.
 - Would a developer introducing the original regression have seen a red CI from these tests? If not, the tests aren't defensive enough.
+
+## Post-Mortem and Process Fix Requirements (Mandatory for Bug Fixes)
+
+Every PR that fixes a bug MUST include a post-mortem and process improvement. Bug fixes without process fixes only fix the symptom — the class of bug will recur.
+
+### 1. Post-Mortem (in `docs/notes/`)
+
+Create a post-mortem file at `docs/notes/YYYY-MM-DD-<descriptive-name>-postmortem.md` covering:
+
+1. **What broke**: Describe the user-visible failure
+2. **Root cause**: Trace to the specific code change that introduced the bug
+3. **Timeline**: When was the bug introduced, when was it discovered, what happened in between?
+4. **Why it wasn't caught**: Analyze which practices failed — missing tests, wrong test type, insufficient review, missing trace, etc.
+5. **Class of bug**: Generalize beyond this specific instance — what *category* of bug is this? (e.g., "state interaction race conditions", "mock-hidden integration failures", "aspirational documentation treated as fact")
+6. **Process fix**: What changes to rules, checklists, agent instructions, or review procedures would prevent this *class* of bug in the future?
+
+### 2. Process Fix (in the same PR)
+
+The PR MUST include concrete changes to at least one of:
+- `.claude/rules/` — agent guidelines and quality gates
+- `.claude/agents/` — reviewer agent instructions
+- `.github/pull_request_template.md` — PR checklist items
+- `CLAUDE.md` — project-level instructions
+
+The process fix must target the **class of bug**, not just the specific instance. Ask: "What rule, if it existed before this bug was introduced, would have prevented it?"
+
+### 3. PR Description
+
+The PR description must include a "Post-Mortem" section summarizing the root cause, the class of bug, and the process changes made. See the PR template for the required format.
 
 ## Pre-Merge PR Review (Required)
 

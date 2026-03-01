@@ -34,6 +34,34 @@
 <!-- Document any gaps between automated test coverage and the full user flow. Include manual verification steps performed. -->
 <!-- If not applicable, write `N/A: full flow covered by automated tests` -->
 
+## Post-Mortem (Required for bug fix PRs)
+
+<!-- If this PR fixes a bug, fill out this section. If not a bug fix, write `N/A: not a bug fix`. -->
+
+### What broke
+
+<!-- Describe the user-visible failure in 1-2 sentences -->
+
+### Root cause
+
+<!-- Trace to the specific commit/change that introduced the bug -->
+
+### Class of bug
+
+<!-- Generalize: what category of bug is this? e.g., "state interaction race condition", "mock-hidden integration failure" -->
+
+### Why it wasn't caught
+
+<!-- Which practices failed? Missing test type, insufficient review, missing trace? -->
+
+### Process fix included in this PR
+
+<!-- List the specific files in .claude/rules/, .claude/agents/, .github/, or CLAUDE.md that were updated to prevent this class of bug -->
+
+### Post-mortem file
+
+<!-- Link to docs/notes/YYYY-MM-DD-*-postmortem.md created in this PR -->
+
 ## Exceptions (If any)
 
 - Scope:
