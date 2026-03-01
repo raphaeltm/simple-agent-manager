@@ -256,17 +256,17 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(MockWebSocket.instances.length).toBe(countBefore);
   });
 
-  it('fetches missed messages on reconnect (not first connect)', async () => {
+  it('fetches missed messages on reconnect', async () => {
     const onCatchUp = vi.fn();
     renderHook(() => useChatWebSocket({ ...defaultProps, onCatchUp }));
 
-    // First connect — no catch-up
+    // First connect — catch-up fires (always catches up now)
     await act(async () => {
       MockWebSocket.instances[0]!.simulateOpen();
-      // Flush microtasks (pending promises)
+      await Promise.resolve();
       await Promise.resolve();
     });
-    expect(onCatchUp).not.toHaveBeenCalled();
+    expect(onCatchUp).toHaveBeenCalledTimes(1);
 
     // Disconnect
     act(() => {
@@ -278,7 +278,7 @@ describe('useChatWebSocket (behavioral)', () => {
       vi.advanceTimersByTime(1000);
     });
 
-    // Reconnect — should trigger catch-up
+    // Reconnect — should trigger catch-up again
     await act(async () => {
       MockWebSocket.instances[1]!.simulateOpen();
       // Flush the getChatSession promise
@@ -286,8 +286,8 @@ describe('useChatWebSocket (behavioral)', () => {
       await Promise.resolve();
     });
 
-    expect(onCatchUp).toHaveBeenCalledOnce();
-    expect(onCatchUp).toHaveBeenCalledWith(
+    expect(onCatchUp).toHaveBeenCalledTimes(2);
+    expect(onCatchUp).toHaveBeenLastCalledWith(
       expect.arrayContaining([expect.objectContaining({ id: 'msg-catchup-1' })]),
       expect.any(Object),
       false,
@@ -363,20 +363,20 @@ describe('useChatWebSocket (behavioral)', () => {
     const onCatchUp = vi.fn();
     const { result } = renderHook(() => useChatWebSocket({ ...defaultProps, onCatchUp }));
 
-    // First connect
+    // First connect — catch-up fires (always catches up now)
     await act(async () => {
       MockWebSocket.instances[0]!.simulateOpen();
       await Promise.resolve();
+      await Promise.resolve();
     });
-    expect(onCatchUp).not.toHaveBeenCalled();
+    expect(onCatchUp).toHaveBeenCalledTimes(1);
 
     // Disconnect
     act(() => {
       MockWebSocket.instances[0]!.simulateClose(1006);
     });
 
-    // Retry (manual) — should still trigger catch-up because
-    // hadConnectionRef stays true
+    // Retry (manual) — should trigger catch-up again
     act(() => {
       result.current.retry();
     });
@@ -387,7 +387,7 @@ describe('useChatWebSocket (behavioral)', () => {
       await Promise.resolve();
     });
 
-    expect(onCatchUp).toHaveBeenCalledOnce();
+    expect(onCatchUp).toHaveBeenCalledTimes(2);
   });
 
   it('sends ping every 30 seconds when connected', () => {
@@ -452,5 +452,218 @@ describe('useChatWebSocket (behavioral)', () => {
     });
 
     expect(onMessage).not.toHaveBeenCalled();
+  });
+
+  // ===========================================================================
+  // messages.batch event handling (TDF message relay fix)
+  // ===========================================================================
+
+  it('delivers each message from a messages.batch event via onMessage', () => {
+    const onMessage = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onMessage }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'messages.batch',
+        payload: {
+          sessionId: 'sess-1',
+          messages: [
+            { id: 'batch-1', role: 'assistant', content: 'Hello', createdAt: 100 },
+            { id: 'batch-2', role: 'assistant', content: 'World', createdAt: 200 },
+          ],
+        },
+      });
+    });
+
+    expect(onMessage).toHaveBeenCalledTimes(2);
+    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'batch-1',
+      content: 'Hello',
+    }));
+    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'batch-2',
+      content: 'World',
+    }));
+  });
+
+  it('skips batch messages without content', () => {
+    const onMessage = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onMessage }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'messages.batch',
+        payload: {
+          sessionId: 'sess-1',
+          messages: [
+            { id: 'batch-1', role: 'assistant', content: 'Has content', createdAt: 100 },
+            { id: 'batch-2', role: 'assistant', createdAt: 200 }, // no content
+            { id: 'batch-3', role: 'assistant', content: '', createdAt: 300 }, // empty content
+          ],
+        },
+      });
+    });
+
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'batch-1',
+      content: 'Has content',
+    }));
+  });
+
+  it('ignores messages.batch for different sessions', () => {
+    const onMessage = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onMessage }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'messages.batch',
+        payload: {
+          sessionId: 'sess-other',
+          messages: [
+            { id: 'batch-1', role: 'assistant', content: 'Wrong session', createdAt: 100 },
+          ],
+        },
+      });
+    });
+
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
+  // ===========================================================================
+  // session.agent_completed event (TDF message relay fix)
+  // ===========================================================================
+
+  it('calls onAgentCompleted on session.agent_completed event', () => {
+    const onAgentCompleted = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onAgentCompleted }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.agent_completed',
+        payload: {
+          sessionId: 'sess-1',
+          agentCompletedAt: 1234567890,
+        },
+      });
+    });
+
+    expect(onAgentCompleted).toHaveBeenCalledOnce();
+    expect(onAgentCompleted).toHaveBeenCalledWith(1234567890);
+  });
+
+  it('ignores session.agent_completed for different sessions', () => {
+    const onAgentCompleted = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onAgentCompleted }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.agent_completed',
+        payload: {
+          sessionId: 'sess-other',
+          agentCompletedAt: 1234567890,
+        },
+      });
+    });
+
+    expect(onAgentCompleted).not.toHaveBeenCalled();
+  });
+
+  // ===========================================================================
+  // message.new with payload wrapper (broadcast format, TDF fix)
+  // ===========================================================================
+
+  it('handles message.new with payload wrapper from broadcast', () => {
+    const onMessage = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onMessage }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'message.new',
+        payload: {
+          sessionId: 'sess-1',
+          messageId: 'msg-wrapped',
+          role: 'assistant',
+          content: 'Wrapped message',
+          createdAt: 12345,
+        },
+      });
+    });
+
+    expect(onMessage).toHaveBeenCalledOnce();
+    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'msg-wrapped',
+      role: 'assistant',
+      content: 'Wrapped message',
+      createdAt: 12345,
+    }));
+  });
+
+  it('skips message.new without content', () => {
+    const onMessage = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onMessage }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'message.new',
+        sessionId: 'sess-1',
+        id: 'msg-no-content',
+        role: 'assistant',
+        // No content field — should be skipped
+      });
+    });
+
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
+  // ===========================================================================
+  // Catch-up on first connect (TDF fix — not just reconnects)
+  // ===========================================================================
+
+  it('triggers catch-up on first connect (not just reconnect)', async () => {
+    const onCatchUp = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onCatchUp }));
+
+    // First connect — catch-up should fire now (changed behavior)
+    await act(async () => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onCatchUp).toHaveBeenCalledOnce();
+    expect(onCatchUp).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'msg-catchup-1' })]),
+      expect.any(Object),
+      false,
+    );
   });
 });

@@ -362,3 +362,69 @@ describe('handleNodeAgentReady', () => {
     expect(section).toContain('controller.abort()');
   });
 });
+
+// =============================================================================
+// Task context passed to cloud-init (TDF message relay fix)
+// =============================================================================
+
+describe('task context passed to provisionNode for cloud-init', () => {
+  it('passes projectId to provisionNode call', () => {
+    const section = doSource.slice(
+      doSource.indexOf('private async handleNodeProvisioning('),
+      doSource.indexOf('private async handleNodeAgentReady(')
+    );
+    expect(section).toContain('state.projectId');
+    expect(section).toContain('provisionNode');
+  });
+
+  it('passes chatSessionId from step results to provisionNode', () => {
+    const section = doSource.slice(
+      doSource.indexOf('private async handleNodeProvisioning('),
+      doSource.indexOf('private async handleNodeAgentReady(')
+    );
+    expect(section).toContain('chatSessionId');
+    expect(section).toContain('state.stepResults.chatSessionId');
+  });
+
+  it('passes taskId to provisionNode call', () => {
+    const section = doSource.slice(
+      doSource.indexOf('private async handleNodeProvisioning('),
+      doSource.indexOf('private async handleNodeAgentReady(')
+    );
+    expect(section).toContain('state.taskId');
+  });
+});
+
+// =============================================================================
+// provisionNode accepts task context (nodes.ts)
+// =============================================================================
+
+describe('provisionNode task context', () => {
+  const nodesSource = readFileSync(
+    resolve(process.cwd(), 'src/services/nodes.ts'),
+    'utf8'
+  );
+
+  it('defines ProvisionTaskContext interface with projectId, chatSessionId, taskId', () => {
+    expect(nodesSource).toContain('export interface ProvisionTaskContext');
+    expect(nodesSource).toContain('projectId: string');
+    expect(nodesSource).toContain('chatSessionId: string');
+    expect(nodesSource).toContain('taskId: string');
+  });
+
+  it('provisionNode accepts optional taskContext parameter', () => {
+    expect(nodesSource).toContain('taskContext?: ProvisionTaskContext');
+  });
+
+  it('passes taskContext projectId to generateCloudInit', () => {
+    expect(nodesSource).toContain('taskContext?.projectId');
+  });
+
+  it('passes taskContext chatSessionId to generateCloudInit', () => {
+    expect(nodesSource).toContain('taskContext?.chatSessionId');
+  });
+
+  it('passes taskContext taskId to generateCloudInit', () => {
+    expect(nodesSource).toContain('taskContext?.taskId');
+  });
+});

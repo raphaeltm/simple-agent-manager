@@ -33,24 +33,26 @@ describe('useChatWebSocket hook', () => {
     expect(hookSource).toContain("setConnectionState('disconnected')");
   });
 
-  it('fetches missed messages on reconnect via REST', () => {
+  it('fetches missed messages on connect via REST', () => {
     expect(hookSource).toContain('catchUpMessages');
     expect(hookSource).toContain('getChatSession(projectId, sessionId)');
-    expect(hookSource).toContain('wasReconnect');
     expect(hookSource).toContain('hadConnectionRef');
   });
 
-  it('only catches up when reconnecting (not on first connect)', () => {
-    expect(hookSource).toContain('const wasReconnect = hadConnectionRef.current');
-    expect(hookSource).toContain('hadConnectionRef.current = true');
-    expect(hookSource).toContain('if (wasReconnect)');
+  it('always catches up on connect (initial and reconnect)', () => {
+    expect(hookSource).toContain('void catchUpMessages()');
+    // Catch-up fires on every connect, not just reconnects
+    expect(hookSource).not.toContain('if (wasReconnect)');
   });
 
-  it('handles WebSocket message types', () => {
+  it('handles all WebSocket message types including batch and agent_completed', () => {
     expect(hookSource).toContain("data.type === 'message.new'");
+    expect(hookSource).toContain("data.type === 'messages.batch'");
     expect(hookSource).toContain("data.type === 'session.stopped'");
+    expect(hookSource).toContain("data.type === 'session.agent_completed'");
     expect(hookSource).toContain('onMessageRef.current');
     expect(hookSource).toContain('onSessionStoppedRef.current');
+    expect(hookSource).toContain('onAgentCompletedRef.current');
   });
 
   it('sends ping keep-alive messages', () => {
