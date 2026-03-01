@@ -18,6 +18,10 @@ concurrency:
   group: deploy-staging
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   deploy:
     uses: ./.github/workflows/deploy-reusable.yml
