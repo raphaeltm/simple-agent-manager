@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 interface ContainerProps {
   children: ReactNode;
@@ -6,24 +6,16 @@ interface ContainerProps {
   maxWidth?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
-const maxWidthMap: Record<NonNullable<ContainerProps['maxWidth']>, string> = {
-  sm: '40rem',
-  md: '56rem',
-  lg: '72rem',
-  xl: '80rem',
+const maxWidthClasses: Record<NonNullable<ContainerProps['maxWidth']>, string> = {
+  sm: 'max-w-[40rem]',
+  md: 'max-w-[56rem]',
+  lg: 'max-w-[72rem]',
+  xl: 'max-w-[80rem]',
 };
 
 export function Container({ children, className = '', maxWidth = 'lg' }: ContainerProps) {
-  const style: CSSProperties = {
-    width: '100%',
-    maxWidth: maxWidthMap[maxWidth],
-    margin: '0 auto',
-    paddingLeft: 'var(--sam-space-4)',
-    paddingRight: 'var(--sam-space-4)',
-  };
-
   return (
-    <div style={style} className={className}>
+    <div className={`w-full ${maxWidthClasses[maxWidth]} mx-auto px-4 ${className}`}>
       {children}
     </div>
   );

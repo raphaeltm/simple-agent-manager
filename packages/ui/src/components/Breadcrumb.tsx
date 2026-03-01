@@ -1,4 +1,3 @@
-import { type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 
 export interface BreadcrumbSegment {
@@ -11,49 +10,24 @@ export interface BreadcrumbProps {
   className?: string;
 }
 
-const navStyle: CSSProperties = {
-  fontSize: 'var(--sam-type-secondary-size)',
-  lineHeight: 'var(--sam-type-secondary-line-height)',
-};
-
-const listStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 'var(--sam-space-1)',
-  listStyle: 'none',
-  margin: 0,
-  padding: 0,
-};
-
-const separatorStyle: CSSProperties = {
-  color: 'var(--sam-color-fg-muted)',
-  userSelect: 'none',
-};
-
-const linkStyle: CSSProperties = {
-  color: 'var(--sam-color-fg-muted)',
-  textDecoration: 'none',
-};
-
-const currentStyle: CSSProperties = {
-  color: 'var(--sam-color-fg-primary)',
-};
-
 export function Breadcrumb({ segments, className }: BreadcrumbProps) {
   return (
-    <nav aria-label="Breadcrumb" className={className} style={navStyle}>
-      <ol style={listStyle}>
+    <nav aria-label="Breadcrumb" className={`sam-type-secondary ${className ?? ''}`}>
+      <ol className="flex items-center gap-1 list-none m-0 p-0">
         {segments.map((segment, index) => {
           const isLast = index === segments.length - 1;
           return (
-            <li key={segment.path ?? segment.label} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-1)' }}>
-              {index > 0 && <span style={separatorStyle} aria-hidden="true">/</span>}
+            <li key={segment.path ?? segment.label} className="flex items-center gap-1">
+              {index > 0 && <span className="text-fg-muted select-none" aria-hidden="true">/</span>}
               {isLast || !segment.path ? (
-                <span aria-current={isLast ? 'page' : undefined} style={currentStyle}>
+                <span aria-current={isLast ? 'page' : undefined} className="text-fg-primary">
                   {segment.label}
                 </span>
               ) : (
-                <Link to={segment.path} style={linkStyle} className="sam-breadcrumb-link">
+                <Link
+                  to={segment.path}
+                  className="text-fg-muted no-underline hover:underline hover:text-fg-primary"
+                >
                   {segment.label}
                 </Link>
               )}
@@ -61,13 +35,6 @@ export function Breadcrumb({ segments, className }: BreadcrumbProps) {
           );
         })}
       </ol>
-
-      <style>{`
-        .sam-breadcrumb-link:hover {
-          text-decoration: underline;
-          color: var(--sam-color-fg-primary);
-        }
-      `}</style>
     </nav>
   );
 }

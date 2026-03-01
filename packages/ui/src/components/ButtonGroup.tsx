@@ -6,10 +6,6 @@ export interface ButtonGroupProps {
   className?: string;
 }
 
-const containerStyle: CSSProperties = {
-  display: 'inline-flex',
-};
-
 export function ButtonGroup({ children, size, className }: ButtonGroupProps) {
   const items = Children.toArray(children).filter(
     (child): child is ReactElement<{ style?: CSSProperties; size?: string }> => isValidElement(child),
@@ -17,7 +13,7 @@ export function ButtonGroup({ children, size, className }: ButtonGroupProps) {
   const count = items.length;
 
   return (
-    <div role="group" className={className} style={containerStyle}>
+    <div role="group" className={`inline-flex ${className ?? ''}`}>
       {items.map((child, index) => {
         let borderRadius: string;
         if (count === 1) {

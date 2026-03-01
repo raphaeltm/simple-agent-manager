@@ -57,38 +57,38 @@
 
 ### Batch 1: Simple components (1 inline style each)
 
-- [ ] T016 [P] [US4] Migrate `packages/ui/src/components/StatusBadge.tsx` — replace inline styles with Tailwind classes
-- [ ] T017 [P] [US4] Migrate `packages/ui/src/components/Spinner.tsx` — replace inline styles with Tailwind classes
-- [ ] T018 [P] [US4] Migrate `packages/ui/src/components/Input.tsx` — replace inline styles with Tailwind classes
-- [ ] T019 [P] [US4] Migrate `packages/ui/src/components/Select.tsx` — replace inline styles with Tailwind classes
+- [x] T016 [P] [US4] Migrate `packages/ui/src/components/StatusBadge.tsx` — replace inline styles with Tailwind classes
+- [x] T017 [P] [US4] Migrate `packages/ui/src/components/Spinner.tsx` — replace inline styles with Tailwind classes
+- [x] T018 [P] [US4] Migrate `packages/ui/src/components/Input.tsx` — replace inline styles with Tailwind classes
+- [x] T019 [P] [US4] Migrate `packages/ui/src/components/Select.tsx` — replace inline styles with Tailwind classes
 
 ### Batch 2: Medium components (1-3 inline styles)
 
-- [ ] T020 [P] [US4] Migrate `packages/ui/src/components/Card.tsx` — replace inline styles with Tailwind classes
-- [ ] T021 [P] [US4] Migrate `packages/ui/src/components/ButtonGroup.tsx` — replace inline styles with Tailwind classes
-- [ ] T022 [P] [US4] Migrate `packages/ui/src/components/Tooltip.tsx` — replace inline styles with Tailwind classes
-- [ ] T023 [P] [US4] Migrate `packages/ui/src/components/Skeleton.tsx` — replace inline styles with Tailwind classes (runtime injection already removed in T011)
+- [x] T020 [P] [US4] Migrate `packages/ui/src/components/Card.tsx` — replace inline styles with Tailwind classes
+- [x] T021 [P] [US4] Migrate `packages/ui/src/components/ButtonGroup.tsx` — replace inline styles with Tailwind classes
+- [x] T022 [P] [US4] Migrate `packages/ui/src/components/Tooltip.tsx` — replace inline styles with Tailwind classes
+- [x] T023 [P] [US4] Migrate `packages/ui/src/components/Skeleton.tsx` — replace inline styles with Tailwind classes (runtime injection already removed in T011)
 
 ### Batch 3: Complex components (4+ inline styles)
 
-- [ ] T024 [P] [US4] Migrate `packages/ui/src/components/Alert.tsx` — replace 4 inline style objects with Tailwind classes for all 4 variants (error, warning, success, info)
-- [ ] T025 [P] [US4] Migrate `packages/ui/src/components/Button.tsx` — replace inline styles with Tailwind classes for all 4 variants (primary, secondary, danger, ghost) x 3 sizes (sm, md, lg) + loading state
-- [ ] T026 [P] [US4] Migrate `packages/ui/src/components/Breadcrumb.tsx` — replace inline styles + remove `<style>` hover injection, use `hover:` Tailwind variant
-- [ ] T027 [P] [US4] Migrate `packages/ui/src/components/Tabs.tsx` — replace inline styles + remove `<style>` hover/focus injection, use Tailwind variants
+- [x] T024 [P] [US4] Migrate `packages/ui/src/components/Alert.tsx` — replace 4 inline style objects with Tailwind classes for all 4 variants (error, warning, success, info)
+- [x] T025 [P] [US4] Migrate `packages/ui/src/components/Button.tsx` — replace inline styles with Tailwind classes for all 4 variants (primary, secondary, danger, ghost) x 3 sizes (sm, md, lg) + loading state
+- [x] T026 [P] [US4] Migrate `packages/ui/src/components/Breadcrumb.tsx` — replace inline styles + remove `<style>` hover injection, use `hover:` Tailwind variant
+- [x] T027 [P] [US4] Migrate `packages/ui/src/components/Tabs.tsx` — replace inline styles + remove `<style>` hover/focus injection, use Tailwind variants
 
 ### Batch 4: Most complex components (5-6 inline styles + injection)
 
-- [ ] T028 [US4] Migrate `packages/ui/src/components/Dialog.tsx` — replace 5 inline style objects with Tailwind classes, preserve keyboard navigation and focus trapping
-- [ ] T029 [US4] Migrate `packages/ui/src/components/DropdownMenu.tsx` — replace 6 inline style objects + remove `<style>` hover injection, use Tailwind variants, preserve keyboard navigation
-- [ ] T030 [US4] Migrate `packages/ui/src/components/Toast.tsx` — replace 6 inline style objects with Tailwind classes (runtime injection already removed in T011)
-- [ ] T031 [US4] Migrate `packages/ui/src/components/EmptyState.tsx` — replace 5 inline style objects with Tailwind classes
+- [x] T028 [US4] Migrate `packages/ui/src/components/Dialog.tsx` — replace 5 inline style objects with Tailwind classes, preserve keyboard navigation and focus trapping
+- [x] T029 [US4] Migrate `packages/ui/src/components/DropdownMenu.tsx` — replace 6 inline style objects + remove `<style>` hover injection, use Tailwind variants, preserve keyboard navigation
+- [x] T030 [US4] Migrate `packages/ui/src/components/Toast.tsx` — replace 6 inline style objects with Tailwind classes (runtime injection already removed in T011)
+- [x] T031 [US4] Migrate `packages/ui/src/components/EmptyState.tsx` — replace 5 inline style objects with Tailwind classes
 
 ### Batch 5: Primitives
 
-- [ ] T031a [P] [US4] Migrate `packages/ui/src/primitives/Typography.tsx` — replace inline styles with Tailwind classes
-- [ ] T031b [P] [US4] Migrate `packages/ui/src/primitives/Container.tsx` — replace inline styles with Tailwind classes
-- [ ] T031c [P] [US4] Migrate `packages/ui/src/primitives/PageLayout.tsx` — replace inline styles with Tailwind classes
-- [ ] T032 [US4] Build UI package with `pnpm --filter @simple-agent-manager/ui build` and web app with `pnpm --filter @simple-agent-manager/web build` to verify no regressions
+- [x] T031a [P] [US4] Migrate `packages/ui/src/primitives/Typography.tsx` — replace inline styles with Tailwind classes
+- [x] T031b [P] [US4] Migrate `packages/ui/src/primitives/Container.tsx` — replace inline styles with Tailwind classes
+- [x] T031c [P] [US4] Migrate `packages/ui/src/primitives/PageLayout.tsx` — replace inline styles with Tailwind classes
+- [x] T032 [US4] Build UI package with `pnpm --filter @simple-agent-manager/ui build` and web app with `pnpm --filter @simple-agent-manager/web build` to verify no regressions
 
 **Checkpoint**: All 19 styled UI package components migrated (16 components + 3 primitives). Zero inline `CSSProperties` in `packages/ui`. SC-001 and SC-007 achieved.
 

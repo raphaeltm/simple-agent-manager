@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useId, type ReactNode, type CSSProperties, type KeyboardEvent } from 'react';
+import { useState, useRef, useCallback, useId, type ReactNode, type KeyboardEvent } from 'react';
 import { MoreVertical } from 'lucide-react';
 import { useClickOutside } from '../hooks/useClickOutside';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -19,50 +19,6 @@ export interface DropdownMenuProps {
   align?: 'start' | 'end';
   'aria-label'?: string;
 }
-
-const triggerStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  width: 32,
-  height: 32,
-  padding: 0,
-  border: '1px solid var(--sam-color-border-default)',
-  borderRadius: 'var(--sam-radius-sm)',
-  background: 'transparent',
-  color: 'var(--sam-color-fg-muted)',
-  cursor: 'pointer',
-};
-
-const menuStyle: CSSProperties = {
-  position: 'absolute',
-  top: '100%',
-  marginTop: 'var(--sam-space-1)',
-  minWidth: 160,
-  padding: 'var(--sam-space-1) 0',
-  background: 'var(--sam-color-bg-surface)',
-  border: '1px solid var(--sam-color-border-default)',
-  borderRadius: 'var(--sam-radius-md)',
-  boxShadow: 'var(--sam-shadow-dropdown)',
-  zIndex: 'var(--sam-z-dropdown)',
-  listStyle: 'none',
-  margin: 0,
-};
-
-const itemStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 'var(--sam-space-2)',
-  width: '100%',
-  padding: 'var(--sam-space-2) var(--sam-space-3)',
-  border: 'none',
-  background: 'transparent',
-  color: 'var(--sam-color-fg-primary)',
-  fontSize: 'var(--sam-type-secondary-size)',
-  lineHeight: 'var(--sam-type-secondary-line-height)',
-  cursor: 'pointer',
-  textAlign: 'left',
-};
 
 export function DropdownMenu({ items, trigger, align = 'end', 'aria-label': ariaLabel }: DropdownMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -144,7 +100,7 @@ export function DropdownMenu({ items, trigger, align = 'end', 'aria-label': aria
   }
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', display: 'inline-block' }}>
+    <div ref={containerRef} className="relative inline-block">
       <button
         ref={triggerRef}
         type="button"
@@ -154,8 +110,7 @@ export function DropdownMenu({ items, trigger, align = 'end', 'aria-label': aria
         aria-expanded={isOpen}
         aria-controls={isOpen ? menuId : undefined}
         aria-label={ariaLabel ?? 'Actions'}
-        style={triggerStyle}
-        className="sam-dropdown-trigger"
+        className="inline-flex items-center justify-center w-8 h-8 p-0 border border-border-default rounded-sm bg-transparent text-fg-muted cursor-pointer hover:bg-surface-hover hover:text-fg-primary"
       >
         {trigger ?? <MoreVertical size={16} />}
       </button>
@@ -164,10 +119,7 @@ export function DropdownMenu({ items, trigger, align = 'end', 'aria-label': aria
         <ul
           id={menuId}
           role="menu"
-          style={{
-            ...menuStyle,
-            ...(align === 'start' ? { left: 0 } : { right: 0 }),
-          }}
+          className={`absolute top-full mt-1 min-w-40 py-1 m-0 list-none bg-surface border border-border-default rounded-md shadow-dropdown z-dropdown ${align === 'start' ? 'left-0' : 'right-0'}`}
         >
           {items.map((item, index) => (
             <li key={item.id} role="none">
@@ -180,12 +132,7 @@ export function DropdownMenu({ items, trigger, align = 'end', 'aria-label': aria
                 title={item.disabled ? item.disabledReason : undefined}
                 onClick={() => handleItemClick(item)}
                 onKeyDown={(e) => handleItemKeyDown(e, index)}
-                style={{
-                  ...itemStyle,
-                  ...(item.variant === 'danger' ? { color: 'var(--sam-color-danger)' } : {}),
-                  ...(item.disabled ? { opacity: 0.5, cursor: 'not-allowed' } : {}),
-                }}
-                className="sam-dropdown-item"
+                className={`sam-type-secondary flex items-center gap-2 w-full px-3 py-2 border-none bg-transparent text-left cursor-pointer hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:-outline-offset-2 ${item.variant === 'danger' ? 'text-danger' : 'text-fg-primary'} ${item.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {item.icon}
                 {item.label}
@@ -194,20 +141,6 @@ export function DropdownMenu({ items, trigger, align = 'end', 'aria-label': aria
           ))}
         </ul>
       )}
-
-      <style>{`
-        .sam-dropdown-trigger:hover {
-          background: var(--sam-color-bg-surface-hover);
-          color: var(--sam-color-fg-primary);
-        }
-        .sam-dropdown-item:hover:not(:disabled) {
-          background: var(--sam-color-bg-surface-hover);
-        }
-        .sam-dropdown-item:focus-visible {
-          outline: 2px solid var(--sam-color-focus-ring);
-          outline-offset: -2px;
-        }
-      `}</style>
     </div>
   );
 }

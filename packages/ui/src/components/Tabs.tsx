@@ -1,4 +1,4 @@
-import { useRef, type ReactNode, type CSSProperties, type KeyboardEvent } from 'react';
+import { useRef, type ReactNode, type KeyboardEvent } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 
 export interface Tab {
@@ -13,38 +13,6 @@ export interface TabsProps {
   basePath: string;
   className?: string;
 }
-
-const tabListStyle: CSSProperties = {
-  display: 'flex',
-  overflowX: 'auto',
-  borderBottom: '1px solid var(--sam-color-border-default)',
-  scrollSnapType: 'x mandatory',
-  gap: 0,
-};
-
-const tabBaseStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 'var(--sam-space-2)',
-  padding: 'var(--sam-space-2) var(--sam-space-4)',
-  border: 'none',
-  borderBottom: '2px solid transparent',
-  background: 'transparent',
-  color: 'var(--sam-color-fg-muted)',
-  fontSize: 'var(--sam-type-secondary-size)',
-  fontWeight: 'var(--sam-type-secondary-weight)',
-  lineHeight: 'var(--sam-type-secondary-line-height)',
-  textDecoration: 'none',
-  whiteSpace: 'nowrap',
-  cursor: 'pointer',
-  scrollSnapAlign: 'start',
-  transition: 'color 150ms ease, border-color 150ms ease',
-};
-
-const activeStyle: CSSProperties = {
-  color: 'var(--sam-color-fg-primary)',
-  borderBottomColor: 'var(--sam-color-accent-primary)',
-};
 
 export function Tabs({ tabs, basePath, className }: TabsProps) {
   const location = useLocation();
@@ -88,7 +56,10 @@ export function Tabs({ tabs, basePath, className }: TabsProps) {
   }
 
   return (
-    <div role="tablist" className={className} style={tabListStyle}>
+    <div
+      role="tablist"
+      className={`flex overflow-x-auto border-b border-border-default snap-x snap-mandatory ${className ?? ''}`}
+    >
       {tabs.map((tab, index) => {
         const active = isActive(tab);
         return (
@@ -100,28 +71,13 @@ export function Tabs({ tabs, basePath, className }: TabsProps) {
             aria-selected={active}
             tabIndex={active ? 0 : -1}
             onKeyDown={(e) => handleKeyDown(e, index)}
-            style={{
-              ...tabBaseStyle,
-              ...(active ? activeStyle : {}),
-            }}
-            className="sam-tab"
+            className={`sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespace-nowrap cursor-pointer snap-start transition-[color,border-color] duration-150 ease-in-out hover:text-fg-primary hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:-outline-offset-2 ${active ? 'text-fg-primary border-b-accent' : 'text-fg-muted border-b-transparent'}`}
           >
             {tab.icon}
             {tab.label}
           </NavLink>
         );
       })}
-
-      <style>{`
-        .sam-tab:hover {
-          color: var(--sam-color-fg-primary);
-          background: var(--sam-color-bg-surface-hover);
-        }
-        .sam-tab:focus-visible {
-          outline: 2px solid var(--sam-color-focus-ring);
-          outline-offset: -2px;
-        }
-      `}</style>
     </div>
   );
 }
