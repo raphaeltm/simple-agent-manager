@@ -3,7 +3,7 @@
 **Date**: 2026-03-01
 **Author**: Claude (investigation session)
 **Severity**: Critical — agent output never reaches users
-**Status**: Fixed — all four bugs addressed
+**Status**: Fixed — all five bugs addressed
 
 ---
 
@@ -80,6 +80,27 @@ Even for individual message creation (not batch), the WebSocket broadcast had in
 - The broadcast function was tested for "does it send an event," not "does the event contain all required fields"
 - The frontend's WebSocket handler was tested for "does it update state," not "does the rendered message have content"
 - No test asserted the full payload shape against what the UI consumer expects
+
+### Bug 5 (CRITICAL): Message Reporter Uses NodeID Instead of WorkspaceID in POST URL
+
+**Location**: `packages/vm-agent/internal/messagereport/reporter.go:sendBatch()`, `packages/vm-agent/internal/server/server.go:defaultWorkspaceScope()`
+
+After Bug 1 was fixed (reporter now properly initialized with project context), the reporter was still unable to deliver messages because it used the **wrong workspace ID** in its HTTP POST URL.
+
+**What went wrong**:
+1. The message reporter is initialized at VM boot with `WorkspaceID = defaultWorkspaceScope(cfg.WorkspaceID, cfg.NodeID)`
+2. `WORKSPACE_ID` is not set in cloud-init because the workspace doesn't exist when the VM is provisioned
+3. `defaultWorkspaceScope()` falls back to `cfg.NodeID`
+4. The reporter POSTs to `/api/workspaces/{nodeId}/messages`
+5. The API endpoint looks up the workspace in D1 (`WHERE id = nodeId`) — no workspace has that ID — returns 404
+6. 404 is not a permanent error (400/401/403), so messages retry until exhaustion and accumulate in the SQLite outbox forever
+7. The task runner later creates the workspace with its own UUID (e.g., `ws-abc123`), but the reporter is never informed
+
+**Why it wasn't caught**:
+- PR #228 fixed the reporter initialization (Bug 1: not nil) but didn't verify the POST URL contained a valid workspace ID
+- The `WORKSPACE_ID` env var is intentionally absent from cloud-init because the workspace is created after node provisioning
+- No integration test exercised the complete POST URL path with a real workspace ID
+- Unit tests for `sendBatch()` used mock HTTP servers and pre-configured workspace IDs
 
 ### Bug 4 (UX): Provisioning State Lost on Navigation
 
@@ -211,7 +232,11 @@ The existing rule `10-e2e-verification.md` already mandates capability tests and
 4. **Interrupted Flow Testing**:
    - For features involving navigation and ephemeral state, add tests that exercise: start flow → navigate away → navigate back → assert state restored
 
-5. **Capability Test Evidence Requirement**:
+5. **Dynamic Resource ID Verification**:
+   - When a component constructs URLs using resource IDs (workspace ID, node ID, session ID), a capability test MUST verify the URL uses the **correct** ID at runtime — not just that a URL is constructed
+   - Specifically: if a resource ID is not available at init time and must be set later, test the complete lifecycle: init with placeholder → set real ID → verify requests use real ID
+
+6. **Capability Test Evidence Requirement**:
    - PRs touching cross-boundary features MUST include evidence of a passing capability test that exercises the complete flow
    - The test must assert the user-visible outcome (messages appear in UI), not just intermediate states (messages persisted to DB)
 
@@ -306,6 +331,25 @@ const activeProvisioning =
 ```
 
 When returning to a session with an in-progress task, the component now checks the task status and reconstructs the provisioning indicator.
+
+### Fix 5: Dynamically Update Reporter WorkspaceID After Workspace Creation
+
+**Files**: 
+- `packages/vm-agent/internal/messagereport/reporter.go`
+- `packages/vm-agent/internal/server/workspaces.go`
+
+Added `SetWorkspaceID(id string)` method to the Reporter (following the existing `SetToken` pattern), with a mutex-protected `workspaceID` field read by `sendBatch()`. When the workspace ID is empty, `sendBatch()` returns a non-permanent error so messages stay in the outbox for retry rather than being discarded.
+
+Called `SetWorkspaceID()` from `handleCreateWorkspace` in the VM agent server, which is invoked by the task runner after workspace creation. Messages enqueued before workspace creation are retained and delivered on the next flush cycle.
+
+```go
+func (r *Reporter) SetWorkspaceID(id string) {
+    if r == nil { return }
+    r.mu.Lock()
+    r.workspaceID = id
+    r.mu.Unlock()
+}
+```
 
 ### Additional Fix: Enrich Task Embed with Output Summary
 

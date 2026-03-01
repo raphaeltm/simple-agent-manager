@@ -65,27 +65,27 @@ SQLite outbox, and are never delivered.
 
 ### Go changes (vm-agent)
 
-- [ ] Add `SetWorkspaceID(id string)` method to `messagereport.Reporter`
+- [x] Add `SetWorkspaceID(id string)` method to `messagereport.Reporter`
   - Uses `r.mu.Lock()` for thread safety (same pattern as `SetToken`)
   - Stores in a new `r.workspaceID` field (separate from `r.cfg.WorkspaceID` for clarity)
   - `sendBatch()` reads the workspace ID under lock
 
-- [ ] Refactor `sendBatch()` URL construction to use the mutex-protected workspace ID
+- [x] Refactor `sendBatch()` URL construction to use the mutex-protected workspace ID
   - Read workspace ID under lock at start of method
   - If empty, log warning and return error (messages stay in outbox for retry)
 
-- [ ] Call `s.messageReporter.SetWorkspaceID(workspaceId)` from `handleCreateWorkspace`
+- [x] Call `s.messageReporter.SetWorkspaceID(workspaceId)` from `handleCreateWorkspace`
   in server's workspace creation handler
 
-- [ ] Add unit test for `SetWorkspaceID` — verify URL construction uses updated ID
+- [x] Add unit test for `SetWorkspaceID` — verify URL construction uses updated ID
 
-- [ ] Add unit test for `sendBatch` with empty workspace ID — verify it returns error
+- [x] Add unit test for `sendBatch` with empty workspace ID — verify it returns error
   (not permanent error that would delete the batch)
 
 ### Post-mortem
 
-- [ ] Update post-mortem with Bug 5 details
-- [ ] Add process fix: capability test must verify POST URL, not just reporter initialization
+- [x] Update post-mortem with Bug 5 details
+- [x] Add process fix: capability test must verify POST URL, not just reporter initialization
 
 ## Acceptance Criteria
 
