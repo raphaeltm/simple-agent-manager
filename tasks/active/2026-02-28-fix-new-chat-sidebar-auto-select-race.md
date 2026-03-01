@@ -105,6 +105,12 @@ Add a `useRef` flag (`newChatIntentRef`) that tracks whether the user explicitly
 |------|--------|
 | `apps/web/src/pages/ProjectChat.tsx` | Add `newChatIntentRef` guard to auto-select effect |
 | `apps/web/tests/unit/pages/project-chat.test.tsx` | New test file with 5 test cases |
+| `docs/notes/2026-03-01-new-chat-button-postmortem.md` | Post-mortem for this bug |
+| `.claude/rules/02-quality-gates.md` | Ban source-contract tests, require interactive element tests, require post-mortems |
+| `.claude/rules/06-technical-patterns.md` | React interaction-effect analysis rule |
+| `.claude/agents/ui-ux-specialist/UI_UX_SPECIALIST.md` | Effect collision check for UI reviewer |
+| `.github/pull_request_template.md` | Post-mortem section for bug fix PRs |
+| `tasks/backlog/2026-03-01-migrate-source-contract-tests.md` | Migration task for 6 source-contract test files |
 
 ## Test Plan
 
@@ -118,4 +124,13 @@ Add a `useRef` flag (`newChatIntentRef`) that tracks whether the user explicitly
   - [x] Task submission clears intent and navigates to new session
 - [x] Run `pnpm typecheck` and `pnpm lint`
 - [x] Run unit tests
+- [x] Write post-mortem and process fixes:
+  - [x] Post-mortem: `docs/notes/2026-03-01-new-chat-button-postmortem.md`
+  - [x] Ban source-contract tests for interactive components (`.claude/rules/02-quality-gates.md`)
+  - [x] Require behavioral tests for every new interactive element (`.claude/rules/02-quality-gates.md`)
+  - [x] Require post-mortem + process fix for every bug fix PR (`.claude/rules/02-quality-gates.md`)
+  - [x] Add React interaction-effect analysis rule (`.claude/rules/06-technical-patterns.md`)
+  - [x] Add effect collision check to UI reviewer agent (`.claude/agents/ui-ux-specialist/UI_UX_SPECIALIST.md`)
+  - [x] Add post-mortem section to PR template (`.github/pull_request_template.md`)
+  - [x] Create migration task for source-contract test files (`tasks/backlog/2026-03-01-migrate-source-contract-tests.md`)
 - [ ] Push and verify CI passes
