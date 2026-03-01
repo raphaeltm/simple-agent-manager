@@ -280,6 +280,16 @@ jobs:
             echo "Cron triggers may not work. Initialize manually: CF Dashboard > Workers & Pages > Settings > Domains & Routes"
           fi
 
+      # Verify Pages custom domain is active (must run BEFORE Worker deploys wildcard routes)
+      - name: Verify Pages Custom Domain
+        if: ${{ inputs.dry_run != true }}
+        run: bash scripts/deploy/verify-pages-domain.sh
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          PAGES_PROJECT: ${{ vars.RESOURCE_PREFIX || 'sam' }}-web-${{ steps.stack.outputs.name }}
+          PAGES_DOMAIN: app.${{ vars.BASE_DOMAIN }}
+
       # ========================================
       # Phase 3: Application (Wrangler)
       # ========================================
