@@ -2,8 +2,13 @@
 /**
  * Sync Pulumi outputs to wrangler.toml
  *
- * This script reads Pulumi stack outputs and updates the wrangler.toml
- * bindings for D1, KV, and R2 resources in the production environment.
+ * Generates complete [env.*] sections for both the API worker and tail worker
+ * at deploy time. The checked-in wrangler.toml files contain only top-level
+ * config for local dev — all environment sections are generated here.
+ *
+ * Static bindings (Durable Objects, AI, migrations) are copied from the
+ * top-level config. Dynamic bindings (D1 IDs, KV IDs, R2 names) come from
+ * Pulumi stack outputs. Worker names are derived from DEPLOYMENT_CONFIG.
  *
  * Usage:
  *   PULUMI_STACK=prod pnpm tsx scripts/deploy/sync-wrangler-config.ts
@@ -13,15 +18,29 @@ import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import * as TOML from "@iarna/toml";
-import type { PulumiOutputs, WranglerToml, WranglerEnvConfig } from "./types.js";
+import type {
+  PulumiOutputs,
+  WranglerToml,
+  WranglerEnvConfig,
+  DurableObjectsConfig,
+  AIBinding,
+  MigrationEntry,
+  TailWorkerWranglerToml,
+} from "./types.js";
 import { DEPLOYMENT_CONFIG } from "./config.js";
 
 const INFRA_DIR = resolve(import.meta.dirname, "../../infra");
 const WRANGLER_TOML_PATH = resolve(import.meta.dirname, "../../apps/api/wrangler.toml");
+const TAIL_WORKER_WRANGLER_TOML_PATH = resolve(import.meta.dirname, "../../apps/tail-worker/wrangler.toml");
+const FIRST_DEPLOY_MARKER = "/tmp/tail-worker-first-deploy";
+
+// ============================================================================
+// Pulumi
+// ============================================================================
 
 function getPulumiOutputs(stack: string): PulumiOutputs {
   const command = `pulumi stack output --json --stack ${stack}`;
-  console.log(`📦 Fetching Pulumi outputs: ${command}`);
+  console.log(`Fetching Pulumi outputs: ${command}`);
 
   try {
     const output = execSync(command, {
@@ -36,34 +55,85 @@ function getPulumiOutputs(stack: string): PulumiOutputs {
   }
 }
 
+// ============================================================================
+// Tail Worker Existence Check
+// ============================================================================
+
+async function checkTailWorkerExists(accountId: string, tailWorkerName: string): Promise<boolean> {
+  const apiToken = process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
+  if (!apiToken) {
+    console.log("  No CF API token available, assuming tail worker does not exist");
+    return false;
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${tailWorkerName}`,
+      { headers: { Authorization: `Bearer ${apiToken}` } }
+    );
+    return response.ok;
+  } catch {
+    console.log("  Failed to check tail worker existence, assuming it does not exist");
+    return false;
+  }
+}
+
+// ============================================================================
+// Static Binding Extraction
+// ============================================================================
+
+function extractStaticBindings(topLevel: WranglerToml): {
+  durable_objects: DurableObjectsConfig | undefined;
+  ai: AIBinding | undefined;
+  migrations: MigrationEntry[] | undefined;
+} {
+  return {
+    durable_objects: topLevel.durable_objects as DurableObjectsConfig | undefined,
+    ai: topLevel.ai as AIBinding | undefined,
+    migrations: topLevel.migrations as MigrationEntry[] | undefined,
+  };
+}
+
+// ============================================================================
+// API Worker Config Generation
+// ============================================================================
+
 function loadWranglerToml(): WranglerToml {
-  console.log(`📖 Reading wrangler.toml from: ${WRANGLER_TOML_PATH}`);
+  console.log(`Reading wrangler.toml from: ${WRANGLER_TOML_PATH}`);
   const content = readFileSync(WRANGLER_TOML_PATH, "utf-8");
   return TOML.parse(content) as WranglerToml;
 }
 
 function saveWranglerToml(config: WranglerToml): void {
-  console.log(`💾 Writing updated wrangler.toml`);
+  console.log(`Writing updated wrangler.toml`);
   const content = TOML.stringify(config as TOML.JsonMap);
   writeFileSync(WRANGLER_TOML_PATH, content, "utf-8");
 }
 
-function updateEnvironmentBindings(
-  envConfig: WranglerEnvConfig,
-  outputs: PulumiOutputs
+function generateApiWorkerEnv(
+  topLevel: WranglerToml,
+  outputs: PulumiOutputs,
+  stack: string,
+  includeTailConsumers: boolean,
 ): WranglerEnvConfig {
-  return {
-    ...envConfig,
-    // Set account_id for authentication
+  const staticBindings = extractStaticBindings(topLevel);
+  const tailWorkerName = DEPLOYMENT_CONFIG.resources.tailWorkerName(stack);
+
+  const envConfig: WranglerEnvConfig = {
+    // Worker name derived from config
+    name: DEPLOYMENT_CONFIG.resources.workerName(stack),
+
+    // Account ID for authentication
     account_id: outputs.cloudflareAccountId,
-    // Add routes for custom domains
+
+    // Custom domain routes
     // IMPORTANT: patterns MUST end with /* to match all paths, not just the root
-    // Without /*, only the root path (/) matches and subpaths like /health get Cloudflare errors
     routes: [
       { pattern: `api.${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain },
-      { pattern: `*.${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain }
+      { pattern: `*.${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain },
     ],
-    // Enable Workers Observability for logging/debugging
+
+    // Workers Observability
     observability: {
       enabled: true,
       logs: {
@@ -71,14 +141,17 @@ function updateEnvironmentBindings(
         head_sampling_rate: 1,
       },
     },
+
+    // Vars: merge top-level defaults with dynamic overrides
     vars: {
-      ...envConfig.vars,
+      ...(topLevel.vars || {}),
       BASE_DOMAIN: outputs.stackSummary.baseDomain,
       VERSION: DEPLOYMENT_CONFIG.version,
       PAGES_PROJECT_NAME: outputs.pagesName,
-      // Optional feature flags from environment
       ...(process.env.REQUIRE_APPROVAL ? { REQUIRE_APPROVAL: process.env.REQUIRE_APPROVAL } : {}),
     },
+
+    // Dynamic bindings from Pulumi outputs
     d1_databases: [
       {
         binding: "DATABASE",
@@ -93,35 +166,67 @@ function updateEnvironmentBindings(
         migrations_dir: "src/db/migrations/observability",
       },
     ],
-    kv_namespaces: [
-      {
-        binding: "KV",
-        id: outputs.kvId,
-      },
-    ],
-    r2_buckets: [
-      {
-        binding: "R2",
-        bucket_name: outputs.r2Name,
-      },
-    ],
+    kv_namespaces: [{ binding: "KV", id: outputs.kvId }],
+    r2_buckets: [{ binding: "R2", bucket_name: outputs.r2Name }],
+
+    // Static bindings copied from top-level config
+    ...(staticBindings.durable_objects ? { durable_objects: staticBindings.durable_objects } : {}),
+    ...(staticBindings.ai ? { ai: staticBindings.ai } : {}),
+    ...(staticBindings.migrations ? { migrations: staticBindings.migrations } : {}),
+
+    // Tail consumers (conditional — omitted on first deploy when tail worker doesn't exist)
+    ...(includeTailConsumers ? { tail_consumers: [{ service: tailWorkerName }] } : {}),
   };
+
+  return envConfig;
 }
+
+// ============================================================================
+// Tail Worker Config Generation
+// ============================================================================
+
+function syncTailWorkerConfig(stack: string, accountId: string, envKey: string): void {
+  console.log(`\nSyncing tail worker wrangler.toml`);
+
+  const content = readFileSync(TAIL_WORKER_WRANGLER_TOML_PATH, "utf-8");
+  const config = TOML.parse(content) as TOML.JsonMap;
+
+  const tailWorkerName = DEPLOYMENT_CONFIG.resources.tailWorkerName(stack);
+  const apiWorkerName = DEPLOYMENT_CONFIG.resources.workerName(stack);
+
+  if (!config.env) config.env = {};
+
+  (config.env as Record<string, unknown>)[envKey] = {
+    name: tailWorkerName,
+    account_id: accountId,
+    services: [{ binding: "API_WORKER", service: apiWorkerName }],
+  };
+
+  const output = TOML.stringify(config);
+  writeFileSync(TAIL_WORKER_WRANGLER_TOML_PATH, output, "utf-8");
+
+  console.log(`  Tail worker name: ${tailWorkerName}`);
+  console.log(`  API worker service binding: ${apiWorkerName}`);
+}
+
+// ============================================================================
+// Main
+// ============================================================================
 
 async function main(): Promise<void> {
   const stack = process.env.PULUMI_STACK;
   if (!stack) {
-    console.error("❌ PULUMI_STACK environment variable is required");
+    console.error("PULUMI_STACK environment variable is required");
     process.exit(1);
   }
 
-  console.log(`\n🔄 Syncing Pulumi outputs to wrangler.toml`);
+  console.log(`\nSyncing Pulumi outputs to wrangler.toml`);
   console.log(`   Stack: ${stack}`);
   console.log("");
 
   // Get Pulumi outputs
   const outputs = getPulumiOutputs(stack);
-  console.log(`✅ Got Pulumi outputs:`);
+  console.log(`Got Pulumi outputs:`);
   console.log(`   Base Domain: ${outputs.stackSummary.baseDomain}`);
   console.log(`   D1 Database: ${outputs.d1DatabaseName} (${outputs.d1DatabaseId})`);
   console.log(`   D1 Observability: ${outputs.observabilityD1DatabaseName} (${outputs.observabilityD1DatabaseId})`);
@@ -129,33 +234,40 @@ async function main(): Promise<void> {
   console.log(`   R2 Bucket: ${outputs.r2Name}`);
   console.log("");
 
-  // Load and update wrangler.toml
+  // Load API worker config
   const config = loadWranglerToml();
-
-  // Determine environment key based on stack using centralized config
   const envKey = DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack);
 
-  // Ensure env section exists
+  // Check if tail worker already exists (for conditional tail_consumers)
+  const tailWorkerName = DEPLOYMENT_CONFIG.resources.tailWorkerName(stack);
+  const hasTailWorker = await checkTailWorkerExists(outputs.cloudflareAccountId, tailWorkerName);
+  console.log(`  Tail worker "${tailWorkerName}" exists: ${hasTailWorker}`);
+  if (!hasTailWorker) {
+    console.log(`  tail_consumers will be OMITTED (first deploy — will re-add after tail worker is deployed)`);
+  }
+
+  // Generate complete env section for API worker
   if (!config.env) {
     config.env = {};
   }
+  config.env[envKey] = generateApiWorkerEnv(config, outputs, stack, hasTailWorker);
+  saveWranglerToml(config);
+  console.log(`Updated wrangler.toml [env.${envKey}]`);
 
-  // Ensure environment section exists
-  if (!config.env[envKey]) {
-    config.env[envKey] = {};
+  // Generate env section for tail worker
+  syncTailWorkerConfig(stack, outputs.cloudflareAccountId, envKey);
+
+  // Write first-deploy marker for the workflow to detect
+  if (!hasTailWorker) {
+    writeFileSync(FIRST_DEPLOY_MARKER, "true", "utf-8");
+    console.log(`\nFirst-deploy marker written to ${FIRST_DEPLOY_MARKER}`);
+    console.log("The deploy workflow will re-sync and re-deploy after the tail worker is created.");
   }
 
-  // Update bindings
-  config.env[envKey] = updateEnvironmentBindings(config.env[envKey], outputs);
-
-  // Save updated config
-  saveWranglerToml(config);
-
-  console.log(`✅ Updated wrangler.toml [env.${envKey}] with Pulumi resource bindings`);
-  console.log("");
+  console.log("\nSync complete.");
 }
 
 main().catch((error) => {
-  console.error("❌ Error:", error instanceof Error ? error.message : error);
+  console.error("Error:", error instanceof Error ? error.message : error);
   process.exit(1);
 });

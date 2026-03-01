@@ -1,0 +1,32 @@
+name: Deploy Staging
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths-ignore:
+      - 'apps/www/**'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Preview changes without applying'
+        required: false
+        type: boolean
+        default: false
+
+# Persistent staging: all PRs share one staging environment, last push wins
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/deploy-reusable.yml
+    with:
+      environment: staging
+      skip_agent: true
+      dry_run: ${{ inputs.dry_run || false }}
+    secrets: inherit

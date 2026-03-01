@@ -410,6 +410,41 @@ export interface WranglerToml extends WranglerTomlBindings {
   [key: string]: unknown;
 }
 
+// ============================================================================
+// Wrangler Binding Types (for generated env sections)
+// ============================================================================
+
+export interface DurableObjectBinding {
+  name: string;
+  class_name: string;
+}
+
+export interface DurableObjectsConfig {
+  bindings: DurableObjectBinding[];
+}
+
+export interface AIBinding {
+  binding: string;
+}
+
+export interface TailConsumer {
+  service: string;
+}
+
+export interface MigrationEntry {
+  tag: string;
+  new_sqlite_classes?: string[];
+  new_classes?: string[];
+}
+
+export interface ObservabilityConfig {
+  enabled: boolean;
+  logs?: {
+    invocation_logs: boolean;
+    head_sampling_rate: number;
+  };
+}
+
 export interface WranglerEnvConfig {
   name?: string;
   account_id?: string;
@@ -417,6 +452,35 @@ export interface WranglerEnvConfig {
   d1_databases?: WranglerTomlBindings["d1_databases"];
   kv_namespaces?: WranglerTomlBindings["kv_namespaces"];
   r2_buckets?: WranglerTomlBindings["r2_buckets"];
+  durable_objects?: DurableObjectsConfig;
+  ai?: AIBinding;
+  tail_consumers?: TailConsumer[];
+  migrations?: MigrationEntry[];
+  observability?: ObservabilityConfig;
   vars?: Record<string, string>;
+  [key: string]: unknown;
+}
+
+// ============================================================================
+// Tail Worker Types
+// ============================================================================
+
+export interface TailWorkerServiceBinding {
+  binding: string;
+  service: string;
+}
+
+export interface TailWorkerEnvConfig {
+  name?: string;
+  account_id?: string;
+  services?: TailWorkerServiceBinding[];
+}
+
+export interface TailWorkerWranglerToml {
+  name?: string;
+  main?: string;
+  compatibility_date?: string;
+  compatibility_flags?: string[];
+  env?: Record<string, TailWorkerEnvConfig>;
   [key: string]: unknown;
 }

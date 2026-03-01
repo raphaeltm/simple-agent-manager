@@ -1,35 +1,29 @@
 /**
- * Wrangler Binding Consistency Check
+ * Wrangler Config Quality Check
  *
- * Validates that all non-inheritable bindings defined at the top level of
- * wrangler.toml are also present in every environment section (staging, production).
+ * Enforces two invariants:
  *
- * Wrangler does NOT inherit these binding types into [env.*] sections:
- * - durable_objects.bindings
- * - d1_databases
- * - kv_namespaces
- * - r2_buckets
- * - ai
- * - tail_consumers
+ * 1. NO [env.*] sections committed — environment-specific config is generated
+ *    at deploy time by scripts/deploy/sync-wrangler-config.ts.
  *
- * If a binding exists at the top level but not in an environment, it will be
- * undefined at runtime when deploying with --env <name>.
+ * 2. Top-level config has all required binding types — the sync script copies
+ *    static bindings (Durable Objects, AI, migrations) from top-level into
+ *    generated env sections. If they're missing at the top level, they'll be
+ *    missing at runtime.
  *
- * This check runs in CI to prevent the class of bug where tests pass (Miniflare
- * uses its own config) but production breaks because wrangler.toml is misconfigured.
+ * This check runs in CI to prevent misconfigurations.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import * as TOML from '@iarna/toml';
 
-const WRANGLER_PATH = resolve(import.meta.dirname, '../../apps/api/wrangler.toml');
-const REQUIRED_ENVS = ['staging', 'production'];
+const API_WRANGLER_PATH = resolve(import.meta.dirname, '../../apps/api/wrangler.toml');
+const TAIL_WORKER_WRANGLER_PATH = resolve(import.meta.dirname, '../../apps/tail-worker/wrangler.toml');
 
 interface Binding {
   name?: string;
   binding?: string;
   class_name?: string;
-  service?: string;
   [key: string]: unknown;
 }
 
@@ -47,107 +41,95 @@ interface WranglerConfig {
   kv_namespaces?: Binding[];
   r2_buckets?: Binding[];
   ai?: AIConfig;
-  tail_consumers?: Binding[];
-  env?: Record<string, WranglerConfig>;
+  migrations?: Array<{ tag: string; [key: string]: unknown }>;
+  env?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
-function getBindingNames(bindings: Binding[] | undefined, key: 'name' | 'binding'): string[] {
-  if (!bindings || !Array.isArray(bindings)) return [];
-  return bindings.map((b) => b[key] as string).filter(Boolean).sort();
-}
-
 function fail(errors: string[]): never {
-  console.error('\nWrangler binding consistency check FAILED:\n');
+  console.error('\nWrangler config check FAILED:\n');
   for (const err of errors) {
     console.error(`  - ${err}`);
   }
-  console.error('\nFix: Add missing bindings to the environment section in apps/api/wrangler.toml.');
-  console.error('See: .claude/rules/07-env-and-urls.md (Wrangler Non-Inheritable Bindings)\n');
+  console.error('\nSee: .claude/rules/07-env-and-urls.md\n');
   process.exit(1);
 }
 
 function main(): void {
-  const content = readFileSync(WRANGLER_PATH, 'utf-8');
-  const config = TOML.parse(content) as unknown as WranglerConfig;
   const errors: string[] = [];
 
-  // Extract top-level bindings
-  const topLevelDOs = getBindingNames(config.durable_objects?.bindings, 'name');
-  const topLevelD1 = getBindingNames(config.d1_databases, 'binding');
-  const topLevelKV = getBindingNames(config.kv_namespaces, 'binding');
-  const topLevelR2 = getBindingNames(config.r2_buckets, 'binding');
-  const topLevelAI = config.ai?.binding ? [config.ai.binding] : [];
+  // ========================================
+  // Check 1: No env sections committed
+  // ========================================
 
-  for (const envName of REQUIRED_ENVS) {
-    const envConfig = config.env?.[envName] as WranglerConfig | undefined;
-    if (!envConfig) {
-      errors.push(`Missing [env.${envName}] section entirely`);
-      continue;
-    }
+  const apiContent = readFileSync(API_WRANGLER_PATH, 'utf-8');
+  const apiConfig = TOML.parse(apiContent) as unknown as WranglerConfig;
 
-    // Check Durable Objects
-    const envDOs = getBindingNames(
-      (envConfig.durable_objects as DurableObjectConfig | undefined)?.bindings,
-      'name'
+  if (apiConfig.env && Object.keys(apiConfig.env).length > 0) {
+    const envNames = Object.keys(apiConfig.env).join(', ');
+    errors.push(
+      `apps/api/wrangler.toml contains [env.*] sections (${envNames}). ` +
+      `These are generated at deploy time by sync-wrangler-config.ts. ` +
+      `Remove them from the checked-in file.`
     );
-    for (const doName of topLevelDOs) {
-      if (!envDOs.includes(doName)) {
-        errors.push(
-          `[env.${envName}] missing durable_objects binding "${doName}" ` +
-          `(defined at top level but not inherited by environments)`
-        );
-      }
-    }
-
-    // Check D1 databases
-    const envD1 = getBindingNames(envConfig.d1_databases, 'binding');
-    for (const d1Name of topLevelD1) {
-      if (!envD1.includes(d1Name)) {
-        errors.push(
-          `[env.${envName}] missing d1_databases binding "${d1Name}"`
-        );
-      }
-    }
-
-    // Check KV namespaces
-    const envKV = getBindingNames(envConfig.kv_namespaces, 'binding');
-    for (const kvName of topLevelKV) {
-      if (!envKV.includes(kvName)) {
-        errors.push(
-          `[env.${envName}] missing kv_namespaces binding "${kvName}"`
-        );
-      }
-    }
-
-    // Check R2 buckets
-    const envR2 = getBindingNames(envConfig.r2_buckets, 'binding');
-    for (const r2Name of topLevelR2) {
-      if (!envR2.includes(r2Name)) {
-        errors.push(
-          `[env.${envName}] missing r2_buckets binding "${r2Name}"`
-        );
-      }
-    }
-
-    // Check AI binding
-    const envAI = (envConfig.ai as AIConfig | undefined)?.binding;
-    for (const aiName of topLevelAI) {
-      if (!envAI) {
-        errors.push(
-          `[env.${envName}] missing ai binding "${aiName}"`
-        );
-      }
-    }
   }
+
+  const tailContent = readFileSync(TAIL_WORKER_WRANGLER_PATH, 'utf-8');
+  const tailConfig = TOML.parse(tailContent) as unknown as WranglerConfig;
+
+  if (tailConfig.env && Object.keys(tailConfig.env).length > 0) {
+    const envNames = Object.keys(tailConfig.env).join(', ');
+    errors.push(
+      `apps/tail-worker/wrangler.toml contains [env.*] sections (${envNames}). ` +
+      `These are generated at deploy time. Remove them from the checked-in file.`
+    );
+  }
+
+  // ========================================
+  // Check 2: Top-level has required bindings
+  // ========================================
+
+  if (!apiConfig.durable_objects?.bindings?.length) {
+    errors.push('apps/api/wrangler.toml: top-level missing durable_objects.bindings (sync script copies these to env sections)');
+  }
+
+  if (!apiConfig.ai?.binding) {
+    errors.push('apps/api/wrangler.toml: top-level missing [ai] binding (sync script copies this to env sections)');
+  }
+
+  if (!apiConfig.d1_databases?.length) {
+    errors.push('apps/api/wrangler.toml: top-level missing d1_databases');
+  }
+
+  if (!apiConfig.kv_namespaces?.length) {
+    errors.push('apps/api/wrangler.toml: top-level missing kv_namespaces');
+  }
+
+  if (!apiConfig.r2_buckets?.length) {
+    errors.push('apps/api/wrangler.toml: top-level missing r2_buckets');
+  }
+
+  if (!apiConfig.migrations?.length) {
+    errors.push('apps/api/wrangler.toml: top-level missing [[migrations]] (sync script copies these to env sections)');
+  }
+
+  // ========================================
+  // Result
+  // ========================================
 
   if (errors.length > 0) {
     fail(errors);
   }
 
-  console.log('Wrangler binding consistency check passed.');
-  console.log(`  Top-level: ${topLevelDOs.length} DOs, ${topLevelD1.length} D1, ${topLevelKV.length} KV, ${topLevelR2.length} R2, ${topLevelAI.length} AI`);
-  console.log(`  Verified in: ${REQUIRED_ENVS.join(', ')}`);
+  const doCount = apiConfig.durable_objects?.bindings?.length ?? 0;
+  const d1Count = apiConfig.d1_databases?.length ?? 0;
+  const kvCount = apiConfig.kv_namespaces?.length ?? 0;
+  const r2Count = apiConfig.r2_buckets?.length ?? 0;
+  const migrationCount = apiConfig.migrations?.length ?? 0;
+
+  console.log('Wrangler config check passed.');
+  console.log(`  No [env.*] sections in checked-in files.`);
+  console.log(`  Top-level: ${doCount} DOs, ${d1Count} D1, ${kvCount} KV, ${r2Count} R2, AI, ${migrationCount} migrations`);
 }
 
 main();

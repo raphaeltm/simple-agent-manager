@@ -269,10 +269,10 @@ describe('Initial prompt delivery: Env and config', () => {
     expect(wranglerConfig).toContain('DEFAULT_TASK_AGENT_TYPE = "claude-code"');
   });
 
-  it('DEFAULT_TASK_AGENT_TYPE appears in all environment vars sections', () => {
+  it('DEFAULT_TASK_AGENT_TYPE appears in top-level vars (sync script copies to env sections at deploy time)', () => {
     const matches = wranglerConfig.match(/DEFAULT_TASK_AGENT_TYPE/g);
     expect(matches).not.toBeNull();
-    // top-level + staging + production = at least 3
-    expect(matches!.length).toBeGreaterThanOrEqual(3);
+    // Present in top-level vars (env sections are generated at deploy time, not checked in)
+    expect(matches!.length).toBeGreaterThanOrEqual(1);
   });
 });

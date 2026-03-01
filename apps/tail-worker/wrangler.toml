@@ -3,16 +3,6 @@ main = "src/index.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-[env.staging]
-name = "sam-tail-worker-staging"
-
-[[env.staging.services]]
-binding = "API_WORKER"
-service = "sam-api-staging"
-
-[env.production]
-name = "sam-tail-worker-prod"
-
-[[env.production.services]]
-binding = "API_WORKER"
-service = "sam-api-prod"
+# NOTE: [env.*] sections are NOT checked in — they are generated at deploy time
+# by scripts/deploy/sync-wrangler-config.ts with environment-specific worker names
+# and service bindings.

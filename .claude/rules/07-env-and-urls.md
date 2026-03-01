@@ -38,30 +38,32 @@ GH_APP_SLUG            ->  GITHUB_APP_SLUG
 - **Code reading from env**: Use `env.GITHUB_CLIENT_ID`
 - **Local development**: Use `GITHUB_CLIENT_ID` in `.env`
 
-## Wrangler Non-Inheritable Bindings
+## Wrangler Environment Sections (Generated at Deploy Time)
 
-Wrangler does NOT inherit certain binding types from the top-level config into `[env.*]` sections. When deploying with `--env production` or `--env staging`, bindings defined only at the top level will be **undefined** at runtime.
+Environment-specific sections (`[env.staging]`, `[env.production]`) are NOT checked into the repository. They are generated dynamically at deploy time by `scripts/deploy/sync-wrangler-config.ts`, which:
 
-### Non-inheritable binding types (MUST be duplicated per environment)
+1. Reads Pulumi stack outputs for dynamic bindings (D1 IDs, KV IDs, R2 bucket names)
+2. Copies static bindings from the top-level config (Durable Objects, AI, migrations)
+3. Derives worker names from `DEPLOYMENT_CONFIG` in `scripts/deploy/config.ts`
+4. Conditionally adds `tail_consumers` (only if the tail worker already exists)
 
-- `durable_objects.bindings` — Durable Object bindings
-- `ai` — Workers AI binding
-- `d1_databases` — D1 database bindings
-- `kv_namespaces` — KV namespace bindings
-- `r2_buckets` — R2 bucket bindings
-- `tail_consumers` — Tail Worker consumers
+### Required action when adding a new binding
 
-### Required action when adding ANY new binding
+Add the binding to the **top-level section of `wrangler.toml` only**. The sync script handles the rest.
 
-When adding a new binding to `wrangler.toml`, you MUST add it to ALL THREE places:
+- **Static bindings** (Durable Objects, AI, migrations): Copied verbatim from top-level to generated env sections.
+- **Dynamic bindings** (D1, KV, R2): Generated from Pulumi outputs with correct resource IDs per environment.
+- **Derived bindings** (worker name, routes, tail_consumers): Computed from `DEPLOYMENT_CONFIG` naming conventions.
 
-1. **Top-level** — used by local dev and Miniflare tests
-2. **`[env.staging]`** — used by `wrangler deploy --env staging`
-3. **`[env.production]`** — used by `wrangler deploy --env production`
+The CI quality check (`pnpm quality:wrangler-bindings`) verifies:
+1. No `[env.*]` sections exist in checked-in `wrangler.toml` files
+2. All required binding types are present at the top level
 
-Failure to do this causes `env.BINDING_NAME` to be `undefined` at runtime, producing `Cannot read properties of undefined (reading 'idFromName')` or similar errors that only appear in deployed environments, never in local tests.
+### Why this architecture
 
-### Why tests don't catch this
+Wrangler does NOT inherit bindings (D1, KV, R2, DO, AI, tail_consumers) from top-level into `[env.*]` sections. Previously, this required manually duplicating every binding 3x (top-level + staging + production). Now the sync script generates complete env sections, eliminating duplication and making the config fork-friendly.
+
+### Why tests don't catch binding issues
 
 Miniflare (used in Vitest worker tests) configures bindings directly in `vitest.workers.config.ts`, NOT from `wrangler.toml`. Tests will pass even when wrangler.toml is misconfigured.
 

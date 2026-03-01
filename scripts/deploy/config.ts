@@ -71,6 +71,7 @@ export const DEPLOYMENT_CONFIG = {
     kvNamespace: (stack: string) => `${DEPLOYMENT_CONFIG.prefix}-${stack}-sessions`,
     r2Bucket: (stack: string) => `${DEPLOYMENT_CONFIG.prefix}-${stack}-assets`,
     workerName: (stack: string) => `${DEPLOYMENT_CONFIG.prefix}-api-${stack}`,
+    tailWorkerName: (stack: string) => `${DEPLOYMENT_CONFIG.prefix}-tail-worker-${stack}`,
     pagesProject: (stack: string) => `${DEPLOYMENT_CONFIG.prefix}-web-${stack}`,
   },
 

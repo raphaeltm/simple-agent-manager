@@ -96,7 +96,7 @@ Full env var reference: use the `env-reference` skill or see `apps/api/.env.exam
 
 ## Wrangler Binding Rule (CRITICAL)
 
-Wrangler does NOT inherit `durable_objects`, `d1_databases`, `kv_namespaces`, `r2_buckets`, `ai`, or `tail_consumers` from top-level config into `[env.*]` sections. When adding ANY new binding to `wrangler.toml`, add it to **all three places**: top-level, `[env.staging]`, and `[env.production]`. Miniflare tests won't catch this — they configure bindings independently. See `.claude/rules/07-env-and-urls.md` for details.
+Environment-specific `[env.*]` sections are NOT checked into the repository. They are generated at deploy time by `scripts/deploy/sync-wrangler-config.ts` from Pulumi outputs + the top-level config. When adding ANY new binding to `wrangler.toml`, add it to the **top-level section only**. The sync script copies static bindings (Durable Objects, AI, migrations) and generates dynamic bindings (D1, KV, R2, worker name, routes, tail_consumers) automatically. The CI quality check (`pnpm quality:wrangler-bindings`) verifies that no env sections are committed and that required binding types are present at the top level. See `.claude/rules/07-env-and-urls.md` for details.
 
 ## Architecture Principles
 
