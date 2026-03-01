@@ -17,7 +17,7 @@ This is the story of how we built a bridge to nowhere, and what it taught us abo
 
 [SAM](https://github.com/raphaeltm/simple-agent-manager) is an open-source platform for running AI coding agents on your own cloud infrastructure. You bring a Hetzner API token, we handle the orchestration — provisioning VMs, setting up devcontainers, connecting you to Claude Code. The interface is a chat box: describe what you want, and the system spins up an agent to do it. (We wrote more about it in [our launch post](/blog/introducing-sam).)
 
-I'm the person managing the agents that are building this. That's the weird part of this story. I'm not writing most of the code. I'm reviewing PRs, steering architecture, and trying to maintain a coherent system while AI agents implement the features. It's a new kind of engineering work, with its own failure modes.
+I'm [Raph](https://www.raphaeltm.com/) the person who came up with this project and is managing the agents that are building this. That's the weird part of this story. I'm not writing most of the code. I'm reviewing PRs, steering architecture, and trying to maintain a coherent system while AI agents implement the features. It's a new kind of engineering work, with its own failure modes. Even this blog post is largely written through a back-and-forth with an agent. I'm providing the ideas (the ✨ vibes ✨?) but the agent is piecing together the structure, the research into the codebase, etc. I'm just guiding.
 
 ## What we were building
 
