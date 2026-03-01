@@ -61,10 +61,10 @@ describe('MobileNavDrawer', () => {
     render(<MobileNavDrawer {...defaultProps} currentPath="/dashboard" />);
 
     const dashboardButton = screen.getByText('Dashboard');
-    expect(dashboardButton.className).toContain('is-active');
+    expect(dashboardButton.className).toContain('text-accent');
 
     const projectsButton = screen.getByText('Projects');
-    expect(projectsButton.className).not.toContain('is-active');
+    expect(projectsButton.className).not.toContain('text-accent');
   });
 
   it('calls onNavigate when a nav item is clicked', () => {
@@ -111,9 +111,9 @@ describe('MobileNavDrawer', () => {
     render(<MobileNavDrawer {...defaultProps} currentPath="/projects/abc-123" />);
 
     const projectsButton = screen.getByText('Projects');
-    expect(projectsButton.className).toContain('is-active');
+    expect(projectsButton.className).toContain('text-accent');
 
     const dashboardButton = screen.getByText('Dashboard');
-    expect(dashboardButton.className).not.toContain('is-active');
+    expect(dashboardButton.className).not.toContain('text-accent');
   });
 });

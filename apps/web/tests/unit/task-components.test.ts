@@ -72,7 +72,7 @@ describe('TaskSubmitForm', () => {
 
   it('shows error messages', () => {
     expect(source).toContain('setError');
-    expect(source).toContain('var(--sam-color-danger)');
+    expect(source).toContain('text-danger');
   });
 
   it('submits on Enter key', () => {
@@ -128,8 +128,8 @@ describe('TaskKanbanCard', () => {
   });
 
   it('has hover styling', () => {
-    expect(source).toContain('kanban-card:hover');
-    expect(source).toContain('var(--sam-color-accent-primary)');
+    expect(source).toContain('hover:border-accent');
+    expect(source).toContain('hover:bg-surface-hover');
   });
 });
 

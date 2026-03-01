@@ -80,7 +80,7 @@ describe('DropdownMenu', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
 
     const deleteItem = screen.getByText('Delete');
-    expect(deleteItem.style.color).toBe('var(--sam-color-danger)');
+    expect(deleteItem.className).toContain('text-danger');
   });
 
   it('renders disabled items with aria-disabled and title', () => {

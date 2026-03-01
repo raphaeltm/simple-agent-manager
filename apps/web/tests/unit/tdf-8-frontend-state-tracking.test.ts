@@ -75,7 +75,7 @@ describe('ProvisioningIndicator (ProjectChat)', () => {
   it('renders segmented progress bar for provisioning steps', () => {
     expect(source).toContain('PROVISIONING_STEPS');
     expect(source).toContain('PROVISIONING_STEPS.map');
-    expect(source).toContain('flex: 1');
+    expect(source).toContain('flex-1');
   });
 
   it('filters out running and awaiting_followup from progress bar', () => {
@@ -106,8 +106,8 @@ describe('ProvisioningIndicator (ProjectChat)', () => {
 
   it('shows error message with styled container', () => {
     expect(source).toContain('state.errorMessage');
-    expect(source).toContain('var(--sam-color-danger)');
-    expect(source).toContain('wordBreak');
+    expect(source).toContain('text-danger');
+    expect(source).toContain('break-words');
   });
 });
 

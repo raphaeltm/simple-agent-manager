@@ -23,7 +23,7 @@ describe('SessionSidebar', () => {
   });
 
   it('renders active session indicator (green dot)', () => {
-    expect(source).toContain('borderRadius: \'50%\'');
+    expect(source).toContain('rounded-full');
     expect(source).toContain('var(--sam-color-success)');
   });
 

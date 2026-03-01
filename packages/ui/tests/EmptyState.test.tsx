@@ -49,12 +49,12 @@ describe('EmptyState', () => {
   it('uses section-heading typography for heading', () => {
     render(<EmptyState heading="Test heading" />);
     const heading = screen.getByText('Test heading');
-    expect(heading.style.fontSize).toBe('var(--sam-type-section-heading-size)');
+    expect(heading.className).toContain('sam-type-section-heading');
   });
 
   it('uses secondary typography for description', () => {
     render(<EmptyState heading="Test" description="Desc" />);
     const desc = screen.getByText('Desc');
-    expect(desc.style.fontSize).toBe('var(--sam-type-secondary-size)');
+    expect(desc.className).toContain('sam-type-secondary');
   });
 });

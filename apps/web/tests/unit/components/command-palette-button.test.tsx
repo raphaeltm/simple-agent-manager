@@ -18,7 +18,7 @@ describe('CommandPaletteButton', () => {
   it('uses compact mobile size when enabled', () => {
     render(<CommandPaletteButton onClick={vi.fn()} isMobile compactMobile />);
     const button = screen.getByRole('button', { name: 'Open command palette' });
-    expect(button.style.minWidth).toBe('36px');
-    expect(button.style.minHeight).toBe('36px');
+    expect(button.className).toContain('min-w-9');
+    expect(button.className).toContain('min-h-9');
   });
 });

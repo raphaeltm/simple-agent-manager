@@ -83,19 +83,19 @@ describe('AppShell', () => {
   it('highlights active nav item based on current route', () => {
     renderAppShell('/projects');
     const projectsLink = screen.getByText('Projects').closest('a');
-    expect(projectsLink).toHaveClass('is-active');
+    expect(projectsLink?.className).toContain('text-accent');
   });
 
   it('does not highlight inactive nav items', () => {
     renderAppShell('/dashboard');
     const projectsLink = screen.getByText('Projects').closest('a');
-    expect(projectsLink).not.toHaveClass('is-active');
+    expect(projectsLink?.className).not.toContain('text-accent');
   });
 
   it('highlights nav item for nested routes', () => {
     renderAppShell('/projects/123');
     const projectsLink = screen.getByText('Projects').closest('a');
-    expect(projectsLink).toHaveClass('is-active');
+    expect(projectsLink?.className).toContain('text-accent');
   });
 
   it('shows Admin nav item in sidebar for superadmins', () => {

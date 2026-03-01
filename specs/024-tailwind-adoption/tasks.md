@@ -200,11 +200,11 @@
 
 **Independent Test**: View Dashboard, Landing, Nodes, and TaskDetail pages at mobile, tablet, and desktop widths — all layouts reflow correctly.
 
-- [ ] T093 [US2] Verify Dashboard responsive grid uses `grid-cols-1 md:grid-cols-2 lg:grid-cols-3` (migrated in T091) — test at 375px, 768px, and 1280px viewport widths
-- [ ] T094 [US2] Verify Landing page responsive grid uses `grid-cols-1 sm:grid-cols-3` (migrated in T050) — test at 375px and 768px viewport widths
-- [ ] T095 [US2] Verify Nodes page responsive grid uses `grid-cols-1 md:grid-cols-2` (migrated in T074) — test at 375px and 768px viewport widths
-- [ ] T096 [US2] Verify TaskDetail page layout uses Tailwind breakpoints (migrated in T068) — test at 375px and 1024px viewport widths
-- [ ] T097 [US2] Verify no remaining runtime `<style>` tags contain `@media` queries — search codebase for `@media` in TSX files
+- [x] T093 [US2] Verify Dashboard responsive grid uses `grid-cols-1 md:grid-cols-2 lg:grid-cols-3` (migrated in T091) — test at 375px, 768px, and 1280px viewport widths
+- [x] T094 [US2] Verify Landing page responsive grid uses `grid-cols-1 sm:grid-cols-3` (migrated in T050) — test at 375px and 768px viewport widths
+- [x] T095 [US2] Verify Nodes page responsive grid uses `grid-cols-1 md:grid-cols-2` (migrated in T074) — test at 375px and 768px viewport widths
+- [x] T096 [US2] Verify TaskDetail page layout uses Tailwind breakpoints (migrated in T068) — test at 375px and 1024px viewport widths
+- [x] T097 [US2] Verify no remaining runtime `<style>` tags contain `@media` queries — search codebase for `@media` in TSX files
 
 **Checkpoint**: All responsive layouts use Tailwind breakpoint prefixes. Zero ad-hoc media queries in components.
 
@@ -216,10 +216,10 @@
 
 **Independent Test**: Create a test component that uses every mapped token class and verify rendered output matches existing design.
 
-- [ ] T098 [US3] Audit `apps/web/src/app.css` `@theme` block against `packages/ui/src/tokens/theme.css` — verify every SAM CSS variable has a corresponding `@theme` mapping per data-model.md
-- [ ] T099 [US3] Verify color tint tokens (`accent-tint`, `success-tint`, etc.) and semantic fg tokens (`success-fg`, `danger-fg`, etc.) are mapped in `@theme` and usable as Tailwind classes
-- [ ] T100 [US3] Verify z-index tokens (`z-sticky`, `z-dropdown`, `z-drawer`, `z-dialog`, `z-panel`, `z-command-palette`) are mapped and used in Dialog, DropdownMenu, Toast, CommandPalette, MobileNavDrawer
-- [ ] T101 [US3] Verify shadow tokens (`shadow-sm` through `shadow-xl`, `shadow-dropdown`, `shadow-overlay`, `shadow-tooltip`) render correctly with dark-tuned values
+- [x] T098 [US3] Audit `apps/web/src/app.css` `@theme` block against `packages/ui/src/tokens/theme.css` — verify every SAM CSS variable has a corresponding `@theme` mapping per data-model.md
+- [x] T099 [US3] Verify color tint tokens (`accent-tint`, `success-tint`, etc.) and semantic fg tokens (`success-fg`, `danger-fg`, etc.) are mapped in `@theme` and usable as Tailwind classes
+- [x] T100 [US3] Verify z-index tokens (`z-sticky`, `z-dropdown`, `z-drawer`, `z-dialog`, `z-panel`, `z-command-palette`) are mapped and used in Dialog, DropdownMenu, Toast, CommandPalette, MobileNavDrawer
+- [x] T101 [US3] Verify shadow tokens (`shadow-sm` through `shadow-xl`, `shadow-dropdown`, `shadow-overlay`, `shadow-tooltip`) render correctly with dark-tuned values
 
 **Checkpoint**: Complete token integration verified. All SAM design tokens accessible as Tailwind utility classes.
 
@@ -231,9 +231,9 @@
 
 **Independent Test**: Build succeeds, all pages render correctly, no CSS conflicts between any remaining inline styles and Tailwind classes.
 
-- [ ] T102 [US5] Final coexistence verification: run `pnpm build` and confirm zero build errors or CSS warnings
-- [ ] T103 [US5] Search for any remaining `CSSProperties` type annotations in `apps/web/src/` — document any that intentionally remain (e.g., dynamic computed styles that can't be expressed as classes)
-- [ ] T104 [US5] Copy `specs/024-tailwind-adoption/quickstart.md` to `docs/guides/tailwind-usage.md` for permanent developer documentation
+- [x] T102 [US5] Final coexistence verification: run `pnpm build` and confirm zero build errors or CSS warnings
+- [x] T103 [US5] Search for any remaining `CSSProperties` type annotations in `apps/web/src/` — document any that intentionally remain (e.g., dynamic computed styles that can't be expressed as classes)
+- [x] T104 [US5] Copy `specs/024-tailwind-adoption/quickstart.md` to `docs/guides/tailwind-usage.md` for permanent developer documentation
 
 **Checkpoint**: Migration complete. Incremental approach validated. Developer guide in place.
 
@@ -243,14 +243,14 @@
 
 **Purpose**: Final validation, cleanup, and documentation.
 
-- [ ] T105 Build time benchmark: compare `pnpm --filter @simple-agent-manager/web build` time before and after migration — confirm < 20% increase (SC-006)
-- [ ] T106 Production CSS size check: build production bundle and measure gzipped CSS output — confirm < 50KB (SC-003)
-- [ ] T107 Run `pnpm typecheck` from repo root — confirm zero type errors
-- [ ] T108 Run `pnpm lint` from repo root — confirm zero lint errors
-- [ ] T109 Run `pnpm test` from repo root — confirm all existing tests pass
-- [ ] T110 Capture post-migration Playwright screenshots of key pages (Dashboard, Project, Workspace, Settings, Admin) and compare against baseline screenshots from T007a — confirm no visual regressions (SC-004)
-- [ ] T111 Update `CLAUDE.md` Active Technologies section to include Tailwind CSS v4
-- [ ] T112 Run quickstart.md validation: verify all code examples in `specs/024-tailwind-adoption/quickstart.md` use correct class names that match the `@theme` configuration
+- [x] T105 Build time benchmark: compare `pnpm --filter @simple-agent-manager/web build` time before and after migration — confirm < 20% increase (SC-006)
+- [x] T106 Production CSS size check: build production bundle and measure gzipped CSS output — confirm < 50KB (SC-003)
+- [x] T107 Run `pnpm typecheck` from repo root — confirm zero type errors
+- [x] T108 Run `pnpm lint` from repo root — confirm zero lint errors
+- [x] T109 Run `pnpm test` from repo root — confirm all existing tests pass
+- [x] T110 Capture post-migration Playwright screenshots of key pages (Dashboard, Project, Workspace, Settings, Admin) and compare against baseline screenshots from T007a — confirm no visual regressions (SC-004)
+- [x] T111 Update `CLAUDE.md` Active Technologies section to include Tailwind CSS v4
+- [x] T112 Run quickstart.md validation: verify all code examples in `specs/024-tailwind-adoption/quickstart.md` use correct class names that match the `@theme` configuration
 
 ---
 
