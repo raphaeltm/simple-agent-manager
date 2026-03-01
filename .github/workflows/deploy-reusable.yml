@@ -358,7 +358,9 @@ jobs:
           PREFIX="${{ vars.RESOURCE_PREFIX || 'sam' }}"
           STACK="${{ steps.stack.outputs.name }}"
           PROJECT_NAME="${PREFIX}-web-${STACK}"
-          pnpm --filter @simple-agent-manager/web exec wrangler pages deploy dist --project-name $PROJECT_NAME
+          # --branch main: Deploy as "production" so custom domains serve this deployment.
+          # Without this, PR branches deploy as "preview" and custom domains show "Deployment Not Found".
+          pnpm --filter @simple-agent-manager/web exec wrangler pages deploy dist --project-name $PROJECT_NAME --branch main
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
