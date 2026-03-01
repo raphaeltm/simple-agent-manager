@@ -145,13 +145,9 @@ function Component() {
 }
 ```
 
-## CSS Framework Note
+## CSS Framework
 
-Currently using custom CSS with Tailwind-like classes. Consider migrating to actual Tailwind CSS for:
-- Better mobile utilities
-- Consistent responsive design system
-- JIT compilation for smaller bundles
-- Built-in mobile-first approach
+SAM uses [Tailwind CSS v4](https://tailwindcss.com/) for styling. All mobile-first responsive utilities are available via Tailwind's built-in breakpoint system (`sm:`, `md:`, `lg:`, `xl:`). See `docs/guides/tailwind-usage.md` for usage patterns and token mapping.
 
 ## Validation Before Deploy
 

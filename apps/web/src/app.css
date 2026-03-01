@@ -89,6 +89,7 @@
   --z-index-dialog: var(--sam-z-dialog);
   --z-index-panel: var(--sam-z-panel);
   --z-index-command-palette: var(--sam-z-command-palette);
+  --z-index-toast: var(--sam-z-toast);
 }
 
 /* ── Dark Mode Variant ──

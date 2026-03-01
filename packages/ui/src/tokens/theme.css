@@ -109,6 +109,7 @@
   --sam-z-dialog: 51;
   --sam-z-panel: 60;
   --sam-z-command-palette: 61;
+  --sam-z-toast: 9999;
 
   /* Section Spacing */
   --sam-space-section: 2rem;
