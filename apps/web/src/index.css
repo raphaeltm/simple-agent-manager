@@ -11,80 +11,91 @@
   }
 }
 
-/* ── Reset ── */
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+/* ── Reset ──
+   Wrapped in @layer base so Tailwind's @layer utilities can override.
+   Tailwind v4 preflight already sets box-sizing: border-box on *, *::before, *::after.
+   We keep margin/padding reset here for non-Tailwind contexts. */
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 }
 
-button {
-  border: none;
-  background: none;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-}
+@layer base {
+  button {
+    border: none;
+    background: none;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
 
-html, body, #root {
-  min-height: var(--sam-app-height);
-}
+  html, body, #root {
+    min-height: var(--sam-app-height);
+  }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background-color: var(--sam-color-bg-canvas);
-  color: var(--sam-color-fg-primary);
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: var(--sam-color-bg-canvas);
+    color: var(--sam-color-fg-primary);
+  }
+
+  /* ── Form elements (dark theme) ── */
+  input[type="text"],
+  input[type="url"],
+  input[type="password"],
+  input[type="date"],
+  textarea,
+  select {
+    display: block;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    min-height: 44px;
+    border: 1px solid var(--sam-color-border-default);
+    border-radius: var(--sam-radius-sm);
+    background-color: var(--sam-color-bg-inset);
+    color: var(--sam-color-fg-primary);
+    font-size: 0.875rem;
+    font-family: inherit;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--sam-color-fg-muted);
+    opacity: 0.6;
+  }
+
+  input:focus,
+  textarea:focus,
+  select:focus {
+    outline: none;
+    border-color: var(--sam-color-focus-ring);
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.15);
+  }
+
+  input:disabled,
+  textarea:disabled,
+  select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
 
 /* ── SAM-specific utility (not replaceable by Tailwind) ── */
-.min-h-screen { min-height: var(--sam-app-height); }
+@layer utilities {
+  .min-h-screen { min-height: var(--sam-app-height); }
+}
 
 /* ── Divide utility (uses SAM border color) ── */
-.divide-y > * + * { border-top: 1px solid var(--sam-color-border-default); }
-
-/* ── Form elements (dark theme) ── */
-input[type="text"],
-input[type="url"],
-input[type="password"],
-input[type="date"],
-textarea,
-select {
-  display: block;
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  min-height: 44px;
-  border: 1px solid var(--sam-color-border-default);
-  border-radius: var(--sam-radius-sm);
-  background-color: var(--sam-color-bg-inset);
-  color: var(--sam-color-fg-primary);
-  font-size: 0.875rem;
-  font-family: inherit;
-}
-
-input::placeholder,
-textarea::placeholder {
-  color: var(--sam-color-fg-muted);
-  opacity: 0.6;
-}
-
-input:focus,
-textarea:focus,
-select:focus {
-  outline: none;
-  border-color: var(--sam-color-focus-ring);
-  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.15);
-}
-
-input:disabled,
-textarea:disabled,
-select:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+@layer utilities {
+  .divide-y > * + * { border-top: 1px solid var(--sam-color-border-default); }
 }
