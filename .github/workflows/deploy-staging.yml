@@ -283,13 +283,6 @@ jobs:
           VITE_API_URL: https://api.${{ vars.BASE_DOMAIN }}
           VITE_FEATURE_MULTI_TERMINAL: 'true'
 
-      - name: Deploy Tail Worker
-        if: ${{ inputs.dry_run != true }}
-        run: pnpm --filter @simple-agent-manager/tail-worker exec wrangler deploy --env staging
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-
       - name: Deploy API Worker
         if: ${{ inputs.dry_run != true }}
         run: |
@@ -306,6 +299,14 @@ jobs:
           fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      # Tail Worker must deploy AFTER API Worker because it has a service binding to sam-api-staging
+      - name: Deploy Tail Worker
+        if: ${{ inputs.dry_run != true }}
+        run: pnpm --filter @simple-agent-manager/tail-worker exec wrangler deploy --env staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Deploy Web UI
         if: ${{ inputs.dry_run != true }}
