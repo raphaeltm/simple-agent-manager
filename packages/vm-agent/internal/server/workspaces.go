@@ -249,6 +249,14 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	runtime.GitUserName = strings.TrimSpace(body.GitUserName)
 	runtime.GitUserEmail = strings.TrimSpace(body.GitUserEmail)
 	runtime.GitHubID = strings.TrimSpace(body.GitHubID)
+
+	// Update the message reporter with the real workspace ID so message
+	// batches are POSTed to the correct URL. At VM boot time, only NODE_ID
+	// is known; the workspace ID becomes available here.
+	if s.messageReporter != nil {
+		s.messageReporter.SetWorkspaceID(body.WorkspaceID)
+	}
+
 	s.appendNodeEvent(body.WorkspaceID, "info", "workspace.provisioning", "Workspace provisioning started", map[string]interface{}{
 		"workspaceId": body.WorkspaceID,
 		"repository":  body.Repository,

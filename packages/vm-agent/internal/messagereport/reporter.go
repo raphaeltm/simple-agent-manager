@@ -33,8 +33,9 @@ type Reporter struct {
 	db     *sql.DB
 	client *http.Client
 
-	mu        sync.Mutex
-	authToken string
+	mu          sync.Mutex
+	authToken   string
+	workspaceID string // dynamically set after workspace creation
 
 	stopC chan struct{}
 	doneC chan struct{}
@@ -86,11 +87,12 @@ func New(db *sql.DB, cfg Config) (*Reporter, error) {
 	}
 
 	r := &Reporter{
-		cfg:    cfg,
-		db:     db,
-		client: &http.Client{Timeout: cfg.HTTPTimeout},
-		stopC:  make(chan struct{}),
-		doneC:  make(chan struct{}),
+		cfg:         cfg,
+		db:          db,
+		client:      &http.Client{Timeout: cfg.HTTPTimeout},
+		workspaceID: cfg.WorkspaceID,
+		stopC:       make(chan struct{}),
+		doneC:       make(chan struct{}),
 	}
 
 	go r.flushLoop()
@@ -106,6 +108,19 @@ func (r *Reporter) SetToken(token string) {
 	r.mu.Lock()
 	r.authToken = token
 	r.mu.Unlock()
+}
+
+// SetWorkspaceID updates the workspace ID used in the batch POST URL.
+// Call this after the first workspace is created on the node, since the
+// workspace ID is not known at VM boot time (cloud-init only sets NODE_ID).
+func (r *Reporter) SetWorkspaceID(id string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.workspaceID = id
+	r.mu.Unlock()
+	slog.Info("messagereport: workspace ID updated", "workspaceId", id)
 }
 
 // Enqueue inserts a message into the SQLite outbox for eventual delivery.
@@ -251,11 +266,16 @@ func (r *Reporter) readBatch() ([]outboxRow, error) {
 func (r *Reporter) sendBatch(batch []outboxRow) error {
 	r.mu.Lock()
 	token := r.authToken
+	wsID := r.workspaceID
 	r.mu.Unlock()
 
 	if token == "" {
 		// No token yet — leave messages in outbox for later.
 		return fmt.Errorf("no auth token")
+	}
+	if wsID == "" {
+		// No workspace yet — leave messages in outbox for later.
+		return fmt.Errorf("no workspace ID")
 	}
 
 	// Build the request body matching the API contract.
@@ -292,7 +312,7 @@ func (r *Reporter) sendBatch(batch []outboxRow) error {
 	}
 
 	url := strings.TrimRight(r.cfg.Endpoint, "/") +
-		"/api/workspaces/" + r.cfg.WorkspaceID + "/messages"
+		"/api/workspaces/" + wsID + "/messages"
 
 	// Retry with exponential backoff + jitter.
 	delay := r.cfg.RetryInitial

@@ -621,6 +621,129 @@ func TestToolMetadata_PersistedAndSent(t *testing.T) {
 	}
 }
 
+func TestSetWorkspaceID_UpdatesURL(t *testing.T) {
+	// Verify that SetWorkspaceID changes the URL used in batch POSTs.
+	requestURLs := make(chan string, 10)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestURLs <- r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": 1, "duplicates": 0})
+	}))
+	defer ts.Close()
+
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "initial-ws")
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+
+	// First message uses initial workspace ID.
+	_ = r.Enqueue(Message{MessageID: "m1", SessionID: "s1", Role: "user", Content: "a", Timestamp: "2024-01-01T00:00:00Z"})
+
+	select {
+	case path := <-requestURLs:
+		if path != "/api/workspaces/initial-ws/messages" {
+			t.Fatalf("expected path with initial-ws, got %q", path)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first message delivery")
+	}
+
+	// Update workspace ID and send another message.
+	r.SetWorkspaceID("real-ws-123")
+	_ = r.Enqueue(Message{MessageID: "m2", SessionID: "s1", Role: "user", Content: "b", Timestamp: "2024-01-01T00:00:01Z"})
+
+	select {
+	case path := <-requestURLs:
+		if path != "/api/workspaces/real-ws-123/messages" {
+			t.Fatalf("expected path with real-ws-123, got %q", path)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for second message delivery")
+	}
+
+	r.Shutdown()
+}
+
+func TestSetWorkspaceID_NilSafe(t *testing.T) {
+	var r *Reporter
+	r.SetWorkspaceID("ws-1") // should not panic
+}
+
+func TestEmptyWorkspaceID_LeavesMessagesInOutbox(t *testing.T) {
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost:9999", "")
+	// Must set ProjectID and SessionID so reporter is not nil.
+	cfg.ProjectID = "proj-1"
+	cfg.SessionID = "sess-1"
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+
+	_ = r.Enqueue(Message{MessageID: "m1", SessionID: "s1", Role: "user", Content: "pending", Timestamp: "2024-01-01T00:00:00Z"})
+
+	time.Sleep(150 * time.Millisecond)
+	r.Shutdown()
+
+	// Messages should still be in the outbox (no workspace ID).
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count)
+	if count != 1 {
+		t.Fatalf("expected 1 message still in outbox (no workspace ID), got %d", count)
+	}
+}
+
+func TestEmptyWorkspaceID_DeliversAfterSet(t *testing.T) {
+	// Start with empty workspace ID, then set it — messages should deliver.
+	var received int32
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&received, 1)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": 1, "duplicates": 0})
+	}))
+	defer ts.Close()
+
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "")
+	cfg.ProjectID = "proj-1"
+	cfg.SessionID = "sess-1"
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+
+	// Enqueue before workspace ID is set — should stay in outbox.
+	_ = r.Enqueue(Message{MessageID: "m1", SessionID: "s1", Role: "user", Content: "queued", Timestamp: "2024-01-01T00:00:00Z"})
+
+	time.Sleep(100 * time.Millisecond)
+	if atomic.LoadInt32(&received) != 0 {
+		t.Fatal("expected 0 deliveries before SetWorkspaceID")
+	}
+
+	// Set workspace ID — next flush tick should deliver.
+	r.SetWorkspaceID("ws-real")
+
+	time.Sleep(200 * time.Millisecond)
+	r.Shutdown()
+
+	if atomic.LoadInt32(&received) != 1 {
+		t.Fatalf("expected 1 delivery after SetWorkspaceID, got %d", atomic.LoadInt32(&received))
+	}
+
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count)
+	if count != 0 {
+		t.Fatalf("expected outbox empty after delivery, got %d", count)
+	}
+}
+
 func TestEnqueue_AutoTimestamp(t *testing.T) {
 	db := openTestDB(t)
 	cfg := testConfig("http://localhost", "ws-1")
