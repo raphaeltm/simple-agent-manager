@@ -34,48 +34,33 @@ function PrereqItem({ label, status, detail, actionLabel, onAction }: PrereqItem
   const icon = iconMap[status];
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: 'var(--sam-space-3) var(--sam-space-4)',
-        borderBottom: '1px solid var(--sam-color-border-default)',
-        gap: 'var(--sam-space-3)',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)', minWidth: 0 }}>
+    <div className="flex items-center justify-between px-4 py-3 border-b border-border-default gap-3">
+
+      <div className="flex items-center gap-3 min-w-0">
         <span
           aria-label={status}
+          className="w-6 h-6 rounded-full flex items-center justify-center font-bold shrink-0"
           style={{
-            width: 24,
-            height: 24,
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
             fontSize: status === 'loading' ? 'var(--sam-type-body-size)' : 'var(--sam-type-secondary-size)',
-            fontWeight: 700,
             color: icon.color,
             backgroundColor: `color-mix(in srgb, ${icon.color} 12%, transparent)`,
-            flexShrink: 0,
           }}
         >
           {status === 'loading' ? <Spinner size="sm" /> : icon.symbol}
         </span>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 'var(--sam-type-secondary-size)', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>
+        <div className="min-w-0">
+          <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
             {label}
           </div>
           {detail && (
-            <div style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)', marginTop: 2 }}>
+            <div className="text-fg-muted mt-0.5" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
               {detail}
             </div>
           )}
         </div>
       </div>
       {actionLabel && onAction && (
-        <Button variant="secondary" size="sm" onClick={onAction} style={{ flexShrink: 0 }}>
+        <Button variant="secondary" size="sm" onClick={onAction} className="shrink-0">
           {actionLabel}
         </Button>
       )}
@@ -277,13 +262,13 @@ export function CreateWorkspace() {
       headerRight={<UserMenu />}
     >
       {showPrereqs && (
-        <Card style={{ marginBottom: 'var(--sam-space-6)', overflow: 'hidden' }}>
-          <div style={{ padding: 'var(--sam-space-4)', borderBottom: '1px solid var(--sam-color-border-default)' }}>
-            <h3 style={{ margin: 0, fontSize: 'var(--sam-type-card-title-size)', fontWeight: 'var(--sam-type-card-title-weight)' as unknown as number, color: 'var(--sam-color-fg-primary)' }}>
+        <Card className="mb-6 overflow-hidden">
+          <div className="p-4 border-b border-border-default">
+            <h3 className="m-0 text-fg-primary" style={{ fontSize: 'var(--sam-type-card-title-size)', fontWeight: 'var(--sam-type-card-title-weight)' as unknown as number }}>
               {checkingPrereqs ? 'Checking prerequisites...' : 'Setup Required'}
             </h3>
             {!checkingPrereqs && anyMissing && (
-              <p style={{ margin: '4px 0 0', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+              <p className="text-fg-muted mt-1" style={{ margin: '4px 0 0', fontSize: 'var(--sam-type-caption-size)' }}>
                 Complete the items below before creating a workspace.
               </p>
             )}
@@ -327,15 +312,7 @@ export function CreateWorkspace() {
       {canCreate && (
         <form
           onSubmit={handleSubmit}
-          style={{
-            backgroundColor: 'var(--sam-color-bg-surface)',
-            borderRadius: 'var(--sam-radius-lg)',
-            border: '1px solid var(--sam-color-border-default)',
-            padding: 'var(--sam-space-6)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--sam-space-6)',
-          }}
+          className="bg-surface rounded-lg border border-border-default p-6 flex flex-col gap-6"
         >
           {error && (
             <Alert variant="error" onDismiss={() => setError(null)}>
@@ -446,38 +423,21 @@ export function CreateWorkspace() {
           {!selectedNodeId && (
             <div>
               <label style={{ ...labelStyle, marginBottom: '0.5rem' }}>VM Size</label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--sam-space-3)' }}>
+              <div className="grid grid-cols-3 gap-3">
                 {VM_SIZES.map((size) => (
                   <button
                     key={size.value}
                     type="button"
                     aria-pressed={vmSize === size.value}
                     onClick={() => setVmSize(size.value)}
-                    style={{
-                      padding: 'var(--sam-space-3)',
-                      border:
-                        vmSize === size.value
-                          ? '2px solid var(--sam-color-accent-primary)'
-                          : '1px solid var(--sam-color-border-default)',
-                      borderRadius: 'var(--sam-radius-md)',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                      backgroundColor:
-                        vmSize === size.value
-                          ? 'var(--sam-color-accent-primary-tint)'
-                          : 'var(--sam-color-bg-inset)',
-                      color: 'var(--sam-color-fg-primary)',
-                      transition: 'all 0.15s ease',
-                    }}
+                    className={`p-3 rounded-md text-left cursor-pointer text-fg-primary transition-all duration-150 ${
+                      vmSize === size.value
+                        ? 'border-2 border-accent bg-accent-tint'
+                        : 'border border-border-default bg-inset'
+                    }`}
                   >
-                    <div style={{ fontWeight: 500 }}>{size.label}</div>
-                    <div
-                      style={{
-                        fontSize: 'var(--sam-type-caption-size)',
-                        color: 'var(--sam-color-fg-muted)',
-                        marginTop: '0.125rem',
-                      }}
-                    >
+                    <div className="font-medium">{size.label}</div>
+                    <div className="text-fg-muted mt-0.5" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
                       {size.description}
                     </div>
                   </button>
@@ -501,14 +461,7 @@ export function CreateWorkspace() {
             </div>
           )}
 
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: 'var(--sam-space-3)',
-              paddingTop: 'var(--sam-space-4)',
-            }}
-          >
+          <div className="flex justify-end gap-3 pt-4">
             <Button type="button" onClick={() => navigate('/dashboard')} variant="secondary" size="md">
               Cancel
             </Button>

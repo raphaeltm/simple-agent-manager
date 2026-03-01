@@ -137,8 +137,8 @@ export function BranchSelector({
   const inputHeight = compact ? 36 : undefined;
 
   return (
-    <div style={{ position: 'relative' }}>
-      <div style={{ display: 'flex', alignItems: 'center' }}>
+    <div className="relative">
+      <div className="flex items-center">
         <Input
           ref={inputRef}
           id={id}

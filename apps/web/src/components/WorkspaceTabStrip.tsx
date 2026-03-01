@@ -243,7 +243,6 @@ export function WorkspaceTabStrip({
 
       {createMenuSlot}
 
-      <style>{`.sam-tab-close-btn:hover { background-color: var(--sam-color-tn-active) !important; color: var(--sam-color-tn-fg) !important; }`}</style>
     </div>
   );
 }
@@ -455,7 +454,7 @@ function SortableTabWrapper({
             onClose();
           }}
           onPointerDown={(event) => event.stopPropagation()}
-          className="sam-tab-close-btn"
+          className="hover:bg-tn-active hover:text-tn-fg"
           style={{
             display: 'flex',
             alignItems: 'center',

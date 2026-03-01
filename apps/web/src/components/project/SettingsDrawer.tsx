@@ -234,40 +234,12 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
 
   if (!open) return null;
 
-  const inputStyle: React.CSSProperties = {
-    display: 'block',
-    width: '100%',
-    padding: '0.375rem 0.625rem',
-    minHeight: '36px',
-    border: '1px solid var(--sam-color-border-default)',
-    borderRadius: 'var(--sam-radius-sm)',
-    backgroundColor: 'var(--sam-color-bg-inset)',
-    color: 'var(--sam-color-fg-primary)',
-    fontSize: '0.8125rem',
-    fontFamily: 'inherit',
-    boxSizing: 'border-box' as const,
-  };
-
-  const listItemStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 'var(--sam-space-2)',
-    padding: '0.375rem 0.5rem',
-    borderBottom: '1px solid var(--sam-color-border-default)',
-    fontSize: '0.8125rem',
-  };
-
   return (
     <>
       {/* Backdrop */}
       <div
         onClick={handleBackdropClick}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'var(--sam-color-bg-overlay)',
-          zIndex: 'var(--sam-z-drawer-backdrop)' as unknown as number,
-        }}
+        className="fixed inset-0 bg-overlay z-drawer-backdrop"
       >
         {/* Drawer panel */}
         <div
@@ -276,52 +248,18 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
           aria-modal="true"
           aria-labelledby="settings-drawer-title"
           tabIndex={-1}
-          style={{
-            position: 'fixed',
-            top: 0,
-            right: 0,
-            bottom: 0,
-            width: 'min(480px, 90vw)',
-            backgroundColor: 'var(--sam-color-bg-surface)',
-            boxShadow: 'var(--sam-shadow-overlay)',
-            overflowY: 'auto',
-            zIndex: 'var(--sam-z-drawer)' as unknown as number,
-            display: 'flex',
-            flexDirection: 'column',
-            outline: 'none',
-          }}
+          className="fixed top-0 right-0 bottom-0 w-[min(480px,90vw)] bg-surface shadow-overlay overflow-y-auto z-drawer flex flex-col outline-none"
         >
           {/* Header */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: 'var(--sam-space-4)',
-            borderBottom: '1px solid var(--sam-color-border-default)',
-            flexShrink: 0,
-          }}>
-            <h2 id="settings-drawer-title" style={{
-              margin: 0,
-              fontSize: 'var(--sam-type-section-heading-size)',
-              fontWeight: 600,
-              color: 'var(--sam-color-fg-primary)',
-            }}>
+          <div className="flex items-center justify-between p-4 border-b border-border-default shrink-0">
+            <h2 id="settings-drawer-title" className="m-0 text-base font-semibold text-fg-primary">
               Project Settings
             </h2>
             <button
               type="button"
               onClick={handleClose}
               aria-label="Close settings"
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--sam-color-fg-muted)',
-                padding: 'var(--sam-space-1)',
-                borderRadius: 'var(--sam-radius-sm)',
-                display: 'flex',
-                alignItems: 'center',
-              }}
+              className="bg-transparent border-none cursor-pointer text-fg-muted p-1 rounded-sm flex items-center"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -330,18 +268,18 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
           </div>
 
           {/* Content */}
-          <div style={{ flex: 1, padding: 'var(--sam-space-4)', display: 'grid', gap: 'var(--sam-space-4)' }}>
+          <div className="flex-1 p-4 grid gap-4">
             {/* Default VM Size */}
-            <section style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
+            <section className="grid gap-3">
               <div>
-                <h3 className="sam-type-card-title" style={{ margin: 0, color: 'var(--sam-color-fg-primary)' }}>
+                <h3 className="sam-type-card-title m-0 text-fg-primary">
                   Default Node Size
                 </h3>
-                <p style={{ margin: '4px 0 0', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+                <p className="m-0 mt-1 text-xs text-fg-muted">
                   Used when launching new workspaces. Click again to clear.
                 </p>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--sam-space-2)' }}>
+              <div className="grid grid-cols-3 gap-2">
                 {VM_SIZES.map((size) => {
                   const isSelected = defaultVmSize === size.value;
                   return (
@@ -351,23 +289,14 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
                       aria-pressed={isSelected}
                       disabled={savingVmSize}
                       onClick={() => void handleSaveVmSize(size.value)}
-                      style={{
-                        padding: 'var(--sam-space-2)',
-                        border: isSelected
-                          ? '2px solid var(--sam-color-accent-primary)'
-                          : '1px solid var(--sam-color-border-default)',
-                        borderRadius: 'var(--sam-radius-md)',
-                        textAlign: 'left',
-                        cursor: savingVmSize ? 'wait' : 'pointer',
-                        backgroundColor: isSelected
-                          ? 'var(--sam-color-accent-primary-tint)'
-                          : 'var(--sam-color-bg-inset)',
-                        color: 'var(--sam-color-fg-primary)',
-                        opacity: savingVmSize ? 0.6 : 1,
-                      }}
+                      className={`p-2 rounded-md text-left text-fg-primary ${
+                        isSelected
+                          ? 'border-2 border-accent bg-accent-tint'
+                          : 'border border-border-default bg-inset'
+                      } ${savingVmSize ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
                     >
-                      <div style={{ fontWeight: 500, fontSize: '0.8125rem' }}>{size.label}</div>
-                      <div style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)', marginTop: '2px' }}>
+                      <div className="font-medium text-[0.8125rem]">{size.label}</div>
+                      <div className="text-xs text-fg-muted mt-0.5">
                         {size.description}
                       </div>
                     </button>
@@ -375,53 +304,53 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
                 })}
               </div>
               {!defaultVmSize && (
-                <div style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+                <div className="text-xs text-fg-muted">
                   No default set — uses platform default (Medium).
                 </div>
               )}
             </section>
 
             {/* Runtime Config */}
-            <section style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
-              <h3 className="sam-type-card-title" style={{ margin: 0, color: 'var(--sam-color-fg-primary)' }}>
+            <section className="grid gap-3">
+              <h3 className="sam-type-card-title m-0 text-fg-primary">
                 Runtime Config
               </h3>
 
               {runtimeConfigLoading ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
+                <div className="flex items-center gap-2">
                   <Spinner size="sm" />
-                  <span style={{ fontSize: '0.8125rem' }}>Loading...</span>
+                  <span className="text-[0.8125rem]">Loading...</span>
                 </div>
               ) : (
-                <div style={{ display: 'grid', gap: 'var(--sam-space-4)' }}>
+                <div className="grid gap-4">
                   {/* Environment Variables */}
-                  <div style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
-                    <h4 style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 600, color: 'var(--sam-color-fg-primary)' }}>
+                  <div className="grid gap-2">
+                    <h4 className="m-0 text-[0.8125rem] font-semibold text-fg-primary">
                       Environment Variables
                     </h4>
-                    <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                      <div style={{ flex: '1 1 100px', minWidth: 0 }}>
-                        <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginBottom: '2px' }}>Key</label>
+                    <div className="flex gap-2 items-end flex-wrap">
+                      <div className="flex-[1_1_100px] min-w-0">
+                        <label className="block text-xs text-fg-muted mb-0.5">Key</label>
                         <input
                           type="text"
                           placeholder="API_TOKEN"
                           value={envKeyInput}
                           onChange={(e) => { setEnvKeyInput(e.currentTarget.value); markDirty(); }}
-                          style={inputStyle}
+                          className="block w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
                         />
                       </div>
-                      <div style={{ flex: '2 1 140px', minWidth: 0 }}>
-                        <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginBottom: '2px' }}>Value</label>
+                      <div className="flex-[2_1_140px] min-w-0">
+                        <label className="block text-xs text-fg-muted mb-0.5">Value</label>
                         <input
                           type="text"
                           placeholder="Value"
                           value={envValueInput}
                           onChange={(e) => { setEnvValueInput(e.currentTarget.value); markDirty(); }}
-                          style={inputStyle}
+                          className="block w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
                         />
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', flexShrink: 0 }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <label className="flex items-center gap-1 text-xs text-fg-muted cursor-pointer whitespace-nowrap">
                           <input type="checkbox" checked={envSecretInput} onChange={(e) => setEnvSecretInput(e.currentTarget.checked)} />
                           Secret
                         </label>
@@ -432,23 +361,23 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
                     </div>
 
                     {runtimeConfig.envVars.length === 0 ? (
-                      <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.75rem' }}>No environment variables configured.</div>
+                      <div className="text-fg-muted text-xs">No environment variables configured.</div>
                     ) : (
-                      <div style={{ border: '1px solid var(--sam-color-border-default)', borderRadius: 'var(--sam-radius-sm)', overflow: 'hidden' }}>
+                      <div className="border border-border-default rounded-sm overflow-hidden">
                         {runtimeConfig.envVars.map((item, idx) => (
-                          <div key={item.key} style={{ ...listItemStyle, borderBottom: idx === runtimeConfig.envVars.length - 1 ? 'none' : listItemStyle.borderBottom }}>
-                            <code style={{ fontWeight: 600, color: 'var(--sam-color-fg-primary)', fontSize: '0.8125rem' }}>{item.key}</code>
-                            <span style={{ color: 'var(--sam-color-fg-muted)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <div key={item.key} className={`flex items-center gap-2 py-1.5 px-2 text-[0.8125rem] ${idx < runtimeConfig.envVars.length - 1 ? 'border-b border-border-default' : ''}`}>
+                            <code className="font-semibold text-fg-primary text-[0.8125rem]">{item.key}</code>
+                            <span className="text-fg-muted flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
                               = {item.isSecret ? '••••••' : item.value}
                             </span>
                             {item.isSecret && (
-                              <span style={{ fontSize: '0.6875rem', color: 'var(--sam-color-fg-muted)', backgroundColor: 'var(--sam-color-bg-inset)', padding: '1px 6px', borderRadius: 'var(--sam-radius-sm)', flexShrink: 0 }}>secret</span>
+                              <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">secret</span>
                             )}
                             <button
                               onClick={() => void handleDeleteEnvVar(item.key)}
                               disabled={savingRuntimeConfig}
                               aria-label={`Remove ${item.key}`}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--sam-color-fg-muted)', padding: '4px', borderRadius: 'var(--sam-radius-sm)', display: 'inline-flex', flexShrink: 0 }}
+                              className="bg-transparent border-none cursor-pointer text-fg-muted p-1 rounded-sm inline-flex shrink-0 hover:text-danger"
                             >
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -461,33 +390,33 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
                   </div>
 
                   {/* Runtime Files */}
-                  <div style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
-                    <h4 style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 600, color: 'var(--sam-color-fg-primary)' }}>
+                  <div className="grid gap-2">
+                    <h4 className="m-0 text-[0.8125rem] font-semibold text-fg-primary">
                       Runtime Files
                     </h4>
-                    <div style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
+                    <div className="grid gap-2">
                       <div>
-                        <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginBottom: '2px' }}>File path</label>
+                        <label className="block text-xs text-fg-muted mb-0.5">File path</label>
                         <input
                           type="text"
                           placeholder=".env.local"
                           value={filePathInput}
                           onChange={(e) => { setFilePathInput(e.currentTarget.value); markDirty(); }}
-                          style={inputStyle}
+                          className="block w-full py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
                         />
                       </div>
                       <div>
-                        <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', marginBottom: '2px' }}>Content</label>
+                        <label className="block text-xs text-fg-muted mb-0.5">Content</label>
                         <textarea
                           placeholder="FOO=bar"
                           rows={3}
                           value={fileContentInput}
                           onChange={(e) => { setFileContentInput(e.currentTarget.value); markDirty(); }}
-                          style={{ ...inputStyle, minHeight: 'auto', resize: 'vertical', fontFamily: 'var(--sam-font-mono, monospace)' }}
+                          className="block w-full py-1.5 px-2.5 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-mono resize-y box-border"
                         />
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)', cursor: 'pointer' }}>
+                      <div className="flex justify-between items-center gap-2">
+                        <label className="flex items-center gap-1 text-xs text-fg-muted cursor-pointer">
                           <input type="checkbox" checked={fileSecretInput} onChange={(e) => setFileSecretInput(e.currentTarget.checked)} />
                           Secret file content
                         </label>
@@ -498,21 +427,21 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
                     </div>
 
                     {runtimeConfig.files.length === 0 ? (
-                      <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.75rem' }}>No runtime files configured.</div>
+                      <div className="text-fg-muted text-xs">No runtime files configured.</div>
                     ) : (
-                      <div style={{ border: '1px solid var(--sam-color-border-default)', borderRadius: 'var(--sam-radius-sm)', overflow: 'hidden' }}>
+                      <div className="border border-border-default rounded-sm overflow-hidden">
                         {runtimeConfig.files.map((item, idx) => (
-                          <div key={item.path} style={{ ...listItemStyle, borderBottom: idx === runtimeConfig.files.length - 1 ? 'none' : listItemStyle.borderBottom }}>
-                            <code style={{ fontWeight: 600, color: 'var(--sam-color-fg-primary)', fontSize: '0.8125rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{item.path}</code>
-                            <span style={{ flex: 1 }} />
+                          <div key={item.path} className={`flex items-center gap-2 py-1.5 px-2 text-[0.8125rem] ${idx < runtimeConfig.files.length - 1 ? 'border-b border-border-default' : ''}`}>
+                            <code className="font-semibold text-fg-primary text-[0.8125rem] overflow-hidden text-ellipsis whitespace-nowrap min-w-0">{item.path}</code>
+                            <span className="flex-1" />
                             {item.isSecret && (
-                              <span style={{ fontSize: '0.6875rem', color: 'var(--sam-color-fg-muted)', backgroundColor: 'var(--sam-color-bg-inset)', padding: '1px 6px', borderRadius: 'var(--sam-radius-sm)', flexShrink: 0 }}>secret</span>
+                              <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">secret</span>
                             )}
                             <button
                               onClick={() => void handleDeleteFile(item.path)}
                               disabled={savingRuntimeConfig}
                               aria-label={`Remove ${item.path}`}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--sam-color-fg-muted)', padding: '4px', borderRadius: 'var(--sam-radius-sm)', display: 'inline-flex', flexShrink: 0 }}
+                              className="bg-transparent border-none cursor-pointer text-fg-muted p-1 rounded-sm inline-flex shrink-0 hover:text-danger"
                             >
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -528,16 +457,16 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
             </section>
 
             {/* Project Views — power-user links to hidden routes */}
-            <section style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
+            <section className="grid gap-3">
               <div>
-                <h3 className="sam-type-card-title" style={{ margin: 0, color: 'var(--sam-color-fg-primary)' }}>
+                <h3 className="sam-type-card-title m-0 text-fg-primary">
                   Project Views
                 </h3>
-                <p style={{ margin: '4px 0 0', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+                <p className="m-0 mt-1 text-xs text-fg-muted">
                   Advanced views for managing workspaces, tasks, and activity.
                 </p>
               </div>
-              <div style={{ display: 'grid', gap: 'var(--sam-space-1)' }}>
+              <div className="grid gap-1">
                 {[
                   { label: 'Overview', description: 'Workspaces & launch controls', path: `/projects/${projectId}/overview` },
                   { label: 'Tasks', description: 'Task list & management', path: `/projects/${projectId}/tasks` },
@@ -547,29 +476,15 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
                     key={link.path}
                     type="button"
                     onClick={() => { onClose(); navigate(link.path); }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 'var(--sam-space-2)',
-                      width: '100%',
-                      padding: 'var(--sam-space-2) var(--sam-space-3)',
-                      background: 'none',
-                      border: '1px solid var(--sam-color-border-default)',
-                      borderRadius: 'var(--sam-radius-sm)',
-                      cursor: 'pointer',
-                      color: 'var(--sam-color-fg-primary)',
-                      textAlign: 'left',
-                    }}
-                    className="sam-hover-surface"
+                    className="sam-hover-surface flex items-center justify-between gap-2 w-full py-2 px-3 bg-transparent border border-border-default rounded-sm cursor-pointer text-fg-primary text-left"
                   >
                     <div>
-                      <div style={{ fontSize: '0.8125rem', fontWeight: 500 }}>{link.label}</div>
-                      <div style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+                      <div className="text-[0.8125rem] font-medium">{link.label}</div>
+                      <div className="text-xs text-fg-muted">
                         {link.description}
                       </div>
                     </div>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: 'var(--sam-color-fg-muted)' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-fg-muted">
                       <polyline points="9 18 15 12 9 6" />
                     </svg>
                   </button>

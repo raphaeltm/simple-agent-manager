@@ -223,26 +223,10 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
     : null;
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        overflow: 'hidden',
-      }}
-    >
+    <div className="flex flex-col h-full overflow-hidden">
       {/* ── Header: name + lifecycle ── */}
-      <div
-        style={{
-          padding: '10px 12px',
-          borderBottom: '1px solid var(--sam-color-border-default)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
+      <div className="flex flex-col gap-2 shrink-0 border-b border-border-default" style={{ padding: '10px 12px' }}>
+        <div className="flex" style={{ gap: 'var(--sam-space-2)' }}>
           <input
             value={displayNameInput}
             onChange={(event) => onDisplayNameChange(event.target.value)}
@@ -250,15 +234,10 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
               if (event.key === 'Enter') onRename();
             }}
             placeholder="Workspace name"
+            className="flex-1 rounded-sm border border-border-default bg-canvas text-fg-primary min-w-0"
             style={{
-              flex: 1,
-              borderRadius: 'var(--sam-radius-sm)',
-              border: '1px solid var(--sam-color-border-default)',
-              background: 'var(--sam-color-bg-canvas)',
-              color: 'var(--sam-color-fg-primary)',
               padding: '5px 8px',
               fontSize: 'var(--sam-type-caption-size)',
-              minWidth: 0,
             }}
           />
           <Button
@@ -271,7 +250,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
         </div>
 
         {/* Lifecycle buttons */}
-        <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
+        <div className="flex" style={{ gap: 'var(--sam-space-2)' }}>
           {isRunning && (
             <>
               <Button
@@ -312,13 +291,13 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
       </div>
 
       {/* ── Scrollable sections ── */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div className="flex-1 overflow-auto">
         {/* Workspace Info */}
         <CollapsibleSection
           title="Workspace Info"
           storageKey="sam-sidebar-workspace-info"
         >
-          <div style={{ display: 'grid', gap: 6, fontSize: 'var(--sam-type-caption-size)' }}>
+          <div className="grid gap-1.5" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
             {/* Repository */}
             {workspace?.repository && (
               <InfoRow label="Repository">
@@ -327,13 +306,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                     href={repoUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    style={{
-                      color: 'var(--sam-color-tn-blue)',
-                      textDecoration: 'none',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4,
-                    }}
+                    className="text-tn-blue no-underline inline-flex items-center gap-1"
                   >
                     {workspace.repository}
                     <ExternalLink size={11} />
@@ -347,8 +320,8 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
             {/* Branch */}
             {workspace?.branch && (
               <InfoRow label="Branch">
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  <GitBranch size={12} style={{ color: 'var(--sam-color-fg-muted)' }} />
+                <span className="inline-flex items-center gap-1">
+                  <GitBranch size={12} className="text-fg-muted" />
                   {workspace.branch}
                 </span>
               </InfoRow>
@@ -369,13 +342,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
               <InfoRow label="Node">
                 <Link
                   to={`/nodes/${workspace.nodeId}`}
-                  style={{
-                    color: 'var(--sam-color-tn-blue)',
-                    textDecoration: 'none',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                  }}
+                  className="text-tn-blue no-underline inline-flex items-center gap-1"
                 >
                   {workspace.nodeId.slice(0, 8)}
                   <ExternalLink size={11} />
@@ -396,7 +363,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
             storageKey="sam-sidebar-node-resources"
           >
             {systemInfo ? (
-              <div style={{ display: 'grid', gap: 10 }}>
+              <div className="grid gap-2.5">
                 <ResourceBar
                   label="CPU"
                   percent={Math.min(100, (systemInfo.cpu.loadAvg1 / systemInfo.cpu.numCpu) * 100)}
@@ -414,11 +381,11 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                 />
               </div>
             ) : systemInfoError ? (
-              <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+              <span className="text-fg-muted" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
                 Unable to load resource data
               </span>
             ) : (
-              <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+              <span className="text-fg-muted" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
                 Loading...
               </span>
             )}
@@ -432,7 +399,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
             badge={workspaceTabs.length}
             storageKey="sam-sidebar-sessions"
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div className="flex flex-col gap-0.5">
               {workspaceTabs.map((tab) => {
                 const active = activeTabId === tab.id;
                 const isChat = tab.kind === 'chat';
@@ -440,11 +407,8 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                 return (
                   <div
                     key={tab.id}
+                    className="flex items-center gap-0 rounded-sm"
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 0,
-                      borderRadius: 'var(--sam-radius-sm)',
                       background: active
                         ? 'var(--sam-color-info-tint)'
                         : 'transparent',
@@ -452,19 +416,10 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                   >
                     <button
                       onClick={() => onSelectTab(tab)}
+                      className="flex items-center gap-2 rounded-sm border-none bg-transparent cursor-pointer flex-1 min-w-0 text-left"
                       style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
                         padding: isMobile ? '8px 6px' : '5px 6px',
                         minHeight: isMobile ? 44 : undefined,
-                        borderRadius: 'var(--sam-radius-sm)',
-                        border: 'none',
-                        background: 'transparent',
-                        cursor: 'pointer',
-                        flex: 1,
-                        minWidth: 0,
-                        textAlign: 'left',
                         fontSize: 'var(--sam-type-caption-size)',
                         color: active
                           ? 'var(--sam-color-fg-primary)'
@@ -472,37 +427,17 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                       }}
                     >
                       <span
-                        style={{
-                          display: 'inline-block',
-                          width: 7,
-                          height: 7,
-                          borderRadius: '50%',
-                          backgroundColor: sessionStatusColor(tab.status, tab.hostStatus),
-                          flexShrink: 0,
-                        }}
+                        className="inline-block w-[7px] h-[7px] rounded-full shrink-0"
+                        style={{ backgroundColor: sessionStatusColor(tab.status, tab.hostStatus) }}
                       />
-                      <span
-                        style={{
-                          flex: 1,
-                          minWidth: 0,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
+                      <span className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
                         {tab.title}
                       </span>
                       {/* Viewer count badge */}
                       {tab.viewerCount != null && tab.viewerCount > 0 && (
                         <span
-                          style={{
-                            fontSize: 'var(--sam-type-caption-size)',
-                            color: 'var(--sam-color-fg-muted)',
-                            backgroundColor: 'var(--sam-color-info-tint)',
-                            borderRadius: 'var(--sam-radius-sm)',
-                            padding: '1px 4px',
-                            flexShrink: 0,
-                          }}
+                          className="text-fg-muted bg-info-tint rounded-sm shrink-0"
+                          style={{ fontSize: 'var(--sam-type-caption-size)', padding: '1px 4px' }}
                           title={`${tab.viewerCount} viewer${tab.viewerCount === 1 ? '' : 's'} connected`}
                         >
                           {tab.viewerCount}
@@ -511,10 +446,10 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                       {/* Host status label */}
                       {isChat && tab.hostStatus && (
                         <span
+                          className="shrink-0"
                           style={{
                             fontSize: 'var(--sam-type-caption-size)',
                             color: sessionStatusColor(tab.status, tab.hostStatus),
-                            flexShrink: 0,
                           }}
                         >
                           {hostStatusLabel(tab.hostStatus)}
@@ -523,11 +458,8 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                       {/* Active label for non-chat or when no hostStatus */}
                       {active && !(isChat && tab.hostStatus) && (
                         <span
-                          style={{
-                            fontSize: 'var(--sam-type-caption-size)',
-                            color: 'var(--sam-color-tn-blue)',
-                            flexShrink: 0,
-                          }}
+                          className="text-tn-blue shrink-0"
+                          style={{ fontSize: 'var(--sam-type-caption-size)' }}
                         >
                           active
                         </span>
@@ -542,20 +474,10 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                         }}
                         title="Stop session"
                         aria-label={`Stop session ${tab.title}`}
+                        className="flex items-center justify-center p-0 border-none bg-transparent text-fg-muted cursor-pointer rounded-sm shrink-0 mr-0.5"
                         style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
                           width: isMobile ? 36 : 24,
                           height: isMobile ? 36 : 24,
-                          padding: 0,
-                          border: 'none',
-                          background: 'transparent',
-                          color: 'var(--sam-color-fg-muted)',
-                          cursor: 'pointer',
-                          borderRadius: 'var(--sam-radius-sm)',
-                          flexShrink: 0,
-                          marginRight: 2,
                         }}
                       >
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
@@ -578,69 +500,46 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
             defaultCollapsed
             storageKey="sam-sidebar-session-history"
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div className="flex flex-col gap-1">
               {historySessions.map((session) => (
                 <div
                   key={session.id}
+                  className="flex items-center gap-0 rounded-sm bg-inset"
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 0,
                     padding: isMobile ? '8px 6px' : '5px 6px',
-                    borderRadius: 'var(--sam-radius-sm)',
-                    background: 'var(--sam-color-bg-inset)',
                     minHeight: isMobile ? 44 : undefined,
                   }}
                 >
                   {/* Status dot */}
                   <span
+                    className="inline-block w-[7px] h-[7px] rounded-full shrink-0 mr-2"
                     style={{
-                      display: 'inline-block',
-                      width: 7,
-                      height: 7,
-                      borderRadius: '50%',
                       backgroundColor:
                         session.status === 'suspended'
                           ? 'var(--sam-color-tn-yellow)'
                           : 'var(--sam-color-tn-fg-dimmer)',
-                      flexShrink: 0,
-                      marginRight: 8,
                     }}
                   />
                   {/* Label + last prompt */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="flex-1 min-w-0">
                     <div
-                      style={{
-                        fontSize: 'var(--sam-type-caption-size)',
-                        color: 'var(--sam-color-fg-primary)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
+                      className="text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap"
+                      style={{ fontSize: 'var(--sam-type-caption-size)' }}
                     >
                       {session.label || `Chat ${session.id.slice(-6)}`}
                     </div>
                     {session.lastPrompt && (
                       <div
-                        style={{
-                          fontSize: '10px',
-                          color: 'var(--sam-color-fg-muted)',
-                          marginTop: 1,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
+                        className="text-fg-muted mt-px overflow-hidden text-ellipsis whitespace-nowrap"
+                        style={{ fontSize: '10px' }}
                         title={session.lastPrompt}
                       >
                         {session.lastPrompt}
                       </div>
                     )}
                     <div
-                      style={{
-                        fontSize: '10px',
-                        color: 'var(--sam-color-fg-muted)',
-                        marginTop: 1,
-                      }}
+                      className="text-fg-muted mt-px"
+                      style={{ fontSize: '10px' }}
                     >
                       {session.status === 'suspended' ? 'suspended' : 'stopped'}
                       {session.suspendedAt &&
@@ -651,24 +550,16 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                     </div>
                   </div>
                   {/* Action buttons */}
-                  <div style={{ display: 'flex', gap: 2, flexShrink: 0, marginLeft: 4 }}>
+                  <div className="flex gap-0.5 shrink-0 ml-1">
                     {session.status === 'suspended' && onResumeSession && (
                       <button
                         onClick={() => onResumeSession(session.id)}
                         title="Resume session"
                         aria-label={`Resume session ${session.label || session.id}`}
+                        className="flex items-center justify-center p-0 border-none bg-transparent text-tn-green cursor-pointer rounded-sm"
                         style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
                           width: isMobile ? 36 : 24,
                           height: isMobile ? 36 : 24,
-                          padding: 0,
-                          border: 'none',
-                          background: 'transparent',
-                          color: 'var(--sam-color-tn-green)',
-                          cursor: 'pointer',
-                          borderRadius: 'var(--sam-radius-sm)',
                         }}
                       >
                         <Play size={12} />
@@ -679,18 +570,10 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                         onClick={() => onDeleteSession(session.id)}
                         title="Delete session"
                         aria-label={`Delete session ${session.label || session.id}`}
+                        className="flex items-center justify-center p-0 border-none bg-transparent text-fg-muted cursor-pointer rounded-sm"
                         style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
                           width: isMobile ? 36 : 24,
                           height: isMobile ? 36 : 24,
-                          padding: 0,
-                          border: 'none',
-                          background: 'transparent',
-                          color: 'var(--sam-color-fg-muted)',
-                          cursor: 'pointer',
-                          borderRadius: 'var(--sam-radius-sm)',
                         }}
                       >
                         <Trash2 size={12} />
@@ -711,46 +594,32 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
             storageKey="sam-sidebar-git"
           >
             {gitStatus ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="flex flex-col gap-2">
                 <div
-                  style={{
-                    display: 'flex',
-                    gap: 12,
-                    fontSize: 'var(--sam-type-caption-size)',
-                    color: 'var(--sam-color-fg-muted)',
-                  }}
+                  className="flex gap-3 text-fg-muted"
+                  style={{ fontSize: 'var(--sam-type-caption-size)' }}
                 >
                   <span>
-                    <strong style={{ color: 'var(--sam-color-tn-green)' }}>{gitStatus.staged.length}</strong> staged
+                    <strong className="text-tn-green">{gitStatus.staged.length}</strong> staged
                   </span>
                   <span>
-                    <strong style={{ color: 'var(--sam-color-tn-yellow)' }}>{gitStatus.unstaged.length}</strong> unstaged
+                    <strong className="text-tn-yellow">{gitStatus.unstaged.length}</strong> unstaged
                   </span>
                   <span>
-                    <strong style={{ color: 'var(--sam-color-tn-fg-muted)' }}>{gitStatus.untracked.length}</strong> untracked
+                    <strong className="text-tn-fg-muted">{gitStatus.untracked.length}</strong> untracked
                   </span>
                 </div>
                 <button
                   onClick={onOpenGitChanges}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '4px 0',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: 'var(--sam-color-tn-blue)',
-                    fontSize: 'var(--sam-type-caption-size)',
-                    textAlign: 'left',
-                  }}
+                  className="inline-flex items-center gap-1.5 py-1 px-0 bg-transparent border-none cursor-pointer text-tn-blue text-left"
+                  style={{ fontSize: 'var(--sam-type-caption-size)' }}
                 >
                   <GitBranch size={12} />
                   View Changes
                 </button>
               </div>
             ) : (
-              <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+              <span className="text-fg-muted" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
                 Loading...
               </span>
             )}
@@ -764,52 +633,27 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
             storageKey="sam-sidebar-tokens"
           >
             <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 6,
-                fontSize: 'var(--sam-type-caption-size)',
-              }}
+              className="flex flex-col gap-1.5"
+              style={{ fontSize: 'var(--sam-type-caption-size)' }}
             >
               {sessionTokenUsages
                 .filter((s) => s.usage.totalTokens > 0)
                 .map((s) => (
                   <div
                     key={s.sessionId}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      color: 'var(--sam-color-fg-muted)',
-                    }}
+                    className="flex justify-between text-fg-muted"
                   >
-                    <span
-                      style={{
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        minWidth: 0,
-                        flex: 1,
-                      }}
-                    >
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap min-w-0 flex-1">
                       {s.label}
                     </span>
-                    <span style={{ flexShrink: 0, marginLeft: 8, fontVariantNumeric: 'tabular-nums' }}>
+                    <span className="shrink-0 ml-2" style={{ fontVariantNumeric: 'tabular-nums' }}>
                       {formatTokens(s.usage.inputTokens)} in / {formatTokens(s.usage.outputTokens)} out
                     </span>
                   </div>
                 ))}
               {sessionTokenUsages.filter((s) => s.usage.totalTokens > 0).length > 1 && (
                 <>
-                  <div
-                    style={{
-                      borderTop: '1px solid var(--sam-color-border-default)',
-                      paddingTop: 4,
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      fontWeight: 600,
-                      color: 'var(--sam-color-fg-primary)',
-                    }}
-                  >
+                  <div className="border-t border-border-default pt-1 flex justify-between font-semibold text-fg-primary">
                     <span>Total</span>
                     <span style={{ fontVariantNumeric: 'tabular-nums' }}>
                       {formatTokens(totalUsage.inputTokens)} in / {formatTokens(totalUsage.outputTokens)} out
@@ -829,36 +673,25 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
           storageKey="sam-sidebar-events"
         >
           {workspaceEvents.length === 0 ? (
-            <span
-              style={{
-                fontSize: 'var(--sam-type-caption-size)',
-                color: 'var(--sam-color-fg-muted)',
-              }}
-            >
+            <span className="text-fg-muted" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
               No events yet.
             </span>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div className="flex flex-col gap-1.5">
               {workspaceEvents.map((event) => (
                 <div
                   key={event.id}
                   style={{ fontSize: 'var(--sam-type-caption-size)' }}
                 >
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      gap: 'var(--sam-space-2)',
-                    }}
-                  >
-                    <strong style={{ color: 'var(--sam-color-fg-primary)' }}>
+                  <div className="flex justify-between" style={{ gap: 'var(--sam-space-2)' }}>
+                    <strong className="text-fg-primary">
                       {event.type}
                     </strong>
-                    <span style={{ color: 'var(--sam-color-fg-muted)', flexShrink: 0 }}>
+                    <span className="text-fg-muted shrink-0">
                       {new Date(event.createdAt).toLocaleTimeString()}
                     </span>
                   </div>
-                  <div style={{ color: 'var(--sam-color-fg-muted)' }}>
+                  <div className="text-fg-muted">
                     {event.message}
                   </div>
                 </div>
@@ -874,33 +707,13 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
 // ─── Sub-components ──────────────────────────────────────────
 
 const InfoRow: FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <div
-    style={{
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'baseline',
-      gap: 8,
-    }}
-  >
-    <span
-      style={{
-        color: 'var(--sam-color-fg-muted)',
-        fontSize: 'var(--sam-type-caption-size)',
-        flexShrink: 0,
-      }}
-    >
+  <div className="flex justify-between items-baseline gap-2">
+    <span className="text-fg-muted shrink-0" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
       {label}
     </span>
     <span
-      style={{
-        color: 'var(--sam-color-fg-primary)',
-        fontSize: 'var(--sam-type-caption-size)',
-        textAlign: 'right',
-        minWidth: 0,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-      }}
+      className="text-fg-primary text-right min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
+      style={{ fontSize: 'var(--sam-type-caption-size)' }}
     >
       {children}
     </span>

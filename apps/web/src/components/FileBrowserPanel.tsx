@@ -253,7 +253,6 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
         )}
       </div>
 
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 };

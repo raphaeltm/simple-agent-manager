@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FC, type CSSProperties } from 'react';
+import { useState, useEffect, useRef, type FC } from 'react';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import type { PlatformErrorSource, PlatformErrorLevel } from '@simple-agent-manager/shared';
 import type { TimeRange } from '../../hooks/useAdminErrors';
@@ -34,29 +34,6 @@ const TIME_RANGE_OPTIONS: { value: TimeRange; label: string }[] = [
   { value: '7d', label: 'Last 7 Days' },
   { value: '30d', label: 'Last 30 Days' },
 ];
-
-const selectStyle: CSSProperties = {
-  padding: 'var(--sam-space-2) var(--sam-space-3)',
-  borderRadius: 'var(--sam-radius-sm)',
-  border: '1px solid var(--sam-color-border-default)',
-  background: 'var(--sam-color-bg-surface)',
-  color: 'var(--sam-color-fg-primary)',
-  fontSize: 'var(--sam-type-secondary-size)',
-  cursor: 'pointer',
-  outline: 'none',
-};
-
-const inputStyle: CSSProperties = {
-  flex: 1,
-  minWidth: 0,
-  padding: 'var(--sam-space-2) var(--sam-space-3)',
-  borderRadius: 'var(--sam-radius-sm)',
-  border: '1px solid var(--sam-color-border-default)',
-  background: 'var(--sam-color-bg-surface)',
-  color: 'var(--sam-color-fg-primary)',
-  fontSize: 'var(--sam-type-secondary-size)',
-  outline: 'none',
-};
 
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -95,21 +72,17 @@ export const ObservabilityFilters: FC<ObservabilityFiltersProps> = ({
 
   return (
     <div
-      style={{
-        display: 'flex',
-        flexDirection: isMobile ? 'column' : 'row',
-        flexWrap: 'wrap',
-        gap: 'var(--sam-space-2)',
-        padding: 'var(--sam-space-3) var(--sam-space-4)',
-        borderBottom: '1px solid var(--sam-color-border-default)',
-        alignItems: isMobile ? 'stretch' : 'center',
-      }}
+      className={`flex flex-wrap gap-2 px-4 py-3 border-b border-border-default ${
+        isMobile ? 'flex-col items-stretch' : 'flex-row items-center'
+      }`}
     >
-      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+      <div className="flex gap-2 flex-wrap">
         <select
           value={source}
           onChange={(e) => onSourceChange(e.target.value as PlatformErrorSource | 'all')}
-          style={{ ...selectStyle, flex: isMobile ? 1 : undefined, minWidth: 0 }}
+          className={`px-3 py-2 rounded-sm border border-border-default bg-surface text-fg-primary text-sm cursor-pointer outline-none ${
+            isMobile ? 'flex-1 min-w-0' : ''
+          }`}
           aria-label="Filter by source"
         >
           {SOURCE_OPTIONS.map((opt) => (
@@ -122,7 +95,9 @@ export const ObservabilityFilters: FC<ObservabilityFiltersProps> = ({
         <select
           value={level}
           onChange={(e) => onLevelChange(e.target.value as PlatformErrorLevel | 'all')}
-          style={{ ...selectStyle, flex: isMobile ? 1 : undefined, minWidth: 0 }}
+          className={`px-3 py-2 rounded-sm border border-border-default bg-surface text-fg-primary text-sm cursor-pointer outline-none ${
+            isMobile ? 'flex-1 min-w-0' : ''
+          }`}
           aria-label="Filter by level"
         >
           {LEVEL_OPTIONS.map((opt) => (
@@ -135,7 +110,9 @@ export const ObservabilityFilters: FC<ObservabilityFiltersProps> = ({
         <select
           value={timeRange}
           onChange={(e) => onTimeRangeChange(e.target.value as TimeRange)}
-          style={{ ...selectStyle, flex: isMobile ? 1 : undefined, minWidth: 0 }}
+          className={`px-3 py-2 rounded-sm border border-border-default bg-surface text-fg-primary text-sm cursor-pointer outline-none ${
+            isMobile ? 'flex-1 min-w-0' : ''
+          }`}
           aria-label="Filter by time range"
         >
           {TIME_RANGE_OPTIONS.map((opt) => (
@@ -151,7 +128,7 @@ export const ObservabilityFilters: FC<ObservabilityFiltersProps> = ({
         placeholder="Search messages..."
         value={searchInput}
         onChange={(e) => handleSearchInput(e.target.value)}
-        style={inputStyle}
+        className="flex-1 min-w-0 px-3 py-2 rounded-sm border border-border-default bg-surface text-fg-primary text-sm outline-none"
         aria-label="Search error messages"
       />
     </div>

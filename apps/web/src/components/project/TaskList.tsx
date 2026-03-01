@@ -36,17 +36,9 @@ export function TaskList({
 }: TaskListProps) {
   if (loading && tasks.length === 0) {
     return (
-      <div style={{
-        padding: 'var(--sam-space-4)',
-        border: '1px solid var(--sam-color-border-default)',
-        borderRadius: 'var(--sam-radius-md)',
-        background: 'var(--sam-color-bg-surface)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--sam-space-2)',
-      }}>
+      <div className="p-4 border border-border-default rounded-md bg-surface flex items-center gap-2">
         <Spinner size="sm" />
-        <span style={{ color: 'var(--sam-color-fg-muted)' }}>Loading tasks…</span>
+        <span className="text-fg-muted">Loading tasks...</span>
       </div>
     );
   }
@@ -61,61 +53,36 @@ export function TaskList({
   }
 
   return (
-    <div style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
+    <div className="grid gap-2">
       {tasks.map((task) => {
         const options = TRANSITIONS[task.status] ?? [];
 
         return (
           <article
             key={task.id}
-            style={{
-              border: '1px solid var(--sam-color-border-default)',
-              borderRadius: 'var(--sam-radius-md)',
-              background: 'var(--sam-color-bg-surface)',
-              padding: 'var(--sam-space-3)',
-              display: 'grid',
-              gap: 'var(--sam-space-2)',
-            }}
+            className="border border-border-default rounded-md bg-surface p-3 grid gap-2"
           >
             {/* Row 1: status + title + priority + blocked */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+            <div className="flex items-center gap-2 flex-wrap">
               <StatusBadge status={task.status} />
               <Link
                 to={`/projects/${projectId}/tasks/${task.id}`}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  color: 'var(--sam-color-fg-primary)',
-                  fontWeight: 600,
-                  textDecoration: 'none',
-                  fontSize: 'var(--sam-type-body-size)',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
+                className="flex-1 min-w-0 text-fg-primary font-semibold no-underline text-base overflow-hidden text-ellipsis whitespace-nowrap"
               >
                 {task.title}
               </Link>
-              <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)', flexShrink: 0 }}>
+              <span className="text-xs text-fg-muted shrink-0">
                 P{task.priority}
               </span>
               {task.blocked && (
-                <span style={{
-                  fontSize: 'var(--sam-type-caption-size)',
-                  padding: '2px 7px',
-                  borderRadius: '9999px',
-                  background: 'var(--sam-color-danger-tint)',
-                  color: 'var(--sam-color-danger-fg)',
-                  fontWeight: 600,
-                  flexShrink: 0,
-                }}>
+                <span className="text-xs py-0.5 px-2 rounded-full bg-danger-tint text-danger-fg font-semibold shrink-0">
                   Blocked
                 </span>
               )}
             </div>
 
             {/* Row 2: quick actions */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+            <div className="flex items-center gap-2 flex-wrap">
               {options.length > 0 && (
                 <select
                   aria-label={`Transition ${task.title}`}
@@ -127,17 +94,9 @@ export function TaskList({
                       event.currentTarget.value = '';
                     }
                   }}
-                  style={{
-                    borderRadius: 'var(--sam-radius-md)',
-                    border: '1px solid var(--sam-color-border-default)',
-                    background: 'var(--sam-color-bg-surface)',
-                    color: 'var(--sam-color-fg-primary)',
-                    fontSize: 'var(--sam-type-caption-size)',
-                    minHeight: '2rem',
-                    padding: '0.25rem 0.5rem',
-                  }}
+                  className="rounded-md border border-border-default bg-surface text-fg-primary text-xs min-h-8 py-1 px-2"
                 >
-                  <option value="">Move to…</option>
+                  <option value="">Move to...</option>
                   {options.map((option) => (
                     <option key={option} value={option}>
                       {toLabel(option)}

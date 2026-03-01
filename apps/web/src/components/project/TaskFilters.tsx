@@ -28,28 +28,11 @@ const SORT_OPTIONS: Array<{ label: string; value: TaskSortOrder }> = [
   { label: 'Highest priority', value: 'priorityDesc' },
 ];
 
-const inputStyle: React.CSSProperties = {
-  borderRadius: 'var(--sam-radius-md)',
-  border: '1px solid var(--sam-color-border-default)',
-  background: 'var(--sam-color-bg-surface)',
-  color: 'var(--sam-color-fg-primary)',
-  minHeight: '2rem',
-  padding: '0.375rem 0.5rem',
-  fontSize: 'var(--sam-type-secondary-size)',
-};
-
 export function TaskFilters({ value, onChange }: TaskFiltersProps) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 'var(--sam-space-3)',
-        flexWrap: 'wrap',
-        alignItems: 'flex-end',
-      }}
-    >
-      <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: 120 }}>
-        <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>Status</span>
+    <div className="flex gap-3 flex-wrap items-end">
+      <label className="flex flex-col gap-1 min-w-[120px]">
+        <span className="text-xs text-fg-muted">Status</span>
         <select
           value={value.status ?? ''}
           onChange={(event) => {
@@ -59,7 +42,7 @@ export function TaskFilters({ value, onChange }: TaskFiltersProps) {
               status: nextStatus || undefined,
             });
           }}
-          style={inputStyle}
+          className="rounded-md border border-border-default bg-surface text-fg-primary min-h-8 py-1.5 px-2 text-sm"
         >
           <option value="">All statuses</option>
           {STATUS_OPTIONS.map((option) => (
@@ -70,8 +53,8 @@ export function TaskFilters({ value, onChange }: TaskFiltersProps) {
         </select>
       </label>
 
-      <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: 80 }}>
-        <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>Min priority</span>
+      <label className="flex flex-col gap-1 min-w-[80px]">
+        <span className="text-xs text-fg-muted">Min priority</span>
         <input
           type="number"
           value={value.minPriority ?? ''}
@@ -84,12 +67,12 @@ export function TaskFilters({ value, onChange }: TaskFiltersProps) {
             const next = Number.parseInt(rawValue, 10);
             onChange({ ...value, minPriority: Number.isNaN(next) ? undefined : next });
           }}
-          style={inputStyle}
+          className="rounded-md border border-border-default bg-surface text-fg-primary min-h-8 py-1.5 px-2 text-sm"
         />
       </label>
 
-      <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: 140 }}>
-        <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>Sort</span>
+      <label className="flex flex-col gap-1 min-w-[140px]">
+        <span className="text-xs text-fg-muted">Sort</span>
         <select
           value={value.sort}
           onChange={(event) => {
@@ -98,7 +81,7 @@ export function TaskFilters({ value, onChange }: TaskFiltersProps) {
               sort: event.currentTarget.value as TaskSortOrder,
             });
           }}
-          style={inputStyle}
+          className="rounded-md border border-border-default bg-surface text-fg-primary min-h-8 py-1.5 px-2 text-sm"
         >
           {SORT_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>

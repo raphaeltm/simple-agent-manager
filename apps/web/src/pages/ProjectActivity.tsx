@@ -35,14 +35,7 @@ export function ProjectActivity() {
   useEffect(() => { void loadActivityEvents(); }, [loadActivityEvents]);
 
   return (
-    <section
-      style={{
-        border: '1px solid var(--sam-color-border-default)',
-        borderRadius: 'var(--sam-radius-md)',
-        background: 'var(--sam-color-bg-surface)',
-        overflow: 'hidden',
-      }}
-    >
+    <section className="border border-border-default rounded-md bg-surface overflow-hidden">
       <ActivityFeed
         events={activityEvents}
         hasMore={activityHasMore}

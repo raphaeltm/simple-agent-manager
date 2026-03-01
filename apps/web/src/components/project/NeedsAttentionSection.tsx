@@ -15,63 +15,31 @@ export function NeedsAttentionSection({ tasks, projectId }: NeedsAttentionSectio
   if (attention.length === 0) return null;
 
   return (
-    <section
-      style={{
-        border: '1px solid rgba(245, 158, 11, 0.4)',
-        borderRadius: 'var(--sam-radius-md)',
-        background: 'var(--sam-color-warning-tint)',
-        padding: 'var(--sam-space-3)',
-        display: 'grid',
-        gap: 'var(--sam-space-2)',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
-        <span style={{ fontSize: 'var(--sam-type-secondary-size)', fontWeight: 600, color: 'var(--sam-color-warning-fg)' }}>
+    <section className="border border-warning/40 rounded-md bg-warning-tint p-3 grid gap-2">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-semibold text-warning-fg">
           Needs attention
         </span>
-        <span style={{
-          fontSize: 'var(--sam-type-caption-size)',
-          fontWeight: 600,
-          padding: '1px 7px',
-          borderRadius: '9999px',
-          background: 'var(--sam-color-warning-tint)',
-          color: 'var(--sam-color-warning-fg)',
-        }}>
+        <span className="text-xs font-semibold py-px px-2 rounded-full bg-warning-tint text-warning-fg">
           {attention.length}
         </span>
       </div>
 
-      <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: '0.375rem' }}>
+      <ul className="m-0 p-0 list-none grid gap-1.5">
         {attention.map((task) => (
           <li
             key={task.id}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--sam-space-2)',
-              flexWrap: 'wrap',
-            }}
+            className="flex items-center gap-2 flex-wrap"
           >
             <StatusBadge status={task.status} />
             {task.blocked && task.status !== 'failed' && (
-              <span style={{
-                fontSize: 'var(--sam-type-caption-size)',
-                padding: '2px 7px',
-                borderRadius: '9999px',
-                background: 'var(--sam-color-danger-tint)',
-                color: 'var(--sam-color-danger-fg)',
-                fontWeight: 600,
-              }}>
+              <span className="text-xs py-0.5 px-2 rounded-full bg-danger-tint text-danger-fg font-semibold">
                 Blocked
               </span>
             )}
             <Link
               to={`/projects/${projectId}/tasks/${task.id}`}
-              style={{
-                fontSize: 'var(--sam-type-secondary-size)',
-                color: 'var(--sam-color-fg-primary)',
-                textDecoration: 'none',
-              }}
+              className="text-sm text-fg-primary no-underline"
             >
               {task.title}
             </Link>

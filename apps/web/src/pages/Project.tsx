@@ -49,20 +49,6 @@ export function Project() {
     );
   }
 
-  const iconButtonStyle = {
-    background: 'none',
-    border: '1px solid var(--sam-color-border-default)',
-    borderRadius: 'var(--sam-radius-sm)',
-    padding: 'var(--sam-space-1) var(--sam-space-2)',
-    minHeight: isMobile ? '44px' : '36px',
-    cursor: 'pointer',
-    color: 'var(--sam-color-fg-muted)',
-    fontSize: 'var(--sam-type-secondary-size)',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 'var(--sam-space-1)',
-  } as const;
-
   return (
     <PageLayout
       title="Project"
@@ -80,48 +66,25 @@ export function Project() {
       />
 
       {error && (
-        <div style={{ marginTop: 'var(--sam-space-3)' }}>
+        <div className="mt-3">
           <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
         </div>
       )}
 
       {projectLoading ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', marginTop: 'var(--sam-space-4)' }}>
+        <div className="flex items-center gap-2 mt-4">
           <Spinner size="md" />
           <span>Loading project...</span>
         </div>
       ) : !project ? (
-        <div style={{ marginTop: 'var(--sam-space-4)' }}>
+        <div className="mt-4">
           <Alert variant="error">Project not found.</Alert>
         </div>
       ) : (
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: isMobile ? 'var(--sam-space-2)' : 'var(--sam-space-3)',
-          marginTop: isMobile ? 'var(--sam-space-2)' : 'var(--sam-space-3)',
-          flex: 1,
-          minHeight: 0,
-        }}>
+        <div className={`flex flex-col ${isMobile ? 'gap-2 mt-2' : 'gap-3 mt-3'} flex-1 min-h-0`}>
           {/* Project header */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--sam-space-2)',
-            minHeight: isMobile ? '36px' : '36px',
-            flexWrap: 'nowrap',
-          }}>
-            <h1 style={{
-              margin: 0,
-              fontSize: 'var(--sam-type-body-size)',
-              fontWeight: 600,
-              color: 'var(--sam-color-fg-primary)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              minWidth: 0,
-              flex: isMobile ? 1 : undefined,
-            }}>
+          <div className="flex items-center gap-2 min-h-9 flex-nowrap">
+            <h1 className={`m-0 text-base font-semibold text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap min-w-0 ${isMobile ? 'flex-1' : ''}`}>
               {project.name}
             </h1>
             {!isMobile && (
@@ -129,23 +92,19 @@ export function Project() {
                 href={`https://github.com/${project.repository}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="sam-type-caption"
-                style={{
-                  color: 'var(--sam-color-fg-muted)',
-                  textDecoration: 'none',
-                }}
+                className="sam-type-caption text-fg-muted no-underline"
               >
                 {project.repository}
               </a>
             )}
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', flexShrink: 0 }}>
+            <div className="ml-auto flex items-center gap-2 shrink-0">
               <button
                 type="button"
                 onClick={() => setInfoPanelOpen(!infoPanelOpen)}
                 title="Project status"
                 aria-label="Project status"
                 aria-expanded={infoPanelOpen}
-                style={iconButtonStyle}
+                className={`bg-transparent border border-border-default rounded-sm ${isMobile ? 'py-1 px-2 min-h-11' : 'py-1 px-2 min-h-9'} cursor-pointer text-fg-muted text-sm flex items-center gap-1`}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
@@ -157,7 +116,7 @@ export function Project() {
                 onClick={() => setSettingsOpen(!settingsOpen)}
                 title="Project settings"
                 aria-label="Project settings"
-                style={iconButtonStyle}
+                className={`bg-transparent border border-border-default rounded-sm ${isMobile ? 'py-1 px-2 min-h-11' : 'py-1 px-2 min-h-9'} cursor-pointer text-fg-muted text-sm flex items-center gap-1`}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="3" />
@@ -169,7 +128,7 @@ export function Project() {
           </div>
 
           {/* Chat-first content — fills remaining space */}
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <div className="flex-1 min-h-0 flex flex-col">
             <ProjectContext.Provider value={{ projectId, project, installations, reload: loadProject, settingsOpen, setSettingsOpen }}>
               <Outlet />
               <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />

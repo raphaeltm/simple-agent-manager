@@ -187,8 +187,8 @@ export function RepoSelector({
   };
 
   return (
-    <div style={{ position: 'relative' }}>
-      <div style={{ display: 'flex', alignItems: 'center' }}>
+    <div className="relative">
+      <div className="flex items-center">
         <Input
           ref={inputRef}
           id={id}

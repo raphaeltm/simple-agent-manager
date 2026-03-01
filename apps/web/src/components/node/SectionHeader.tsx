@@ -8,40 +8,19 @@ interface SectionHeaderProps {
 }
 
 export const SectionHeader: FC<SectionHeaderProps> = ({ icon, iconBg, title, description }) => (
-  <div
-    style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 'var(--sam-space-3)',
-      marginBottom: 'var(--sam-space-4)',
-    }}
-  >
+  <div className="flex items-center gap-3 mb-4">
     <div
-      style={{
-        height: 40,
-        width: 40,
-        backgroundColor: iconBg,
-        borderRadius: 'var(--sam-radius-md)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-      }}
+      className="h-10 w-10 rounded-md flex items-center justify-center shrink-0"
+      style={{ backgroundColor: iconBg }}
     >
       {icon}
     </div>
     <div>
-      <div
-        style={{
-          fontSize: 'var(--sam-type-section-heading-size)',
-          fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number,
-          color: 'var(--sam-color-fg-primary)',
-        }}
-      >
+      <div className="text-fg-primary" style={{ fontSize: 'var(--sam-type-section-heading-size)', fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number }}>
         {title}
       </div>
       {description && (
-        <div style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
+        <div className="text-fg-muted" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
           {description}
         </div>
       )}

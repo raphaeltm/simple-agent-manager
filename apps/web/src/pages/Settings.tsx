@@ -47,12 +47,12 @@ export function Settings() {
       />
 
       {error && (
-        <div style={{ marginTop: 'var(--sam-space-3)' }}>
+        <div className="mt-3">
           <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
         </div>
       )}
 
-      <div style={{ display: 'grid', gap: 'var(--sam-space-4)', marginTop: 'var(--sam-space-4)' }}>
+      <div className="grid gap-4 mt-4">
         <Tabs tabs={SETTINGS_TABS} basePath="/settings" />
 
         <SettingsContext.Provider value={{ credentials, loading, reload: loadCredentials }}>

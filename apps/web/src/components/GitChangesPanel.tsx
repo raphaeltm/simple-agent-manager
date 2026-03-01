@@ -249,10 +249,6 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
         )}
       </div>
 
-      {/* spin keyframe provided by Tailwind; hover style kept for file rows */}
-      <style>{`
-        .git-file-row:hover { background-color: var(--sam-color-bg-surface-hover); }
-      `}</style>
     </div>
   );
 };
@@ -376,7 +372,7 @@ const FileRow: FC<FileRowProps> = ({ file, onClick, isMobile }) => {
 
   return (
     <div
-      className="git-file-row"
+      className="hover:bg-surface-hover"
       onClick={onClick}
       style={rowStyle}
       role="button"

@@ -296,12 +296,8 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
 
     return (
       <div
-        style={{
-          height: '100%',
-          overflow: 'hidden',
-          display: active ? 'flex' : 'none',
-          flexDirection: 'column',
-        }}
+        className="h-full overflow-hidden flex-col"
+        style={{ display: active ? 'flex' : 'none' }}
       >
         <AgentPanel
           ref={agentPanelRef}

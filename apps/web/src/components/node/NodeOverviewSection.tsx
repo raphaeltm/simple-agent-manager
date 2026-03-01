@@ -29,18 +29,6 @@ function formatRelativeTime(iso: string | null): string {
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
-const metaLabelStyle: React.CSSProperties = {
-  fontSize: 'var(--sam-type-caption-size)',
-  color: 'var(--sam-color-fg-muted)',
-  marginBottom: 'var(--sam-space-1)',
-};
-
-const metaValueStyle: React.CSSProperties = {
-  fontSize: 'var(--sam-type-secondary-size)',
-  color: 'var(--sam-color-fg-primary)',
-  fontWeight: 500,
-};
-
 export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({ node, systemInfo }) => {
   const sizeConfig = VM_SIZE_CONFIG[node.vmSize];
   const locationConfig = VM_LOCATIONS[node.vmLocation];
@@ -60,54 +48,33 @@ export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({ node, system
         description="Node overview and configuration"
       />
 
-      <div
-        style={{
-          display: 'flex',
-          gap: 'var(--sam-space-2)',
-          alignItems: 'center',
-          marginBottom: 'var(--sam-space-4)',
-        }}
-      >
+      <div className="flex gap-2 items-center mb-4">
         <StatusBadge status={node.status} />
         <StatusBadge status={node.healthStatus || 'stale'} />
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-          gap: 'var(--sam-space-4)',
-          borderTop: '1px solid var(--sam-color-border-default)',
-          paddingTop: 'var(--sam-space-4)',
-        }}
-      >
+      <div className="grid gap-4 border-t border-border-default pt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
         <div>
-          <div style={metaLabelStyle}>Size</div>
-          <div style={metaValueStyle}>{sizeLabel}</div>
+          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>Size</div>
+          <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>{sizeLabel}</div>
         </div>
         <div>
-          <div style={metaLabelStyle}>Location</div>
-          <div style={metaValueStyle}>{locationLabel}</div>
+          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>Location</div>
+          <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>{locationLabel}</div>
         </div>
         {node.ipAddress && (
           <div>
-            <div style={metaLabelStyle}>IP Address</div>
-            <div style={{ ...metaValueStyle, fontFamily: 'monospace' }}>{node.ipAddress}</div>
+            <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>IP Address</div>
+            <div className="text-fg-primary font-medium font-mono" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>{node.ipAddress}</div>
           </div>
         )}
         <div>
-          <div style={metaLabelStyle}>Last Heartbeat</div>
-          <div style={metaValueStyle}>
+          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>Last Heartbeat</div>
+          <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
             {node.lastHeartbeatAt ? (
               <>
                 {formatRelativeTime(node.lastHeartbeatAt)}
-                <span
-                  style={{
-                    fontSize: '0.6875rem',
-                    color: 'var(--sam-color-fg-muted)',
-                    marginLeft: 'var(--sam-space-1)',
-                  }}
-                >
+                <span className="text-fg-muted ml-1" style={{ fontSize: '0.6875rem' }}>
                   ({formatTimestamp(node.lastHeartbeatAt)})
                 </span>
               </>
@@ -118,23 +85,20 @@ export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({ node, system
         </div>
         {systemInfo?.uptime && (
           <div>
-            <div style={metaLabelStyle}>Uptime</div>
-            <div style={metaValueStyle}>{systemInfo.uptime.humanFormat}</div>
+            <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>Uptime</div>
+            <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>{systemInfo.uptime.humanFormat}</div>
           </div>
         )}
         <div>
-          <div style={metaLabelStyle}>Created</div>
-          <div style={metaValueStyle}>{formatTimestamp(node.createdAt)}</div>
+          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>Created</div>
+          <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>{formatTimestamp(node.createdAt)}</div>
         </div>
       </div>
 
       {node.errorMessage && (
         <div
+          className="mt-4 p-3 bg-danger-tint rounded-sm"
           style={{
-            marginTop: 'var(--sam-space-4)',
-            padding: 'var(--sam-space-3)',
-            backgroundColor: 'var(--sam-color-danger-tint)',
-            borderRadius: 'var(--sam-radius-sm)',
             border: '1px solid rgba(248, 113, 113, 0.3)',
             fontSize: 'var(--sam-type-secondary-size)',
             color: 'var(--sam-color-danger)',

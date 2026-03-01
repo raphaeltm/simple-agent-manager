@@ -120,7 +120,7 @@ export function WorktreeSelector({
     wt.path === activeWorktree || (wt.isPrimary && !activeWorktree);
 
   return (
-    <div ref={popoverRef} style={{ position: 'relative' }}>
+    <div ref={popoverRef} className="relative">
       <button
         id="worktree-selector-trigger"
         type="button"

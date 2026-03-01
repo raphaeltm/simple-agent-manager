@@ -1,4 +1,4 @@
-import { useState, type FC, type CSSProperties } from 'react';
+import { useState, type FC } from 'react';
 import type { PlatformError } from '@simple-agent-manager/shared';
 
 interface ObservabilityLogEntryProps {
@@ -28,19 +28,6 @@ function formatTimestamp(iso: string): string {
   });
 }
 
-const badgeStyle = (colors: { bg: string; text: string }): CSSProperties => ({
-  display: 'inline-flex',
-  alignItems: 'center',
-  padding: '1px 8px',
-  borderRadius: 'var(--sam-radius-full)',
-  fontSize: '0.7rem',
-  fontWeight: 600,
-  letterSpacing: '0.02em',
-  backgroundColor: colors.bg,
-  color: colors.text,
-  textTransform: 'uppercase',
-});
-
 export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({ error: entry }) => {
   const [expanded, setExpanded] = useState(false);
 
@@ -50,12 +37,8 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({ error: e
 
   return (
     <div
-      style={{
-        borderBottom: '1px solid var(--sam-color-border-default)',
-        padding: 'var(--sam-space-3) var(--sam-space-4)',
-        cursor: hasDetails ? 'pointer' : 'default',
-        transition: 'background 150ms ease',
-      }}
+      className="border-b border-border-default px-4 py-3 transition-colors duration-150"
+      style={{ cursor: hasDetails ? 'pointer' : 'default' }}
       onClick={() => hasDetails && setExpanded(!expanded)}
       onKeyDown={(e) => {
         if (hasDetails && (e.key === 'Enter' || e.key === ' ')) {
@@ -68,59 +51,39 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({ error: e
       aria-expanded={hasDetails ? expanded : undefined}
     >
       {/* Main row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', minWidth: 0 }}>
-        <span style={badgeStyle(levelColor)}>{entry.level}</span>
-        <span style={badgeStyle(sourceColor)}>{entry.source}</span>
+      <div className="flex items-center gap-2 min-w-0">
         <span
-          style={{
-            fontSize: 'var(--sam-type-caption-size)',
-            color: 'var(--sam-color-fg-muted)',
-            whiteSpace: 'nowrap',
-            flexShrink: 0,
-          }}
+          className="inline-flex items-center px-2 rounded-full text-[0.7rem] font-semibold uppercase tracking-tight"
+          style={{ backgroundColor: levelColor.bg, color: levelColor.text, padding: '1px 8px' }}
         >
+          {entry.level}
+        </span>
+        <span
+          className="inline-flex items-center px-2 rounded-full text-[0.7rem] font-semibold uppercase tracking-tight"
+          style={{ backgroundColor: sourceColor.bg, color: sourceColor.text, padding: '1px 8px' }}
+        >
+          {entry.source}
+        </span>
+        <span className="text-xs text-fg-muted whitespace-nowrap shrink-0">
           {formatTimestamp(entry.timestamp)}
         </span>
         {hasDetails && (
           <span
-            style={{
-              fontSize: '0.7rem',
-              color: 'var(--sam-color-fg-muted)',
-              transition: 'transform 150ms ease',
-              transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-              flexShrink: 0,
-              marginLeft: 'auto',
-            }}
+            className="text-[0.7rem] text-fg-muted shrink-0 ml-auto transition-transform duration-150"
+            style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
           >
             ▶
           </span>
         )}
       </div>
       {/* Message on its own line for better mobile readability */}
-      <div
-        style={{
-          fontSize: 'var(--sam-type-secondary-size)',
-          color: 'var(--sam-color-fg-primary)',
-          marginTop: 'var(--sam-space-1)',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
+      <div className="text-sm text-fg-primary mt-1 overflow-hidden text-ellipsis whitespace-nowrap">
         {entry.message}
       </div>
 
       {/* Metadata row */}
       {(entry.userId || entry.nodeId || entry.workspaceId) && (
-        <div
-          style={{
-            display: 'flex',
-            gap: 'var(--sam-space-3)',
-            marginTop: 'var(--sam-space-1)',
-            fontSize: 'var(--sam-type-caption-size)',
-            color: 'var(--sam-color-fg-muted)',
-          }}
-        >
+        <div className="flex gap-3 mt-1 text-xs text-fg-muted">
           {entry.userId && <span>user: {entry.userId}</span>}
           {entry.nodeId && <span>node: {entry.nodeId}</span>}
           {entry.workspaceId && <span>ws: {entry.workspaceId}</span>}
@@ -129,41 +92,16 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({ error: e
 
       {/* Expanded details */}
       {expanded && hasDetails && (
-        <div style={{ marginTop: 'var(--sam-space-3)' }}>
+        <div className="mt-3">
           {entry.stack && (
-            <pre
-              style={{
-                padding: 'var(--sam-space-3)',
-                borderRadius: 'var(--sam-radius-sm)',
-                backgroundColor: 'var(--sam-color-bg-inset)',
-                color: 'var(--sam-color-fg-muted)',
-                fontSize: '0.75rem',
-                lineHeight: 1.5,
-                overflow: 'auto',
-                maxHeight: 200,
-                margin: 0,
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-all',
-              }}
-            >
+            <pre className="p-3 rounded-sm bg-inset text-fg-muted text-xs leading-normal overflow-auto m-0 whitespace-pre-wrap break-all" style={{ maxHeight: 200 }}>
               {entry.stack}
             </pre>
           )}
           {entry.context && (
             <pre
-              style={{
-                padding: 'var(--sam-space-3)',
-                borderRadius: 'var(--sam-radius-sm)',
-                backgroundColor: 'var(--sam-color-bg-inset)',
-                color: 'var(--sam-color-fg-muted)',
-                fontSize: '0.75rem',
-                lineHeight: 1.5,
-                overflow: 'auto',
-                maxHeight: 200,
-                margin: entry.stack ? 'var(--sam-space-2) 0 0' : 0,
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-all',
-              }}
+              className="p-3 rounded-sm bg-inset text-fg-muted text-xs leading-normal overflow-auto whitespace-pre-wrap break-all"
+              style={{ maxHeight: 200, margin: entry.stack ? 'var(--sam-space-2) 0 0' : 0 }}
             >
               {JSON.stringify(entry.context, null, 2)}
             </pre>

@@ -39,30 +39,21 @@ export function TaskDelegateDialog({
 
   return (
     <Dialog isOpen={open && !!task} onClose={onClose} maxWidth="md">
-      <div style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
-        <strong style={{ color: 'var(--sam-color-fg-primary)', fontSize: 'var(--sam-type-card-title-size)' }}>
+      <div className="grid gap-3">
+        <strong className="text-fg-primary text-base">
           Delegate task
         </strong>
 
         {/* Intent preview — what the agent will receive */}
-        <section
-          style={{
-            padding: 'var(--sam-space-3)',
-            borderRadius: 'var(--sam-radius-md)',
-            background: 'var(--sam-color-info-tint)',
-            border: '1px solid rgba(99,102,241,0.2)',
-            display: 'grid',
-            gap: '0.375rem',
-          }}
-        >
-          <div style={{ fontSize: 'var(--sam-type-caption-size)', fontWeight: 600, color: 'var(--sam-color-fg-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        <section className="p-3 rounded-md bg-info-tint border border-info/20 grid gap-1.5">
+          <div className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
             Agent will receive
           </div>
-          <div style={{ fontWeight: 600, color: 'var(--sam-color-fg-primary)', fontSize: 'var(--sam-type-body-size)' }}>
+          <div className="font-semibold text-fg-primary text-base">
             {task?.title}
           </div>
           {task?.description && (
-            <div style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)', lineHeight: 1.5 }}>
+            <div className="text-sm text-fg-muted leading-relaxed">
               {task.description}
             </div>
           )}
@@ -70,35 +61,19 @@ export function TaskDelegateDialog({
 
         {/* Workspace selector */}
         {runningWorkspaces.length === 0 ? (
-          <div
-            style={{
-              padding: 'var(--sam-space-3)',
-              borderRadius: 'var(--sam-radius-md)',
-              background: 'var(--sam-color-warning-tint)',
-              border: '1px solid rgba(245, 158, 11, 0.3)',
-              color: 'var(--sam-color-fg-muted)',
-              fontSize: 'var(--sam-type-secondary-size)',
-            }}
-          >
+          <div className="p-3 rounded-md bg-warning-tint border border-warning/30 text-fg-muted text-sm">
             No running workspaces. Start a workspace first.
           </div>
         ) : (
-          <label style={{ display: 'grid', gap: '0.375rem' }}>
-            <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
+          <label className="grid gap-1.5">
+            <span className="text-sm text-fg-muted">
               Target workspace
             </span>
             <select
               value={workspaceId}
               onChange={(event) => setWorkspaceId(event.currentTarget.value)}
               disabled={loading}
-              style={{
-                borderRadius: 'var(--sam-radius-md)',
-                border: '1px solid var(--sam-color-border-default)',
-                background: 'var(--sam-color-bg-surface)',
-                color: 'var(--sam-color-fg-primary)',
-                minHeight: '2.75rem',
-                padding: '0.625rem 0.75rem',
-              }}
+              className="rounded-md border border-border-default bg-surface text-fg-primary min-h-11 py-2.5 px-3"
             >
               <option value="">Select workspace...</option>
               {runningWorkspaces.map((workspace) => (
@@ -112,30 +87,18 @@ export function TaskDelegateDialog({
 
         {/* Selected workspace preview */}
         {selectedWorkspace && (
-          <div
-            style={{
-              padding: 'var(--sam-space-2) var(--sam-space-3)',
-              borderRadius: 'var(--sam-radius-md)',
-              border: '1px solid var(--sam-color-border-default)',
-              background: 'var(--sam-color-bg-surface)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--sam-space-2)',
-              flexWrap: 'wrap',
-              fontSize: 'var(--sam-type-secondary-size)',
-            }}
-          >
+          <div className="py-2 px-3 rounded-md border border-border-default bg-surface flex items-center gap-2 flex-wrap text-sm">
             <StatusBadge status={selectedWorkspace.status} />
-            <span style={{ fontWeight: 600, color: 'var(--sam-color-fg-primary)' }}>
+            <span className="font-semibold text-fg-primary">
               {selectedWorkspace.displayName ?? selectedWorkspace.name}
             </span>
-            <span style={{ color: 'var(--sam-color-fg-muted)' }}>
+            <span className="text-fg-muted">
               {selectedWorkspace.repository}@{selectedWorkspace.branch}
             </span>
           </div>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sam-space-2)' }}>
+        <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose} disabled={loading}>
             Cancel
           </Button>

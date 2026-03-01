@@ -29,22 +29,15 @@ export function ProjectSessions() {
 
   if (loading && chatSessions.length === 0) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', padding: 'var(--sam-space-4)' }}>
+      <div className="flex items-center gap-2 p-4">
         <Spinner size="sm" />
-        <span className="sam-type-secondary" style={{ color: 'var(--sam-color-fg-muted)' }}>Loading sessions...</span>
+        <span className="sam-type-secondary text-fg-muted">Loading sessions...</span>
       </div>
     );
   }
 
   return (
-    <section
-      style={{
-        border: '1px solid var(--sam-color-border-default)',
-        borderRadius: 'var(--sam-radius-md)',
-        background: 'var(--sam-color-bg-surface)',
-        overflow: 'hidden',
-      }}
-    >
+    <section className="border border-border-default rounded-md bg-surface overflow-hidden">
       <ChatSessionList
         sessions={chatSessions}
         onSelect={(sessionId) => navigate(`/projects/${projectId}/sessions/${sessionId}`)}

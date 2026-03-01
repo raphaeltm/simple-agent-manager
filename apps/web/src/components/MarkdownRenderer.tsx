@@ -86,19 +86,10 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
     return (
       <div
         data-testid="mermaid-diagram"
-        style={{
-          marginBottom: 12,
-          padding: '12px 16px',
-          backgroundColor: 'var(--sam-color-danger-tint)',
-          border: '1px solid var(--sam-color-border-default)',
-          borderRadius: 6,
-          fontFamily: 'monospace',
-          fontSize: '0.8125rem',
-          color: 'var(--sam-color-fg-muted)',
-          whiteSpace: 'pre-wrap',
-        }}
+        className="mb-3 px-4 py-3 bg-danger-tint border border-border-default rounded-md font-mono text-fg-muted whitespace-pre-wrap"
+        style={{ fontSize: '0.8125rem' }}
       >
-        <div style={{ marginBottom: 8, color: 'var(--sam-color-fg-primary)' }}>
+        <div className="mb-2 text-fg-primary">
           Mermaid diagram error
         </div>
         {error}
@@ -110,10 +101,7 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
     <div
       ref={containerRef}
       data-testid="mermaid-diagram"
-      style={{
-        marginBottom: 12,
-        overflow: 'auto',
-      }}
+      className="mb-3 overflow-auto"
     />
   );
 };
@@ -127,17 +115,7 @@ export const SyntaxHighlightedCode: FC<{ content: string; language: string }> = 
   return (
     <Highlight theme={themes.nightOwl} code={content} language={language || 'text'}>
       {({ tokens, getLineProps, getTokenProps }) => (
-        <pre
-          style={{
-            margin: 0,
-            padding: 0,
-            fontFamily: 'monospace',
-            fontSize: '0.8125rem',
-            lineHeight: '1.5',
-            background: 'transparent',
-            overflow: 'visible',
-          }}
-        >
+        <pre className="m-0 p-0 font-mono bg-transparent overflow-visible" style={{ fontSize: '0.8125rem', lineHeight: '1.5' }}>
           {tokens.map((line, lineIdx) => {
             const lineProps = getLineProps({ line });
             return (
@@ -152,21 +130,10 @@ export const SyntaxHighlightedCode: FC<{ content: string; language: string }> = 
                   minHeight: '1.5em',
                 }}
               >
-                <span
-                  style={{
-                    display: 'inline-block',
-                    width: 48,
-                    textAlign: 'right',
-                    paddingRight: 12,
-                    color: 'var(--sam-color-fg-muted)',
-                    opacity: 0.5,
-                    userSelect: 'none',
-                    flexShrink: 0,
-                  }}
-                >
+                <span className="inline-block w-12 text-right pr-3 text-fg-muted opacity-50 select-none shrink-0">
                   {lineIdx + 1}
                 </span>
-                <span style={{ flex: 1 }}>
+                <span className="flex-1">
                   {line.map((token, tokenIdx) => {
                     const tokenProps = getTokenProps({ token });
                     return <span key={tokenIdx} {...tokenProps} />;
@@ -183,80 +150,53 @@ export const SyntaxHighlightedCode: FC<{ content: string; language: string }> = 
 
 // ---------- Markdown Rendering ----------
 
-const markdownContainerStyle: CSSProperties = {
-  maxWidth: 900,
-  margin: '0 auto',
-  overflowX: 'hidden',
-  padding: '16px',
-  color: 'var(--sam-color-fg-primary)',
-  lineHeight: 1.6,
-  fontSize: 'var(--sam-type-body-size)',
-  wordBreak: 'break-word',
-};
-
 export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties }> = ({ content, style }) => {
   return (
-    <div style={{ ...markdownContainerStyle, ...style }} data-testid="rendered-markdown">
+    <div
+      className="max-w-[900px] mx-auto overflow-x-hidden p-4 text-fg-primary leading-relaxed text-base break-words"
+      style={style}
+      data-testid="rendered-markdown"
+    >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
           h1: ({ children }) => (
-            <h1 style={{ fontSize: 'var(--sam-type-page-title-size)', margin: '0 0 12px', lineHeight: 1.25 }}>{children}</h1>
+            <h1 className="text-2xl mb-3 leading-tight" style={{ margin: '0 0 12px' }}>{children}</h1>
           ),
           h2: ({ children }) => (
-            <h2 style={{ fontSize: 'var(--sam-type-page-title-size)', margin: '18px 0 10px', lineHeight: 1.3 }}>{children}</h2>
+            <h2 className="text-2xl leading-snug" style={{ margin: '18px 0 10px' }}>{children}</h2>
           ),
           h3: ({ children }) => (
-            <h3 style={{ fontSize: 'var(--sam-type-section-heading-size)', margin: '16px 0 8px', lineHeight: 1.35 }}>{children}</h3>
+            <h3 className="text-base leading-snug" style={{ margin: '16px 0 8px' }}>{children}</h3>
           ),
-          p: ({ children }) => <p style={{ margin: '0 0 12px' }}>{children}</p>,
-          ul: ({ children }) => <ul style={{ margin: '0 0 12px', paddingLeft: 22 }}>{children}</ul>,
-          ol: ({ children }) => <ol style={{ margin: '0 0 12px', paddingLeft: 22 }}>{children}</ol>,
-          li: ({ children }) => <li style={{ marginBottom: 4 }}>{children}</li>,
+          p: ({ children }) => <p className="mb-3" style={{ margin: '0 0 12px' }}>{children}</p>,
+          ul: ({ children }) => <ul className="mb-3" style={{ margin: '0 0 12px', paddingLeft: 22 }}>{children}</ul>,
+          ol: ({ children }) => <ol className="mb-3" style={{ margin: '0 0 12px', paddingLeft: 22 }}>{children}</ol>,
+          li: ({ children }) => <li className="mb-1">{children}</li>,
           blockquote: ({ children }) => (
-            <blockquote
-              style={{
-                margin: '12px 0',
-                padding: '8px 12px',
-                borderLeft: '3px solid var(--sam-color-border-default)',
-                backgroundColor: 'var(--sam-color-info-tint)',
-              }}
-            >
+            <blockquote className="my-3 py-2 px-3 border-l-[3px] border-border-default bg-info-tint">
               {children}
             </blockquote>
           ),
           a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noreferrer" style={{ color: 'var(--sam-color-tn-blue)' }}>
+            <a href={href} target="_blank" rel="noreferrer" className="text-tn-blue">
               {children}
             </a>
           ),
           table: ({ children }) => (
-            <div style={{ overflowX: 'auto', marginBottom: 12 }}>
-              <table
-                style={{
-                  borderCollapse: 'collapse',
-                  width: '100%',
-                  minWidth: 320,
-                }}
-              >
+            <div className="overflow-x-auto mb-3">
+              <table className="border-collapse w-full min-w-80">
                 {children}
               </table>
             </div>
           ),
           th: ({ children }) => (
-            <th
-              style={{
-                border: '1px solid var(--sam-color-border-default)',
-                padding: '6px 8px',
-                textAlign: 'left',
-                backgroundColor: 'var(--sam-color-info-tint)',
-              }}
-            >
+            <th className="border border-border-default px-2 py-1.5 text-left bg-info-tint">
               {children}
             </th>
           ),
           td: ({ children }) => (
-            <td style={{ border: '1px solid var(--sam-color-border-default)', padding: '6px 8px' }}>
+            <td className="border border-border-default px-2 py-1.5">
               {children}
             </td>
           ),
@@ -271,7 +211,7 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties }> = 
             if (codeChild?.properties?.className?.includes('language-mermaid')) {
               return <>{children}</>;
             }
-            return <pre style={{ margin: 0 }}>{children}</pre>;
+            return <pre className="m-0">{children}</pre>;
           },
           code: ({
             className,
@@ -287,7 +227,7 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties }> = 
               }
 
               return (
-                <div style={{ marginBottom: 12 }}>
+                <div className="mb-3">
                   <SyntaxHighlightedCode content={code} language={match[1] ?? ''} />
                 </div>
               );
@@ -296,13 +236,8 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties }> = 
             return (
               <code
                 {...props}
-                style={{
-                  backgroundColor: 'var(--sam-color-info-tint)',
-                  borderRadius: 4,
-                  padding: '1px 5px',
-                  fontFamily: 'monospace',
-                  fontSize: '0.85em',
-                }}
+                className="bg-info-tint rounded-sm font-mono"
+                style={{ padding: '1px 5px', fontSize: '0.85em' }}
               >
                 {children}
               </code>

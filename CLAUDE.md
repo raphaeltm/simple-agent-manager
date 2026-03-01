@@ -156,6 +156,8 @@ Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks
 - TypeScript 5.x (API Worker + Web UI), Go 1.24+ (VM Agent) + Hono (API framework), Drizzle ORM (D1), React 18 + Vite (Web), Cloudflare Workers SDK (Durable Objects), `creack/pty` + `gorilla/websocket` (VM Agent) (022-simplified-chat-ux)
 - TypeScript 5.x (API Worker + Web UI) + Hono (API), React 18 + Vite (Web), Drizzle ORM (D1), Cloudflare Workers SDK (Durable Objects, Tail Workers) (023-admin-observability)
 - Cloudflare D1 (new `OBSERVABILITY_DATABASE` for errors) + existing D1 (`DATABASE` for health queries) + Cloudflare Workers Observability API (historical logs, 7-day retention) (023-admin-observability)
+- TypeScript 5.x (React 18 + Vite 5) + Tailwind CSS v4, `@tailwindcss/vite` plugin, React 18, Vite 5, Lucide React (024-tailwind-adoption)
+- N/A (no backend changes) (024-tailwind-adoption)
 
 ## Recent Changes
 - 023-admin-observability: Admin observability dashboard — error storage in D1, health overview, error list with filtering, historical log viewer via CF API proxy, real-time log stream via AdminLogs DO + Tail Worker, error trends visualization

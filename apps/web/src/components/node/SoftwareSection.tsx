@@ -17,14 +17,6 @@ interface VersionRow {
   detail?: string;
 }
 
-const rowStyle: React.CSSProperties = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  padding: 'var(--sam-space-2) var(--sam-space-3)',
-  borderBottom: '1px solid var(--sam-color-border-default)',
-};
-
 export const SoftwareSection: FC<SoftwareSectionProps> = ({ software, agent, loading }) => {
   const rows: VersionRow[] = [];
 
@@ -68,56 +60,32 @@ export const SoftwareSection: FC<SoftwareSectionProps> = ({ software, agent, loa
       {loading && rows.length === 0 ? (
         <div>
           {[1, 2, 3, 4].map((i) => (
-            <div key={i} style={{ ...rowStyle }}>
+            <div key={i} className="flex justify-between items-center px-3 py-2 border-b border-border-default">
               <Skeleton width={120} height={14} />
               <Skeleton width={80} height={14} />
             </div>
           ))}
         </div>
       ) : rows.length === 0 ? (
-        <div style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
+        <div className="text-fg-muted" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
           Software version info unavailable.
         </div>
       ) : (
-        <div
-          style={{
-            border: '1px solid var(--sam-color-border-default)',
-            borderRadius: 'var(--sam-radius-md)',
-            overflow: 'hidden',
-          }}
-        >
+        <div className="border border-border-default rounded-md overflow-hidden">
           {rows.map((row, i) => (
             <div
               key={row.label}
-              style={{
-                ...rowStyle,
-                borderBottom:
-                  i === rows.length - 1
-                    ? 'none'
-                    : '1px solid var(--sam-color-border-default)',
-              }}
+              className={`flex justify-between items-center px-3 py-2 ${
+                i === rows.length - 1 ? '' : 'border-b border-border-default'
+              }`}
             >
-              <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+              <span className="text-fg-muted" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
                 {row.label}
               </span>
-              <span
-                style={{
-                  fontSize: 'var(--sam-type-caption-size)',
-                  fontWeight: 500,
-                  color: 'var(--sam-color-fg-primary)',
-                  fontFamily: 'monospace',
-                }}
-              >
+              <span className="text-fg-primary font-medium font-mono" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
                 {row.value || 'N/A'}
                 {row.detail && (
-                  <span
-                    style={{
-                      fontSize: '0.6875rem',
-                      color: 'var(--sam-color-fg-muted)',
-                      fontFamily: 'inherit',
-                      marginLeft: 'var(--sam-space-2)',
-                    }}
-                  >
+                  <span className="text-fg-muted ml-2" style={{ fontSize: '0.6875rem', fontFamily: 'inherit' }}>
                     {row.detail}
                   </span>
                 )}

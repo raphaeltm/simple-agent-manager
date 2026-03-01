@@ -70,51 +70,26 @@ export function AdminUsers() {
   return (
     <div>
       {error && (
-        <div
-          style={{
-            padding: 'var(--sam-space-3)',
-            marginBottom: 'var(--sam-space-4)',
-            borderRadius: 'var(--sam-radius-sm)',
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            color: '#f87171',
-            fontSize: 'var(--sam-type-secondary-size)',
-          }}
-        >
+        <div className="p-3 mb-4 rounded-sm bg-danger-tint text-danger-fg text-sm">
           {error}
         </div>
       )}
 
       {/* Filter tabs */}
-      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', marginBottom: 'var(--sam-space-4)' }}>
+      <div className="flex gap-2 mb-4">
         {filters.map((f) => (
           <button
             key={f.value}
             onClick={() => setFilter(f.value)}
-            style={{
-              padding: 'var(--sam-space-2) var(--sam-space-3)',
-              borderRadius: 'var(--sam-radius-sm)',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: 'var(--sam-type-secondary-size)',
-              fontWeight: 500,
-              color: filter === f.value ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
-              background: filter === f.value ? 'var(--sam-color-bg-surface-hover)' : 'transparent',
-              transition: 'all 150ms ease',
-            }}
+            className={`px-3 py-2 rounded-sm border-none cursor-pointer text-sm font-medium transition-all duration-150 ${
+              filter === f.value
+                ? 'text-accent bg-surface-hover'
+                : 'text-fg-muted bg-transparent'
+            }`}
           >
             {f.label}
             {f.value === 'pending' && pendingCount > 0 && filter !== 'pending' && (
-              <span
-                style={{
-                  marginLeft: 'var(--sam-space-1)',
-                  padding: '0 6px',
-                  borderRadius: '9999px',
-                  fontSize: '0.7rem',
-                  fontWeight: 700,
-                  backgroundColor: 'rgba(245, 158, 11, 0.2)',
-                  color: '#fbbf24',
-                }}
-              >
+              <span className="ml-1 px-1.5 rounded-full text-[0.7rem] font-bold bg-warning-tint text-warning-fg">
                 {pendingCount}
               </span>
             )}
@@ -123,13 +98,13 @@ export function AdminUsers() {
       </div>
 
       {loading && users.length === 0 ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-8)' }}>
+        <div className="flex justify-center p-8">
           <Spinner size="lg" />
         </div>
       ) : users.length === 0 ? (
         <Card>
-          <div style={{ padding: 'var(--sam-space-6)', textAlign: 'center' }}>
-            <Body style={{ color: 'var(--sam-color-fg-muted)' }}>
+          <div className="p-6 text-center">
+            <Body className="text-fg-muted">
               No users found{filter !== 'all' ? ` with status "${filter}"` : ''}.
             </Body>
           </div>
@@ -147,37 +122,34 @@ export function AdminUsers() {
                 return (
                   <div
                     key={u.id}
-                    style={{
-                      padding: 'var(--sam-space-3) var(--sam-space-4)',
-                      borderBottom: '1px solid var(--sam-color-border-default)',
-                    }}
+                    className="px-4 py-3 border-b border-border-default"
                   >
                     {/* User info row */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
+                    <div className="flex items-center gap-3">
                       <UserAvatar user={u} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 500, color: 'var(--sam-color-fg-primary)', fontSize: 'var(--sam-type-secondary-size)' }}>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-fg-primary text-sm">
                           {u.name || 'Unnamed'}
                           {isCurrentUser && (
-                            <span style={{ color: 'var(--sam-color-fg-muted)', fontWeight: 400 }}> (you)</span>
+                            <span className="text-fg-muted font-normal"> (you)</span>
                           )}
                         </div>
-                        <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div className="text-fg-muted text-xs overflow-hidden text-ellipsis whitespace-nowrap">
                           {u.email}
                         </div>
                       </div>
                     </div>
                     {/* Badges + date row */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', marginTop: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+                    <div className="flex items-center gap-2 mt-2 flex-wrap">
                       <UserRoleBadge role={u.role} />
                       <UserStatusBadge status={u.status} />
-                      <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: 'var(--sam-type-caption-size)', marginLeft: 'auto' }}>
+                      <span className="text-fg-muted text-xs ml-auto">
                         {new Date(u.createdAt).toLocaleDateString()}
                       </span>
                     </div>
                     {/* Actions row */}
                     {!isSuperadminUser && !isCurrentUser && (
-                      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', marginTop: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+                      <div className="flex gap-2 mt-2 flex-wrap">
                         <UserActions user={u} isLoading={isLoading} onAction={handleAction} onRoleChange={handleRoleChange} />
                       </div>
                     )}
@@ -187,26 +159,15 @@ export function AdminUsers() {
             </div>
           ) : (
             /* Desktop: table layout */
-            <div style={{ overflow: 'auto' }}>
-              <table
-                style={{
-                  width: '100%',
-                  borderCollapse: 'collapse',
-                  fontSize: 'var(--sam-type-secondary-size)',
-                }}
-              >
+            <div className="overflow-auto">
+              <table className="w-full border-collapse text-sm">
                 <thead>
-                  <tr
-                    style={{
-                      borderBottom: '1px solid var(--sam-color-border-default)',
-                      textAlign: 'left',
-                    }}
-                  >
-                    <th style={thStyle}>User</th>
-                    <th style={thStyle}>Role</th>
-                    <th style={thStyle}>Status</th>
-                    <th style={thStyle}>Joined</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>Actions</th>
+                  <tr className="border-b border-border-default text-left">
+                    <th className="px-4 py-3 font-semibold text-fg-muted text-xs uppercase tracking-wide">User</th>
+                    <th className="px-4 py-3 font-semibold text-fg-muted text-xs uppercase tracking-wide">Role</th>
+                    <th className="px-4 py-3 font-semibold text-fg-muted text-xs uppercase tracking-wide">Status</th>
+                    <th className="px-4 py-3 font-semibold text-fg-muted text-xs uppercase tracking-wide">Joined</th>
+                    <th className="px-4 py-3 font-semibold text-fg-muted text-xs uppercase tracking-wide text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -218,38 +179,38 @@ export function AdminUsers() {
                     return (
                       <tr
                         key={u.id}
-                        style={{ borderBottom: '1px solid var(--sam-color-border-default)' }}
+                        className="border-b border-border-default"
                       >
-                        <td style={tdStyle}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3">
                             <UserAvatar user={u} />
                             <div>
-                              <div style={{ fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>
+                              <div className="font-medium text-fg-primary">
                                 {u.name || 'Unnamed'}
                                 {isCurrentUser && (
-                                  <span style={{ color: 'var(--sam-color-fg-muted)', fontWeight: 400 }}> (you)</span>
+                                  <span className="text-fg-muted font-normal"> (you)</span>
                                 )}
                               </div>
-                              <div style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.75rem' }}>
+                              <div className="text-fg-muted text-xs">
                                 {u.email}
                               </div>
                             </div>
                           </div>
                         </td>
-                        <td style={tdStyle}>
+                        <td className="px-4 py-3">
                           <UserRoleBadge role={u.role} />
                         </td>
-                        <td style={tdStyle}>
+                        <td className="px-4 py-3">
                           <UserStatusBadge status={u.status} />
                         </td>
-                        <td style={tdStyle}>
-                          <span style={{ color: 'var(--sam-color-fg-muted)' }}>
+                        <td className="px-4 py-3">
+                          <span className="text-fg-muted">
                             {new Date(u.createdAt).toLocaleDateString()}
                           </span>
                         </td>
-                        <td style={{ ...tdStyle, textAlign: 'right' }}>
+                        <td className="px-4 py-3 text-right">
                           {!isSuperadminUser && !isCurrentUser && (
-                            <div style={{ display: 'flex', gap: 'var(--sam-space-2)', justifyContent: 'flex-end' }}>
+                            <div className="flex gap-2 justify-end">
                               <UserActions user={u} isLoading={isLoading} onAction={handleAction} onRoleChange={handleRoleChange} />
                             </div>
                           )}
@@ -267,45 +228,18 @@ export function AdminUsers() {
   );
 }
 
-const thStyle = {
-  padding: 'var(--sam-space-3) var(--sam-space-4)',
-  fontWeight: 600 as const,
-  color: 'var(--sam-color-fg-muted)',
-  fontSize: '0.75rem',
-  textTransform: 'uppercase' as const,
-  letterSpacing: '0.05em',
-};
-
-const tdStyle = {
-  padding: 'var(--sam-space-3) var(--sam-space-4)',
-};
-
 function UserAvatar({ user }: { user: AdminUser }) {
   if (user.avatarUrl) {
     return (
       <img
         src={user.avatarUrl}
         alt=""
-        style={{ width: 32, height: 32, borderRadius: 'var(--sam-radius-full)', flexShrink: 0 }}
+        className="w-8 h-8 rounded-full shrink-0"
       />
     );
   }
   return (
-    <div
-      style={{
-        width: 32,
-        height: 32,
-        borderRadius: 'var(--sam-radius-full)',
-        backgroundColor: 'var(--sam-color-bg-surface-hover)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '0.75rem',
-        fontWeight: 600,
-        color: 'var(--sam-color-fg-muted)',
-        flexShrink: 0,
-      }}
-    >
+    <div className="w-8 h-8 rounded-full bg-surface-hover flex items-center justify-center text-xs font-semibold text-fg-muted shrink-0">
       {(user.name || user.email)[0]?.toUpperCase()}
     </div>
   );
@@ -314,7 +248,7 @@ function UserAvatar({ user }: { user: AdminUser }) {
 function UserRoleBadge({ role }: { role: string }) {
   if (role === 'superadmin') return <StatusBadge status="running" label="Superadmin" />;
   if (role === 'admin') return <StatusBadge status="creating" label="Admin" />;
-  return <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: 'var(--sam-type-secondary-size)' }}>User</span>;
+  return <span className="text-fg-muted text-sm">User</span>;
 }
 
 function UserStatusBadge({ status }: { status: string }) {

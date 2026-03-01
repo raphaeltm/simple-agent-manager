@@ -12,25 +12,6 @@ interface LogFiltersProps {
   onContainerChange: (container: string) => void;
 }
 
-const selectStyle: React.CSSProperties = {
-  padding: '4px 8px',
-  fontSize: 'var(--sam-type-caption-size, 0.75rem)',
-  borderRadius: 'var(--sam-radius-sm, 4px)',
-  border: '1px solid var(--sam-color-border-default)',
-  backgroundColor: 'var(--sam-color-bg-surface)',
-  color: 'var(--sam-color-fg-primary)',
-  outline: 'none',
-};
-
-const labelStyle: React.CSSProperties = {
-  fontSize: '0.625rem',
-  fontWeight: 600,
-  textTransform: 'uppercase',
-  letterSpacing: '0.05em',
-  color: 'var(--sam-color-fg-muted)',
-  marginBottom: 2,
-};
-
 const SEARCH_DEBOUNCE_MS = 300;
 
 export const LogFilters: FC<LogFiltersProps> = ({
@@ -61,18 +42,12 @@ export const LogFilters: FC<LogFiltersProps> = ({
   useEffect(() => () => clearTimeout(debounceRef.current), []);
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 'var(--sam-space-3)',
-        alignItems: 'flex-end',
-        flexWrap: 'wrap',
-      }}
-    >
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
-        <label style={labelStyle}>Source</label>
+    <div className="flex gap-3 items-end flex-wrap">
+      <div className="flex flex-col">
+        <label className="text-fg-muted font-semibold uppercase tracking-wide mb-0.5" style={{ fontSize: '0.625rem', letterSpacing: '0.05em' }}>Source</label>
         <select
-          style={selectStyle}
+          className="px-2 py-1 rounded-sm border border-border-default bg-surface text-fg-primary outline-none"
+          style={{ fontSize: 'var(--sam-type-caption-size, 0.75rem)' }}
           value={source}
           onChange={(e) => onSourceChange(e.target.value as NodeLogSource)}
         >
@@ -84,10 +59,11 @@ export const LogFilters: FC<LogFiltersProps> = ({
         </select>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
-        <label style={labelStyle}>Level</label>
+      <div className="flex flex-col">
+        <label className="text-fg-muted font-semibold uppercase tracking-wide mb-0.5" style={{ fontSize: '0.625rem', letterSpacing: '0.05em' }}>Level</label>
         <select
-          style={selectStyle}
+          className="px-2 py-1 rounded-sm border border-border-default bg-surface text-fg-primary outline-none"
+          style={{ fontSize: 'var(--sam-type-caption-size, 0.75rem)' }}
           value={level}
           onChange={(e) => onLevelChange(e.target.value as NodeLogLevel)}
         >
@@ -99,32 +75,28 @@ export const LogFilters: FC<LogFiltersProps> = ({
       </div>
 
       {(source === 'docker' || source === 'all') && (
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 140 }}>
-          <label style={labelStyle}>Container</label>
+        <div className="flex flex-col min-w-[140px]">
+          <label className="text-fg-muted font-semibold uppercase tracking-wide mb-0.5" style={{ fontSize: '0.625rem', letterSpacing: '0.05em' }}>Container</label>
           <input
             type="text"
             placeholder="All containers"
             value={container}
             onChange={(e) => onContainerChange(e.target.value)}
-            style={{
-              ...selectStyle,
-              minWidth: 120,
-            }}
+            className="px-2 py-1 rounded-sm border border-border-default bg-surface text-fg-primary outline-none min-w-[120px]"
+            style={{ fontSize: 'var(--sam-type-caption-size, 0.75rem)' }}
           />
         </div>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 160 }}>
-        <label style={labelStyle}>Search</label>
+      <div className="flex flex-col flex-1 min-w-40">
+        <label className="text-fg-muted font-semibold uppercase tracking-wide mb-0.5" style={{ fontSize: '0.625rem', letterSpacing: '0.05em' }}>Search</label>
         <input
           type="text"
           placeholder="Search logs..."
           value={localSearch}
           onChange={(e) => handleSearchChange(e.target.value)}
-          style={{
-            ...selectStyle,
-            minWidth: 120,
-          }}
+          className="px-2 py-1 rounded-sm border border-border-default bg-surface text-fg-primary outline-none min-w-[120px]"
+          style={{ fontSize: 'var(--sam-type-caption-size, 0.75rem)' }}
         />
       </div>
     </div>

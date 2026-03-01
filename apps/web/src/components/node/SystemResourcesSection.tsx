@@ -61,20 +61,20 @@ export const SystemResourcesSection: FC<SystemResourcesSectionProps> = ({
       />
 
       {loading && !hasData ? (
-        <div style={{ display: 'flex', gap: 'var(--sam-space-6)', flexWrap: 'wrap' }}>
+        <div className="flex gap-6 flex-wrap">
           {[1, 2, 3].map((i) => (
-            <div key={i} style={{ flex: 1, minWidth: 160 }}>
+            <div key={i} className="flex-1 min-w-40">
               <Skeleton width="60%" height={12} style={{ marginBottom: 6 }} />
               <Skeleton width="100%" height={8} />
             </div>
           ))}
         </div>
       ) : !hasData ? (
-        <div style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
+        <div className="text-fg-muted" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
           No resource data available yet. Waiting for heartbeat data...
         </div>
       ) : (
-        <div style={{ display: 'flex', gap: 'var(--sam-space-6)', flexWrap: 'wrap' }}>
+        <div className="flex gap-6 flex-wrap">
           {cpuPercent != null && (
             <ResourceBar
               label="CPU"
@@ -92,17 +92,7 @@ export const SystemResourcesSection: FC<SystemResourcesSectionProps> = ({
       )}
 
       {systemInfo?.network && (systemInfo.network.rxBytes > 0 || systemInfo.network.txBytes > 0) && (
-        <div
-          style={{
-            display: 'flex',
-            gap: 'var(--sam-space-6)',
-            marginTop: 'var(--sam-space-4)',
-            paddingTop: 'var(--sam-space-3)',
-            borderTop: '1px solid var(--sam-color-border-default)',
-            fontSize: 'var(--sam-type-caption-size)',
-            color: 'var(--sam-color-fg-muted)',
-          }}
-        >
+        <div className="flex gap-6 mt-4 pt-3 border-t border-border-default text-fg-muted" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
           <span>
             {systemInfo.network.interface || 'Network'} RX: {formatBytes(systemInfo.network.rxBytes)}
           </span>

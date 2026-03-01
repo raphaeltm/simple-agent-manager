@@ -40,76 +40,31 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
       {/* Backdrop */}
       <div
         onClick={onClose}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'var(--sam-color-bg-overlay)',
-          zIndex: 'var(--sam-z-dialog-backdrop)' as unknown as number,
-        }}
+        className="fixed inset-0 bg-overlay z-dialog-backdrop"
       />
 
       {/* Dialog */}
       <div
         role="dialog"
         aria-label="Keyboard shortcuts"
-        style={{
-          position: 'fixed',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          width: '90vw',
-          maxWidth: 520,
-          maxHeight: '80vh',
-          backgroundColor: 'var(--sam-color-tn-surface)',
-          border: '1px solid var(--sam-color-tn-border)',
-          borderRadius: 12,
-          boxShadow: 'var(--sam-shadow-overlay)',
-          zIndex: 'var(--sam-z-dialog)' as unknown as number,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
+        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-[520px] max-h-[80vh] bg-tn-surface border border-tn-border rounded-xl shadow-overlay z-dialog flex flex-col overflow-hidden"
       >
         {/* Header */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '16px 20px',
-            borderBottom: '1px solid var(--sam-color-tn-border)',
-            flexShrink: 0,
-          }}
-        >
-          <h2
-            style={{
-              margin: 0,
-              fontSize: 'var(--sam-type-card-title-size)',
-              fontWeight: 600,
-              color: 'var(--sam-color-tn-fg)',
-            }}
-          >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-tn-border shrink-0">
+          <h2 className="m-0 text-base font-semibold text-tn-fg">
             Keyboard Shortcuts
           </h2>
           <button
             onClick={onClose}
             aria-label="Close"
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--sam-color-tn-fg-muted)',
-              cursor: 'pointer',
-              fontSize: 18,
-              padding: '4px 8px',
-              lineHeight: 1,
-            }}
+            className="bg-transparent border-none text-tn-fg-muted cursor-pointer text-lg px-2 py-1 leading-none"
           >
             ×
           </button>
         </div>
 
         {/* Shortcut list */}
-        <div style={{ overflow: 'auto', padding: '12px 20px 20px' }}>
+        <div className="overflow-auto px-5 pt-3 pb-5">
           {CATEGORY_ORDER.map((category) => {
             const shortcuts = grouped.get(category);
             if (!shortcuts) return null;
@@ -117,46 +72,21 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
             if (visible.length === 0) return null;
 
             return (
-              <div key={category} style={{ marginBottom: 20 }}>
-                <h3
-                  style={{
-                    margin: '0 0 8px',
-                    fontSize: 'var(--sam-type-caption-size)',
-                    fontWeight: 600,
-                    color: 'var(--sam-color-tn-fg-muted)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                  }}
-                >
+              <div key={category} className="mb-5">
+                <h3 className="m-0 mb-2 text-xs font-semibold text-tn-fg-muted uppercase tracking-wider">
                   {category}
                 </h3>
                 {visible.map((shortcut) => (
                   <div
                     key={shortcut.id}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      padding: '6px 0',
-                    }}
+                    className="flex justify-between items-center py-1.5"
                   >
-                    <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-tn-fg)' }}>
+                    <span className="text-xs text-tn-fg">
                       {shortcut.id === 'tab-1'
                         ? 'Switch to tab 1\u20139'
                         : shortcut.description}
                     </span>
-                    <kbd
-                      style={{
-                        fontFamily: 'monospace',
-                        fontSize: 'var(--sam-type-caption-size)',
-                        color: 'var(--sam-color-tn-fg-bright)',
-                        backgroundColor: 'var(--sam-color-tn-selected)',
-                        border: '1px solid var(--sam-color-tn-border-highlight)',
-                        borderRadius: 4,
-                        padding: '2px 8px',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
+                    <kbd className="font-mono text-xs text-tn-fg-bright bg-tn-selected border border-tn-border-highlight rounded-sm px-2 py-0.5 whitespace-nowrap">
                       {shortcut.id === 'tab-1'
                         ? formatShortcut(shortcut).replace('1', '1\u20139')
                         : formatShortcut(shortcut)}

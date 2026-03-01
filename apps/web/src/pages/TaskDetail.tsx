@@ -186,23 +186,6 @@ export function TaskDetail() {
 
   return (
     <div>
-      <style>{`
-        .task-detail-layout {
-          display: grid;
-          gap: var(--sam-space-4);
-          align-items: start;
-        }
-        @media (min-width: 768px) {
-          .task-detail-layout {
-            grid-template-columns: minmax(0, 1fr) 300px;
-          }
-        }
-        .task-title-btn:hover {
-          text-decoration: underline;
-          text-decoration-style: dotted;
-        }
-      `}</style>
-
       {/* Breadcrumb within project context */}
       <Breadcrumb
         segments={[
@@ -215,25 +198,25 @@ export function TaskDetail() {
       />
 
       {error && (
-        <div style={{ marginTop: 'var(--sam-space-3)' }}>
+        <div className="mt-3">
           <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
         </div>
       )}
 
       {loading && !task ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', marginTop: 'var(--sam-space-4)' }}>
+        <div className="flex items-center gap-2 mt-4">
           <Spinner size="md" />
-          <span style={{ color: 'var(--sam-color-fg-muted)' }}>Loading task...</span>
+          <span className="text-fg-muted">Loading task...</span>
         </div>
       ) : task ? (
-        <div className="task-detail-layout" style={{ marginTop: 'var(--sam-space-4)' }}>
+        <div className="grid gap-4 items-start mt-4 md:grid-cols-[minmax(0,1fr)_300px]">
           {/* Main content column */}
-          <div style={{ display: 'grid', gap: 'var(--sam-space-4)' }}>
+          <div className="grid gap-4">
 
             {/* Title + status row */}
-            <div style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
+            <div className="grid gap-2">
               {editingTitle ? (
-                <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'center' }}>
+                <div className="flex gap-2 items-center">
                   <input
                     autoFocus
                     value={titleDraft}
@@ -244,50 +227,24 @@ export function TaskDetail() {
                     }}
                     onBlur={() => void handleSaveTitle()}
                     disabled={savingTitle}
-                    style={{
-                      flex: 1,
-                      fontSize: 'var(--sam-type-section-heading-size)',
-                      fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number,
-                      background: 'var(--sam-color-bg-surface)',
-                      border: '1px solid var(--sam-color-accent-primary)',
-                      borderRadius: 'var(--sam-radius-md)',
-                      color: 'var(--sam-color-fg-primary)',
-                      padding: '0.375rem 0.5rem',
-                    }}
+                    className="flex-1 text-base font-semibold bg-surface border border-accent rounded-md text-fg-primary py-1.5 px-2"
                   />
                   {savingTitle && <Spinner size="sm" />}
                 </div>
               ) : (
                 <button
-                  className="task-title-btn"
+                  className="text-left bg-transparent border-none p-0 cursor-text text-base font-semibold text-fg-primary hover:underline hover:decoration-dotted"
                   onClick={() => { setTitleDraft(task.title); setEditingTitle(true); }}
                   title="Click to edit title"
-                  style={{
-                    textAlign: 'left',
-                    background: 'transparent',
-                    border: 'none',
-                    padding: 0,
-                    cursor: 'text',
-                    fontSize: 'var(--sam-type-section-heading-size)',
-                    fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number,
-                    color: 'var(--sam-color-fg-primary)',
-                  }}
                 >
                   {task.title}
                 </button>
               )}
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+              <div className="flex items-center gap-2 flex-wrap">
                 <StatusBadge status={task.status} />
                 {task.blocked && (
-                  <span style={{
-                    fontSize: 'var(--sam-type-caption-size)',
-                    padding: '2px 8px',
-                    borderRadius: '9999px',
-                    background: 'var(--sam-color-danger-tint)',
-                    color: 'var(--sam-color-danger)',
-                    fontWeight: 600,
-                  }}>
+                  <span className="text-xs py-0.5 px-2 rounded-full bg-danger-tint text-danger font-semibold">
                     Blocked
                   </span>
                 )}
@@ -303,15 +260,7 @@ export function TaskDetail() {
                         e.currentTarget.value = '';
                       }
                     }}
-                    style={{
-                      borderRadius: 'var(--sam-radius-md)',
-                      border: '1px solid var(--sam-color-border-default)',
-                      background: 'var(--sam-color-bg-surface)',
-                      color: 'var(--sam-color-fg-primary)',
-                      fontSize: 'var(--sam-type-secondary-size)',
-                      padding: '0.25rem 0.5rem',
-                      minHeight: '2rem',
-                    }}
+                    className="rounded-md border border-border-default bg-surface text-fg-primary text-sm py-1 px-2 min-h-8"
                   >
                     <option value="">{transitioning ? 'Updating...' : 'Move to...'}</option>
                     {TRANSITIONS[task.status].map((s) => (
@@ -323,16 +272,16 @@ export function TaskDetail() {
             </div>
 
             {/* Description */}
-            <section style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
-              <h2 className="sam-type-card-title" style={{ margin: 0, color: 'var(--sam-color-fg-primary)' }}>
+            <section className="grid gap-2">
+              <h2 className="sam-type-card-title m-0 text-fg-primary">
                 Description
               </h2>
               {task.description ? (
-                <p className="sam-type-body" style={{ margin: 0, color: 'var(--sam-color-fg-muted)', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                <p className="sam-type-body m-0 text-fg-muted whitespace-pre-wrap leading-relaxed">
                   {task.description}
                 </p>
               ) : (
-                <p className="sam-type-body" style={{ margin: 0, color: 'var(--sam-color-fg-muted)', fontStyle: 'italic' }}>
+                <p className="sam-type-body m-0 text-fg-muted italic">
                   No description.
                 </p>
               )}
@@ -340,31 +289,19 @@ export function TaskDetail() {
 
             {/* Output */}
             {(task.outputSummary || task.outputBranch || task.outputPrUrl) && (
-              <section style={{
-                display: 'grid',
-                gap: 'var(--sam-space-2)',
-                border: '1px solid var(--sam-color-border-default)',
-                borderRadius: 'var(--sam-radius-md)',
-                padding: 'var(--sam-space-3)',
-                background: 'var(--sam-color-bg-surface)',
-              }}>
-                <h2 className="sam-type-card-title" style={{ margin: 0, color: 'var(--sam-color-fg-primary)' }}>
+              <section className="grid gap-2 border border-border-default rounded-md p-3 bg-surface">
+                <h2 className="sam-type-card-title m-0 text-fg-primary">
                   Output
                 </h2>
                 {task.outputSummary && (
-                  <p className="sam-type-secondary" style={{ margin: 0, color: 'var(--sam-color-fg-muted)', whiteSpace: 'pre-wrap' }}>
+                  <p className="sam-type-secondary m-0 text-fg-muted whitespace-pre-wrap">
                     {task.outputSummary}
                   </p>
                 )}
                 {task.outputBranch && (
                   <div className="sam-type-secondary">
                     <strong>Branch: </strong>
-                    <code style={{
-                      background: 'var(--sam-color-bg-page)',
-                      padding: '0.125rem 0.375rem',
-                      borderRadius: '4px',
-                      fontSize: 'var(--sam-type-caption-size)',
-                    }}>
+                    <code className="bg-page py-0.5 px-1.5 rounded-[4px] text-xs">
                       {task.outputBranch}
                     </code>
                   </div>
@@ -376,7 +313,7 @@ export function TaskDetail() {
                       href={task.outputPrUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      style={{ color: 'var(--sam-color-accent-primary)' }}
+                      className="text-accent"
                     >
                       {task.outputPrUrl}
                     </a>
@@ -387,60 +324,47 @@ export function TaskDetail() {
 
             {/* Error */}
             {task.errorMessage && (
-              <section style={{
-                border: '1px solid var(--sam-color-danger)',
-                borderRadius: 'var(--sam-radius-md)',
-                padding: 'var(--sam-space-3)',
-                background: 'var(--sam-color-danger-tint)',
-                display: 'grid',
-                gap: '0.375rem',
-              }}>
-                <h2 className="sam-type-card-title" style={{ margin: 0, color: 'var(--sam-color-danger)' }}>Error</h2>
-                <p className="sam-type-secondary" style={{ margin: 0, color: 'var(--sam-color-fg-muted)', whiteSpace: 'pre-wrap' }}>
+              <section className="border border-danger rounded-md p-3 bg-danger-tint grid gap-1.5">
+                <h2 className="sam-type-card-title m-0 text-danger">Error</h2>
+                <p className="sam-type-secondary m-0 text-fg-muted whitespace-pre-wrap">
                   {task.errorMessage}
                 </p>
               </section>
             )}
 
             {/* Activity log */}
-            <section style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
-              <h2 className="sam-type-card-title" style={{ margin: 0, color: 'var(--sam-color-fg-primary)' }}>
+            <section className="grid gap-2">
+              <h2 className="sam-type-card-title m-0 text-fg-primary">
                 Activity
               </h2>
               {events.length === 0 ? (
-                <p className="sam-type-secondary" style={{ margin: 0, color: 'var(--sam-color-fg-muted)' }}>No activity yet.</p>
+                <p className="sam-type-secondary m-0 text-fg-muted">No activity yet.</p>
               ) : (
-                <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: '0.5rem' }}>
+                <ul className="m-0 p-0 list-none grid gap-2">
                   {events.map((event) => (
                     <li
                       key={event.id}
-                      style={{
-                        fontSize: 'var(--sam-type-caption-size)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        flexWrap: 'wrap',
-                      }}
+                      className="text-xs flex items-center gap-2 flex-wrap"
                     >
-                      <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', flexShrink: 0 }}>
+                      <span className="sam-type-caption text-fg-muted shrink-0">
                         {formatDate(event.createdAt)}
                       </span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                      <span className="flex items-center gap-1">
                         {event.fromStatus && (
                           <>
                             <StatusBadge status={event.fromStatus} />
-                            <span style={{ color: 'var(--sam-color-fg-muted)' }}>→</span>
+                            <span className="text-fg-muted">→</span>
                           </>
                         )}
                         <StatusBadge status={event.toStatus} />
                       </span>
                       {event.actorType && (
-                        <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)' }}>
+                        <span className="sam-type-caption text-fg-muted">
                           by {event.actorType}
                         </span>
                       )}
                       {event.reason && (
-                        <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)' }}>
+                        <span className="sam-type-caption text-fg-muted">
                           — {event.reason}
                         </span>
                       )}
@@ -452,31 +376,24 @@ export function TaskDetail() {
           </div>
 
           {/* Sidebar */}
-          <aside style={{
-            display: 'grid',
-            gap: 'var(--sam-space-3)',
-            border: '1px solid var(--sam-color-border-default)',
-            borderRadius: 'var(--sam-radius-md)',
-            background: 'var(--sam-color-bg-surface)',
-            padding: 'var(--sam-space-3)',
-          }}>
+          <aside className="grid gap-3 border border-border-default rounded-md bg-surface p-3">
             {/* Metadata */}
-            <div style={{ display: 'grid', gap: '0.5rem', fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
-              <div><strong style={{ color: 'var(--sam-color-fg-primary)' }}>Priority:</strong> {task.priority}</div>
-              <div><strong style={{ color: 'var(--sam-color-fg-primary)' }}>Created:</strong> {formatDate(task.createdAt)}</div>
-              <div><strong style={{ color: 'var(--sam-color-fg-primary)' }}>Updated:</strong> {formatDate(task.updatedAt)}</div>
+            <div className="grid gap-2 text-sm text-fg-muted">
+              <div><strong className="text-fg-primary">Priority:</strong> {task.priority}</div>
+              <div><strong className="text-fg-primary">Created:</strong> {formatDate(task.createdAt)}</div>
+              <div><strong className="text-fg-primary">Updated:</strong> {formatDate(task.updatedAt)}</div>
               {task.startedAt && (
-                <div><strong style={{ color: 'var(--sam-color-fg-primary)' }}>Started:</strong> {formatDate(task.startedAt)}</div>
+                <div><strong className="text-fg-primary">Started:</strong> {formatDate(task.startedAt)}</div>
               )}
               {task.completedAt && (
-                <div><strong style={{ color: 'var(--sam-color-fg-primary)' }}>Completed:</strong> {formatDate(task.completedAt)}</div>
+                <div><strong className="text-fg-primary">Completed:</strong> {formatDate(task.completedAt)}</div>
               )}
               {task.workspaceId && (
                 <div>
-                  <strong style={{ color: 'var(--sam-color-fg-primary)' }}>Workspace: </strong>
+                  <strong className="text-fg-primary">Workspace: </strong>
                   <Link
                     to={`/workspaces/${task.workspaceId}`}
-                    style={{ color: 'var(--sam-color-accent-primary)' }}
+                    className="text-accent"
                   >
                     View workspace
                   </Link>
@@ -484,7 +401,7 @@ export function TaskDetail() {
               )}
             </div>
 
-            <hr style={{ margin: 0, border: 'none', borderTop: '1px solid var(--sam-color-border-default)' }} />
+            <hr className="m-0 border-none border-t border-border-default" />
 
             {/* Dependencies */}
             <TaskDependencyEditor
@@ -496,10 +413,10 @@ export function TaskDetail() {
               onRemove={handleRemoveDependency}
             />
 
-            <hr style={{ margin: 0, border: 'none', borderTop: '1px solid var(--sam-color-border-default)' }} />
+            <hr className="m-0 border-none border-t border-border-default" />
 
             {/* Actions */}
-            <div style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
+            <div className="grid gap-2">
               <Button onClick={() => setShowDelegateDialog(true)}>
                 Delegate to workspace
               </Button>

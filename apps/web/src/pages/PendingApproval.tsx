@@ -22,51 +22,30 @@ export function PendingApproval() {
   };
 
   return (
-    <div
-      style={{
-        minHeight: 'var(--sam-app-height)',
-        backgroundColor: 'var(--sam-color-bg-canvas)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 'var(--sam-space-4)',
-      }}
-    >
+    <div className="min-h-[var(--sam-app-height)] bg-canvas flex flex-col items-center justify-center p-4">
       <Container maxWidth="sm">
         <Card>
-          <div style={{ padding: 'var(--sam-space-6)', textAlign: 'center' }}>
-            <div
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: 'var(--sam-radius-full)',
-                backgroundColor: 'var(--sam-color-bg-surface-hover)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                margin: '0 auto var(--sam-space-4)',
-              }}
-            >
-              <Clock size={24} style={{ color: 'var(--sam-color-fg-muted)' }} />
+          <div className="p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-surface-hover flex items-center justify-center mx-auto mb-4">
+              <Clock size={24} className="text-fg-muted" />
             </div>
 
-            <PageTitle style={{ marginBottom: 'var(--sam-space-2)' }}>
+            <PageTitle className="mb-2">
               Awaiting Approval
             </PageTitle>
 
-            <Body style={{ color: 'var(--sam-color-fg-muted)', marginBottom: 'var(--sam-space-2)' }}>
+            <Body className="text-fg-muted mb-2">
               Your account has been created, but an administrator needs to approve
               your access before you can use SAM.
             </Body>
 
             {user?.email && (
-              <Secondary style={{ marginBottom: 'var(--sam-space-6)' }}>
+              <Secondary className="mb-6">
                 Signed in as {user.email}
               </Secondary>
             )}
 
-            <div style={{ display: 'flex', gap: 'var(--sam-space-3)', justifyContent: 'center' }}>
+            <div className="flex gap-3 justify-center">
               <Button variant="primary" onClick={handleCheckStatus}>
                 Check Status
               </Button>

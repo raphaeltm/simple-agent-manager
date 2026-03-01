@@ -230,7 +230,7 @@ export function ProjectChat() {
 
   if (loading && sessions.length === 0) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-8)' }}>
+      <div className="flex justify-center p-8">
         <Spinner size="lg" />
       </div>
     );
@@ -242,26 +242,15 @@ export function ProjectChat() {
   const showInlineSidebar = hasSessions && !isMobile;
 
   return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: showInlineSidebar ? '280px 1fr' : '1fr',
-      border: isMobile ? 'none' : '1px solid var(--sam-color-border-default)',
-      borderRadius: isMobile ? 0 : 'var(--sam-radius-md)',
-      backgroundColor: 'var(--sam-color-bg-surface)',
-      overflow: 'hidden',
-      ...(isMobile
-        ? { flex: 1, minHeight: 0 }
-        : { minHeight: '500px', maxHeight: 'calc(100vh - 240px)' }
-      ),
-    }}>
+    <div
+      className={`grid bg-surface overflow-hidden ${isMobile ? 'flex-1 min-h-0' : 'border border-border-default rounded-md min-h-[500px] max-h-[calc(100vh-240px)]'}`}
+      style={{
+        gridTemplateColumns: showInlineSidebar ? '280px 1fr' : '1fr',
+      }}
+    >
       {/* Desktop sidebar — inline when sessions exist */}
       {showInlineSidebar && (
-        <div style={{
-          borderRight: '1px solid var(--sam-color-border-default)',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}>
+        <div className="border-r border-border-default flex flex-col overflow-hidden">
           <SessionSidebar
             sessions={sessions}
             selectedSessionId={sessionId ?? null}
@@ -284,28 +273,13 @@ export function ProjectChat() {
       )}
 
       {/* Main content */}
-      <div style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div className="overflow-hidden flex flex-col">
         {/* Mobile session toggle bar */}
         {isMobile && hasSessions && !showNewChatInput && (
           <button
             type="button"
             onClick={() => setSidebarOpen(true)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--sam-space-2)',
-              padding: 'var(--sam-space-2) var(--sam-space-3)',
-              backgroundColor: 'var(--sam-color-bg-surface)',
-              border: 'none',
-              borderBottom: '1px solid var(--sam-color-border-default)',
-              cursor: 'pointer',
-              color: 'var(--sam-color-fg-muted)',
-              fontSize: 'var(--sam-type-caption-size)',
-              fontWeight: 500,
-              width: '100%',
-              textAlign: 'left',
-              minHeight: '44px',
-            }}
+            className="flex items-center gap-2 px-3 py-2 bg-surface border-none border-b border-border-default cursor-pointer text-fg-muted text-xs font-medium w-full text-left min-h-[44px]"
           >
             <List size={16} />
             <span>{sessions.length} chat{sessions.length !== 1 ? 's' : ''}</span>
@@ -314,32 +288,16 @@ export function ProjectChat() {
 
         {showNewChatInput ? (
           /* New chat / empty state */
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <div style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: isMobile ? 'var(--sam-space-4)' : 'var(--sam-space-8)',
-              gap: 'var(--sam-space-3)',
-            }}>
+          <div className="flex-1 flex flex-col">
+            <div className={`flex-1 flex flex-col items-center justify-center gap-3 ${isMobile ? 'p-4' : 'p-8'}`}>
               {provisioning ? (
                 <ProvisioningIndicator state={provisioning} />
               ) : (
                 <>
-                  <span style={{
-                    fontSize: 'var(--sam-type-body-size)',
-                    fontWeight: 600,
-                    color: 'var(--sam-color-fg-primary)',
-                  }}>
+                  <span className="text-base font-semibold text-fg-primary">
                     What do you want to build?
                   </span>
-                  <span className="sam-type-secondary" style={{
-                    color: 'var(--sam-color-fg-muted)',
-                    textAlign: 'center',
-                    maxWidth: '400px',
-                  }}>
+                  <span className="sam-type-secondary text-fg-muted text-center max-w-[400px]">
                     Describe the task and an agent will start working on it automatically.
                   </span>
                 </>
@@ -356,12 +314,12 @@ export function ProjectChat() {
           </div>
         ) : (
           /* Existing session view */
-          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div className="flex-1 overflow-hidden flex flex-col">
             {/* Inline provisioning indicator if this is the provisioning session */}
             {provisioning && sessionId === provisioning.sessionId && !isTerminal(provisioning.status) && (
               <ProvisioningIndicator state={provisioning} />
             )}
-            <div style={{ flex: 1, overflow: 'hidden' }}>
+            <div className="flex-1 overflow-hidden">
               <ProjectMessageView projectId={projectId} sessionId={sessionId!} />
             </div>
           </div>
@@ -408,11 +366,8 @@ function MobileSessionDrawer({
       <div
         role="presentation"
         onClick={onClose}
+        className="fixed inset-0 bg-overlay z-drawer-backdrop"
         style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'var(--sam-color-bg-overlay)',
-          zIndex: 'var(--sam-z-drawer-backdrop)' as unknown as number,
           animation: 'sam-session-drawer-fade-in 0.15s ease-out',
         }}
       />
@@ -422,19 +377,10 @@ function MobileSessionDrawer({
         role="dialog"
         aria-modal="true"
         aria-label="Chat sessions"
+        className="fixed top-0 left-0 bottom-0 bg-surface border-r border-border-default z-drawer flex flex-col overflow-hidden"
         style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          bottom: 0,
           width: '85vw',
           maxWidth: 320,
-          backgroundColor: 'var(--sam-color-bg-surface)',
-          borderRight: '1px solid var(--sam-color-border-default)',
-          zIndex: 'var(--sam-z-drawer)' as unknown as number,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
           animation: 'sam-session-drawer-slide-in 0.2s ease-out',
         }}
       >
@@ -482,44 +428,26 @@ function ProvisioningIndicator({ state }: { state: ProvisioningState }) {
   const isFailed = state.status === 'failed';
 
   return (
-    <div style={{
-      padding: 'var(--sam-space-3) var(--sam-space-4)',
-      backgroundColor: isFailed ? 'var(--sam-color-danger-tint)' : 'var(--sam-color-info-tint)',
-      borderBottom: '1px solid var(--sam-color-border-default)',
-    }}>
+    <div className={`px-4 py-3 border-b border-border-default ${isFailed ? 'bg-danger-tint' : 'bg-info-tint'}`}>
       {/* Status header */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--sam-space-2)',
-        marginBottom: 'var(--sam-space-2)',
-      }}>
+      <div className="flex items-center gap-2 mb-2">
         {!isTerminal(state.status) && <Spinner size="sm" />}
-        <span className="sam-type-secondary" style={{
-          color: isFailed ? 'var(--sam-color-danger)' : 'var(--sam-color-fg-primary)',
-          fontWeight: 500,
-        }}>
+        <span className={`sam-type-secondary font-medium ${isFailed ? 'text-danger' : 'text-fg-primary'}`}>
           {statusLabel}
         </span>
         {state.branchName && !isTerminal(state.status) && (
-          <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)' }}>
+          <span className="sam-type-caption text-fg-muted">
             {state.branchName}
           </span>
         )}
-        <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', marginLeft: 'auto' }}>
+        <span className="sam-type-caption text-fg-muted ml-auto">
           {elapsedDisplay}
         </span>
       </div>
 
       {/* Step progress bar (only during active provisioning) */}
       {!isTerminal(state.status) && (
-        <div style={{
-          display: 'flex',
-          gap: '2px',
-          height: '3px',
-          borderRadius: '2px',
-          overflow: 'hidden',
-        }}>
+        <div className="flex gap-[2px] h-[3px] rounded-sm overflow-hidden">
           {PROVISIONING_STEPS.map((step) => {
             const stepOrder = EXECUTION_STEP_ORDER[step];
             const isComplete = stepOrder < currentStepOrder;
@@ -529,14 +457,13 @@ function ProvisioningIndicator({ state }: { state: ProvisioningState }) {
               <div
                 key={step}
                 title={EXECUTION_STEP_LABELS[step]}
+                className="flex-1 transition-colors duration-300"
                 style={{
-                  flex: 1,
                   backgroundColor: isComplete
                     ? 'var(--sam-color-success)'
                     : isCurrent
                     ? 'var(--sam-color-accent-primary)'
                     : 'var(--sam-color-border-default)',
-                  transition: 'background-color 0.3s ease',
                 }}
               />
             );
@@ -546,15 +473,7 @@ function ProvisioningIndicator({ state }: { state: ProvisioningState }) {
 
       {/* Error message */}
       {state.errorMessage && (
-        <div className="sam-type-caption" style={{
-          color: 'var(--sam-color-danger)',
-          marginTop: 'var(--sam-space-2)',
-          padding: 'var(--sam-space-2) var(--sam-space-3)',
-          backgroundColor: 'var(--sam-color-bg-surface)',
-          borderRadius: 'var(--sam-radius-sm)',
-          border: '1px solid var(--sam-color-danger-tint)',
-          wordBreak: 'break-word',
-        }}>
+        <div className="sam-type-caption text-danger mt-2 p-2 px-3 bg-surface rounded-sm border border-danger-tint break-words">
           {state.errorMessage}
         </div>
       )}
@@ -585,24 +504,13 @@ function ChatInput({
   }, []);
 
   return (
-    <div style={{
-      borderTop: '1px solid var(--sam-color-border-default)',
-      padding: 'var(--sam-space-3) var(--sam-space-4)',
-      backgroundColor: 'var(--sam-color-bg-surface)',
-    }}>
+    <div className="border-t border-border-default px-4 py-3 bg-surface">
       {error && (
-        <div style={{
-          padding: 'var(--sam-space-2) var(--sam-space-3)',
-          marginBottom: 'var(--sam-space-2)',
-          borderRadius: 'var(--sam-radius-sm)',
-          backgroundColor: 'var(--sam-color-danger-tint)',
-          color: 'var(--sam-color-danger)',
-          fontSize: 'var(--sam-type-caption-size)',
-        }}>
+        <div className="p-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">
           {error}
         </div>
       )}
-      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'flex-end' }}>
+      <div className="flex gap-2 items-end">
         <textarea
           ref={inputRef}
           value={value}
@@ -616,45 +524,23 @@ function ChatInput({
           placeholder={placeholder}
           disabled={submitting}
           rows={1}
-          style={{
-            flex: 1,
-            padding: 'var(--sam-space-2) var(--sam-space-3)',
-            backgroundColor: 'var(--sam-color-bg-page)',
-            border: '1px solid var(--sam-color-border-default)',
-            borderRadius: 'var(--sam-radius-md)',
-            color: 'var(--sam-color-fg-primary)',
-            fontSize: 'var(--sam-type-body-size)',
-            outline: 'none',
-            resize: 'none',
-            fontFamily: 'inherit',
-            lineHeight: 1.5,
-            minHeight: '38px',
-            maxHeight: '120px',
-          }}
+          className="flex-1 p-2 px-3 bg-page border border-border-default rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px]"
         />
         <button
           type="button"
           onClick={onSubmit}
           disabled={submitting || !value.trim()}
+          className="px-3 py-2 border-none rounded-md text-base font-medium whitespace-nowrap"
           style={{
-            padding: 'var(--sam-space-2) var(--sam-space-3)',
             backgroundColor: submitting || !value.trim() ? 'var(--sam-color-bg-inset)' : 'var(--sam-color-accent-primary)',
             color: submitting || !value.trim() ? 'var(--sam-color-fg-muted)' : 'white',
-            border: 'none',
-            borderRadius: 'var(--sam-radius-md)',
             cursor: submitting || !value.trim() ? 'default' : 'pointer',
-            fontSize: 'var(--sam-type-body-size)',
-            fontWeight: 500,
-            whiteSpace: 'nowrap',
           }}
         >
           {submitting ? 'Sending...' : 'Send'}
         </button>
       </div>
-      <div className="sam-type-caption" style={{
-        color: 'var(--sam-color-fg-muted)',
-        marginTop: 'var(--sam-space-1)',
-      }}>
+      <div className="sam-type-caption text-fg-muted mt-1">
         Press Enter to send, Shift+Enter for new line
       </div>
     </div>

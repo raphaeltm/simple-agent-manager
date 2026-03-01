@@ -39,35 +39,27 @@ export const NodeEventsSection: FC<NodeEventsSectionProps> = ({
       />
 
       {nodeStatus && nodeStatus !== 'running' ? (
-        <div style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
+        <div className="text-fg-muted" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
           Events are only available when the node is running.
         </div>
       ) : error ? (
         <div
+          className="p-3 bg-danger-tint rounded-sm flex justify-between items-center"
           style={{
-            padding: 'var(--sam-space-3)',
-            backgroundColor: 'var(--sam-color-danger-tint)',
-            borderRadius: 'var(--sam-radius-sm)',
             border: '1px solid rgba(248, 113, 113, 0.3)',
             fontSize: 'var(--sam-type-secondary-size)',
             color: 'var(--sam-color-danger)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
           }}
         >
           <span>Failed to load events: {error}</span>
           {onRetry && (
             <button
               onClick={onRetry}
+              className="px-3 py-1 rounded-sm bg-transparent cursor-pointer"
               style={{
-                padding: 'var(--sam-space-1) var(--sam-space-3)',
                 fontSize: 'var(--sam-type-caption-size)',
                 border: '1px solid rgba(248, 113, 113, 0.3)',
-                borderRadius: 'var(--sam-radius-sm)',
-                backgroundColor: 'transparent',
                 color: 'var(--sam-color-danger)',
-                cursor: 'pointer',
               }}
             >
               Retry
@@ -75,58 +67,30 @@ export const NodeEventsSection: FC<NodeEventsSectionProps> = ({
           )}
         </div>
       ) : events.length === 0 ? (
-        <div style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
+        <div className="text-fg-muted" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
           No events recorded yet.
         </div>
       ) : (
-        <div
-          style={{
-            border: '1px solid var(--sam-color-border-default)',
-            borderRadius: 'var(--sam-radius-md)',
-            maxHeight: 320,
-            overflow: 'auto',
-          }}
-        >
+        <div className="border border-border-default rounded-md max-h-80 overflow-auto">
           {events.map((event, i) => (
             <div
               key={event.id}
-              style={{
-                padding: 'var(--sam-space-2) var(--sam-space-3)',
-                borderBottom:
-                  i === events.length - 1
-                    ? 'none'
-                    : '1px solid var(--sam-color-border-default)',
-                fontSize: 'var(--sam-type-caption-size)',
-              }}
+              className={`px-3 py-2 ${i === events.length - 1 ? '' : 'border-b border-border-default'}`}
+              style={{ fontSize: 'var(--sam-type-caption-size)' }}
             >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: 'var(--sam-space-2)',
-                }}
-              >
+              <div className="flex justify-between items-center gap-2">
                 <span
-                  style={{
-                    fontWeight: 600,
-                    color: levelColors[event.level] || 'var(--sam-color-fg-primary)',
-                  }}
+                  className="font-semibold"
+                  style={{ color: levelColors[event.level] || 'var(--sam-color-fg-primary)' }}
                 >
                   {event.type}
                 </span>
-                <span
-                  style={{
-                    fontSize: '0.6875rem',
-                    color: 'var(--sam-color-fg-muted)',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
+                <span className="text-fg-muted whitespace-nowrap" style={{ fontSize: '0.6875rem' }}>
                   {formatEventTime(event.createdAt)}
                 </span>
               </div>
               {event.message && (
-                <div style={{ color: 'var(--sam-color-fg-muted)', marginTop: 2 }}>
+                <div className="text-fg-muted mt-0.5">
                   {event.message}
                 </div>
               )}

@@ -66,22 +66,13 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
       />
 
       {!isRunning ? (
-        <div style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
+        <div className="text-fg-muted" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
           Start the node to view its logs.
         </div>
       ) : (
         <>
           {/* Toolbar */}
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'flex-end',
-              gap: 'var(--sam-space-3)',
-              marginBottom: 'var(--sam-space-3)',
-              flexWrap: 'wrap',
-            }}
-          >
+          <div className="flex justify-between items-end gap-3 mb-3 flex-wrap">
             <LogFilters
               source={filter.source}
               level={filter.level}
@@ -93,23 +84,20 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
               onContainerChange={setContainer}
             />
 
-            <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'center' }}>
+            <div className="flex gap-2 items-center">
               {/* Streaming indicator */}
               <span
+                className="inline-flex items-center gap-1 font-semibold"
                 style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
                   fontSize: '0.625rem',
-                  fontWeight: 600,
                   color: streaming ? '#22c55e' : 'var(--sam-color-fg-muted)',
                 }}
               >
                 <span
+                  className="rounded-full"
                   style={{
                     width: 6,
                     height: 6,
-                    borderRadius: '50%',
                     backgroundColor: streaming ? '#22c55e' : 'var(--sam-color-fg-disabled)',
                   }}
                 />
@@ -120,18 +108,7 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
               <button
                 onClick={togglePause}
                 title={paused ? 'Resume streaming' : 'Pause streaming'}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 28,
-                  height: 28,
-                  borderRadius: 'var(--sam-radius-sm, 4px)',
-                  border: '1px solid var(--sam-color-border-default)',
-                  backgroundColor: 'var(--sam-color-bg-surface)',
-                  color: 'var(--sam-color-fg-muted)',
-                  cursor: 'pointer',
-                }}
+                className="inline-flex items-center justify-center w-7 h-7 rounded-sm border border-border-default bg-surface text-fg-muted cursor-pointer"
               >
                 {paused ? <Play size={14} /> : <Pause size={14} />}
               </button>
@@ -140,18 +117,7 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
               <button
                 onClick={refresh}
                 title="Refresh logs"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 28,
-                  height: 28,
-                  borderRadius: 'var(--sam-radius-sm, 4px)',
-                  border: '1px solid var(--sam-color-border-default)',
-                  backgroundColor: 'var(--sam-color-bg-surface)',
-                  color: 'var(--sam-color-fg-muted)',
-                  cursor: 'pointer',
-                }}
+                className="inline-flex items-center justify-center w-7 h-7 rounded-sm border border-border-default bg-surface text-fg-muted cursor-pointer"
               >
                 <RefreshCw size={14} />
               </button>
@@ -161,14 +127,12 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
           {/* Error banner */}
           {error && (
             <div
+              className="px-3 py-2 rounded-sm mb-2"
               style={{
-                padding: 'var(--sam-space-2) var(--sam-space-3)',
-                borderRadius: 'var(--sam-radius-sm, 4px)',
                 backgroundColor: 'rgba(239, 68, 68, 0.08)',
                 border: '1px solid rgba(239, 68, 68, 0.2)',
                 color: 'var(--sam-color-fg-danger, #ef4444)',
                 fontSize: 'var(--sam-type-caption-size)',
-                marginBottom: 'var(--sam-space-2)',
               }}
             >
               {error}
@@ -184,20 +148,15 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
               <Skeleton width="95%" height={20} />
             </div>
           ) : entries.length === 0 ? (
-            <div style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)', padding: 'var(--sam-space-4) 0' }}>
+            <div className="text-fg-muted py-4" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
               No log entries found with the current filters.
             </div>
           ) : (
             <div
               ref={listRef}
               onScroll={handleScroll}
-              style={{
-                maxHeight: 500,
-                overflowY: 'auto',
-                border: '1px solid var(--sam-color-border-default)',
-                borderRadius: 'var(--sam-radius-md)',
-                backgroundColor: 'var(--sam-color-bg-primary, #0d1117)',
-              }}
+              className="max-h-[500px] overflow-y-auto border border-border-default rounded-md"
+              style={{ backgroundColor: 'var(--sam-color-bg-primary, #0d1117)' }}
             >
               {entries.map((entry, idx) => (
                 <LogEntry
@@ -209,17 +168,15 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
 
               {/* Load more */}
               {hasMore && (
-                <div style={{ padding: 'var(--sam-space-2)', textAlign: 'center' }}>
+                <div className="p-2 text-center">
                   <button
                     onClick={loadMore}
                     disabled={loading}
+                    className="bg-transparent border-none underline"
                     style={{
                       fontSize: 'var(--sam-type-caption-size)',
                       color: 'var(--sam-color-fg-accent, #3b82f6)',
-                      background: 'none',
-                      border: 'none',
                       cursor: loading ? 'default' : 'pointer',
-                      textDecoration: 'underline',
                     }}
                   >
                     {loading ? 'Loading...' : 'Load older entries'}
@@ -231,7 +188,7 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
 
           {/* Match count when searching */}
           {filter.search && entries.length > 0 && (
-            <div style={{ fontSize: '0.6875rem', color: 'var(--sam-color-fg-muted)', marginTop: 'var(--sam-space-1)' }}>
+            <div className="text-fg-muted mt-1" style={{ fontSize: '0.6875rem' }}>
               {entries.length} entries matching &ldquo;{filter.search}&rdquo;
             </div>
           )}

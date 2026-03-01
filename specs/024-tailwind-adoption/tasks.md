@@ -102,93 +102,93 @@
 
 ### Layout & Navigation
 
-- [ ] T033 [P] [US1] Migrate `apps/web/src/components/AppShell.tsx` — replace inline styles + remove `<style>` hover injection for sign-out button
-- [ ] T034 [P] [US1] Migrate `apps/web/src/components/NavSidebar.tsx` — replace inline styles with Tailwind classes
-- [ ] T035 [P] [US1] Migrate `apps/web/src/components/MobileNavDrawer.tsx` — replace inline styles, remove `<style>` block (keyframes extracted in T012), use Tailwind for hover/active states
-- [ ] T036 [P] [US1] Migrate `apps/web/src/components/UserMenu.tsx` — replace inline styles with Tailwind classes
-- [ ] T037 [P] [US1] Migrate `apps/web/src/components/CommandPalette.tsx` — replace inline styles with Tailwind classes
-- [ ] T038 [P] [US1] Migrate `apps/web/src/components/CommandPaletteButton.tsx` — replace inline styles with Tailwind classes
+- [x] T033 [P] [US1] Migrate `apps/web/src/components/AppShell.tsx` — replace inline styles + remove `<style>` hover injection for sign-out button
+- [x] T034 [P] [US1] Migrate `apps/web/src/components/NavSidebar.tsx` — replace inline styles with Tailwind classes
+- [x] T035 [P] [US1] Migrate `apps/web/src/components/MobileNavDrawer.tsx` — replace inline styles, remove `<style>` block (keyframes extracted in T012), use Tailwind for hover/active states
+- [x] T036 [P] [US1] Migrate `apps/web/src/components/UserMenu.tsx` — replace inline styles with Tailwind classes
+- [x] T037 [P] [US1] Migrate `apps/web/src/components/CommandPalette.tsx` — replace inline styles with Tailwind classes
+- [x] T038 [P] [US1] Migrate `apps/web/src/components/CommandPaletteButton.tsx` — replace inline styles with Tailwind classes
 
 ### Shared Components
 
-- [ ] T039 [P] [US1] Migrate `apps/web/src/components/ConfirmDialog.tsx` — replace inline styles with Tailwind classes
-- [ ] T040 [P] [US1] Migrate `apps/web/src/components/StatusBadge.tsx` — replace inline styles with Tailwind classes
-- [ ] T041 [P] [US1] Migrate `apps/web/src/components/CollapsibleSection.tsx` — replace inline styles with Tailwind classes
-- [ ] T042 [P] [US1] Migrate `apps/web/src/components/ErrorBoundary.tsx` — replace inline styles with Tailwind classes
-- [ ] T043 [P] [US1] Migrate `apps/web/src/components/MarkdownRenderer.tsx` — replace inline styles with Tailwind classes
-- [ ] T044 [P] [US1] Migrate `apps/web/src/components/KeyboardShortcutsHelp.tsx` — replace inline styles with Tailwind classes
-- [ ] T045 [P] [US1] Migrate `apps/web/src/components/OrphanedSessionsBanner.tsx` — replace inline styles with Tailwind classes
-- [ ] T046 [P] [US1] Migrate `apps/web/src/components/OnboardingChecklist.tsx` — replace inline styles with Tailwind classes
+- [x] T039 [P] [US1] Migrate `apps/web/src/components/ConfirmDialog.tsx` — replace inline styles with Tailwind classes
+- [x] T040 [P] [US1] Migrate `apps/web/src/components/StatusBadge.tsx` — replace inline styles with Tailwind classes
+- [x] T041 [P] [US1] Migrate `apps/web/src/components/CollapsibleSection.tsx` — replace inline styles with Tailwind classes
+- [x] T042 [P] [US1] Migrate `apps/web/src/components/ErrorBoundary.tsx` — replace inline styles with Tailwind classes
+- [x] T043 [P] [US1] Migrate `apps/web/src/components/MarkdownRenderer.tsx` — replace inline styles with Tailwind classes
+- [x] T044 [P] [US1] Migrate `apps/web/src/components/KeyboardShortcutsHelp.tsx` — replace inline styles with Tailwind classes
+- [x] T045 [P] [US1] Migrate `apps/web/src/components/OrphanedSessionsBanner.tsx` — replace inline styles with Tailwind classes
+- [x] T046 [P] [US1] Migrate `apps/web/src/components/OnboardingChecklist.tsx` — replace inline styles with Tailwind classes
 
 ### Auth
 
-- [ ] T047 [P] [US1] Migrate `apps/web/src/components/AuthProvider.tsx` and `apps/web/src/components/ProtectedRoute.tsx` — replace inline styles with Tailwind classes
-- [ ] T048 [P] [US1] Migrate `apps/web/src/components/AuthInstructions.tsx` — replace inline styles with Tailwind classes
-- [ ] T049 [P] [US1] Migrate `apps/web/src/components/CredentialToggle.tsx` — replace inline styles with Tailwind classes
+- [x] T047 [P] [US1] Migrate `apps/web/src/components/AuthProvider.tsx` and `apps/web/src/components/ProtectedRoute.tsx` — replace inline styles with Tailwind classes
+- [x] T048 [P] [US1] Migrate `apps/web/src/components/AuthInstructions.tsx` — replace inline styles with Tailwind classes
+- [x] T049 [P] [US1] Migrate `apps/web/src/components/CredentialToggle.tsx` — replace inline styles with Tailwind classes
 
 ### Pages: Simple
 
-- [ ] T050 [P] [US1] Migrate `apps/web/src/pages/Landing.tsx` — replace inline styles, remove `<style>` responsive grid injection, use Tailwind breakpoints
-- [ ] T051 [P] [US1] Migrate `apps/web/src/pages/PendingApproval.tsx` — replace inline styles with Tailwind classes
-- [ ] T052 [P] [US1] Migrate `apps/web/src/pages/Settings.tsx` and `apps/web/src/pages/SettingsContext.tsx` — replace inline styles with Tailwind classes
-- [ ] T053 [P] [US1] Migrate `apps/web/src/pages/SettingsCloudProvider.tsx` — replace inline styles with Tailwind classes
-- [ ] T054 [P] [US1] Migrate `apps/web/src/pages/SettingsGitHub.tsx` — replace inline styles with Tailwind classes
-- [ ] T055 [P] [US1] Migrate `apps/web/src/pages/SettingsAgentKeys.tsx` and `apps/web/src/pages/SettingsAgentConfig.tsx` — replace inline styles with Tailwind classes
-- [ ] T056 [P] [US1] Migrate `apps/web/src/components/HetznerTokenForm.tsx` — replace inline styles with Tailwind classes
-- [ ] T057 [P] [US1] Migrate `apps/web/src/components/AgentSettingsSection.tsx`, `apps/web/src/components/AgentKeysSection.tsx`, `apps/web/src/components/AgentKeyCard.tsx` — replace inline styles with Tailwind classes
-- [ ] T058 [P] [US1] Migrate `apps/web/src/components/GitHubAppSection.tsx` — replace inline styles with Tailwind classes
+- [x] T050 [P] [US1] Migrate `apps/web/src/pages/Landing.tsx` — replace inline styles, remove `<style>` responsive grid injection, use Tailwind breakpoints
+- [x] T051 [P] [US1] Migrate `apps/web/src/pages/PendingApproval.tsx` — replace inline styles with Tailwind classes
+- [x] T052 [P] [US1] Migrate `apps/web/src/pages/Settings.tsx` and `apps/web/src/pages/SettingsContext.tsx` — replace inline styles with Tailwind classes
+- [x] T053 [P] [US1] Migrate `apps/web/src/pages/SettingsCloudProvider.tsx` — replace inline styles with Tailwind classes
+- [x] T054 [P] [US1] Migrate `apps/web/src/pages/SettingsGitHub.tsx` — replace inline styles with Tailwind classes
+- [x] T055 [P] [US1] Migrate `apps/web/src/pages/SettingsAgentKeys.tsx` and `apps/web/src/pages/SettingsAgentConfig.tsx` — replace inline styles with Tailwind classes
+- [x] T056 [P] [US1] Migrate `apps/web/src/components/HetznerTokenForm.tsx` — replace inline styles with Tailwind classes
+- [x] T057 [P] [US1] Migrate `apps/web/src/components/AgentSettingsSection.tsx`, `apps/web/src/components/AgentKeysSection.tsx`, `apps/web/src/components/AgentKeyCard.tsx` — replace inline styles with Tailwind classes
+- [x] T058 [P] [US1] Migrate `apps/web/src/components/GitHubAppSection.tsx` — replace inline styles with Tailwind classes
 
 ### Pages: Projects & Tasks
 
-- [ ] T059 [P] [US1] Migrate `apps/web/src/pages/Projects.tsx` and `apps/web/src/pages/ProjectCreate.tsx` — replace inline styles with Tailwind classes
-- [ ] T060 [P] [US1] Migrate `apps/web/src/components/project/ProjectForm.tsx` and `apps/web/src/components/project/ProjectInfoPanel.tsx` — replace inline styles with Tailwind classes
-- [ ] T061 [P] [US1] Migrate `apps/web/src/pages/Project.tsx`, `apps/web/src/pages/ProjectContext.tsx`, `apps/web/src/pages/ProjectOverview.tsx` — replace inline styles with Tailwind classes
-- [ ] T062 [P] [US1] Migrate `apps/web/src/pages/ProjectSettings.tsx` and `apps/web/src/components/project/SettingsDrawer.tsx` — replace inline styles with Tailwind classes
-- [ ] T063 [P] [US1] Migrate `apps/web/src/pages/ProjectActivity.tsx` and `apps/web/src/components/ActivityFeed.tsx` — replace inline styles with Tailwind classes
-- [ ] T064 [P] [US1] Migrate `apps/web/src/pages/ProjectSessions.tsx` and `apps/web/src/pages/ChatSessionView.tsx` — replace inline styles with Tailwind classes
-- [ ] T065 [P] [US1] Migrate `apps/web/src/pages/ProjectTasks.tsx`, `apps/web/src/pages/ProjectKanban.tsx` — replace inline styles with Tailwind classes
-- [ ] T066 [P] [US1] Migrate `apps/web/src/components/project/TaskList.tsx`, `apps/web/src/components/project/TaskForm.tsx`, `apps/web/src/components/project/TaskFilters.tsx` — replace inline styles with Tailwind classes
-- [ ] T067 [P] [US1] Migrate `apps/web/src/components/project/TaskDelegateDialog.tsx`, `apps/web/src/components/project/TaskDependencyEditor.tsx`, `apps/web/src/components/project/NeedsAttentionSection.tsx` — replace inline styles with Tailwind classes
-- [ ] T068 [P] [US1] Migrate `apps/web/src/pages/TaskDetail.tsx` — replace inline styles + remove `<style>` injection, use Tailwind breakpoints
-- [ ] T069 [P] [US1] Migrate `apps/web/src/components/task/TaskKanbanCard.tsx`, `apps/web/src/components/task/TaskKanbanBoard.tsx`, `apps/web/src/components/task/TaskSubmitForm.tsx` — replace inline styles with Tailwind classes
-- [ ] T070 [P] [US1] Migrate `apps/web/src/components/ProjectSummaryCard.tsx` — replace inline styles with Tailwind classes
+- [x] T059 [P] [US1] Migrate `apps/web/src/pages/Projects.tsx` and `apps/web/src/pages/ProjectCreate.tsx` — replace inline styles with Tailwind classes
+- [x] T060 [P] [US1] Migrate `apps/web/src/components/project/ProjectForm.tsx` and `apps/web/src/components/project/ProjectInfoPanel.tsx` — replace inline styles with Tailwind classes
+- [x] T061 [P] [US1] Migrate `apps/web/src/pages/Project.tsx`, `apps/web/src/pages/ProjectContext.tsx`, `apps/web/src/pages/ProjectOverview.tsx` — replace inline styles with Tailwind classes
+- [x] T062 [P] [US1] Migrate `apps/web/src/pages/ProjectSettings.tsx` and `apps/web/src/components/project/SettingsDrawer.tsx` — replace inline styles with Tailwind classes
+- [x] T063 [P] [US1] Migrate `apps/web/src/pages/ProjectActivity.tsx` and `apps/web/src/components/ActivityFeed.tsx` — replace inline styles with Tailwind classes
+- [x] T064 [P] [US1] Migrate `apps/web/src/pages/ProjectSessions.tsx` and `apps/web/src/pages/ChatSessionView.tsx` — replace inline styles with Tailwind classes
+- [x] T065 [P] [US1] Migrate `apps/web/src/pages/ProjectTasks.tsx`, `apps/web/src/pages/ProjectKanban.tsx` — replace inline styles with Tailwind classes
+- [x] T066 [P] [US1] Migrate `apps/web/src/components/project/TaskList.tsx`, `apps/web/src/components/project/TaskForm.tsx`, `apps/web/src/components/project/TaskFilters.tsx` — replace inline styles with Tailwind classes
+- [x] T067 [P] [US1] Migrate `apps/web/src/components/project/TaskDelegateDialog.tsx`, `apps/web/src/components/project/TaskDependencyEditor.tsx`, `apps/web/src/components/project/NeedsAttentionSection.tsx` — replace inline styles with Tailwind classes
+- [x] T068 [P] [US1] Migrate `apps/web/src/pages/TaskDetail.tsx` — replace inline styles + remove `<style>` injection, use Tailwind breakpoints
+- [x] T069 [P] [US1] Migrate `apps/web/src/components/task/TaskKanbanCard.tsx`, `apps/web/src/components/task/TaskKanbanBoard.tsx`, `apps/web/src/components/task/TaskSubmitForm.tsx` — replace inline styles with Tailwind classes
+- [x] T070 [P] [US1] Migrate `apps/web/src/components/ProjectSummaryCard.tsx` — replace inline styles with Tailwind classes
 
 ### Pages: Chat
 
-- [ ] T071 [P] [US1] Migrate `apps/web/src/pages/ProjectChat.tsx` — replace inline styles, remove `<style>` drawer animation block (keyframes extracted in T013)
-- [ ] T072 [P] [US1] Migrate `apps/web/src/components/chat/SessionSidebar.tsx` and `apps/web/src/components/chat/ProjectMessageView.tsx` — replace inline styles with Tailwind classes
-- [ ] T073 [P] [US1] Migrate `apps/web/src/components/ChatSession.tsx` and `apps/web/src/components/ChatSessionList.tsx` — replace inline styles, remove `<style>` hover injection from ChatSessionList
+- [x] T071 [P] [US1] Migrate `apps/web/src/pages/ProjectChat.tsx` — replace inline styles, remove `<style>` drawer animation block (keyframes extracted in T013)
+- [x] T072 [P] [US1] Migrate `apps/web/src/components/chat/SessionSidebar.tsx` and `apps/web/src/components/chat/ProjectMessageView.tsx` — replace inline styles with Tailwind classes
+- [x] T073 [P] [US1] Migrate `apps/web/src/components/ChatSession.tsx` and `apps/web/src/components/ChatSessionList.tsx` — replace inline styles, remove `<style>` hover injection from ChatSessionList
 
 ### Pages: Nodes
 
-- [ ] T074 [P] [US1] Migrate `apps/web/src/pages/Nodes.tsx` — replace inline styles, remove `<style>` responsive grid injection, use Tailwind breakpoints
-- [ ] T075 [P] [US1] Migrate `apps/web/src/pages/Node.tsx` — replace inline styles with Tailwind classes
-- [ ] T076 [P] [US1] Migrate `apps/web/src/components/node/NodeCard.tsx`, `apps/web/src/components/node/NodeOverviewSection.tsx`, `apps/web/src/components/node/SectionHeader.tsx`, `apps/web/src/components/node/Section.tsx` — replace inline styles with Tailwind classes
-- [ ] T077 [P] [US1] Migrate `apps/web/src/components/node/ResourceBar.tsx`, `apps/web/src/components/node/MiniMetricBadge.tsx`, `apps/web/src/components/node/SystemResourcesSection.tsx` — replace inline styles with Tailwind classes
-- [ ] T078 [P] [US1] Migrate `apps/web/src/components/node/DockerSection.tsx`, `apps/web/src/components/node/SoftwareSection.tsx`, `apps/web/src/components/node/NodeWorkspacesSection.tsx`, `apps/web/src/components/node/NodeWorkspaceMiniCard.tsx` — replace inline styles with Tailwind classes
-- [ ] T079 [P] [US1] Migrate `apps/web/src/components/node/LogsSection.tsx`, `apps/web/src/components/node/LogEntry.tsx`, `apps/web/src/components/node/LogFilters.tsx`, `apps/web/src/components/node/NodeEventsSection.tsx` — replace inline styles with Tailwind classes
+- [x] T074 [P] [US1] Migrate `apps/web/src/pages/Nodes.tsx` — replace inline styles, remove `<style>` responsive grid injection, use Tailwind breakpoints
+- [x] T075 [P] [US1] Migrate `apps/web/src/pages/Node.tsx` — replace inline styles with Tailwind classes
+- [x] T076 [P] [US1] Migrate `apps/web/src/components/node/NodeCard.tsx`, `apps/web/src/components/node/NodeOverviewSection.tsx`, `apps/web/src/components/node/SectionHeader.tsx`, `apps/web/src/components/node/Section.tsx` — replace inline styles with Tailwind classes
+- [x] T077 [P] [US1] Migrate `apps/web/src/components/node/ResourceBar.tsx`, `apps/web/src/components/node/MiniMetricBadge.tsx`, `apps/web/src/components/node/SystemResourcesSection.tsx` — replace inline styles with Tailwind classes
+- [x] T078 [P] [US1] Migrate `apps/web/src/components/node/DockerSection.tsx`, `apps/web/src/components/node/SoftwareSection.tsx`, `apps/web/src/components/node/NodeWorkspacesSection.tsx`, `apps/web/src/components/node/NodeWorkspaceMiniCard.tsx` — replace inline styles with Tailwind classes
+- [x] T079 [P] [US1] Migrate `apps/web/src/components/node/LogsSection.tsx`, `apps/web/src/components/node/LogEntry.tsx`, `apps/web/src/components/node/LogFilters.tsx`, `apps/web/src/components/node/NodeEventsSection.tsx` — replace inline styles with Tailwind classes
 
 ### Pages: Workspace
 
-- [ ] T080 [P] [US1] Migrate `apps/web/src/pages/Workspace.tsx` and `apps/web/src/pages/CreateWorkspace.tsx` — replace inline styles with Tailwind classes
-- [ ] T081 [P] [US1] Migrate `apps/web/src/components/WorkspaceCard.tsx`, `apps/web/src/components/WorkspaceSidebar.tsx`, `apps/web/src/components/WorkspaceTabStrip.tsx` — replace inline styles, remove `<style>` hover injection from WorkspaceTabStrip
-- [ ] T082 [P] [US1] Migrate `apps/web/src/components/GitChangesPanel.tsx`, `apps/web/src/components/GitChangesButton.tsx`, `apps/web/src/components/GitDiffView.tsx` — replace inline styles, remove `<style>` injection from GitChangesPanel
-- [ ] T083 [P] [US1] Migrate `apps/web/src/components/FileBrowserPanel.tsx`, `apps/web/src/components/FileBrowserButton.tsx`, `apps/web/src/components/FileViewerPanel.tsx` — replace inline styles with Tailwind classes
-- [ ] T084 [P] [US1] Migrate `apps/web/src/components/WorktreeSelector.tsx`, `apps/web/src/components/BranchSelector.tsx`, `apps/web/src/components/RepoSelector.tsx` — replace inline styles with Tailwind classes
+- [x] T080 [P] [US1] Migrate `apps/web/src/pages/Workspace.tsx` and `apps/web/src/pages/CreateWorkspace.tsx` — replace inline styles with Tailwind classes
+- [x] T081 [P] [US1] Migrate `apps/web/src/components/WorkspaceCard.tsx`, `apps/web/src/components/WorkspaceSidebar.tsx`, `apps/web/src/components/WorkspaceTabStrip.tsx` — replace inline styles, remove `<style>` hover injection from WorkspaceTabStrip
+- [x] T082 [P] [US1] Migrate `apps/web/src/components/GitChangesPanel.tsx`, `apps/web/src/components/GitChangesButton.tsx`, `apps/web/src/components/GitDiffView.tsx` — replace inline styles, remove `<style>` injection from GitChangesPanel
+- [x] T083 [P] [US1] Migrate `apps/web/src/components/FileBrowserPanel.tsx`, `apps/web/src/components/FileBrowserButton.tsx`, `apps/web/src/components/FileViewerPanel.tsx` — replace inline styles with Tailwind classes
+- [x] T084 [P] [US1] Migrate `apps/web/src/components/WorktreeSelector.tsx`, `apps/web/src/components/BranchSelector.tsx`, `apps/web/src/components/RepoSelector.tsx` — replace inline styles with Tailwind classes
 
 ### Pages: Admin
 
-- [ ] T085 [P] [US1] Migrate `apps/web/src/pages/Admin.tsx`, `apps/web/src/pages/AdminOverview.tsx`, `apps/web/src/pages/AdminUsers.tsx` — replace inline styles with Tailwind classes
-- [ ] T086 [P] [US1] Migrate `apps/web/src/pages/AdminErrors.tsx`, `apps/web/src/pages/AdminLogs.tsx`, `apps/web/src/pages/AdminStream.tsx` — replace inline styles with Tailwind classes
-- [ ] T087 [P] [US1] Migrate `apps/web/src/components/admin/HealthOverview.tsx`, `apps/web/src/components/admin/ErrorList.tsx`, `apps/web/src/components/admin/ErrorTrends.tsx` — replace inline styles with Tailwind classes
-- [ ] T088 [P] [US1] Migrate `apps/web/src/components/admin/LogViewer.tsx`, `apps/web/src/components/admin/LogStream.tsx`, `apps/web/src/components/admin/ObservabilityFilters.tsx`, `apps/web/src/components/admin/ObservabilityLogEntry.tsx` — replace inline styles with Tailwind classes
+- [x] T085 [P] [US1] Migrate `apps/web/src/pages/Admin.tsx`, `apps/web/src/pages/AdminOverview.tsx`, `apps/web/src/pages/AdminUsers.tsx` — replace inline styles with Tailwind classes
+- [x] T086 [P] [US1] Migrate `apps/web/src/pages/AdminErrors.tsx`, `apps/web/src/pages/AdminLogs.tsx`, `apps/web/src/pages/AdminStream.tsx` — replace inline styles with Tailwind classes
+- [x] T087 [P] [US1] Migrate `apps/web/src/components/admin/HealthOverview.tsx`, `apps/web/src/components/admin/ErrorList.tsx`, `apps/web/src/components/admin/ErrorTrends.tsx` — replace inline styles with Tailwind classes
+- [x] T088 [P] [US1] Migrate `apps/web/src/components/admin/LogViewer.tsx`, `apps/web/src/components/admin/LogStream.tsx`, `apps/web/src/components/admin/ObservabilityFilters.tsx`, `apps/web/src/components/admin/ObservabilityLogEntry.tsx` — replace inline styles with Tailwind classes
 
 ### Remaining
 
-- [ ] T089 [P] [US1] Migrate `apps/web/src/components/ui/SplitButton.tsx` — replace inline styles, remove `<style>` hover injection
-- [ ] T090 [P] [US1] Migrate `apps/web/src/pages/UiStandards.tsx` — replace inline styles with Tailwind classes
-- [ ] T091 [US1] Migrate `apps/web/src/pages/Dashboard.tsx` — replace inline styles, remove `<style>` responsive grid injection, use Tailwind breakpoints (`grid-cols-1 md:grid-cols-2 lg:grid-cols-3`)
-- [ ] T092 [US1] Full build verification: run `pnpm build` from repo root to confirm all packages build successfully
+- [x] T089 [P] [US1] Migrate `apps/web/src/components/ui/SplitButton.tsx` — replace inline styles, remove `<style>` hover injection
+- [x] T090 [P] [US1] Migrate `apps/web/src/pages/UiStandards.tsx` — replace inline styles with Tailwind classes
+- [x] T091 [US1] Migrate `apps/web/src/pages/Dashboard.tsx` — replace inline styles, remove `<style>` responsive grid injection, use Tailwind breakpoints (`grid-cols-1 md:grid-cols-2 lg:grid-cols-3`)
+- [x] T092 [US1] Full build verification: run `pnpm build` from repo root to confirm all packages build successfully
 
 **Checkpoint**: All web app components migrated. SC-002 (zero runtime `<style>` injections) and SC-008 (90%+ inline styles replaced) should be achieved.
 

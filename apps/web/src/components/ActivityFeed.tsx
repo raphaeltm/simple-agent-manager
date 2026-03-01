@@ -101,12 +101,7 @@ function formatActorLabel(event: ActivityEventResponse): string {
 export function ActivityFeed({ events, hasMore, onLoadMore, loading }: ActivityFeedProps) {
   if (events.length === 0 && !loading) {
     return (
-      <div style={{
-        color: 'var(--sam-color-fg-muted)',
-        fontSize: 'var(--sam-type-secondary-size)',
-        padding: 'var(--sam-space-4)',
-        textAlign: 'center',
-      }}>
+      <div className="text-fg-muted text-sm p-4 text-center">
         No activity yet.
       </div>
     );
@@ -114,55 +109,30 @@ export function ActivityFeed({ events, hasMore, onLoadMore, loading }: ActivityF
 
   return (
     <div>
-      <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+      <ul className="m-0 p-0 list-none">
         {events.map((event) => {
           const color = getEventColor(event.eventType);
           return (
             <li
               key={event.id}
-              style={{
-                display: 'flex',
-                gap: 'var(--sam-space-3)',
-                padding: 'var(--sam-space-3) var(--sam-space-4)',
-                borderBottom: '1px solid var(--sam-color-border-default)',
-              }}
+              className="flex gap-3 py-3 px-4 border-b border-border-default"
             >
               {/* Icon */}
-              <div style={{
-                width: '28px',
-                height: '28px',
-                borderRadius: '50%',
-                backgroundColor: color,
-                color: 'var(--sam-color-fg-on-accent)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 'var(--sam-type-caption-size)',
-                fontWeight: 700,
-                flexShrink: 0,
-                marginTop: '2px',
-              }}>
+              <div
+                className="w-7 h-7 rounded-full text-fg-on-accent flex items-center justify-center text-xs font-bold shrink-0 mt-0.5"
+                style={{ backgroundColor: color }}
+              >
                 {getEventIcon(event.eventType)}
               </div>
 
               {/* Content */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{
-                  fontSize: 'var(--sam-type-secondary-size)',
-                  color: 'var(--sam-color-fg-primary)',
-                  lineHeight: 1.4,
-                }}>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-fg-primary leading-snug">
                   {formatEventDescription(event)}
                 </div>
-                <div style={{
-                  display: 'flex',
-                  gap: 'var(--sam-space-2)',
-                  fontSize: 'var(--sam-type-caption-size)',
-                  color: 'var(--sam-color-fg-muted)',
-                  marginTop: '2px',
-                }}>
+                <div className="flex gap-2 text-xs text-fg-muted mt-0.5">
                   <span>{formatActorLabel(event)}</span>
-                  <span style={{ opacity: 0.5 }}>-</span>
+                  <span className="opacity-50">-</span>
                   <span>{formatRelativeTime(event.createdAt)}</span>
                 </div>
               </div>
@@ -172,20 +142,11 @@ export function ActivityFeed({ events, hasMore, onLoadMore, loading }: ActivityF
       </ul>
 
       {hasMore && (
-        <div style={{ padding: 'var(--sam-space-3) var(--sam-space-4)', textAlign: 'center' }}>
+        <div className="py-3 px-4 text-center">
           <button
             onClick={onLoadMore}
             disabled={loading}
-            style={{
-              padding: 'var(--sam-space-2) var(--sam-space-4)',
-              fontSize: 'var(--sam-type-caption-size)',
-              color: 'var(--sam-color-fg-primary)',
-              backgroundColor: 'var(--sam-color-bg-inset)',
-              border: '1px solid var(--sam-color-border-default)',
-              borderRadius: 'var(--sam-radii-md, 6px)',
-              cursor: loading ? 'default' : 'pointer',
-              opacity: loading ? 0.6 : 1,
-            }}
+            className="py-2 px-4 text-xs text-fg-primary bg-inset border border-border-default rounded-md cursor-pointer disabled:cursor-default disabled:opacity-60"
           >
             {loading ? 'Loading...' : 'Load more'}
           </button>

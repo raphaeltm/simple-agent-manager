@@ -30,20 +30,16 @@ export const MiniMetricBadge: FC<MiniMetricBadgeProps> = ({
 
   return (
     <span
+      className="inline-flex items-center gap-0.5 rounded-full whitespace-nowrap"
       style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 3,
         padding: '1px 6px',
-        borderRadius: 9999,
         backgroundColor: bg,
         fontSize: '0.6875rem',
         fontWeight: 500,
         color: fg,
-        whiteSpace: 'nowrap',
       }}
     >
-      <span style={{ opacity: 0.7 }}>{label}</span>
+      <span className="opacity-70">{label}</span>
       {value.toFixed(precision)}{suffix}
     </span>
   );

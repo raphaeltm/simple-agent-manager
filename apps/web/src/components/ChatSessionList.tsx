@@ -40,39 +40,16 @@ export function ChatSessionList({ sessions, onSelect }: ChatSessionListProps) {
   }
 
   return (
-    <>
-    <style>{`.chat-session-row:hover { background-color: var(--sam-color-bg-inset); }`}</style>
-    <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: '1px' }}>
+    <ul className="m-0 p-0 list-none grid gap-px">
       {sessions.map((session) => (
         <li
           key={session.id}
-          className="chat-session-row"
           onClick={() => onSelect(session.id)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--sam-space-3)',
-            padding: 'var(--sam-space-3) var(--sam-space-4)',
-            cursor: 'pointer',
-            borderBottom: '1px solid var(--sam-color-border-default)',
-            transition: 'background-color 0.1s',
-          }}
+          className="flex items-center gap-3 px-4 py-3 cursor-pointer border-b border-border-default transition-colors duration-100 hover:bg-inset"
         >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--sam-space-2)',
-              marginBottom: '2px',
-            }}>
-              <span style={{
-                fontSize: 'var(--sam-type-secondary-size)',
-                fontWeight: 500,
-                color: 'var(--sam-color-fg-primary)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-[2px]">
+              <span className="text-sm font-medium text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap">
                 {session.topic || `Session ${session.id.slice(0, 8)}`}
               </span>
               <StatusBadge
@@ -80,27 +57,16 @@ export function ChatSessionList({ sessions, onSelect }: ChatSessionListProps) {
                 label={session.status}
               />
             </div>
-            <div style={{
-              display: 'flex',
-              gap: 'var(--sam-space-3)',
-              fontSize: 'var(--sam-type-caption-size)',
-              color: 'var(--sam-color-fg-muted)',
-            }}>
+            <div className="flex gap-3 text-xs text-fg-muted">
               <span>{session.messageCount} message{session.messageCount !== 1 ? 's' : ''}</span>
               <span>{formatDuration(session.startedAt, session.endedAt)}</span>
             </div>
           </div>
-          <span style={{
-            fontSize: 'var(--sam-type-caption-size)',
-            color: 'var(--sam-color-fg-muted)',
-            whiteSpace: 'nowrap',
-            flexShrink: 0,
-          }}>
+          <span className="text-xs text-fg-muted whitespace-nowrap shrink-0">
             {formatRelativeTime(session.startedAt)}
           </span>
         </li>
       ))}
     </ul>
-    </>
   );
 }

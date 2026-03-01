@@ -30,35 +30,20 @@ export const NodeWorkspacesSection: FC<NodeWorkspacesSectionProps> = ({
       />
 
       {workspaces.length === 0 ? (
-        <div
-          style={{
-            textAlign: 'center',
-            padding: 'var(--sam-space-6)',
-            border: '1px dashed var(--sam-color-border-default)',
-            borderRadius: 'var(--sam-radius-md)',
-          }}
-        >
-          <div style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)', marginBottom: 'var(--sam-space-3)' }}>
+        <div className="text-center p-6 border border-dashed border-border-default rounded-md">
+          <div className="text-fg-muted mb-3" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
             No workspaces on this node yet.
           </div>
           <button
             onClick={onCreateWorkspace}
-            style={{
-              padding: 'var(--sam-space-2) var(--sam-space-4)',
-              backgroundColor: 'var(--sam-color-accent-primary)',
-              color: 'var(--sam-color-fg-on-accent)',
-              border: 'none',
-              borderRadius: 'var(--sam-radius-md)',
-              fontSize: 'var(--sam-type-caption-size)',
-              fontWeight: 500,
-              cursor: 'pointer',
-            }}
+            className="px-4 py-2 bg-accent text-fg-on-accent border-none rounded-md font-medium cursor-pointer"
+            style={{ fontSize: 'var(--sam-type-caption-size)' }}
           >
             Create Workspace
           </button>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-2)' }}>
+        <div className="flex flex-col gap-2">
           {workspaces.map((ws) => (
             <WorkspaceCard
               key={ws.id}

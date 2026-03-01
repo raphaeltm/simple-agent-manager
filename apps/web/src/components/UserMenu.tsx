@@ -36,48 +36,29 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
     <img
       src={user.image}
       alt={user.name || user.email}
-      style={{ height: 32, width: 32, borderRadius: '50%' }}
+      className="h-8 w-8 rounded-full"
     />
   ) : (
-    <div style={{
-      height: 32,
-      width: 32,
-      borderRadius: '50%',
-      backgroundColor: 'var(--sam-color-accent-primary)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      color: 'var(--sam-color-fg-on-accent)',
-      fontSize: 'var(--sam-type-secondary-size)',
-      fontWeight: 500,
-    }}>
+    <div className="h-8 w-8 rounded-full bg-accent flex items-center justify-center text-fg-on-accent text-sm font-medium">
       {(user.name || user.email).charAt(0).toUpperCase()}
     </div>
   );
 
   return (
-    <div style={{ position: 'relative' }} ref={menuRef}>
+    <div className="relative" ref={menuRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--sam-space-2)',
-          color: 'var(--sam-color-fg-muted)',
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          padding: 'var(--sam-space-1)',
-        }}
+        className="flex items-center gap-2 text-fg-muted bg-transparent border-none cursor-pointer p-1"
       >
         {avatarElement}
         {!compact && (
           <>
-            <span style={{ fontSize: 'var(--sam-type-secondary-size)', fontWeight: 500, color: 'var(--sam-color-fg-primary)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span className="text-sm font-medium text-fg-primary max-w-30 overflow-hidden text-ellipsis whitespace-nowrap">
               {user.name || user.email}
             </span>
             <svg
-              style={{ height: 16, width: 16, transition: 'transform 150ms', transform: isOpen ? 'rotate(180deg)' : 'none' }}
+              className="h-4 w-4 transition-transform duration-150"
+              style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }}
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -89,52 +70,24 @@ export function UserMenu({ compact = false }: { compact?: boolean }) {
       </button>
 
       {isOpen && (
-        <div style={{
-          position: 'absolute',
-          right: 0,
-          marginTop: 'var(--sam-space-2)',
-          width: '12rem',
-          backgroundColor: 'var(--sam-color-bg-surface)',
-          borderRadius: 'var(--sam-radius-md)',
-          boxShadow: 'var(--sam-shadow-dropdown)',
-          border: '1px solid var(--sam-color-border-default)',
-          zIndex: 'var(--sam-z-dropdown)',
-          overflow: 'hidden',
-        }}>
-          <div style={{ padding: 'var(--sam-space-2) var(--sam-space-4)', borderBottom: '1px solid var(--sam-color-border-default)' }}>
-            <p style={{ fontSize: 'var(--sam-type-secondary-size)', fontWeight: 500, color: 'var(--sam-color-fg-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
+        <div className="absolute right-0 mt-2 w-48 bg-surface rounded-md shadow-dropdown border border-border-default z-dropdown overflow-hidden">
+          <div className="px-4 py-2 border-b border-border-default">
+            <p className="text-sm font-medium text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap m-0">
               {user.name || 'User'}
             </p>
-            <p style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
+            <p className="text-xs text-fg-muted overflow-hidden text-ellipsis whitespace-nowrap m-0">
               {user.email}
             </p>
           </div>
 
           <button
             onClick={handleSignOut}
-            className="sam-user-menu-item"
-            style={{
-              display: 'block',
-              width: '100%',
-              textAlign: 'left',
-              padding: 'var(--sam-space-2) var(--sam-space-4)',
-              fontSize: 'var(--sam-type-secondary-size)',
-              color: 'var(--sam-color-danger)',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-            }}
+            className="block w-full text-left px-4 py-2 text-sm text-danger-fg bg-transparent border-none cursor-pointer hover:bg-surface-hover"
           >
             Sign out
           </button>
         </div>
       )}
-
-      <style>{`
-        .sam-user-menu-item:hover {
-          background: var(--sam-color-bg-surface-hover);
-        }
-      `}</style>
     </div>
   );
 }

@@ -54,7 +54,7 @@ export const SessionSidebar: FC<SessionSidebarProps> = ({
 }) => {
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-6)' }}>
+      <div className="flex justify-center p-6">
         <Spinner size="md" />
       </div>
     );
@@ -62,40 +62,16 @@ export const SessionSidebar: FC<SessionSidebarProps> = ({
 
   return (
     <>
-      <style>{`
-        .session-item:hover { background-color: var(--sam-color-bg-surface-hover); }
-      `}</style>
-
       {/* Header with New Chat button */}
-      <div style={{
-        padding: 'var(--sam-space-3)',
-        borderBottom: '1px solid var(--sam-color-border-default)',
-        flexShrink: 0,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-      }}>
-        <span style={{
-          fontSize: 'var(--sam-type-secondary-size)',
-          fontWeight: 600,
-          color: 'var(--sam-color-fg-primary)',
-        }}>
+      <div className="p-3 border-b border-border-default shrink-0 flex items-center justify-between">
+        <span className="text-sm font-semibold text-fg-primary">
           Chats
         </span>
         {onNewChat && (
           <button
             type="button"
             onClick={onNewChat}
-            style={{
-              background: 'none',
-              border: '1px solid var(--sam-color-border-default)',
-              borderRadius: 'var(--sam-radius-sm)',
-              padding: '2px 8px',
-              cursor: 'pointer',
-              color: 'var(--sam-color-fg-primary)',
-              fontSize: 'var(--sam-type-caption-size)',
-              fontWeight: 500,
-            }}
+            className="bg-transparent border border-border-default rounded-sm px-2 py-[2px] cursor-pointer text-fg-primary text-xs font-medium"
           >
             + New
           </button>
@@ -103,14 +79,14 @@ export const SessionSidebar: FC<SessionSidebarProps> = ({
       </div>
 
       {sessions.length === 0 ? (
-        <div style={{ padding: 'var(--sam-space-4)' }}>
+        <div className="p-4">
           <EmptyState
             heading="No chats yet"
             description="Start a new chat to get going."
           />
         </div>
       ) : (
-        <nav style={{ overflowY: 'auto', flex: 1 }}>
+        <nav className="overflow-y-auto flex-1">
           {sessions.map((session) => {
             const isSelected = session.id === selectedSessionId;
             const state = getSessionState(session);
@@ -119,63 +95,33 @@ export const SessionSidebar: FC<SessionSidebarProps> = ({
               <button
                 key={session.id}
                 type="button"
-                className={isSelected ? '' : 'session-item'}
                 onClick={() => onSelect(session.id)}
+                className={`block w-full text-left p-3 border-none border-b border-border-default cursor-pointer transition-colors duration-100 ${isSelected ? 'bg-inset' : 'hover:bg-surface-hover'}`}
                 style={{
-                  display: 'block',
-                  width: '100%',
-                  textAlign: 'left',
-                  padding: 'var(--sam-space-3)',
-                  backgroundColor: isSelected ? 'var(--sam-color-bg-inset)' : 'transparent',
-                  border: 'none',
                   borderLeft: isSelected
                     ? '3px solid var(--sam-color-accent-primary)'
                     : '3px solid transparent',
-                  borderBottom: '1px solid var(--sam-color-border-default)',
-                  cursor: 'pointer',
-                  transition: 'background-color 0.1s',
                 }}
               >
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--sam-space-2)',
-                  marginBottom: '2px',
-                }}>
+                <div className="flex items-center gap-2 mb-[2px]">
                   {/* State dot: green (active), amber (idle), gray (terminated) */}
-                  <span style={{
-                    display: 'inline-block',
-                    width: '6px',
-                    height: '6px',
-                    borderRadius: '50%',
-                    backgroundColor: dotColor,
-                    flexShrink: 0,
-                  }} />
-                  <span style={{
-                    fontSize: 'var(--sam-type-secondary-size)',
-                    fontWeight: isSelected ? 600 : 500,
-                    color: 'var(--sam-color-fg-primary)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    flex: 1,
-                  }}>
+                  <span
+                    className="inline-block w-[6px] h-[6px] rounded-full shrink-0"
+                    style={{ backgroundColor: dotColor }}
+                  />
+                  <span className={`text-sm text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap flex-1 ${isSelected ? 'font-semibold' : 'font-medium'}`}>
                     {session.topic || `Chat ${session.id.slice(0, 8)}`}
                   </span>
                 </div>
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--sam-space-2)',
-                  fontSize: 'var(--sam-type-caption-size)',
-                  color: 'var(--sam-color-fg-muted)',
-                  paddingLeft: 'calc(6px + var(--sam-space-2))',
-                }}>
-                  <span style={{ color: dotColor, fontWeight: 500 }}>
+                <div
+                  className="flex items-center gap-2 text-xs text-fg-muted"
+                  style={{ paddingLeft: 'calc(6px + var(--sam-space-2))' }}
+                >
+                  <span style={{ color: dotColor }} className="font-medium">
                     {STATE_LABELS[state]}
                   </span>
                   <span>{session.messageCount} msg{session.messageCount !== 1 ? 's' : ''}</span>
-                  <span style={{ marginLeft: 'auto' }}>{formatRelativeTime(session.startedAt)}</span>
+                  <span className="ml-auto">{formatRelativeTime(session.startedAt)}</span>
                 </div>
               </button>
             );

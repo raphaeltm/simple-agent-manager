@@ -34,54 +34,33 @@ const LogEntryRow: FC<LogEntryRowProps> = ({ entry }) => {
 
   return (
     <div
-      style={{
-        padding: 'var(--sam-space-2) var(--sam-space-4)',
-        borderBottom: '1px solid var(--sam-color-border-default)',
-        cursor: hasDetails ? 'pointer' : 'default',
-        fontSize: 'var(--sam-type-secondary-size)',
-      }}
+      className="px-4 py-2 border-b border-border-default text-sm"
+      style={{ cursor: hasDetails ? 'pointer' : 'default' }}
       onClick={() => hasDetails && setExpanded(!expanded)}
       role={hasDetails ? 'button' : undefined}
       tabIndex={hasDetails ? 0 : undefined}
       aria-expanded={hasDetails ? expanded : undefined}
     >
-      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'baseline', flexWrap: 'wrap' }}>
+      <div className="flex gap-2 items-baseline flex-wrap">
         <span
-          style={{
-            color: LEVEL_COLORS[entry.level] ?? 'var(--sam-color-fg-muted)',
-            fontWeight: 600,
-            textTransform: 'uppercase',
-            fontSize: '0.7rem',
-            minWidth: '3rem',
-          }}
+          className="font-semibold uppercase text-[0.7rem] min-w-[3rem]"
+          style={{ color: LEVEL_COLORS[entry.level] ?? 'var(--sam-color-fg-muted)' }}
         >
           {entry.level}
         </span>
-        <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.75rem' }}>
+        <span className="text-fg-muted text-xs">
           {new Date(entry.timestamp).toLocaleTimeString()}
         </span>
-        <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.7rem', opacity: 0.7 }}>
+        <span className="text-fg-muted text-[0.7rem] opacity-70">
           {entry.event}
         </span>
       </div>
-      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
+      <div className="overflow-hidden text-ellipsis whitespace-nowrap mt-0.5">
         {entry.message}
       </div>
 
       {expanded && hasDetails && (
-        <pre
-          style={{
-            marginTop: 'var(--sam-space-2)',
-            padding: 'var(--sam-space-2)',
-            backgroundColor: 'var(--sam-color-bg-inset)',
-            borderRadius: 'var(--sam-radius-sm)',
-            fontSize: '0.75rem',
-            overflow: 'auto',
-            maxHeight: '200px',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-          }}
-        >
+        <pre className="mt-2 p-2 bg-inset rounded-sm text-xs overflow-auto whitespace-pre-wrap break-all" style={{ maxHeight: '200px' }}>
           {JSON.stringify(entry.details, null, 2)}
         </pre>
       )}
@@ -138,60 +117,42 @@ export const LogStream: FC = () => {
     <div>
       <Card>
         {/* Toolbar */}
-        <div
-          style={{
-            padding: 'var(--sam-space-3) var(--sam-space-4)',
-            borderBottom: '1px solid var(--sam-color-border-default)',
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 'var(--sam-space-2)',
-            alignItems: 'center',
-          }}
-        >
+        <div className="px-4 py-3 border-b border-border-default flex flex-wrap gap-2 items-center">
           {/* Connection status */}
           <div
-            style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-1)' }}
+            className="flex items-center gap-1"
             aria-label="Connection status"
           >
             <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                backgroundColor: STATE_COLORS[state],
-                display: 'inline-block',
-              }}
+              className="inline-block w-2 h-2 rounded-full"
+              style={{ backgroundColor: STATE_COLORS[state] }}
               data-testid="connection-indicator"
             />
-            <span style={{ fontSize: '0.75rem', color: 'var(--sam-color-fg-muted)' }}>
+            <span className="text-xs text-fg-muted">
               {STATE_LABELS[state]}
             </span>
             {state === 'connected' && clientCount > 0 && (
-              <span style={{ fontSize: '0.7rem', color: 'var(--sam-color-fg-muted)', opacity: 0.6 }}>
+              <span className="text-[0.7rem] text-fg-muted opacity-60">
                 ({clientCount} client{clientCount !== 1 ? 's' : ''})
               </span>
             )}
           </div>
 
           {/* Level filters */}
-          <div style={{ display: 'flex', gap: 'var(--sam-space-1)' }}>
+          <div className="flex gap-1">
             {LEVEL_OPTIONS.map((level) => (
               <button
                 key={level}
                 onClick={() => handleLevelToggle(level)}
+                className="rounded-sm border border-border-default text-xs cursor-pointer capitalize"
                 style={{
                   padding: '2px 8px',
-                  borderRadius: 'var(--sam-radius-sm)',
-                  border: '1px solid var(--sam-color-border-default)',
                   backgroundColor: filter.levels.includes(level)
                     ? (LEVEL_COLORS[level] + '22')
                     : 'transparent',
                   color: filter.levels.includes(level)
                     ? LEVEL_COLORS[level]
                     : 'var(--sam-color-fg-muted)',
-                  fontSize: '0.75rem',
-                  cursor: 'pointer',
-                  textTransform: 'capitalize',
                 }}
               >
                 {level}
@@ -200,7 +161,7 @@ export const LogStream: FC = () => {
           </div>
 
           {/* Search */}
-          <div style={{ display: 'flex', gap: 'var(--sam-space-1)', flex: 1, minWidth: 0 }}>
+          <div className="flex gap-1 flex-1 min-w-0">
             <input
               type="text"
               placeholder="Search..."
@@ -208,15 +169,7 @@ export const LogStream: FC = () => {
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearchSubmit()}
               aria-label="Search stream"
-              style={{
-                flex: 1,
-                padding: 'var(--sam-space-1) var(--sam-space-2)',
-                borderRadius: 'var(--sam-radius-sm)',
-                border: '1px solid var(--sam-color-border-default)',
-                backgroundColor: 'var(--sam-color-bg-surface)',
-                color: 'var(--sam-color-fg-default)',
-                fontSize: 'var(--sam-type-secondary-size)',
-              }}
+              className="flex-1 px-2 py-1 rounded-sm border border-border-default bg-surface text-fg-primary text-sm"
             />
           </div>
 
@@ -234,25 +187,22 @@ export const LogStream: FC = () => {
           )}
 
           {/* Entry count */}
-          <span style={{ fontSize: '0.7rem', color: 'var(--sam-color-fg-muted)', marginLeft: 'auto' }}>
+          <span className="text-[0.7rem] text-fg-muted ml-auto">
             {entries.length} entries
           </span>
         </div>
 
-        {/* Log entries — scrollable container */}
+        {/* Log entries -- scrollable container */}
         <div
           ref={scrollContainerRef}
           onScroll={handleScroll}
-          style={{
-            maxHeight: '600px',
-            overflowY: 'auto',
-            minHeight: '200px',
-          }}
+          className="overflow-y-auto"
+          style={{ maxHeight: '600px', minHeight: '200px' }}
           data-testid="log-stream-entries"
         >
           {entries.length === 0 ? (
-            <div style={{ padding: 'var(--sam-space-8)', textAlign: 'center' }}>
-              <Body style={{ color: 'var(--sam-color-fg-muted)' }}>
+            <div className="p-8 text-center">
+              <Body className="text-fg-muted">
                 {state === 'connected'
                   ? paused
                     ? 'Stream paused. Click Resume to continue receiving logs.'
@@ -271,13 +221,7 @@ export const LogStream: FC = () => {
 
         {/* Auto-scroll indicator */}
         {!autoScroll && entries.length > 0 && (
-          <div
-            style={{
-              padding: 'var(--sam-space-2)',
-              textAlign: 'center',
-              borderTop: '1px solid var(--sam-color-border-default)',
-            }}
-          >
+          <div className="p-2 text-center border-t border-border-default">
             <button
               onClick={() => {
                 setAutoScroll(true);
@@ -285,15 +229,7 @@ export const LogStream: FC = () => {
                   scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
                 }
               }}
-              style={{
-                padding: '2px 12px',
-                borderRadius: 'var(--sam-radius-sm)',
-                border: '1px solid var(--sam-color-border-default)',
-                backgroundColor: 'transparent',
-                color: 'var(--sam-color-fg-muted)',
-                fontSize: '0.75rem',
-                cursor: 'pointer',
-              }}
+              className="px-3 py-0.5 rounded-sm border border-border-default bg-transparent text-fg-muted text-xs cursor-pointer"
             >
               Scroll to bottom
             </button>

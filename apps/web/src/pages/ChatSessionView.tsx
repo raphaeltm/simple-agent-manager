@@ -31,54 +31,33 @@ function MessageBubble({ message }: { message: ChatMessageResponse }) {
   const style = roleStyles[message.role] || roleStyles.system!;
 
   return (
-    <div style={{
-      padding: 'var(--sam-space-3) var(--sam-space-4)',
-      borderRadius: 'var(--sam-radius-md)',
-      backgroundColor: style.bg,
-      borderLeft: `3px solid ${style.color}`,
-    }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--sam-space-2)',
-        marginBottom: 'var(--sam-space-2)',
-      }}>
-        <span style={{
-          fontSize: 'var(--sam-type-caption-size)',
-          fontWeight: 600,
-          color: style.color,
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-        }}>
+    <div
+      className="py-3 px-4 rounded-md"
+      style={{
+        backgroundColor: style.bg,
+        borderLeft: `3px solid ${style.color}`,
+      }}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <span
+          className="text-xs font-semibold uppercase tracking-wide"
+          style={{ color: style.color }}
+        >
           {style.label}
         </span>
-        <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)' }}>
+        <span className="sam-type-caption text-fg-muted">
           {formatTimestamp(message.createdAt)}
         </span>
       </div>
-      <div className="sam-type-body" style={{
-        color: 'var(--sam-color-fg-primary)',
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
-        lineHeight: 1.5,
-      }}>
+      <div className="sam-type-body text-fg-primary whitespace-pre-wrap break-words leading-relaxed">
         {message.content}
       </div>
       {message.toolMetadata && (
-        <details style={{ marginTop: 'var(--sam-space-2)' }}>
-          <summary className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', cursor: 'pointer' }}>
+        <details className="mt-2">
+          <summary className="sam-type-caption text-fg-muted cursor-pointer">
             Tool metadata
           </summary>
-          <pre style={{
-            fontSize: 'var(--sam-type-caption-size)',
-            color: 'var(--sam-color-fg-muted)',
-            backgroundColor: 'var(--sam-color-bg-inset)',
-            padding: 'var(--sam-space-2)',
-            borderRadius: 'var(--sam-radius-sm)',
-            overflow: 'auto',
-            maxHeight: '200px',
-            marginTop: 'var(--sam-space-1)',
-          }}>
+          <pre className="text-xs text-fg-muted bg-inset p-2 rounded-sm overflow-auto max-h-[200px] mt-1">
             {JSON.stringify(message.toolMetadata, null, 2)}
           </pre>
         </details>
@@ -140,7 +119,7 @@ export function ChatSessionView() {
 
   if (loading && !session) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-8)' }}>
+      <div className="flex justify-center p-8">
         <Spinner size="lg" />
       </div>
     );
@@ -160,43 +139,25 @@ export function ChatSessionView() {
       />
 
       {error && (
-        <div style={{
-          padding: 'var(--sam-space-3) var(--sam-space-4)',
-          borderRadius: 'var(--sam-radius-md)',
-          backgroundColor: 'var(--sam-color-danger-tint)',
-          border: '1px solid var(--sam-color-danger)',
-          color: 'var(--sam-color-danger)',
-          fontSize: 'var(--sam-type-secondary-size)',
-          marginTop: 'var(--sam-space-3)',
-        }}>
+        <div className="py-3 px-4 rounded-md bg-danger-tint border border-danger text-danger text-sm mt-3">
           {error}
         </div>
       )}
 
       {/* Session info header */}
       {session && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--sam-space-3)',
-          padding: 'var(--sam-space-4)',
-          borderRadius: 'var(--sam-radius-md)',
-          border: '1px solid var(--sam-color-border-default)',
-          backgroundColor: 'var(--sam-color-bg-surface)',
-          marginTop: 'var(--sam-space-4)',
-          flexWrap: 'wrap',
-        }}>
+        <div className="flex items-center gap-3 p-4 rounded-md border border-border-default bg-surface mt-4 flex-wrap">
           <StatusBadge
             status={session.status === 'active' ? 'running' : session.status === 'error' ? 'error' : 'stopped'}
             label={session.status}
           />
-          <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)' }}>
+          <span className="sam-type-caption text-fg-muted">
             {session.messageCount} message{session.messageCount !== 1 ? 's' : ''}
           </span>
-          <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)' }}>
+          <span className="sam-type-caption text-fg-muted">
             Duration: {formatDuration(session.startedAt, session.endedAt)}
           </span>
-          <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', marginLeft: 'auto' }}>
+          <span className="sam-type-caption text-fg-muted ml-auto">
             Started {formatTimestamp(session.startedAt)}
           </span>
         </div>
@@ -204,7 +165,7 @@ export function ChatSessionView() {
 
       {/* Load more */}
       {hasMore && (
-        <div style={{ textAlign: 'center', marginTop: 'var(--sam-space-3)' }}>
+        <div className="text-center mt-3">
           <Button
             variant="ghost"
             size="sm"
@@ -218,14 +179,9 @@ export function ChatSessionView() {
       )}
 
       {/* Messages */}
-      <div style={{ display: 'grid', gap: 'var(--sam-space-3)', marginTop: 'var(--sam-space-4)' }}>
+      <div className="grid gap-3 mt-4">
         {messages.length === 0 ? (
-          <div style={{
-            color: 'var(--sam-color-fg-muted)',
-            fontSize: 'var(--sam-type-secondary-size)',
-            textAlign: 'center',
-            padding: 'var(--sam-space-8)',
-          }}>
+          <div className="text-fg-muted text-sm text-center p-8">
             No messages in this session.
           </div>
         ) : (

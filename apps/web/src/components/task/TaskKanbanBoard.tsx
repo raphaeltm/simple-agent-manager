@@ -59,7 +59,7 @@ export const TaskKanbanBoard: FC<TaskKanbanBoardProps> = ({
 
   if (loading && tasks.length === 0) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-8)' }}>
+      <div className="flex justify-center p-8">
         <Spinner size="lg" />
       </div>
     );
@@ -97,13 +97,10 @@ export const TaskKanbanBoard: FC<TaskKanbanBoardProps> = ({
   }
 
   return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: `repeat(${columns.length}, minmax(200px, 1fr))`,
-      gap: 'var(--sam-space-3)',
-      overflowX: 'auto',
-      paddingBottom: 'var(--sam-space-2)',
-    }}>
+    <div
+      className="grid gap-3 overflow-x-auto pb-2"
+      style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(200px, 1fr))` }}
+    >
       {columns.map((status) => {
         const columnTasks = tasksByStatus[status] ?? [];
         const isTransient = TRANSIENT_STATUSES.includes(status);
@@ -111,39 +108,14 @@ export const TaskKanbanBoard: FC<TaskKanbanBoardProps> = ({
         return (
           <div
             key={status}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--sam-space-2)',
-              minHeight: '120px',
-            }}
+            className="flex flex-col gap-2 min-h-[120px]"
           >
             {/* Column header */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--sam-space-2)',
-              padding: 'var(--sam-space-2)',
-              borderBottom: '2px solid var(--sam-color-border-default)',
-            }}>
-              <span style={{
-                fontSize: 'var(--sam-type-caption-size)',
-                fontWeight: 600,
-                color: 'var(--sam-color-fg-primary)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-              }}>
+            <div className="flex items-center gap-2 p-2 border-b-2 border-border-default">
+              <span className="text-xs font-semibold text-fg-primary uppercase tracking-wide">
                 {COLUMN_LABELS[status] ?? status}
               </span>
-              <span style={{
-                fontSize: 'var(--sam-type-caption-size)',
-                color: 'var(--sam-color-fg-muted)',
-                backgroundColor: 'var(--sam-color-bg-inset)',
-                borderRadius: '9999px',
-                padding: '0 6px',
-                minWidth: '18px',
-                textAlign: 'center',
-              }}>
+              <span className="text-xs text-fg-muted bg-inset rounded-full px-1.5 min-w-[18px] text-center">
                 {columnTasks.length}
               </span>
               {isTransient && (
@@ -152,21 +124,9 @@ export const TaskKanbanBoard: FC<TaskKanbanBoardProps> = ({
             </div>
 
             {/* Cards */}
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--sam-space-2)',
-              flex: 1,
-            }}>
+            <div className="flex flex-col gap-2 flex-1">
               {columnTasks.length === 0 ? (
-                <div style={{
-                  color: 'var(--sam-color-fg-muted)',
-                  fontSize: 'var(--sam-type-caption-size)',
-                  textAlign: 'center',
-                  padding: 'var(--sam-space-4)',
-                  border: '1px dashed var(--sam-color-border-default)',
-                  borderRadius: 'var(--sam-radius-md)',
-                }}>
+                <div className="text-fg-muted text-xs text-center p-4 border border-dashed border-border-default rounded-md">
                   No tasks
                 </div>
               ) : (

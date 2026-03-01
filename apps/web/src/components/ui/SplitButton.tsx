@@ -47,44 +47,25 @@ export const SplitButton: FC<SplitButtonProps> = ({
   const isDisabled = disabled || loading;
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', display: 'inline-flex' }}>
-      <style>{`
-        .split-btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
-        .split-btn-chevron:hover:not(:disabled) { filter: brightness(1.1); }
-        .split-btn-option:hover { background-color: var(--sam-color-bg-surface-hover); }
-      `}</style>
+    <div ref={containerRef} className="relative inline-flex">
       {/* Primary action button */}
       <button
         type="button"
-        className="split-btn-primary"
         onClick={onPrimaryAction}
         disabled={isDisabled}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 'var(--sam-space-2)',
-          padding: 'var(--sam-space-2) var(--sam-space-4)',
-          backgroundColor: 'var(--sam-color-accent-primary)',
-          color: '#fff',
-          border: 'none',
-          borderRadius: 'var(--sam-radius-md) 0 0 var(--sam-radius-md)',
-          fontSize: 'var(--sam-type-secondary-size)',
-          fontWeight: 500,
-          cursor: isDisabled ? 'not-allowed' : 'pointer',
-          opacity: isDisabled ? 0.5 : 1,
-          transition: 'filter 0.15s',
-        }}
+        className={`inline-flex items-center gap-2 px-4 py-2 bg-accent text-white border-none text-sm font-medium transition-[filter] duration-150 ${
+          isDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:brightness-110'
+        }`}
+        style={{ borderRadius: 'var(--sam-radius-md) 0 0 var(--sam-radius-md)' }}
       >
         {loading && (
-          <span style={{
-            display: 'inline-block',
-            width: '14px',
-            height: '14px',
-            border: '2px solid rgba(255,255,255,0.3)',
-            borderTopColor: '#fff',
-            borderRadius: '50%',
-            animation: 'spin 0.6s linear infinite',
-          }} />
+          <span
+            className="inline-block w-3.5 h-3.5 rounded-full animate-spin"
+            style={{
+              border: '2px solid rgba(255,255,255,0.3)',
+              borderTopColor: '#fff',
+            }}
+          />
         )}
         {primaryLabel}
       </button>
@@ -92,22 +73,15 @@ export const SplitButton: FC<SplitButtonProps> = ({
       {/* Chevron dropdown toggle */}
       <button
         type="button"
-        className="split-btn-chevron"
         onClick={() => !isDisabled && setOpen(!open)}
         disabled={isDisabled}
         aria-label="More options"
+        className={`inline-flex items-center px-2 py-2 bg-accent text-white border-none transition-[filter] duration-150 ${
+          isDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:brightness-110'
+        }`}
         style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          padding: 'var(--sam-space-2) var(--sam-space-2)',
-          backgroundColor: 'var(--sam-color-accent-primary)',
-          color: '#fff',
-          border: 'none',
           borderLeft: '1px solid rgba(255,255,255,0.2)',
           borderRadius: '0 var(--sam-radius-md) var(--sam-radius-md) 0',
-          cursor: isDisabled ? 'not-allowed' : 'pointer',
-          opacity: isDisabled ? 0.5 : 1,
-          transition: 'filter 0.15s',
         }}
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
@@ -117,40 +91,16 @@ export const SplitButton: FC<SplitButtonProps> = ({
 
       {/* Dropdown menu */}
       {open && (
-        <div style={{
-          position: 'absolute',
-          top: '100%',
-          right: 0,
-          marginTop: '4px',
-          minWidth: '180px',
-          backgroundColor: 'var(--sam-color-bg-surface)',
-          border: '1px solid var(--sam-color-border-default)',
-          borderRadius: 'var(--sam-radius-md)',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-          zIndex: 100,
-          overflow: 'hidden',
-        }}>
+        <div className="absolute top-full right-0 mt-1 min-w-[180px] bg-surface border border-border-default rounded-md shadow-dropdown z-dropdown overflow-hidden">
           {options.map((option, idx) => (
             <button
               key={idx}
               type="button"
-              className="split-btn-option"
               onClick={() => {
                 option.onClick();
                 setOpen(false);
               }}
-              style={{
-                display: 'block',
-                width: '100%',
-                textAlign: 'left',
-                padding: 'var(--sam-space-2) var(--sam-space-3)',
-                backgroundColor: 'transparent',
-                color: 'var(--sam-color-fg-primary)',
-                border: 'none',
-                fontSize: 'var(--sam-type-secondary-size)',
-                cursor: 'pointer',
-                transition: 'background-color 0.1s',
-              }}
+              className="block w-full text-left px-3 py-2 bg-transparent text-fg-primary border-none text-sm cursor-pointer transition-colors duration-100 hover:bg-surface-hover"
             >
               {option.label}
             </button>

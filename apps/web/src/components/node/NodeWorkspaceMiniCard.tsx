@@ -26,50 +26,22 @@ export const NodeWorkspaceMiniCard: FC<NodeWorkspaceMiniCardProps> = ({ workspac
   };
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--sam-space-2)',
-        padding: 'var(--sam-space-2) var(--sam-space-3)',
-        backgroundColor: 'var(--sam-color-bg-inset)',
-        borderRadius: 'var(--sam-radius-sm)',
-      }}
-    >
+    <div className="flex items-center gap-2 px-3 py-2 bg-inset rounded-sm">
       <StatusBadge status={workspace.status} />
 
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 'var(--sam-space-2)' }}>
-        <span
-          className="sam-type-caption"
-          style={{
-            color: 'var(--sam-color-fg-primary)',
-            fontWeight: 500,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            minWidth: 0,
-          }}
-        >
+      <div className="flex-1 min-w-0 flex items-baseline gap-2">
+        <span className="sam-type-caption text-fg-primary font-medium overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
           {workspace.displayName || workspace.name}
         </span>
         {workspace.branch && (
-          <span
-            className="sam-type-caption"
-            style={{
-              color: 'var(--sam-color-fg-muted)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              minWidth: 0,
-            }}
-          >
+          <span className="sam-type-caption text-fg-muted overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
             {workspace.branch}
           </span>
         )}
       </div>
 
       {isActive && (
-        <div style={{ flexShrink: 0 }}>
+        <div className="shrink-0">
           <Button variant="secondary" size="sm" onClick={handleOpen}>
             Open
           </Button>

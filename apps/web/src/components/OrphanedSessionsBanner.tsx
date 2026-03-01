@@ -31,31 +31,17 @@ export function OrphanedSessionsBanner({
   return (
     <div
       role="status"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '4px 12px',
-        backgroundColor: 'var(--sam-color-warning-surface)',
-        borderBottom: '1px solid rgba(224, 175, 104, 0.3)',
-        fontSize: 'var(--sam-type-caption-size)',
-        color: 'var(--sam-color-tn-yellow)',
-        flexShrink: 0,
-        gap: '8px',
-      }}
+      className="flex items-center justify-between px-3 py-1 bg-warning-surface text-tn-yellow text-xs shrink-0 gap-2"
+      style={{ borderBottom: '1px solid rgba(224, 175, 104, 0.3)' }}
     >
       <span>Recovered {label} still running on VM</span>
-      <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+      <div className="flex gap-2 shrink-0">
         <button
           onClick={onStopAll}
+          className="bg-transparent rounded-sm text-tn-yellow cursor-pointer px-2 py-0.5"
           style={{
-            background: 'none',
             border: '1px solid rgba(224, 175, 104, 0.4)',
-            borderRadius: '4px',
-            color: 'var(--sam-color-tn-yellow)',
-            cursor: 'pointer',
             fontSize: '0.6875rem',
-            padding: '2px 8px',
           }}
         >
           Stop All
@@ -63,15 +49,7 @@ export function OrphanedSessionsBanner({
         <button
           onClick={onDismiss}
           aria-label="Dismiss orphaned sessions banner"
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--sam-color-tn-yellow)',
-            cursor: 'pointer',
-            fontSize: 'var(--sam-type-secondary-size)',
-            padding: '0 4px',
-            lineHeight: 1,
-          }}
+          className="bg-transparent border-none text-tn-yellow cursor-pointer text-sm px-1 py-0 leading-none"
         >
           ×
         </button>

@@ -63,7 +63,7 @@ export function OnboardingChecklist() {
         },
       ]);
     } catch {
-      // Silently fail — onboarding is non-critical
+      // Silently fail -- onboarding is non-critical
     } finally {
       setLoading(false);
     }
@@ -88,14 +88,9 @@ export function OnboardingChecklist() {
   if (allComplete) return null;
 
   return (
-    <Card style={{ padding: 'var(--sam-space-4)', marginBottom: 'var(--sam-space-6)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--sam-space-3)' }}>
-        <h3 style={{
-          margin: 0,
-          fontSize: 'var(--sam-type-card-title-size)',
-          fontWeight: 'var(--sam-type-card-title-weight)' as unknown as number,
-          color: 'var(--sam-color-fg-primary)',
-        }}>
+    <Card className="p-4 mb-6">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="m-0 text-base font-semibold text-fg-primary">
           Get Started
         </h3>
         <Button variant="ghost" size="sm" onClick={handleDismiss}>
@@ -104,21 +99,10 @@ export function OnboardingChecklist() {
       </div>
 
       {/* Progress bar */}
-      <div style={{
-        height: 4,
-        borderRadius: 2,
-        background: 'var(--sam-color-border-default)',
-        marginBottom: 'var(--sam-space-3)',
-        overflow: 'hidden',
-      }}>
+      <div className="h-1 rounded-sm bg-border-default mb-3 overflow-hidden">
         <div
-          style={{
-            height: '100%',
-            width: `${(completedCount / steps.length) * 100}%`,
-            background: 'var(--sam-color-accent)',
-            borderRadius: 2,
-            transition: 'width 0.3s ease',
-          }}
+          className="h-full bg-accent rounded-sm transition-[width] duration-300 ease-in-out"
+          style={{ width: `${(completedCount / steps.length) * 100}%` }}
           role="progressbar"
           aria-valuenow={completedCount}
           aria-valuemin={0}
@@ -126,45 +110,29 @@ export function OnboardingChecklist() {
         />
       </div>
 
-      <p style={{ margin: '0 0 var(--sam-space-3)', fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
+      <p className="m-0 mb-3 text-sm text-fg-muted">
         {completedCount} of {steps.length} steps completed
       </p>
 
-      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 'var(--sam-space-2)' }}>
+      <ul className="list-none m-0 p-0 grid gap-2">
         {steps.map((step) => (
           <li key={step.id}>
             <button
               onClick={() => !step.complete && navigate(step.path)}
               disabled={step.complete}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 'var(--sam-space-2)',
-                width: '100%',
-                padding: 'var(--sam-space-2)',
-                border: 'none',
-                borderRadius: 'var(--sam-radius-sm)',
-                background: step.complete ? 'transparent' : 'var(--sam-color-bg-inset)',
-                color: step.complete ? 'var(--sam-color-fg-muted)' : 'var(--sam-color-fg-primary)',
-                cursor: step.complete ? 'default' : 'pointer',
-                textDecoration: step.complete ? 'line-through' : 'none',
-                textAlign: 'left',
-                fontSize: 'var(--sam-type-body-size)',
-              }}
+              className={`flex items-center gap-2 w-full p-2 border-none rounded-sm text-left text-base ${
+                step.complete
+                  ? 'bg-transparent text-fg-muted cursor-default line-through'
+                  : 'bg-inset text-fg-primary cursor-pointer no-underline'
+              }`}
             >
-              <span style={{
-                flexShrink: 0,
-                width: 20,
-                height: 20,
-                borderRadius: '50%',
-                border: step.complete ? 'none' : '2px solid var(--sam-color-border-default)',
-                background: step.complete ? 'var(--sam-color-accent)' : 'transparent',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'white',
-                fontSize: '0.75rem',
-              }}>
+              <span
+                className={`shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-xs ${
+                  step.complete
+                    ? 'bg-accent text-white border-none'
+                    : 'bg-transparent border-2 border-border-default'
+                }`}
+              >
                 {step.complete ? '\u2713' : ''}
               </span>
               {step.label}

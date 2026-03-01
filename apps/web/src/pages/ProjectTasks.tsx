@@ -150,15 +150,9 @@ export function ProjectTasks() {
   };
 
   return (
-    <div style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
+    <div className="grid gap-3">
       {/* Toolbar */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        gap: 'var(--sam-space-2)',
-        flexWrap: 'wrap',
-      }}>
+      <div className="flex justify-between items-start gap-2 flex-wrap">
         <TaskFilters value={filters} onChange={setFilters} />
         <Button onClick={() => setShowTaskCreate(true)}>
           New task
@@ -167,7 +161,7 @@ export function ProjectTasks() {
 
       {/* New task dialog */}
       <Dialog isOpen={showTaskCreate} onClose={() => setShowTaskCreate(false)} maxWidth="lg">
-        <h2 style={{ margin: '0 0 var(--sam-space-3)', fontSize: 'var(--sam-type-section-heading-size)', fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number, color: 'var(--sam-color-fg-primary)' }}>New Task</h2>
+        <h2 className="m-0 mb-3 text-base font-semibold text-fg-primary">New Task</h2>
         <TaskForm
           mode="create"
           tasks={tasks}

@@ -165,20 +165,10 @@ export function ProjectForm({
     });
   };
 
-  const selectStyle = {
-    width: '100%',
-    borderRadius: 'var(--sam-radius-md)',
-    border: '1px solid var(--sam-color-border-default)',
-    background: 'var(--sam-color-bg-surface)',
-    color: 'var(--sam-color-fg-primary)',
-    padding: '0.625rem 0.75rem',
-    minHeight: '2.75rem',
-  };
-
   return (
-    <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
-      <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Name</span>
+    <form onSubmit={handleSubmit} className="grid gap-3">
+      <label className="grid gap-1.5">
+        <span className="text-sm text-fg-muted">Name</span>
         <Input
           value={values.name}
           onChange={(event) => handleChange('name', event.currentTarget.value)}
@@ -187,32 +177,24 @@ export function ProjectForm({
         />
       </label>
 
-      <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Description</span>
+      <label className="grid gap-1.5">
+        <span className="text-sm text-fg-muted">Description</span>
         <textarea
           value={values.description}
           onChange={(event) => handleChange('description', event.currentTarget.value)}
           rows={3}
           disabled={submitting}
-          style={{
-            width: '100%',
-            borderRadius: 'var(--sam-radius-md)',
-            border: '1px solid var(--sam-color-border-default)',
-            background: 'var(--sam-color-bg-surface)',
-            color: 'var(--sam-color-fg-primary)',
-            padding: '0.625rem 0.75rem',
-            resize: 'vertical',
-          }}
+          className="w-full rounded-md border border-border-default bg-surface text-fg-primary py-2.5 px-3 resize-y"
         />
       </label>
 
-      <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Installation</span>
+      <label className="grid gap-1.5">
+        <span className="text-sm text-fg-muted">Installation</span>
         <select
           value={values.installationId}
           onChange={(event) => handleInstallationChange(event.currentTarget.value)}
           disabled={submitting || isEditMode}
-          style={selectStyle}
+          className="w-full rounded-md border border-border-default bg-surface text-fg-primary py-2.5 px-3 min-h-11"
         >
           {installations.length === 0 ? (
             <option value="">No installations</option>
@@ -226,8 +208,8 @@ export function ProjectForm({
         </select>
       </label>
 
-      <label htmlFor="project-repository" style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Repository</span>
+      <label htmlFor="project-repository" className="grid gap-1.5">
+        <span className="text-sm text-fg-muted">Repository</span>
         {isEditMode ? (
           <Input
             id="project-repository"
@@ -248,8 +230,8 @@ export function ProjectForm({
         )}
       </label>
 
-      <label htmlFor="project-default-branch" style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Default branch</span>
+      <label htmlFor="project-default-branch" className="grid gap-1.5">
+        <span className="text-sm text-fg-muted">Default branch</span>
         <BranchSelector
           id="project-default-branch"
           branches={branches}
@@ -263,12 +245,12 @@ export function ProjectForm({
       </label>
 
       {error && (
-        <div style={{ color: 'var(--sam-color-danger)', fontSize: 'var(--sam-type-secondary-size)' }} role="alert">
+        <div className="text-danger text-sm" role="alert">
           {error}
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+      <div className="flex gap-2 flex-wrap">
         <Button type="submit" disabled={submitting}>
           {submitting ? 'Saving...' : (submitLabel ?? (isEditMode ? 'Update Project' : 'Create Project'))}
         </Button>
