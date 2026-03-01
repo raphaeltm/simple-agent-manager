@@ -202,8 +202,10 @@ export interface ChatSessionTaskEmbed {
   id: string;
   status: TaskStatus;
   executionStep: TaskExecutionStep | null;
+  errorMessage: string | null;
   outputBranch: string | null;
   outputPrUrl: string | null;
+  outputSummary: string | null;
   finalizedAt: string | null;
 }
 

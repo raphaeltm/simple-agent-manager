@@ -214,7 +214,14 @@ export class ProjectData extends DurableObject<Env> {
     }
 
     this.scheduleSummarySync();
-    this.broadcastEvent('message.new', { sessionId, messageId: id, role });
+    this.broadcastEvent('message.new', {
+      sessionId,
+      messageId: id,
+      role,
+      content,
+      toolMetadata: toolMetadata ? JSON.parse(toolMetadata) : null,
+      createdAt: now,
+    });
     return id;
   }
 
@@ -762,7 +769,14 @@ export class ProjectData extends DurableObject<Env> {
         now,
         sessionId
       );
-      this.broadcastEvent('message.new', { sessionId, messageId: id, role: 'system' });
+      this.broadcastEvent('message.new', {
+        sessionId,
+        messageId: id,
+        role: 'system',
+        content,
+        toolMetadata: null,
+        createdAt: now,
+      });
     } catch {
       // Best-effort notification
     }

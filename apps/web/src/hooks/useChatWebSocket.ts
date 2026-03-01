@@ -14,12 +14,14 @@ interface UseChatWebSocketOptions {
   sessionId: string;
   /** Only connect when the session is active. */
   enabled: boolean;
-  /** Called when a new message arrives via WebSocket. */
+  /** Called when a new message arrives via WebSocket (single or from batch). */
   onMessage: (msg: ChatMessageResponse) => void;
   /** Called when the session is stopped server-side. */
   onSessionStopped: () => void;
   /** Called when we catch up with missed messages after reconnect. */
   onCatchUp: (messages: ChatMessageResponse[], session: ChatSessionResponse, hasMore: boolean) => void;
+  /** Called when the agent completes on the session. */
+  onAgentCompleted?: (agentCompletedAt: number) => void;
 }
 
 export interface UseChatWebSocketReturn {
@@ -41,6 +43,7 @@ export function useChatWebSocket({
   onMessage,
   onSessionStopped,
   onCatchUp,
+  onAgentCompleted,
 }: UseChatWebSocketOptions): UseChatWebSocketReturn {
   const [connectionState, setConnectionState] = useState<ChatConnectionState>('disconnected');
 
@@ -55,9 +58,11 @@ export function useChatWebSocket({
   const onMessageRef = useRef(onMessage);
   const onSessionStoppedRef = useRef(onSessionStopped);
   const onCatchUpRef = useRef(onCatchUp);
+  const onAgentCompletedRef = useRef(onAgentCompleted);
   onMessageRef.current = onMessage;
   onSessionStoppedRef.current = onSessionStopped;
   onCatchUpRef.current = onCatchUp;
+  onAgentCompletedRef.current = onAgentCompleted;
 
   const getReconnectDelay = useCallback((attempt: number) => {
     return Math.min(BASE_RECONNECT_DELAY * Math.pow(2, attempt), MAX_RECONNECT_DELAY);
@@ -103,15 +108,14 @@ export function useChatWebSocket({
           ws.close(1000);
           return;
         }
-        const wasReconnect = hadConnectionRef.current;
         retriesRef.current = 0;
         setConnectionState('connected');
         hadConnectionRef.current = true;
 
-        // On reconnect, fetch missed messages via REST
-        if (wasReconnect) {
-          void catchUpMessages();
-        }
+        // Always catch up on connect — the initial REST load may have
+        // completed before messages arrived, and reconnects need to
+        // fetch anything missed while disconnected.
+        void catchUpMessages();
       };
 
       ws.onmessage = (event) => {
@@ -119,18 +123,46 @@ export function useChatWebSocket({
 
         try {
           const data = JSON.parse(event.data);
-          if (data.type === 'message.new' && data.sessionId === sessionId) {
+          const payload = data.payload ?? data;
+
+          if (data.type === 'message.new') {
+            const p = payload;
+            if (p.sessionId !== sessionId) return;
+            // Only deliver if content is present (broadcast now includes it)
+            if (!p.content) return;
             const newMsg: ChatMessageResponse = {
-              id: data.id || crypto.randomUUID(),
-              sessionId: data.sessionId,
-              role: data.role,
-              content: data.content,
-              toolMetadata: data.toolMetadata || null,
-              createdAt: data.createdAt || Date.now(),
+              id: p.messageId || p.id || crypto.randomUUID(),
+              sessionId: p.sessionId,
+              role: p.role,
+              content: p.content,
+              toolMetadata: p.toolMetadata || null,
+              createdAt: p.createdAt || Date.now(),
             };
             onMessageRef.current(newMsg);
-          } else if (data.type === 'session.stopped' && data.sessionId === sessionId) {
+          } else if (data.type === 'messages.batch') {
+            const p = payload;
+            if (p.sessionId !== sessionId) return;
+            const msgs: ChatMessageResponse[] = (p.messages ?? [])
+              .filter((m: Record<string, unknown>) => m.content)
+              .map((m: Record<string, unknown>) => ({
+                id: (m.id as string) || crypto.randomUUID(),
+                sessionId: sessionId,
+                role: (m.role as string) || 'assistant',
+                content: m.content as string,
+                toolMetadata: (m.toolMetadata as Record<string, unknown>) || null,
+                createdAt: (m.createdAt as number) || Date.now(),
+              }));
+            for (const msg of msgs) {
+              onMessageRef.current(msg);
+            }
+          } else if (data.type === 'session.stopped') {
+            const p = payload;
+            if (p.sessionId !== sessionId) return;
             onSessionStoppedRef.current();
+          } else if (data.type === 'session.agent_completed') {
+            const p = payload;
+            if (p.sessionId !== sessionId) return;
+            onAgentCompletedRef.current?.(p.agentCompletedAt ?? Date.now());
           }
         } catch {
           // Ignore malformed messages

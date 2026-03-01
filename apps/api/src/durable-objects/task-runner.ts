@@ -423,8 +423,14 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       vmSize: state.config.vmSize,
     });
 
-    // Provision the node (calls Hetzner API)
-    await provisionNode(createdNode.id, this.env as any);
+    // Provision the node with task context so the VM agent enables
+    // the message reporter for chat persistence (Bug fix: previously
+    // projectId/chatSessionId were empty, disabling the reporter).
+    await provisionNode(createdNode.id, this.env as any, {
+      projectId: state.projectId,
+      chatSessionId: state.stepResults.chatSessionId ?? '',
+      taskId: state.taskId,
+    });
 
     // Verify it's running
     const provisionedNode = await this.env.DATABASE.prepare(
