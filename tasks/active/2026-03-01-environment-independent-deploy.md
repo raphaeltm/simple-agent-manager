@@ -25,9 +25,19 @@ Make the deployment pipeline fully environment-independent:
 - [x] Rewrite `scripts/quality/check-wrangler-bindings.ts` for new invariants
 - [x] Update `CLAUDE.md` Wrangler Binding Rule
 - [x] Update `.claude/rules/07-env-and-urls.md`
-- [ ] Run quality checks locally
-- [ ] Push and verify CI passes
-- [ ] Verify staging deploy succeeds
+- [x] Run quality checks locally (lint, typecheck, 1374 tests, quality:wrangler-bindings)
+- [x] Push and verify CI passes (Build, Test, Type Check, Lint all green)
+- [ ] Verify staging deploy succeeds (blocked: Pulumi state needs existing resources imported)
+
+## CI Results (2026-03-01)
+
+### Passing
+- Build, Test (1374), Type Check, Lint, Validate Deploy Scripts, UI Compliance, Pulumi Tests, E2E Smoke, VM Agent Smoke
+
+### Failing (not related to config changes)
+- **Deploy to Cloudflare**: Pulumi staging stack has no state for previously-created resources (D1, KV, Pages). Need to import existing resources into Pulumi state.
+- **claude-deployment-review**: Pre-existing GitHub App credential issue (401 Bad Credentials).
+- **Preflight Evidence**: Event payload is frozen at workflow trigger time. PR body was updated after push. Fixed by pushing a new commit to get fresh event payload.
 
 ## Key Design Decisions
 
