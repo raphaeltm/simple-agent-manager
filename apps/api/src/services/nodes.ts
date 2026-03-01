@@ -69,7 +69,18 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
   };
 }
 
-export async function provisionNode(nodeId: string, env: Env): Promise<void> {
+/** Optional task context for cloud-init (enables message reporter on VM). */
+export interface ProvisionTaskContext {
+  projectId: string;
+  chatSessionId: string;
+  taskId: string;
+}
+
+export async function provisionNode(
+  nodeId: string,
+  env: Env,
+  taskContext?: ProvisionTaskContext,
+): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
 
   const nodes = await db
@@ -112,6 +123,9 @@ export async function provisionNode(nodeId: string, env: Env): Promise<void> {
       logJournalMaxUse: env.LOG_JOURNAL_MAX_USE,
       logJournalKeepFree: env.LOG_JOURNAL_KEEP_FREE,
       logJournalMaxRetention: env.LOG_JOURNAL_MAX_RETENTION,
+      projectId: taskContext?.projectId,
+      chatSessionId: taskContext?.chatSessionId,
+      taskId: taskContext?.taskId,
     });
 
     if (!validateCloudInitSize(cloudInit)) {
