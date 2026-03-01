@@ -457,6 +457,7 @@ export interface ChatSessionListResponse {
 export interface ChatSessionResponse {
   id: string;
   workspaceId: string | null;
+  taskId: string | null;
   topic: string | null;
   status: string;
   messageCount: number;

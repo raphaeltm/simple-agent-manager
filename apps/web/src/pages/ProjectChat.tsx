@@ -168,6 +168,41 @@ export function ProjectChat() {
     setProvisioning(null);
   }, [navigate, projectId]);
 
+  // Restore provisioning state when navigating to a session with an active task.
+  // This covers the case where the user navigates away during provisioning and
+  // comes back — the ephemeral ProvisioningState was lost, so we reconstruct it
+  // from the task's current status in D1.
+  useEffect(() => {
+    if (!sessionId || provisioning) return;
+
+    const selectedSession = sessions.find((s) => s.id === sessionId);
+    if (!selectedSession?.taskId) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const task = await getProjectTask(projectId, selectedSession.taskId!);
+        if (cancelled) return;
+        // Only restore if the task is still in a provisioning phase
+        if (!isTerminal(task.status) && task.status !== 'in_progress') {
+          setProvisioning({
+            taskId: task.id,
+            sessionId,
+            branchName: task.outputBranch ?? '',
+            status: task.status,
+            executionStep: task.executionStep ?? null,
+            errorMessage: task.errorMessage ?? null,
+            startedAt: task.startedAt ? new Date(task.startedAt).getTime() : Date.now(),
+          });
+        }
+      } catch {
+        // Best-effort — if the task lookup fails, we just don't show provisioning
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [sessionId, sessions, projectId, provisioning]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
