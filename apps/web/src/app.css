@@ -95,3 +95,28 @@
    Maps to [data-ui-theme='sam'] selector on <html>.
    Currently dark-only; enables future light mode via dark: prefix. */
 @custom-variant dark (&:where([data-ui-theme="sam"], [data-ui-theme="sam"] *));
+
+/* ══════════════════════════════════════════════════════════════
+   Keyframe Animations
+   Extracted from component-level <style> injections.
+   ══════════════════════════════════════════════════════════════ */
+
+/* MobileNavDrawer — slide-in from right + backdrop fade */
+@keyframes sam-drawer-slide-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes sam-drawer-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ProjectChat MobileSessionDrawer — slide-in from left + backdrop fade */
+@keyframes sam-session-drawer-slide-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+@keyframes sam-session-drawer-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

@@ -36,14 +36,14 @@
 
 **Purpose**: Remove hand-rolled utility classes from `index.css` that Tailwind now provides. Resolve naming conflicts. This MUST complete before component migration begins.
 
-- [ ] T008 Remove 153 exact-match Tailwind utility classes from `apps/web/src/index.css` per research.md Decision 3 (typography, layout, spacing, sizing, borders, positioning, overflow, animations, opacity classes)
-- [ ] T009 Remove 16 SAM-specific semantic utility classes from `apps/web/src/index.css` that are now covered by `@theme` mappings (bg-canvas, bg-surface, bg-inset, text-primary, text-muted, text-accent, border-default, hover variants, etc.)
-- [ ] T010 Keep form element reset styles, CSS reset block, and `min-h-screen` custom utility in `apps/web/src/index.css` (these are not replaced by Tailwind)
-- [ ] T011 Extract keyframe animations from `packages/ui/src/components/Skeleton.tsx` and `packages/ui/src/components/Toast.tsx` (runtime `document.createElement('style')` injections) into `packages/ui/src/styles.css` as static `@keyframes` rules, and remove the runtime injection code
-- [ ] T012 [P] Extract keyframe animations from `apps/web/src/components/MobileNavDrawer.tsx` (`sam-drawer-slide-in`, `sam-drawer-fade-in`) into `apps/web/src/app.css`
-- [ ] T013 [P] Extract keyframe animations from `apps/web/src/pages/ProjectChat.tsx` (`sam-session-drawer-slide-in`, `sam-session-drawer-fade-in`) into `apps/web/src/app.css`
-- [ ] T014 [P] Extract spin keyframe from `apps/web/src/components/GitChangesPanel.tsx` (duplicate of existing `sam-spin`) — remove the inline `<style>` and use the existing animation class
-- [ ] T015 Verify build and run `pnpm --filter @simple-agent-manager/web build` to confirm no regressions from index.css cleanup
+- [x] T008 Remove 153 exact-match Tailwind utility classes from `apps/web/src/index.css` per research.md Decision 3 (typography, layout, spacing, sizing, borders, positioning, overflow, animations, opacity classes)
+- [x] T009 Remove 16 SAM-specific semantic utility classes from `apps/web/src/index.css` that are now covered by `@theme` mappings (bg-canvas, bg-surface, bg-inset, text-primary, text-muted, text-accent, border-default, hover variants, etc.)
+- [x] T010 Keep form element reset styles, CSS reset block, and `min-h-screen` custom utility in `apps/web/src/index.css` (these are not replaced by Tailwind)
+- [x] T011 Extract keyframe animations from `packages/ui/src/components/Skeleton.tsx` and `packages/ui/src/components/Toast.tsx` (runtime `document.createElement('style')` injections) into `packages/ui/src/styles.css` as static `@keyframes` rules, and remove the runtime injection code
+- [x] T012 [P] Extract keyframe animations from `apps/web/src/components/MobileNavDrawer.tsx` (`sam-drawer-slide-in`, `sam-drawer-fade-in`) into `apps/web/src/app.css`
+- [x] T013 [P] Extract keyframe animations from `apps/web/src/pages/ProjectChat.tsx` (`sam-session-drawer-slide-in`, `sam-session-drawer-fade-in`) into `apps/web/src/app.css`
+- [x] T014 [P] Extract spin keyframe from `apps/web/src/components/GitChangesPanel.tsx` (duplicate of existing `sam-spin`) — remove the inline `<style>` and use the existing animation class
+- [x] T015 Verify build and run `pnpm --filter @simple-agent-manager/web build` to confirm no regressions from index.css cleanup
 
 **Checkpoint**: Foundation ready. All hand-rolled utilities removed, keyframe animations extracted to static CSS. Component migration can now begin.
 

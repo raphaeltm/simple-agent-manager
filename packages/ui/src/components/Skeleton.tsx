@@ -13,26 +13,10 @@ interface SkeletonProps {
   className?: string;
 }
 
-const pulseKeyframes = `
-@keyframes sam-skeleton-pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.15; }
-}
-`;
-
-let styleInjected = false;
-
-function injectStyle() {
-  if (styleInjected || typeof document === 'undefined') return;
-  const style = document.createElement('style');
-  style.textContent = pulseKeyframes;
-  document.head.appendChild(style);
-  styleInjected = true;
-}
-
 /**
  * Skeleton placeholder for content that is loading.
  * Renders an animated pulsing bar that matches the layout of expected content.
+ * Keyframes defined in packages/ui/src/styles.css (sam-skeleton-pulse).
  */
 export const Skeleton: FC<SkeletonProps> = ({
   width = '100%',
@@ -41,7 +25,6 @@ export const Skeleton: FC<SkeletonProps> = ({
   style,
   className,
 }) => {
-  injectStyle();
 
   return (
     <div
@@ -72,7 +55,6 @@ interface SkeletonCardProps {
  * A skeleton card matching the typical workspace/node card layout.
  */
 export const SkeletonCard: FC<SkeletonCardProps> = ({ lines = 3, style }) => {
-  injectStyle();
 
   return (
     <div

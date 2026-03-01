@@ -96,28 +96,11 @@ interface ToastContainerProps {
   onDismiss: (id: string) => void;
 }
 
-const slideInKeyframes = `
-@keyframes sam-toast-slide-in {
-  from { transform: translateY(-10px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-`;
-
-let toastStyleInjected = false;
-
-function injectToastStyle() {
-  if (toastStyleInjected || typeof document === 'undefined') return;
-  const el = document.createElement('style');
-  el.textContent = slideInKeyframes;
-  document.head.appendChild(el);
-  toastStyleInjected = true;
-}
-
 /**
  * Absolutely-positioned container that renders toasts stacked at the top-right.
+ * Keyframes defined in packages/ui/src/styles.css (sam-toast-slide-in).
  */
 export const ToastContainer: FC<ToastContainerProps> = ({ toasts, onDismiss }) => {
-  injectToastStyle();
 
   if (toasts.length === 0) return null;
 

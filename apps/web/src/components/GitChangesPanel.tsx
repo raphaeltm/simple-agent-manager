@@ -249,9 +249,8 @@ export const GitChangesPanel: FC<GitChangesPanelProps> = ({
         )}
       </div>
 
-      {/* Inline keyframe for spinner */}
+      {/* spin keyframe provided by Tailwind; hover style kept for file rows */}
       <style>{`
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .git-file-row:hover { background-color: var(--sam-color-bg-surface-hover); }
       `}</style>
     </div>

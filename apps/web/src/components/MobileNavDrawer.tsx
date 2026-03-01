@@ -39,15 +39,8 @@ export function MobileNavDrawer({
 
   return (
     <>
+      {/* Keyframes (sam-drawer-slide-in, sam-drawer-fade-in) defined in app.css */}
       <style>{`
-        @keyframes sam-drawer-slide-in {
-          from { transform: translateX(100%); }
-          to { transform: translateX(0); }
-        }
-        @keyframes sam-drawer-fade-in {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
         .sam-mobile-nav-item {
           display: flex;
           align-items: center;

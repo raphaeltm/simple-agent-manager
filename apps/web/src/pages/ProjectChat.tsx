@@ -402,16 +402,7 @@ function MobileSessionDrawer({
 
   return (
     <>
-      <style>{`
-        @keyframes sam-session-drawer-slide-in {
-          from { transform: translateX(-100%); }
-          to { transform: translateX(0); }
-        }
-        @keyframes sam-session-drawer-fade-in {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-      `}</style>
+      {/* Keyframes (sam-session-drawer-slide-in, sam-session-drawer-fade-in) defined in app.css */}
 
       {/* Backdrop */}
       <div
