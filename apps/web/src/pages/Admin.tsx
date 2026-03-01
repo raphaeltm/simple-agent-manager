@@ -22,7 +22,7 @@ export function Admin() {
   return (
     <PageLayout title="Admin" maxWidth="xl" headerRight={<UserMenu />}>
       <Tabs tabs={ADMIN_TABS} basePath="/admin" />
-      <div style={{ marginTop: 'var(--sam-space-4)' }}>
+      <div className="mt-4">
         <Outlet />
       </div>
     </PageLayout>

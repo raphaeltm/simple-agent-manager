@@ -3,7 +3,7 @@ import { ErrorTrends } from '../components/admin/ErrorTrends';
 
 export function AdminOverview() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-4)' }}>
+    <div className="flex flex-col gap-4">
       <HealthOverview />
       <ErrorTrends />
     </div>

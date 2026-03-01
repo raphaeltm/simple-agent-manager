@@ -10,24 +10,6 @@ interface DockerSectionProps {
   loading?: boolean;
 }
 
-const cellStyle: React.CSSProperties = {
-  padding: 'var(--sam-space-2) var(--sam-space-3)',
-  fontSize: 'var(--sam-type-caption-size)',
-  color: 'var(--sam-color-fg-primary)',
-  whiteSpace: 'nowrap',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-};
-
-const headerCellStyle: React.CSSProperties = {
-  ...cellStyle,
-  fontSize: '0.6875rem',
-  fontWeight: 600,
-  color: 'var(--sam-color-fg-muted)',
-  textTransform: 'uppercase' as const,
-  letterSpacing: '0.05em',
-};
-
 function stateStyle(state: string): React.CSSProperties {
   switch (state) {
     case 'running':
@@ -67,11 +49,10 @@ export const DockerSection: FC<DockerSectionProps> = ({ docker, loading }) => {
         </div>
       ) : docker?.error ? (
         <div
+          className="p-3 rounded-md"
           style={{
             fontSize: 'var(--sam-type-secondary-size)',
             color: 'var(--sam-color-fg-danger, #ef4444)',
-            padding: 'var(--sam-space-3)',
-            borderRadius: 'var(--sam-radius-md)',
             backgroundColor: 'rgba(239, 68, 68, 0.08)',
             border: '1px solid rgba(239, 68, 68, 0.2)',
           }}
@@ -79,58 +60,44 @@ export const DockerSection: FC<DockerSectionProps> = ({ docker, loading }) => {
           Failed to query Docker: {docker.error}
         </div>
       ) : !docker || !docker.containerList || docker.containerList.length === 0 ? (
-        <div style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
+        <div className="text-fg-muted" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
           {docker ? 'No containers.' : 'Docker info unavailable.'}
         </div>
       ) : (
-        <div
-          style={{
-            overflowX: 'auto',
-            border: '1px solid var(--sam-color-border-default)',
-            borderRadius: 'var(--sam-radius-md)',
-          }}
-        >
-          <table
-            style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              minWidth: 500,
-            }}
-          >
+        <div className="overflow-x-auto border border-border-default rounded-md">
+          <table className="w-full border-collapse" style={{ minWidth: 500 }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid var(--sam-color-border-default)' }}>
-                <th style={{ ...headerCellStyle, textAlign: 'left' }}>Container</th>
-                <th style={{ ...headerCellStyle, textAlign: 'left' }}>Image</th>
-                <th style={{ ...headerCellStyle, textAlign: 'left' }}>State</th>
-                <th style={{ ...headerCellStyle, textAlign: 'left' }}>Status</th>
-                <th style={{ ...headerCellStyle, textAlign: 'right' }}>CPU</th>
-                <th style={{ ...headerCellStyle, textAlign: 'right' }}>Memory</th>
+              <tr className="border-b border-border-default">
+                <th className="px-3 py-2 text-left text-fg-muted font-semibold uppercase tracking-wide" style={{ fontSize: '0.6875rem', letterSpacing: '0.05em' }}>Container</th>
+                <th className="px-3 py-2 text-left text-fg-muted font-semibold uppercase tracking-wide" style={{ fontSize: '0.6875rem', letterSpacing: '0.05em' }}>Image</th>
+                <th className="px-3 py-2 text-left text-fg-muted font-semibold uppercase tracking-wide" style={{ fontSize: '0.6875rem', letterSpacing: '0.05em' }}>State</th>
+                <th className="px-3 py-2 text-left text-fg-muted font-semibold uppercase tracking-wide" style={{ fontSize: '0.6875rem', letterSpacing: '0.05em' }}>Status</th>
+                <th className="px-3 py-2 text-right text-fg-muted font-semibold uppercase tracking-wide" style={{ fontSize: '0.6875rem', letterSpacing: '0.05em' }}>CPU</th>
+                <th className="px-3 py-2 text-right text-fg-muted font-semibold uppercase tracking-wide" style={{ fontSize: '0.6875rem', letterSpacing: '0.05em' }}>Memory</th>
               </tr>
             </thead>
             <tbody>
               {docker.containerList.map((container) => (
                 <tr
                   key={container.id}
-                  style={{ borderBottom: '1px solid var(--sam-color-border-default)' }}
+                  className="border-b border-border-default"
                 >
-                  <td style={{ ...cellStyle, fontFamily: 'monospace', maxWidth: 180 }}>
+                  <td className="px-3 py-2 text-fg-primary font-mono whitespace-nowrap overflow-hidden text-ellipsis max-w-[180px]" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
                     {container.name}
                   </td>
                   <td
-                    style={{ ...cellStyle, maxWidth: 240 }}
+                    className="px-3 py-2 text-fg-primary whitespace-nowrap overflow-hidden text-ellipsis max-w-60"
                     title={container.image}
+                    style={{ fontSize: 'var(--sam-type-caption-size)' }}
                   >
                     {container.image}
                   </td>
-                  <td style={cellStyle}>
+                  <td className="px-3 py-2 whitespace-nowrap" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
                     <span
+                      className="inline-block rounded-sm uppercase font-semibold"
                       style={{
-                        display: 'inline-block',
                         padding: '1px 6px',
-                        borderRadius: 'var(--sam-radius-sm, 4px)',
                         fontSize: '0.625rem',
-                        fontWeight: 600,
-                        textTransform: 'uppercase',
                         letterSpacing: '0.04em',
                         ...stateStyle(container.state),
                       }}
@@ -138,24 +105,18 @@ export const DockerSection: FC<DockerSectionProps> = ({ docker, loading }) => {
                       {container.state}
                     </span>
                   </td>
-                  <td style={cellStyle}>{container.status}</td>
-                  <td style={{ ...cellStyle, textAlign: 'right', fontFamily: 'monospace' }}>
+                  <td className="px-3 py-2 text-fg-primary whitespace-nowrap overflow-hidden text-ellipsis" style={{ fontSize: 'var(--sam-type-caption-size)' }}>{container.status}</td>
+                  <td className="px-3 py-2 text-right text-fg-primary font-mono whitespace-nowrap" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
                     {container.state === 'running' ? `${container.cpuPercent.toFixed(1)}%` : '\u2014'}
                   </td>
-                  <td style={{ ...cellStyle, textAlign: 'right' }}>
+                  <td className="px-3 py-2 text-right whitespace-nowrap" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
                     {container.state === 'running' ? (
                       <>
-                        <span style={{ fontFamily: 'monospace' }}>
+                        <span className="font-mono text-fg-primary">
                           {container.memPercent.toFixed(1)}%
                         </span>
                         {container.memUsage && (
-                          <span
-                            style={{
-                              fontSize: '0.6875rem',
-                              color: 'var(--sam-color-fg-muted)',
-                              marginLeft: 'var(--sam-space-1)',
-                            }}
-                          >
+                          <span className="text-fg-muted ml-1" style={{ fontSize: '0.6875rem' }}>
                             ({container.memUsage})
                           </span>
                         )}

@@ -35,54 +35,33 @@ const LogEntryRow: FC<LogEntryRowProps> = ({ log }) => {
 
   return (
     <div
-      style={{
-        padding: 'var(--sam-space-2) var(--sam-space-4)',
-        borderBottom: '1px solid var(--sam-color-border-default)',
-        cursor: hasDetails ? 'pointer' : 'default',
-        fontSize: 'var(--sam-type-secondary-size)',
-      }}
+      className="px-4 py-2 border-b border-border-default text-sm"
+      style={{ cursor: hasDetails ? 'pointer' : 'default' }}
       onClick={() => hasDetails && setExpanded(!expanded)}
       role={hasDetails ? 'button' : undefined}
       tabIndex={hasDetails ? 0 : undefined}
       aria-expanded={hasDetails ? expanded : undefined}
     >
-      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'baseline', flexWrap: 'wrap' }}>
+      <div className="flex gap-2 items-baseline flex-wrap">
         <span
-          style={{
-            color: LEVEL_COLORS[log.level] ?? 'var(--sam-color-fg-muted)',
-            fontWeight: 600,
-            textTransform: 'uppercase',
-            fontSize: '0.7rem',
-            minWidth: '3rem',
-          }}
+          className="font-semibold uppercase text-[0.7rem] min-w-[3rem]"
+          style={{ color: LEVEL_COLORS[log.level] ?? 'var(--sam-color-fg-muted)' }}
         >
           {log.level}
         </span>
-        <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.75rem' }}>
+        <span className="text-fg-muted text-xs">
           {new Date(log.timestamp).toLocaleTimeString()}
         </span>
-        <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: '0.7rem', opacity: 0.7 }}>
+        <span className="text-fg-muted text-[0.7rem] opacity-70">
           {log.event}
         </span>
       </div>
-      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
+      <div className="overflow-hidden text-ellipsis whitespace-nowrap mt-0.5">
         {log.message}
       </div>
 
       {expanded && hasDetails && (
-        <pre
-          style={{
-            marginTop: 'var(--sam-space-2)',
-            padding: 'var(--sam-space-2)',
-            backgroundColor: 'var(--sam-color-bg-inset)',
-            borderRadius: 'var(--sam-radius-sm)',
-            fontSize: '0.75rem',
-            overflow: 'auto',
-            maxHeight: '200px',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-          }}
-        >
+        <pre className="mt-2 p-2 bg-inset rounded-sm text-xs overflow-auto whitespace-pre-wrap break-all" style={{ maxHeight: '200px' }}>
           {JSON.stringify(log.details, null, 2)}
         </pre>
       )}
@@ -121,19 +100,7 @@ export const LogViewer: FC = () => {
   return (
     <div>
       {error && (
-        <div
-          style={{
-            padding: 'var(--sam-space-3)',
-            marginBottom: 'var(--sam-space-4)',
-            borderRadius: 'var(--sam-radius-sm)',
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            color: '#f87171',
-            fontSize: 'var(--sam-type-secondary-size)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
+        <div className="p-3 mb-4 rounded-sm bg-danger-tint text-danger-fg text-sm flex justify-between items-center">
           <span>{error}</span>
           <Button size="sm" variant="ghost" onClick={refresh}>
             Retry
@@ -143,29 +110,13 @@ export const LogViewer: FC = () => {
 
       <Card>
         {/* Filters */}
-        <div
-          style={{
-            padding: 'var(--sam-space-3) var(--sam-space-4)',
-            borderBottom: '1px solid var(--sam-color-border-default)',
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 'var(--sam-space-2)',
-            alignItems: 'center',
-          }}
-        >
+        <div className="px-4 py-3 border-b border-border-default flex flex-wrap gap-2 items-center">
           {/* Time range */}
           <select
             value={filter.timeRange}
             onChange={(e) => setTimeRange(e.target.value as LogTimeRange)}
             aria-label="Time range"
-            style={{
-              padding: 'var(--sam-space-1) var(--sam-space-2)',
-              borderRadius: 'var(--sam-radius-sm)',
-              border: '1px solid var(--sam-color-border-default)',
-              backgroundColor: 'var(--sam-color-bg-surface)',
-              color: 'var(--sam-color-fg-default)',
-              fontSize: 'var(--sam-type-secondary-size)',
-            }}
+            className="px-2 py-1 rounded-sm border border-border-default bg-surface text-fg-primary text-sm"
           >
             {TIME_RANGE_OPTIONS.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -173,23 +124,20 @@ export const LogViewer: FC = () => {
           </select>
 
           {/* Level toggles */}
-          <div style={{ display: 'flex', gap: 'var(--sam-space-1)' }}>
+          <div className="flex gap-1">
             {LEVEL_OPTIONS.map(opt => (
               <button
                 key={opt.value}
                 onClick={() => handleLevelToggle(opt.value)}
+                className="rounded-sm border border-border-default text-xs cursor-pointer"
                 style={{
                   padding: '2px 8px',
-                  borderRadius: 'var(--sam-radius-sm)',
-                  border: '1px solid var(--sam-color-border-default)',
                   backgroundColor: filter.levels.includes(opt.value)
                     ? (LEVEL_COLORS[opt.value] + '22')
                     : 'transparent',
                   color: filter.levels.includes(opt.value)
                     ? LEVEL_COLORS[opt.value]
                     : 'var(--sam-color-fg-muted)',
-                  fontSize: '0.75rem',
-                  cursor: 'pointer',
                 }}
               >
                 {opt.label}
@@ -198,7 +146,7 @@ export const LogViewer: FC = () => {
           </div>
 
           {/* Search */}
-          <div style={{ display: 'flex', gap: 'var(--sam-space-1)', flex: 1, minWidth: 0 }}>
+          <div className="flex gap-1 flex-1 min-w-0">
             <input
               type="text"
               placeholder="Search logs..."
@@ -206,15 +154,7 @@ export const LogViewer: FC = () => {
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearchSubmit()}
               aria-label="Search logs"
-              style={{
-                flex: 1,
-                padding: 'var(--sam-space-1) var(--sam-space-2)',
-                borderRadius: 'var(--sam-radius-sm)',
-                border: '1px solid var(--sam-color-border-default)',
-                backgroundColor: 'var(--sam-color-bg-surface)',
-                color: 'var(--sam-color-fg-default)',
-                fontSize: 'var(--sam-type-secondary-size)',
-              }}
+              className="flex-1 px-2 py-1 rounded-sm border border-border-default bg-surface text-fg-primary text-sm"
             />
             <Button size="sm" variant="ghost" onClick={handleSearchSubmit}>
               Search
@@ -228,12 +168,12 @@ export const LogViewer: FC = () => {
 
         {/* Log entries */}
         {loading && logs.length === 0 ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-8)' }}>
+          <div className="flex justify-center p-8">
             <Spinner size="lg" />
           </div>
         ) : logs.length === 0 ? (
-          <div style={{ padding: 'var(--sam-space-8)', textAlign: 'center' }}>
-            <Body style={{ color: 'var(--sam-color-fg-muted)' }}>
+          <div className="p-8 text-center">
+            <Body className="text-fg-muted">
               No logs found for the selected filters. Try adjusting the time range or search query.
             </Body>
           </div>
@@ -244,7 +184,7 @@ export const LogViewer: FC = () => {
             ))}
 
             {hasMore && (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-4)' }}>
+              <div className="flex justify-center p-4">
                 <Button size="sm" variant="secondary" onClick={loadMore} disabled={loading}>
                   {loading ? 'Loading...' : 'Load More'}
                 </Button>
@@ -252,7 +192,7 @@ export const LogViewer: FC = () => {
             )}
 
             {loading && logs.length > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-3)' }}>
+              <div className="flex justify-center p-3">
                 <Spinner size="sm" />
               </div>
             )}

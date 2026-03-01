@@ -73,7 +73,7 @@ export function AgentKeysSection() {
 
   if (loading && agents.length === 0) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-4)' }}>
+      <div className="flex justify-center p-4">
         <Spinner size="md" />
       </div>
     );
@@ -85,15 +85,7 @@ export function AgentKeysSection() {
         {error}
         <button
           onClick={loadData}
-          style={{
-            marginLeft: 'var(--sam-space-2)',
-            color: 'inherit',
-            textDecoration: 'underline',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            fontSize: 'inherit',
-          }}
+          className="ml-2 text-inherit underline bg-transparent border-none cursor-pointer text-[length:inherit]"
         >
           Retry
         </button>
@@ -102,7 +94,7 @@ export function AgentKeysSection() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-3)' }}>
+    <div className="flex flex-col gap-3">
       {agents.map((agent) => {
         // Filter credentials for this agent
         const agentCredentials = credentials.filter((c) => c.agentType === agent.id);

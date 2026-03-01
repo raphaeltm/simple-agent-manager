@@ -13,16 +13,15 @@ describe('PageTitle', () => {
   it('renders an h1 with page-title token styles', () => {
     render(<PageTitle>Dashboard</PageTitle>);
     const el = screen.getByRole('heading', { level: 1, name: 'Dashboard' });
-    expect(el.style.fontSize).toBe('var(--sam-type-page-title-size)');
-    expect(el.style.fontWeight).toBe('var(--sam-type-page-title-weight)');
-    expect(el.style.lineHeight).toBe('var(--sam-type-page-title-line-height)');
+    expect(el.className).toContain('sam-type-page-title');
+    expect(el.className).toContain('text-fg-primary');
   });
 
   it('merges custom style and className', () => {
     render(<PageTitle style={{ color: 'red' }} className="custom">Title</PageTitle>);
     const el = screen.getByRole('heading', { level: 1 });
     expect(el.style.color).toBe('red');
-    expect(el.className).toBe('custom');
+    expect(el.className).toContain('custom');
   });
 });
 
@@ -30,9 +29,8 @@ describe('SectionHeading', () => {
   it('renders an h2 with section-heading token styles', () => {
     render(<SectionHeading>Overview</SectionHeading>);
     const el = screen.getByRole('heading', { level: 2, name: 'Overview' });
-    expect(el.style.fontSize).toBe('var(--sam-type-section-heading-size)');
-    expect(el.style.fontWeight).toBe('var(--sam-type-section-heading-weight)');
-    expect(el.style.lineHeight).toBe('var(--sam-type-section-heading-line-height)');
+    expect(el.className).toContain('sam-type-section-heading');
+    expect(el.className).toContain('text-fg-primary');
   });
 });
 
@@ -40,9 +38,8 @@ describe('CardTitle', () => {
   it('renders an h3 with card-title token styles', () => {
     render(<CardTitle>Workspace Info</CardTitle>);
     const el = screen.getByRole('heading', { level: 3, name: 'Workspace Info' });
-    expect(el.style.fontSize).toBe('var(--sam-type-card-title-size)');
-    expect(el.style.fontWeight).toBe('var(--sam-type-card-title-weight)');
-    expect(el.style.lineHeight).toBe('var(--sam-type-card-title-line-height)');
+    expect(el.className).toContain('sam-type-card-title');
+    expect(el.className).toContain('text-fg-primary');
   });
 });
 
@@ -51,10 +48,8 @@ describe('Body', () => {
     render(<Body>Some body text here.</Body>);
     const el = screen.getByText('Some body text here.');
     expect(el.tagName).toBe('P');
-    expect(el.style.fontSize).toBe('var(--sam-type-body-size)');
-    expect(el.style.fontWeight).toBe('var(--sam-type-body-weight)');
-    expect(el.style.lineHeight).toBe('var(--sam-type-body-line-height)');
-    expect(el.style.color).toBe('var(--sam-color-fg-primary)');
+    expect(el.className).toContain('sam-type-body');
+    expect(el.className).toContain('text-fg-primary');
   });
 });
 
@@ -63,10 +58,8 @@ describe('Secondary', () => {
     render(<Secondary>Secondary text</Secondary>);
     const el = screen.getByText('Secondary text');
     expect(el.tagName).toBe('P');
-    expect(el.style.fontSize).toBe('var(--sam-type-secondary-size)');
-    expect(el.style.fontWeight).toBe('var(--sam-type-secondary-weight)');
-    expect(el.style.lineHeight).toBe('var(--sam-type-secondary-line-height)');
-    expect(el.style.color).toBe('var(--sam-color-fg-muted)');
+    expect(el.className).toContain('sam-type-secondary');
+    expect(el.className).toContain('text-fg-muted');
   });
 });
 
@@ -75,17 +68,14 @@ describe('Caption', () => {
     render(<Caption>Updated 2 hours ago</Caption>);
     const el = screen.getByText('Updated 2 hours ago');
     expect(el.tagName).toBe('SPAN');
-    expect(el.style.fontSize).toBe('var(--sam-type-caption-size)');
-    expect(el.style.fontWeight).toBe('var(--sam-type-caption-weight)');
-    expect(el.style.lineHeight).toBe('var(--sam-type-caption-line-height)');
-    expect(el.style.color).toBe('var(--sam-color-fg-muted)');
+    expect(el.className).toContain('sam-type-caption');
+    expect(el.className).toContain('text-fg-muted');
   });
 
   it('merges custom style', () => {
     render(<Caption style={{ marginLeft: '8px' }}>Note</Caption>);
     const el = screen.getByText('Note');
     expect(el.style.marginLeft).toBe('8px');
-    // Token styles still applied
-    expect(el.style.fontSize).toBe('var(--sam-type-caption-size)');
+    expect(el.className).toContain('sam-type-caption');
   });
 });

@@ -36,54 +36,33 @@ function MessageBubble({ message }: { message: ChatMessageResponse }) {
   const style = roleStyles[message.role] || roleStyles.system!;
 
   return (
-    <div style={{
-      padding: 'var(--sam-space-3) var(--sam-space-4)',
-      borderRadius: 'var(--sam-radius-md)',
-      backgroundColor: style.bg,
-      borderLeft: `3px solid ${style.color}`,
-    }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--sam-space-2)',
-        marginBottom: 'var(--sam-space-2)',
-      }}>
-        <span style={{
-          fontSize: 'var(--sam-type-caption-size)',
-          fontWeight: 600,
-          color: style.color,
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-        }}>
+    <div
+      className="p-3 px-4 rounded-md"
+      style={{
+        backgroundColor: style.bg,
+        borderLeft: `3px solid ${style.color}`,
+      }}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <span
+          className="text-xs font-semibold uppercase tracking-wide"
+          style={{ color: style.color }}
+        >
           {style.label}
         </span>
-        <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)' }}>
+        <span className="sam-type-caption text-fg-muted">
           {formatTimestamp(message.createdAt)}
         </span>
       </div>
-      <div className="sam-type-body" style={{
-        color: 'var(--sam-color-fg-primary)',
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
-        lineHeight: 1.5,
-      }}>
+      <div className="sam-type-body text-fg-primary whitespace-pre-wrap break-words leading-[1.5]">
         {message.content}
       </div>
       {message.toolMetadata && (
-        <details style={{ marginTop: 'var(--sam-space-2)' }}>
-          <summary className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', cursor: 'pointer' }}>
+        <details className="mt-2">
+          <summary className="sam-type-caption text-fg-muted cursor-pointer">
             Tool metadata
           </summary>
-          <pre style={{
-            fontSize: 'var(--sam-type-caption-size)',
-            color: 'var(--sam-color-fg-muted)',
-            backgroundColor: 'var(--sam-color-bg-inset)',
-            padding: 'var(--sam-space-2)',
-            borderRadius: 'var(--sam-radius-sm)',
-            overflow: 'auto',
-            maxHeight: '200px',
-            marginTop: 'var(--sam-space-1)',
-          }}>
+          <pre className="text-xs text-fg-muted bg-inset p-2 rounded-sm overflow-auto max-h-[200px] mt-1">
             {JSON.stringify(message.toolMetadata, null, 2)}
           </pre>
         </details>
@@ -318,7 +297,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-8)' }}>
+      <div className="flex justify-center p-8">
         <Spinner size="lg" />
       </div>
     );
@@ -326,18 +305,14 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
   if (error) {
     return (
-      <div style={{
-        padding: 'var(--sam-space-4)',
-        color: 'var(--sam-color-danger)',
-        fontSize: 'var(--sam-type-secondary-size)',
-      }}>
+      <div className="p-4 text-danger text-sm">
         {error}
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="flex flex-col h-full">
       {/* Connection indicator (TDF-8) */}
       {sessionState === 'active' && connectionState !== 'connected' && (
         <ConnectionBanner state={connectionState} onRetry={retryWs} />
@@ -345,64 +320,41 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Session header with branch/PR info */}
       {session && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--sam-space-3)',
-          padding: 'var(--sam-space-3) var(--sam-space-4)',
-          borderBottom: '1px solid var(--sam-color-border-default)',
-          flexWrap: 'wrap',
-          flexShrink: 0,
-        }}>
-          <span style={{
-            fontSize: 'var(--sam-type-body-size)',
-            fontWeight: 600,
-            color: 'var(--sam-color-fg-primary)',
-          }}>
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-border-default flex-wrap shrink-0">
+          <span className="text-base font-semibold text-fg-primary">
             {session.topic || `Chat ${session.id.slice(0, 8)}`}
           </span>
 
           {/* State indicator */}
-          <span style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '4px',
-            fontSize: 'var(--sam-type-caption-size)',
-            color: sessionState === 'active' ? 'var(--sam-color-success)'
-              : sessionState === 'idle' ? 'var(--sam-color-warning, #f59e0b)'
-              : 'var(--sam-color-fg-muted)',
-            fontWeight: 500,
-          }}>
-            <span style={{
-              width: '6px',
-              height: '6px',
-              borderRadius: '50%',
-              backgroundColor: 'currentColor',
-            }} />
+          <span
+            className="inline-flex items-center gap-1 text-xs font-medium"
+            style={{
+              color: sessionState === 'active' ? 'var(--sam-color-success)'
+                : sessionState === 'idle' ? 'var(--sam-color-warning, #f59e0b)'
+                : 'var(--sam-color-fg-muted)',
+            }}
+          >
+            <span className="w-[6px] h-[6px] rounded-full bg-current" />
             {sessionState === 'active' ? 'Active' : sessionState === 'idle' ? 'Idle' : 'Stopped'}
           </span>
 
           {/* Idle countdown (TDF-8) */}
           {sessionState === 'idle' && idleCountdownMs !== null && (
-            <span className="sam-type-caption" style={{
-              color: idleCountdownMs < 5 * 60 * 1000
-                ? 'var(--sam-color-danger)'
-                : 'var(--sam-color-warning, #f59e0b)',
-              fontFamily: 'monospace',
-            }}>
+            <span
+              className="sam-type-caption font-mono"
+              style={{
+                color: idleCountdownMs < 5 * 60 * 1000
+                  ? 'var(--sam-color-danger)'
+                  : 'var(--sam-color-warning, #f59e0b)',
+              }}
+            >
               Cleanup in {formatCountdown(idleCountdownMs)}
             </span>
           )}
 
           {/* Branch name (T021) */}
           {taskEmbed?.outputBranch && (
-            <span className="sam-type-caption" style={{
-              color: 'var(--sam-color-fg-muted)',
-              fontFamily: 'monospace',
-              backgroundColor: 'var(--sam-color-bg-inset)',
-              padding: '1px 6px',
-              borderRadius: 'var(--sam-radius-sm)',
-            }}>
+            <span className="sam-type-caption text-fg-muted font-mono bg-inset px-[6px] py-[1px] rounded-sm">
               {taskEmbed.outputBranch}
             </span>
           )}
@@ -413,12 +365,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               href={taskEmbed.outputPrUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="sam-type-caption"
-              style={{
-                color: 'var(--sam-color-accent-primary)',
-                textDecoration: 'none',
-                fontWeight: 500,
-              }}
+              className="sam-type-caption font-medium no-underline"
+              style={{ color: 'var(--sam-color-accent-primary)' }}
             >
               View PR
             </a>
@@ -429,7 +377,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               href={`/workspaces/${session.workspaceId}`}
               target="_blank"
               rel="noopener noreferrer"
-              style={{ marginLeft: 'auto' }}
+              className="ml-auto"
             >
               <Button variant="ghost" size="sm">
                 Open Workspace
@@ -441,54 +389,30 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Task error/summary display (TDF-8) */}
       {taskEmbed?.errorMessage && sessionState === 'terminated' && (
-        <div style={{
-          padding: 'var(--sam-space-2) var(--sam-space-4)',
-          backgroundColor: 'var(--sam-color-danger-tint)',
-          borderBottom: '1px solid var(--sam-color-border-default)',
-        }}>
-          <span className="sam-type-caption" style={{
-            color: 'var(--sam-color-danger)',
-            fontWeight: 500,
-          }}>
+        <div className="px-4 py-2 bg-danger-tint border-b border-border-default">
+          <span className="sam-type-caption text-danger font-medium">
             Error:
           </span>{' '}
-          <span className="sam-type-caption" style={{
-            color: 'var(--sam-color-danger)',
-            wordBreak: 'break-word',
-          }}>
+          <span className="sam-type-caption text-danger break-words">
             {taskEmbed.errorMessage}
           </span>
         </div>
       )}
       {taskEmbed?.outputSummary && sessionState === 'terminated' && (
-        <div style={{
-          padding: 'var(--sam-space-2) var(--sam-space-4)',
-          backgroundColor: 'var(--sam-color-success-tint)',
-          borderBottom: '1px solid var(--sam-color-border-default)',
-        }}>
-          <span className="sam-type-caption" style={{
-            color: 'var(--sam-color-success)',
-            fontWeight: 500,
-          }}>
+        <div className="px-4 py-2 bg-success-tint border-b border-border-default">
+          <span className="sam-type-caption text-success font-medium">
             Summary:
           </span>{' '}
-          <span className="sam-type-caption" style={{
-            color: 'var(--sam-color-fg-primary)',
-            wordBreak: 'break-word',
-          }}>
+          <span className="sam-type-caption text-fg-primary break-words">
             {taskEmbed.outputSummary}
           </span>
         </div>
       )}
 
       {/* Messages area */}
-      <div style={{
-        flex: 1,
-        overflowY: 'auto',
-        padding: 'var(--sam-space-4)',
-      }}>
+      <div className="flex-1 overflow-y-auto p-4">
         {hasMore && (
-          <div style={{ textAlign: 'center', marginBottom: 'var(--sam-space-3)' }}>
+          <div className="text-center mb-3">
             <Button variant="ghost" size="sm" onClick={loadMore} loading={loadingMore}>
               Load earlier messages
             </Button>
@@ -496,16 +420,11 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         )}
 
         {messages.length === 0 ? (
-          <div style={{
-            color: 'var(--sam-color-fg-muted)',
-            fontSize: 'var(--sam-type-secondary-size)',
-            textAlign: 'center',
-            padding: 'var(--sam-space-8)',
-          }}>
+          <div className="text-fg-muted text-sm text-center p-8">
             {sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
           </div>
         ) : (
-          <div style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
+          <div className="grid gap-3">
             {messages.map((msg) => (
               <MessageBubble key={msg.id} message={msg} />
             ))}
@@ -535,13 +454,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         />
       )}
       {sessionState === 'terminated' && (
-        <div style={{
-          borderTop: '1px solid var(--sam-color-border-default)',
-          padding: 'var(--sam-space-3) var(--sam-space-4)',
-          backgroundColor: 'var(--sam-color-bg-surface)',
-          textAlign: 'center',
-        }}>
-          <span className="sam-type-secondary" style={{ color: 'var(--sam-color-fg-muted)' }}>
+        <div className="border-t border-border-default px-4 py-3 bg-surface text-center">
+          <span className="sam-type-secondary text-fg-muted">
             This session has ended.
           </span>
         </div>
@@ -559,35 +473,22 @@ function ConnectionBanner({ state, onRetry }: { state: ChatConnectionState; onRe
   const isRecoverable = state === 'disconnected';
 
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 'var(--sam-space-2)',
-      padding: 'var(--sam-space-1) var(--sam-space-4)',
-      backgroundColor: isRecoverable ? 'var(--sam-color-danger-tint)' : 'var(--sam-color-warning-tint, var(--sam-color-info-tint))',
-      borderBottom: '1px solid var(--sam-color-border-default)',
-      fontSize: 'var(--sam-type-caption-size)',
-    }}>
+    <div
+      className="flex items-center gap-2 px-4 py-1 border-b border-border-default text-xs"
+      style={{
+        backgroundColor: isRecoverable ? 'var(--sam-color-danger-tint)' : 'var(--sam-color-warning-tint, var(--sam-color-info-tint))',
+      }}
+    >
       {!isRecoverable && <Spinner size="sm" />}
-      <span style={{
-        color: isRecoverable ? 'var(--sam-color-danger)' : 'var(--sam-color-fg-muted)',
-      }}>
+      <span style={{ color: isRecoverable ? 'var(--sam-color-danger)' : 'var(--sam-color-fg-muted)' }}>
         {label}
       </span>
       {isRecoverable && (
         <button
           type="button"
           onClick={onRetry}
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--sam-color-accent-primary)',
-            fontSize: 'var(--sam-type-caption-size)',
-            fontWeight: 500,
-            textDecoration: 'underline',
-            padding: 0,
-          }}
+          className="bg-transparent border-none cursor-pointer text-xs font-medium underline p-0"
+          style={{ color: 'var(--sam-color-accent-primary)' }}
         >
           Retry
         </button>
@@ -611,12 +512,8 @@ function FollowUpInput({
   placeholder: string;
 }) {
   return (
-    <div style={{
-      borderTop: '1px solid var(--sam-color-border-default)',
-      padding: 'var(--sam-space-3) var(--sam-space-4)',
-      backgroundColor: 'var(--sam-color-bg-surface)',
-    }}>
-      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'flex-end' }}>
+    <div className="border-t border-border-default px-4 py-3 bg-surface">
+      <div className="flex gap-2 items-end">
         <textarea
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -629,35 +526,17 @@ function FollowUpInput({
           placeholder={placeholder}
           disabled={sending}
           rows={1}
-          style={{
-            flex: 1,
-            padding: 'var(--sam-space-2) var(--sam-space-3)',
-            backgroundColor: 'var(--sam-color-bg-page)',
-            border: '1px solid var(--sam-color-border-default)',
-            borderRadius: 'var(--sam-radius-md)',
-            color: 'var(--sam-color-fg-primary)',
-            fontSize: 'var(--sam-type-body-size)',
-            outline: 'none',
-            resize: 'none',
-            fontFamily: 'inherit',
-            lineHeight: 1.5,
-            minHeight: '38px',
-            maxHeight: '120px',
-          }}
+          className="flex-1 p-2 px-3 bg-page border border-border-default rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px]"
         />
         <button
           type="button"
           onClick={onSend}
           disabled={sending || !value.trim()}
+          className="px-3 py-2 border-none rounded-md text-base font-medium"
           style={{
-            padding: 'var(--sam-space-2) var(--sam-space-3)',
             backgroundColor: sending || !value.trim() ? 'var(--sam-color-bg-inset)' : 'var(--sam-color-accent-primary)',
             color: sending || !value.trim() ? 'var(--sam-color-fg-muted)' : 'white',
-            border: 'none',
-            borderRadius: 'var(--sam-radius-md)',
             cursor: sending || !value.trim() ? 'default' : 'pointer',
-            fontSize: 'var(--sam-type-body-size)',
-            fontWeight: 500,
           }}
         >
           Send

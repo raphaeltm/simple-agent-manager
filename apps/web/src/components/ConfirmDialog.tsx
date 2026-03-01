@@ -15,18 +15,18 @@ interface ConfirmDialogProps {
 
 const variantConfig = {
   danger: {
-    iconColor: 'var(--sam-color-danger)',
-    iconBg: 'var(--sam-color-danger-tint)',
+    iconColorClass: 'text-danger',
+    iconBgClass: 'bg-danger-tint',
     iconPath: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z',
   },
   warning: {
-    iconColor: 'var(--sam-color-warning)',
-    iconBg: 'var(--sam-color-warning-tint)',
+    iconColorClass: 'text-warning',
+    iconBgClass: 'bg-warning-tint',
     iconPath: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z',
   },
   info: {
-    iconColor: 'var(--sam-color-accent-primary)',
-    iconBg: 'var(--sam-color-accent-primary-tint)',
+    iconColorClass: 'text-accent',
+    iconBgClass: 'bg-accent-tint',
     iconPath: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
   },
 };
@@ -84,68 +84,38 @@ export function ConfirmDialog({
 
   return (
     <div
-      style={{ position: 'fixed', inset: 0, zIndex: 'var(--sam-z-dialog-backdrop)' as unknown as number, overflowY: 'auto' }}
+      className="fixed inset-0 z-dialog-backdrop overflow-y-auto"
       aria-labelledby="modal-title"
       role="dialog"
       aria-modal="true"
     >
       {/* Backdrop */}
       <div
-        style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'var(--sam-color-bg-overlay)',
-          transition: 'opacity 0.15s',
-        }}
+        className="fixed inset-0 bg-overlay transition-opacity duration-150"
         onClick={loading ? undefined : onClose}
       />
 
-      <div style={{
-        display: 'flex',
-        minHeight: '100%',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 'var(--sam-space-4)',
-      }}>
+      <div className="flex min-h-full items-center justify-center p-4">
         <div
           ref={dialogRef}
           tabIndex={-1}
-          style={{
-            position: 'relative',
-            backgroundColor: 'var(--sam-color-bg-surface)',
-            borderRadius: 'var(--sam-radius-lg)',
-            boxShadow: 'var(--sam-shadow-overlay)',
-            border: '1px solid var(--sam-color-border-default)',
-            maxWidth: '28rem',
-            width: '100%',
-            padding: 'var(--sam-space-6)',
-            outline: 'none',
-          }}
+          className="relative bg-surface rounded-lg shadow-overlay border border-border-default max-w-md w-full p-6 outline-none"
         >
-          <div style={{ display: 'flex', alignItems: 'flex-start' }}>
-            <div style={{
-              flexShrink: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: 48,
-              width: 48,
-              borderRadius: '50%',
-              backgroundColor: config.iconBg,
-            }}>
-              <svg style={{ height: 24, width: 24, color: config.iconColor }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="flex items-start">
+            <div className={`shrink-0 flex items-center justify-center h-12 w-12 rounded-full ${config.iconBgClass}`}>
+              <svg className={`h-6 w-6 ${config.iconColorClass}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={config.iconPath} />
               </svg>
             </div>
-            <div style={{ marginLeft: 'var(--sam-space-4)', flex: 1 }}>
-              <h3 style={{ fontSize: 'var(--sam-type-section-heading-size)', fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number, color: 'var(--sam-color-fg-primary)' }} id="modal-title">
+            <div className="ml-4 flex-1">
+              <h3 className="text-base font-semibold text-fg-primary" id="modal-title">
                 {title}
               </h3>
-              <div style={{ marginTop: 'var(--sam-space-2)', fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>{message}</div>
+              <div className="mt-2 text-sm text-fg-muted">{message}</div>
             </div>
           </div>
 
-          <div style={{ marginTop: 'var(--sam-space-6)', display: 'flex', justifyContent: 'flex-end', gap: 'var(--sam-space-3)' }}>
+          <div className="mt-6 flex justify-end gap-3">
             <Button
               variant="secondary"
               disabled={loading}

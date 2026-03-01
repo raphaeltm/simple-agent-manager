@@ -114,22 +114,8 @@ export function Nodes() {
 
   return (
     <PageLayout title="Nodes" maxWidth="xl" headerRight={<UserMenu />}>
-      <style>{`
-        .sam-node-grid { grid-template-columns: 1fr; }
-        @media (min-width: 768px) { .sam-node-grid { grid-template-columns: repeat(2, 1fr); } }
-      `}</style>
-
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 'var(--sam-space-6)',
-          gap: 'var(--sam-space-3)',
-          flexWrap: 'wrap',
-        }}
-      >
-        <p className="sam-type-secondary" style={{ margin: 0, color: 'var(--sam-color-fg-muted)' }}>
+      <div className="flex justify-between items-center mb-6 gap-3 flex-wrap">
+        <p className="sam-type-secondary m-0 text-fg-muted">
           Nodes host one or more workspaces.
         </p>
         <Button onClick={() => setShowCreateForm((v) => !v)} disabled={creating}>
@@ -138,43 +124,24 @@ export function Nodes() {
       </div>
 
       {showCreateForm && (
-        <div
-          style={{
-            marginBottom: 'var(--sam-space-4)',
-            border: '1px solid var(--sam-color-border-default)',
-            borderRadius: 'var(--sam-radius-md)',
-            background: 'var(--sam-color-bg-surface)',
-            padding: 'var(--sam-space-4)',
-            display: 'grid',
-            gap: 'var(--sam-space-4)',
-          }}
-        >
+        <div className="mb-4 border border-border-default rounded-md bg-surface p-4 grid gap-4">
           <div>
-            <label style={{ display: 'block', fontSize: 'var(--sam-type-secondary-size)', fontWeight: 500, color: 'var(--sam-color-fg-muted)', marginBottom: '0.5rem' }}>Node Size</label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--sam-space-3)' }}>
+            <label className="block text-fg-muted font-medium mb-2" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Node Size</label>
+            <div className="grid grid-cols-3 gap-3">
               {VM_SIZES.map((size) => (
                 <button
                   key={size.value}
                   type="button"
                   aria-pressed={newNodeSize === size.value}
                   onClick={() => setNewNodeSize(size.value)}
-                  style={{
-                    padding: 'var(--sam-space-3)',
-                    border: newNodeSize === size.value
-                      ? '2px solid var(--sam-color-accent-primary)'
-                      : '1px solid var(--sam-color-border-default)',
-                    borderRadius: 'var(--sam-radius-md)',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    backgroundColor: newNodeSize === size.value
-                      ? 'var(--sam-color-accent-primary-tint)'
-                      : 'var(--sam-color-bg-inset)',
-                    color: 'var(--sam-color-fg-primary)',
-                    transition: 'all 0.15s ease',
-                  }}
+                  className={`p-3 rounded-md text-left cursor-pointer text-fg-primary transition-all duration-150 ${
+                    newNodeSize === size.value
+                      ? 'border-2 border-accent bg-accent-tint'
+                      : 'border border-border-default bg-inset'
+                  }`}
                 >
-                  <div style={{ fontWeight: 500 }}>{size.label}</div>
-                  <div style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)', marginTop: '0.125rem' }}>
+                  <div className="font-medium">{size.label}</div>
+                  <div className="text-fg-muted mt-0.5" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
                     {size.description}
                   </div>
                 </button>
@@ -182,14 +149,14 @@ export function Nodes() {
             </div>
           </div>
           <div>
-            <label htmlFor="node-location" style={{ display: 'block', fontSize: 'var(--sam-type-secondary-size)', fontWeight: 500, color: 'var(--sam-color-fg-muted)', marginBottom: '0.25rem' }}>Location</label>
+            <label htmlFor="node-location" className="block text-fg-muted font-medium mb-1" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Location</label>
             <Select id="node-location" value={newNodeLocation} onChange={(e) => setNewNodeLocation(e.target.value as VMLocation)}>
               {VM_LOCATIONS.map((loc) => (
                 <option key={loc.value} value={loc.value}>{loc.label}</option>
               ))}
             </Select>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div className="flex justify-end">
             <Button onClick={handleCreateNode} disabled={creating} loading={creating}>
               Create Node
             </Button>
@@ -198,7 +165,7 @@ export function Nodes() {
       )}
 
       {error && (
-        <div style={{ marginBottom: 'var(--sam-space-4)' }}>
+        <div className="mb-4">
           <Alert variant="error" onDismiss={() => setError(null)}>
             {error}
           </Alert>
@@ -206,7 +173,7 @@ export function Nodes() {
       )}
 
       {loading ? (
-        <div className="sam-node-grid" style={{ display: 'grid', gap: 'var(--sam-space-4)' }}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {Array.from({ length: 3 }, (_, i) => (
             <SkeletonCard key={i} lines={3} />
           ))}
@@ -219,7 +186,7 @@ export function Nodes() {
           action={{ label: 'Create Node', onClick: () => setShowCreateForm(true) }}
         />
       ) : (
-        <div className="sam-node-grid" style={{ display: 'grid', gap: 'var(--sam-space-4)', alignItems: 'start' }}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
           {sortedNodes.map((node) => (
             <NodeCard
               key={node.id}

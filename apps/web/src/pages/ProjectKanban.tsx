@@ -13,7 +13,7 @@ export function ProjectKanban() {
   };
 
   return (
-    <div style={{ overflow: 'hidden' }}>
+    <div className="overflow-hidden">
       <TaskKanbanBoard
         projectId={projectId}
         onTaskClick={handleTaskClick}

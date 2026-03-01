@@ -1,5 +1,3 @@
-import type { CSSProperties } from 'react';
-
 const statusConfig: Record<string, { label: string; bg: string; fg: string }> = {
   // Workspace / node statuses
   pending: { label: 'Pending', bg: 'rgba(159, 183, 174, 0.15)', fg: '#9fb7ae' },
@@ -32,17 +30,13 @@ interface StatusBadgeProps {
 
 export function StatusBadge({ status, label }: StatusBadgeProps) {
   const config = statusConfig[status] ?? { label: 'Unknown', bg: '#e5e7eb', fg: '#1f2937' };
-  const style: CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '6px',
-    padding: '2px 10px',
-    borderRadius: '9999px',
-    fontSize: '0.75rem',
-    fontWeight: 600,
-    backgroundColor: config.bg,
-    color: config.fg,
-  };
 
-  return <span style={style}>{label ?? config.label}</span>;
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold"
+      style={{ backgroundColor: config.bg, color: config.fg }}
+    >
+      {label ?? config.label}
+    </span>
+  );
 }

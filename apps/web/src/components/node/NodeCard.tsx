@@ -83,65 +83,42 @@ export const NodeCard: FC<NodeCardProps> = ({
       role="button"
       tabIndex={0}
       aria-label={`View node ${node.name}`}
-      style={{ cursor: 'pointer' }}
+      className="cursor-pointer"
     >
-      <Card style={{ padding: 'clamp(var(--sam-space-3), 3vw, var(--sam-space-4))', display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-3)' }}>
+      <Card className="flex flex-col gap-3" style={{ padding: 'clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }}>
         {/* Header: icon + name + dropdown */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
-          <div
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 'var(--sam-radius-sm)',
-              backgroundColor: 'var(--sam-color-info-tint)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-sm bg-info-tint flex items-center justify-center shrink-0">
             <Server size={20} color="var(--sam-color-info-fg)" />
           </div>
 
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <span
-              className="sam-type-card-title"
-              style={{
-                color: 'var(--sam-color-fg-primary)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                display: 'block',
-              }}
-            >
+          <div className="flex-1 min-w-0">
+            <span className="sam-type-card-title text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap block">
               {node.name}
             </span>
           </div>
 
           {overflowItems.length > 0 && (
-            <div onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0 }}>
+            <div onClick={(e) => e.stopPropagation()} className="shrink-0">
               <DropdownMenu items={overflowItems} aria-label={`Actions for ${node.name}`} />
             </div>
           )}
         </div>
 
         {/* Status badges */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
+        <div className="flex items-center gap-2">
           <StatusBadge status={node.status} />
           <StatusBadge status={node.healthStatus || 'stale'} />
         </div>
 
         {/* VM info */}
-        <div
-          className="sam-type-caption"
-          style={{ color: 'var(--sam-color-fg-muted)' }}
-        >
+        <div className="sam-type-caption text-fg-muted">
           {node.vmSize} ({sizeConfig.cpus} CPU, {sizeConfig.ram}) &middot; {locationConfig.name}, {locationConfig.country}
         </div>
 
         {/* Resource metrics */}
         {hasMetrics ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sam-space-2)' }}>
+          <div className="flex flex-wrap gap-2">
             {metrics.cpuLoadAvg1 != null && (
               <MiniMetricBadge label="CPU" value={metrics.cpuLoadAvg1} />
             )}
@@ -153,22 +130,14 @@ export const NodeCard: FC<NodeCardProps> = ({
             )}
           </div>
         ) : (
-          <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', fontStyle: 'italic' }}>
+          <span className="sam-type-caption text-fg-muted italic">
             No metrics yet
           </span>
         )}
 
         {/* Workspaces section */}
-        <div
-          style={{
-            borderTop: '1px solid var(--sam-color-border-default)',
-            paddingTop: 'var(--sam-space-3)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--sam-space-2)',
-          }}
-        >
-          <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', fontWeight: 500 }}>
+        <div className="border-t border-border-default pt-3 flex flex-col gap-2">
+          <span className="sam-type-caption text-fg-muted font-medium">
             Workspaces ({workspaces.length})
           </span>
 
@@ -180,13 +149,13 @@ export const NodeCard: FC<NodeCardProps> = ({
                 </div>
               ))}
               {hiddenCount > 0 && (
-                <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', paddingLeft: 'var(--sam-space-3)' }}>
+                <span className="sam-type-caption text-fg-muted pl-3">
                   +{hiddenCount} more
                 </span>
               )}
             </>
           ) : (
-            <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', fontStyle: 'italic' }}>
+            <span className="sam-type-caption text-fg-muted italic">
               No workspaces
             </span>
           )}
@@ -195,7 +164,7 @@ export const NodeCard: FC<NodeCardProps> = ({
             variant="ghost"
             size="sm"
             onClick={handleCreateWorkspace}
-            style={{ alignSelf: 'flex-start' }}
+            className="self-start"
           >
             <Plus size={14} />
             Create Workspace
@@ -204,14 +173,8 @@ export const NodeCard: FC<NodeCardProps> = ({
 
         {/* Error message */}
         {node.errorMessage && (
-          <div
-            style={{
-              padding: 'var(--sam-space-2)',
-              backgroundColor: 'var(--sam-color-danger-tint)',
-              borderRadius: 'var(--sam-radius-sm)',
-            }}
-          >
-            <span className="sam-type-caption" style={{ color: 'var(--sam-color-danger)' }}>
+          <div className="p-2 bg-danger-tint rounded-sm">
+            <span className="sam-type-caption text-danger">
               {node.errorMessage}
             </span>
           </div>

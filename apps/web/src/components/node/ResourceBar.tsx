@@ -17,17 +17,10 @@ export const ResourceBar: FC<ResourceBarProps> = ({ label, percent, detail }) =>
   const color = getBarColor(clampedPercent);
 
   return (
-    <div style={{ flex: 1, minWidth: 160 }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'baseline',
-          marginBottom: 'var(--sam-space-1)',
-        }}
-      >
-        <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>{label}</span>
-        <span style={{ fontSize: 'var(--sam-type-caption-size)', fontWeight: 600, color: 'var(--sam-color-fg-primary)' }}>
+    <div className="flex-1 min-w-40">
+      <div className="flex justify-between items-baseline mb-1">
+        <span className="text-fg-muted" style={{ fontSize: 'var(--sam-type-caption-size)' }}>{label}</span>
+        <span className="text-fg-primary font-semibold" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
           {clampedPercent.toFixed(1)}%
         </span>
       </div>
@@ -37,25 +30,18 @@ export const ResourceBar: FC<ResourceBarProps> = ({ label, percent, detail }) =>
         aria-valuemin={0}
         aria-valuemax={100}
         aria-label={`${label}: ${clampedPercent.toFixed(1)}%`}
-        style={{
-          height: 8,
-          borderRadius: 4,
-          backgroundColor: 'var(--sam-color-bg-inset)',
-          overflow: 'hidden',
-        }}
+        className="h-2 rounded-full bg-inset overflow-hidden"
       >
         <div
+          className="h-full rounded-full transition-[width] duration-300 ease-in-out"
           style={{
-            height: '100%',
             width: `${clampedPercent}%`,
             backgroundColor: color,
-            borderRadius: 4,
-            transition: 'width 0.3s ease',
           }}
         />
       </div>
       {detail && (
-        <div style={{ fontSize: '0.6875rem', color: 'var(--sam-color-fg-muted)', marginTop: 2 }}>
+        <div className="text-fg-muted mt-0.5" style={{ fontSize: '0.6875rem' }}>
           {detail}
         </div>
       )}

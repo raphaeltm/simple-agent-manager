@@ -8,22 +8,6 @@ export interface TooltipProps {
   delay?: number;
 }
 
-const tooltipBaseStyle: CSSProperties = {
-  position: 'absolute',
-  padding: 'var(--sam-space-1) var(--sam-space-2)',
-  background: 'var(--sam-color-bg-surface)',
-  border: '1px solid var(--sam-color-border-default)',
-  borderRadius: 'var(--sam-radius-sm)',
-  boxShadow: 'var(--sam-shadow-tooltip)',
-  color: 'var(--sam-color-fg-primary)',
-  fontSize: 'var(--sam-type-caption-size)',
-  lineHeight: 'var(--sam-type-caption-line-height)',
-  maxWidth: 200,
-  zIndex: 'var(--sam-z-dropdown)',
-  pointerEvents: 'none',
-  whiteSpace: 'normal',
-};
-
 function getPositionStyle(side: 'top' | 'bottom' | 'left' | 'right'): CSSProperties {
   switch (side) {
     case 'top':
@@ -60,7 +44,7 @@ export function Tooltip({ content, children, side = 'top', delay = 400 }: Toolti
 
   return (
     <span
-      style={{ position: 'relative', display: 'inline-flex' }}
+      className="relative inline-flex"
       onMouseEnter={showAfterDelay}
       onMouseLeave={hide}
       onFocus={showImmediate}
@@ -74,7 +58,12 @@ export function Tooltip({ content, children, side = 'top', delay = 400 }: Toolti
         <span
           id={tooltipId}
           role="tooltip"
-          style={{ ...tooltipBaseStyle, ...getPositionStyle(side) }}
+          className="absolute py-1 px-2 bg-surface border border-border-default rounded-sm shadow-tooltip text-fg-primary max-w-[200px] z-dropdown pointer-events-none whitespace-normal"
+          style={{
+            fontSize: 'var(--sam-type-caption-size)',
+            lineHeight: 'var(--sam-type-caption-line-height)',
+            ...getPositionStyle(side),
+          }}
         >
           {content}
         </span>

@@ -56,49 +56,32 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
     }
   };
 
-  const actionBtnStyle: React.CSSProperties = {
-    padding: '4px 12px',
-    fontSize: 'var(--sam-type-secondary-size)',
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-  };
-
   if (credential && !showForm) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-4)' }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: 'var(--sam-space-4)',
-          backgroundColor: 'var(--sam-color-success-tint)',
-          border: '1px solid rgba(34, 197, 94, 0.3)',
-          borderRadius: 'var(--sam-radius-md)',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
-            <div style={{
-              height: 40, width: 40,
-              backgroundColor: 'var(--sam-color-success-tint)',
-              borderRadius: '50%',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <svg style={{ height: 20, width: 20, color: 'var(--sam-color-success-fg)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between p-4 bg-success-tint border border-success/30 rounded-md">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 bg-success-tint rounded-full flex items-center justify-center">
+              <svg className="h-5 w-5 text-success-fg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             </div>
             <div>
-              <p style={{ fontWeight: 500, color: 'var(--sam-color-success-fg)' }}>Connected</p>
-              <p style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>
+              <p className="font-medium text-success-fg">Connected</p>
+              <p className="text-sm text-fg-muted">
                 Added: {new Date(credential.createdAt).toLocaleDateString()}
               </p>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
-            <button onClick={() => setShowForm(true)} style={{ ...actionBtnStyle, color: 'var(--sam-color-accent-primary)' }}>
+          <div className="flex gap-2">
+            <button onClick={() => setShowForm(true)} className="py-1 px-3 text-sm bg-transparent border-none cursor-pointer text-accent">
               Update
             </button>
-            <button onClick={handleDelete} disabled={loading} style={{ ...actionBtnStyle, color: 'var(--sam-color-danger)', opacity: loading ? 0.5 : 1 }}>
+            <button
+              onClick={handleDelete}
+              disabled={loading}
+              className={`py-1 px-3 text-sm bg-transparent border-none cursor-pointer text-danger ${loading ? 'opacity-50' : 'opacity-100'}`}
+            >
               {loading ? 'Removing...' : 'Disconnect'}
             </button>
           </div>
@@ -108,18 +91,12 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
     );
   }
 
-  const labelStyle: React.CSSProperties = {
-    display: 'block',
-    fontSize: 'var(--sam-type-secondary-size)',
-    fontWeight: 500,
-    color: 'var(--sam-color-fg-primary)',
-    marginBottom: 'var(--sam-space-1)',
-  };
-
   return (
-    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-4)' }}>
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <div>
-        <label htmlFor="hetzner-token" style={labelStyle}>Hetzner API Token</label>
+        <label htmlFor="hetzner-token" className="block text-sm font-medium text-fg-primary mb-1">
+          Hetzner API Token
+        </label>
         <Input
           id="hetzner-token"
           type="password"
@@ -128,13 +105,13 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
           placeholder="Enter your Hetzner Cloud API token"
           required
         />
-        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+        <p className="mt-1 text-xs text-fg-muted">
           Get your API token from{' '}
           <a
             href="https://console.hetzner.cloud/projects"
             target="_blank"
             rel="noopener noreferrer"
-            style={{ color: 'var(--sam-color-accent-primary)' }}
+            className="text-accent"
           >
             Hetzner Cloud Console
           </a>
@@ -144,7 +121,7 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
 
       {error && <Alert variant="error">{error}</Alert>}
 
-      <div style={{ display: 'flex', gap: 'var(--sam-space-3)' }}>
+      <div className="flex gap-3">
         <Button type="submit" disabled={loading || !token} loading={loading}>
           {credential ? 'Update Token' : 'Connect'}
         </Button>

@@ -70,14 +70,10 @@ export const LogEntry: FC<LogEntryProps> = ({ entry, searchTerm }) => {
 
   return (
     <div
+      className="flex items-start gap-2 px-2 font-mono leading-relaxed"
       style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 'var(--sam-space-2)',
         padding: '2px var(--sam-space-2)',
         fontSize: 'var(--sam-type-caption-size, 0.75rem)',
-        fontFamily: 'monospace',
-        lineHeight: 1.6,
         backgroundColor: bg,
         borderLeft: entry.level === 'error' ? '2px solid #ef4444' : entry.level === 'warn' ? '2px solid #f59e0b' : '2px solid transparent',
         cursor: hasMetadata ? 'pointer' : 'default',
@@ -85,19 +81,15 @@ export const LogEntry: FC<LogEntryProps> = ({ entry, searchTerm }) => {
       onClick={hasMetadata ? () => setExpanded(!expanded) : undefined}
     >
       {/* Timestamp */}
-      <span style={{ color: 'var(--sam-color-fg-disabled, #6b7280)', flexShrink: 0, whiteSpace: 'nowrap' }}>
+      <span className="shrink-0 whitespace-nowrap" style={{ color: 'var(--sam-color-fg-disabled, #6b7280)' }}>
         {formatTimestamp(entry.timestamp)}
       </span>
 
       {/* Level badge */}
       <span
+        className="shrink-0 w-9 text-center uppercase font-semibold"
         style={{
-          flexShrink: 0,
-          width: 36,
-          textAlign: 'center',
-          textTransform: 'uppercase',
           fontSize: '0.625rem',
-          fontWeight: 600,
           color,
           letterSpacing: '0.02em',
         }}
@@ -107,25 +99,21 @@ export const LogEntry: FC<LogEntryProps> = ({ entry, searchTerm }) => {
 
       {/* Source badge */}
       <span
+        className="shrink-0 rounded-sm whitespace-nowrap text-fg-muted font-medium"
         style={{
-          flexShrink: 0,
           padding: '0 4px',
-          borderRadius: 3,
           fontSize: '0.625rem',
-          fontWeight: 500,
-          color: 'var(--sam-color-fg-muted)',
           backgroundColor: 'rgba(128, 128, 128, 0.1)',
-          whiteSpace: 'nowrap',
         }}
       >
         {entry.source}
       </span>
 
       {/* Message */}
-      <span style={{ color: 'var(--sam-color-fg-primary)', flex: 1, wordBreak: 'break-word' }}>
+      <span className="text-fg-primary flex-1 break-words">
         {searchTerm ? highlightSearch(entry.message, searchTerm) : entry.message}
         {hasMetadata && (
-          <span style={{ color: 'var(--sam-color-fg-disabled)', marginLeft: 4 }}>
+          <span className="ml-1" style={{ color: 'var(--sam-color-fg-disabled)' }}>
             {expanded ? '\u25BC' : '\u25B6'}
           </span>
         )}
@@ -134,15 +122,10 @@ export const LogEntry: FC<LogEntryProps> = ({ entry, searchTerm }) => {
       {/* Expanded metadata */}
       {expanded && hasMetadata && (
         <div
+          className="mt-1 p-2 rounded-sm text-fg-muted whitespace-pre-wrap break-all"
           style={{
-            marginTop: 4,
-            padding: 'var(--sam-space-2)',
             backgroundColor: 'rgba(0, 0, 0, 0.05)',
-            borderRadius: 'var(--sam-radius-sm, 4px)',
             fontSize: '0.6875rem',
-            color: 'var(--sam-color-fg-muted)',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
           }}
         >
           {JSON.stringify(entry.metadata, null, 2)}

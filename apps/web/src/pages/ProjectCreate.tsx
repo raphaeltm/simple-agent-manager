@@ -62,24 +62,16 @@ export function ProjectCreate() {
       />
 
       {error && (
-        <div style={{ marginTop: 'var(--sam-space-3)' }}>
+        <div className="mt-3">
           <Alert variant="error" onDismiss={() => setError(null)}>
             {error}
           </Alert>
         </div>
       )}
 
-      <div
-        style={{
-          marginTop: 'var(--sam-space-4)',
-          border: '1px solid var(--sam-color-border-default)',
-          borderRadius: 'var(--sam-radius-md)',
-          background: 'var(--sam-color-bg-surface)',
-          padding: 'var(--sam-space-4)',
-        }}
-      >
+      <div className="mt-4 border border-border-default rounded-md bg-surface p-4">
         {loading ? (
-          <div style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
+          <div className="grid gap-3">
             <Skeleton width="30%" height="0.875rem" />
             <Skeleton width="100%" height="2.5rem" borderRadius="var(--sam-radius-md)" />
             <Skeleton width="30%" height="0.875rem" />

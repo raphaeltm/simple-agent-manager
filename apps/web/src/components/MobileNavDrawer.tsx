@@ -39,53 +39,12 @@ export function MobileNavDrawer({
 
   return (
     <>
-      <style>{`
-        @keyframes sam-drawer-slide-in {
-          from { transform: translateX(100%); }
-          to { transform: translateX(0); }
-        }
-        @keyframes sam-drawer-fade-in {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        .sam-mobile-nav-item {
-          display: flex;
-          align-items: center;
-          width: 100%;
-          min-height: 44px;
-          padding: 0.625rem 1.25rem;
-          font-size: var(--sam-type-body-size);
-          font-weight: 500;
-          color: var(--sam-color-fg-muted);
-          background: none;
-          border: none;
-          cursor: pointer;
-          text-align: left;
-          border-left: 3px solid transparent;
-          transition: all 0.12s ease;
-        }
-        .sam-mobile-nav-item:hover {
-          color: var(--sam-color-fg-primary);
-          background: color-mix(in srgb, var(--sam-color-bg-surface) 72%, transparent);
-        }
-        .sam-mobile-nav-item.is-active {
-          color: var(--sam-color-accent-primary);
-          border-left-color: var(--sam-color-accent-primary);
-          background: color-mix(in srgb, var(--sam-color-accent-primary) 10%, transparent);
-        }
-      `}</style>
-
       {/* Backdrop */}
       <div
         data-testid="mobile-nav-backdrop"
         onClick={onClose}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'var(--sam-color-bg-overlay)',
-          zIndex: 'var(--sam-z-drawer-backdrop)' as unknown as number,
-          animation: 'sam-drawer-fade-in 0.15s ease-out',
-        }}
+        className="fixed inset-0 bg-overlay z-drawer-backdrop"
+        style={{ animation: 'sam-drawer-fade-in 0.15s ease-out' }}
       />
 
       {/* Panel */}
@@ -93,99 +52,34 @@ export function MobileNavDrawer({
         role="dialog"
         aria-label="Navigation menu"
         data-testid="mobile-nav-panel"
-        style={{
-          position: 'fixed',
-          top: 0,
-          right: 0,
-          bottom: 0,
-          width: '85vw',
-          maxWidth: 320,
-          backgroundColor: 'var(--sam-color-bg-surface)',
-          borderLeft: '1px solid var(--sam-color-border-default)',
-          zIndex: 'var(--sam-z-drawer)' as unknown as number,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          animation: 'sam-drawer-slide-in 0.2s ease-out',
-        }}
+        className="fixed top-0 right-0 bottom-0 w-[85vw] max-w-80 bg-surface border-l border-border-default z-drawer flex flex-col overflow-hidden"
+        style={{ animation: 'sam-drawer-slide-in 0.2s ease-out' }}
       >
         {/* Header: user info + close */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-            padding: '1rem 1.25rem',
-            borderBottom: '1px solid var(--sam-color-border-default)',
-          }}
-        >
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-border-default">
           {user.image ? (
             <img
               src={user.image}
               alt={user.name || user.email}
-              style={{ height: 36, width: 36, borderRadius: '50%', flexShrink: 0 }}
+              className="h-9 w-9 rounded-full shrink-0"
             />
           ) : (
-            <div
-              style={{
-                height: 36,
-                width: 36,
-                borderRadius: '50%',
-                backgroundColor: 'var(--sam-color-accent-primary)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'var(--sam-color-fg-on-accent)',
-                fontSize: 'var(--sam-type-secondary-size)',
-                fontWeight: 500,
-                flexShrink: 0,
-              }}
-            >
+            <div className="h-9 w-9 rounded-full bg-accent flex items-center justify-center text-fg-on-accent text-sm font-medium shrink-0">
               {(user.name || user.email).charAt(0).toUpperCase()}
             </div>
           )}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p
-              style={{
-                fontSize: 'var(--sam-type-secondary-size)',
-                fontWeight: 600,
-                color: 'var(--sam-color-fg-primary)',
-                margin: 0,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-fg-primary m-0 overflow-hidden text-ellipsis whitespace-nowrap">
               {user.name || 'User'}
             </p>
-            <p
-              style={{
-                fontSize: 'var(--sam-type-caption-size)',
-                color: 'var(--sam-color-fg-muted)',
-                margin: 0,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
+            <p className="text-xs text-fg-muted m-0 overflow-hidden text-ellipsis whitespace-nowrap">
               {user.email}
             </p>
           </div>
           <button
             onClick={onClose}
             aria-label="Close navigation"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 32,
-              height: 32,
-              background: 'none',
-              border: 'none',
-              color: 'var(--sam-color-fg-muted)',
-              cursor: 'pointer',
-              flexShrink: 0,
-            }}
+            className="flex items-center justify-center w-8 h-8 bg-transparent border-none text-fg-muted cursor-pointer shrink-0"
           >
             <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -194,24 +88,30 @@ export function MobileNavDrawer({
         </div>
 
         {/* Nav items */}
-        <nav aria-label="Primary navigation" style={{ flex: 1, paddingTop: '0.5rem' }}>
-          {navItems.map((item) => (
-            <button
-              key={item.path}
-              className={`sam-mobile-nav-item${isNavItemActive(item.path, currentPath) ? ' is-active' : ''}`}
-              onClick={() => onNavigate(item.path)}
-            >
-              {item.label}
-            </button>
-          ))}
+        <nav aria-label="Primary navigation" className="flex-1 pt-2">
+          {navItems.map((item) => {
+            const active = isNavItemActive(item.path, currentPath);
+            return (
+              <button
+                key={item.path}
+                className={`flex items-center w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${
+                  active
+                    ? 'text-accent border-l-accent bg-accent-tint'
+                    : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-surface-hover'
+                }`}
+                onClick={() => onNavigate(item.path)}
+              >
+                {item.label}
+              </button>
+            );
+          })}
         </nav>
 
         {/* Sign out */}
-        <div style={{ borderTop: '1px solid var(--sam-color-border-default)', padding: '0.5rem 0' }}>
+        <div className="border-t border-border-default py-2">
           <button
             onClick={onSignOut}
-            className="sam-mobile-nav-item"
-            style={{ color: 'var(--sam-color-danger)' }}
+            className="flex items-center w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 border-l-transparent text-danger-fg hover:bg-surface-hover transition-all duration-[120ms]"
           >
             Sign out
           </button>

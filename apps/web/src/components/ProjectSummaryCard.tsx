@@ -44,32 +44,26 @@ export function ProjectSummaryCard({ project, onDelete }: ProjectSummaryCardProp
   return (
     <div
       onClick={() => navigate(`/projects/${project.id}`)}
-      style={{ cursor: 'pointer' }}
+      className="cursor-pointer"
       role="button"
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/projects/${project.id}`); } }}
     >
-    <Card style={{ padding: 'var(--sam-space-3) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
+    <Card className="py-3 px-[clamp(var(--sam-space-3),3vw,var(--sam-space-4))]">
+      <div className="flex items-center gap-3">
         {/* Status + main info */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
+        <div className="flex-1 min-w-0 flex items-center gap-3">
           <StatusBadge status={project.status === 'detached' ? 'error' : 'running'} label={project.status} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--sam-space-2)', minWidth: 0 }}>
-              <span className="sam-type-card-title" style={{
-                color: 'var(--sam-color-fg-primary)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                minWidth: 0,
-              }}>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline gap-2 min-w-0">
+              <span className="sam-type-card-title text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
                 {project.name}
               </span>
-              <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span className="sam-type-caption text-fg-muted overflow-hidden text-ellipsis whitespace-nowrap">
                 {project.activeWorkspaceCount} ws &middot; {project.activeSessionCount} sessions
               </span>
             </div>
-            <div className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div className="sam-type-caption text-fg-muted mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap">
               {project.repository}
               <> &middot; {formatRelativeTime(project.lastActivityAt)}</>
             </div>
@@ -78,7 +72,7 @@ export function ProjectSummaryCard({ project, onDelete }: ProjectSummaryCardProp
 
         {/* Overflow menu */}
         {overflowItems.length > 0 && (
-          <div onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0 }}>
+          <div onClick={(e) => e.stopPropagation()} className="shrink-0">
             <DropdownMenu items={overflowItems} aria-label={`Actions for ${project.name}`} />
           </div>
         )}

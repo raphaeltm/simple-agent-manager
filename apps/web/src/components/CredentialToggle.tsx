@@ -44,58 +44,35 @@ export function CredentialToggle({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-2)' }}>
-      <div style={{
-        display: 'flex',
-        gap: 'var(--sam-space-1)',
-        padding: '2px',
-        backgroundColor: 'var(--sam-color-bg-inset)',
-        borderRadius: 'var(--sam-radius-sm)',
-        border: '1px solid var(--sam-color-border-default)',
-      }}>
+    <div className="flex flex-col gap-2">
+      <div className="flex gap-1 p-0.5 bg-inset rounded-sm border border-border-default">
         {availableKinds.map((kind) => (
           <button
             key={kind}
             onClick={() => handleToggle(kind)}
             disabled={disabled || loading}
-            style={{
-              flex: 1,
-              padding: '6px 12px',
-              border: 'none',
-              borderRadius: 'calc(var(--sam-radius-sm) - 2px)',
-              backgroundColor: kind === activeKind
-                ? 'var(--sam-color-accent-primary)'
-                : 'transparent',
-              color: kind === activeKind
-                ? 'white'
-                : 'var(--sam-color-fg-secondary)',
-              fontSize: 'var(--sam-type-caption-size)',
-              fontWeight: kind === activeKind ? 500 : 400,
-              cursor: disabled || loading ? 'not-allowed' : 'pointer',
-              transition: 'all 0.2s ease',
-              opacity: disabled || loading ? 0.5 : 1,
-            }}
+            className={`flex-1 py-1.5 px-3 border-none rounded-[calc(var(--sam-radius-sm)-2px)] text-xs transition-all duration-200 ${
+              kind === activeKind
+                ? 'bg-accent text-white font-medium'
+                : 'bg-transparent text-fg-muted font-normal'
+            } ${
+              disabled || loading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer opacity-100'
+            }`}
           >
             {getLabel(kind)}
-            {kind === activeKind && ' ✓'}
+            {kind === activeKind && ' \u2713'}
           </button>
         ))}
       </div>
 
       {error && (
-        <div style={{
-          fontSize: 'var(--sam-type-caption-size)',
-          color: 'var(--sam-color-danger)',
-        }}>
+        <div className="text-xs text-danger">
           {error}
         </div>
       )}
 
       {loading && (
-        <div style={{
-          fontSize: 'var(--sam-type-caption-size)',
-          color: 'var(--sam-color-fg-muted)',
-        }}>
+        <div className="text-xs text-fg-muted">
           Switching credential...
         </div>
       )}

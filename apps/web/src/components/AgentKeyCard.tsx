@@ -67,24 +67,12 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
     }
   };
 
-  const actionBtnStyle: React.CSSProperties = {
-    fontSize: 'var(--sam-type-caption-size)',
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    padding: '2px 8px',
-  };
-
   return (
-    <div style={{
-      border: '1px solid var(--sam-color-border-default)',
-      borderRadius: 'var(--sam-radius-md)',
-      padding: 'var(--sam-space-4)',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--sam-space-3)' }}>
+    <div className="border border-border-default rounded-md p-4">
+      <div className="flex items-center justify-between mb-3">
         <div>
-          <h3 style={{ fontSize: 'var(--sam-type-secondary-size)', fontWeight: 500, color: 'var(--sam-color-fg-primary)' }}>{agent.name}</h3>
-          <p style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>{agent.description}</p>
+          <h3 className="text-sm font-medium text-fg-primary">{agent.name}</h3>
+          <p className="text-xs text-fg-muted">{agent.description}</p>
         </div>
         <StatusBadge
           status={hasAnyCredential ? 'connected' : 'disconnected'}
@@ -97,29 +85,26 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
       </div>
 
       {activeCredential && !showForm && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-3)' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: 'var(--sam-space-3)',
-            backgroundColor: 'var(--sam-color-bg-inset)',
-            borderRadius: 'var(--sam-radius-sm)',
-          }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-1)' }}>
-              <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between p-3 bg-inset rounded-sm">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-fg-muted">
                 {activeCredential.credentialKind === 'oauth-token' ? 'OAuth Token' : 'API Key'}
                 {activeCredential.label && ` (${activeCredential.label})`}
               </span>
-              <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)', fontFamily: 'monospace' }}>
+              <span className="text-sm text-fg-muted font-mono">
                 {activeCredential.maskedKey}
               </span>
             </div>
-            <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
-              <button onClick={() => setShowForm(true)} style={{ ...actionBtnStyle, color: 'var(--sam-color-accent-primary)' }}>
+            <div className="flex gap-2">
+              <button onClick={() => setShowForm(true)} className="text-xs bg-transparent border-none cursor-pointer py-0.5 px-2 text-accent">
                 Update
               </button>
-              <button onClick={() => handleDelete(activeCredential.credentialKind)} disabled={loading} style={{ ...actionBtnStyle, color: 'var(--sam-color-danger)', opacity: loading ? 0.5 : 1 }}>
+              <button
+                onClick={() => handleDelete(activeCredential.credentialKind)}
+                disabled={loading}
+                className={`text-xs bg-transparent border-none cursor-pointer py-0.5 px-2 text-danger ${loading ? 'opacity-50' : 'opacity-100'}`}
+              >
                 {loading ? 'Removing...' : 'Remove'}
               </button>
             </div>
@@ -129,36 +114,28 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
       )}
 
       {(!hasAnyCredential || showForm) && (
-        <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-3)' }}>
+        <form onSubmit={handleSave} className="flex flex-col gap-3">
           {supportsOAuth && agent.id === 'claude-code' && (
-            <div style={{ display: 'flex', gap: 'var(--sam-space-2)', marginBottom: 'var(--sam-space-2)' }}>
+            <div className="flex gap-2 mb-2">
               <button
                 type="button"
                 onClick={() => setCredentialKind('api-key')}
-                style={{
-                  padding: '8px 12px',
-                  border: '1px solid var(--sam-color-border-default)',
-                  borderRadius: 'var(--sam-radius-sm)',
-                  backgroundColor: credentialKind === 'api-key' ? 'var(--sam-color-accent-primary)' : 'transparent',
-                  color: credentialKind === 'api-key' ? 'white' : 'var(--sam-color-fg-primary)',
-                  cursor: 'pointer',
-                  fontSize: 'var(--sam-type-secondary-size)',
-                }}
+                className={`py-2 px-3 border border-border-default rounded-sm text-sm cursor-pointer ${
+                  credentialKind === 'api-key'
+                    ? 'bg-accent text-white'
+                    : 'bg-transparent text-fg-primary'
+                }`}
               >
                 API Key
               </button>
               <button
                 type="button"
                 onClick={() => setCredentialKind('oauth-token')}
-                style={{
-                  padding: '8px 12px',
-                  border: '1px solid var(--sam-color-border-default)',
-                  borderRadius: 'var(--sam-radius-sm)',
-                  backgroundColor: credentialKind === 'oauth-token' ? 'var(--sam-color-accent-primary)' : 'transparent',
-                  color: credentialKind === 'oauth-token' ? 'white' : 'var(--sam-color-fg-primary)',
-                  cursor: 'pointer',
-                  fontSize: 'var(--sam-type-secondary-size)',
-                }}
+                className={`py-2 px-3 border border-border-default rounded-sm text-sm cursor-pointer ${
+                  credentialKind === 'oauth-token'
+                    ? 'bg-accent text-white'
+                    : 'bg-transparent text-fg-primary'
+                }`}
               >
                 OAuth Token (Pro/Max)
               </button>
@@ -177,18 +154,18 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
               }
               required
             />
-            <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+            <p className="mt-1 text-xs text-fg-muted">
               {credentialKind === 'oauth-token' && agentDef?.oauthSupport ? (
                 <>
                   {agentDef.oauthSupport.setupInstructions}{' '}
-                  <a href={agentDef.oauthSupport.subscriptionUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--sam-color-accent-primary)' }}>
+                  <a href={agentDef.oauthSupport.subscriptionUrl} target="_blank" rel="noopener noreferrer" className="text-accent">
                     View subscription
                   </a>
                 </>
               ) : (
                 <>
                   Get your API key from{' '}
-                  <a href={agent.credentialHelpUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--sam-color-accent-primary)' }}>
+                  <a href={agent.credentialHelpUrl} target="_blank" rel="noopener noreferrer" className="text-accent">
                     {agent.name} Console
                   </a>
                 </>
@@ -198,7 +175,7 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
 
           {error && <Alert variant="error">{error}</Alert>}
 
-          <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
+          <div className="flex gap-2">
             <Button type="submit" disabled={loading || !credential} loading={loading} size="sm">
               {hasAnyCredential ? 'Update Credential' : 'Save Credential'}
             </Button>

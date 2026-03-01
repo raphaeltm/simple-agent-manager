@@ -25,6 +25,7 @@
     "@simple-agent-manager/shared": "workspace:*",
     "@simple-agent-manager/terminal": "workspace:*",
     "@simple-agent-manager/ui": "workspace:*",
+    "@tailwindcss/vite": "^4.2.1",
     "better-auth": "^1.0.0",
     "lucide-react": "^0.460.0",
     "mermaid": "^11.12.3",
@@ -33,7 +34,8 @@
     "react-dom": "^18.0.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^6.0.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "tailwindcss": "^4.2.1"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.0.0",

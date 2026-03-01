@@ -50,53 +50,26 @@ export const CollapsibleSection: FC<CollapsibleSectionProps> = ({
   const toggle = useCallback(() => setCollapsed((prev) => !prev), []);
 
   return (
-    <div
-      style={{
-        borderBottom: '1px solid var(--sam-color-border-default)',
-      }}
-    >
+    <div className="border-b border-border-default">
       <button
         onClick={toggle}
         aria-expanded={!collapsed}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          width: '100%',
-          padding: '8px 12px',
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          color: 'var(--sam-color-fg-primary)',
-          fontSize: 'var(--sam-type-caption-size)',
-          fontWeight: 600,
-          textTransform: 'uppercase',
-          letterSpacing: '0.04em',
-          textAlign: 'left',
-        }}
+        className="flex items-center gap-1.5 w-full py-2 px-3 bg-transparent border-none cursor-pointer text-fg-primary text-xs font-semibold uppercase tracking-wide text-left"
       >
         <ChevronDown
           size={14}
+          className="shrink-0 text-fg-muted transition-transform duration-150 ease-in-out"
           style={{
             transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
-            transition: 'transform 0.15s ease',
-            flexShrink: 0,
-            color: 'var(--sam-color-fg-muted)',
           }}
         />
-        <span style={{ flex: 1, minWidth: 0 }}>{title}</span>
+        <span className="flex-1 min-w-0">{title}</span>
         {badge !== undefined && badge !== 0 && (
           <span
+            className="text-xs font-medium text-fg-muted rounded-full leading-tight normal-case tracking-normal"
             style={{
-              fontSize: 'var(--sam-type-caption-size)',
-              fontWeight: 500,
-              color: 'var(--sam-color-fg-muted)',
               backgroundColor: 'rgba(120, 124, 153, 0.15)',
-              borderRadius: 9,
               padding: '1px 6px',
-              lineHeight: '1.3',
-              textTransform: 'none',
-              letterSpacing: 0,
             }}
           >
             {badge}
@@ -104,7 +77,7 @@ export const CollapsibleSection: FC<CollapsibleSectionProps> = ({
         )}
       </button>
       {!collapsed && (
-        <div style={{ padding: '0 12px 10px 12px' }}>
+        <div className="px-3 pb-2.5">
           {children}
         </div>
       )}

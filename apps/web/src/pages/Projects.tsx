@@ -34,17 +34,8 @@ export function Projects() {
 
   return (
     <PageLayout title="Projects" maxWidth="xl" headerRight={<UserMenu />}>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 'var(--sam-space-3)',
-          flexWrap: 'wrap',
-          marginBottom: 'var(--sam-space-4)',
-        }}
-      >
-        <p style={{ margin: 0, color: 'var(--sam-color-fg-muted)' }}>
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
+        <p className="m-0 text-fg-muted">
           Projects are repository-backed planning spaces for backlog tasks and delegation.
         </p>
         <Button onClick={() => navigate('/projects/new')}>
@@ -53,7 +44,7 @@ export function Projects() {
       </div>
 
       {error && (
-        <div style={{ marginBottom: 'var(--sam-space-3)' }}>
+        <div className="mb-3">
           <Alert variant="error" onDismiss={() => setError(null)}>
             {error}
           </Alert>
@@ -61,18 +52,11 @@ export function Projects() {
       )}
 
       {loading ? (
-        <div style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
+        <div className="grid gap-3">
           {Array.from({ length: 3 }, (_, index) => (
             <div
               key={index}
-              style={{
-                border: '1px solid var(--sam-color-border-default)',
-                borderRadius: 'var(--sam-radius-md)',
-                padding: 'var(--sam-space-4)',
-                background: 'var(--sam-color-bg-surface)',
-                display: 'grid',
-                gap: 'var(--sam-space-2)',
-              }}
+              className="border border-border-default rounded-md p-4 bg-surface grid gap-2"
             >
               <Skeleton width="40%" height="1rem" />
               <Skeleton width="60%" height="0.875rem" />
@@ -86,29 +70,19 @@ export function Projects() {
           action={{ label: 'New Project', onClick: () => navigate('/projects/new') }}
         />
       ) : (
-        <div style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
+        <div className="grid gap-3">
           {sortedProjects.map((project) => (
             <button
               key={project.id}
               onClick={() => navigate(`/projects/${project.id}`)}
-              style={{
-                textAlign: 'left',
-                border: '1px solid var(--sam-color-border-default)',
-                borderRadius: 'var(--sam-radius-md)',
-                background: 'var(--sam-color-bg-surface)',
-                padding: 'var(--sam-space-4)',
-                color: 'var(--sam-color-fg-primary)',
-                cursor: 'pointer',
-                display: 'grid',
-                gap: '0.5rem',
-              }}
+              className="text-left border border-border-default rounded-md bg-surface p-4 text-fg-primary cursor-pointer grid gap-2"
             >
               <strong>{project.name}</strong>
-              <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: 'var(--sam-type-secondary-size)' }}>
+              <span className="text-fg-muted text-sm">
                 {project.repository}@{project.defaultBranch}
               </span>
               {project.description && (
-                <span style={{ color: 'var(--sam-color-fg-muted)', fontSize: 'var(--sam-type-secondary-size)' }}>
+                <span className="text-fg-muted text-sm">
                   {project.description}
                 </span>
               )}

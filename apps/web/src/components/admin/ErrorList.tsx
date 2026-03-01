@@ -23,19 +23,7 @@ export const ErrorList: FC = () => {
   return (
     <div>
       {error && (
-        <div
-          style={{
-            padding: 'var(--sam-space-3)',
-            marginBottom: 'var(--sam-space-4)',
-            borderRadius: 'var(--sam-radius-sm)',
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            color: '#f87171',
-            fontSize: 'var(--sam-type-secondary-size)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
+        <div className="p-3 mb-4 rounded-sm bg-danger-tint text-danger-fg text-sm flex justify-between items-center">
           <span>{error}</span>
           <Button size="sm" variant="ghost" onClick={refresh}>
             Retry
@@ -56,17 +44,7 @@ export const ErrorList: FC = () => {
         />
 
         {/* Summary bar */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: 'var(--sam-space-2) var(--sam-space-4)',
-            borderBottom: '1px solid var(--sam-color-border-default)',
-            fontSize: 'var(--sam-type-caption-size)',
-            color: 'var(--sam-color-fg-muted)',
-          }}
-        >
+        <div className="flex justify-between items-center px-4 py-2 border-b border-border-default text-xs text-fg-muted">
           <span>
             {total > 0
               ? `Showing ${errors.length} of ${total} errors`
@@ -79,12 +57,12 @@ export const ErrorList: FC = () => {
 
         {/* Error list */}
         {loading && errors.length === 0 ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-8)' }}>
+          <div className="flex justify-center p-8">
             <Spinner size="lg" />
           </div>
         ) : errors.length === 0 ? (
-          <div style={{ padding: 'var(--sam-space-8)', textAlign: 'center' }}>
-            <Body style={{ color: 'var(--sam-color-fg-muted)' }}>
+          <div className="p-8 text-center">
+            <Body className="text-fg-muted">
               No errors match the current filters.
             </Body>
           </div>
@@ -96,13 +74,7 @@ export const ErrorList: FC = () => {
 
             {/* Load More / Loading */}
             {hasMore && (
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'center',
-                  padding: 'var(--sam-space-4)',
-                }}
-              >
+              <div className="flex justify-center p-4">
                 <Button
                   size="sm"
                   variant="secondary"
@@ -115,7 +87,7 @@ export const ErrorList: FC = () => {
             )}
 
             {loading && errors.length > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-3)' }}>
+              <div className="flex justify-center p-3">
                 <Spinner size="sm" />
               </div>
             )}

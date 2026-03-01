@@ -1385,13 +1385,8 @@ export function Workspace() {
   if (loading && !workspace) {
     return (
       <div
-        style={{
-          height: 'var(--sam-app-height)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: 'var(--sam-color-tn-bg)',
-        }}
+        className="flex items-center justify-center bg-tn-bg"
+        style={{ height: 'var(--sam-app-height)' }}
       >
         <Spinner size="lg" />
       </div>
@@ -1402,12 +1397,8 @@ export function Workspace() {
   if (error && !workspace) {
     return (
       <div
-        style={{
-          height: 'var(--sam-app-height)',
-          display: 'flex',
-          flexDirection: 'column',
-          backgroundColor: 'var(--sam-color-tn-bg)',
-        }}
+        className="flex flex-col bg-tn-bg"
+        style={{ height: 'var(--sam-app-height)' }}
       >
         <Toolbar onBack={() => navigate('/dashboard')} />
         <CenteredStatus
@@ -1426,7 +1417,7 @@ export function Workspace() {
 
   // ── Terminal content (always rendered when running, hidden when chat is active) ──
   const terminalContent = (
-    <div style={{ height: '100%', display: viewMode === 'terminal' ? 'block' : 'none' }}>
+    <div className="h-full" style={{ display: viewMode === 'terminal' ? 'block' : 'none' }}>
       {wsUrl ? (
         featureFlags.multiTerminal ? (
           <MultiTerminal
@@ -1510,7 +1501,7 @@ export function Workspace() {
         title="Workspace Error"
         subtitle={workspace?.errorMessage || 'An unexpected error occurred.'}
         action={
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <div className="flex gap-2 flex-wrap justify-center">
             <Button
               variant="primary"
               size="sm"
@@ -1537,7 +1528,7 @@ export function Workspace() {
 
   // ── Tab strip (shown on both desktop and mobile when running) ──
   const createMenuContent = (
-    <div ref={createMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
+    <div ref={createMenuRef} className="relative shrink-0">
       <button
         onClick={() => setCreateMenuOpen((prev) => !prev)}
         disabled={sessionsLoading}
@@ -1698,13 +1689,8 @@ export function Workspace() {
   // ══════════════════════════════════════════════════════════════
   return (
     <div
-      style={{
-        height: 'var(--sam-app-height)',
-        display: 'flex',
-        flexDirection: 'column',
-        backgroundColor: 'var(--sam-color-tn-bg)',
-        overflow: 'hidden',
-      }}
+      className="flex flex-col bg-tn-bg overflow-hidden"
+      style={{ height: 'var(--sam-app-height)' }}
     >
       {/* ── Header ── */}
       <header
@@ -1962,20 +1948,10 @@ export function Workspace() {
       )}
 
       {/* ── Content area ── */}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        <div
-          style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-        >
+      <div className="flex flex-1 min-h-0">
+        <div className="flex flex-col flex-1 min-w-0 min-h-0">
           {workspaceTabStrip}
-          <div
-            style={{
-              flex: 1,
-              minHeight: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              position: 'relative',
-            }}
-          >
+          <div className="flex flex-col flex-1 min-h-0 relative">
             {isRunning ? (
               <>
                 {/* Terminal content — always mounted, shown/hidden */}
@@ -2014,16 +1990,7 @@ export function Workspace() {
 
         {/* ── Sidebar (desktop only) ── */}
         {!isMobile && (
-          <aside
-            style={{
-              width: 320,
-              minWidth: 320,
-              borderLeft: '1px solid var(--sam-color-border-default)',
-              background: 'var(--sam-color-bg-surface)',
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-          >
+          <aside className="flex flex-col w-80 min-w-80 border-l border-border-default bg-surface">
             {sidebarContent}
           </aside>
         )}
@@ -2036,74 +2003,30 @@ export function Workspace() {
           <div
             data-testid="mobile-menu-backdrop"
             onClick={() => setMobileMenuOpen(false)}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              backgroundColor: 'var(--sam-color-bg-overlay)',
-              zIndex: 'var(--sam-z-drawer-backdrop)' as unknown as number,
-            }}
+            className="fixed inset-0 bg-overlay z-drawer-backdrop"
           />
           {/* Panel (slides from right) */}
           <div
             role="dialog"
             aria-label="Workspace menu"
             data-testid="mobile-menu-panel"
-            style={{
-              position: 'fixed',
-              top: 0,
-              right: 0,
-              bottom: 0,
-              width: '85vw',
-              maxWidth: 360,
-              backgroundColor: 'var(--sam-color-bg-surface)',
-              borderLeft: '1px solid var(--sam-color-border-default)',
-              zIndex: 'var(--sam-z-drawer)' as unknown as number,
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-            }}
+            className="fixed top-0 right-0 bottom-0 w-[85vw] max-w-[360px] bg-surface border-l border-border-default z-drawer flex flex-col overflow-hidden"
           >
             {/* Close button header */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: 'var(--sam-space-3) var(--sam-space-4)',
-                borderBottom: '1px solid var(--sam-color-border-default)',
-                flexShrink: 0,
-              }}
-            >
-              <span
-                style={{
-                  fontWeight: 600,
-                  fontSize: 'var(--sam-type-secondary-size)',
-                  color: 'var(--sam-color-fg-primary)',
-                }}
-              >
+            <div className="flex items-center justify-between border-b border-border-default shrink-0" style={{ padding: 'var(--sam-space-3) var(--sam-space-4)' }}>
+              <span className="font-semibold text-fg-primary" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
                 Workspace
               </span>
               <button
                 onClick={() => setMobileMenuOpen(false)}
                 aria-label="Close workspace menu"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: 'var(--sam-color-fg-muted)',
-                  padding: '8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: 44,
-                  minHeight: 44,
-                }}
+                className="bg-transparent border-none cursor-pointer text-fg-muted p-2 flex items-center justify-center min-w-[44px] min-h-[44px]"
               >
                 <X size={18} />
               </button>
             </div>
             {/* Scrollable sidebar content */}
-            <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+            <div className="flex flex-col flex-1 overflow-auto">
               {sidebarContent}
             </div>
           </div>
@@ -2190,28 +2113,10 @@ export function Workspace() {
 
 function Toolbar({ onBack }: { onBack: () => void }) {
   return (
-    <header
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        padding: '0 12px',
-        height: '40px',
-        backgroundColor: 'var(--sam-color-bg-surface)',
-        borderBottom: '1px solid var(--sam-color-border-default)',
-        gap: '10px',
-        flexShrink: 0,
-      }}
-    >
+    <header className="flex items-center px-3 h-10 bg-surface border-b border-border-default gap-2.5 shrink-0">
       <button
         onClick={onBack}
-        style={{
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          color: 'var(--sam-color-fg-muted)',
-          padding: '4px',
-          display: 'flex',
-        }}
+        className="bg-transparent border-none cursor-pointer text-fg-muted p-1 flex"
       >
         <svg
           style={{ height: 16, width: 16 }}
@@ -2222,7 +2127,7 @@ function Toolbar({ onBack }: { onBack: () => void }) {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
         </svg>
       </button>
-      <span style={{ fontWeight: 600, fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-primary)' }}>
+      <span className="font-semibold text-fg-primary" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
         Workspace
       </span>
     </header>
@@ -2243,34 +2148,18 @@ function CenteredStatus({
   loading?: boolean;
 }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100%',
-        gap: '12px',
-        backgroundColor: 'var(--sam-color-tn-bg)',
-        color: 'var(--sam-color-tn-fg)',
-      }}
-    >
+    <div className="flex flex-col items-center justify-center h-full gap-3 bg-tn-bg text-tn-fg">
       {isLoading && <Spinner size="lg" />}
-      <h3 style={{ fontSize: 'var(--sam-type-card-title-size)', fontWeight: 600, color, margin: 0 }}>{title}</h3>
+      <h3 className="font-semibold m-0" style={{ fontSize: 'var(--sam-type-card-title-size)', color }}>{title}</h3>
       {subtitle && (
         <p
-          style={{
-            fontSize: 'var(--sam-type-secondary-size)',
-            color: 'var(--sam-color-tn-fg-muted)',
-            margin: 0,
-            maxWidth: '400px',
-            textAlign: 'center',
-          }}
+          className="m-0 max-w-[400px] text-center text-tn-fg-muted"
+          style={{ fontSize: 'var(--sam-type-secondary-size)' }}
         >
           {subtitle}
         </p>
       )}
-      {action && <div style={{ marginTop: '4px' }}>{action}</div>}
+      {action && <div className="mt-1">{action}</div>}
     </div>
   );
 }
@@ -2298,16 +2187,16 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
     switch (status) {
       case 'completed':
         return (
-          <span style={{ color: 'var(--sam-color-success-fg)', marginRight: 8, fontSize: 'var(--sam-type-secondary-size)' }}>&#10003;</span>
+          <span className="text-success-fg mr-2" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>&#10003;</span>
         );
       case 'failed':
         return (
-          <span style={{ color: 'var(--sam-color-danger-fg)', marginRight: 8, fontSize: 'var(--sam-type-secondary-size)' }}>&#10007;</span>
+          <span className="text-danger-fg mr-2" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>&#10007;</span>
         );
       case 'started':
       default:
         return (
-          <span style={{ marginRight: 8, display: 'inline-flex' }}>
+          <span className="mr-2 inline-flex">
             <Spinner size="sm" />
           </span>
         );
@@ -2318,43 +2207,22 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
   const hasFailed = lastStep?.status === 'failed';
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100%',
-        backgroundColor: 'var(--sam-color-tn-bg)',
-        color: 'var(--sam-color-tn-fg)',
-        padding: '24px',
-      }}
-    >
+    <div className="flex flex-col items-center justify-center h-full bg-tn-bg text-tn-fg p-6">
       <h3
+        className="font-semibold mb-4"
         style={{
           fontSize: 'var(--sam-type-card-title-size)',
-          fontWeight: 600,
           color: hasFailed ? 'var(--sam-color-danger-fg)' : 'var(--sam-color-info)',
-          margin: '0 0 16px 0',
         }}
       >
         {hasFailed ? 'Provisioning Failed' : 'Creating Workspace'}
       </h3>
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '6px',
-          maxWidth: '400px',
-          width: '100%',
-        }}
-      >
+      <div className="flex flex-col gap-1.5 max-w-[400px] w-full">
         {steps.map((entry, i) => (
           <div
             key={i}
+            className="flex items-center"
             style={{
-              display: 'flex',
-              alignItems: 'center',
               fontSize: 'var(--sam-type-caption-size)',
               color:
                 entry.status === 'failed'
@@ -2371,14 +2239,8 @@ function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
       </div>
       {lastStep?.status === 'failed' && lastStep.detail && (
         <p
-          style={{
-            fontSize: 'var(--sam-type-caption-size)',
-            color: 'var(--sam-color-tn-fg-muted)',
-            margin: '12px 0 0',
-            maxWidth: '400px',
-            textAlign: 'center',
-            wordBreak: 'break-word',
-          }}
+          className="mt-3 mb-0 max-w-[400px] text-center break-words text-tn-fg-muted"
+          style={{ fontSize: 'var(--sam-type-caption-size)' }}
         >
           {lastStep.detail}
         </p>

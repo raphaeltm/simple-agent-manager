@@ -115,9 +115,9 @@ export function ProjectOverview() {
   if (!project) return null;
 
   return (
-    <div style={{ display: 'grid', gap: 'var(--sam-space-4)' }}>
+    <div className="grid gap-4">
       {/* Action buttons */}
-      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+      <div className="flex gap-2 flex-wrap">
         <Button
           onClick={handleLaunchWorkspace}
           loading={launchingWorkspace}
@@ -155,18 +155,9 @@ export function ProjectOverview() {
       )}
 
       {/* Summary stats */}
-      <section
-        style={{
-          border: '1px solid var(--sam-color-border-default)',
-          borderRadius: 'var(--sam-radius-md)',
-          background: 'var(--sam-color-bg-surface)',
-          padding: 'var(--sam-space-3)',
-          display: 'grid',
-          gap: 'var(--sam-space-2)',
-        }}
-      >
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.375rem' }}>
-          <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>Tasks:</span>
+      <section className="border border-border-default rounded-md bg-surface p-3 grid gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-fg-muted">Tasks:</span>
           {(Object.entries(project.summary.taskCountsByStatus) as [string, number][])
             .filter(([, count]) => count > 0)
             .map(([status, count]) => (
@@ -177,26 +168,26 @@ export function ProjectOverview() {
               />
             ))}
           {Object.values(project.summary.taskCountsByStatus).every((c) => c === 0) && (
-            <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>none</span>
+            <span className="text-xs text-fg-muted">none</span>
           )}
         </div>
       </section>
 
       {/* Workspaces section */}
       <section>
-        <h3 style={{ margin: '0 0 var(--sam-space-3)', fontSize: 'var(--sam-type-section-heading-size)', fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number, color: 'var(--sam-color-fg-primary)' }}>
+        <h3 className="m-0 mb-3 text-base font-semibold text-fg-primary">
           Workspaces ({workspaces.length})
         </h3>
         {workspacesLoading && workspaces.length === 0 ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-4)' }}>
+          <div className="flex justify-center p-4">
             <Spinner />
           </div>
         ) : workspaces.length === 0 ? (
-          <p style={{ margin: 0, color: 'var(--sam-color-fg-muted)', fontSize: 'var(--sam-type-secondary-size)' }}>
+          <p className="m-0 text-fg-muted text-sm">
             No workspaces yet. Launch one to get started.
           </p>
         ) : (
-          <div style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
+          <div className="grid gap-3">
             {workspaces.map((ws) => (
               <WorkspaceCard
                 key={ws.id}
@@ -212,14 +203,7 @@ export function ProjectOverview() {
 
       {/* Edit form */}
       {showProjectEdit && (
-        <section
-          style={{
-            border: '1px solid var(--sam-color-border-default)',
-            borderRadius: 'var(--sam-radius-md)',
-            background: 'var(--sam-color-bg-surface)',
-            padding: 'var(--sam-space-3)',
-          }}
-        >
+        <section className="border border-border-default rounded-md bg-surface p-3">
           <ProjectForm
             mode="edit"
             installations={installations}

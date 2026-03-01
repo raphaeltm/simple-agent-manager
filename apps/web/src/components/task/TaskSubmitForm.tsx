@@ -86,26 +86,15 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   };
 
   return (
-    <div style={{
-      borderTop: '1px solid var(--sam-color-border-default)',
-      padding: 'var(--sam-space-3) var(--sam-space-4)',
-      backgroundColor: 'var(--sam-color-bg-surface)',
-    }}>
+    <div className="border-t border-border-default py-3 px-4 bg-surface">
       {error && (
-        <div style={{
-          padding: 'var(--sam-space-2) var(--sam-space-3)',
-          marginBottom: 'var(--sam-space-2)',
-          borderRadius: 'var(--sam-radius-sm)',
-          backgroundColor: 'var(--sam-color-danger-tint)',
-          color: 'var(--sam-color-danger)',
-          fontSize: 'var(--sam-type-caption-size)',
-        }}>
+        <div className="py-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">
           {error}
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', alignItems: 'flex-start' }}>
-        <div style={{ flex: 1 }}>
+      <div className="flex gap-2 items-start">
+        <div className="flex-1">
           <input
             type="text"
             value={title}
@@ -117,16 +106,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
             }}
             placeholder="Describe the task for the agent..."
             disabled={submitting}
-            style={{
-              width: '100%',
-              padding: 'var(--sam-space-2) var(--sam-space-3)',
-              backgroundColor: 'var(--sam-color-bg-page)',
-              border: '1px solid var(--sam-color-border-default)',
-              borderRadius: 'var(--sam-radius-md)',
-              color: 'var(--sam-color-fg-primary)',
-              fontSize: 'var(--sam-type-body-size)',
-              outline: 'none',
-            }}
+            className="w-full py-2 px-3 bg-page border border-border-default rounded-md text-fg-primary text-base outline-none"
           />
         </div>
 
@@ -142,35 +122,20 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
       </div>
 
       {/* Advanced options toggle */}
-      <div style={{ marginTop: 'var(--sam-space-2)' }}>
+      <div className="mt-2">
         <button
           type="button"
           onClick={() => setShowAdvanced(!showAdvanced)}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--sam-color-fg-muted)',
-            fontSize: 'var(--sam-type-caption-size)',
-            cursor: 'pointer',
-            padding: 0,
-          }}
+          className="bg-transparent border-none text-fg-muted text-xs cursor-pointer p-0"
         >
           {showAdvanced ? 'Hide' : 'Show'} advanced options
         </button>
       </div>
 
       {showAdvanced && (
-        <div style={{
-          display: 'grid',
-          gap: 'var(--sam-space-2)',
-          marginTop: 'var(--sam-space-2)',
-          padding: 'var(--sam-space-3)',
-          backgroundColor: 'var(--sam-color-bg-page)',
-          borderRadius: 'var(--sam-radius-md)',
-          border: '1px solid var(--sam-color-border-default)',
-        }}>
+        <div className="grid gap-2 mt-2 p-3 bg-page rounded-md border border-border-default">
           <div>
-            <label style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)', display: 'block', marginBottom: '4px' }}>
+            <label className="text-xs text-fg-muted block mb-1">
               Description (optional)
             </label>
             <textarea
@@ -178,35 +143,19 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Additional context for the agent..."
               rows={2}
-              style={{
-                width: '100%',
-                padding: 'var(--sam-space-2)',
-                backgroundColor: 'var(--sam-color-bg-surface)',
-                border: '1px solid var(--sam-color-border-default)',
-                borderRadius: 'var(--sam-radius-sm)',
-                color: 'var(--sam-color-fg-primary)',
-                fontSize: 'var(--sam-type-secondary-size)',
-                resize: 'vertical',
-              }}
+              className="w-full p-2 bg-surface border border-border-default rounded-sm text-fg-primary text-sm resize-y"
             />
           </div>
 
-          <div style={{ display: 'flex', gap: 'var(--sam-space-3)', flexWrap: 'wrap' }}>
+          <div className="flex gap-3 flex-wrap">
             <div>
-              <label style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)', display: 'block', marginBottom: '4px' }}>
+              <label className="text-xs text-fg-muted block mb-1">
                 Priority
               </label>
               <select
                 value={priority}
                 onChange={(e) => setPriority(Number(e.target.value))}
-                style={{
-                  padding: 'var(--sam-space-1) var(--sam-space-2)',
-                  backgroundColor: 'var(--sam-color-bg-surface)',
-                  border: '1px solid var(--sam-color-border-default)',
-                  borderRadius: 'var(--sam-radius-sm)',
-                  color: 'var(--sam-color-fg-primary)',
-                  fontSize: 'var(--sam-type-secondary-size)',
-                }}
+                className="py-1 px-2 bg-surface border border-border-default rounded-sm text-fg-primary text-sm"
               >
                 <option value={0}>Normal (0)</option>
                 <option value={1}>Low (1)</option>
@@ -216,20 +165,13 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
             </div>
 
             <div>
-              <label style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)', display: 'block', marginBottom: '4px' }}>
+              <label className="text-xs text-fg-muted block mb-1">
                 VM Size
               </label>
               <select
                 value={vmSize}
                 onChange={(e) => setVmSize(e.target.value as VMSize | '')}
-                style={{
-                  padding: 'var(--sam-space-1) var(--sam-space-2)',
-                  backgroundColor: 'var(--sam-color-bg-surface)',
-                  border: '1px solid var(--sam-color-border-default)',
-                  borderRadius: 'var(--sam-radius-sm)',
-                  color: 'var(--sam-color-fg-primary)',
-                  fontSize: 'var(--sam-type-secondary-size)',
-                }}
+                className="py-1 px-2 bg-surface border border-border-default rounded-sm text-fg-primary text-sm"
               >
                 <option value="">Default</option>
                 <option value="small">Small</option>
@@ -239,7 +181,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
             </div>
 
             <div>
-              <label style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)', display: 'block', marginBottom: '4px' }}>
+              <label className="text-xs text-fg-muted block mb-1">
                 Agent Hint
               </label>
               <input
@@ -247,15 +189,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
                 value={agentProfileHint}
                 onChange={(e) => setAgentProfileHint(e.target.value)}
                 placeholder="e.g. claude-code"
-                style={{
-                  padding: 'var(--sam-space-1) var(--sam-space-2)',
-                  backgroundColor: 'var(--sam-color-bg-surface)',
-                  border: '1px solid var(--sam-color-border-default)',
-                  borderRadius: 'var(--sam-radius-sm)',
-                  color: 'var(--sam-color-fg-primary)',
-                  fontSize: 'var(--sam-type-secondary-size)',
-                  width: '140px',
-                }}
+                className="py-1 px-2 bg-surface border border-border-default rounded-sm text-fg-primary text-sm w-[140px]"
               />
             </div>
           </div>

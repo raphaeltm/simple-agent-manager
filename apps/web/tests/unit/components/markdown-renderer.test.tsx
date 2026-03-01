@@ -28,8 +28,8 @@ describe('RenderedMarkdown', () => {
   it('applies max-width 900px and centers content', () => {
     render(<RenderedMarkdown content="Some text" />);
     const container = screen.getByTestId('rendered-markdown');
-    expect(container.style.maxWidth).toBe('900px');
-    expect(container.style.margin).toBe('0px auto');
+    expect(container.className).toContain('max-w-[900px]');
+    expect(container.className).toContain('mx-auto');
   });
 
   it('allows style overrides', () => {

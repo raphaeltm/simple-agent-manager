@@ -151,30 +151,17 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
   const language = detectLanguage(filePath);
   const binary = content !== null && isBinaryContent(content);
 
-  const overlayStyle: CSSProperties = {
-    position: 'fixed',
-    inset: 0,
-    zIndex: 'var(--sam-z-panel)' as unknown as number,
-    backgroundColor: 'var(--sam-color-bg-canvas)',
-    display: 'flex',
-    flexDirection: 'column',
-  };
-
-  const headerStyle: CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    padding: isMobile ? '0 8px' : '0 16px',
-    height: isMobile ? 44 : 40,
-    backgroundColor: 'var(--sam-color-bg-surface)',
-    borderBottom: '1px solid var(--sam-color-border-default)',
-    gap: isMobile ? 6 : 12,
-    flexShrink: 0,
-  };
-
   return (
-    <div style={overlayStyle}>
+    <div className="fixed inset-0 z-panel bg-canvas flex flex-col">
       {/* Header */}
-      <header style={headerStyle}>
+      <header
+        className="flex items-center bg-surface border-b border-border-default shrink-0"
+        style={{
+          padding: isMobile ? '0 8px' : '0 16px',
+          height: isMobile ? 44 : 40,
+          gap: isMobile ? 6 : 12,
+        }}
+      >
         <button onClick={onBack} aria-label="Back to file list" style={iconBtnStyle(isMobile)}>
           <svg
             style={{ height: isMobile ? 18 : 16, width: isMobile ? 18 : 16 }}
@@ -260,23 +247,17 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
       </header>
 
       {/* Content */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div className="flex-1 overflow-auto">
         {loading && (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
+          <div className="flex justify-center p-8">
             <Spinner size="md" />
           </div>
         )}
 
         {error && (
           <div
-            style={{
-              margin: 16,
-              padding: 12,
-              backgroundColor: 'var(--sam-color-danger-tint)',
-              borderRadius: 8,
-              color: 'var(--sam-color-tn-red)',
-              fontSize: 'var(--sam-type-caption-size)',
-            }}
+            className="m-4 p-3 bg-danger-tint rounded-lg text-tn-red"
+            style={{ fontSize: 'var(--sam-type-caption-size)' }}
           >
             {error}
           </div>
@@ -284,13 +265,8 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
 
         {!loading && !error && binary && (
           <div
-            style={{
-              display: 'flex',
-              justifyContent: 'center',
-              padding: 48,
-              color: 'var(--sam-color-fg-muted)',
-              fontSize: 'var(--sam-type-secondary-size)',
-            }}
+            className="flex justify-center p-12 text-fg-muted"
+            style={{ fontSize: 'var(--sam-type-secondary-size)' }}
           >
             Binary file — cannot display
           </div>

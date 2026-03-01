@@ -1,18 +1,12 @@
-import type { CSSProperties, SelectHTMLAttributes } from 'react';
+import type { SelectHTMLAttributes } from 'react';
 
 export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {}
 
-export function Select(props: SelectProps) {
-  const style: CSSProperties = {
-    width: '100%',
-    minHeight: '44px',
-    borderRadius: 'var(--sam-radius-sm)',
-    border: '1px solid var(--sam-color-border-default)',
-    backgroundColor: 'var(--sam-color-bg-inset)',
-    color: 'var(--sam-color-fg-primary)',
-    padding: '10px 12px',
-    fontSize: '0.95rem',
-  };
-
-  return <select {...props} style={{ ...style, ...props.style }} />;
+export function Select({ className, ...props }: SelectProps) {
+  return (
+    <select
+      className={`w-full min-h-11 rounded-sm border border-border-default bg-inset text-fg-primary py-2.5 px-3 text-[0.95rem] ${className ?? ''}`}
+      {...props}
+    />
+  );
 }

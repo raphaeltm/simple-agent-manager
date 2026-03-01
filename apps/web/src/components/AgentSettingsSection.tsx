@@ -86,97 +86,28 @@ function AgentSettingsCard({
     (model.trim() || null) !== (settings?.model ?? null) ||
     permissionMode !== (settings?.permissionMode ?? 'default');
 
-  const cardStyle: React.CSSProperties = {
-    padding: 'var(--sam-space-4)',
-    borderRadius: 'var(--sam-radius-md)',
-    border: '1px solid var(--sam-color-border-default)',
-    backgroundColor: 'var(--sam-color-bg-inset)',
-  };
-
-  const labelStyle: React.CSSProperties = {
-    fontSize: 'var(--sam-type-secondary-size)',
-    fontWeight: 500,
-    color: 'var(--sam-color-fg-primary)',
-    marginBottom: 'var(--sam-space-1)',
-  };
-
-  const descStyle: React.CSSProperties = {
-    fontSize: 'var(--sam-type-caption-size)',
-    color: 'var(--sam-color-fg-muted)',
-    marginBottom: 'var(--sam-space-2)',
-  };
-
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    padding: 'var(--sam-space-2) var(--sam-space-3)',
-    borderRadius: 'var(--sam-radius-md)',
-    border: '1px solid var(--sam-color-border-default)',
-    backgroundColor: 'var(--sam-color-bg-surface)',
-    color: 'var(--sam-color-fg-primary)',
-    fontSize: 'var(--sam-type-secondary-size)',
-    outline: 'none',
-    boxSizing: 'border-box',
-  };
-
-  const radioGroupStyle: React.CSSProperties = {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 'var(--sam-space-2)',
-  };
-
-  const radioLabelStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 'var(--sam-space-2)',
-    fontSize: 'var(--sam-type-secondary-size)',
-    color: 'var(--sam-color-fg-primary)',
-    cursor: 'pointer',
-  };
-
-  const buttonStyle = (variant: 'primary' | 'secondary'): React.CSSProperties => ({
-    padding: 'var(--sam-space-2) var(--sam-space-4)',
-    borderRadius: 'var(--sam-radius-md)',
-    border: variant === 'primary' ? 'none' : '1px solid var(--sam-color-border-default)',
-    backgroundColor: variant === 'primary' ? 'var(--sam-color-accent-primary)' : 'transparent',
-    color: variant === 'primary' ? 'var(--sam-color-fg-on-accent)' : 'var(--sam-color-fg-muted)',
-    fontSize: 'var(--sam-type-secondary-size)',
-    fontWeight: 500,
-    cursor: 'pointer',
-    minHeight: 40,
-    opacity: saving || resetting ? 0.6 : 1,
-  });
-
-  const warningStyle: React.CSSProperties = {
-    fontSize: 'var(--sam-type-caption-size)',
-    color: 'var(--sam-color-status-error)',
-    padding: 'var(--sam-space-2) var(--sam-space-3)',
-    borderRadius: 'var(--sam-radius-md)',
-    backgroundColor: 'var(--sam-color-danger-tint)',
-    marginTop: 'var(--sam-space-1)',
-  };
-
   return (
-    <div style={cardStyle} data-testid={`agent-settings-${agent.id}`}>
-      <div style={{ marginBottom: 'var(--sam-space-2)', fontWeight: 600, fontSize: 'var(--sam-type-body-size)', color: 'var(--sam-color-fg-primary)' }}>
+    <div className="p-4 rounded-md border border-border-default bg-inset" data-testid={`agent-settings-${agent.id}`}>
+      <div className="mb-2 font-semibold text-base text-fg-primary">
         {agent.name}
       </div>
 
       {error && (
-        <div style={{ marginBottom: 'var(--sam-space-3)' }}>
+        <div className="mb-3">
           <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
         </div>
       )}
 
       {success && (
-        <div style={{ marginBottom: 'var(--sam-space-3)' }}>
+        <div className="mb-3">
           <Alert variant="success">Settings saved</Alert>
         </div>
       )}
 
       {/* Model selection */}
-      <div style={{ marginBottom: 'var(--sam-space-4)' }}>
-        <div style={labelStyle}>Model</div>
-        <div style={descStyle}>
+      <div className="mb-4">
+        <div className="text-sm font-medium text-fg-primary mb-1">Model</div>
+        <div className="text-xs text-fg-muted mb-2">
           Leave empty to use the default model. Model availability depends on your API key or subscription.
         </div>
         <input
@@ -184,20 +115,20 @@ function AgentSettingsCard({
           value={model}
           onChange={(e) => setModel(e.target.value)}
           placeholder={modelPlaceholder}
-          style={inputStyle}
+          className="w-full py-2 px-3 rounded-md border border-border-default bg-surface text-fg-primary text-sm outline-none box-border"
           data-testid={`model-input-${agent.id}`}
         />
       </div>
 
       {/* Permission mode */}
-      <div style={{ marginBottom: 'var(--sam-space-4)' }}>
-        <div style={labelStyle}>Permission Mode</div>
-        <div style={descStyle}>
+      <div className="mb-4">
+        <div className="text-sm font-medium text-fg-primary mb-1">Permission Mode</div>
+        <div className="text-xs text-fg-muted mb-2">
           Controls how the agent handles file edits and tool execution.
         </div>
-        <div style={radioGroupStyle}>
+        <div className="flex flex-col gap-2">
           {VALID_PERMISSION_MODES.map((mode) => (
-            <label key={mode} style={radioLabelStyle}>
+            <label key={mode} className="flex items-center gap-2 text-sm text-fg-primary cursor-pointer">
               <input
                 type="radio"
                 name={`permission-mode-${agent.id}`}
@@ -211,21 +142,20 @@ function AgentSettingsCard({
           ))}
         </div>
         {permissionMode === 'bypassPermissions' && (
-          <div style={warningStyle}>
+          <div className="text-xs text-danger-fg py-2 px-3 rounded-md bg-danger-tint mt-1">
             Warning: This disables all safety prompts. The agent will execute commands and edit files without confirmation.
           </div>
         )}
       </div>
 
       {/* Action buttons */}
-      <div style={{ display: 'flex', gap: 'var(--sam-space-3)', flexWrap: 'wrap' }}>
+      <div className="flex gap-3 flex-wrap">
         <button
           onClick={handleSave}
           disabled={saving || resetting || !hasChanges}
-          style={{
-            ...buttonStyle('primary'),
-            opacity: saving || resetting || !hasChanges ? 0.5 : 1,
-          }}
+          className={`py-2 px-4 rounded-md border-none bg-accent text-fg-on-accent text-sm font-medium cursor-pointer min-h-[40px] ${
+            saving || resetting || !hasChanges ? 'opacity-50' : 'opacity-100'
+          }`}
           data-testid={`save-settings-${agent.id}`}
         >
           {saving ? 'Saving...' : 'Save Settings'}
@@ -233,7 +163,9 @@ function AgentSettingsCard({
         <button
           onClick={handleReset}
           disabled={saving || resetting}
-          style={buttonStyle('secondary')}
+          className={`py-2 px-4 rounded-md border border-border-default bg-transparent text-fg-muted text-sm font-medium cursor-pointer min-h-[40px] ${
+            saving || resetting ? 'opacity-60' : 'opacity-100'
+          }`}
           data-testid={`reset-settings-${agent.id}`}
         >
           {resetting ? 'Resetting...' : 'Reset to Defaults'}
@@ -308,7 +240,7 @@ export function AgentSettingsSection() {
 
   if (loading && agents.length === 0) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-4)' }}>
+      <div className="flex justify-center p-4">
         <Spinner size="md" />
       </div>
     );
@@ -319,7 +251,7 @@ export function AgentSettingsSection() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-4)' }}>
+    <div className="flex flex-col gap-4">
       {agents.map((agent) => (
         <AgentSettingsCard
           key={agent.id}

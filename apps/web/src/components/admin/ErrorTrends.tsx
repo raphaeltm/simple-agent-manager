@@ -51,21 +51,12 @@ export const ErrorTrends: FC = () => {
 
   return (
     <Card>
-      <div style={{ padding: 'var(--sam-space-4)' }}>
+      <div className="p-4">
         {/* Header */}
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 'var(--sam-space-2)',
-            marginBottom: 'var(--sam-space-4)',
-          }}
-        >
-          <Body style={{ fontWeight: 600 }}>Error Trends</Body>
+        <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
+          <Body className="font-semibold">Error Trends</Body>
 
-          <div style={{ display: 'flex', gap: 'var(--sam-space-1)' }}>
+          <div className="flex gap-1">
             {RANGES.map((r) => (
               <Button
                 key={r}
@@ -81,26 +72,15 @@ export const ErrorTrends: FC = () => {
         </div>
 
         {/* Legend */}
-        <div
-          style={{
-            display: 'flex',
-            gap: 'var(--sam-space-4)',
-            marginBottom: 'var(--sam-space-3)',
-          }}
-        >
+        <div className="flex gap-4 mb-3">
           {Object.entries(SOURCE_LABELS).map(([key, label]) => (
-            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-1)' }}>
+            <div key={key} className="flex items-center gap-1">
               <span
                 data-testid={`legend-${key}`}
-                style={{
-                  width: 12,
-                  height: 12,
-                  borderRadius: 2,
-                  backgroundColor: SOURCE_COLORS[key],
-                  display: 'inline-block',
-                }}
+                className="inline-block w-3 h-3 rounded-sm"
+                style={{ backgroundColor: SOURCE_COLORS[key] }}
               />
-              <Body style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+              <Body className="text-xs text-fg-muted">
                 {label}
               </Body>
             </div>
@@ -109,16 +89,8 @@ export const ErrorTrends: FC = () => {
 
         {/* Content */}
         {error && !data && (
-          <div
-            style={{
-              padding: 'var(--sam-space-4)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 'var(--sam-space-3)',
-            }}
-          >
-            <Body style={{ color: '#f87171' }}>{error}</Body>
+          <div className="p-4 flex flex-col items-center gap-3">
+            <Body className="text-danger-fg">{error}</Body>
             <Button size="sm" variant="secondary" onClick={() => fetchTrends(range)}>
               Retry
             </Button>
@@ -126,27 +98,22 @@ export const ErrorTrends: FC = () => {
         )}
 
         {loading && !data && (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-8)' }}>
+          <div className="flex justify-center p-8">
             <Spinner size="lg" />
           </div>
         )}
 
         {data && data.buckets.length === 0 && (
-          <div style={{ padding: 'var(--sam-space-6)', textAlign: 'center' }}>
-            <Body style={{ color: 'var(--sam-color-fg-muted)' }}>No error data for this time range</Body>
+          <div className="p-6 text-center">
+            <Body className="text-fg-muted">No error data for this time range</Body>
           </div>
         )}
 
         {data && data.buckets.length > 0 && (
           <div
             data-testid="trend-chart"
-            style={{
-              display: 'flex',
-              alignItems: 'flex-end',
-              gap: 1,
-              height: 160,
-              padding: 'var(--sam-space-2) 0',
-            }}
+            className="flex items-end py-2"
+            style={{ gap: 1, height: 160 }}
           >
             {data.buckets.map((bucket, i) => (
               <TrendBar key={i} bucket={bucket} maxTotal={maxTotal} />
@@ -156,17 +123,11 @@ export const ErrorTrends: FC = () => {
 
         {/* Time axis labels */}
         {data && data.buckets.length > 0 && (
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              paddingTop: 'var(--sam-space-1)',
-            }}
-          >
-            <Body style={{ fontSize: '0.65rem', color: 'var(--sam-color-fg-muted)' }}>
+          <div className="flex justify-between pt-1">
+            <Body className="text-[0.65rem] text-fg-muted">
               {formatTimestamp(data.buckets[0]!.timestamp, range)}
             </Body>
-            <Body style={{ fontSize: '0.65rem', color: 'var(--sam-color-fg-muted)' }}>
+            <Body className="text-[0.65rem] text-fg-muted">
               {formatTimestamp(data.buckets[data.buckets.length - 1]!.timestamp, range)}
             </Body>
           </div>
@@ -190,23 +151,10 @@ const TrendBar: FC<TrendBarProps> = ({ bucket, maxTotal }) => {
       <div
         data-testid="trend-bar"
         title={`${formatTime(bucket.timestamp)}: 0 errors`}
-        style={{
-          flex: 1,
-          minWidth: 2,
-          height: '100%',
-          display: 'flex',
-          alignItems: 'flex-end',
-        }}
+        className="flex-1 h-full flex items-end"
+        style={{ minWidth: 2 }}
       >
-        <div
-          style={{
-            width: '100%',
-            height: 2,
-            backgroundColor: 'var(--sam-color-border-default)',
-            borderRadius: 1,
-            opacity: 0.3,
-          }}
-        />
+        <div className="w-full bg-border-default opacity-30" style={{ height: 2, borderRadius: 1 }} />
       </div>
     );
   }
@@ -215,24 +163,12 @@ const TrendBar: FC<TrendBarProps> = ({ bucket, maxTotal }) => {
     <div
       data-testid="trend-bar"
       title={`${formatTime(bucket.timestamp)}: ${bucket.total} errors`}
-      style={{
-        flex: 1,
-        minWidth: 2,
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'flex-end',
-      }}
+      className="flex-1 h-full flex flex-col justify-end"
+      style={{ minWidth: 2 }}
     >
       <div
-        style={{
-          width: '100%',
-          height: `${heightPct}%`,
-          display: 'flex',
-          flexDirection: 'column',
-          borderRadius: '2px 2px 0 0',
-          overflow: 'hidden',
-        }}
+        className="w-full flex flex-col overflow-hidden"
+        style={{ height: `${heightPct}%`, borderRadius: '2px 2px 0 0' }}
       >
         {sources.map((source) => {
           const count = bucket.bySource[source] ?? 0;
@@ -241,8 +177,8 @@ const TrendBar: FC<TrendBarProps> = ({ bucket, maxTotal }) => {
           return (
             <div
               key={source}
+              className="w-full"
               style={{
-                width: '100%',
                 height: `${segmentPct}%`,
                 backgroundColor: SOURCE_COLORS[source],
                 minHeight: 1,

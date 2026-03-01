@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { getPaletteShortcuts, formatShortcut } from '../lib/keyboard-shortcuts';
 import type { ShortcutDefinition } from '../lib/keyboard-shortcuts';
 import { fuzzyMatch, fileNameFromPath, type FuzzyMatchResult } from '../lib/fuzzy-match';
@@ -189,7 +189,7 @@ function HighlightedText({ text, matches }: { text: string; matches: number[] })
     <>
       {parts.map((part, i) =>
         part.highlighted ? (
-          <span key={i} style={{ color: 'var(--sam-color-tn-blue)', fontWeight: 600 }}>
+          <span key={i} className="text-tn-blue font-semibold">
             {part.text}
           </span>
         ) : (
@@ -293,63 +293,15 @@ export function CommandPalette({
   // Track the flat index for rendering
   let flatIndex = -1;
 
-  const backdropStyle: CSSProperties = {
-    position: 'fixed',
-    inset: 0,
-    backgroundColor: 'var(--sam-color-bg-overlay)',
-    zIndex: 'var(--sam-z-dialog-backdrop)' as unknown as number,
-  };
-
-  const dialogStyle: CSSProperties = {
-    position: 'fixed',
-    top: '20%',
-    left: '50%',
-    transform: 'translateX(-50%)',
-    width: '90vw',
-    maxWidth: 480,
-    backgroundColor: 'var(--sam-color-tn-surface)',
-    border: '1px solid var(--sam-color-tn-border)',
-    borderRadius: 12,
-    boxShadow: 'var(--sam-shadow-overlay)',
-    zIndex: 'var(--sam-z-command-palette)' as unknown as number,
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-  };
-
-  const inputStyle: CSSProperties = {
-    width: '100%',
-    padding: '12px 16px',
-    backgroundColor: 'transparent',
-    border: 'none',
-    borderBottom: '1px solid var(--sam-color-tn-border)',
-    color: 'var(--sam-color-tn-fg)',
-    fontSize: 'var(--sam-type-secondary-size)',
-    outline: 'none',
-    fontFamily: 'inherit',
-  };
-
-  const listStyle: CSSProperties = {
-    maxHeight: 360,
-    overflowY: 'auto',
-    padding: '4px 0',
-  };
-
-  const categoryHeaderStyle: CSSProperties = {
-    padding: '6px 16px 4px',
-    fontSize: 'var(--sam-type-caption-size)',
-    fontWeight: 600,
-    color: 'var(--sam-color-tn-fg-dim)',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    userSelect: 'none',
-  };
-
   return (
     <>
-      <div onClick={onClose} style={backdropStyle} />
+      <div onClick={onClose} className="fixed inset-0 bg-overlay z-dialog-backdrop" />
 
-      <div role="dialog" aria-label="Command palette" style={dialogStyle}>
+      <div
+        role="dialog"
+        aria-label="Command palette"
+        className="fixed top-[20%] left-1/2 -translate-x-1/2 w-[90vw] max-w-[480px] bg-tn-surface border border-tn-border rounded-xl shadow-overlay z-command-palette flex flex-col overflow-hidden"
+      >
         <input
           ref={inputRef}
           type="text"
@@ -357,57 +309,35 @@ export function CommandPalette({
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Search tabs, files, or commands..."
-          style={inputStyle}
+          className="w-full px-4 py-3 bg-transparent border-none border-b border-tn-border text-tn-fg text-sm outline-none font-[inherit]"
           aria-label="Search tabs, files, and commands"
           autoComplete="off"
           spellCheck={false}
         />
 
-        <div role="listbox" style={listStyle}>
+        <div role="listbox" className="max-h-90 overflow-y-auto py-1">
           {flatResults.length === 0 && !fileIndexLoading && (
-            <div
-              style={{
-                padding: '16px',
-                textAlign: 'center',
-                color: 'var(--sam-color-tn-fg-muted)',
-                fontSize: 'var(--sam-type-caption-size)',
-              }}
-            >
+            <div className="p-4 text-center text-tn-fg-muted text-xs">
               No matching results
             </div>
           )}
 
           {fileIndexLoading && query && flatResults.length === 0 && (
-            <div
-              style={{
-                padding: '16px',
-                textAlign: 'center',
-                color: 'var(--sam-color-tn-fg-muted)',
-                fontSize: 'var(--sam-type-caption-size)',
-              }}
-            >
+            <div className="p-4 text-center text-tn-fg-muted text-xs">
               Loading files...
             </div>
           )}
 
           {groups.map((group) => (
             <div key={group.category}>
-              <div style={categoryHeaderStyle}>{group.category}</div>
+              <div className="px-4 pt-1.5 pb-1 text-xs font-semibold text-tn-fg-dim uppercase tracking-wide select-none">
+                {group.category}
+              </div>
 
               {group.results.map((result) => {
                 flatIndex++;
                 const currentFlatIndex = flatIndex;
                 const isSelected = currentFlatIndex === selectedIndex;
-                const itemStyle: CSSProperties = {
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '7px 16px',
-                  cursor: 'pointer',
-                  backgroundColor: isSelected ? 'var(--sam-color-tn-selected)' : 'transparent',
-                  transition: 'background-color 0.1s',
-                  gap: 12,
-                };
 
                 return (
                   <div
@@ -417,49 +347,25 @@ export function CommandPalette({
                     aria-selected={isSelected}
                     onClick={() => executeResult(result)}
                     onMouseEnter={() => setSelectedIndex(currentFlatIndex)}
-                    style={itemStyle}
+                    className={`flex justify-between items-center px-4 py-[7px] cursor-pointer gap-3 transition-colors duration-100 ${
+                      isSelected ? 'bg-tn-selected' : 'bg-transparent'
+                    }`}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
-                      <span style={{ fontSize: 'var(--sam-type-caption-size)', flexShrink: 0 }}>
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <span className="text-xs shrink-0">
                         {resultIcon(result)}
                       </span>
-                      <span
-                        style={{
-                          fontSize: 'var(--sam-type-caption-size)',
-                          color: 'var(--sam-color-tn-fg)',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
+                      <span className="text-xs text-tn-fg overflow-hidden text-ellipsis whitespace-nowrap">
                         <HighlightedText text={result.label} matches={result.matches} />
                       </span>
                     </div>
                     {result.kind === 'command' && (
-                      <kbd
-                        style={{
-                          fontFamily: 'monospace',
-                          fontSize: 'var(--sam-type-caption-size)',
-                          color: 'var(--sam-color-tn-fg-bright)',
-                          backgroundColor: 'var(--sam-color-tn-selected)',
-                          border: '1px solid var(--sam-color-tn-border-highlight)',
-                          borderRadius: 4,
-                          padding: '2px 8px',
-                          whiteSpace: 'nowrap',
-                          flexShrink: 0,
-                        }}
-                      >
+                      <kbd className="font-mono text-xs text-tn-fg-bright bg-tn-selected border border-tn-border-highlight rounded px-2 py-0.5 whitespace-nowrap shrink-0">
                         {result.shortcutKey}
                       </kbd>
                     )}
                     {result.kind === 'tab' && (
-                      <span
-                        style={{
-                          fontSize: 'var(--sam-type-caption-size)',
-                          color: 'var(--sam-color-tn-fg-dim)',
-                          flexShrink: 0,
-                        }}
-                      >
+                      <span className="text-xs text-tn-fg-dim shrink-0">
                         {result.tab.kind === 'terminal' ? 'terminal' : 'chat'}
                       </span>
                     )}

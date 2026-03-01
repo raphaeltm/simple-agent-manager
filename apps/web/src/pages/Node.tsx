@@ -187,57 +187,28 @@ export function Node() {
   return (
     <PageLayout title="Node" maxWidth="xl" headerRight={<UserMenu />}>
       {/* Breadcrumb navigation */}
-      <nav
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--sam-space-2)',
-          marginBottom: 'var(--sam-space-4)',
-          fontSize: 'var(--sam-type-secondary-size)',
-          color: 'var(--sam-color-fg-muted)',
-        }}
-      >
+      <nav className="flex items-center gap-2 mb-4 text-fg-muted" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
         <button
           onClick={() => navigate('/dashboard')}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--sam-color-accent-primary)',
-            cursor: 'pointer',
-            padding: 0,
-            fontSize: 'inherit',
-          }}
+          className="bg-transparent border-none text-accent cursor-pointer p-0"
+          style={{ fontSize: 'inherit' }}
         >
           Dashboard
         </button>
         <span>/</span>
         <button
           onClick={() => navigate('/nodes')}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--sam-color-accent-primary)',
-            cursor: 'pointer',
-            padding: 0,
-            fontSize: 'inherit',
-          }}
+          className="bg-transparent border-none text-accent cursor-pointer p-0"
+          style={{ fontSize: 'inherit' }}
         >
           Nodes
         </button>
         <span>/</span>
-        <span style={{ color: 'var(--sam-color-fg-primary)' }}>{node?.name || 'Loading...'}</span>
+        <span className="text-fg-primary">{node?.name || 'Loading...'}</span>
       </nav>
 
       {/* Action buttons */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--sam-space-3)',
-          marginBottom: 'var(--sam-space-6)',
-          flexWrap: 'wrap',
-        }}
-      >
+      <div className="flex items-center gap-3 mb-6 flex-wrap">
         <Button onClick={() => navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })}>
           Create Workspace
         </Button>
@@ -259,7 +230,7 @@ export function Node() {
       </div>
 
       {error && (
-        <div style={{ marginBottom: 'var(--sam-space-4)' }}>
+        <div className="mb-4">
           <Alert variant="error" onDismiss={() => setError(null)}>
             {error}
           </Alert>
@@ -267,34 +238,19 @@ export function Node() {
       )}
 
       {loading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-6)' }}>
+        <div className="flex flex-col gap-6">
           <div
             aria-hidden="true"
-            style={{
-              border: '1px solid var(--sam-color-border-default)',
-              borderRadius: 'var(--sam-radius-lg)',
-              padding: 'var(--sam-space-6)',
-              background: 'var(--sam-color-bg-surface)',
-              display: 'grid',
-              gap: 'var(--sam-space-4)',
-            }}
+            className="border border-border-default rounded-lg p-6 bg-surface grid gap-4"
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="flex justify-between items-center">
               <Skeleton width="40%" height="1.25rem" />
-              <div style={{ display: 'flex', gap: 'var(--sam-space-2)' }}>
+              <div className="flex gap-2">
                 <Skeleton width="60px" height="1.25rem" borderRadius="9999px" />
                 <Skeleton width="60px" height="1.25rem" borderRadius="9999px" />
               </div>
             </div>
-            <div
-              style={{
-                borderTop: '1px solid var(--sam-color-border-default)',
-                paddingTop: 'var(--sam-space-4)',
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-                gap: 'var(--sam-space-4)',
-              }}
-            >
+            <div className="border-t border-border-default pt-4 grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
               {Array.from({ length: 5 }, (_, i) => (
                 <div key={i}>
                   <Skeleton width="50%" height="0.75rem" style={{ marginBottom: 'var(--sam-space-1)' }} />
@@ -307,7 +263,7 @@ export function Node() {
       ) : !node ? (
         <Alert variant="error">Node not found</Alert>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sam-space-6)' }}>
+        <div className="flex flex-col gap-6">
           <NodeOverviewSection node={node} systemInfo={systemInfo} />
 
           {node.status === 'running' && (

@@ -1,4 +1,3 @@
-import { type CSSProperties } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Home, FolderKanban, Server, Settings, Shield } from 'lucide-react';
 import { useAuth } from './AuthProvider';
@@ -25,13 +24,6 @@ interface NavSidebarProps {
   className?: string;
 }
 
-const navStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 'var(--sam-space-1)',
-  padding: 'var(--sam-space-2)',
-};
-
 export function NavSidebar({ className }: NavSidebarProps) {
   const location = useLocation();
   const { isSuperadmin } = useAuth();
@@ -41,40 +33,24 @@ export function NavSidebar({ className }: NavSidebarProps) {
     : NAV_ITEMS;
 
   return (
-    <nav aria-label="Primary navigation" className={className} style={navStyle}>
+    <nav aria-label="Primary navigation" className={`flex flex-col gap-1 p-2 ${className ?? ''}`}>
       {items.map((item) => {
         const active = isActive(item.path, location.pathname);
         return (
           <Link
             key={item.path}
             to={item.path}
-            className={`sam-nav-sidebar-link${active ? ' is-active' : ''}`}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--sam-space-3)',
-              padding: 'var(--sam-space-2) var(--sam-space-3)',
-              borderRadius: 'var(--sam-radius-sm)',
-              textDecoration: 'none',
-              fontSize: 'var(--sam-type-secondary-size)',
-              fontWeight: 500,
-              color: active ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
-              background: active ? 'var(--sam-color-bg-surface-hover)' : 'transparent',
-              transition: 'all 150ms ease',
-            }}
+            className={`flex items-center gap-3 px-3 py-2 rounded-sm no-underline text-sm font-medium transition-all duration-150 ${
+              active
+                ? 'text-accent bg-surface-hover'
+                : 'text-fg-muted hover:text-fg-primary hover:bg-surface-hover'
+            }`}
           >
             {item.icon}
             {item.label}
           </Link>
         );
       })}
-
-      <style>{`
-        .sam-nav-sidebar-link:hover:not(.is-active) {
-          color: var(--sam-color-fg-primary);
-          background: var(--sam-color-bg-surface-hover);
-        }
-      `}</style>
     </nav>
   );
 }

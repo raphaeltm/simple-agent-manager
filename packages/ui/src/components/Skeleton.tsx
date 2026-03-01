@@ -13,26 +13,10 @@ interface SkeletonProps {
   className?: string;
 }
 
-const pulseKeyframes = `
-@keyframes sam-skeleton-pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.15; }
-}
-`;
-
-let styleInjected = false;
-
-function injectStyle() {
-  if (styleInjected || typeof document === 'undefined') return;
-  const style = document.createElement('style');
-  style.textContent = pulseKeyframes;
-  document.head.appendChild(style);
-  styleInjected = true;
-}
-
 /**
  * Skeleton placeholder for content that is loading.
  * Renders an animated pulsing bar that matches the layout of expected content.
+ * Keyframes defined in packages/ui/src/styles.css (sam-skeleton-pulse).
  */
 export const Skeleton: FC<SkeletonProps> = ({
   width = '100%',
@@ -41,17 +25,14 @@ export const Skeleton: FC<SkeletonProps> = ({
   style,
   className,
 }) => {
-  injectStyle();
-
   return (
     <div
-      className={className}
+      className={`bg-surface ${className ?? ''}`}
       aria-hidden="true"
       style={{
         width,
         height,
         borderRadius,
-        backgroundColor: 'var(--sam-color-bg-surface, #24283b)',
         animation: 'sam-skeleton-pulse 1.5s ease-in-out infinite',
         ...style,
       }}
@@ -72,24 +53,14 @@ interface SkeletonCardProps {
  * A skeleton card matching the typical workspace/node card layout.
  */
 export const SkeletonCard: FC<SkeletonCardProps> = ({ lines = 3, style }) => {
-  injectStyle();
-
   return (
     <div
+      className="border border-border-default rounded-md p-4 bg-surface flex flex-col gap-3"
       aria-hidden="true"
-      style={{
-        border: '1px solid var(--sam-color-border-default)',
-        borderRadius: 'var(--sam-radius-md)',
-        padding: 'var(--sam-space-4)',
-        background: 'var(--sam-color-bg-surface)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--sam-space-3)',
-        ...style,
-      }}
+      style={style}
     >
       {/* Title row */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="flex justify-between items-center">
         <Skeleton width="60%" height="1.25rem" />
         <Skeleton width="60px" height="1.25rem" borderRadius="9999px" />
       </div>
@@ -124,14 +95,10 @@ export const SkeletonList: FC<SkeletonListProps> = ({
 }) => {
   return (
     <div
+      className="flex flex-col gap-4"
       aria-hidden="true"
       aria-label="Loading content"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--sam-space-4)',
-        ...style,
-      }}
+      style={style}
     >
       {Array.from({ length: count }, (_, i) =>
         variant === 'card' ? (

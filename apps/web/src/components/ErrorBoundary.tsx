@@ -46,103 +46,32 @@ export class ErrorBoundary extends Component<Props, State> {
     }
 
     return (
-      <div
-        style={{
-          minHeight: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: 'var(--sam-color-bg-base, #0a0a0a)',
-          color: 'var(--sam-color-fg-primary, #e5e5e5)',
-          padding: '24px',
-        }}
-      >
-        <div
-          style={{
-            maxWidth: '480px',
-            width: '100%',
-            textAlign: 'center',
-          }}
-        >
-          <div
-            style={{
-              fontSize: '2rem',
-              marginBottom: '16px',
-              color: 'var(--sam-color-danger, #f87171)',
-            }}
-          >
+      <div className="min-h-screen flex items-center justify-center bg-canvas text-fg-primary p-6">
+        <div className="max-w-md w-full text-center">
+          <div className="text-3xl mb-4 text-danger">
             Something went wrong
           </div>
 
-          <p
-            style={{
-              color: 'var(--sam-color-fg-secondary, #a3a3a3)',
-              fontSize: 'var(--sam-type-body-size)',
-              lineHeight: 1.6,
-              marginBottom: '24px',
-            }}
-          >
+          <p className="text-fg-muted text-base leading-relaxed mb-6">
             An unexpected error occurred. The error has been reported automatically.
           </p>
 
           {this.state.error && (
-            <div
-              style={{
-                backgroundColor: 'var(--sam-color-danger-tint)',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
-                borderRadius: '8px',
-                padding: '12px 16px',
-                marginBottom: '24px',
-                textAlign: 'left',
-                fontSize: '0.8rem',
-                fontFamily: 'monospace',
-                color: 'var(--sam-color-danger-fg)',
-                wordBreak: 'break-word',
-                maxHeight: '120px',
-                overflow: 'auto',
-              }}
-            >
+            <div className="bg-danger-tint border border-danger/30 rounded-lg px-4 py-3 mb-6 text-left text-xs font-mono text-danger-fg break-words max-h-30 overflow-auto">
               {this.state.error.message}
             </div>
           )}
 
-          <div
-            style={{
-              display: 'flex',
-              gap: '12px',
-              justifyContent: 'center',
-              flexWrap: 'wrap',
-            }}
-          >
+          <div className="flex gap-3 justify-center flex-wrap">
             <button
               onClick={this.handleReload}
-              style={{
-                minHeight: '48px',
-                padding: '0 24px',
-                backgroundColor: 'var(--sam-color-accent-primary, #10b981)',
-                color: 'var(--sam-color-fg-on-accent)',
-                border: 'none',
-                borderRadius: '8px',
-                fontSize: 'var(--sam-type-body-size)',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
+              className="min-h-12 px-6 bg-accent text-fg-on-accent border-none rounded-lg text-base font-semibold cursor-pointer"
             >
               Reload Page
             </button>
             <button
               onClick={this.handleGoHome}
-              style={{
-                minHeight: '48px',
-                padding: '0 24px',
-                backgroundColor: 'var(--sam-color-bg-surface, #1a1a1a)',
-                color: 'var(--sam-color-fg-primary, #e5e5e5)',
-                border: '1px solid var(--sam-color-border-default, #333)',
-                borderRadius: '8px',
-                fontSize: 'var(--sam-type-body-size)',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
+              className="min-h-12 px-6 bg-surface text-fg-primary border border-border-default rounded-lg text-base font-semibold cursor-pointer"
             >
               Go Home
             </button>

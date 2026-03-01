@@ -66,9 +66,9 @@ export function TaskForm({
   const isEditMode = mode === 'edit';
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 'var(--sam-space-3)' }}>
-      <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Title</span>
+    <form onSubmit={handleSubmit} className="grid gap-3">
+      <label className="grid gap-1.5">
+        <span className="text-sm text-fg-muted">Title</span>
         <Input
           value={values.title}
           onChange={(event) => {
@@ -80,8 +80,8 @@ export function TaskForm({
         />
       </label>
 
-      <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Description</span>
+      <label className="grid gap-1.5">
+        <span className="text-sm text-fg-muted">Description</span>
         <textarea
           value={values.description}
           onChange={(event) => {
@@ -90,20 +90,12 @@ export function TaskForm({
           }}
           rows={3}
           disabled={submitting}
-          style={{
-            width: '100%',
-            borderRadius: 'var(--sam-radius-md)',
-            border: '1px solid var(--sam-color-border-default)',
-            background: 'var(--sam-color-bg-surface)',
-            color: 'var(--sam-color-fg-primary)',
-            padding: '0.625rem 0.75rem',
-            resize: 'vertical',
-          }}
+          className="w-full rounded-md border border-border-default bg-surface text-fg-primary py-2.5 px-3 resize-y"
         />
       </label>
 
-      <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Priority</span>
+      <label className="grid gap-1.5">
+        <span className="text-sm text-fg-muted">Priority</span>
         <Input
           type="number"
           value={String(values.priority)}
@@ -116,8 +108,8 @@ export function TaskForm({
         />
       </label>
 
-      <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Parent task</span>
+      <label className="grid gap-1.5">
+        <span className="text-sm text-fg-muted">Parent task</span>
         <select
           value={values.parentTaskId}
           onChange={(event) => {
@@ -125,15 +117,7 @@ export function TaskForm({
             updateField('parentTaskId', value);
           }}
           disabled={submitting}
-          style={{
-            width: '100%',
-            borderRadius: 'var(--sam-radius-md)',
-            border: '1px solid var(--sam-color-border-default)',
-            background: 'var(--sam-color-bg-surface)',
-            color: 'var(--sam-color-fg-primary)',
-            padding: '0.625rem 0.75rem',
-            minHeight: '2.75rem',
-          }}
+          className="w-full rounded-md border border-border-default bg-surface text-fg-primary py-2.5 px-3 min-h-11"
         >
           <option value="">No parent</option>
           {candidateParents.map((task) => (
@@ -144,8 +128,8 @@ export function TaskForm({
         </select>
       </label>
 
-      <label style={{ display: 'grid', gap: '0.375rem' }}>
-        <span style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-muted)' }}>Agent hint</span>
+      <label className="grid gap-1.5">
+        <span className="text-sm text-fg-muted">Agent hint</span>
         <Input
           value={values.agentProfileHint}
           onChange={(event) => {
@@ -158,12 +142,12 @@ export function TaskForm({
       </label>
 
       {error && (
-        <div role="alert" style={{ color: 'var(--sam-color-danger)', fontSize: 'var(--sam-type-secondary-size)' }}>
+        <div role="alert" className="text-danger text-sm">
           {error}
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 'var(--sam-space-2)', flexWrap: 'wrap' }}>
+      <div className="flex gap-2 flex-wrap">
         <Button type="submit" disabled={submitting}>
           {submitting ? 'Saving...' : (submitLabel ?? (isEditMode ? 'Update Task' : 'Create Task'))}
         </Button>

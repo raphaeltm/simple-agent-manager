@@ -120,30 +120,17 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
   // Parse diff to get set of added line numbers (for full-file view highlighting)
   const addedLines = parseDiffAddedLines(diff);
 
-  const overlayStyle: CSSProperties = {
-    position: 'fixed',
-    inset: 0,
-    zIndex: 'var(--sam-z-panel)' as unknown as number,
-    backgroundColor: 'var(--sam-color-bg-canvas)',
-    display: 'flex',
-    flexDirection: 'column',
-  };
-
-  const headerStyle: CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    padding: isMobile ? '0 8px' : '0 16px',
-    height: isMobile ? 44 : 40,
-    backgroundColor: 'var(--sam-color-bg-surface)',
-    borderBottom: '1px solid var(--sam-color-border-default)',
-    gap: isMobile ? 6 : 12,
-    flexShrink: 0,
-  };
-
   return (
-    <div style={overlayStyle}>
+    <div className="fixed inset-0 z-panel bg-canvas flex flex-col">
       {/* Header */}
-      <header style={headerStyle}>
+      <header
+        className="flex items-center bg-surface border-b border-border-default shrink-0"
+        style={{
+          padding: isMobile ? '0 8px' : '0 16px',
+          height: isMobile ? 44 : 40,
+          gap: isMobile ? 6 : 12,
+        }}
+      >
         <button onClick={onBack} aria-label="Back to file list" style={iconBtnStyle(isMobile)}>
           <svg
             style={{ height: isMobile ? 18 : 16, width: isMobile ? 18 : 16 }}
@@ -238,23 +225,17 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
       </header>
 
       {/* Content */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div className="flex-1 overflow-auto">
         {loading && (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
+          <div className="flex justify-center p-8">
             <Spinner size="md" />
           </div>
         )}
 
         {error && (
           <div
-            style={{
-              margin: 16,
-              padding: 12,
-              backgroundColor: 'var(--sam-color-danger-tint)',
-              borderRadius: 8,
-              color: 'var(--sam-color-tn-red)',
-              fontSize: 'var(--sam-type-caption-size)',
-            }}
+            className="m-4 p-3 bg-danger-tint rounded-lg text-tn-red"
+            style={{ fontSize: 'var(--sam-type-caption-size)' }}
           >
             {error}
           </div>
@@ -262,13 +243,8 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
 
         {!loading && !error && diff === '' && (
           <div
-            style={{
-              display: 'flex',
-              justifyContent: 'center',
-              padding: 48,
-              color: 'var(--sam-color-fg-muted)',
-              fontSize: 'var(--sam-type-secondary-size)',
-            }}
+            className="flex justify-center p-12 text-fg-muted"
+            style={{ fontSize: 'var(--sam-type-secondary-size)' }}
           >
             No diff available
           </div>
@@ -280,7 +256,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
           !error &&
           viewMode === 'full' &&
           (fullLoading ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
+            <div className="flex justify-center p-8">
               <Spinner size="md" />
             </div>
           ) : fullContent !== null ? (
@@ -442,19 +418,9 @@ const ToggleButton: FC<{ label: string; active: boolean; onClick: () => void }> 
 
 // ---------- Rendered Markdown ----------
 
-const markdownContainerStyle: CSSProperties = {
-  maxWidth: '100%',
-  overflowX: 'hidden',
-  padding: '16px',
-  color: 'var(--sam-color-fg-primary)',
-  lineHeight: 1.6,
-  fontSize: 'var(--sam-type-body-size)',
-  wordBreak: 'break-word',
-};
-
 const RenderedMarkdown: FC<{ content: string }> = ({ content }) => {
   return (
-    <div style={markdownContainerStyle}>
+    <div className="max-w-full overflow-x-hidden p-4 text-fg-primary break-words" style={{ lineHeight: 1.6, fontSize: 'var(--sam-type-body-size)' }}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -484,7 +450,7 @@ const RenderedMarkdown: FC<{ content: string }> = ({ content }) => {
             </blockquote>
           ),
           a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noreferrer" style={{ color: 'var(--sam-color-tn-blue)' }}>
+            <a href={href} target="_blank" rel="noreferrer" className="text-tn-blue">
               {children}
             </a>
           ),

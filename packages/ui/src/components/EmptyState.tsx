@@ -1,4 +1,4 @@
-import { type ReactNode, type CSSProperties } from 'react';
+import type { ReactNode } from 'react';
 import { Button } from './Button';
 
 export interface EmptyStateProps {
@@ -11,46 +11,18 @@ export interface EmptyStateProps {
   };
 }
 
-const containerStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  padding: 'var(--sam-space-8)',
-};
-
-const iconStyle: CSSProperties = {
-  width: 48,
-  height: 48,
-  color: 'var(--sam-color-fg-muted)',
-  marginBottom: 'var(--sam-space-4)',
-};
-
-const headingStyle: CSSProperties = {
-  fontSize: 'var(--sam-type-section-heading-size)',
-  fontWeight: 'var(--sam-type-section-heading-weight)',
-  lineHeight: 'var(--sam-type-section-heading-line-height)',
-  color: 'var(--sam-color-fg-primary)',
-  textAlign: 'center',
-  margin: 0,
-};
-
-const descriptionStyle: CSSProperties = {
-  fontSize: 'var(--sam-type-secondary-size)',
-  lineHeight: 'var(--sam-type-secondary-line-height)',
-  color: 'var(--sam-color-fg-muted)',
-  textAlign: 'center',
-  maxWidth: 320,
-  marginTop: 'var(--sam-space-2)',
-};
-
 export function EmptyState({ icon, heading, description, action }: EmptyStateProps) {
   return (
-    <div style={containerStyle}>
-      {icon && <div style={iconStyle}>{icon}</div>}
-      <h3 style={headingStyle}>{heading}</h3>
-      {description && <p style={descriptionStyle}>{description}</p>}
+    <div className="flex flex-col items-center p-8">
+      {icon && <div className="w-12 h-12 text-fg-muted mb-4">{icon}</div>}
+      <h3 className="sam-type-section-heading text-fg-primary text-center m-0">{heading}</h3>
+      {description && (
+        <p className="sam-type-secondary text-fg-muted text-center max-w-xs mt-2">
+          {description}
+        </p>
+      )}
       {action && (
-        <div style={{ marginTop: 'var(--sam-space-4)' }}>
+        <div className="mt-4">
           <Button variant="primary" onClick={action.onClick}>
             {action.label}
           </Button>

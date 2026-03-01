@@ -41,9 +41,9 @@ export function TaskDependencyEditor({
   });
 
   return (
-    <section style={{ display: 'grid', gap: 'var(--sam-space-2)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sam-space-2)' }}>
-        <strong style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-color-fg-primary)' }}>Dependencies</strong>
+    <section className="grid gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <strong className="text-sm text-fg-primary">Dependencies</strong>
         {onClose && (
           <Button variant="secondary" size="sm" onClick={onClose}>
             Close
@@ -51,20 +51,13 @@ export function TaskDependencyEditor({
         )}
       </div>
 
-      <div style={{ display: 'grid', gap: 'var(--sam-space-2)', gridTemplateColumns: '1fr auto' }}>
+      <div className="grid gap-2 grid-cols-[1fr_auto]">
         <select
           aria-label="Add dependency"
           value={dependsOnTaskId}
           onChange={(event) => setDependsOnTaskId(event.currentTarget.value)}
           disabled={loading}
-          style={{
-            borderRadius: 'var(--sam-radius-md)',
-            border: '1px solid var(--sam-color-border-default)',
-            background: 'var(--sam-color-bg-surface)',
-            color: 'var(--sam-color-fg-primary)',
-            minHeight: '2.5rem',
-            padding: '0.5rem 0.625rem',
-          }}
+          className="rounded-md border border-border-default bg-surface text-fg-primary min-h-10 py-2 px-2.5"
         >
           <option value="">Select prerequisite task...</option>
           {availableTasks.map((candidate) => (
@@ -88,23 +81,15 @@ export function TaskDependencyEditor({
       </div>
 
       {dependencies.length === 0 ? (
-        <p style={{ margin: 0, color: 'var(--sam-color-fg-muted)' }}>No dependencies yet.</p>
+        <p className="m-0 text-fg-muted">No dependencies yet.</p>
       ) : (
-        <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 'var(--sam-space-2)' }}>
+        <ul className="m-0 p-0 list-none grid gap-2">
           {dependencies.map((dependency) => {
             const dependencyTask = tasks.find((candidate) => candidate.id === dependency.dependsOnTaskId);
             return (
               <li
                 key={dependency.dependsOnTaskId}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 'var(--sam-space-2)',
-                  border: '1px solid var(--sam-color-border-default)',
-                  borderRadius: 'var(--sam-radius-sm)',
-                  padding: '0.5rem 0.625rem',
-                }}
+                className="flex items-center justify-between gap-2 border border-border-default rounded-sm py-2 px-2.5"
               >
                 <span>{dependencyTask?.title ?? dependency.dependsOnTaskId}</span>
                 <Button

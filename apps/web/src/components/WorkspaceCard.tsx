@@ -74,27 +74,21 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
   const overflowItems = getWorkspaceActions(workspace, { onStop, onRestart, onDelete });
 
   return (
-    <Card style={{ padding: 'var(--sam-space-3) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))', transition: 'border-color 150ms' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
+    <Card className="transition-[border-color] duration-150" style={{ padding: 'var(--sam-space-3) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }}>
+      <div className="flex items-center gap-3">
         {/* Main content */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 'var(--sam-space-3)' }}>
+        <div className="flex-1 min-w-0 flex items-center gap-3">
           <StatusBadge status={workspace.status} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--sam-space-2)', minWidth: 0 }}>
-              <span className="sam-type-card-title" style={{
-                color: 'var(--sam-color-fg-primary)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                minWidth: 0,
-              }}>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline gap-2 min-w-0">
+              <span className="sam-type-card-title text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
                 {workspace.displayName || workspace.name}
               </span>
-              <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span className="sam-type-caption text-fg-muted overflow-hidden text-ellipsis whitespace-nowrap">
                 {workspace.branch}
               </span>
             </div>
-            <div className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div className="sam-type-caption text-fg-muted mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap">
               {workspace.repository}
               {workspace.lastActivityAt && (
                 <> &middot; {new Date(workspace.lastActivityAt).toLocaleDateString()}</>
@@ -105,41 +99,36 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
 
         {/* Primary action */}
         {isActive && (
-          <div style={{ flexShrink: 0 }}>
+          <div className="shrink-0">
             <Button variant="primary" size="sm" onClick={handleOpen}>
               Open
             </Button>
           </div>
         )}
         {workspace.status === 'stopped' && onRestart && (
-          <div style={{ flexShrink: 0 }}>
+          <div className="shrink-0">
             <Button variant="secondary" size="sm" onClick={() => onRestart(workspace.id)}>
               Start
             </Button>
           </div>
         )}
         {(workspace.status === 'creating' || workspace.status === 'stopping') && (
-          <span className="sam-type-caption" style={{ color: 'var(--sam-color-fg-muted)', flexShrink: 0 }}>
+          <span className="sam-type-caption text-fg-muted shrink-0">
             Please wait...
           </span>
         )}
 
         {/* Overflow menu */}
         {overflowItems.length > 0 && (
-          <div style={{ flexShrink: 0 }}>
+          <div className="shrink-0">
             <DropdownMenu items={overflowItems} aria-label={`Actions for ${workspace.displayName || workspace.name}`} />
           </div>
         )}
       </div>
 
       {workspace.errorMessage && (
-        <div style={{
-          marginTop: 'var(--sam-space-2)',
-          padding: 'var(--sam-space-2)',
-          backgroundColor: 'var(--sam-color-danger-tint)',
-          borderRadius: 'var(--sam-radius-sm)',
-        }}>
-          <span className="sam-type-caption" style={{ color: 'var(--sam-color-danger)' }}>
+        <div className="mt-2 p-2 bg-danger-tint rounded-sm">
+          <span className="sam-type-caption text-danger">
             {workspace.errorMessage}
           </span>
         </div>

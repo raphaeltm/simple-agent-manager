@@ -12,33 +12,19 @@ interface MetricCardProps {
 const MetricCard: FC<MetricCardProps> = ({ label, value, metricKey, warning }) => (
   <div
     data-metric={metricKey}
-    style={{
-      flex: '1 1 140px',
-      padding: 'var(--sam-space-4)',
-      borderRadius: 'var(--sam-radius-sm)',
-      border: '1px solid var(--sam-color-border-default)',
-      backgroundColor: warning ? 'rgba(239, 68, 68, 0.05)' : 'var(--sam-color-bg-surface)',
-      textAlign: 'center',
-    }}
+    className={`flex-[1_1_140px] p-4 rounded-sm border border-border-default text-center ${
+      warning ? 'bg-danger-tint' : 'bg-surface'
+    }`}
   >
     <div
-      style={{
-        fontSize: '2rem',
-        fontWeight: 700,
-        fontVariantNumeric: 'tabular-nums',
-        color: warning ? '#f87171' : 'var(--sam-color-fg-default)',
-        lineHeight: 1.2,
-      }}
+      className={`text-[2rem] font-bold leading-tight ${
+        warning ? 'text-danger-fg' : 'text-fg-primary'
+      }`}
+      style={{ fontVariantNumeric: 'tabular-nums' }}
     >
       {value}
     </div>
-    <div
-      style={{
-        fontSize: 'var(--sam-type-caption-size)',
-        color: 'var(--sam-color-fg-muted)',
-        marginTop: 'var(--sam-space-1)',
-      }}
-    >
+    <div className="text-xs text-fg-muted mt-1">
       {label}
     </div>
   </div>
@@ -52,16 +38,8 @@ export const HealthOverview: FC = () => {
   if (error && !health) {
     return (
       <Card>
-        <div
-          style={{
-            padding: 'var(--sam-space-4)',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 'var(--sam-space-3)',
-          }}
-        >
-          <Body style={{ color: '#f87171' }}>{error}</Body>
+        <div className="p-4 flex flex-col items-center gap-3">
+          <Body className="text-danger-fg">{error}</Body>
           <Button size="sm" variant="secondary" onClick={refresh}>
             Retry
           </Button>
@@ -72,7 +50,7 @@ export const HealthOverview: FC = () => {
 
   if (loading && !health) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--sam-space-8)' }}>
+      <div className="flex justify-center p-8">
         <Spinner size="lg" />
       </div>
     );
@@ -84,17 +62,10 @@ export const HealthOverview: FC = () => {
 
   return (
     <Card>
-      <div style={{ padding: 'var(--sam-space-4)' }}>
+      <div className="p-4">
         {/* Header */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 'var(--sam-space-4)',
-          }}
-        >
-          <Body style={{ color: 'var(--sam-color-fg-muted)', fontSize: 'var(--sam-type-caption-size)' }}>
+        <div className="flex justify-between items-center mb-4">
+          <Body className="text-fg-muted text-xs">
             Last updated: {lastUpdated}
           </Body>
           <Button size="sm" variant="ghost" onClick={refresh} disabled={loading}>
@@ -103,13 +74,7 @@ export const HealthOverview: FC = () => {
         </div>
 
         {/* Metric cards grid */}
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 'var(--sam-space-3)',
-          }}
-        >
+        <div className="flex flex-wrap gap-3">
           <MetricCard
             label="Active Nodes"
             value={health.activeNodes}

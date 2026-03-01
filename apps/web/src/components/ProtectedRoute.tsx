@@ -16,13 +16,7 @@ export function ProtectedRoute({ children, skipApprovalCheck }: ProtectedRoutePr
 
   if (isLoading) {
     return (
-      <div style={{
-        minHeight: 'var(--sam-app-height)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'var(--sam-color-bg-canvas)',
-      }}>
+      <div className="min-h-[var(--sam-app-height)] flex items-center justify-center bg-canvas">
         <Spinner size="lg" />
       </div>
     );
