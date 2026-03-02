@@ -27,6 +27,6 @@ jobs:
     uses: ./.github/workflows/deploy-reusable.yml
     with:
       environment: staging
-      skip_agent: true
+      skip_agent: false
       dry_run: ${{ inputs.dry_run || false }}
     secrets: inherit
