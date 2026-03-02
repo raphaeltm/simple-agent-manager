@@ -107,6 +107,18 @@ function isActiveWorkspaceStatus(status: string): boolean {
   return ACTIVE_WORKSPACE_STATUSES.has(status as 'running' | 'recovery');
 }
 
+/** Parse a JSON string into a plain object, returning null on failure or prototype pollution. */
+function safeParseJson(s: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(s);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+    if ('__proto__' in parsed || 'constructor' in parsed || 'prototype' in parsed) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeWorkspaceReadyStatus(status: unknown): 'running' | 'recovery' {
   if (typeof status !== 'string') return 'running';
   const normalized = status.trim().toLowerCase();
@@ -1495,7 +1507,7 @@ workspacesRoutes.post('/:id/messages', async (c) => {
       sessionId: string;
       role: string;
       content: string;
-      toolMetadata?: { tool: string; target: string; status: string } | null;
+      toolMetadata?: string | null;
       timestamp: string;
     }>;
   }>();
@@ -1568,7 +1580,7 @@ workspacesRoutes.post('/:id/messages', async (c) => {
       messageId: m.messageId,
       role: m.role,
       content: m.content,
-      toolMetadata: m.toolMetadata ?? null,
+      toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : null,
       timestamp: m.timestamp,
     }))
   );
