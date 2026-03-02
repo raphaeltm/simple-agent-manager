@@ -134,6 +134,14 @@ Claude Code supports dual authentication: **API keys** (pay-per-use from Anthrop
 - **Live test cleanup required**: delete test workspaces/nodes after verification
 - See `.claude/rules/02-quality-gates.md` for full testing requirements
 
+## Bug Discovery During Testing
+
+When you discover bugs or errors during testing — even if unrelated to your current task — file them as backlog tasks immediately so they don't get lost:
+
+1. Create `tasks/backlog/YYYY-MM-DD-descriptive-name.md`
+2. Include: Problem description, Context (where/when discovered), Acceptance Criteria checklist
+3. Continue with your current work
+
 ## Troubleshooting
 
 - **Build errors**: Run builds in dependency order (see Build Order above)
