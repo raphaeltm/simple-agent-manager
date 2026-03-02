@@ -37,6 +37,12 @@ vi.mock('../../src/lib/auth', () => ({
   signOut: vi.fn(),
 }));
 
+// Mock API calls used by GlobalCommandPalette
+vi.mock('../../src/lib/api', () => ({
+  listProjects: vi.fn().mockResolvedValue({ projects: [] }),
+  listNodes: vi.fn().mockResolvedValue([]),
+}));
+
 beforeEach(() => {
   matchMediaMatches = false;
   mockAuthState = {
@@ -114,6 +120,24 @@ describe('AppShell', () => {
     };
     renderAppShell();
     expect(screen.queryByText('Admin')).not.toBeInTheDocument();
+  });
+});
+
+describe('AppShell (command palette)', () => {
+  it('renders command palette trigger button in sidebar', () => {
+    renderAppShell();
+    expect(screen.getByLabelText('Open command palette')).toBeInTheDocument();
+  });
+
+  it('renders Search... text in trigger button', () => {
+    renderAppShell();
+    expect(screen.getByText('Search...')).toBeInTheDocument();
+  });
+
+  it('opens command palette when trigger button is clicked', async () => {
+    renderAppShell();
+    fireEvent.click(screen.getByLabelText('Open command palette'));
+    expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeInTheDocument();
   });
 });
 

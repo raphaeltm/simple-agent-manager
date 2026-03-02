@@ -1,10 +1,13 @@
 import { useState, useEffect, useMemo, type ReactNode } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Menu } from 'lucide-react';
+import { Menu, Search } from 'lucide-react';
 import { useAuth } from './AuthProvider';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { NavSidebar, NAV_ITEMS } from './NavSidebar';
 import { MobileNavDrawer } from './MobileNavDrawer';
+import { GlobalCommandPalette } from './GlobalCommandPalette';
+import { useGlobalCommandPalette } from '../hooks/useGlobalCommandPalette';
+import { isMacPlatform } from '../lib/keyboard-shortcuts';
 import { signOut } from '../lib/auth';
 
 interface AppShellProps {
@@ -17,6 +20,7 @@ export function AppShell({ children }: AppShellProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const commandPalette = useGlobalCommandPalette();
 
   const mobileNavItems = useMemo(() => {
     const items = NAV_ITEMS.map((item) => ({ label: item.label, path: item.path }));
@@ -83,6 +87,10 @@ export function AppShell({ children }: AppShellProps) {
             onSignOut={handleSignOut}
           />
         )}
+
+        {commandPalette.isOpen && (
+          <GlobalCommandPalette onClose={commandPalette.close} />
+        )}
       </div>
     );
   }
@@ -91,6 +99,18 @@ export function AppShell({ children }: AppShellProps) {
     <div className="grid bg-canvas h-screen" style={{ gridTemplateColumns: '220px 1fr' }}>
       <aside className="flex flex-col border-r border-border-default bg-surface sticky top-0 h-screen overflow-y-auto">
         <div className="p-4 text-lg font-semibold text-fg-primary border-b border-border-default">SAM</div>
+        {/* Command palette trigger */}
+        <button
+          onClick={commandPalette.open}
+          className="mx-2 mt-2 flex items-center gap-2 px-3 py-1.5 rounded-sm bg-transparent border border-border-default text-fg-muted text-xs cursor-pointer hover:bg-surface-hover hover:text-fg-primary transition-colors"
+          aria-label="Open command palette"
+        >
+          <Search size={12} />
+          <span className="flex-1 text-left">Search...</span>
+          <kbd className="font-mono text-[10px] bg-inset border border-border-default rounded px-1 py-0.5">
+            {isMacPlatform() ? '\u2318K' : 'Ctrl+K'}
+          </kbd>
+        </button>
         <NavSidebar />
         {user && (
           <div className="mt-auto p-3 border-t border-border-default flex items-center gap-2">
@@ -116,6 +136,10 @@ export function AppShell({ children }: AppShellProps) {
       <main className="flex-1 overflow-y-auto flex flex-col">
         {children ?? <Outlet />}
       </main>
+
+      {commandPalette.isOpen && (
+        <GlobalCommandPalette onClose={commandPalette.close} />
+      )}
     </div>
   );
 }
