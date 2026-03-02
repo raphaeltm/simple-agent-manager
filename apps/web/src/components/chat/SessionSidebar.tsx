@@ -86,7 +86,7 @@ export const SessionSidebar: FC<SessionSidebarProps> = ({
           />
         </div>
       ) : (
-        <nav className="overflow-y-auto flex-1">
+        <nav className="overflow-y-auto flex-1 min-h-0">
           {sessions.map((session) => {
             const isSelected = session.id === selectedSessionId;
             const state = getSessionState(session);

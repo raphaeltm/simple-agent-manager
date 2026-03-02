@@ -275,7 +275,7 @@ export function ProjectChat() {
       )}
 
       {/* Main content */}
-      <div className="overflow-hidden flex flex-col">
+      <div className="overflow-hidden flex flex-col min-h-0">
         {/* Mobile session toggle bar */}
         {isMobile && hasSessions && !showNewChatInput && (
           <button
@@ -316,12 +316,12 @@ export function ProjectChat() {
           </div>
         ) : (
           /* Existing session view */
-          <div className="flex-1 overflow-hidden flex flex-col">
+          <div className="flex-1 overflow-hidden flex flex-col min-h-0">
             {/* Inline provisioning indicator if this is the provisioning session */}
             {provisioning && sessionId === provisioning.sessionId && !isTerminal(provisioning.status) && (
               <ProvisioningIndicator state={provisioning} />
             )}
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 overflow-hidden flex flex-col min-h-0">
               <ProjectMessageView projectId={projectId} sessionId={sessionId!} />
             </div>
           </div>
