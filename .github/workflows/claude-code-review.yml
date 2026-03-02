@@ -1,23 +1,11 @@
-name: Claude Code Review
+name: Claude Deployment Safety Review
 
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
 
 jobs:
-  claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
-
+  deployment-safety:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,16 +17,75 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
-      - name: Run Claude Code Review
-        id: claude-review
+      - name: Run SAM deployment safety review
+        id: review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
+          display_report: true
+          prompt: |
+            You are a deployment-safety reviewer for Simple Agent Manager (SAM),
+            a serverless monorepo on Cloudflare Workers + Hetzner Cloud VMs.
 
+            Read CLAUDE.md for full project context, then review the PR diff for
+            deployment risks that static analysis can't catch.
+
+            ## SAM-Specific Checks
+
+            1. **Wrangler binding consistency**: Environment-specific [env.*] sections
+               are generated at deploy time by scripts/deploy/sync-wrangler-config.ts.
+               If any [env.staging] or [env.production] sections appear in wrangler.toml,
+               flag as CRITICAL — they must not be checked in.
+               If new bindings are added, verify they are in the top-level section only.
+
+            2. **Durable Object migrations**: If a new DO class is added, verify there
+               is a corresponding [[migrations]] entry with the correct tag and that the
+               class is exported from the worker entrypoint (index.ts).
+
+            3. **Environment variable naming**: GitHub secrets use GH_* prefix;
+               Worker runtime uses GITHUB_* prefix. configure-secrets.sh maps between
+               them. If new env vars are added, verify correct prefix per context and
+               that .env.example is updated.
+
+            4. **Cross-component contract changes**: If shared types in packages/shared
+               are modified, check that all consumers (apps/api, apps/web,
+               packages/vm-agent) are updated accordingly.
+
+            5. **Database schema changes**: If new D1 migrations are added, verify they
+               are backward-compatible (no column drops without migration strategy).
+
+            6. **Constitution compliance**: Check for hardcoded URLs (should derive from
+               BASE_DOMAIN), hardcoded timeouts (should be configurable), or hardcoded
+               limits/identifiers.
+
+            7. **URL construction**: All URLs must use subdomains — app.${BASE_DOMAIN}
+               for web UI, api.${BASE_DOMAIN} for API, ws-${id}.${BASE_DOMAIN} for
+               workspaces. Never bare ${BASE_DOMAIN}.
+
+            8. **BYOC principle**: The platform must NOT have cloud provider credentials.
+               User credentials are encrypted per-user in the database, never as env vars
+               or Worker secrets.
+
+            9. **Documentation sync**: If behavior or interfaces changed, verify docs are
+               updated in the same PR (CLAUDE.md, docs/, specs/).
+
+            10. **Build order**: shared -> providers -> cloud-init -> api/web. If
+                dependencies between packages changed, verify build order is respected.
+
+            ## Review Standards
+
+            Only report genuine deployment risks and correctness issues.
+            Do not flag style, formatting, or minor suggestions.
+            If everything looks safe, mark as passing.
+
+            Set "pass" to false only if you find critical or high severity issues
+            that could cause deployment failures, data loss, or security problems.
+          claude_args: >-
+            --max-turns 15
+
+      - name: Report outcome
+        if: always()
+        run: |
+          echo "Review complete — see Step Summary for details."
