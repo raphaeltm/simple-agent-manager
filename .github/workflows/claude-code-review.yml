@@ -78,14 +78,50 @@ jobs:
 
             Only report genuine deployment risks and correctness issues.
             Do not flag style, formatting, or minor suggestions.
-            If everything looks safe, mark as passing.
+            If everything looks safe, set pass to true with an empty findings array.
 
             Set "pass" to false only if you find critical or high severity issues
             that could cause deployment failures, data loss, or security problems.
           claude_args: >-
             --max-turns 15
+            --output-format json
+            --json-schema '{"type":"object","properties":{"pass":{"type":"boolean","description":"true if no critical/high issues found"},"summary":{"type":"string","description":"Brief overall assessment"},"findings":{"type":"array","items":{"type":"object","properties":{"severity":{"type":"string","enum":["critical","high","medium","low"]},"category":{"type":"string","description":"Which SAM check this relates to"},"file":{"type":"string","description":"Affected file path, if applicable"},"description":{"type":"string","description":"What the issue is and why it matters"}},"required":["severity","category","description"]}}},"required":["pass","summary","findings"]}'
 
-      - name: Report outcome
-        if: always()
+      - name: Display findings
+        if: always() && steps.review.outputs.structured_output
         run: |
-          echo "Review complete — see Step Summary for details."
+          OUTPUT='${{ steps.review.outputs.structured_output }}'
+
+          echo "## Deployment Safety Review" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "$OUTPUT" | jq -r '.summary' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          CRITICAL=$(echo "$OUTPUT" | jq '[.findings[] | select(.severity == "critical")] | length')
+          HIGH=$(echo "$OUTPUT" | jq '[.findings[] | select(.severity == "high")] | length')
+          MEDIUM=$(echo "$OUTPUT" | jq '[.findings[] | select(.severity == "medium")] | length')
+          LOW=$(echo "$OUTPUT" | jq '[.findings[] | select(.severity == "low")] | length')
+
+          echo "| Severity | Count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Critical | $CRITICAL |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| High | $HIGH |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Medium | $MEDIUM |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Low | $LOW |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$(echo "$OUTPUT" | jq '.findings | length')" -gt 0 ]; then
+            echo "### Findings" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "$OUTPUT" | jq -r '.findings[] | "- **\(.severity)** [\(.category)] \(.file // ""): \(.description)"' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Gate on review result
+        if: always() && steps.review.outputs.structured_output
+        run: |
+          PASS=$(echo '${{ steps.review.outputs.structured_output }}' | jq -r '.pass')
+          if [ "$PASS" != "true" ]; then
+            echo "::error::Deployment safety review found critical/high issues — see Step Summary for details"
+            exit 1
+          fi
+          echo "Deployment safety review passed."
