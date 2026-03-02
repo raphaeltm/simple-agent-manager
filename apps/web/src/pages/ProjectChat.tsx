@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { List } from 'lucide-react';
+import { List, Settings, LayoutGrid } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
-import { SessionSidebar } from '../components/chat/SessionSidebar';
 import { ProjectMessageView } from '../components/chat/ProjectMessageView';
 import { useIsMobile } from '../hooks/useIsMobile';
 import type { TaskStatus, TaskExecutionStep } from '@simple-agent-manager/shared';
@@ -20,10 +19,18 @@ import {
 import type { ChatSessionResponse } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
 /** How often to re-poll sessions when a task is actively executing (ms). */
 const ACTIVE_SESSION_POLL_MS = 3000;
 /** How often to poll task status during provisioning (ms). */
 const TASK_STATUS_POLL_MS = 2000;
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface ProvisioningState {
   taskId: string;
@@ -35,10 +42,56 @@ interface ProvisioningState {
   startedAt: number;
 }
 
+type SessionState = 'active' | 'idle' | 'terminated';
+
+// ---------------------------------------------------------------------------
+// Session helpers (moved from SessionSidebar.tsx)
+// ---------------------------------------------------------------------------
+
+function getSessionState(session: ChatSessionResponse): SessionState {
+  if (session.status === 'stopped') return 'terminated';
+  const s = session as ChatSessionResponse & { agentCompletedAt?: number | null; isIdle?: boolean };
+  if (s.isIdle || s.agentCompletedAt) return 'idle';
+  if (session.status === 'active') return 'active';
+  return 'terminated';
+}
+
+const STATE_COLORS: Record<SessionState, string> = {
+  active: 'var(--sam-color-success)',
+  idle: 'var(--sam-color-warning, #f59e0b)',
+  terminated: 'var(--sam-color-fg-muted)',
+};
+
+const STATE_LABELS: Record<SessionState, string> = {
+  active: 'Active',
+  idle: 'Idle',
+  terminated: 'Stopped',
+};
+
+function formatRelativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(timestamp).toLocaleDateString();
+}
+
+function isTerminal(status: TaskStatus): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
 export function ProjectChat() {
   const navigate = useNavigate();
   const { sessionId } = useParams<{ sessionId: string }>();
-  const { projectId } = useProjectContext();
+  const { projectId, project, settingsOpen, setSettingsOpen, infoPanelOpen, setInfoPanelOpen } = useProjectContext();
   const isMobile = useIsMobile();
 
   const [sessions, setSessions] = useState<ChatSessionResponse[]>([]);
@@ -46,17 +99,22 @@ export function ProjectChat() {
   const [hasCloudCredentials, setHasCloudCredentials] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Simple text input state
+  // New chat input state
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Inline provisioning tracking (replaces TaskExecutionProgress banner)
+  // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
   const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Track when user explicitly clicked "New Chat" so auto-select does not override it
+  // Track "New Chat" intent so auto-select doesn't override it
   const newChatIntentRef = useRef(false);
+
+  // ---------------------------------------------------------------------------
+  // Effects (all preserved from original)
+  // ---------------------------------------------------------------------------
+
   // Check for Hetzner credentials
   useEffect(() => {
     void listCredentials()
@@ -89,14 +147,14 @@ export function ProjectChat() {
         const task = await getProjectTask(projectId, provisioning.taskId);
         setProvisioning((prev) => prev ? { ...prev, status: task.status, executionStep: task.executionStep ?? null, errorMessage: task.errorMessage ?? null } : null);
 
-        // When task reaches in_progress and has a workspace, navigate to its session
-        if (task.status === 'in_progress' && task.workspaceId) {
+        if (task.status === 'in_progress' && (task.workspaceId || task.executionStep === 'running')) {
           navigate(`/projects/${projectId}/chat/${provisioning.sessionId}`, { replace: true });
           setProvisioning(null);
         }
 
         if (isTerminal(task.status)) {
-          // Reload sessions on terminal to pick up final state
+          navigate(`/projects/${projectId}/chat/${provisioning.sessionId}`, { replace: true });
+          setProvisioning(null);
           void loadSessions();
         }
       } catch {
@@ -125,6 +183,59 @@ export function ProjectChat() {
     };
   }, [provisioning?.taskId, provisioning?.status, loadSessions]);
 
+  // Restore provisioning state when navigating to a session with an active task
+  useEffect(() => {
+    if (!sessionId || provisioning) return;
+
+    const selectedSession = sessions.find((s) => s.id === sessionId);
+    if (!selectedSession?.taskId) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const task = await getProjectTask(projectId, selectedSession.taskId!);
+        if (cancelled) return;
+        if (!isTerminal(task.status) && task.status !== 'in_progress') {
+          setProvisioning({
+            taskId: task.id,
+            sessionId,
+            branchName: task.outputBranch ?? '',
+            status: task.status,
+            executionStep: task.executionStep ?? null,
+            errorMessage: task.errorMessage ?? null,
+            startedAt: task.startedAt ? new Date(task.startedAt).getTime() : Date.now(),
+          });
+        }
+      } catch {
+        // Best-effort
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [sessionId, sessions, projectId, provisioning]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (sessionPollRef.current) clearInterval(sessionPollRef.current);
+    };
+  }, []);
+
+  // Auto-select the most recent session on initial load
+  useEffect(() => {
+    if (!sessionId && sessions.length > 0 && !loading && !provisioning) {
+      if (newChatIntentRef.current) return;
+      const mostRecent = sessions[0];
+      if (mostRecent) {
+        navigate(`/projects/${projectId}/chat/${mostRecent.id}`, { replace: true });
+      }
+    }
+  }, [sessionId, sessions, loading, projectId, navigate, provisioning]);
+
+  // ---------------------------------------------------------------------------
+  // Handlers (all preserved from original)
+  // ---------------------------------------------------------------------------
+
   const handleSubmit = async () => {
     const trimmed = message.trim();
     if (!trimmed) return;
@@ -148,10 +259,8 @@ export function ProjectChat() {
         errorMessage: null,
         startedAt: Date.now(),
       });
-      // Navigate to the new session immediately
       newChatIntentRef.current = false;
       navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
-      // Reload sessions to include the new one
       void loadSessions();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Failed to start task');
@@ -168,59 +277,6 @@ export function ProjectChat() {
     setProvisioning(null);
   }, [navigate, projectId]);
 
-  // Restore provisioning state when navigating to a session with an active task.
-  // This covers the case where the user navigates away during provisioning and
-  // comes back — the ephemeral ProvisioningState was lost, so we reconstruct it
-  // from the task's current status in D1.
-  useEffect(() => {
-    if (!sessionId || provisioning) return;
-
-    const selectedSession = sessions.find((s) => s.id === sessionId);
-    if (!selectedSession?.taskId) return;
-
-    let cancelled = false;
-    void (async () => {
-      try {
-        const task = await getProjectTask(projectId, selectedSession.taskId!);
-        if (cancelled) return;
-        // Only restore if the task is still in a provisioning phase
-        if (!isTerminal(task.status) && task.status !== 'in_progress') {
-          setProvisioning({
-            taskId: task.id,
-            sessionId,
-            branchName: task.outputBranch ?? '',
-            status: task.status,
-            executionStep: task.executionStep ?? null,
-            errorMessage: task.errorMessage ?? null,
-            startedAt: task.startedAt ? new Date(task.startedAt).getTime() : Date.now(),
-          });
-        }
-      } catch {
-        // Best-effort — if the task lookup fails, we just don't show provisioning
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [sessionId, sessions, projectId, provisioning]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (sessionPollRef.current) clearInterval(sessionPollRef.current);
-    };
-  }, []);
-
-  // Auto-select the most recent session on initial load (skip if user clicked "New Chat")
-  useEffect(() => {
-    if (!sessionId && sessions.length > 0 && !loading && !provisioning) {
-      if (newChatIntentRef.current) return;
-      const mostRecent = sessions[0];
-      if (mostRecent) {
-        navigate(`/projects/${projectId}/chat/${mostRecent.id}`, { replace: true });
-      }
-    }
-  }, [sessionId, sessions, loading, projectId, navigate, provisioning]);
-
   const handleSelect = (id: string) => {
     newChatIntentRef.current = false;
     setProvisioning(null);
@@ -228,67 +284,126 @@ export function ProjectChat() {
     navigate(`/projects/${projectId}/chat/${id}`);
   };
 
+  // ---------------------------------------------------------------------------
+  // Derived state
+  // ---------------------------------------------------------------------------
+
+  const showNewChatInput = !sessionId || sessions.length === 0;
+  const hasSessions = sessions.length > 0;
+
+  // ---------------------------------------------------------------------------
+  // Loading state
+  // ---------------------------------------------------------------------------
+
   if (loading && sessions.length === 0) {
     return (
-      <div className="flex justify-center p-8">
+      <div className="flex-1 flex items-center justify-center">
         <Spinner size="lg" />
       </div>
     );
   }
 
-  // Determine if we're showing the "new chat" input (no session selected, or empty state)
-  const showNewChatInput = !sessionId || sessions.length === 0;
-  const hasSessions = sessions.length > 0;
-  const showInlineSidebar = hasSessions && !isMobile;
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
   return (
-    <div
-      className={`grid bg-surface overflow-hidden ${isMobile ? 'flex-1 min-h-0' : 'border border-border-default rounded-md min-h-[500px] max-h-[calc(100vh-240px)]'}`}
-      style={{
-        gridTemplateColumns: showInlineSidebar ? '280px 1fr' : '1fr',
-      }}
-    >
-      {/* Desktop sidebar — inline when sessions exist */}
-      {showInlineSidebar && (
-        <div className="border-r border-border-default flex flex-col overflow-hidden">
-          <SessionSidebar
-            sessions={sessions}
-            selectedSessionId={sessionId ?? null}
-            loading={false}
-            onSelect={handleSelect}
-            onNewChat={handleNewChat}
-          />
+    <div className="flex flex-1 min-h-0">
+      {/* ================================================================== */}
+      {/* Desktop sidebar                                                    */}
+      {/* ================================================================== */}
+      {!isMobile && (
+        <div className="w-72 shrink-0 border-r border-border-default flex flex-col bg-surface">
+          {/* Sidebar header: project name + action buttons */}
+          <div className="shrink-0 px-3 py-2.5 border-b border-border-default flex items-center gap-2">
+            <span className="text-sm font-semibold text-fg-primary truncate flex-1">
+              {project?.name || 'Project'}
+            </span>
+            <button
+              type="button"
+              onClick={() => setInfoPanelOpen(!infoPanelOpen)}
+              title="Project status"
+              aria-label="Project status"
+              className="shrink-0 p-1 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary transition-colors"
+            >
+              <LayoutGrid size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(!settingsOpen)}
+              title="Project settings"
+              aria-label="Project settings"
+              className="shrink-0 p-1 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary transition-colors"
+            >
+              <Settings size={15} />
+            </button>
+          </div>
+
+          {/* New chat button */}
+          <div className="shrink-0 p-2 border-b border-border-default">
+            <button
+              type="button"
+              onClick={handleNewChat}
+              className="w-full py-1.5 px-3 rounded-md border border-border-default bg-transparent cursor-pointer text-fg-primary text-xs font-medium hover:bg-surface-hover transition-colors"
+            >
+              + New Chat
+            </button>
+          </div>
+
+          {/* Session list — scrollable */}
+          {hasSessions ? (
+            <nav className="flex-1 overflow-y-auto min-h-0">
+              {sessions.map((session) => (
+                <SessionItem
+                  key={session.id}
+                  session={session}
+                  isSelected={session.id === sessionId}
+                  onSelect={handleSelect}
+                />
+              ))}
+            </nav>
+          ) : (
+            <div className="flex-1 flex items-center justify-center p-4">
+              <span className="text-xs text-fg-muted text-center">No chats yet. Start a new one above.</span>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Mobile session drawer overlay */}
-      {isMobile && sidebarOpen && hasSessions && (
-        <MobileSessionDrawer
-          sessions={sessions}
-          selectedSessionId={sessionId ?? null}
-          onSelect={handleSelect}
-          onNewChat={() => { setSidebarOpen(false); handleNewChat(); }}
-          onClose={() => setSidebarOpen(false)}
-        />
-      )}
-
-      {/* Main content */}
-      <div className="overflow-hidden flex flex-col">
-        {/* Mobile session toggle bar */}
-        {isMobile && hasSessions && !showNewChatInput && (
-          <button
-            type="button"
-            onClick={() => setSidebarOpen(true)}
-            className="flex items-center gap-2 px-3 py-2 bg-surface border-none border-b border-border-default cursor-pointer text-fg-muted text-xs font-medium w-full text-left min-h-[44px]"
-          >
-            <List size={16} />
-            <span>{sessions.length} chat{sessions.length !== 1 ? 's' : ''}</span>
-          </button>
+      {/* ================================================================== */}
+      {/* Main content area                                                  */}
+      {/* ================================================================== */}
+      <div className="flex-1 flex flex-col min-h-0 min-w-0">
+        {/* Mobile header bar */}
+        {isMobile && (
+          <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border-default bg-surface">
+            {hasSessions && (
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                aria-label="Open chat list"
+                className="p-1.5 bg-transparent border-none cursor-pointer text-fg-muted"
+              >
+                <List size={18} />
+              </button>
+            )}
+            <span className="text-sm font-semibold text-fg-primary truncate flex-1">
+              {project?.name || 'Project'}
+            </span>
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(!settingsOpen)}
+              aria-label="Project settings"
+              className="shrink-0 p-1.5 bg-transparent border-none cursor-pointer text-fg-muted"
+            >
+              <Settings size={16} />
+            </button>
+          </div>
         )}
 
         {showNewChatInput ? (
           /* New chat / empty state */
-          <div className="flex-1 flex flex-col">
+          <div className="flex-1 flex flex-col min-h-0">
             <div className={`flex-1 flex flex-col items-center justify-center gap-3 ${isMobile ? 'p-4' : 'p-8'}`}>
               {provisioning ? (
                 <ProvisioningIndicator state={provisioning} />
@@ -313,23 +428,83 @@ export function ProjectChat() {
             />
           </div>
         ) : (
-          /* Existing session view */
-          <div className="flex-1 overflow-hidden flex flex-col">
-            {/* Inline provisioning indicator if this is the provisioning session */}
+          /* Active session view */
+          <div className="flex-1 flex flex-col min-h-0">
             {provisioning && sessionId === provisioning.sessionId && !isTerminal(provisioning.status) && (
               <ProvisioningIndicator state={provisioning} />
             )}
-            <div className="flex-1 overflow-hidden">
-              <ProjectMessageView projectId={projectId} sessionId={sessionId!} />
-            </div>
+            <ProjectMessageView projectId={projectId} sessionId={sessionId!} />
           </div>
         )}
       </div>
+
+      {/* ================================================================== */}
+      {/* Mobile session drawer                                              */}
+      {/* ================================================================== */}
+      {isMobile && sidebarOpen && hasSessions && (
+        <MobileSessionDrawer
+          sessions={sessions}
+          selectedSessionId={sessionId ?? null}
+          onSelect={handleSelect}
+          onNewChat={() => { setSidebarOpen(false); handleNewChat(); }}
+          onClose={() => setSidebarOpen(false)}
+        />
+      )}
     </div>
   );
 }
 
-/** Mobile drawer overlay for the session sidebar. */
+// ---------------------------------------------------------------------------
+// Session item (inline — replaces SessionSidebar.tsx)
+// ---------------------------------------------------------------------------
+
+function SessionItem({
+  session,
+  isSelected,
+  onSelect,
+}: {
+  session: ChatSessionResponse;
+  isSelected: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const state = getSessionState(session);
+  const dotColor = STATE_COLORS[state];
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(session.id)}
+      className={`block w-full text-left px-3 py-2.5 border-none border-b border-border-default cursor-pointer transition-colors duration-100 ${isSelected ? 'bg-inset' : 'hover:bg-surface-hover'}`}
+      style={{
+        borderLeft: isSelected
+          ? '3px solid var(--sam-color-accent-primary)'
+          : '3px solid transparent',
+      }}
+    >
+      <div className="flex items-center gap-2 mb-0.5">
+        <span
+          className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
+          style={{ backgroundColor: dotColor }}
+        />
+        <span className={`text-sm overflow-hidden text-ellipsis whitespace-nowrap flex-1 ${isSelected ? 'font-semibold text-fg-primary' : 'font-medium text-fg-primary'}`}>
+          {session.topic || `Chat ${session.id.slice(0, 8)}`}
+        </span>
+      </div>
+      <div className="flex items-center gap-2 text-xs text-fg-muted pl-[calc(6px+8px)]">
+        <span style={{ color: dotColor }} className="font-medium">
+          {STATE_LABELS[state]}
+        </span>
+        <span>{session.messageCount} msg{session.messageCount !== 1 ? 's' : ''}</span>
+        <span className="ml-auto">{formatRelativeTime(session.startedAt)}</span>
+      </div>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mobile session drawer
+// ---------------------------------------------------------------------------
+
 function MobileSessionDrawer({
   sessions,
   selectedSessionId,
@@ -343,7 +518,6 @@ function MobileSessionDrawer({
   onNewChat: () => void;
   onClose: () => void;
 }) {
-  // Escape key to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -352,7 +526,6 @@ function MobileSessionDrawer({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  // Lock body scroll while drawer is open
   useEffect(() => {
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = ''; };
@@ -360,52 +533,62 @@ function MobileSessionDrawer({
 
   return (
     <>
-      {/* Keyframes (sam-session-drawer-slide-in, sam-session-drawer-fade-in) defined in app.css */}
-
       {/* Backdrop */}
       <div
         role="presentation"
         onClick={onClose}
         className="fixed inset-0 bg-overlay z-drawer-backdrop"
-        style={{
-          animation: 'sam-session-drawer-fade-in 0.15s ease-out',
-        }}
+        style={{ animation: 'sam-session-drawer-fade-in 0.15s ease-out' }}
       />
 
-      {/* Panel — slides from left */}
+      {/* Panel */}
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Chat sessions"
-        className="fixed top-0 left-0 bottom-0 bg-surface border-r border-border-default z-drawer flex flex-col overflow-hidden"
+        className="fixed top-0 left-0 bottom-0 bg-surface border-r border-border-default z-drawer flex flex-col"
         style={{
           width: '85vw',
           maxWidth: 320,
           animation: 'sam-session-drawer-slide-in 0.2s ease-out',
         }}
       >
-        <SessionSidebar
-          sessions={sessions}
-          selectedSessionId={selectedSessionId}
-          loading={false}
-          onSelect={onSelect}
-          onNewChat={onNewChat}
-        />
+        {/* Drawer header */}
+        <div className="shrink-0 p-3 border-b border-border-default flex items-center justify-between">
+          <span className="text-sm font-semibold text-fg-primary">Chats</span>
+          <button
+            type="button"
+            onClick={onNewChat}
+            className="bg-transparent border border-border-default rounded-sm px-2 py-0.5 cursor-pointer text-fg-primary text-xs font-medium"
+          >
+            + New
+          </button>
+        </div>
+
+        {/* Session list */}
+        <nav className="flex-1 overflow-y-auto min-h-0">
+          {sessions.map((session) => (
+            <SessionItem
+              key={session.id}
+              session={session}
+              isSelected={session.id === selectedSessionId}
+              onSelect={onSelect}
+            />
+          ))}
+        </nav>
       </div>
     </>
   );
 }
 
-function isTerminal(status: TaskStatus): boolean {
-  return status === 'completed' || status === 'failed' || status === 'cancelled';
-}
+// ---------------------------------------------------------------------------
+// Provisioning indicator (preserved)
+// ---------------------------------------------------------------------------
 
-/** Steps shown in the provisioning progress bar (setup steps only, not running/followup). */
 const PROVISIONING_STEPS: TaskExecutionStep[] = TASK_EXECUTION_STEPS.filter(
   (s) => s !== 'running' && s !== 'awaiting_followup'
 );
 
-/** Inline provisioning progress with granular execution step display (TDF-8). */
 function ProvisioningIndicator({ state }: { state: ProvisioningState }) {
   const [elapsed, setElapsed] = useState(0);
 
@@ -418,7 +601,6 @@ function ProvisioningIndicator({ state }: { state: ProvisioningState }) {
   const seconds = Math.floor(elapsed / 1000);
   const elapsedDisplay = seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds}s`;
 
-  // Use execution step label if available, otherwise fall back to status-based label
   const statusLabel = state.status === 'failed' ? 'Setup failed'
     : state.status === 'cancelled' ? 'Cancelled'
     : state.executionStep ? EXECUTION_STEP_LABELS[state.executionStep]
@@ -428,31 +610,24 @@ function ProvisioningIndicator({ state }: { state: ProvisioningState }) {
   const isFailed = state.status === 'failed';
 
   return (
-    <div className={`px-4 py-3 border-b border-border-default ${isFailed ? 'bg-danger-tint' : 'bg-info-tint'}`}>
-      {/* Status header */}
+    <div className={`shrink-0 px-4 py-3 border-b border-border-default ${isFailed ? 'bg-danger-tint' : 'bg-info-tint'}`}>
       <div className="flex items-center gap-2 mb-2">
         {!isTerminal(state.status) && <Spinner size="sm" />}
         <span className={`sam-type-secondary font-medium ${isFailed ? 'text-danger' : 'text-fg-primary'}`}>
           {statusLabel}
         </span>
         {state.branchName && !isTerminal(state.status) && (
-          <span className="sam-type-caption text-fg-muted">
-            {state.branchName}
-          </span>
+          <span className="sam-type-caption text-fg-muted">{state.branchName}</span>
         )}
-        <span className="sam-type-caption text-fg-muted ml-auto">
-          {elapsedDisplay}
-        </span>
+        <span className="sam-type-caption text-fg-muted ml-auto">{elapsedDisplay}</span>
       </div>
 
-      {/* Step progress bar (only during active provisioning) */}
       {!isTerminal(state.status) && (
         <div className="flex gap-[2px] h-[3px] rounded-sm overflow-hidden">
           {PROVISIONING_STEPS.map((step) => {
             const stepOrder = EXECUTION_STEP_ORDER[step];
             const isComplete = stepOrder < currentStepOrder;
             const isCurrent = stepOrder === currentStepOrder;
-
             return (
               <div
                 key={step}
@@ -471,7 +646,6 @@ function ProvisioningIndicator({ state }: { state: ProvisioningState }) {
         </div>
       )}
 
-      {/* Error message */}
       {state.errorMessage && (
         <div className="sam-type-caption text-danger mt-2 p-2 px-3 bg-surface rounded-sm border border-danger-tint break-words">
           {state.errorMessage}
@@ -481,7 +655,10 @@ function ProvisioningIndicator({ state }: { state: ProvisioningState }) {
   );
 }
 
-/** Simple chat-style text input with enter-to-submit. */
+// ---------------------------------------------------------------------------
+// Chat input (preserved)
+// ---------------------------------------------------------------------------
+
 function ChatInput({
   value,
   onChange,
@@ -504,7 +681,7 @@ function ChatInput({
   }, []);
 
   return (
-    <div className="border-t border-border-default px-4 py-3 bg-surface">
+    <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface">
       {error && (
         <div className="p-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">
           {error}

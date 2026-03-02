@@ -176,7 +176,7 @@ export class DevcontainerProvider implements Provider {
       const additionalFeatures = JSON.stringify({
         'ghcr.io/devcontainers/features/node:1': { version: '22' },
         'ghcr.io/devcontainers-community/npm-features/npm-package:1': {
-          package: '@zed-industries/claude-code-acp',
+          package: '@zed-industries/claude-agent-acp',
         },
       });
       const cmd = `devcontainer up --workspace-folder ${workspaceFolder} --id-label managed-by=${MANAGED_BY_LABEL} --id-label provider=${PROVIDER_LABEL} --id-label workspace-id=${config.workspaceId} --id-label repo-url=${encodeURIComponent(config.repoUrl).slice(0, 63)} --additional-features '${additionalFeatures}'`;

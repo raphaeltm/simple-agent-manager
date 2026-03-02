@@ -1,9 +1,20 @@
-import { type FC, useCallback, useEffect, useRef, useState } from 'react';
+import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { getChatSession, resetIdleTimer } from '../../lib/api';
+import { getChatSession, resetIdleTimer, sendFollowUpPrompt } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
+import {
+  FileText,
+  FileEdit,
+  Pencil,
+  Terminal,
+  Search,
+  Wrench,
+  ChevronDown,
+  ChevronRight,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 interface ProjectMessageViewProps {
   projectId: string;
@@ -20,6 +31,76 @@ const roleStyles: Record<string, { label: string; color: string; bg: string }> =
 /** Default idle timeout in ms — matches the server-side default (NODE_WARM_TIMEOUT_MS). */
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
+// ---------------------------------------------------------------------------
+// Tool kind → friendly label + icon mapping
+// ---------------------------------------------------------------------------
+interface ToolKindInfo {
+  label: string;
+  Icon: LucideIcon;
+}
+
+const TOOL_KINDS: Record<string, ToolKindInfo> = {
+  write: { label: 'Write file', Icon: FileEdit },
+  read: { label: 'Read file', Icon: FileText },
+  edit: { label: 'Edit file', Icon: Pencil },
+  bash: { label: 'Run command', Icon: Terminal },
+  glob: { label: 'Search files', Icon: Search },
+  grep: { label: 'Search content', Icon: Search },
+};
+
+const DEFAULT_TOOL_KIND: ToolKindInfo = { label: 'Tool', Icon: Wrench };
+
+function getToolKind(meta: Record<string, unknown> | null): ToolKindInfo {
+  if (!meta || typeof meta.kind !== 'string') return DEFAULT_TOOL_KIND;
+  return TOOL_KINDS[meta.kind] ?? DEFAULT_TOOL_KIND;
+}
+
+function getToolPath(meta: Record<string, unknown> | null): string | null {
+  if (!meta) return null;
+  const locations = meta.locations as Array<{ path?: string }> | undefined;
+  if (!locations?.length) return null;
+  const p = locations[0]?.path;
+  return p ?? null;
+}
+
+/** True for placeholder content that adds no user value. */
+function isPlaceholderContent(content: string): boolean {
+  const trimmed = content.trim();
+  return trimmed === '(tool call)' || trimmed === '(tool update)';
+}
+
+// ---------------------------------------------------------------------------
+// Message grouping — merges consecutive same-role messages for clean display
+// ---------------------------------------------------------------------------
+
+interface MessageGroup {
+  id: string;          // ID of first message in group
+  role: string;
+  messages: ChatMessageResponse[];
+  createdAt: number;   // Timestamp of first message
+}
+
+/** Groups consecutive messages by role. Assistant chunks become one bubble,
+ *  consecutive tool messages become one activity block. */
+export function groupMessages(msgs: ChatMessageResponse[]): MessageGroup[] {
+  const groups: MessageGroup[] = [];
+  for (const msg of msgs) {
+    const last = groups[groups.length - 1];
+    // Merge into existing group if same role and both are groupable roles
+    if (last && last.role === msg.role && (msg.role === 'assistant' || msg.role === 'tool')) {
+      last.messages.push(msg);
+    } else {
+      groups.push({
+        id: msg.id,
+        role: msg.role,
+        messages: [msg],
+        createdAt: msg.createdAt,
+      });
+    }
+  }
+  return groups;
+}
+
 function formatTimestamp(ts: number): string {
   return new Date(ts).toLocaleString();
 }
@@ -32,6 +113,11 @@ function formatCountdown(ms: number): string {
   return `${min}:${sec.toString().padStart(2, '0')}`;
 }
 
+// ---------------------------------------------------------------------------
+// Message bubble components
+// ---------------------------------------------------------------------------
+
+/** Standard bubble for user/system messages (one message = one bubble). */
 function MessageBubble({ message }: { message: ChatMessageResponse }) {
   const style = roleStyles[message.role] || roleStyles.system!;
 
@@ -57,16 +143,172 @@ function MessageBubble({ message }: { message: ChatMessageResponse }) {
       <div className="sam-type-body text-fg-primary whitespace-pre-wrap break-words leading-[1.5]">
         {message.content}
       </div>
-      {message.toolMetadata && (
-        <details className="mt-2">
-          <summary className="sam-type-caption text-fg-muted cursor-pointer">
-            Tool metadata
-          </summary>
-          <pre className="text-xs text-fg-muted bg-inset p-2 rounded-sm overflow-auto max-h-[200px] mt-1">
-            {JSON.stringify(message.toolMetadata, null, 2)}
-          </pre>
-        </details>
+    </div>
+  );
+}
+
+/** Merged assistant bubble — concatenates streaming chunks into one message. */
+function AssistantBubble({ group }: { group: MessageGroup }) {
+  const style = roleStyles.assistant!;
+  const content = group.messages.map((m) => m.content).join('');
+
+  if (!content.trim()) return null;
+
+  return (
+    <div
+      className="p-3 px-4 rounded-md"
+      style={{
+        backgroundColor: style.bg,
+        borderLeft: `3px solid ${style.color}`,
+      }}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <span
+          className="text-xs font-semibold uppercase tracking-wide"
+          style={{ color: style.color }}
+        >
+          {style.label}
+        </span>
+        <span className="sam-type-caption text-fg-muted">
+          {formatTimestamp(group.createdAt)}
+        </span>
+      </div>
+      <div className="sam-type-body text-fg-primary whitespace-pre-wrap break-words leading-[1.5]">
+        {content}
+      </div>
+    </div>
+  );
+}
+
+/** Compact tool activity block — groups consecutive tool calls into a summary. */
+function ToolActivityBlock({ group }: { group: MessageGroup }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Build summary lines from tool messages
+  const toolLines = group.messages.map((msg) => {
+    const kind = getToolKind(msg.toolMetadata as Record<string, unknown> | null);
+    const path = getToolPath(msg.toolMetadata as Record<string, unknown> | null);
+    const hasContent = !isPlaceholderContent(msg.content);
+    return { kind, path, content: hasContent ? msg.content : null, id: msg.id };
+  });
+
+  // Deduplicate: consecutive same-kind + same-path entries collapse into one
+  const deduped: typeof toolLines = [];
+  for (const line of toolLines) {
+    const prev = deduped[deduped.length - 1];
+    if (prev && prev.kind.label === line.kind.label && prev.path === line.path && !line.content) {
+      continue; // Skip duplicate status update for same tool+path
+    }
+    deduped.push(line);
+  }
+
+  // Count how many have meaningful content for the expand toggle
+  const contentLines = deduped.filter((l) => l.content);
+
+  return (
+    <div
+      className="rounded-md border border-border-default overflow-hidden"
+      style={{ backgroundColor: 'var(--sam-color-bg-inset)' }}
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-2 px-3 py-2 bg-transparent border-none cursor-pointer text-left"
+      >
+        {expanded
+          ? <ChevronDown size={14} className="text-fg-muted shrink-0" />
+          : <ChevronRight size={14} className="text-fg-muted shrink-0" />
+        }
+        <span className="text-xs font-medium text-fg-muted uppercase tracking-wide">
+          Activity
+        </span>
+        <span className="text-xs text-fg-muted">
+          {deduped.length} {deduped.length === 1 ? 'action' : 'actions'}
+        </span>
+      </button>
+
+      {/* Collapsed: show compact summary of tool actions */}
+      {!expanded && (
+        <div className="px-3 pb-2 flex flex-wrap gap-x-3 gap-y-1">
+          {deduped.map((line) => (
+            <span key={line.id} className="inline-flex items-center gap-1 text-xs text-fg-muted">
+              <line.kind.Icon size={12} />
+              <span>{line.kind.label}</span>
+              {line.path && (
+                <span className="font-mono opacity-70">
+                  {line.path.split('/').pop()}
+                </span>
+              )}
+            </span>
+          ))}
+        </div>
       )}
+
+      {/* Expanded: show full details */}
+      {expanded && (
+        <div className="border-t border-border-default">
+          {deduped.map((line) => (
+            <div
+              key={line.id}
+              className="flex items-start gap-2 px-3 py-1.5 border-b border-border-default last:border-b-0"
+            >
+              <line.kind.Icon size={14} className="text-fg-muted shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-fg-secondary">
+                    {line.kind.label}
+                  </span>
+                  {line.path && (
+                    <span className="text-xs font-mono text-fg-muted truncate">
+                      {line.path}
+                    </span>
+                  )}
+                </div>
+                {line.content && (
+                  <pre className="text-xs text-fg-muted mt-1 whitespace-pre-wrap break-words max-h-[200px] overflow-auto">
+                    {line.content}
+                  </pre>
+                )}
+              </div>
+            </div>
+          ))}
+          {contentLines.length === 0 && (
+            <div className="px-3 py-2 text-xs text-fg-muted">
+              No detailed output available.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Renders a message group — dispatches to the right component by role. */
+function MessageGroupView({ group }: { group: MessageGroup }) {
+  if (group.role === 'assistant') {
+    return <AssistantBubble group={group} />;
+  }
+  if (group.role === 'tool') {
+    return <ToolActivityBlock group={group} />;
+  }
+  // user / system — render each message individually (usually just one)
+  return (
+    <>
+      {group.messages.map((msg) => (
+        <MessageBubble key={msg.id} message={msg} />
+      ))}
+    </>
+  );
+}
+
+/** Renders all messages with grouping applied. */
+function GroupedMessages({ messages }: { messages: ChatMessageResponse[] }) {
+  const groups = useMemo(() => groupMessages(messages), [messages]);
+  return (
+    <div className="grid gap-3">
+      {groups.map((group) => (
+        <MessageGroupView key={group.id} group={group} />
+      ))}
     </div>
   );
 }
@@ -77,7 +319,7 @@ interface ExtendedSession extends ChatSessionResponse {
   agentCompletedAt?: number | null;
   isIdle?: boolean;
   cleanupAt?: number | null;
-  task?: { id: string; outputBranch?: string | null; outputPrUrl?: string | null; errorMessage?: string | null; outputSummary?: string | null };
+  task?: { id: string; status?: string; executionStep?: string | null; errorMessage?: string | null; outputBranch?: string | null; outputPrUrl?: string | null; outputSummary?: string | null; finalizedAt?: string | null };
 }
 
 function deriveSessionState(session: ChatSessionResponse): SessionState {
@@ -106,6 +348,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [followUp, setFollowUp] = useState('');
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
 
+  // Prompt pending state — shows "Agent is working..." indicator
+  const [promptPending, setPromptPending] = useState(false);
+  const promptPendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Idle timer state (TDF-8)
   const [idleCountdownMs, setIdleCountdownMs] = useState<number | null>(null);
 
@@ -117,8 +363,28 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     sessionId,
     enabled: session?.status === 'active',
     onMessage: useCallback((msg: ChatMessageResponse) => {
+      // Clear "Agent is working..." indicator when agent responds
+      if (msg.role === 'assistant' || msg.role === 'tool') {
+        setPromptPending(false);
+        if (promptPendingTimeoutRef.current) {
+          clearTimeout(promptPendingTimeoutRef.current);
+          promptPendingTimeoutRef.current = null;
+        }
+      }
+
       setMessages((prev) => {
         if (prev.some((m) => m.id === msg.id)) return prev;
+        // Replace optimistic message if this is a server-confirmed user message with matching content
+        if (msg.role === 'user') {
+          const optimisticIdx = prev.findIndex(
+            (m) => m.id.startsWith('optimistic-') && m.role === 'user' && m.content === msg.content
+          );
+          if (optimisticIdx !== -1) {
+            const updated = [...prev];
+            updated[optimisticIdx] = msg;
+            return updated;
+          }
+        }
         return [...prev, msg];
       });
     }, []),
@@ -157,14 +423,25 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     void loadSession();
   }, [loadSession]);
 
-  // Auto-scroll to bottom only when new messages are appended
+  // Auto-scroll to bottom on initial load, session switch, and new messages
   const prevMessageCountRef = useRef(0);
+  const prevSessionIdRef = useRef(sessionId);
   useEffect(() => {
-    if (messages.length > prevMessageCountRef.current && !loading && !loadingMore) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (loading || loadingMore) return;
+
+    const isNewSession = prevSessionIdRef.current !== sessionId;
+    const hasNewMessages = messages.length > prevMessageCountRef.current;
+    const isInitialLoad = prevMessageCountRef.current === 0 && messages.length > 0;
+
+    if (isNewSession || hasNewMessages || isInitialLoad) {
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: isNewSession ? 'instant' : 'smooth' });
+      });
     }
+
     prevMessageCountRef.current = messages.length;
-  }, [messages.length, loading, loadingMore]);
+    prevSessionIdRef.current = sessionId;
+  }, [messages.length, loading, loadingMore, sessionId]);
 
   // Polling fallback — keeps running alongside WebSocket for reliability.
   // Only updates state when the server has new data (fingerprint-based).
@@ -175,14 +452,18 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     let lastPollFingerprint = '';
     const pollInterval = setInterval(async () => {
       try {
-        const data = await getChatSession(projectId, sessionId);
+        const data: ChatSessionDetailResponse & { session: ExtendedSession } = await getChatSession(projectId, sessionId);
         const newLastId = data.messages[data.messages.length - 1]?.id ?? '';
-        const fingerprint = `${data.messages.length}:${newLastId}:${data.session.status}:${data.hasMore}`;
+        const taskStatus = data.session.task?.status ?? '';
+        const fingerprint = `${data.messages.length}:${newLastId}:${data.session.status}:${data.hasMore}:${taskStatus}`;
         if (fingerprint !== lastPollFingerprint) {
           lastPollFingerprint = fingerprint;
           setSession(data.session);
           setHasMore(data.hasMore);
           setMessages(data.messages);
+          if (data.session.task) {
+            setTaskEmbed(data.session.task);
+          }
         }
       } catch {
         // Silently fail on poll errors
@@ -246,9 +527,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           });
       }
 
-      // Optimistic add
+      // Optimistic add — use a prefixed ID so we can replace it with the server-confirmed message
+      const optimisticId = `optimistic-${crypto.randomUUID()}`;
       setMessages((prev) => [...prev, {
-        id: crypto.randomUUID(),
+        id: optimisticId,
         sessionId,
         role: 'user',
         content: trimmed,
@@ -256,7 +538,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         createdAt: Date.now(),
       }]);
 
-      // Try sending via WebSocket
+      // Try sending via WebSocket (persists message in ProjectData DO)
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({
           type: 'message.send',
@@ -269,6 +551,23 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         // be delivered until the next poll cycle or WS reconnects.
         console.warn('[ProjectMessageView] WebSocket not connected, message delivery deferred');
       }
+
+      // Forward the prompt to the running agent via API
+      setPromptPending(true);
+      // Safety timeout — clear indicator after 30s even if no response
+      promptPendingTimeoutRef.current = setTimeout(() => {
+        setPromptPending(false);
+        promptPendingTimeoutRef.current = null;
+      }, 30_000);
+
+      sendFollowUpPrompt(projectId, sessionId, trimmed).catch((err) => {
+        console.warn('[ProjectMessageView] Follow-up prompt forwarding failed:', err);
+        setPromptPending(false);
+        if (promptPendingTimeoutRef.current) {
+          clearTimeout(promptPendingTimeoutRef.current);
+          promptPendingTimeoutRef.current = null;
+        }
+      });
 
       setFollowUp('');
     } finally {
@@ -312,7 +611,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Connection indicator (TDF-8) */}
       {sessionState === 'active' && connectionState !== 'connected' && (
         <ConnectionBanner state={connectionState} onRetry={retryWs} />
@@ -320,7 +619,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Session header with branch/PR info */}
       {session && (
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-border-default flex-wrap shrink-0">
+        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border-default flex-wrap shrink-0">
           <span className="text-base font-semibold text-fg-primary">
             {session.topic || `Chat ${session.id.slice(0, 8)}`}
           </span>
@@ -387,18 +686,18 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
 
-      {/* Task error/summary display (TDF-8) */}
-      {taskEmbed?.errorMessage && sessionState === 'terminated' && (
+      {/* Task error/summary display — shown whenever task has error/summary, regardless of session state */}
+      {taskEmbed?.errorMessage && (
         <div className="px-4 py-2 bg-danger-tint border-b border-border-default">
           <span className="sam-type-caption text-danger font-medium">
-            Error:
+            Task failed:
           </span>{' '}
           <span className="sam-type-caption text-danger break-words">
             {taskEmbed.errorMessage}
           </span>
         </div>
       )}
-      {taskEmbed?.outputSummary && sessionState === 'terminated' && (
+      {taskEmbed?.outputSummary && (
         <div className="px-4 py-2 bg-success-tint border-b border-border-default">
           <span className="sam-type-caption text-success font-medium">
             Summary:
@@ -410,7 +709,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       )}
 
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto min-h-0 p-4">
         {hasMore && (
           <div className="text-center mb-3">
             <Button variant="ghost" size="sm" onClick={loadMore} loading={loadingMore}>
@@ -424,15 +723,19 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             {sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
           </div>
         ) : (
-          <div className="grid gap-3">
-            {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
-            ))}
-          </div>
+          <GroupedMessages messages={messages} />
         )}
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Agent working indicator — shown after sending a follow-up prompt */}
+      {promptPending && (
+        <div className="flex items-center gap-2 px-4 py-2 border-t border-border-default bg-surface shrink-0">
+          <Spinner size="sm" />
+          <span className="text-xs text-fg-muted">Agent is working...</span>
+        </div>
+      )}
 
       {/* Input area — varies by session state */}
       {sessionState === 'active' && (
@@ -454,7 +757,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         />
       )}
       {sessionState === 'terminated' && (
-        <div className="border-t border-border-default px-4 py-3 bg-surface text-center">
+        <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface text-center">
           <span className="sam-type-secondary text-fg-muted">
             This session has ended.
           </span>
@@ -512,7 +815,7 @@ function FollowUpInput({
   placeholder: string;
 }) {
   return (
-    <div className="border-t border-border-default px-4 py-3 bg-surface">
+    <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface">
       <div className="flex gap-2 items-end">
         <textarea
           value={value}

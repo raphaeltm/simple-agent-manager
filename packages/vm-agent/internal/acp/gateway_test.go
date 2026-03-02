@@ -18,25 +18,25 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			name:           "Claude Code with OAuth token",
 			agentType:      "claude-code",
 			credentialKind: "oauth-token",
-			wantCommand:    "claude-code-acp",
+			wantCommand:    "claude-agent-acp",
 			wantEnvVar:     "CLAUDE_CODE_OAUTH_TOKEN",
-			wantInstallCmd: "npm install -g @zed-industries/claude-code-acp",
+			wantInstallCmd: "npm install -g @zed-industries/claude-agent-acp",
 		},
 		{
 			name:           "Claude Code with API key",
 			agentType:      "claude-code",
 			credentialKind: "api-key",
-			wantCommand:    "claude-code-acp",
+			wantCommand:    "claude-agent-acp",
 			wantEnvVar:     "ANTHROPIC_API_KEY",
-			wantInstallCmd: "npm install -g @zed-industries/claude-code-acp",
+			wantInstallCmd: "npm install -g @zed-industries/claude-agent-acp",
 		},
 		{
 			name:           "Claude Code with empty credential kind defaults to API key",
 			agentType:      "claude-code",
 			credentialKind: "",
-			wantCommand:    "claude-code-acp",
+			wantCommand:    "claude-agent-acp",
 			wantEnvVar:     "ANTHROPIC_API_KEY",
-			wantInstallCmd: "npm install -g @zed-industries/claude-code-acp",
+			wantInstallCmd: "npm install -g @zed-industries/claude-agent-acp",
 		},
 		{
 			name:           "OpenAI Codex always uses API key",
@@ -163,13 +163,13 @@ func TestGetAgentCommandInfoClaudeCode(t *testing.T) {
 	t.Parallel()
 
 	info := getAgentCommandInfo("claude-code", "api-key")
-	if info.command != "claude-code-acp" {
-		t.Fatalf("command=%q, want %q", info.command, "claude-code-acp")
+	if info.command != "claude-agent-acp" {
+		t.Fatalf("command=%q, want %q", info.command, "claude-agent-acp")
 	}
 	if info.envVarName != "ANTHROPIC_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "ANTHROPIC_API_KEY")
 	}
-	if info.installCmd != "npm install -g @zed-industries/claude-code-acp" {
+	if info.installCmd != "npm install -g @zed-industries/claude-agent-acp" {
 		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
 	}
 	if info.args != nil {

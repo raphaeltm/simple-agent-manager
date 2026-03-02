@@ -230,13 +230,14 @@ export async function createAgentSessionOnNode(
   sessionId: string,
   label: string | null,
   env: Env,
-  userId: string
+  userId: string,
+  chatSessionId?: string | null,
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/agent-sessions`, {
     method: 'POST',
     userId,
     workspaceId,
-    body: JSON.stringify({ sessionId, label }),
+    body: JSON.stringify({ sessionId, label, chatSessionId: chatSessionId ?? undefined }),
   });
 }
 
@@ -258,6 +259,27 @@ export async function startAgentSessionOnNode(
       userId,
       workspaceId,
       body: JSON.stringify({ agentType, initialPrompt }),
+    }
+  );
+}
+
+export async function sendPromptToAgentOnNode(
+  nodeId: string,
+  workspaceId: string,
+  sessionId: string,
+  prompt: string,
+  env: Env,
+  userId: string
+): Promise<unknown> {
+  return nodeAgentRequest(
+    nodeId,
+    env,
+    `/workspaces/${workspaceId}/agent-sessions/${sessionId}/prompt`,
+    {
+      method: 'POST',
+      userId,
+      workspaceId,
+      body: JSON.stringify({ prompt }),
     }
   );
 }

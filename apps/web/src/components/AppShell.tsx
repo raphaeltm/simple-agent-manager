@@ -53,7 +53,7 @@ export function AppShell({ children }: AppShellProps) {
 
   if (isMobile) {
     return (
-      <div className="flex flex-col bg-canvas" style={{ minHeight: 'var(--sam-app-height, 100vh)' }}>
+      <div className="flex flex-col bg-canvas h-screen">
         <header className="flex items-center justify-between px-4 py-2 border-b border-border-default bg-surface">
           {/* Title on the left */}
           <span className="text-lg font-semibold text-fg-primary">
@@ -88,7 +88,7 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   return (
-    <div className="grid bg-canvas" style={{ gridTemplateColumns: '220px 1fr', minHeight: 'var(--sam-app-height, 100vh)' }}>
+    <div className="grid bg-canvas h-screen" style={{ gridTemplateColumns: '220px 1fr' }}>
       <aside className="flex flex-col border-r border-border-default bg-surface sticky top-0 h-screen overflow-y-auto">
         <div className="p-4 text-lg font-semibold text-fg-primary border-b border-border-default">SAM</div>
         <NavSidebar />

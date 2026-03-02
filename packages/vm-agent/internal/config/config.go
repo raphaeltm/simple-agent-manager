@@ -261,7 +261,7 @@ func Load() (*Config, error) {
 		ContainerLabelValue: containerLabelValue,
 		ContainerCacheTTL:   getEnvDuration("CONTAINER_CACHE_TTL", 30*time.Second),
 
-		// Default installs Node.js (required by ACP adapters) and claude-code-acp.
+		// Default installs Node.js (required by ACP adapters) and claude-agent-acp.
 		// Override via ADDITIONAL_FEATURES env var. Set to empty string to disable.
 		AdditionalFeatures: getEnv("ADDITIONAL_FEATURES", DefaultAdditionalFeatures),
 

@@ -755,6 +755,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         sessionLabel,
         this.env as any,
         state.userId,
+        state.stepResults.chatSessionId,
       );
 
       log.info('task_runner_do.step.agent_session_created', {

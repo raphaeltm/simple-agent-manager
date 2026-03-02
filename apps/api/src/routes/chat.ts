@@ -7,7 +7,7 @@
  * See: specs/018-project-first-architecture/tasks.md (T027)
  */
 import { Hono } from 'hono';
-import { eq } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { isTaskExecutionStep } from '@simple-agent-manager/shared';
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
@@ -205,6 +205,74 @@ chatRoutes.post('/:sessionId/idle-reset', async (c) => {
   const result = await projectDataService.resetIdleCleanup(c.env, projectId, sessionId);
 
   return c.json({ cleanupAt: result.cleanupAt });
+});
+
+/**
+ * POST /api/projects/:projectId/sessions/:sessionId/prompt
+ * Forward a follow-up prompt to the running agent session on the VM.
+ * Looks up workspace + agent session from D1, then calls the VM agent.
+ */
+chatRoutes.post('/:sessionId/prompt', async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const sessionId = requireRouteParam(c, 'sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireOwnedProject(db, projectId, userId);
+
+  const body = await c.req.json<{ content?: string }>().catch((): { content?: string } => ({}));
+  const content = body.content?.trim();
+  if (!content) {
+    throw errors.badRequest('content is required');
+  }
+
+  // Find the workspace linked to this chat session
+  const [workspace] = await db
+    .select({
+      id: schema.workspaces.id,
+      nodeId: schema.workspaces.nodeId,
+    })
+    .from(schema.workspaces)
+    .where(
+      and(
+        eq(schema.workspaces.chatSessionId, sessionId),
+        inArray(schema.workspaces.status, ['running', 'recovery'])
+      )
+    )
+    .limit(1);
+
+  if (!workspace || !workspace.nodeId) {
+    throw errors.notFound('No active workspace found for this session');
+  }
+
+  // Find the running agent session on that workspace
+  const [agentSession] = await db
+    .select({ id: schema.agentSessions.id })
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.workspaceId, workspace.id),
+        eq(schema.agentSessions.status, 'running')
+      )
+    )
+    .limit(1);
+
+  if (!agentSession) {
+    throw errors.notFound('No running agent session found');
+  }
+
+  // Forward the prompt to the VM agent
+  const { sendPromptToAgentOnNode } = await import('../services/node-agent');
+  const result = await sendPromptToAgentOnNode(
+    workspace.nodeId,
+    workspace.id,
+    agentSession.id,
+    content,
+    c.env,
+    userId
+  );
+
+  return c.json(result as Record<string, unknown>);
 });
 
 // Browser-side POST /:sessionId/messages route removed — messages are now

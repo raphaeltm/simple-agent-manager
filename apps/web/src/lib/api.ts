@@ -543,6 +543,20 @@ export async function resetIdleTimer(
   });
 }
 
+export async function sendFollowUpPrompt(
+  projectId: string,
+  sessionId: string,
+  content: string
+): Promise<{ status: string; sessionId?: string; message?: string }> {
+  return request<{ status: string; sessionId?: string; message?: string }>(
+    `/api/projects/${projectId}/sessions/${sessionId}/prompt`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }
+  );
+}
+
 // persistChatMessage removed — messages are now persisted exclusively by the
 // VM agent. See: specs/021-task-chat-architecture (US1).
 

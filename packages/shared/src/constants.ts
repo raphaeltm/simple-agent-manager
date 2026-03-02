@@ -209,7 +209,7 @@ export const HETZNER_IMAGE = DEFAULT_HETZNER_IMAGE;
 // =============================================================================
 
 /** Valid permission modes for agent sessions.
- * These match the mode IDs reported by claude-code-acp via ACP NewSession. */
+ * These match the mode IDs reported by claude-agent-acp via ACP NewSession. */
 export const VALID_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions'] as const;
 
 /** Human-readable labels for permission modes */
