@@ -152,10 +152,10 @@ describe('ProjectMessageView', () => {
     expect(source).toContain('Cleanup in');
   });
 
-  it('displays task error and summary for terminated sessions (TDF-8)', () => {
+  it('displays task error and summary regardless of session state (TDF-8)', () => {
     expect(source).toContain('taskEmbed?.errorMessage');
     expect(source).toContain('taskEmbed?.outputSummary');
-    expect(source).toContain('Error:');
+    expect(source).toContain('Task failed:');
     expect(source).toContain('Summary:');
   });
 });
