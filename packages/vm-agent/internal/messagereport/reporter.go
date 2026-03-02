@@ -36,6 +36,7 @@ type Reporter struct {
 	mu          sync.Mutex
 	authToken   string
 	workspaceID string // dynamically set after workspace creation
+	sessionID   string // dynamically updated when warm node is reused for new task
 
 	stopC chan struct{}
 	doneC chan struct{}
@@ -91,6 +92,7 @@ func New(db *sql.DB, cfg Config) (*Reporter, error) {
 		db:          db,
 		client:      &http.Client{Timeout: cfg.HTTPTimeout},
 		workspaceID: cfg.WorkspaceID,
+		sessionID:   cfg.SessionID,
 		stopC:       make(chan struct{}),
 		doneC:       make(chan struct{}),
 	}
@@ -123,6 +125,19 @@ func (r *Reporter) SetWorkspaceID(id string) {
 	slog.Info("messagereport: workspace ID updated", "workspaceId", id)
 }
 
+// SetSessionID updates the chat session ID used for all subsequently enqueued
+// messages. Call this when a warm node is reused for a new task so that
+// messages are tagged with the correct chat session.
+func (r *Reporter) SetSessionID(id string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.sessionID = id
+	r.mu.Unlock()
+	slog.Info("messagereport: session ID updated", "sessionId", id)
+}
+
 // Enqueue inserts a message into the SQLite outbox for eventual delivery.
 // It is non-blocking and safe to call from any goroutine.
 // Returns an error if the outbox is at capacity.
@@ -146,8 +161,11 @@ func (r *Reporter) Enqueue(msg Message) error {
 		msg.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 
-	// Always use the reporter's configured session ID.
-	sessionID := r.cfg.SessionID
+	// Use the dynamically updatable session ID (updated via SetSessionID
+	// when a warm node is reused for a new task).
+	r.mu.Lock()
+	sessionID := r.sessionID
+	r.mu.Unlock()
 
 	// INSERT OR IGNORE for crash-recovery dedup on message_id UNIQUE constraint.
 	_, err := r.db.Exec(

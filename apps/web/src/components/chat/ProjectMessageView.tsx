@@ -1,9 +1,20 @@
-import { type FC, useCallback, useEffect, useRef, useState } from 'react';
+import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { getChatSession, resetIdleTimer } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
+import {
+  FileText,
+  FileEdit,
+  Pencil,
+  Terminal,
+  Search,
+  Wrench,
+  ChevronDown,
+  ChevronRight,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 interface ProjectMessageViewProps {
   projectId: string;
@@ -20,6 +31,76 @@ const roleStyles: Record<string, { label: string; color: string; bg: string }> =
 /** Default idle timeout in ms — matches the server-side default (NODE_WARM_TIMEOUT_MS). */
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
+// ---------------------------------------------------------------------------
+// Tool kind → friendly label + icon mapping
+// ---------------------------------------------------------------------------
+interface ToolKindInfo {
+  label: string;
+  Icon: LucideIcon;
+}
+
+const TOOL_KINDS: Record<string, ToolKindInfo> = {
+  write: { label: 'Write file', Icon: FileEdit },
+  read: { label: 'Read file', Icon: FileText },
+  edit: { label: 'Edit file', Icon: Pencil },
+  bash: { label: 'Run command', Icon: Terminal },
+  glob: { label: 'Search files', Icon: Search },
+  grep: { label: 'Search content', Icon: Search },
+};
+
+const DEFAULT_TOOL_KIND: ToolKindInfo = { label: 'Tool', Icon: Wrench };
+
+function getToolKind(meta: Record<string, unknown> | null): ToolKindInfo {
+  if (!meta || typeof meta.kind !== 'string') return DEFAULT_TOOL_KIND;
+  return TOOL_KINDS[meta.kind] ?? DEFAULT_TOOL_KIND;
+}
+
+function getToolPath(meta: Record<string, unknown> | null): string | null {
+  if (!meta) return null;
+  const locations = meta.locations as Array<{ path?: string }> | undefined;
+  if (!locations?.length) return null;
+  const p = locations[0]?.path;
+  return p ?? null;
+}
+
+/** True for placeholder content that adds no user value. */
+function isPlaceholderContent(content: string): boolean {
+  const trimmed = content.trim();
+  return trimmed === '(tool call)' || trimmed === '(tool update)';
+}
+
+// ---------------------------------------------------------------------------
+// Message grouping — merges consecutive same-role messages for clean display
+// ---------------------------------------------------------------------------
+
+interface MessageGroup {
+  id: string;          // ID of first message in group
+  role: string;
+  messages: ChatMessageResponse[];
+  createdAt: number;   // Timestamp of first message
+}
+
+/** Groups consecutive messages by role. Assistant chunks become one bubble,
+ *  consecutive tool messages become one activity block. */
+export function groupMessages(msgs: ChatMessageResponse[]): MessageGroup[] {
+  const groups: MessageGroup[] = [];
+  for (const msg of msgs) {
+    const last = groups[groups.length - 1];
+    // Merge into existing group if same role and both are groupable roles
+    if (last && last.role === msg.role && (msg.role === 'assistant' || msg.role === 'tool')) {
+      last.messages.push(msg);
+    } else {
+      groups.push({
+        id: msg.id,
+        role: msg.role,
+        messages: [msg],
+        createdAt: msg.createdAt,
+      });
+    }
+  }
+  return groups;
+}
+
 function formatTimestamp(ts: number): string {
   return new Date(ts).toLocaleString();
 }
@@ -32,6 +113,11 @@ function formatCountdown(ms: number): string {
   return `${min}:${sec.toString().padStart(2, '0')}`;
 }
 
+// ---------------------------------------------------------------------------
+// Message bubble components
+// ---------------------------------------------------------------------------
+
+/** Standard bubble for user/system messages (one message = one bubble). */
 function MessageBubble({ message }: { message: ChatMessageResponse }) {
   const style = roleStyles[message.role] || roleStyles.system!;
 
@@ -57,16 +143,172 @@ function MessageBubble({ message }: { message: ChatMessageResponse }) {
       <div className="sam-type-body text-fg-primary whitespace-pre-wrap break-words leading-[1.5]">
         {message.content}
       </div>
-      {message.toolMetadata && (
-        <details className="mt-2">
-          <summary className="sam-type-caption text-fg-muted cursor-pointer">
-            Tool metadata
-          </summary>
-          <pre className="text-xs text-fg-muted bg-inset p-2 rounded-sm overflow-auto max-h-[200px] mt-1">
-            {JSON.stringify(message.toolMetadata, null, 2)}
-          </pre>
-        </details>
+    </div>
+  );
+}
+
+/** Merged assistant bubble — concatenates streaming chunks into one message. */
+function AssistantBubble({ group }: { group: MessageGroup }) {
+  const style = roleStyles.assistant!;
+  const content = group.messages.map((m) => m.content).join('');
+
+  if (!content.trim()) return null;
+
+  return (
+    <div
+      className="p-3 px-4 rounded-md"
+      style={{
+        backgroundColor: style.bg,
+        borderLeft: `3px solid ${style.color}`,
+      }}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <span
+          className="text-xs font-semibold uppercase tracking-wide"
+          style={{ color: style.color }}
+        >
+          {style.label}
+        </span>
+        <span className="sam-type-caption text-fg-muted">
+          {formatTimestamp(group.createdAt)}
+        </span>
+      </div>
+      <div className="sam-type-body text-fg-primary whitespace-pre-wrap break-words leading-[1.5]">
+        {content}
+      </div>
+    </div>
+  );
+}
+
+/** Compact tool activity block — groups consecutive tool calls into a summary. */
+function ToolActivityBlock({ group }: { group: MessageGroup }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Build summary lines from tool messages
+  const toolLines = group.messages.map((msg) => {
+    const kind = getToolKind(msg.toolMetadata as Record<string, unknown> | null);
+    const path = getToolPath(msg.toolMetadata as Record<string, unknown> | null);
+    const hasContent = !isPlaceholderContent(msg.content);
+    return { kind, path, content: hasContent ? msg.content : null, id: msg.id };
+  });
+
+  // Deduplicate: consecutive same-kind + same-path entries collapse into one
+  const deduped: typeof toolLines = [];
+  for (const line of toolLines) {
+    const prev = deduped[deduped.length - 1];
+    if (prev && prev.kind.label === line.kind.label && prev.path === line.path && !line.content) {
+      continue; // Skip duplicate status update for same tool+path
+    }
+    deduped.push(line);
+  }
+
+  // Count how many have meaningful content for the expand toggle
+  const contentLines = deduped.filter((l) => l.content);
+
+  return (
+    <div
+      className="rounded-md border border-border-default overflow-hidden"
+      style={{ backgroundColor: 'var(--sam-color-bg-inset)' }}
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-2 px-3 py-2 bg-transparent border-none cursor-pointer text-left"
+      >
+        {expanded
+          ? <ChevronDown size={14} className="text-fg-muted shrink-0" />
+          : <ChevronRight size={14} className="text-fg-muted shrink-0" />
+        }
+        <span className="text-xs font-medium text-fg-muted uppercase tracking-wide">
+          Activity
+        </span>
+        <span className="text-xs text-fg-muted">
+          {deduped.length} {deduped.length === 1 ? 'action' : 'actions'}
+        </span>
+      </button>
+
+      {/* Collapsed: show compact summary of tool actions */}
+      {!expanded && (
+        <div className="px-3 pb-2 flex flex-wrap gap-x-3 gap-y-1">
+          {deduped.map((line) => (
+            <span key={line.id} className="inline-flex items-center gap-1 text-xs text-fg-muted">
+              <line.kind.Icon size={12} />
+              <span>{line.kind.label}</span>
+              {line.path && (
+                <span className="font-mono opacity-70">
+                  {line.path.split('/').pop()}
+                </span>
+              )}
+            </span>
+          ))}
+        </div>
       )}
+
+      {/* Expanded: show full details */}
+      {expanded && (
+        <div className="border-t border-border-default">
+          {deduped.map((line) => (
+            <div
+              key={line.id}
+              className="flex items-start gap-2 px-3 py-1.5 border-b border-border-default last:border-b-0"
+            >
+              <line.kind.Icon size={14} className="text-fg-muted shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-fg-secondary">
+                    {line.kind.label}
+                  </span>
+                  {line.path && (
+                    <span className="text-xs font-mono text-fg-muted truncate">
+                      {line.path}
+                    </span>
+                  )}
+                </div>
+                {line.content && (
+                  <pre className="text-xs text-fg-muted mt-1 whitespace-pre-wrap break-words max-h-[200px] overflow-auto">
+                    {line.content}
+                  </pre>
+                )}
+              </div>
+            </div>
+          ))}
+          {contentLines.length === 0 && (
+            <div className="px-3 py-2 text-xs text-fg-muted">
+              No detailed output available.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Renders a message group — dispatches to the right component by role. */
+function MessageGroupView({ group }: { group: MessageGroup }) {
+  if (group.role === 'assistant') {
+    return <AssistantBubble group={group} />;
+  }
+  if (group.role === 'tool') {
+    return <ToolActivityBlock group={group} />;
+  }
+  // user / system — render each message individually (usually just one)
+  return (
+    <>
+      {group.messages.map((msg) => (
+        <MessageBubble key={msg.id} message={msg} />
+      ))}
+    </>
+  );
+}
+
+/** Renders all messages with grouping applied. */
+function GroupedMessages({ messages }: { messages: ChatMessageResponse[] }) {
+  const groups = useMemo(() => groupMessages(messages), [messages]);
+  return (
+    <div className="grid gap-3">
+      {groups.map((group) => (
+        <MessageGroupView key={group.id} group={group} />
+      ))}
     </div>
   );
 }
@@ -440,11 +682,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             {sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
           </div>
         ) : (
-          <div className="grid gap-3">
-            {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
-            ))}
-          </div>
+          <GroupedMessages messages={messages} />
         )}
 
         <div ref={messagesEndRef} />

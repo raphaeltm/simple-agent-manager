@@ -524,8 +524,9 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	}
 
 	var body struct {
-		SessionID string `json:"sessionId"`
-		Label     string `json:"label"`
+		SessionID     string `json:"sessionId"`
+		Label         string `json:"label"`
+		ChatSessionID string `json:"chatSessionId"` // Chat session ID for message routing (warm node reuse)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -534,6 +535,13 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	if strings.TrimSpace(body.SessionID) == "" {
 		writeError(w, http.StatusBadRequest, "sessionId is required")
 		return
+	}
+
+	// Update the message reporter's session ID when the control plane provides
+	// a chat session ID. This is critical for warm node reuse — the original
+	// CHAT_SESSION_ID from cloud-init is stale when a new task starts.
+	if chatSID := strings.TrimSpace(body.ChatSessionID); chatSID != "" && s.messageReporter != nil {
+		s.messageReporter.SetSessionID(chatSID)
 	}
 
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))

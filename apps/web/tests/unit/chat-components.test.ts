@@ -129,10 +129,10 @@ describe('ProjectMessageView', () => {
     expect(source).toContain('session.workspaceId');
   });
 
-  it('displays tool metadata in expandable details', () => {
+  it('displays tool activity with grouped rendering', () => {
     expect(source).toContain('toolMetadata');
-    expect(source).toContain('<details');
-    expect(source).toContain('Tool metadata');
+    expect(source).toContain('ToolActivityBlock');
+    expect(source).toContain('groupMessages');
   });
 
   it('cleans up polling on unmount', () => {
