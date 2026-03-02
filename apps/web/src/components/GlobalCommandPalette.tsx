@@ -15,6 +15,20 @@ import { useAuth } from './AuthProvider';
 import { listProjects, listNodes } from '../lib/api';
 import { isMacPlatform } from '../lib/keyboard-shortcuts';
 
+// ── Configurable limits ──
+
+const DEFAULT_PROJECT_FETCH_LIMIT = 50;
+const DEFAULT_MAX_RESULTS_PER_CATEGORY = 10;
+
+const PROJECT_FETCH_LIMIT = parseInt(
+  import.meta.env.VITE_CMD_PALETTE_PROJECT_FETCH_LIMIT ||
+    String(DEFAULT_PROJECT_FETCH_LIMIT),
+);
+const MAX_RESULTS_PER_CATEGORY = parseInt(
+  import.meta.env.VITE_CMD_PALETTE_MAX_RESULTS_PER_CATEGORY ||
+    String(DEFAULT_MAX_RESULTS_PER_CATEGORY),
+);
+
 // ── Result types ──
 
 interface NavigationResult {
@@ -123,6 +137,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   // Dynamic data
   const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
@@ -135,7 +150,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
     async function fetchData() {
       try {
         const [projectsRes, nodesRes] = await Promise.all([
-          listProjects(50).catch(() => ({ projects: [] as Array<{ id: string; name: string }> })),
+          listProjects(PROJECT_FETCH_LIMIT).catch(() => ({ projects: [] as Array<{ id: string; name: string }> })),
           listNodes().catch(() => [] as Array<{ id: string; name: string }>),
         ]);
         if (!cancelled) {
@@ -229,8 +244,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         }
       }
       projectResults.sort((a, b) => b.score - a.score);
-      // Cap to 10 for performance
-      const capped = projectResults.slice(0, 10);
+      const capped = projectResults.slice(0, MAX_RESULTS_PER_CATEGORY);
       if (capped.length > 0) {
         result.push({ category: 'Projects', results: capped });
       }
@@ -264,7 +278,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         }
       }
       nodeResults.sort((a, b) => b.score - a.score);
-      const capped = nodeResults.slice(0, 10);
+      const capped = nodeResults.slice(0, MAX_RESULTS_PER_CATEGORY);
       if (capped.length > 0) {
         result.push({ category: 'Nodes', results: capped });
       }
@@ -299,6 +313,11 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
     return flat;
   }, [groups]);
 
+  // Active descendant ID for ARIA
+  const activeDescendantId = flatResults[selectedIndex]
+    ? `gcp-option-${resultKey(flatResults[selectedIndex])}`
+    : undefined;
+
   // Auto-focus on mount
   useEffect(() => {
     inputRef.current?.focus();
@@ -315,6 +334,19 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   useEffect(() => {
     setSelectedIndex(0);
   }, [query]);
+
+  // Focus trap — keep Tab within the dialog
+  useEffect(() => {
+    const handleTab = (e: KeyboardEvent) => {
+      if (e.key === 'Tab') {
+        // Keep focus on the input — there's only one interactive element
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleTab);
+    return () => window.removeEventListener('keydown', handleTab);
+  }, []);
 
   const executeResult = useCallback(
     (result: PaletteResult) => {
@@ -384,8 +416,10 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
 
       {/* Palette dialog */}
       <div
+        ref={dialogRef}
         role="dialog"
         aria-label="Command palette"
+        aria-modal="true"
         className="fixed top-[20%] left-1/2 -translate-x-1/2 w-[90vw] max-w-[480px] bg-surface border border-border-default rounded-lg shadow-overlay z-command-palette flex flex-col overflow-hidden"
       >
         {/* Search input */}
@@ -394,11 +428,15 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
           <input
             ref={inputRef}
             type="text"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="gcp-listbox"
+            aria-activedescendant={activeDescendantId}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Search pages, projects, nodes..."
-            className="w-full bg-transparent border-none text-fg-primary text-sm outline-none font-[inherit] placeholder:text-fg-muted"
+            className="w-full bg-transparent border-none text-fg-primary text-sm outline-none font-[inherit] placeholder:text-fg-muted focus:ring-0"
             aria-label="Search pages, projects, and nodes"
             autoComplete="off"
             spellCheck={false}
@@ -409,18 +447,21 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         </div>
 
         {/* Results */}
-        <div role="listbox" className="max-h-[360px] overflow-y-auto py-1">
+        <div role="listbox" id="gcp-listbox" aria-label="Command palette results" className="max-h-[360px] overflow-y-auto py-1">
           {flatResults.length === 0 && !loading && (
             <div className="p-4 text-center text-fg-muted text-xs">No matching results</div>
           )}
 
-          {loading && query && flatResults.length === 0 && (
+          {loading && flatResults.length === 0 && (
             <div className="p-4 text-center text-fg-muted text-xs">Loading...</div>
           )}
 
           {groups.map((group) => (
-            <div key={group.category}>
-              <div className="px-4 pt-2 pb-1 text-[10px] font-semibold text-fg-muted uppercase tracking-wider select-none">
+            <div key={group.category} role="group" aria-labelledby={`gcp-category-${group.category}`}>
+              <div
+                id={`gcp-category-${group.category}`}
+                className="px-4 pt-2 pb-1 text-[10px] font-semibold text-fg-muted uppercase tracking-wider select-none"
+              >
                 {group.category}
               </div>
 
@@ -432,6 +473,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
                 return (
                   <div
                     key={resultKey(result)}
+                    id={`gcp-option-${resultKey(result)}`}
                     ref={isSelected ? selectedRef : undefined}
                     role="option"
                     aria-selected={isSelected}

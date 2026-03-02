@@ -63,7 +63,7 @@ describe('GlobalCommandPalette', () => {
 
   it('auto-focuses the search input', () => {
     renderPalette();
-    const input = screen.getByRole('textbox');
+    const input = screen.getByRole('combobox');
     expect(document.activeElement).toBe(input);
   });
 
@@ -118,7 +118,7 @@ describe('GlobalCommandPalette', () => {
 
   it('filters navigation items by query', async () => {
     renderPalette();
-    const input = screen.getByRole('textbox');
+    const input = screen.getByRole('combobox');
 
     await waitFor(() => {
       expect(screen.getByText('Dashboard')).toBeInTheDocument();
@@ -136,7 +136,7 @@ describe('GlobalCommandPalette', () => {
 
   it('filters projects by name', async () => {
     renderPalette();
-    const input = screen.getByRole('textbox');
+    const input = screen.getByRole('combobox');
 
     await waitFor(() => {
       expect(screen.getByText('My API Worker')).toBeInTheDocument();
@@ -154,7 +154,7 @@ describe('GlobalCommandPalette', () => {
 
   it('filters nodes by name', async () => {
     renderPalette();
-    const input = screen.getByRole('textbox');
+    const input = screen.getByRole('combobox');
 
     await waitFor(() => {
       expect(screen.getByText('node-hetzner-1')).toBeInTheDocument();
@@ -171,7 +171,7 @@ describe('GlobalCommandPalette', () => {
 
   it('shows "No matching results" for unmatched query', async () => {
     renderPalette();
-    const input = screen.getByRole('textbox');
+    const input = screen.getByRole('combobox');
 
     await waitFor(() => {
       expect(screen.getByText('Dashboard')).toBeInTheDocument();
@@ -250,7 +250,7 @@ describe('GlobalCommandPalette', () => {
   it('executes selected result via Enter key', async () => {
     const onClose = vi.fn();
     renderPalette(onClose);
-    const input = screen.getByRole('textbox');
+    const input = screen.getByRole('combobox');
 
     await waitFor(() => {
       expect(screen.getByText('Dashboard')).toBeInTheDocument();
@@ -268,7 +268,7 @@ describe('GlobalCommandPalette', () => {
 
   it('navigates selection with ArrowDown and ArrowUp', async () => {
     renderPalette();
-    const input = screen.getByRole('textbox');
+    const input = screen.getByRole('combobox');
 
     await waitFor(() => {
       expect(screen.getAllByRole('option').length).toBeGreaterThan(1);
@@ -290,7 +290,7 @@ describe('GlobalCommandPalette', () => {
 
   it('resets selection when query changes', async () => {
     renderPalette();
-    const input = screen.getByRole('textbox');
+    const input = screen.getByRole('combobox');
 
     await waitFor(() => {
       expect(screen.getAllByRole('option').length).toBeGreaterThan(1);
@@ -322,7 +322,7 @@ describe('GlobalCommandPalette', () => {
   it('closes on Escape key', async () => {
     const onClose = vi.fn();
     renderPalette(onClose);
-    const input = screen.getByRole('textbox');
+    const input = screen.getByRole('combobox');
 
     fireEvent.keyDown(input, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -342,7 +342,7 @@ describe('GlobalCommandPalette', () => {
   it('does not navigate when Escape is pressed', async () => {
     const onClose = vi.fn();
     renderPalette(onClose);
-    const input = screen.getByRole('textbox');
+    const input = screen.getByRole('combobox');
 
     fireEvent.keyDown(input, { key: 'Escape' });
     expect(mockNavigate).not.toHaveBeenCalled();
@@ -365,7 +365,7 @@ describe('GlobalCommandPalette', () => {
 
   it('ArrowDown does not go past last result', async () => {
     renderPalette();
-    const input = screen.getByRole('textbox');
+    const input = screen.getByRole('combobox');
 
     // Filter to get a small set
     await waitFor(() => {
@@ -387,7 +387,7 @@ describe('GlobalCommandPalette', () => {
 
   it('ArrowUp does not go above first result', async () => {
     renderPalette();
-    const input = screen.getByRole('textbox');
+    const input = screen.getByRole('combobox');
 
     await waitFor(() => {
       expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
@@ -399,6 +399,104 @@ describe('GlobalCommandPalette', () => {
 
     const options = screen.getAllByRole('option');
     expect(options[0]?.getAttribute('aria-selected')).toBe('true');
+  });
+
+  // ── Current path skip logic ──
+
+  it('does not navigate when selecting current page (closes only)', async () => {
+    // Location is mocked as /dashboard — clicking Dashboard should not navigate
+    const onClose = vi.fn();
+    renderPalette(onClose);
+
+    await waitFor(() => {
+      expect(screen.getByText('Dashboard')).toBeInTheDocument();
+    });
+
+    const options = screen.getAllByRole('option');
+    const dashOption = options.find((o) => o.textContent?.includes('Dashboard'));
+    fireEvent.click(dashOption!);
+
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // ── ARIA attributes ──
+
+  it('has combobox role on input with aria-controls and aria-expanded', async () => {
+    renderPalette();
+    const input = screen.getByRole('combobox');
+    expect(input).toBeInTheDocument();
+    expect(input.getAttribute('aria-expanded')).toBe('true');
+    expect(input.getAttribute('aria-controls')).toBe('gcp-listbox');
+  });
+
+  it('has listbox with matching id', async () => {
+    renderPalette();
+    const listbox = screen.getByRole('listbox');
+    expect(listbox.getAttribute('id')).toBe('gcp-listbox');
+  });
+
+  it('sets aria-activedescendant on input to selected option id', async () => {
+    renderPalette();
+    const input = screen.getByRole('combobox');
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
+    });
+
+    // First option selected by default
+    const options = screen.getAllByRole('option');
+    const firstOptionId = options[0]?.getAttribute('id');
+    expect(firstOptionId).toBeTruthy();
+    expect(input.getAttribute('aria-activedescendant')).toBe(firstOptionId);
+
+    // Arrow down changes it
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    const updatedOptions = screen.getAllByRole('option');
+    const secondOptionId = updatedOptions[1]?.getAttribute('id');
+    expect(input.getAttribute('aria-activedescendant')).toBe(secondOptionId);
+  });
+
+  it('has aria-modal on dialog', async () => {
+    renderPalette();
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+  });
+
+  it('options have unique id attributes', async () => {
+    renderPalette();
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('option').length).toBeGreaterThan(1);
+    });
+
+    const options = screen.getAllByRole('option');
+    const ids = options.map((o) => o.getAttribute('id'));
+    const uniqueIds = new Set(ids);
+    expect(uniqueIds.size).toBe(ids.length);
+    // All IDs should start with gcp-option-
+    for (const id of ids) {
+      expect(id).toMatch(/^gcp-option-/);
+    }
+  });
+
+  // ── Category group structure ──
+
+  it('has role=group with aria-labelledby for categories', async () => {
+    renderPalette();
+
+    await waitFor(() => {
+      expect(screen.getByText('Navigation')).toBeInTheDocument();
+    });
+
+    // The Navigation header should have an id
+    const navHeader = screen.getByText('Navigation');
+    expect(navHeader.getAttribute('id')).toBe('gcp-category-Navigation');
+
+    // Its parent group should reference it
+    const group = navHeader.closest('[role="group"]');
+    expect(group).not.toBeNull();
+    expect(group?.getAttribute('aria-labelledby')).toBe('gcp-category-Navigation');
   });
 });
 
