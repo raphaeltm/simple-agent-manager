@@ -611,7 +611,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Connection indicator (TDF-8) */}
       {sessionState === 'active' && connectionState !== 'connected' && (
         <ConnectionBanner state={connectionState} onRetry={retryWs} />
@@ -619,7 +619,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Session header with branch/PR info */}
       {session && (
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-border-default flex-wrap shrink-0">
+        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border-default flex-wrap shrink-0">
           <span className="text-base font-semibold text-fg-primary">
             {session.topic || `Chat ${session.id.slice(0, 8)}`}
           </span>
@@ -709,7 +709,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       )}
 
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto min-h-0 p-4">
         {hasMore && (
           <div className="text-center mb-3">
             <Button variant="ghost" size="sm" onClick={loadMore} loading={loadingMore}>
@@ -757,7 +757,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         />
       )}
       {sessionState === 'terminated' && (
-        <div className="border-t border-border-default px-4 py-3 bg-surface text-center">
+        <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface text-center">
           <span className="sam-type-secondary text-fg-muted">
             This session has ended.
           </span>
@@ -815,7 +815,7 @@ function FollowUpInput({
   placeholder: string;
 }) {
   return (
-    <div className="border-t border-border-default px-4 py-3 bg-surface">
+    <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface">
       <div className="flex gap-2 items-end">
         <textarea
           value={value}
