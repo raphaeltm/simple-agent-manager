@@ -3,17 +3,17 @@ const items = [
   {
     title: 'Project-First Architecture',
     description: 'Organize everything by project. Persistent chat sessions survive workspace stops. Activity feeds track what every agent did, across all workspaces.',
-    status: 'building',
+    status: 'shipped',
   },
   {
     title: 'Hierarchical Task Orchestration',
-    description: 'Define high-level goals, break them into tasks, and delegate to agents across your fleet. Agents decompose work into subtasks, spin up new workspaces when needed, and coordinate autonomously — the orchestration layer between your roadmap and shipping code.',
-    status: 'building',
+    description: 'Define high-level goals that get broken into tasks and delegated to agents across your fleet. The vision: agents that decompose work into subtasks, spin up new workspaces when needed, and coordinate autonomously — the orchestration layer between your roadmap and shipping code.',
+    status: 'planned',
   },
   {
     title: 'Cross-Workspace Monitoring',
     description: 'See all active agent sessions and task progress from your dashboard. Jump directly into any conversation. Monitor work across your entire fleet of agents.',
-    status: 'building',
+    status: 'shipped',
   },
   {
     title: 'Multi-Cloud Providers',
@@ -39,8 +39,7 @@ const items = [
       <span class="section-label">What's Next</span>
       <h2 class="section-title">Building the full<br />agent orchestration platform</h2>
       <p class="section-subtitle">
-        SAM today runs coding agents in managed workspaces. Where it's heading: a complete platform for
-        delegating tasks to coding agents, letting them coordinate autonomously, and tracking everything across your infrastructure.
+        SAM today orchestrates coding agents in project-scoped workspaces with real-time monitoring. Where it's heading: multi-cloud support, hierarchical task decomposition, and team-scale agent fleets.
       </p>
     </div>
 
@@ -50,7 +49,7 @@ const items = [
           <div class="vision-card-header">
             <h3 class="vision-card-title">{item.title}</h3>
             <span class={`vision-badge ${item.status}`}>
-              {item.status === 'building' ? 'Building Now' : 'Planned'}
+              {item.status === 'shipped' ? 'Shipped' : item.status === 'building' ? 'Building Now' : 'Planned'}
             </span>
           </div>
           <p class="vision-card-desc">{item.description}</p>
@@ -126,6 +125,11 @@ const items = [
     letter-spacing: 0.02em;
     white-space: nowrap;
     flex-shrink: 0;
+  }
+
+  .vision-badge.shipped {
+    color: var(--color-accent);
+    background: var(--color-accent-glow);
   }
 
   .vision-badge.building {

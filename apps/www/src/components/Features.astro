@@ -3,7 +3,7 @@ const features = [
   {
     icon: 'agents',
     title: 'Multi-Agent Orchestration',
-    description: 'Assign tasks to Claude Code, OpenAI Codex, or Gemini CLI — running in parallel across workspaces. Agents decompose work into subtasks and delegate to other agents. Bring your own API keys, stored encrypted.',
+    description: 'Assign tasks to Claude Code, OpenAI Codex, or Gemini CLI — running in parallel across isolated workspaces. Warm node pooling means sequential tasks start in seconds. Bring your own API keys, stored encrypted.',
   },
   {
     icon: 'eye',
@@ -13,7 +13,7 @@ const features = [
   {
     icon: 'shield',
     title: 'Bring Your Own Cloud',
-    description: 'Your code runs on your VMs. Hetzner tokens encrypted per-user, never stored as platform secrets. You control costs, regions, and data residency.',
+    description: 'Your code runs on your VMs, in your cloud account. Cloud credentials are encrypted per-user with AES-256 — never stored in plaintext anywhere. You control costs, regions, and data residency. Revoke access anytime by rotating your API key.',
   },
   {
     icon: 'project',
@@ -21,9 +21,9 @@ const features = [
     description: 'Organize tasks, milestones, and workspaces by project. Persistent chat sessions, activity feeds, and cross-agent monitoring — all tied to your GitHub repos.',
   },
   {
-    icon: 'layers',
-    title: 'Node Consolidation',
-    description: 'Run multiple isolated workspaces on a single VM. Each gets its own devcontainer, agent sessions, and lifecycle — sharing infrastructure costs.',
+    icon: 'container',
+    title: 'Real Dev Environments, Not Sandboxes',
+    description: 'Agents work inside your repo\'s devcontainer — the same environment your team uses. Same toolchains, same test runners, same everything. Not a 5-minute throwaway sandbox. A real workspace a human can take over.',
   },
   {
     icon: 'code',
@@ -49,10 +49,10 @@ const iconPaths: Record<string, string[]> = {
   project: [
     'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z',
   ],
-  layers: [
-    'M12 2L2 7l10 5 10-5-10-5z',
-    'M2 17l10 5 10-5',
-    'M2 12l10 5 10-5',
+  container: [
+    'M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z',
+    'M3.27 6.96L12 12.01l8.73-5.05',
+    'M12 22.08V12',
   ],
   code: [
     'M16 18l6-6-6-6',
@@ -65,9 +65,9 @@ const iconPaths: Record<string, string[]> = {
   <div class="container">
     <div class="features-header animate-on-scroll">
       <span class="section-label">Features</span>
-      <h2 class="section-title">Coding agent infrastructure<br />that you control</h2>
+      <h2 class="section-title">Agent orchestration<br />on infrastructure you own</h2>
       <p class="section-subtitle">
-        Purpose-built for running coding agents on your own cloud. Multi-agent, multi-workspace, fully observable.
+        Purpose-built for running autonomous coding agents on your own cloud. Multi-agent, multi-workspace, fully observable.
       </p>
     </div>
 
