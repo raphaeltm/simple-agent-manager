@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write
       issues: read
       id-token: write
 
@@ -83,6 +83,9 @@ jobs:
 
             Set "pass" to false only if you find critical or high severity issues
             that could cause deployment failures, data loss, or security problems.
+
+            Post findings as inline PR comments on the relevant lines so the
+            author gets feedback directly in the diff view.
           claude_args: >-
             --max-turns 15
             --output-format json
