@@ -8,29 +8,8 @@ function readSource(relativePath: string): string {
   return readFileSync(join(srcRoot, relativePath), 'utf-8');
 }
 
-describe('SessionSidebar', () => {
-  const source = readSource('components/chat/SessionSidebar.tsx');
-
-  it('exports SessionSidebar as named export', () => {
-    expect(source).toContain('export const SessionSidebar');
-  });
-
-  it('accepts sessions, selectedSessionId, loading, and onSelect props', () => {
-    expect(source).toContain('sessions: ChatSessionResponse[]');
-    expect(source).toContain('selectedSessionId: string | null');
-    expect(source).toContain('loading: boolean');
-    expect(source).toContain('onSelect: (sessionId: string) => void');
-  });
-
-  it('renders active session indicator (green dot)', () => {
-    expect(source).toContain('rounded-full');
-    expect(source).toContain('var(--sam-color-success)');
-  });
-
-  it('shows selected session highlight with left border', () => {
-    expect(source).toContain('var(--sam-color-accent-primary)');
-    expect(source).toContain('borderLeft');
-  });
+describe('ProjectChat session sidebar (inline)', () => {
+  const source = readSource('pages/ProjectChat.tsx');
 
   it('renders session topic or fallback ID', () => {
     expect(source).toContain('session.topic');
@@ -39,15 +18,6 @@ describe('SessionSidebar', () => {
 
   it('shows message count for each session', () => {
     expect(source).toContain('session.messageCount');
-  });
-
-  it('renders empty state when no sessions', () => {
-    // Updated in 022: SessionSidebar uses EmptyState component
-    expect(source).toContain('EmptyState');
-  });
-
-  it('renders loading spinner when loading', () => {
-    expect(source).toContain('Spinner');
   });
 
   it('formats relative time for timestamps', () => {
@@ -62,6 +32,10 @@ describe('SessionSidebar', () => {
     expect(source).toContain('STATE_COLORS');
     expect(source).toContain('STATE_LABELS');
     expect(source).toContain('getSessionState');
+  });
+
+  it('renders loading spinner when loading', () => {
+    expect(source).toContain('Spinner');
   });
 });
 
@@ -213,9 +187,9 @@ describe('ProjectChat page', () => {
     expect(source).toContain('export function ProjectChat');
   });
 
-  it('uses SessionSidebar component', () => {
-    expect(source).toContain('SessionSidebar');
-    expect(source).toContain('from \'../components/chat/SessionSidebar\'');
+  it('renders inline session sidebar with SessionItem component', () => {
+    expect(source).toContain('SessionItem');
+    expect(source).toContain('w-72');
   });
 
   it('uses ProjectMessageView component', () => {
@@ -238,9 +212,9 @@ describe('ProjectChat page', () => {
     expect(source).toContain('replace: true');
   });
 
-  it('renders split layout with sidebar and content', () => {
-    expect(source).toContain('gridTemplateColumns');
-    expect(source).toContain('280px 1fr');
+  it('renders flex layout with sidebar and content', () => {
+    expect(source).toContain('flex flex-1 min-h-0');
+    expect(source).toContain('w-72 shrink-0');
   });
 
   it('navigates to session on selection', () => {

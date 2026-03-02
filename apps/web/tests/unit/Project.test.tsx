@@ -44,11 +44,12 @@ vi.mock('../../src/components/project/SettingsDrawer', () => ({
   SettingsDrawer: () => null,
 }));
 
-function renderProject(path = '/projects/proj-1/chat') {
+function renderProject(path = '/projects/proj-1/overview') {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/projects/:id" element={<Project />}>
+          <Route path="overview" element={<div data-testid="overview-content">Overview</div>} />
           <Route path="chat" element={<div data-testid="chat-content">Chat</div>} />
           <Route path="chat/:sessionId" element={<div data-testid="chat-session">Session</div>} />
         </Route>
@@ -57,7 +58,7 @@ function renderProject(path = '/projects/proj-1/chat') {
   );
 }
 
-describe('Project shell', () => {
+describe('Project shell (non-chat routes)', () => {
   it('renders project name as heading after loading', async () => {
     renderProject();
     expect(await screen.findByRole('heading', { name: 'My Project' })).toBeInTheDocument();
@@ -84,13 +85,29 @@ describe('Project shell', () => {
   });
 
   it('renders child route content via Outlet', async () => {
-    renderProject('/projects/proj-1/chat');
-    expect(await screen.findByTestId('chat-content')).toBeInTheDocument();
+    renderProject('/projects/proj-1/overview');
+    expect(await screen.findByTestId('overview-content')).toBeInTheDocument();
   });
 
   it('renders settings gear button', async () => {
     renderProject();
     await screen.findByRole('heading', { name: 'My Project' });
     expect(screen.getByRole('button', { name: 'Project settings' })).toBeInTheDocument();
+  });
+});
+
+describe('Project shell (chat route — full-bleed)', () => {
+  it('renders child route content via Outlet without PageLayout', async () => {
+    renderProject('/projects/proj-1/chat');
+    expect(await screen.findByTestId('chat-content')).toBeInTheDocument();
+    // Chat routes bypass PageLayout — no heading, breadcrumb, or repo link
+    expect(screen.queryByRole('heading', { name: 'My Project' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).not.toBeInTheDocument();
+  });
+
+  it('renders session route content without PageLayout', async () => {
+    renderProject('/projects/proj-1/chat/session-1');
+    expect(await screen.findByTestId('chat-session')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'My Project' })).not.toBeInTheDocument();
   });
 });

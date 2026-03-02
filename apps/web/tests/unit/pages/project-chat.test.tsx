@@ -57,6 +57,8 @@ function renderProjectChat(path = `/projects/${PROJECT_ID}/chat`) {
     reload: vi.fn(),
     settingsOpen: false,
     setSettingsOpen: vi.fn(),
+    infoPanelOpen: false,
+    setInfoPanelOpen: vi.fn(),
   };
 
   return render(
@@ -115,8 +117,8 @@ describe('ProjectChat new chat button', () => {
       expect(screen.getByText('First chat')).toBeInTheDocument();
     });
 
-    // Click the "+ New" button in the sidebar
-    fireEvent.click(screen.getByRole('button', { name: '+ New' }));
+    // Click the "+ New Chat" button in the sidebar
+    fireEvent.click(screen.getByRole('button', { name: '+ New Chat' }));
 
     // Should show the new chat input, NOT redirect back to session-1
     await waitFor(() => {
@@ -139,8 +141,8 @@ describe('ProjectChat new chat button', () => {
       expect(screen.getByText('First chat')).toBeInTheDocument();
     });
 
-    // Click "+ New"
-    fireEvent.click(screen.getByRole('button', { name: '+ New' }));
+    // Click "+ New Chat"
+    fireEvent.click(screen.getByRole('button', { name: '+ New Chat' }));
 
     await waitFor(() => {
       expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
@@ -183,8 +185,8 @@ describe('ProjectChat new chat button', () => {
       expect(screen.getByText('First chat')).toBeInTheDocument();
     });
 
-    // Click "+ New"
-    fireEvent.click(screen.getByRole('button', { name: '+ New' }));
+    // Click "+ New Chat"
+    fireEvent.click(screen.getByRole('button', { name: '+ New Chat' }));
 
     await waitFor(() => {
       expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
