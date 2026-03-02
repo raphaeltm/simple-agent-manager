@@ -24,12 +24,25 @@ This means cloud-init on newly provisioned VMs cannot download the `vm-agent` bi
 - The endpoint serves binaries from the R2 bucket (`AGENT_BUCKET` binding)
 - Likely cause: the VM agent binary was never uploaded to the staging R2 bucket, or the R2 binding is misconfigured
 
+## Root Cause (Confirmed)
+
+The `deploy.yml` workflow does NOT build or upload the VM agent binary to R2. The R2 binding exists (the `/api/agent/version` endpoint returns `{ version: "unknown", available: false }` rather than 503), but the R2 bucket is empty — no `agents/vm-agent-linux-amd64` binary, no `agents/version.json`.
+
+The route handler (`apps/api/src/routes/agent.ts`) is correct — it looks for `agents/vm-agent-linux-amd64` in R2 and returns 404 when not found.
+
+## Fix Required
+
+Add a step to the deploy workflow (or a separate workflow) that:
+1. Cross-compiles the Go VM agent for linux/amd64 and linux/arm64
+2. Uploads the binaries to R2 under `agents/vm-agent-linux-{arch}`
+3. Uploads a `agents/version.json` with version metadata
+
 ## Investigation Steps
 
-- [ ] Check if the `AGENT_BUCKET` R2 binding exists in the staging wrangler config
-- [ ] Check if the VM agent binary has been uploaded to the staging R2 bucket
-- [ ] Check the deploy workflow to see if binary upload is included in staging deploys
-- [ ] Verify the `/api/agent/download` route handler and error response
+- [x] Check if the `AGENT_BUCKET` R2 binding exists — **yes, R2 is bound (not 503)**
+- [x] Check if the VM agent binary has been uploaded — **no, R2 bucket is empty**
+- [x] Check the deploy workflow for binary upload — **not present in `deploy.yml`**
+- [x] Verify the `/api/agent/download` route handler — **correct, returns 404 when R2 object missing**
 
 ## Acceptance Criteria
 
