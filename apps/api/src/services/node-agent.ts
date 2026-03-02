@@ -263,6 +263,27 @@ export async function startAgentSessionOnNode(
   );
 }
 
+export async function sendPromptToAgentOnNode(
+  nodeId: string,
+  workspaceId: string,
+  sessionId: string,
+  prompt: string,
+  env: Env,
+  userId: string
+): Promise<unknown> {
+  return nodeAgentRequest(
+    nodeId,
+    env,
+    `/workspaces/${workspaceId}/agent-sessions/${sessionId}/prompt`,
+    {
+      method: 'POST',
+      userId,
+      workspaceId,
+      body: JSON.stringify({ prompt }),
+    }
+  );
+}
+
 export async function stopAgentSessionOnNode(
   nodeId: string,
   workspaceId: string,

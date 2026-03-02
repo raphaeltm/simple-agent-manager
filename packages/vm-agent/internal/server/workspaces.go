@@ -700,6 +700,82 @@ func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessio
 	host.HandlePrompt(ctx, syntheticReqID, promptParams, "server")
 }
 
+// handleSendPrompt sends a follow-up prompt to a running agent session.
+// Called by the control plane when a user sends a follow-up message in the chat UI.
+// The prompt is dispatched asynchronously — the endpoint returns 202 immediately
+// and responses flow back through the message reporter.
+func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	sessionID := r.PathValue("sessionId")
+	if workspaceID == "" || sessionID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId and sessionId are required")
+		return
+	}
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+
+	var body struct {
+		Prompt string `json:"prompt"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(body.Prompt) == "" {
+		writeError(w, http.StatusBadRequest, "prompt is required")
+		return
+	}
+
+	// Look up the existing SessionHost for this session.
+	hostKey := workspaceID + ":" + sessionID
+	s.sessionHostMu.Lock()
+	host := s.sessionHosts[hostKey]
+	s.sessionHostMu.Unlock()
+
+	if host == nil {
+		writeError(w, http.StatusNotFound, "no active agent session found")
+		return
+	}
+
+	// Check agent status — must be ready (not already prompting).
+	status := host.Status()
+	if status == acp.HostPrompting {
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"status":  "busy",
+			"message": "Agent is already processing a prompt",
+		})
+		return
+	}
+	if status != acp.HostReady {
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"status":  string(status),
+			"message": "Agent is not ready for prompts",
+		})
+		return
+	}
+
+	// Build JSON-RPC params matching what HandlePrompt expects.
+	promptParams, _ := json.Marshal(map[string]interface{}{
+		"prompt": []map[string]string{
+			{"type": "text", "text": strings.TrimSpace(body.Prompt)},
+		},
+	})
+	syntheticReqID, _ := json.Marshal("control-plane-followup")
+
+	s.appendNodeEvent(workspaceID, "info", "agent_session.followup_prompt", "Sending follow-up prompt to agent", map[string]interface{}{
+		"sessionId": sessionID,
+	})
+
+	// Dispatch asynchronously — HandlePrompt blocks until the agent completes.
+	go host.HandlePrompt(context.Background(), syntheticReqID, promptParams, "control-plane")
+
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{
+		"status":    "prompting",
+		"sessionId": sessionID,
+	})
+}
+
 func (s *Server) handleStopAgentSession(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	sessionID := r.PathValue("sessionId")

@@ -1,6 +1,6 @@
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { getChatSession, resetIdleTimer } from '../../lib/api';
+import { getChatSession, resetIdleTimer, sendFollowUpPrompt } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
@@ -348,6 +348,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [followUp, setFollowUp] = useState('');
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
 
+  // Prompt pending state — shows "Agent is working..." indicator
+  const [promptPending, setPromptPending] = useState(false);
+  const promptPendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Idle timer state (TDF-8)
   const [idleCountdownMs, setIdleCountdownMs] = useState<number | null>(null);
 
@@ -359,6 +363,15 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     sessionId,
     enabled: session?.status === 'active',
     onMessage: useCallback((msg: ChatMessageResponse) => {
+      // Clear "Agent is working..." indicator when agent responds
+      if (msg.role === 'assistant' || msg.role === 'tool') {
+        setPromptPending(false);
+        if (promptPendingTimeoutRef.current) {
+          clearTimeout(promptPendingTimeoutRef.current);
+          promptPendingTimeoutRef.current = null;
+        }
+      }
+
       setMessages((prev) => {
         if (prev.some((m) => m.id === msg.id)) return prev;
         // Replace optimistic message if this is a server-confirmed user message with matching content
@@ -410,14 +423,25 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     void loadSession();
   }, [loadSession]);
 
-  // Auto-scroll to bottom only when new messages are appended
+  // Auto-scroll to bottom on initial load, session switch, and new messages
   const prevMessageCountRef = useRef(0);
+  const prevSessionIdRef = useRef(sessionId);
   useEffect(() => {
-    if (messages.length > prevMessageCountRef.current && !loading && !loadingMore) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (loading || loadingMore) return;
+
+    const isNewSession = prevSessionIdRef.current !== sessionId;
+    const hasNewMessages = messages.length > prevMessageCountRef.current;
+    const isInitialLoad = prevMessageCountRef.current === 0 && messages.length > 0;
+
+    if (isNewSession || hasNewMessages || isInitialLoad) {
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: isNewSession ? 'instant' : 'smooth' });
+      });
     }
+
     prevMessageCountRef.current = messages.length;
-  }, [messages.length, loading, loadingMore]);
+    prevSessionIdRef.current = sessionId;
+  }, [messages.length, loading, loadingMore, sessionId]);
 
   // Polling fallback — keeps running alongside WebSocket for reliability.
   // Only updates state when the server has new data (fingerprint-based).
@@ -514,7 +538,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         createdAt: Date.now(),
       }]);
 
-      // Try sending via WebSocket
+      // Try sending via WebSocket (persists message in ProjectData DO)
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({
           type: 'message.send',
@@ -527,6 +551,23 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         // be delivered until the next poll cycle or WS reconnects.
         console.warn('[ProjectMessageView] WebSocket not connected, message delivery deferred');
       }
+
+      // Forward the prompt to the running agent via API
+      setPromptPending(true);
+      // Safety timeout — clear indicator after 30s even if no response
+      promptPendingTimeoutRef.current = setTimeout(() => {
+        setPromptPending(false);
+        promptPendingTimeoutRef.current = null;
+      }, 30_000);
+
+      sendFollowUpPrompt(projectId, sessionId, trimmed).catch((err) => {
+        console.warn('[ProjectMessageView] Follow-up prompt forwarding failed:', err);
+        setPromptPending(false);
+        if (promptPendingTimeoutRef.current) {
+          clearTimeout(promptPendingTimeoutRef.current);
+          promptPendingTimeoutRef.current = null;
+        }
+      });
 
       setFollowUp('');
     } finally {
@@ -687,6 +728,14 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Agent working indicator — shown after sending a follow-up prompt */}
+      {promptPending && (
+        <div className="flex items-center gap-2 px-4 py-2 border-t border-border-default bg-surface shrink-0">
+          <Spinner size="sm" />
+          <span className="text-xs text-fg-muted">Agent is working...</span>
+        </div>
+      )}
 
       {/* Input area — varies by session state */}
       {sessionState === 'active' && (
