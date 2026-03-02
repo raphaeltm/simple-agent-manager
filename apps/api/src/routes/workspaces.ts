@@ -107,11 +107,13 @@ function isActiveWorkspaceStatus(status: string): boolean {
   return ACTIVE_WORKSPACE_STATUSES.has(status as 'running' | 'recovery');
 }
 
-/** Parse a JSON string into an object, returning null on failure. */
+/** Parse a JSON string into a plain object, returning null on failure or prototype pollution. */
 function safeParseJson(s: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(s);
-    return typeof parsed === 'object' && parsed !== null ? parsed : null;
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+    if ('__proto__' in parsed || 'constructor' in parsed || 'prototype' in parsed) return null;
+    return parsed as Record<string, unknown>;
   } catch {
     return null;
   }
