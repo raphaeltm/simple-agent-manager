@@ -27,6 +27,6 @@ jobs:
     uses: ./.github/workflows/deploy-reusable.yml
     with:
       environment: staging
-      skip_agent: false
+      skip_agent: false # Required: staging VMs need the agent binary in R2
       dry_run: ${{ inputs.dry_run || false }}
     secrets: inherit
