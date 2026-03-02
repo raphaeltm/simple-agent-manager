@@ -111,7 +111,7 @@ type ProcessConfig struct {
 	ContainerID string
 	// ContainerUser is the user to run as inside the container.
 	ContainerUser string
-	// AcpCommand is the binary name (e.g., "claude-code-acp").
+	// AcpCommand is the binary name (e.g., "claude-agent-acp").
 	AcpCommand string
 	// AcpArgs are additional CLI arguments (e.g., ["--experimental-acp"]).
 	AcpArgs []string
@@ -265,7 +265,7 @@ func (p *AgentProcess) Stop() error {
 	defer deadline.Stop()
 
 	// Stage 1: SIGTERM inside the container. This is the critical step —
-	// the agent processes (claude-code-acp, claude) run inside the container's
+	// the agent processes (claude-agent-acp, claude) run inside the container's
 	// PID namespace. Host-side PGID signals only affect docker exec itself.
 	p.killContainerProcesses(syscall.SIGTERM)
 
@@ -315,7 +315,7 @@ func (p *AgentProcess) Stop() error {
 // `docker exec` process does NOT terminate the processes inside the container —
 // they run in a separate PID namespace.
 //
-// Targets both the ACP adapter (claude-code-acp) and the underlying agent
+// Targets both the ACP adapter (claude-agent-acp) and the underlying agent
 // (claude) to ensure nothing leaks.
 func (p *AgentProcess) killContainerProcesses(sig syscall.Signal) {
 	if p.containerID == "" {

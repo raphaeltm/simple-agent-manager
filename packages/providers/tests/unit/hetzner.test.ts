@@ -105,7 +105,7 @@ describe('HetznerProvider', () => {
     it('should inject ACP adapters via --additional-features', () => {
       const cloudInit = provider.generateCloudInit(vmConfig);
       expect(cloudInit).toContain('--additional-features');
-      expect(cloudInit).toContain('@zed-industries/claude-code-acp');
+      expect(cloudInit).toContain('@zed-industries/claude-agent-acp');
       expect(cloudInit).toContain('npm-features/npm-package');
     });
 

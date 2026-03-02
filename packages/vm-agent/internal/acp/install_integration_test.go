@@ -549,7 +549,7 @@ func TestIntegration_InstallAgent_Devcontainer_SAMRepoConfig(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestIntegration_InstallAgent_RealClaudeCodeACP installs the actual
-// @zed-industries/claude-code-acp package and Claude Code CLI inside a
+// @zed-industries/claude-agent-acp package and Claude Code CLI inside a
 // SAM-style devcontainer, then verifies they work together.
 //
 // This test requires network access (npm registry + claude.ai) and takes
@@ -594,29 +594,29 @@ func TestIntegration_InstallAgent_RealClaudeCodeACP(t *testing.T) {
 		_ = exec.Command("docker", "rm", "-f", containerID).Run()
 	})
 
-	// Step 1: Install claude-code-acp using the REAL production install path
+	// Step 1: Install claude-agent-acp using the REAL production install path
 	realInfo := getAgentCommandInfo("claude-code", "")
 	t.Logf("Installing real agent: command=%s, installCmd=%s", realInfo.command, realInfo.installCmd)
 
 	if err := installAgentBinary(ctx, containerID, realInfo); err != nil {
-		t.Fatalf("installAgentBinary with real claude-code-acp: %v", err)
+		t.Fatalf("installAgentBinary with real claude-agent-acp: %v", err)
 	}
 
-	// Verify claude-code-acp is installed
-	out, err = exec.CommandContext(ctx, "docker", "exec", containerID, "which", "claude-code-acp").CombinedOutput()
+	// Verify claude-agent-acp is installed
+	out, err = exec.CommandContext(ctx, "docker", "exec", containerID, "which", "claude-agent-acp").CombinedOutput()
 	if err != nil {
-		t.Fatalf("claude-code-acp not found after install: %v\n%s", err, string(out))
+		t.Fatalf("claude-agent-acp not found after install: %v\n%s", err, string(out))
 	}
-	t.Logf("claude-code-acp location: %s", strings.TrimSpace(string(out)))
+	t.Logf("claude-agent-acp location: %s", strings.TrimSpace(string(out)))
 
-	// Verify non-root user (node) can find and execute claude-code-acp
-	out, err = exec.CommandContext(ctx, "docker", "exec", "-u", "node", containerID, "which", "claude-code-acp").CombinedOutput()
+	// Verify non-root user (node) can find and execute claude-agent-acp
+	out, err = exec.CommandContext(ctx, "docker", "exec", "-u", "node", containerID, "which", "claude-agent-acp").CombinedOutput()
 	if err != nil {
-		t.Fatalf("claude-code-acp not accessible by node user: %v\n%s", err, string(out))
+		t.Fatalf("claude-agent-acp not accessible by node user: %v\n%s", err, string(out))
 	}
-	t.Logf("claude-code-acp accessible by node user at: %s", strings.TrimSpace(string(out)))
+	t.Logf("claude-agent-acp accessible by node user at: %s", strings.TrimSpace(string(out)))
 
-	// Step 2: Install Claude Code CLI (the underlying CLI that claude-code-acp wraps)
+	// Step 2: Install Claude Code CLI (the underlying CLI that claude-agent-acp wraps)
 	// Install as the node user so it lands in /home/node/.local/bin/ (matching production
 	// where the devcontainer's default user runs the install script).
 	// Then symlink to /usr/local/bin/ so it's on everyone's PATH.
@@ -642,12 +642,12 @@ func TestIntegration_InstallAgent_RealClaudeCodeACP(t *testing.T) {
 	}
 	t.Logf("claude version: %s", strings.TrimSpace(string(out)))
 
-	// Step 3: Verify claude-code-acp + claude CLI work together via ACP protocol.
+	// Step 3: Verify claude-agent-acp + claude CLI work together via ACP protocol.
 	// Send an ACP Initialize JSON-RPC message to stdin and verify we get a valid
 	// response with agent capabilities. This is the critical integration point:
-	// claude-code-acp must find claude CLI and successfully negotiate the protocol.
+	// claude-agent-acp must find claude CLI and successfully negotiate the protocol.
 	acpInitMsg := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}`
-	acpTestScript := fmt.Sprintf(`echo '%s' | timeout 15 claude-code-acp 2>/dev/null`, acpInitMsg)
+	acpTestScript := fmt.Sprintf(`echo '%s' | timeout 15 claude-agent-acp 2>/dev/null`, acpInitMsg)
 	out, err = exec.CommandContext(ctx, "docker", "exec", "-u", "node", containerID, "bash", "-c", acpTestScript).CombinedOutput()
 	if err != nil {
 		t.Fatalf("ACP Initialize handshake failed: %v\n%s", err, string(out))
@@ -659,7 +659,7 @@ func TestIntegration_InstallAgent_RealClaudeCodeACP(t *testing.T) {
 	if !strings.Contains(acpResponse, `"jsonrpc":"2.0"`) {
 		t.Fatalf("expected JSON-RPC response, got: %s", acpResponse)
 	}
-	if !strings.Contains(acpResponse, "claude-code-acp") {
+	if !strings.Contains(acpResponse, "claude-agent-acp") {
 		t.Fatalf("expected agent name in response, got: %s", acpResponse)
 	}
 	if !strings.Contains(acpResponse, `"agentCapabilities"`) {

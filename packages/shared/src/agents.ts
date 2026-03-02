@@ -57,11 +57,11 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     description: "Anthropic's AI coding agent",
     provider: 'anthropic',
     envVarName: 'ANTHROPIC_API_KEY',
-    acpCommand: 'claude-code-acp',
+    acpCommand: 'claude-agent-acp',
     acpArgs: [],
     supportsAcp: true,
     credentialHelpUrl: 'https://console.anthropic.com/settings/keys',
-    installCommand: 'npm install -g @zed-industries/claude-code-acp',
+    installCommand: 'npm install -g @zed-industries/claude-agent-acp',
     oauthSupport: {
       envVarName: 'CLAUDE_CODE_OAUTH_TOKEN',
       setupInstructions: 'Generate a token using "claude setup-token" or "claude login" in your terminal',

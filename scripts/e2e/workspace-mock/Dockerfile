@@ -9,7 +9,7 @@ WORKDIR /workspace
 COPY mock-acp-agent.sh /usr/local/bin/mock-acp-agent
 
 RUN chmod +x /usr/local/bin/mock-acp-agent \
-  && ln -s /usr/local/bin/mock-acp-agent /usr/local/bin/claude-code-acp \
+  && ln -s /usr/local/bin/mock-acp-agent /usr/local/bin/claude-agent-acp \
   && ln -s /usr/local/bin/mock-acp-agent /usr/local/bin/codex-acp \
   && ln -s /usr/local/bin/mock-acp-agent /usr/local/bin/gemini
 

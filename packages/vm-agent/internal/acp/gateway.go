@@ -475,9 +475,9 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 	switch agentType {
 	case "claude-code":
 		if credentialKind == "oauth-token" {
-			return agentCommandInfo{"claude-code-acp", nil, "CLAUDE_CODE_OAUTH_TOKEN", "npm install -g @zed-industries/claude-code-acp"}
+			return agentCommandInfo{"claude-agent-acp", nil, "CLAUDE_CODE_OAUTH_TOKEN", "npm install -g @zed-industries/claude-agent-acp"}
 		}
-		return agentCommandInfo{"claude-code-acp", nil, "ANTHROPIC_API_KEY", "npm install -g @zed-industries/claude-code-acp"}
+		return agentCommandInfo{"claude-agent-acp", nil, "ANTHROPIC_API_KEY", "npm install -g @zed-industries/claude-agent-acp"}
 	case "openai-codex":
 		return agentCommandInfo{"codex-acp", nil, "OPENAI_API_KEY", "npm install -g @zed-industries/codex-acp"}
 	case "google-gemini":
