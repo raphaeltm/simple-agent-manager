@@ -1,0 +1,137 @@
+name: Claude Deployment Safety Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+jobs:
+  deployment-safety:
+    if: ${{ !github.event.pull_request.head.repo.fork }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run SAM deployment safety review
+        id: review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          display_report: true
+          prompt: |
+            You are a deployment-safety reviewer for Simple Agent Manager (SAM),
+            a serverless monorepo on Cloudflare Workers + Hetzner Cloud VMs.
+
+            Read CLAUDE.md for full project context, then review the PR diff for
+            deployment risks that static analysis can't catch.
+
+            ## SAM-Specific Checks
+
+            1. **Wrangler binding consistency**: Environment-specific [env.*] sections
+               are generated at deploy time by scripts/deploy/sync-wrangler-config.ts.
+               If any [env.staging] or [env.production] sections appear in wrangler.toml,
+               flag as CRITICAL — they must not be checked in.
+               If new bindings are added, verify they are in the top-level section only.
+
+            2. **Durable Object migrations**: If a new DO class is added, verify there
+               is a corresponding [[migrations]] entry with the correct tag and that the
+               class is exported from the worker entrypoint (index.ts).
+
+            3. **Environment variable naming**: GitHub secrets use GH_* prefix;
+               Worker runtime uses GITHUB_* prefix. configure-secrets.sh maps between
+               them. If new env vars are added, verify correct prefix per context and
+               that .env.example is updated.
+
+            4. **Cross-component contract changes**: If shared types in packages/shared
+               are modified, check that all consumers (apps/api, apps/web,
+               packages/vm-agent) are updated accordingly.
+
+            5. **Database schema changes**: If new D1 migrations are added, verify they
+               are backward-compatible (no column drops without migration strategy).
+
+            6. **Constitution compliance**: Check for hardcoded URLs (should derive from
+               BASE_DOMAIN), hardcoded timeouts (should be configurable), or hardcoded
+               limits/identifiers.
+
+            7. **URL construction**: All URLs must use subdomains — app.${BASE_DOMAIN}
+               for web UI, api.${BASE_DOMAIN} for API, ws-${id}.${BASE_DOMAIN} for
+               workspaces. Never bare ${BASE_DOMAIN}.
+
+            8. **BYOC principle**: The platform must NOT have cloud provider credentials.
+               User credentials are encrypted per-user in the database, never as env vars
+               or Worker secrets.
+
+            9. **Documentation sync**: If behavior or interfaces changed, verify docs are
+               updated in the same PR (CLAUDE.md, docs/, specs/).
+
+            10. **Build order**: shared -> providers -> cloud-init -> api/web. If
+                dependencies between packages changed, verify build order is respected.
+
+            ## Review Standards
+
+            Only report genuine deployment risks and correctness issues.
+            Do not flag style, formatting, or minor suggestions.
+            If everything looks safe, set pass to true with an empty findings array.
+
+            Set "pass" to false only if you find critical or high severity issues
+            that could cause deployment failures, data loss, or security problems.
+
+            Post findings as inline PR comments on the relevant lines so the
+            author gets feedback directly in the diff view.
+          claude_args: >-
+            --max-turns 15
+            --output-format json
+            --json-schema '{"type":"object","properties":{"pass":{"type":"boolean","description":"true if no critical/high issues found"},"summary":{"type":"string","description":"Brief overall assessment"},"findings":{"type":"array","items":{"type":"object","properties":{"severity":{"type":"string","enum":["critical","high","medium","low"]},"category":{"type":"string","description":"Which SAM check this relates to"},"file":{"type":"string","description":"Affected file path, if applicable"},"description":{"type":"string","description":"What the issue is and why it matters"}},"required":["severity","category","description"]}}},"required":["pass","summary","findings"]}'
+
+      - name: Display findings
+        if: always() && steps.review.outputs.structured_output
+        run: |
+          OUTPUT=$(cat <<'JSON'
+          ${{ steps.review.outputs.structured_output }}
+          JSON
+          )
+
+          echo "## Deployment Safety Review" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "$OUTPUT" | jq -r '.summary' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          CRITICAL=$(echo "$OUTPUT" | jq '[.findings[] | select(.severity == "critical")] | length')
+          HIGH=$(echo "$OUTPUT" | jq '[.findings[] | select(.severity == "high")] | length')
+          MEDIUM=$(echo "$OUTPUT" | jq '[.findings[] | select(.severity == "medium")] | length')
+          LOW=$(echo "$OUTPUT" | jq '[.findings[] | select(.severity == "low")] | length')
+
+          echo "| Severity | Count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Critical | $CRITICAL |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| High | $HIGH |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Medium | $MEDIUM |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Low | $LOW |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$(echo "$OUTPUT" | jq '.findings | length')" -gt 0 ]; then
+            echo "### Findings" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "$OUTPUT" | jq -r '.findings[] | "- **\(.severity)** [\(.category)] \(.file // ""): \(.description)"' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Gate on review result
+        if: always() && steps.review.outputs.structured_output
+        run: |
+          PASS=$(cat <<'JSON' | jq -r '.pass'
+          ${{ steps.review.outputs.structured_output }}
+          JSON
+          )
+          if [ "$PASS" != "true" ]; then
+            echo "::error::Deployment safety review found critical/high issues — see Step Summary for details"
+            exit 1
+          fi
+          echo "Deployment safety review passed."
