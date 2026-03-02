@@ -89,14 +89,16 @@ export function ProjectChat() {
         const task = await getProjectTask(projectId, provisioning.taskId);
         setProvisioning((prev) => prev ? { ...prev, status: task.status, executionStep: task.executionStep ?? null, errorMessage: task.errorMessage ?? null } : null);
 
-        // When task reaches in_progress and has a workspace, navigate to its session
-        if (task.status === 'in_progress' && task.workspaceId) {
+        // Dismiss provisioning when task is running or has a workspace
+        if (task.status === 'in_progress' && (task.workspaceId || task.executionStep === 'running')) {
           navigate(`/projects/${projectId}/chat/${provisioning.sessionId}`, { replace: true });
           setProvisioning(null);
         }
 
         if (isTerminal(task.status)) {
-          // Reload sessions on terminal to pick up final state
+          // Clear provisioning so the session view renders and shows the task error
+          navigate(`/projects/${projectId}/chat/${provisioning.sessionId}`, { replace: true });
+          setProvisioning(null);
           void loadSessions();
         }
       } catch {

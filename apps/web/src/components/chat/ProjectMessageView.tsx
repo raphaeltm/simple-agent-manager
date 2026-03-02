@@ -77,7 +77,7 @@ interface ExtendedSession extends ChatSessionResponse {
   agentCompletedAt?: number | null;
   isIdle?: boolean;
   cleanupAt?: number | null;
-  task?: { id: string; outputBranch?: string | null; outputPrUrl?: string | null; errorMessage?: string | null; outputSummary?: string | null };
+  task?: { id: string; status?: string; executionStep?: string | null; errorMessage?: string | null; outputBranch?: string | null; outputPrUrl?: string | null; outputSummary?: string | null; finalizedAt?: string | null };
 }
 
 function deriveSessionState(session: ChatSessionResponse): SessionState {
@@ -119,6 +119,17 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     onMessage: useCallback((msg: ChatMessageResponse) => {
       setMessages((prev) => {
         if (prev.some((m) => m.id === msg.id)) return prev;
+        // Replace optimistic message if this is a server-confirmed user message with matching content
+        if (msg.role === 'user') {
+          const optimisticIdx = prev.findIndex(
+            (m) => m.id.startsWith('optimistic-') && m.role === 'user' && m.content === msg.content
+          );
+          if (optimisticIdx !== -1) {
+            const updated = [...prev];
+            updated[optimisticIdx] = msg;
+            return updated;
+          }
+        }
         return [...prev, msg];
       });
     }, []),
@@ -175,14 +186,18 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     let lastPollFingerprint = '';
     const pollInterval = setInterval(async () => {
       try {
-        const data = await getChatSession(projectId, sessionId);
+        const data: ChatSessionDetailResponse & { session: ExtendedSession } = await getChatSession(projectId, sessionId);
         const newLastId = data.messages[data.messages.length - 1]?.id ?? '';
-        const fingerprint = `${data.messages.length}:${newLastId}:${data.session.status}:${data.hasMore}`;
+        const taskStatus = data.session.task?.status ?? '';
+        const fingerprint = `${data.messages.length}:${newLastId}:${data.session.status}:${data.hasMore}:${taskStatus}`;
         if (fingerprint !== lastPollFingerprint) {
           lastPollFingerprint = fingerprint;
           setSession(data.session);
           setHasMore(data.hasMore);
           setMessages(data.messages);
+          if (data.session.task) {
+            setTaskEmbed(data.session.task);
+          }
         }
       } catch {
         // Silently fail on poll errors
@@ -246,9 +261,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           });
       }
 
-      // Optimistic add
+      // Optimistic add — use a prefixed ID so we can replace it with the server-confirmed message
+      const optimisticId = `optimistic-${crypto.randomUUID()}`;
       setMessages((prev) => [...prev, {
-        id: crypto.randomUUID(),
+        id: optimisticId,
         sessionId,
         role: 'user',
         content: trimmed,
@@ -387,18 +403,18 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
 
-      {/* Task error/summary display (TDF-8) */}
-      {taskEmbed?.errorMessage && sessionState === 'terminated' && (
+      {/* Task error/summary display — shown whenever task has error/summary, regardless of session state */}
+      {taskEmbed?.errorMessage && (
         <div className="px-4 py-2 bg-danger-tint border-b border-border-default">
           <span className="sam-type-caption text-danger font-medium">
-            Error:
+            Task failed:
           </span>{' '}
           <span className="sam-type-caption text-danger break-words">
             {taskEmbed.errorMessage}
           </span>
         </div>
       )}
-      {taskEmbed?.outputSummary && sessionState === 'terminated' && (
+      {taskEmbed?.outputSummary && (
         <div className="px-4 py-2 bg-success-tint border-b border-border-default">
           <span className="sam-type-caption text-success font-medium">
             Summary:

@@ -829,16 +829,40 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    // Handle ping/pong for Hibernatable WebSocket keep-alive
-    if (typeof message === 'string') {
-      try {
-        const parsed = JSON.parse(message);
-        if (parsed.type === 'ping') {
-          ws.send(JSON.stringify({ type: 'pong' }));
-        }
-      } catch {
-        // Ignore non-JSON messages
+    if (typeof message !== 'string') return;
+
+    try {
+      const parsed = JSON.parse(message);
+
+      if (parsed.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong' }));
+        return;
       }
+
+      if (parsed.type === 'message.send') {
+        const { sessionId, content, role } = parsed;
+        if (!sessionId || !content || typeof content !== 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: 'Missing sessionId or content' }));
+          return;
+        }
+        const sanitizedRole = role === 'user' ? 'user' : 'user'; // Only allow user role from clients
+        const trimmed = content.trim();
+        if (!trimmed || trimmed.length > 2000) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Message must be 1-2000 characters' }));
+          return;
+        }
+
+        try {
+          const messageId = await this.persistMessage(sessionId, sanitizedRole, trimmed, null);
+          ws.send(JSON.stringify({ type: 'message.ack', messageId, sessionId }));
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : 'Failed to persist message';
+          ws.send(JSON.stringify({ type: 'error', message: errMsg }));
+        }
+        return;
+      }
+    } catch {
+      // Ignore non-JSON messages
     }
   }
 
