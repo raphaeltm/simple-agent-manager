@@ -245,7 +245,7 @@ export function ProjectChat() {
 
   return (
     <div
-      className={`grid bg-surface overflow-hidden ${isMobile ? 'flex-1 min-h-0' : 'border border-border-default rounded-md min-h-[500px] max-h-[calc(100vh-240px)]'}`}
+      className={`grid bg-surface overflow-hidden flex-1 min-h-0 ${isMobile ? '' : 'border border-border-default rounded-md'}`}
       style={{
         gridTemplateColumns: showInlineSidebar ? '280px 1fr' : '1fr',
       }}

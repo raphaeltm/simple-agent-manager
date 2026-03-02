@@ -52,7 +52,7 @@ export function PageLayout({
   };
 
   return (
-    <div className={`min-h-screen bg-canvas ${compact ? 'flex flex-col' : ''}`}>
+    <div className="min-h-0 flex-1 flex flex-col bg-canvas">
       {!hideHeader && (
         <header className="bg-surface border-b border-border-default">
           <div
@@ -80,7 +80,7 @@ export function PageLayout({
         </header>
       )}
       <main
-        className={`${mwClass} mx-auto ${compact ? 'flex flex-col flex-1 min-h-0' : ''}`}
+        className={`${mwClass} mx-auto flex flex-col flex-1 min-h-0`}
         style={compact ? compactPaddingStyle : mainPaddingStyle}
       >
         {children}
