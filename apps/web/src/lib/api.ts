@@ -30,7 +30,7 @@ import type {
   CredentialResponse,
   CreateCredentialRequest,
   GitHubInstallation,
-  Repository,
+  RepositoryListResponse,
   TerminalTokenResponse,
   AgentSession,
   CreateAgentSessionRequest,
@@ -150,11 +150,11 @@ export async function getGitHubInstallUrl(): Promise<{ url: string }> {
   return request<{ url: string }>('/api/github/install-url');
 }
 
-export async function listRepositories(installationId?: string): Promise<Repository[]> {
+export async function listRepositories(installationId?: string): Promise<RepositoryListResponse> {
   const url = installationId
     ? `/api/github/repositories?installation_id=${installationId}`
     : '/api/github/repositories';
-  return request<Repository[]>(url);
+  return request<RepositoryListResponse>(url);
 }
 
 export async function listBranches(

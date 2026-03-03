@@ -58,16 +58,18 @@ describe('CreateWorkspace', () => {
       },
     ]);
     mocks.listNodes.mockResolvedValue([]);
-    mocks.listRepositories.mockResolvedValue([
-      {
-        id: 1,
-        fullName: 'octo/my-repo',
-        name: 'my-repo',
-        private: false,
-        defaultBranch: 'main',
-        installationId: 'inst-1',
-      },
-    ]);
+    mocks.listRepositories.mockResolvedValue({
+      repositories: [
+        {
+          id: 1,
+          fullName: 'octo/my-repo',
+          name: 'my-repo',
+          private: false,
+          defaultBranch: 'main',
+          installationId: 'inst-1',
+        },
+      ],
+    });
     mocks.listBranches.mockResolvedValue([
       { name: 'main' },
       { name: 'develop' },

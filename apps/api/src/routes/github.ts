@@ -73,16 +73,16 @@ githubRoutes.get('/repositories', requireAuth(), requireApproved(), async (c) =>
     return c.json([]);
   }
 
-  // Filter by installation if specified
+  // Filter by installation if specified (match by DB row ID, consistent with branches endpoint)
   const targetInstallations = installationId
-    ? installations.filter((i) => i.installationId === installationId)
+    ? installations.filter((i) => i.id === installationId)
     : installations;
 
   if (targetInstallations.length === 0) {
     throw errors.notFound('Installation');
   }
 
-  // Fetch repositories from all installations in parallel (was sequential for-of loop).
+  // Fetch repositories from all installations in parallel
   const repoResults = await Promise.allSettled(
     targetInstallations.map(async (inst) => {
       const repos = await getInstallationRepositories(inst.installationId, c.env);
@@ -98,15 +98,22 @@ githubRoutes.get('/repositories', requireAuth(), requireApproved(), async (c) =>
   );
 
   const allRepos: Repository[] = [];
-  for (const result of repoResults) {
+  const failedInstallations: string[] = [];
+  for (let i = 0; i < repoResults.length; i++) {
+    const result = repoResults[i]!;
     if (result.status === 'fulfilled') {
       allRepos.push(...result.value);
     } else {
-      console.error('Failed to get repos for installation:', result.reason);
+      const inst = targetInstallations[i]!;
+      console.error(`Failed to get repos for installation ${inst.accountName} (${inst.id}):`, result.reason);
+      failedInstallations.push(inst.accountName);
     }
   }
 
-  return c.json(allRepos);
+  return c.json({
+    repositories: allRepos,
+    ...(failedInstallations.length > 0 && { failedInstallations }),
+  });
 });
 
 /**

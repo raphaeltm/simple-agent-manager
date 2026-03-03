@@ -367,6 +367,7 @@ export function CreateWorkspace() {
                 value={repository}
                 onChange={setRepository}
                 onRepoSelect={handleRepoSelect}
+                installationId={installationId}
                 required
               />
             )}
@@ -410,7 +411,16 @@ export function CreateWorkspace() {
               <label htmlFor="installation" style={labelStyle}>
                 GitHub Account
               </label>
-              <Select id="installation" value={installationId} onChange={(e) => setInstallationId(e.target.value)}>
+              <Select id="installation" value={installationId} onChange={(e) => {
+                setInstallationId(e.target.value);
+                if (!isProjectLinked) {
+                  setRepository('');
+                  setBranch('main');
+                  setBranches([]);
+                  setBranchesError(null);
+                  setRepoDefaultBranch(undefined);
+                }
+              }}>
                 {installations.map((installation) => (
                   <option key={installation.id} value={installation.id}>
                     {installation.accountName} ({installation.accountType})
