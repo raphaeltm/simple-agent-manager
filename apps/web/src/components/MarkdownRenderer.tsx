@@ -150,10 +150,12 @@ export const SyntaxHighlightedCode: FC<{ content: string; language: string }> = 
 
 // ---------- Markdown Rendering ----------
 
-export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties }> = ({ content, style }) => {
+export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inline?: boolean }> = ({ content, style, inline }) => {
   return (
     <div
-      className="max-w-[900px] mx-auto overflow-x-hidden p-4 text-fg-primary leading-relaxed text-base break-words"
+      className={inline
+        ? 'text-fg-primary leading-relaxed text-base break-words overflow-x-hidden'
+        : 'max-w-[900px] mx-auto overflow-x-hidden p-4 text-fg-primary leading-relaxed text-base break-words'}
       style={style}
       data-testid="rendered-markdown"
     >
