@@ -119,7 +119,11 @@ export const ProjectInfoPanel: FC<ProjectInfoPanelProps> = ({ projectId, open, o
             <h2 id="info-panel-title" className="m-0 text-base font-semibold text-fg-primary">
               Project Status
             </h2>
-            {refreshing && <Spinner size="sm" />}
+            {refreshing && (
+              <span role="status" aria-label="Refreshing project status" className="inline-flex items-center">
+                <Spinner size="sm" />
+              </span>
+            )}
           </div>
           <button
             type="button"
