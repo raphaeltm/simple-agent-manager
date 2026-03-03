@@ -151,7 +151,7 @@ nodesRoutes.post('/', async (c) => {
   const existingNodes = await db
     .select({ id: schema.nodes.id })
     .from(schema.nodes)
-    .where(eq(schema.nodes.userId, userId));
+    .where(and(eq(schema.nodes.userId, userId), ne(schema.nodes.status, 'deleted')));
 
   if (existingNodes.length >= limits.maxNodesPerUser) {
     throw errors.badRequest(`Maximum ${limits.maxNodesPerUser} nodes allowed`);
@@ -235,7 +235,7 @@ nodesRoutes.post('/:id/stop', async (c) => {
       .where(inArray(schema.agentSessions.workspaceId, workspaceIds));
   }
 
-  return c.json({ status: 'stopped' });
+  return c.json({ status: 'deleted' });
 });
 
 nodesRoutes.delete('/:id', async (c) => {

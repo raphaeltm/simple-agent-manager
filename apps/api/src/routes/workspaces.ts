@@ -139,7 +139,7 @@ async function getOwnedWorkspace(
     .limit(1);
 
   const workspace = rows[0];
-  if (!workspace) {
+  if (!workspace || workspace.status === 'deleted') {
     throw errors.notFound('Workspace');
   }
 

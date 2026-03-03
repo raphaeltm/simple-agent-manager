@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { getUserId } from './auth';
 import { nodes, type Node, workspaces, type Workspace } from '../db/schema';
@@ -22,7 +22,8 @@ export async function requireNodeOwnership(
     .where(
       and(
         eq(nodes.id, nodeId),
-        eq(nodes.userId, userId)
+        eq(nodes.userId, userId),
+        ne(nodes.status, 'deleted')
       )
     )
     .limit(1);

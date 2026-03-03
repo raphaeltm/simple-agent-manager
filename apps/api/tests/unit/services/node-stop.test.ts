@@ -1,10 +1,11 @@
 /**
- * Source contract tests for stopNodeResources (stop-node-marks-deleted).
+ * Source contract tests for stop-node-marks-deleted feature.
  *
  * Verifies that stopping a node:
  * 1. Deletes the Hetzner server (not just powers off)
  * 2. Deletes the DNS record
  * 3. Marks node and workspaces as 'deleted' (not 'stopped')
+ * 4. All deletion paths use consistent 'deleted' terminal status
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -34,7 +35,6 @@ describe('stopNodeResources source contract', () => {
 
   it('marks workspaces as deleted', () => {
     expect(section).toContain("status: 'deleted'");
-    // Ensure it does NOT use 'stopped' for workspaces
     const workspaceUpdate = section.slice(
       section.indexOf('.update(schema.workspaces)'),
       section.indexOf('.update(schema.nodes)')
@@ -47,5 +47,51 @@ describe('stopNodeResources source contract', () => {
     const nodeUpdate = section.slice(section.indexOf('.update(schema.nodes)'));
     expect(nodeUpdate).toContain("status: 'deleted'");
     expect(nodeUpdate).not.toContain("status: 'stopped'");
+  });
+});
+
+describe('deleted status consistency across deletion paths', () => {
+  it('requireNodeOwnership filters deleted nodes', () => {
+    const authFile = readFileSync(resolve(process.cwd(), 'src/middleware/node-auth.ts'), 'utf8');
+    expect(authFile).toContain("ne(nodes.status, 'deleted')");
+  });
+
+  it('node creation limit excludes deleted nodes', () => {
+    const nodesFile = readFileSync(resolve(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
+    const createSection = nodesFile.slice(
+      nodesFile.indexOf("nodesRoutes.post('/',"),
+      nodesFile.indexOf("nodesRoutes.get('/:id',")
+    );
+    expect(createSection).toContain("ne(schema.nodes.status, 'deleted')");
+  });
+
+  it('stop endpoint returns deleted status in response', () => {
+    const nodesFile = readFileSync(resolve(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
+    const stopSection = nodesFile.slice(
+      nodesFile.indexOf("nodesRoutes.post('/:id/stop',"),
+      nodesFile.indexOf("nodesRoutes.delete('/:id',")
+    );
+    expect(stopSection).toContain("c.json({ status: 'deleted' })");
+  });
+
+  it('cron cleanup marks destroyed nodes as deleted', () => {
+    const cleanupFile = readFileSync(resolve(process.cwd(), 'src/scheduled/node-cleanup.ts'), 'utf8');
+    expect(cleanupFile).toContain("status: 'deleted'");
+    expect(cleanupFile).not.toContain("status: 'stopped', warmSince: null");
+  });
+
+  it('cron lifetime guard skips deleted nodes', () => {
+    const cleanupFile = readFileSync(resolve(process.cwd(), 'src/scheduled/node-cleanup.ts'), 'utf8');
+    expect(cleanupFile).toContain("node.status === 'deleted'");
+  });
+
+  it('task runner guards against deleted node status', () => {
+    const taskRunner = readFileSync(resolve(process.cwd(), 'src/services/task-runner.ts'), 'utf8');
+    expect(taskRunner).toContain("node.status === 'deleted'");
+  });
+
+  it('getOwnedWorkspace rejects deleted workspaces', () => {
+    const wsFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces.ts'), 'utf8');
+    expect(wsFile).toContain("workspace.status === 'deleted'");
   });
 });
