@@ -113,7 +113,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
       });
       await db
         .update(schema.nodes)
-        .set({ status: 'stopped', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
+        .set({ status: 'deleted', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
         .where(eq(schema.nodes.id, node.id));
       result.staleDestroyed++;
     } catch (err) {
@@ -168,7 +168,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
       .where(eq(schema.nodes.id, nodeId))
       .limit(1);
 
-    if (!node || node.status === 'stopped') continue;
+    if (!node || node.status === 'stopped' || node.status === 'deleted') continue;
     if (node.createdAt > lifetimeThreshold) continue; // Not past max lifetime
 
     // Node exceeds max lifetime — destroy regardless
@@ -193,7 +193,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
       });
       await db
         .update(schema.nodes)
-        .set({ status: 'stopped', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
+        .set({ status: 'deleted', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
         .where(eq(schema.nodes.id, node.id));
       result.lifetimeDestroyed++;
     } catch (err) {

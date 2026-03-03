@@ -37,6 +37,10 @@ describe('nodes routes source contract', () => {
     expect(file).toContain('.delete(schema.nodes)');
   });
 
+  it('excludes deleted nodes from list endpoint', () => {
+    expect(file).toContain("ne(schema.nodes.status, 'deleted')");
+  });
+
   it('contains heartbeat health transition logic', () => {
     expect(file).toContain('deriveHealthStatus');
     expect(file).toContain('staleThreshold');

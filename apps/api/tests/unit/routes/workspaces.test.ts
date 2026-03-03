@@ -82,4 +82,8 @@ describe('workspaces routes source contract', () => {
     expect(file).toContain('requireOwnedProject');
     expect(file).toContain('projectId: linkedProject?.id ?? null');
   });
+
+  it('excludes deleted workspaces from list endpoint by default', () => {
+    expect(file).toContain("ne(schema.workspaces.status, 'deleted')");
+  });
 });

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { and, count, desc, eq, inArray } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { ulid } from '../lib/ulid';
 import type { Env } from '../index';
@@ -139,7 +139,7 @@ async function getOwnedWorkspace(
     .limit(1);
 
   const workspace = rows[0];
-  if (!workspace) {
+  if (!workspace || workspace.status === 'deleted') {
     throw errors.notFound('Workspace');
   }
 
@@ -345,6 +345,9 @@ workspacesRoutes.get('/', async (c) => {
   const conditions = [eq(schema.workspaces.userId, userId)];
   if (status) {
     conditions.push(eq(schema.workspaces.status, status));
+  } else {
+    // Exclude deleted workspaces by default unless explicitly requested
+    conditions.push(ne(schema.workspaces.status, 'deleted'));
   }
   if (nodeId) {
     conditions.push(eq(schema.workspaces.nodeId, nodeId));

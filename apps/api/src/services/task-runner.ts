@@ -142,9 +142,9 @@ async function cleanupAutoProvisionedNode(
     return;
   }
 
-  // Already stopped — nothing to do
-  if (node.status === 'stopped') {
-    log.info('task_run.cleanup.node_already_stopped', { nodeId });
+  // Already stopped or deleted — nothing to do
+  if (node.status === 'stopped' || node.status === 'deleted') {
+    log.info('task_run.cleanup.node_already_stopped', { nodeId, status: node.status });
     return;
   }
 

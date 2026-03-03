@@ -576,7 +576,7 @@ export interface DashboardActiveTasksResponse {
 // =============================================================================
 // Workspace
 // =============================================================================
-export type NodeStatus = 'pending' | 'creating' | 'running' | 'stopping' | 'stopped' | 'error';
+export type NodeStatus = 'pending' | 'creating' | 'running' | 'stopping' | 'stopped' | 'deleted' | 'error';
 
 export type NodeHealthStatus = 'healthy' | 'stale' | 'unhealthy';
 
@@ -587,6 +587,7 @@ export type WorkspaceStatus =
   | 'recovery'
   | 'stopping'
   | 'stopped'
+  | 'deleted'
   | 'error';
 
 export type VMSize = 'small' | 'medium' | 'large';
