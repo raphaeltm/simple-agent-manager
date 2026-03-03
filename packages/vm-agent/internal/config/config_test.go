@@ -133,8 +133,8 @@ func TestBootstrapTimeoutDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if cfg.BootstrapTimeout != 15*time.Minute {
-		t.Fatalf("BootstrapTimeout=%v, want %v", cfg.BootstrapTimeout, 15*time.Minute)
+	if cfg.BootstrapTimeout != 30*time.Minute {
+		t.Fatalf("BootstrapTimeout=%v, want %v", cfg.BootstrapTimeout, 30*time.Minute)
 	}
 }
 
