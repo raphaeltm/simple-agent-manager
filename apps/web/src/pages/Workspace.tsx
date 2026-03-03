@@ -1429,7 +1429,7 @@ export function Workspace() {
             className="h-full"
             persistenceKey={id ? `sam-terminal-sessions-${id}` : undefined}
             hideTabBar
-            onSessionsChange={(sessions, activeSessionId) => {
+            onSessionsChange={(sessions: MultiTerminalSessionSnapshot[], activeSessionId: string | null) => {
               setTerminalTabs(sessions);
               setActiveTerminalSessionId(activeSessionId);
             }}
