@@ -206,6 +206,64 @@ describe('ProjectData Durable Object', () => {
       expect(typeof results[0]!.lastMessageAt).toBe('number');
       expect(results[0]!.messageCount).toBe(1);
     });
+
+    it('returns a numeric lastMessageAt even for a brand-new session with no messages', async () => {
+      // mapSessionRow sets lastMessageAt = updated_at which is set to Date.now() at creation.
+      // The dashboard uses lastMessageAt to decide isActive; if it is non-null on a new session
+      // the task would incorrectly appear active before any messages exist.
+      // This test pins the current behavior so any change is visible.
+      const stub = getStub('project-batch-new-session-lastmsg');
+      const before = Date.now();
+      await stub.createSession(null, 'Fresh session', 'task-fresh');
+      const after = Date.now();
+
+      const results = await stub.getSessionsByTaskIds(['task-fresh']);
+      expect(results).toHaveLength(1);
+      // lastMessageAt is derived from updated_at which equals created_at on a new session
+      // so it is always a valid number — document and assert this behavior
+      expect(typeof results[0]!.lastMessageAt).toBe('number');
+      expect(results[0]!.lastMessageAt as number).toBeGreaterThanOrEqual(before);
+      expect(results[0]!.lastMessageAt as number).toBeLessThanOrEqual(after);
+      expect(results[0]!.messageCount).toBe(0);
+    });
+
+    it('when a task has multiple sessions returns the most recently updated one first', async () => {
+      // A task can have two sessions if the runner retried (e.g., after a crash).
+      // The query orders by updated_at DESC so the freshest session comes first.
+      const stub = getStub('project-batch-multi-session');
+
+      const s1 = await stub.createSession(null, 'First attempt', 'task-multi');
+      // Add a message to s1 to advance its updated_at
+      await stub.persistMessage(s1, 'user', 'First message', null);
+
+      // Small pause to guarantee a later timestamp for s2
+      await new Promise((r) => setTimeout(r, 5));
+      const s2 = await stub.createSession(null, 'Second attempt', 'task-multi');
+      await stub.persistMessage(s2, 'user', 'Second message', null);
+
+      const results = await stub.getSessionsByTaskIds(['task-multi']);
+      // Both sessions are returned (no status filter)
+      expect(results.length).toBeGreaterThanOrEqual(2);
+      // The first result must be the more recently updated session (s2)
+      expect(results[0]!.id).toBe(s2);
+    });
+
+    it('returns stopped sessions for the given task IDs (no status filter)', async () => {
+      // The dashboard's isActive logic is computed in the route, not in the DO.
+      // getSessionsByTaskIds must return stopped sessions too, so the route can
+      // still show the session link even if the task is no longer active.
+      const stub = getStub('project-batch-stopped-session');
+      const sessionId = await stub.createSession(null, 'Completed task session', 'task-done');
+      await stub.persistMessage(sessionId, 'user', 'Done', null);
+      await stub.stopSession(sessionId);
+
+      const results = await stub.getSessionsByTaskIds(['task-done']);
+      expect(results).toHaveLength(1);
+      expect(results[0]!.id).toBe(sessionId);
+      expect(results[0]!.status).toBe('stopped');
+      // lastMessageAt is still populated from updated_at set by stopSession
+      expect(typeof results[0]!.lastMessageAt).toBe('number');
+    });
   });
 
   // =========================================================================

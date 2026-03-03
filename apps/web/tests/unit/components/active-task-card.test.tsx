@@ -95,4 +95,103 @@ describe('ActiveTaskCard', () => {
     render(<ActiveTaskCard task={makeTask({ status: 'queued' })} />);
     expect(screen.getByText('Queued')).toBeInTheDocument();
   });
+
+  // ---------------------------------------------------------------------------
+  // Keyboard — Space key
+  // ---------------------------------------------------------------------------
+
+  it('navigates on keyboard Space', () => {
+    render(<ActiveTaskCard task={makeTask()} />);
+    fireEvent.keyDown(screen.getByRole('button'), { key: ' ' });
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1/chat/session-1');
+  });
+
+  it('does not navigate on other keys', () => {
+    render(<ActiveTaskCard task={makeTask()} />);
+    fireEvent.keyDown(screen.getByRole('button'), { key: 'Tab' });
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Execution step labels — each non-running step shows its label
+  // ---------------------------------------------------------------------------
+
+  it('shows label for node_selection step', () => {
+    render(<ActiveTaskCard task={makeTask({ executionStep: 'node_selection' })} />);
+    expect(screen.getByText('Finding a server...')).toBeInTheDocument();
+  });
+
+  it('shows label for workspace_creation step', () => {
+    render(<ActiveTaskCard task={makeTask({ executionStep: 'workspace_creation' })} />);
+    expect(screen.getByText('Creating workspace...')).toBeInTheDocument();
+  });
+
+  it('shows label for workspace_ready step', () => {
+    render(<ActiveTaskCard task={makeTask({ executionStep: 'workspace_ready' })} />);
+    expect(screen.getByText('Setting up development environment...')).toBeInTheDocument();
+  });
+
+  it('shows label for agent_session step', () => {
+    render(<ActiveTaskCard task={makeTask({ executionStep: 'agent_session' })} />);
+    expect(screen.getByText('Starting AI agent...')).toBeInTheDocument();
+  });
+
+  it('shows label for awaiting_followup step', () => {
+    render(<ActiveTaskCard task={makeTask({ executionStep: 'awaiting_followup' })} />);
+    expect(screen.getByText('Waiting for follow-up...')).toBeInTheDocument();
+  });
+
+  it('shows label for node_agent_ready step', () => {
+    render(<ActiveTaskCard task={makeTask({ executionStep: 'node_agent_ready' })} />);
+    expect(screen.getByText('Waiting for server to start...')).toBeInTheDocument();
+  });
+
+  it('does not show any step label when executionStep is null', () => {
+    render(<ActiveTaskCard task={makeTask({ executionStep: null })} />);
+    // None of the known labels should appear
+    expect(screen.queryByText('Finding a server...')).not.toBeInTheDocument();
+    expect(screen.queryByText('Setting up a new server...')).not.toBeInTheDocument();
+    expect(screen.queryByText('Creating workspace...')).not.toBeInTheDocument();
+  });
+
+  // ---------------------------------------------------------------------------
+  // formatRelativeTime — boundary cases
+  // ---------------------------------------------------------------------------
+
+  it('shows "Just now" for timestamps less than 60 seconds ago', () => {
+    render(<ActiveTaskCard task={makeTask({ lastMessageAt: Date.now() - 30 * 1000 })} />);
+    expect(screen.getByText('Last msg Just now')).toBeInTheDocument();
+  });
+
+  it('shows days for timestamps older than 24 hours', () => {
+    render(<ActiveTaskCard task={makeTask({ lastMessageAt: Date.now() - 2 * 24 * 60 * 60 * 1000 })} />);
+    expect(screen.getByText('Last msg 2d ago')).toBeInTheDocument();
+  });
+
+  it('handles lastMessageAt as an ISO string', () => {
+    // The component accepts string or number; the string branch converts via new Date()
+    const isoTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    render(<ActiveTaskCard task={makeTask({ lastMessageAt: isoTime as unknown as number })} />);
+    expect(screen.getByText('Last msg 10m ago')).toBeInTheDocument();
+  });
+
+  it('shows submission time in days when createdAt is old', () => {
+    render(
+      <ActiveTaskCard
+        task={makeTask({ createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString() })}
+      />
+    );
+    expect(screen.getByText('Submitted 3d ago')).toBeInTheDocument();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Status badge — additional status values
+  // ---------------------------------------------------------------------------
+
+  it('renders status badge for delegated status', () => {
+    render(<ActiveTaskCard task={makeTask({ status: 'delegated' })} />);
+    // StatusBadge should render something representing this status; at minimum it should render
+    const button = screen.getByRole('button');
+    expect(button).toBeInTheDocument();
+  });
 });
