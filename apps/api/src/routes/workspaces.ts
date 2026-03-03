@@ -1509,6 +1509,7 @@ workspacesRoutes.post('/:id/messages', async (c) => {
       content: string;
       toolMetadata?: string | null;
       timestamp: string;
+      sequence?: number;
     }>;
   }>();
 
@@ -1582,6 +1583,7 @@ workspacesRoutes.post('/:id/messages', async (c) => {
       content: m.content,
       toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : null,
       timestamp: m.timestamp,
+      sequence: m.sequence,
     }))
   );
 

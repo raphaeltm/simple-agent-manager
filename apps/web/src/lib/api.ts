@@ -473,6 +473,7 @@ export interface ChatMessageResponse {
   content: string;
   toolMetadata: Record<string, unknown> | null;
   createdAt: number;
+  sequence?: number | null;
 }
 
 export interface ChatSessionDetailResponse {
