@@ -114,6 +114,15 @@ export async function listSessions(
   return stub.listSessions(status, limit, offset, taskId);
 }
 
+export async function getSessionsByTaskIds(
+  env: Env,
+  projectId: string,
+  taskIds: string[]
+): Promise<Array<Record<string, unknown>>> {
+  const stub = await getStub(env, projectId);
+  return stub.getSessionsByTaskIds(taskIds);
+}
+
 export async function getSession(
   env: Env,
   projectId: string,

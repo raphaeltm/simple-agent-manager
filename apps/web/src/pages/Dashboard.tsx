@@ -2,14 +2,17 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../components/AuthProvider';
 import { UserMenu } from '../components/UserMenu';
 import { ProjectSummaryCard } from '../components/ProjectSummaryCard';
+import { ActiveTaskCard } from '../components/ActiveTaskCard';
 import { useProjectList } from '../hooks/useProjectData';
+import { useActiveTasks } from '../hooks/useActiveTasks';
 import { PageLayout, Button, Alert, EmptyState, SkeletonCard } from '@simple-agent-manager/ui';
 
 export function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  const { projects, loading: projectsLoading, error, refresh } = useProjectList({ sort: 'last_activity', limit: 50 });
+  const { tasks, loading: tasksLoading, error: tasksError, refresh: refreshTasks } = useActiveTasks();
+  const { projects, loading: projectsLoading, error: projectsError, refresh: refreshProjects } = useProjectList({ sort: 'last_activity', limit: 50 });
 
   return (
     <PageLayout
@@ -19,24 +22,62 @@ export function Dashboard() {
     >
       {/* Welcome section */}
       <div className="mb-6">
-        <h2 style={{ fontSize: 'var(--sam-type-page-title-size)', fontWeight: 'var(--sam-type-page-title-weight)' as unknown as number, lineHeight: 'var(--sam-type-page-title-line-height)' }} className="text-fg-primary">
+        <h2 className="sam-type-page-title text-fg-primary">
           Welcome, {user?.name || user?.email}!
         </h2>
       </div>
 
-      {/* Error message */}
-      {error && (
+      {/* Error messages */}
+      {tasksError && (
         <div className="mb-4">
-          <Alert variant="error" onDismiss={() => void refresh()}>
-            {error}
+          <Alert variant="error" onDismiss={() => void refreshTasks()}>
+            {tasksError}
+          </Alert>
+        </div>
+      )}
+      {projectsError && (
+        <div className="mb-4">
+          <Alert variant="error" onDismiss={() => void refreshProjects()}>
+            {projectsError}
           </Alert>
         </div>
       )}
 
+      {/* Active Tasks section */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="sam-type-section-heading m-0 text-fg-primary">Active Tasks</h3>
+        </div>
+
+        {tasksLoading ? (
+          <div
+            role="status"
+            aria-label="Loading active tasks"
+            aria-busy="true"
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+          >
+            {Array.from({ length: 3 }, (_, i) => (
+              <SkeletonCard key={i} lines={3} />
+            ))}
+          </div>
+        ) : tasks.length === 0 ? (
+          <EmptyState
+            heading="No active tasks"
+            description="Submit a task from a project to get started."
+          />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {tasks.map((task) => (
+              <ActiveTaskCard key={task.id} task={task} />
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Projects section */}
       <div>
         <div className="flex items-center justify-between mb-4">
-          <h3 style={{ fontSize: 'var(--sam-type-section-heading-size)', fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number }} className="m-0 text-fg-primary">Projects</h3>
+          <h3 className="sam-type-section-heading m-0 text-fg-primary">Projects</h3>
           <Button variant="primary" size="sm" onClick={() => navigate('/projects/new')}>
             Import Project
           </Button>

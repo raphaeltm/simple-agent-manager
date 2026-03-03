@@ -184,6 +184,12 @@ export const DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS = 10_000;
 // Hetzner Configuration
 // =============================================================================
 
+/** Threshold (ms) after which a task is considered inactive on the dashboard. Override via DASHBOARD_INACTIVE_THRESHOLD_MS. */
+export const DEFAULT_DASHBOARD_INACTIVE_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes
+
+/** Default dashboard poll interval (ms) for active tasks. */
+export const DEFAULT_DASHBOARD_POLL_INTERVAL_MS = 15_000; // 15 seconds
+
 /** Default Hetzner image. Override via HETZNER_IMAGE env var. */
 export const DEFAULT_HETZNER_IMAGE = 'ubuntu-24.04';
 

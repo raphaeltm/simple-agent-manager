@@ -7,6 +7,7 @@ import type {
   CreateTaskRequest,
   WorkspaceResponse,
   CreateWorkspaceRequest,
+  DashboardActiveTasksResponse,
   DelegateTaskRequest,
   RunTaskRequest,
   RunTaskResponse,
@@ -175,6 +176,18 @@ export async function listBranches(
 // =============================================================================
 // Projects
 // =============================================================================
+// =============================================================================
+// Dashboard
+// =============================================================================
+
+export async function listActiveTasks(): Promise<DashboardActiveTasksResponse> {
+  return request<DashboardActiveTasksResponse>('/api/dashboard/active-tasks');
+}
+
+// =============================================================================
+// Projects
+// =============================================================================
+
 export async function listProjects(limit?: number, cursor?: string): Promise<ListProjectsResponse> {
   const params = new URLSearchParams();
   if (limit !== undefined) {

@@ -416,6 +416,29 @@ export class ProjectData extends DurableObject<Env> {
     };
   }
 
+  /**
+   * Returns session summaries for a batch of task IDs.
+   * Used by the dashboard to get last-message timestamps for active tasks.
+   */
+  async getSessionsByTaskIds(
+    taskIds: string[]
+  ): Promise<Array<Record<string, unknown>>> {
+    if (taskIds.length === 0) return [];
+
+    const placeholders = taskIds.map(() => '?').join(', ');
+    const rows = this.sql
+      .exec(
+        `SELECT id, workspace_id, task_id, topic, status, message_count, started_at, ended_at, created_at, updated_at
+         FROM chat_sessions
+         WHERE task_id IN (${placeholders})
+         ORDER BY updated_at DESC`,
+        ...taskIds
+      )
+      .toArray();
+
+    return rows.map((row) => this.mapSessionRow(row));
+  }
+
   async getSession(sessionId: string): Promise<Record<string, unknown> | null> {
     const rows = this.sql
       .exec(
@@ -946,6 +969,7 @@ export class ProjectData extends DurableObject<Env> {
       endedAt: row.ended_at,
       createdAt: row.created_at,
       agentCompletedAt,
+      lastMessageAt: (row.updated_at as number) ?? null,
       isIdle: status === 'active' && agentCompletedAt != null,
       isTerminated: status === 'stopped',
       workspaceUrl: workspaceId && baseDomain ? `https://ws-${workspaceId}.${baseDomain}` : null,
