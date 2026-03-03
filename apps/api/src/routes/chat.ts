@@ -117,7 +117,7 @@ chatRoutes.get('/:sessionId', async (c) => {
     throw errors.notFound('Chat session');
   }
 
-  const limit = Math.min(parseInt(c.req.query('limit') || '100', 10), 500);
+  const limit = Math.min(parseInt(c.req.query('limit') || '1000', 10), 5000);
   const beforeParam = c.req.query('before');
   const before = beforeParam ? parseInt(beforeParam, 10) : null;
 

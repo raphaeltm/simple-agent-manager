@@ -431,7 +431,7 @@ export class ProjectData extends DurableObject<Env> {
 
   async getMessages(
     sessionId: string,
-    limit: number = 100,
+    limit: number = 1000,
     before: number | null = null
   ): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
     let query =

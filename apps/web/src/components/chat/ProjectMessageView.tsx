@@ -333,6 +333,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   sessionId,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const isLoadingMoreRef = useRef(false);
 
   const [session, setSession] = useState<ChatSessionResponse | null>(null);
   const [taskEmbed, setTaskEmbed] = useState<ExtendedSession['task'] | null>(null);
@@ -422,11 +424,18 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     void loadSession();
   }, [loadSession]);
 
-  // Auto-scroll to bottom on initial load, session switch, and new messages
+  // Auto-scroll to bottom on initial load, session switch, and new messages.
+  // Skip when older messages were prepended via "Load earlier messages".
   const prevMessageCountRef = useRef(0);
   const prevSessionIdRef = useRef(sessionId);
   useEffect(() => {
-    if (loading || loadingMore) return;
+    if (loading) return;
+
+    // Skip auto-scroll when messages were prepended via "load more"
+    if (isLoadingMoreRef.current) {
+      prevMessageCountRef.current = messages.length;
+      return;
+    }
 
     const isNewSession = prevSessionIdRef.current !== sessionId;
     const hasNewMessages = messages.length > prevMessageCountRef.current;
@@ -440,7 +449,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
     prevMessageCountRef.current = messages.length;
     prevSessionIdRef.current = sessionId;
-  }, [messages.length, loading, loadingMore, sessionId]);
+  }, [messages.length, loading, sessionId]);
 
   // Polling fallback — keeps running alongside WebSocket for reliability.
   // Only updates state when the server has new data (fingerprint-based).
@@ -579,6 +588,11 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     const firstMessage = messages[0];
     if (!firstMessage) return;
 
+    const container = messagesContainerRef.current;
+    const prevScrollHeight = container?.scrollHeight ?? 0;
+    const prevScrollTop = container?.scrollTop ?? 0;
+
+    isLoadingMoreRef.current = true;
     setLoadingMore(true);
     try {
       const data = await getChatSession(projectId, sessionId, {
@@ -586,8 +600,19 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       });
       setMessages((prev) => [...data.messages, ...prev]);
       setHasMore(data.hasMore);
+
+      // Restore scroll position after prepending older messages.
+      // The new content increases scrollHeight; offset scrollTop to keep
+      // the same messages visible.
+      requestAnimationFrame(() => {
+        if (container) {
+          const newScrollHeight = container.scrollHeight;
+          container.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+        }
+        isLoadingMoreRef.current = false;
+      });
     } catch {
-      // Silently fail
+      isLoadingMoreRef.current = false;
     } finally {
       setLoadingMore(false);
     }
@@ -723,7 +748,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       )}
 
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto min-h-0 p-4">
+      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto min-h-0 p-4">
         {hasMore && (
           <div className="text-center mb-3">
             <Button variant="ghost" size="sm" onClick={loadMore} loading={loadingMore}>
