@@ -161,6 +161,54 @@ describe('ProjectData Durable Object', () => {
   });
 
   // =========================================================================
+  // Batch session lookup by task IDs
+  // =========================================================================
+
+  describe('getSessionsByTaskIds', () => {
+    it('returns sessions matching the given task IDs', async () => {
+      const stub = getStub('project-batch-taskids');
+      await stub.createSession(null, 'Task 1', 'task-111');
+      await stub.createSession(null, 'Task 2', 'task-222');
+      await stub.createSession(null, 'No task session');
+
+      const results = await stub.getSessionsByTaskIds(['task-111', 'task-222']);
+      expect(results).toHaveLength(2);
+
+      const taskIds = results.map((r) => r.taskId);
+      expect(taskIds).toContain('task-111');
+      expect(taskIds).toContain('task-222');
+    });
+
+    it('returns empty array for no matching task IDs', async () => {
+      const stub = getStub('project-batch-no-match');
+      await stub.createSession(null, 'Some session', 'task-exists');
+
+      const results = await stub.getSessionsByTaskIds(['task-nope']);
+      expect(results).toHaveLength(0);
+    });
+
+    it('returns empty array for empty input', async () => {
+      const stub = getStub('project-batch-empty');
+      const results = await stub.getSessionsByTaskIds([]);
+      expect(results).toHaveLength(0);
+    });
+
+    it('includes lastMessageAt from updated_at', async () => {
+      const stub = getStub('project-batch-lastmsg');
+      const sessionId = await stub.createSession(null, 'Task with messages', 'task-msg');
+
+      // Persist a message to update the session's updated_at
+      await stub.persistMessage(sessionId, 'user', 'Hello', null);
+
+      const results = await stub.getSessionsByTaskIds(['task-msg']);
+      expect(results).toHaveLength(1);
+      expect(results[0]!.lastMessageAt).toBeTruthy();
+      expect(typeof results[0]!.lastMessageAt).toBe('number');
+      expect(results[0]!.messageCount).toBe(1);
+    });
+  });
+
+  // =========================================================================
   // Batch Message Persistence
   // =========================================================================
 
