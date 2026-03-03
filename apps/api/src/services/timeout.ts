@@ -15,8 +15,9 @@ import { log } from '../lib/logger';
 import { persistError } from './observability';
 
 /** Default provisioning timeout in milliseconds (30 minutes).
- * Must be >= WORKSPACE_READY_TIMEOUT_MS to avoid marking workspaces as timed out
- * while the task runner is still waiting for them to become ready. */
+ * Must be >= TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS (the TaskRunner DO's workspace-ready
+ * timeout) to avoid the cron marking workspaces as timed out while the DO is still
+ * legitimately waiting for the workspace-ready callback. */
 const DEFAULT_PROVISIONING_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
