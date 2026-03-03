@@ -2,6 +2,7 @@ import React from 'react';
 import type { Components } from 'react-markdown';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Highlight, themes } from 'prism-react-renderer';
 
 interface MessageBubbleProps {
   text: string;
@@ -12,6 +13,59 @@ interface MessageBubbleProps {
 // Stable remark plugins array — avoids creating a new array reference on every render
 const REMARK_PLUGINS = [remarkGfm];
 
+/** Syntax-highlighted fenced code block using prism-react-renderer. */
+function HighlightedCode({ code, language }: { code: string; language: string }) {
+  return (
+    <Highlight theme={themes.nightOwl} code={code} language={language || 'text'}>
+      {({ tokens, getLineProps, getTokenProps }) => (
+        <pre
+          className="p-3 rounded-md overflow-x-auto text-xs whitespace-pre"
+          style={{ margin: 0, background: '#011627', fontFamily: 'monospace', lineHeight: '1.5' }}
+        >
+          {tokens.map((line, lineIdx) => {
+            const lineProps = getLineProps({ line });
+            return (
+              <div
+                key={lineIdx}
+                {...lineProps}
+                style={{
+                  ...lineProps.style,
+                  display: 'flex',
+                  padding: 0,
+                  whiteSpace: 'pre',
+                  minHeight: '1.5em',
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: 'inline-block',
+                    width: '2em',
+                    textAlign: 'right',
+                    paddingRight: '0.75em',
+                    opacity: 0.4,
+                    userSelect: 'none',
+                    flexShrink: 0,
+                    color: '#637777',
+                  }}
+                >
+                  {lineIdx + 1}
+                </span>
+                <span style={{ flex: 1 }}>
+                  {line.map((token, tokenIdx) => {
+                    const tokenProps = getTokenProps({ token });
+                    return <span key={tokenIdx} {...tokenProps} />;
+                  })}
+                </span>
+              </div>
+            );
+          })}
+        </pre>
+      )}
+    </Highlight>
+  );
+}
+
 // Stable Markdown component overrides — hoisted to module scope so
 // react-markdown sees the same component references across renders.
 // This prevents unmount/remount of custom renderers which was destroying
@@ -20,6 +74,7 @@ const USER_MARKDOWN_COMPONENTS: Components = {
   pre: ({ children }) => <>{children}</>,
   code: ({ className, children, ...props }) => {
     const match = /language-(\w+)/.exec(className || '');
+    const code = String(children ?? '').replace(/\n$/, '');
     const isInline = !match && !className;
     if (isInline) {
       return (
@@ -32,11 +87,9 @@ const USER_MARKDOWN_COMPONENTS: Components = {
       );
     }
     return (
-      <pre className="bg-gray-900 text-gray-100 p-3 rounded-md overflow-x-auto text-xs whitespace-pre">
-        <code className={className} {...props}>
-          {children}
-        </code>
-      </pre>
+      <div className="my-2">
+        <HighlightedCode code={code} language={match?.[1] ?? ''} />
+      </div>
     );
   },
   a: ({ href, children }) => (
@@ -50,6 +103,7 @@ const AGENT_MARKDOWN_COMPONENTS: Components = {
   pre: ({ children }) => <>{children}</>,
   code: ({ className, children, ...props }) => {
     const match = /language-(\w+)/.exec(className || '');
+    const code = String(children ?? '').replace(/\n$/, '');
     const isInline = !match && !className;
     if (isInline) {
       return (
@@ -62,11 +116,9 @@ const AGENT_MARKDOWN_COMPONENTS: Components = {
       );
     }
     return (
-      <pre className="bg-gray-900 text-gray-100 p-3 rounded-md overflow-x-auto text-xs whitespace-pre">
-        <code className={className} {...props}>
-          {children}
-        </code>
-      </pre>
+      <div className="my-2">
+        <HighlightedCode code={code} language={match?.[1] ?? ''} />
+      </div>
     );
   },
   a: ({ href, children }) => (
@@ -77,7 +129,7 @@ const AGENT_MARKDOWN_COMPONENTS: Components = {
 };
 
 /**
- * Renders a single message bubble with markdown support.
+ * Renders a single message bubble with markdown support and syntax highlighting.
  * Agent messages are left-aligned, user messages are right-aligned.
  *
  * Wrapped in React.memo to prevent re-renders when parent state changes

@@ -14,6 +14,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from 'lucide-react';
+import { RenderedMarkdown } from '../MarkdownRenderer';
 import type { LucideIcon } from 'lucide-react';
 
 interface ProjectMessageViewProps {
@@ -140,9 +141,7 @@ function MessageBubble({ message }: { message: ChatMessageResponse }) {
           {formatTimestamp(message.createdAt)}
         </span>
       </div>
-      <div className="sam-type-body text-fg-primary whitespace-pre-wrap break-words leading-[1.5]">
-        {message.content}
-      </div>
+      <RenderedMarkdown content={message.content} inline />
     </div>
   );
 }
@@ -173,9 +172,7 @@ function AssistantBubble({ group }: { group: MessageGroup }) {
           {formatTimestamp(group.createdAt)}
         </span>
       </div>
-      <div className="sam-type-body text-fg-primary whitespace-pre-wrap break-words leading-[1.5]">
-        {content}
-      </div>
+      <RenderedMarkdown content={content} inline />
     </div>
   );
 }

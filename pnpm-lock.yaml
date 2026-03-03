@@ -282,6 +282,9 @@ importers:
       '@agentclientprotocol/sdk':
         specifier: ^0.14.0
         version: 0.14.1(zod@4.3.6)
+      prism-react-renderer:
+        specifier: ^2.4.1
+        version: 2.4.1(react@18.3.1)
       react-markdown:
         specifier: ^10.1.0
         version: 10.1.0(@types/react@18.3.27)(react@18.3.1)
