@@ -156,7 +156,7 @@ export class ProjectData extends DurableObject<Env> {
     }
 
     this.scheduleSummarySync();
-    this.broadcastEvent('session.stopped', { sessionId });
+    this.broadcastEvent('session.stopped', { sessionId }, sessionId);
   }
 
   async persistMessage(
@@ -224,7 +224,7 @@ export class ProjectData extends DurableObject<Env> {
       toolMetadata: toolMetadata ? JSON.parse(toolMetadata) : null,
       createdAt: now,
       sequence,
-    });
+    }, sessionId);
     return id;
   }
 
@@ -342,7 +342,7 @@ export class ProjectData extends DurableObject<Env> {
         sessionId,
         messages: persistedMessages,
         count: persisted,
-      });
+      }, sessionId);
     }
 
     return { persisted, duplicates };
@@ -374,7 +374,7 @@ export class ProjectData extends DurableObject<Env> {
       sessionId
     );
 
-    this.broadcastEvent('session.updated', { sessionId, workspaceId });
+    this.broadcastEvent('session.updated', { sessionId, workspaceId }, sessionId);
   }
 
   async listSessions(
@@ -545,7 +545,7 @@ export class ProjectData extends DurableObject<Env> {
       now,
       sessionId
     );
-    this.broadcastEvent('session.agent_completed', { sessionId, agentCompletedAt: now });
+    this.broadcastEvent('session.agent_completed', { sessionId, agentCompletedAt: now }, sessionId);
   }
 
   // =========================================================================
@@ -659,7 +659,7 @@ export class ProjectData extends DurableObject<Env> {
           taskId,
           JSON.stringify({ retryCount })
         );
-        this.broadcastEvent('session.idle_cleanup', { sessionId, workspaceId, taskId });
+        this.broadcastEvent('session.idle_cleanup', { sessionId, workspaceId, taskId }, sessionId);
         this.scheduleSummarySync();
       } catch (err) {
         console.error('Idle cleanup failed for session', sessionId, err);
@@ -794,7 +794,7 @@ export class ProjectData extends DurableObject<Env> {
         toolMetadata: null,
         createdAt: now,
         sequence,
-      });
+      }, sessionId);
     } catch {
       // Best-effort notification
     }
@@ -838,8 +838,14 @@ export class ProjectData extends DurableObject<Env> {
         return new Response('Expected WebSocket upgrade', { status: 426 });
       }
 
+      // Tag the WebSocket with the session ID for server-side broadcast filtering.
+      // Clients pass ?sessionId=xxx to subscribe to a specific session's events.
+      // Sockets without a session tag still receive project-wide events.
+      const sessionId = url.searchParams.get('sessionId');
+      const tags = sessionId ? [`session:${sessionId}`] : [];
+
       const pair = new WebSocketPair();
-      this.ctx.acceptWebSocket(pair[1]);
+      this.ctx.acceptWebSocket(pair[1], tags);
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
 
@@ -967,8 +973,18 @@ export class ProjectData extends DurableObject<Env> {
     return ((row?.max_seq as number) ?? 0) + 1;
   }
 
-  private broadcastEvent(type: string, payload: Record<string, unknown>): void {
-    const sockets = this.ctx.getWebSockets();
+  /**
+   * Broadcast an event to connected WebSocket clients.
+   *
+   * When `sessionId` is provided, the event is sent ONLY to sockets tagged
+   * with `session:<sessionId>` (clients subscribed to that session).
+   * When omitted, the event is broadcast to ALL connected sockets
+   * (used for project-wide events like session.created, activity.new).
+   */
+  private broadcastEvent(type: string, payload: Record<string, unknown>, sessionId?: string): void {
+    const sockets = sessionId
+      ? this.ctx.getWebSockets(`session:${sessionId}`)
+      : this.ctx.getWebSockets();
     const message = JSON.stringify({ type, payload });
     for (const ws of sockets) {
       try {

@@ -1556,10 +1556,13 @@ workspacesRoutes.post('/:id/messages', async (c) => {
     }
   }
 
-  // Resolve workspace to project
+  // Resolve workspace to project and validate session ownership
   const db = drizzle(c.env.DATABASE, { schema });
   const workspaceRows = await db
-    .select({ projectId: schema.workspaces.projectId })
+    .select({
+      projectId: schema.workspaces.projectId,
+      chatSessionId: schema.workspaces.chatSessionId,
+    })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
@@ -1570,6 +1573,13 @@ workspacesRoutes.post('/:id/messages', async (c) => {
   }
   if (!workspace.projectId) {
     throw errors.badRequest('Workspace is not linked to a project');
+  }
+  // Verify the target session matches the workspace's linked session.
+  // This prevents a buggy agent from routing messages to the wrong session.
+  if (workspace.chatSessionId && sessionId !== workspace.chatSessionId) {
+    throw errors.badRequest(
+      `Session mismatch: messages target session ${sessionId} but workspace is linked to session ${workspace.chatSessionId}`
+    );
   }
 
   // Delegate to ProjectData DO

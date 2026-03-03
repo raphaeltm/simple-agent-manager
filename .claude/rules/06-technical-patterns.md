@@ -69,6 +69,39 @@ Conflict: Effect undoes the handler's intent
 Fix: Add newChatIntentRef to distinguish "user clicked New" from "initial page load"
 ```
 
+## Async Effect Cleanup Must Cancel In-Flight Requests
+
+When a `useEffect` makes HTTP requests (directly or via intervals/polling), the cleanup function MUST abort in-flight requests using `AbortController`, not just stop future ones via `clearInterval`.
+
+### Why This Rule Exists
+
+The chat session leakage bug (see `docs/notes/2026-03-03-chat-session-leakage-postmortem.md`) was caused by a polling interval that called `clearInterval()` on cleanup but did NOT abort the in-flight HTTP request. When the user switched sessions, the old session's poll response arrived after the new session's data had loaded and overwrote it.
+
+### Required Pattern
+
+```typescript
+useEffect(() => {
+  const abortController = new AbortController();
+  const interval = setInterval(async () => {
+    if (abortController.signal.aborted) return;
+    const data = await fetchData(/* pass signal if possible */);
+    if (abortController.signal.aborted) return; // Guard after await
+    setState(data);
+  }, POLL_MS);
+
+  return () => {
+    abortController.abort();
+    clearInterval(interval);
+  };
+}, [deps]);
+```
+
+### Key Points
+
+1. Always check `abortController.signal.aborted` AFTER every `await` before writing state
+2. Pass the `AbortSignal` to `fetch()` calls when possible for early cancellation
+3. For components that receive an entity ID as a prop and manage state based on it, prefer `key={id}` on the parent to force clean unmount/remount
+
 ## Adding New Features
 
 1. Check if types need to be added to `packages/shared`

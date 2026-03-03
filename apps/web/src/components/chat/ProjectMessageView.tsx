@@ -444,14 +444,19 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
   // Polling fallback — keeps running alongside WebSocket for reliability.
   // Only updates state when the server has new data (fingerprint-based).
+  // Uses AbortController to cancel in-flight requests on cleanup, preventing
+  // stale poll responses from overwriting state after session switch.
   useEffect(() => {
     if (!session || session.status !== 'active') return;
 
     const ACTIVE_POLL_MS = 3000;
     let lastPollFingerprint = '';
+    const abortController = new AbortController();
     const pollInterval = setInterval(async () => {
+      if (abortController.signal.aborted) return;
       try {
         const data: ChatSessionDetailResponse & { session: ExtendedSession } = await getChatSession(projectId, sessionId);
+        if (abortController.signal.aborted) return;
         const newLastId = data.messages[data.messages.length - 1]?.id ?? '';
         const taskStatus = data.session.task?.status ?? '';
         const fingerprint = `${data.messages.length}:${newLastId}:${data.session.status}:${data.hasMore}:${taskStatus}`;
@@ -465,11 +470,14 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           }
         }
       } catch {
-        // Silently fail on poll errors
+        // Silently fail on poll errors (including aborted requests)
       }
     }, ACTIVE_POLL_MS);
 
-    return () => clearInterval(pollInterval);
+    return () => {
+      abortController.abort();
+      clearInterval(pollInterval);
+    };
   }, [session?.status, projectId, sessionId]);
 
   // Idle timer countdown (TDF-8)

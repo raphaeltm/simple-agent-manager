@@ -443,7 +443,7 @@ export function ProjectChat() {
             {provisioning && sessionId === provisioning.sessionId && !isTerminal(provisioning.status) && (
               <ProvisioningIndicator state={provisioning} />
             )}
-            <ProjectMessageView projectId={projectId} sessionId={sessionId!} />
+            <ProjectMessageView key={sessionId} projectId={projectId} sessionId={sessionId!} />
           </div>
         )}
       </div>
