@@ -77,7 +77,7 @@ SAM deploys automatically via GitHub Actions. Fork, configure, push.
 | `GH_CLIENT_ID` | GitHub App client ID |
 | `GH_CLIENT_SECRET` | GitHub App client secret |
 | `GH_APP_ID` | GitHub App ID |
-| `GH_APP_PRIVATE_KEY` | GitHub App private key (PEM) |
+| `GH_APP_PRIVATE_KEY` | GitHub App private key (raw PEM or base64) |
 | `GH_APP_SLUG` | GitHub App URL slug |
 
 > Security keys (JWT, encryption) are generated automatically on first deploy.
@@ -95,7 +95,7 @@ Browser (app.{domain})
     ↕ HTTPS
 Cloudflare Worker (API + reverse proxy)
     ├── D1 (database)
-    ├── KV (sessions)
+    ├── KV (tokens + boot logs)
     ├── R2 (binaries)
     ↕ HTTP proxy
 Hetzner VM (node)
