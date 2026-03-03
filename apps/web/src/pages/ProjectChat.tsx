@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { List, Settings, LayoutGrid } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
 import { VoiceButton } from '@simple-agent-manager/acp-client';
@@ -110,8 +110,13 @@ export function ProjectChat() {
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
   const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Track "New Chat" intent so auto-select doesn't override it
-  const newChatIntentRef = useRef(false);
+  // Track "New Chat" intent so auto-select doesn't override it.
+  // Initialize from navigation state to support external navigation
+  // (e.g., command palette "New Chat" action).
+  const location = useLocation();
+  const newChatIntentRef = useRef(
+    (location.state as { newChat?: boolean } | null)?.newChat === true,
+  );
 
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
