@@ -7,6 +7,7 @@ import {
   Settings,
   Shield,
   Plus,
+  MessageSquarePlus,
   Search,
   ArrowRight,
 } from 'lucide-react';
@@ -247,6 +248,32 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
       const capped = projectResults.slice(0, MAX_RESULTS_PER_CATEGORY);
       if (capped.length > 0) {
         result.push({ category: 'Projects', results: capped });
+      }
+    }
+
+    // Quick Actions — per-project actions (only when searching)
+    if (projects.length > 0 && query) {
+      const quickActionResults: ActionResult[] = [];
+      for (const project of projects) {
+        const searchText = `${project.name} New Chat`;
+        const m = fuzzyMatch(query, searchText);
+        if (m) {
+          const projectId = project.id;
+          quickActionResults.push({
+            kind: 'action',
+            id: `quick-new-chat-${projectId}`,
+            label: searchText,
+            action: () => navigate(`/projects/${projectId}/chat`),
+            icon: <MessageSquarePlus size={14} />,
+            score: m.score,
+            matches: m.matches,
+          });
+        }
+      }
+      quickActionResults.sort((a, b) => b.score - a.score);
+      const cappedQuickActions = quickActionResults.slice(0, MAX_RESULTS_PER_CATEGORY);
+      if (cappedQuickActions.length > 0) {
+        result.push({ category: 'Quick Actions', results: cappedQuickActions });
       }
     }
 

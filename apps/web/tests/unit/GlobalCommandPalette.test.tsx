@@ -498,6 +498,102 @@ describe('GlobalCommandPalette', () => {
     expect(group).not.toBeNull();
     expect(group?.getAttribute('aria-labelledby')).toBe('gcp-category-Navigation');
   });
+
+  // ── Quick Actions (New Chat) ──
+
+  it('shows "Quick Actions" category when typing "new chat"', async () => {
+    renderPalette();
+    const input = screen.getByRole('combobox');
+
+    await waitFor(() => {
+      expect(screen.getByText('My API Worker')).toBeInTheDocument();
+    });
+
+    fireEvent.change(input, { target: { value: 'new chat' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('Quick Actions')).toBeInTheDocument();
+    });
+
+    // Should show new chat options for all three projects
+    const options = screen.getAllByRole('option');
+    const newChatOptions = options.filter((o) => o.textContent?.includes('New Chat'));
+    expect(newChatOptions.length).toBe(3);
+  });
+
+  it('filters quick actions by project name prefix', async () => {
+    renderPalette();
+    const input = screen.getByRole('combobox');
+
+    await waitFor(() => {
+      expect(screen.getByText('My API Worker')).toBeInTheDocument();
+    });
+
+    fireEvent.change(input, { target: { value: 'api new chat' } });
+
+    const options = screen.getAllByRole('option');
+    const newChatOptions = options.filter((o) => o.textContent?.includes('New Chat'));
+    // Only "My API Worker New Chat" should match well enough
+    expect(newChatOptions.length).toBeGreaterThanOrEqual(1);
+    const apiOption = options.find((o) => o.textContent?.includes('My API Worker New Chat'));
+    expect(apiOption).toBeDefined();
+  });
+
+  it('navigates to project chat when quick action is clicked', async () => {
+    const onClose = vi.fn();
+    renderPalette(onClose);
+    const input = screen.getByRole('combobox');
+
+    await waitFor(() => {
+      expect(screen.getByText('My API Worker')).toBeInTheDocument();
+    });
+
+    fireEvent.change(input, { target: { value: 'api new chat' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('Quick Actions')).toBeInTheDocument();
+    });
+
+    const options = screen.getAllByRole('option');
+    const apiNewChat = options.find((o) => o.textContent?.includes('My API Worker New Chat'));
+    expect(apiNewChat).toBeDefined();
+    fireEvent.click(apiNewChat!);
+
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/chat');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not show quick actions when query is empty', async () => {
+    renderPalette();
+
+    await waitFor(() => {
+      expect(screen.getByText('My API Worker')).toBeInTheDocument();
+    });
+
+    // Query is empty — no Quick Actions category
+    expect(screen.queryByText('Quick Actions')).not.toBeInTheDocument();
+  });
+
+  it('quick action is executable via Enter key', async () => {
+    const onClose = vi.fn();
+    renderPalette(onClose);
+    const input = screen.getByRole('combobox');
+
+    await waitFor(() => {
+      expect(screen.getByText('My API Worker')).toBeInTheDocument();
+    });
+
+    // Type a query that uniquely matches one quick action
+    fireEvent.change(input, { target: { value: 'Auth Service New Chat' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('Quick Actions')).toBeInTheDocument();
+    });
+
+    // First matching result should be selected; press Enter
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/p3/chat');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });
-
-
