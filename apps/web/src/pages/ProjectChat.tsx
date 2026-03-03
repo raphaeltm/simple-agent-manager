@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { List, Settings, LayoutGrid } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
+import { VoiceButton } from '@simple-agent-manager/acp-client';
 import { ProjectMessageView } from '../components/chat/ProjectMessageView';
 import { useIsMobile } from '../hooks/useIsMobile';
 import type { TaskStatus, TaskExecutionStep } from '@simple-agent-manager/shared';
@@ -15,6 +16,7 @@ import {
   listCredentials,
   submitTask,
   getProjectTask,
+  getTranscribeApiUrl,
 } from '../lib/api';
 import type { ChatSessionResponse } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
@@ -110,6 +112,8 @@ export function ProjectChat() {
 
   // Track "New Chat" intent so auto-select doesn't override it
   const newChatIntentRef = useRef(false);
+
+  const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
   // ---------------------------------------------------------------------------
   // Effects (all preserved from original)
@@ -425,6 +429,7 @@ export function ProjectChat() {
               submitting={submitting}
               error={submitError}
               placeholder="Describe what you want the agent to do..."
+              transcribeApiUrl={transcribeApiUrl}
             />
           </div>
         ) : (
@@ -666,6 +671,7 @@ function ChatInput({
   submitting,
   error,
   placeholder,
+  transcribeApiUrl,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -673,12 +679,22 @@ function ChatInput({
   submitting: boolean;
   error: string | null;
   placeholder: string;
+  transcribeApiUrl: string;
 }) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  const handleTranscription = useCallback(
+    (text: string) => {
+      const separator = value.length > 0 && !value.endsWith(' ') ? ' ' : '';
+      onChange(value + separator + text);
+      inputRef.current?.focus();
+    },
+    [value, onChange],
+  );
 
   return (
     <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface">
@@ -702,6 +718,11 @@ function ChatInput({
           disabled={submitting}
           rows={1}
           className="flex-1 p-2 px-3 bg-page border border-border-default rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px]"
+        />
+        <VoiceButton
+          onTranscription={handleTranscription}
+          disabled={submitting}
+          apiUrl={transcribeApiUrl}
         />
         <button
           type="button"
