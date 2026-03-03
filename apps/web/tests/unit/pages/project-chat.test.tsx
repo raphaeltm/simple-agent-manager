@@ -19,8 +19,18 @@ vi.mock('../../../src/lib/api', () => ({
 }));
 
 vi.mock('@simple-agent-manager/acp-client', () => ({
-  VoiceButton: ({ onTranscription }: { onTranscription: (text: string) => void }) => (
-    <button data-testid="voice-button" onClick={() => onTranscription('test voice input')}>
+  VoiceButton: ({
+    onTranscription,
+    disabled,
+  }: {
+    onTranscription: (text: string) => void;
+    disabled?: boolean;
+  }) => (
+    <button
+      data-testid="voice-button"
+      disabled={disabled}
+      onClick={() => onTranscription('hello world')}
+    >
       Voice
     </button>
   ),
@@ -218,5 +228,54 @@ describe('ProjectChat new chat button', () => {
     await waitFor(() => {
       expect(screen.getByTestId('message-view')).toHaveTextContent('session-new');
     });
+  });
+});
+
+describe('ProjectChat voice input', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.listCredentials.mockResolvedValue([]);
+  });
+
+  it('renders voice button in the new chat input', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+    renderProjectChat();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('voice-button')).toBeInTheDocument();
+    });
+  });
+
+  it('appends transcribed text to empty input on voice button click', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+    renderProjectChat();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('voice-button')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('voice-button'));
+
+    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
+    expect(textarea).toHaveValue('hello world');
+  });
+
+  it('appends transcribed text to existing input with space separator', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+    renderProjectChat();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('voice-button')).toBeInTheDocument();
+    });
+
+    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
+    fireEvent.change(textarea, { target: { value: 'existing text' } });
+
+    fireEvent.click(screen.getByTestId('voice-button'));
+
+    expect(textarea).toHaveValue('existing text hello world');
   });
 });
