@@ -31,6 +31,7 @@ import { activityRoutes } from './routes/activity';
 import { taskRunsRoutes } from './routes/task-runs';
 import { taskSubmitRoutes } from './routes/task-submit';
 import { adminRoutes } from './routes/admin';
+import { dashboardRoutes } from './routes/dashboard';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
@@ -128,6 +129,8 @@ export interface Env {
   ACP_RECONNECT_DELAY_MS?: string;
   ACP_RECONNECT_TIMEOUT_MS?: string;
   ACP_MAX_RESTART_ATTEMPTS?: string;
+  // Dashboard configuration
+  DASHBOARD_INACTIVE_THRESHOLD_MS?: string;
   // Boot log configuration
   BOOT_LOG_TTL_SECONDS?: string;
   BOOT_LOG_MAX_ENTRIES?: string;
@@ -430,6 +433,7 @@ app.route('/api/projects/:projectId/activity', activityRoutes);
 app.route('/api/projects/:projectId/tasks', taskRunsRoutes);
 app.route('/api/projects/:projectId/tasks', taskSubmitRoutes);
 app.route('/api/admin', adminRoutes);
+app.route('/api/dashboard', dashboardRoutes);
 
 // 404 handler
 app.notFound((c) => {

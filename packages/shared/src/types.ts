@@ -196,6 +196,8 @@ export interface ChatSession {
   endedAt: number | null;
   createdAt: number;
   agentCompletedAt: number | null;
+  /** Timestamp (ms) of the last message or session update */
+  lastMessageAt: number | null;
   /** Computed: true when status === 'active' && agentCompletedAt != null */
   isIdle: boolean;
   /** Computed: true when status === 'stopped' */
@@ -545,6 +547,30 @@ export interface ListTasksResponse {
 
 export interface ListTaskEventsResponse {
   events: TaskStatusEvent[];
+}
+
+// =============================================================================
+// Dashboard
+// =============================================================================
+
+/** An active task enriched with project + session info for the dashboard grid. */
+export interface DashboardTask {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  executionStep: TaskExecutionStep | null;
+  projectId: string;
+  projectName: string;
+  sessionId: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  lastMessageAt: number | null;
+  messageCount: number;
+  isActive: boolean;
+}
+
+export interface DashboardActiveTasksResponse {
+  tasks: DashboardTask[];
 }
 
 // =============================================================================
