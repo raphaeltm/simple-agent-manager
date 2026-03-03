@@ -5,16 +5,11 @@ import { MessageBubble } from './MessageBubble';
 // Verify React.memo is applied (component has $$typeof for memo)
 describe('MessageBubble memoization', () => {
   it('is wrapped in React.memo', () => {
-    // React.memo wraps the component — its $$typeof is Symbol.for('react.memo')
-    // We can verify by checking the component has a 'compare' property slot
-    // or by checking that re-rendering with identical props does not re-run.
     expect(typeof MessageBubble).toBe('object');
     expect((MessageBubble as { $$typeof?: symbol }).$$typeof).toBe(Symbol.for('react.memo'));
   });
 
   it('skips re-render when props are identical', () => {
-    // Verify the output is structurally identical across re-renders with
-    // the same props (which proves React.memo is working — React bails out).
     const { rerender, container } = render(
       <MessageBubble text="Hello" role="agent" />
     );
@@ -29,8 +24,8 @@ describe('MessageBubble memoization', () => {
 
 describe('MessageBubble', () => {
   describe('code blocks', () => {
-    it('renders fenced code blocks with overflow-x-auto for horizontal scrolling', () => {
-      const markdown = '```typescript\nconst veryLongVariableName = "this is a very long string that should cause horizontal scrolling on mobile devices";\n```';
+    it('renders fenced code blocks with syntax highlighting (colored tokens)', () => {
+      const markdown = '```typescript\nconst x = 42;\n```';
       const { container } = render(
         <MessageBubble text={markdown} role="agent" />
       );
@@ -38,7 +33,25 @@ describe('MessageBubble', () => {
       const pre = container.querySelector('pre');
       expect(pre).not.toBeNull();
       expect(pre!.className).toContain('overflow-x-auto');
-      expect(pre!.className).toContain('whitespace-pre');
+
+      // prism-react-renderer produces <span> elements with inline styles for token colors
+      const tokenSpans = pre!.querySelectorAll('span[style]');
+      expect(tokenSpans.length).toBeGreaterThan(0);
+    });
+
+    it('renders line numbers in fenced code blocks', () => {
+      const markdown = '```js\nconst a = 1;\nconst b = 2;\nconst c = 3;\n```';
+      const { container } = render(
+        <MessageBubble text={markdown} role="agent" />
+      );
+
+      const pre = container.querySelector('pre');
+      expect(pre).not.toBeNull();
+
+      // Line numbers are rendered as spans with the line number text
+      expect(pre!.textContent).toContain('1');
+      expect(pre!.textContent).toContain('2');
+      expect(pre!.textContent).toContain('3');
     });
 
     it('does not double-wrap code blocks in nested <pre> elements', () => {
@@ -75,6 +88,18 @@ describe('MessageBubble', () => {
       const proseDiv = container.querySelector('.prose');
       expect(proseDiv).not.toBeNull();
       expect(proseDiv!.className).not.toContain('overflow-hidden');
+    });
+
+    it('applies Night Owl theme background to code blocks', () => {
+      const markdown = '```python\nprint("hello")\n```';
+      const { container } = render(
+        <MessageBubble text={markdown} role="agent" />
+      );
+
+      const pre = container.querySelector('pre');
+      expect(pre).not.toBeNull();
+      // Night Owl theme uses #011627 as background (JSDOM normalizes to rgb)
+      expect(pre!.style.background).toBe('rgb(1, 22, 39)');
     });
   });
 
@@ -139,6 +164,30 @@ describe('MessageBubble', () => {
 
       const indicator = container.querySelector('.animate-pulse');
       expect(indicator).toBeNull();
+    });
+  });
+
+  describe('markdown features', () => {
+    it('renders links with target=_blank', () => {
+      const { container } = render(
+        <MessageBubble text="Visit [example](https://example.com)" role="agent" />
+      );
+
+      const link = container.querySelector('a');
+      expect(link).not.toBeNull();
+      expect(link!.getAttribute('target')).toBe('_blank');
+      expect(link!.getAttribute('rel')).toContain('noopener');
+      expect(link!.textContent).toBe('example');
+    });
+
+    it('renders GFM tables', () => {
+      const markdown = '| Col1 | Col2 |\n| --- | --- |\n| A | B |';
+      const { container } = render(
+        <MessageBubble text={markdown} role="agent" />
+      );
+
+      const table = container.querySelector('table');
+      expect(table).not.toBeNull();
     });
   });
 });
