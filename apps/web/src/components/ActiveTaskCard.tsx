@@ -40,8 +40,9 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
   return (
     <div
       onClick={() => navigate(chatPath)}
-      className="cursor-pointer"
+      className="cursor-pointer rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
       role="button"
+      aria-label={`Open task: ${task.title}`}
       tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -50,17 +51,17 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
         }
       }}
     >
-      <Card className="py-3 px-[clamp(var(--sam-space-3),3vw,var(--sam-space-4))] hover:border-border-emphasis transition-colors">
+      <Card className="py-3 px-[clamp(var(--sam-space-3),3vw,var(--sam-space-4))] hover:border-border-default transition-colors">
         {/* Top row: status + activity indicator */}
         <div className="flex items-center justify-between gap-2 mb-2">
           <StatusBadge status={task.status} />
           <div className="flex items-center gap-1.5">
             <span
-              className={`inline-block w-2 h-2 rounded-full ${task.isActive ? 'bg-green-400' : 'bg-neutral-500'}`}
-              title={task.isActive ? 'Active' : 'Inactive'}
+              aria-hidden="true"
+              className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${task.isActive ? 'bg-success-fg' : 'bg-fg-muted'}`}
             />
             <span className="sam-type-caption text-fg-muted">
-              {task.isActive ? 'Active' : 'Inactive'}
+              {task.isActive ? 'Active' : 'Idle'}
             </span>
           </div>
         </div>
@@ -77,15 +78,15 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
 
         {/* Execution step (if provisioning) */}
         {stepLabel && (
-          <div className="sam-type-caption text-info mb-2 overflow-hidden text-ellipsis whitespace-nowrap">
+          <div className="sam-type-caption text-info-fg mb-2 overflow-hidden text-ellipsis whitespace-nowrap">
             {stepLabel}
           </div>
         )}
 
         {/* Time info */}
-        <div className="flex items-center justify-between sam-type-caption text-fg-muted">
-          <span>Submitted {formatRelativeTime(task.createdAt)}</span>
-          <span>
+        <div className="flex items-center justify-between sam-type-caption text-fg-muted gap-2">
+          <span className="min-w-0 truncate">Submitted {formatRelativeTime(task.createdAt)}</span>
+          <span className="flex-shrink-0">
             {task.lastMessageAt
               ? `Last msg ${formatRelativeTime(task.lastMessageAt)}`
               : 'No messages'}

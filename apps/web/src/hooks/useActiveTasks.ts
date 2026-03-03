@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
+import { DEFAULT_DASHBOARD_POLL_INTERVAL_MS } from '@simple-agent-manager/shared';
 import type { DashboardTask } from '@simple-agent-manager/shared';
 import * as api from '../lib/api';
 
 interface UseActiveTasksOptions {
-  /** Polling interval in ms. Default: 15000 (15s) */
+  /** Polling interval in ms. Defaults to DEFAULT_DASHBOARD_POLL_INTERVAL_MS. */
   pollInterval?: number;
 }
 
@@ -15,7 +16,7 @@ interface UseActiveTasksResult {
 }
 
 export function useActiveTasks(options: UseActiveTasksOptions = {}): UseActiveTasksResult {
-  const { pollInterval = 15000 } = options;
+  const { pollInterval = DEFAULT_DASHBOARD_POLL_INTERVAL_MS } = options;
   const [tasks, setTasks] = useState<DashboardTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

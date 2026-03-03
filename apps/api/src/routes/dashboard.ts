@@ -47,7 +47,8 @@ dashboardRoutes.get('/active-tasks', async (c) => {
         eq(schema.tasks.userId, userId),
         inArray(schema.tasks.status, ACTIVE_TASK_STATUSES)
       )
-    );
+    )
+    .limit(100);
 
   if (rows.length === 0) {
     return c.json({ tasks: [] } satisfies DashboardActiveTasksResponse);

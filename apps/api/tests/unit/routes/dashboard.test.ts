@@ -96,7 +96,8 @@ function buildMockDB(rows: ReturnType<typeof makeTaskRow>[]) {
     select: vi.fn().mockReturnThis(),
     from: vi.fn().mockReturnThis(),
     innerJoin: vi.fn().mockReturnThis(),
-    where: vi.fn().mockResolvedValue(rows),
+    where: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockResolvedValue(rows),
   };
   (drizzle as any).mockReturnValue(mockDB);
   return mockDB;

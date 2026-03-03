@@ -43,9 +43,9 @@ describe('ActiveTaskCard', () => {
     expect(screen.getByText('Active')).toBeInTheDocument();
   });
 
-  it('shows inactive indicator when task is inactive', () => {
+  it('shows idle indicator when task is inactive', () => {
     render(<ActiveTaskCard task={makeTask({ isActive: false })} />);
-    expect(screen.getByText('Inactive')).toBeInTheDocument();
+    expect(screen.getByText('Idle')).toBeInTheDocument();
   });
 
   it('shows "No messages" when lastMessageAt is null', () => {
