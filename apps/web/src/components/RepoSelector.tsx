@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { listRepositories } from '../lib/api';
-import { Input, Spinner } from '@simple-agent-manager/ui';
+import { Alert, Input, Spinner } from '@simple-agent-manager/ui';
 import type { Repository } from '@simple-agent-manager/shared';
 
 interface RepoSelectorProps {
@@ -277,9 +277,9 @@ export function RepoSelector({
         </p>
       )}
       {fetchWarning && (
-        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-warning-fg)' }}>
+        <Alert variant="warning" className="mt-1 text-xs">
           {fetchWarning}
-        </p>
+        </Alert>
       )}
       {error && repositories.length === 0 && value && !value.startsWith('http') && !value.startsWith('git@') && (
         <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>

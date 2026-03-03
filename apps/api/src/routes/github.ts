@@ -60,7 +60,7 @@ githubRoutes.get('/install-url', requireAuth(), requireApproved(), async (c) => 
  */
 githubRoutes.get('/repositories', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
-  const installationId = c.req.query('installation_id');
+  const installationRowId = c.req.query('installation_id');
   const db = drizzle(c.env.DATABASE, { schema });
 
   // Get user's installations
@@ -70,12 +70,12 @@ githubRoutes.get('/repositories', requireAuth(), requireApproved(), async (c) =>
     .where(eq(schema.githubInstallations.userId, userId));
 
   if (installations.length === 0) {
-    return c.json([]);
+    return c.json({ repositories: [] });
   }
 
   // Filter by installation if specified (match by DB row ID, consistent with branches endpoint)
-  const targetInstallations = installationId
-    ? installations.filter((i) => i.id === installationId)
+  const targetInstallations = installationRowId
+    ? installations.filter((i) => i.id === installationRowId)
     : installations;
 
   if (targetInstallations.length === 0) {
