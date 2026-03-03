@@ -295,6 +295,58 @@ describe('ProjectData Durable Object', () => {
       expect(session!.messageCount).toBe(0);
     });
 
+    it('preserves message order when timestamps collide (sequence tiebreaker)', async () => {
+      const stub = getStub('project-batch-ordering');
+      const sessionId = await stub.createSession(null, null);
+
+      // All messages share the exact same timestamp to simulate streaming chunks
+      // arriving within the same millisecond
+      const sameTimestamp = new Date().toISOString();
+      const messages = [
+        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: 'Hello', toolMetadata: null, timestamp: sameTimestamp, sequence: 1 },
+        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: ' world', toolMetadata: null, timestamp: sameTimestamp, sequence: 2 },
+        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: '!', toolMetadata: null, timestamp: sameTimestamp, sequence: 3 },
+        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: ' How', toolMetadata: null, timestamp: sameTimestamp, sequence: 4 },
+        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: ' are', toolMetadata: null, timestamp: sameTimestamp, sequence: 5 },
+        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: ' you?', toolMetadata: null, timestamp: sameTimestamp, sequence: 6 },
+      ];
+
+      await stub.persistMessageBatch(sessionId, messages);
+      const { messages: stored } = await stub.getMessages(sessionId);
+
+      expect(stored).toHaveLength(6);
+      // Messages must be in sequence order despite identical timestamps
+      expect(stored[0]!.content).toBe('Hello');
+      expect(stored[1]!.content).toBe(' world');
+      expect(stored[2]!.content).toBe('!');
+      expect(stored[3]!.content).toBe(' How');
+      expect(stored[4]!.content).toBe(' are');
+      expect(stored[5]!.content).toBe(' you?');
+
+      // Verify sequence numbers are returned
+      expect(stored[0]!.sequence).toBe(1);
+      expect(stored[5]!.sequence).toBe(6);
+    });
+
+    it('auto-assigns sequence when not provided by client', async () => {
+      const stub = getStub('project-batch-auto-seq');
+      const sessionId = await stub.createSession(null, null);
+
+      // No sequence field — DO should auto-assign
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: crypto.randomUUID(), role: 'user', content: 'First', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Second', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      const { messages: stored } = await stub.getMessages(sessionId);
+      expect(stored).toHaveLength(2);
+      // Both should have sequence values (auto-assigned)
+      expect(stored[0]!.sequence).toBeTruthy();
+      expect(stored[1]!.sequence).toBeTruthy();
+      // Second should have a higher sequence than first
+      expect((stored[1]!.sequence as number)).toBeGreaterThan(stored[0]!.sequence as number);
+    });
+
     it('all-duplicate batch does not update session timestamp', async () => {
       const stub = getStub('project-batch-all-dup');
       const sessionId = await stub.createSession(null, null);

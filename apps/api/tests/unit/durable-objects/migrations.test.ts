@@ -183,13 +183,14 @@ describe('DO Migrations', () => {
       const log = sql.getExecLog();
       const indexes = log.filter((q) => q.toUpperCase().startsWith('CREATE INDEX'));
 
-      // 9 indexes total:
+      // 10 CREATE INDEX statements total (migration 007 drops session_created
+      // and creates session_seq, but DROP INDEX doesn't count here):
       // chat_sessions: 3 (status, started_at, workspace) + 1 (task_id from migration 002)
-      // chat_messages: 1 (session_created)
+      // chat_messages: 1 (session_created from 001) + 1 (session_seq from 007)
       // task_status_events: 1 (task)
       // activity_events: 2 (created, type)
       // idle_cleanup_schedule: 1 (cleanup_at from migration 005)
-      expect(indexes.length).toBe(9);
+      expect(indexes.length).toBe(10);
     });
   });
 });

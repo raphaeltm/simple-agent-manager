@@ -137,6 +137,7 @@ export function useChatWebSocket({
               content: p.content,
               toolMetadata: p.toolMetadata || null,
               createdAt: p.createdAt || Date.now(),
+              sequence: p.sequence ?? null,
             };
             onMessageRef.current(newMsg);
           } else if (data.type === 'messages.batch') {
@@ -151,6 +152,7 @@ export function useChatWebSocket({
                 content: m.content as string,
                 toolMetadata: (m.toolMetadata as Record<string, unknown>) || null,
                 createdAt: (m.createdAt as number) || Date.now(),
+                sequence: (m.sequence as number) ?? null,
               }));
             for (const msg of msgs) {
               onMessageRef.current(msg);

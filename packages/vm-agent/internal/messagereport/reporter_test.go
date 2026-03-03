@@ -764,3 +764,120 @@ func TestEnqueue_AutoTimestamp(t *testing.T) {
 		t.Fatalf("expected RFC3339 timestamp, got %q: %v", createdAt, err)
 	}
 }
+
+func TestFlush_IncludesSequenceFromOutboxID(t *testing.T) {
+	// Verify that the batch POST payload includes a monotonic "sequence"
+	// field derived from the outbox autoincrement ID.
+	type receivedMsg struct {
+		MessageID string `json:"messageId"`
+		Sequence  int64  `json:"sequence"`
+	}
+	var receivedMsgs []receivedMsg
+	var mu sync.Mutex
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Messages []receivedMsg `json:"messages"`
+		}
+		json.Unmarshal(body, &payload)
+		mu.Lock()
+		receivedMsgs = append(receivedMsgs, payload.Messages...)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": len(payload.Messages), "duplicates": 0})
+	}))
+	defer ts.Close()
+
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "ws-1")
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+
+	// Enqueue 3 messages — they should get autoincrement IDs 1, 2, 3
+	for i := 0; i < 3; i++ {
+		_ = r.Enqueue(Message{
+			MessageID: fmt.Sprintf("seq-msg-%d", i),
+			SessionID: "s1",
+			Role:      "assistant",
+			Content:   fmt.Sprintf("chunk %d", i),
+			Timestamp: "2024-01-01T00:00:00Z", // same timestamp — simulates fast streaming
+		})
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	r.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(receivedMsgs) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(receivedMsgs))
+	}
+
+	// Sequences must be monotonically increasing
+	for i := 1; i < len(receivedMsgs); i++ {
+		if receivedMsgs[i].Sequence <= receivedMsgs[i-1].Sequence {
+			t.Fatalf("sequence not monotonic: msg[%d].sequence=%d <= msg[%d].sequence=%d",
+				i, receivedMsgs[i].Sequence, i-1, receivedMsgs[i-1].Sequence)
+		}
+	}
+
+	// All sequences must be positive (outbox IDs start at 1)
+	for i, m := range receivedMsgs {
+		if m.Sequence <= 0 {
+			t.Fatalf("msg[%d] has non-positive sequence: %d", i, m.Sequence)
+		}
+	}
+}
+
+func TestReadBatch_OrdersByID(t *testing.T) {
+	// Verify that readBatch uses ORDER BY id ASC (not created_at)
+	// so that messages with identical timestamps maintain insertion order.
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost", "ws-1")
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer r.Shutdown()
+
+	// Insert 5 messages with the exact same timestamp
+	sameTS := "2024-01-01T00:00:00.000000000Z"
+	for i := 0; i < 5; i++ {
+		_ = r.Enqueue(Message{
+			MessageID: fmt.Sprintf("order-%d", i),
+			SessionID: "s1",
+			Role:      "assistant",
+			Content:   fmt.Sprintf("chunk-%d", i),
+			Timestamp: sameTS,
+		})
+	}
+
+	// Read batch and verify order matches insertion order
+	batch, err := r.readBatch()
+	if err != nil {
+		t.Fatalf("readBatch: %v", err)
+	}
+	if len(batch) != 5 {
+		t.Fatalf("expected 5 rows, got %d", len(batch))
+	}
+
+	for i := 0; i < 5; i++ {
+		expected := fmt.Sprintf("order-%d", i)
+		if batch[i].messageID != expected {
+			t.Fatalf("batch[%d].messageID = %q, want %q", i, batch[i].messageID, expected)
+		}
+	}
+
+	// IDs should be monotonically increasing
+	for i := 1; i < len(batch); i++ {
+		if batch[i].id <= batch[i-1].id {
+			t.Fatalf("outbox IDs not monotonic: batch[%d].id=%d <= batch[%d].id=%d",
+				i, batch[i].id, i-1, batch[i-1].id)
+		}
+	}
+}

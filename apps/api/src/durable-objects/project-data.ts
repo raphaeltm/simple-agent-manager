@@ -179,16 +179,18 @@ export class ProjectData extends DurableObject<Env> {
 
     const id = generateId();
     const now = Date.now();
+    const sequence = this.nextSequence(sessionId);
 
     this.sql.exec(
-      `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       id,
       sessionId,
       role,
       content,
       toolMetadata,
-      now
+      now,
+      sequence
     );
 
     this.sql.exec(
@@ -221,6 +223,7 @@ export class ProjectData extends DurableObject<Env> {
       content,
       toolMetadata: toolMetadata ? JSON.parse(toolMetadata) : null,
       createdAt: now,
+      sequence,
     });
     return id;
   }
@@ -237,6 +240,7 @@ export class ProjectData extends DurableObject<Env> {
       content: string;
       toolMetadata: string | null;
       timestamp: string;
+      sequence?: number;
     }>
   ): Promise<{ persisted: number; duplicates: number }> {
     const session = this.sql
@@ -251,12 +255,16 @@ export class ProjectData extends DurableObject<Env> {
     let persisted = 0;
     let duplicates = 0;
     const now = Date.now();
+    // Get next sequence once for the whole batch (not per message) to avoid
+    // N queries and ensure monotonic assignment within the batch.
+    let nextSeq = this.nextSequence(sessionId);
     const persistedMessages: Array<{
       id: string;
       role: string;
       content: string;
       toolMetadata: unknown;
       createdAt: number;
+      sequence: number;
     }> = [];
 
     for (const msg of messages) {
@@ -277,15 +285,18 @@ export class ProjectData extends DurableObject<Env> {
       }
 
       const createdAt = new Date(msg.timestamp).getTime() || now;
+      // Use client-provided sequence if available, otherwise auto-assign
+      const sequence = msg.sequence ?? nextSeq++;
       this.sql.exec(
-        `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         msg.messageId,
         sessionId,
         msg.role,
         msg.content,
         msg.toolMetadata,
-        createdAt
+        createdAt,
+        sequence
       );
       persisted++;
       persistedMessages.push({
@@ -294,6 +305,7 @@ export class ProjectData extends DurableObject<Env> {
         content: msg.content,
         toolMetadata: msg.toolMetadata ? JSON.parse(msg.toolMetadata) : null,
         createdAt,
+        sequence,
       });
     }
 
@@ -423,7 +435,7 @@ export class ProjectData extends DurableObject<Env> {
     before: number | null = null
   ): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
     let query =
-      'SELECT id, session_id, role, content, tool_metadata, created_at FROM chat_messages WHERE session_id = ?';
+      'SELECT id, session_id, role, content, tool_metadata, created_at, sequence FROM chat_messages WHERE session_id = ?';
     const params: (string | number)[] = [sessionId];
 
     if (before !== null) {
@@ -431,7 +443,9 @@ export class ProjectData extends DurableObject<Env> {
       params.push(before);
     }
 
-    query += ' ORDER BY created_at DESC LIMIT ?';
+    // Order by created_at with sequence as tiebreaker for messages
+    // that arrive within the same millisecond (streaming chunks).
+    query += ' ORDER BY created_at DESC, sequence DESC LIMIT ?';
     params.push(limit + 1);
 
     const rows = this.sql.exec(query, ...params).toArray();
@@ -446,6 +460,7 @@ export class ProjectData extends DurableObject<Env> {
         content: row.content as string,
         toolMetadata: row.tool_metadata ? JSON.parse(row.tool_metadata as string) : null,
         createdAt: row.created_at as number,
+        sequence: row.sequence as number | null,
       })),
       hasMore,
     };
@@ -756,13 +771,15 @@ export class ProjectData extends DurableObject<Env> {
     try {
       const id = generateId();
       const now = Date.now();
+      const sequence = this.nextSequence(sessionId);
       this.sql.exec(
-        `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at)
-         VALUES (?, ?, 'system', ?, NULL, ?)`,
+        `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence)
+         VALUES (?, ?, 'system', ?, NULL, ?, ?)`,
         id,
         sessionId,
         content,
-        now
+        now,
+        sequence
       );
       this.sql.exec(
         `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ? WHERE id = ?`,
@@ -776,6 +793,7 @@ export class ProjectData extends DurableObject<Env> {
         content,
         toolMetadata: null,
         createdAt: now,
+        sequence,
       });
     } catch {
       // Best-effort notification
@@ -932,6 +950,21 @@ export class ProjectData extends DurableObject<Env> {
       isTerminated: status === 'stopped',
       workspaceUrl: workspaceId && baseDomain ? `https://ws-${workspaceId}.${baseDomain}` : null,
     };
+  }
+
+  /**
+   * Returns the next monotonic sequence number for a session's messages.
+   * Uses MAX(sequence) + 1 so ordering is deterministic even when
+   * multiple messages share the same created_at millisecond.
+   */
+  private nextSequence(sessionId: string): number {
+    const row = this.sql
+      .exec(
+        'SELECT COALESCE(MAX(sequence), 0) AS max_seq FROM chat_messages WHERE session_id = ?',
+        sessionId
+      )
+      .toArray()[0];
+    return ((row?.max_seq as number) ?? 0) + 1;
   }
 
   private broadcastEvent(type: string, payload: Record<string, unknown>): void {

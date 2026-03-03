@@ -85,6 +85,7 @@ export async function persistMessageBatch(
     content: string;
     toolMetadata: Record<string, unknown> | null;
     timestamp: string;
+    sequence?: number;
   }>
 ): Promise<{ persisted: number; duplicates: number }> {
   const stub = await getStub(env, projectId);
@@ -96,6 +97,7 @@ export async function persistMessageBatch(
       content: m.content,
       toolMetadata: m.toolMetadata ? JSON.stringify(m.toolMetadata) : null,
       timestamp: m.timestamp,
+      sequence: m.sequence,
     }))
   );
 }

@@ -250,7 +250,7 @@ func (r *Reporter) readBatch() ([]outboxRow, error) {
 	rows, err := r.db.Query(
 		`SELECT id, message_id, session_id, role, content, tool_metadata, created_at
 		 FROM message_outbox
-		 ORDER BY created_at ASC
+		 ORDER BY id ASC
 		 LIMIT ?`,
 		r.cfg.BatchMaxSize,
 	)
@@ -304,6 +304,7 @@ func (r *Reporter) sendBatch(batch []outboxRow) error {
 		Content      string `json:"content"`
 		ToolMetadata string `json:"toolMetadata,omitempty"`
 		Timestamp    string `json:"timestamp"`
+		Sequence     int64  `json:"sequence"`
 	}
 	messages := make([]apiMessage, 0, len(batch))
 	for _, row := range batch {
@@ -313,6 +314,7 @@ func (r *Reporter) sendBatch(batch []outboxRow) error {
 			Role:      row.role,
 			Content:   row.content,
 			Timestamp: row.createdAt,
+			Sequence:  row.id, // outbox AUTOINCREMENT id is monotonic
 		}
 		if row.toolMetadata.Valid {
 			m.ToolMetadata = row.toolMetadata.String
