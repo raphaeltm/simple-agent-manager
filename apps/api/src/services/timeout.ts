@@ -14,10 +14,10 @@ import * as schema from '../db/schema';
 import { log } from '../lib/logger';
 import { persistError } from './observability';
 
-/** Default provisioning timeout in milliseconds (15 minutes).
+/** Default provisioning timeout in milliseconds (30 minutes).
  * Must be >= WORKSPACE_READY_TIMEOUT_MS to avoid marking workspaces as timed out
  * while the task runner is still waiting for them to become ready. */
-const DEFAULT_PROVISIONING_TIMEOUT_MS = 15 * 60 * 1000;
+const DEFAULT_PROVISIONING_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
  * Get provisioning timeout from env or use default (per constitution principle XI).

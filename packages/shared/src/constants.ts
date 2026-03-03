@@ -161,9 +161,9 @@ export const DEFAULT_TASK_RUN_MAX_EXECUTION_MS = 2 * 60 * 60 * 1000; // 2 hours
 export const DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
 /** Default threshold (ms) for a task stuck in 'delegated' status. Override via TASK_STUCK_DELEGATED_TIMEOUT_MS env var.
- * Must be > WORKSPACE_READY_TIMEOUT_MS (15 min) to avoid stuck-task recovery killing legitimate workspace startups.
- * Set to 16 minutes (1 min buffer above workspace ready timeout). */
-export const DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS = 16 * 60 * 1000; // 16 minutes
+ * Must be > WORKSPACE_READY_TIMEOUT_MS (30 min) to avoid stuck-task recovery killing legitimate workspace startups.
+ * Set to 31 minutes (1 min buffer above workspace ready timeout). */
+export const DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS = 31 * 60 * 1000; // 31 minutes
 
 // =============================================================================
 // TaskRunner DO Defaults (Alarm-Driven Orchestration — TDF-2)
@@ -185,7 +185,7 @@ export const DEFAULT_TASK_RUNNER_AGENT_POLL_INTERVAL_MS = 5_000;
 export const DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS = 120_000;
 
 /** Default timeout (ms) for workspace-ready callback. Override via TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS env var. */
-export const DEFAULT_TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+export const DEFAULT_TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 /** Default poll interval (ms) for provisioning status checks. Override via TASK_RUNNER_PROVISION_POLL_INTERVAL_MS env var. */
 export const DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS = 10_000;
