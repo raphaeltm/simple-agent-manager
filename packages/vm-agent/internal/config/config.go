@@ -206,7 +206,9 @@ func Load() (*Config, error) {
 		WorkspaceDir:       workspaceDir,
 		BootstrapStatePath: getEnv("BOOTSTRAP_STATE_PATH", "/var/lib/vm-agent/bootstrap-state.json"),
 		BootstrapMaxWait:   getEnvDuration("BOOTSTRAP_MAX_WAIT", 5*time.Minute),
-		BootstrapTimeout:   getEnvDuration("BOOTSTRAP_TIMEOUT", 30*time.Minute), // Must match API-side TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS
+		// Must be <= API-side TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS (default 30m).
+		// If larger, the API declares the workspace dead while bootstrap is still running.
+		BootstrapTimeout: getEnvDuration("BOOTSTRAP_TIMEOUT", 30*time.Minute),
 
 		SessionTTL:             getEnvDuration("SESSION_TTL", 24*time.Hour),
 		SessionCleanupInterval: getEnvDuration("SESSION_CLEANUP_INTERVAL", 1*time.Minute),
