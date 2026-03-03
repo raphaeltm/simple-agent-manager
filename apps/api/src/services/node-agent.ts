@@ -153,6 +153,17 @@ async function nodeAgentRequest<T>(
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
+
+    // Detect Worker loop-back: when the vm-{nodeId} DNS record is missing,
+    // the wildcard DNS record routes the request back to this API Worker,
+    // which returns its own 404 format. Provide a clear error instead.
+    if (response.status === 404 && body.includes('"Endpoint not found"')) {
+      throw new Error(
+        `Node Agent unreachable: DNS record for vm-${nodeId.toLowerCase()} may be missing. ` +
+        `The request was routed back to the API Worker instead of the VM.`
+      );
+    }
+
     throw new Error(`Node Agent request failed: ${response.status} ${body}`);
   }
 

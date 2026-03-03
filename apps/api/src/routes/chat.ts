@@ -226,13 +226,20 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
     throw errors.badRequest('content is required');
   }
 
-  // Find the workspace linked to this chat session
+  // Find the workspace linked to this chat session, joining with nodes
+  // to verify the node is still active. When a node is destroyed (e.g.,
+  // after task timeout), its DNS record is cleaned up but the workspace
+  // may still be marked as 'running' in D1. Without this check, the
+  // request to the VM agent would hit the wildcard DNS record and loop
+  // back to this Worker, producing a confusing 404.
   const [workspace] = await db
     .select({
       id: schema.workspaces.id,
       nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
     })
     .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.workspaces.nodeId, schema.nodes.id))
     .where(
       and(
         eq(schema.workspaces.chatSessionId, sessionId),
@@ -243,6 +250,15 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
 
   if (!workspace || !workspace.nodeId) {
     throw errors.notFound('No active workspace found for this session');
+  }
+
+  // Verify the node is still reachable — prevents requests to destroyed VMs
+  // whose DNS records no longer exist (would loop back via wildcard DNS).
+  // Allow 'active' (in use) and 'warm' (idle but still running) nodes.
+  if (workspace.nodeStatus !== 'active' && workspace.nodeStatus !== 'warm') {
+    throw errors.conflict(
+      'The workspace node is no longer running. Start a new chat to create a fresh workspace.'
+    );
   }
 
   // Find the running agent session on that workspace

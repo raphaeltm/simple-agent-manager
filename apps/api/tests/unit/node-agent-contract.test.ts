@@ -889,6 +889,38 @@ describe('Node Agent client functions send correct payloads', () => {
     ).rejects.toThrow('Node Agent request failed: 404');
   });
 
+  it('node agent request detects Worker loop-back 404 and provides clear error', async () => {
+    vi.resetModules();
+
+    vi.doMock('../../src/services/jwt', () => ({
+      signNodeManagementToken: vi.fn().mockResolvedValue({
+        token: 'mock-jwt',
+        expiresAt: new Date().toISOString(),
+      }),
+    }));
+
+    vi.doMock('../../src/services/telemetry', () => ({
+      recordNodeRoutingMetric: vi.fn(),
+    }));
+
+    // Simulate the API Worker's own 404 response (loop-back via wildcard DNS)
+    vi.doMock('../../src/services/fetch-timeout', () => ({
+      fetchWithTimeout: vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: 'NOT_FOUND', message: 'Endpoint not found' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      ),
+      getTimeoutMs: vi.fn().mockReturnValue(30000),
+    }));
+
+    const { deleteWorkspaceOnNode } = await import('../../src/services/node-agent');
+
+    await expect(
+      deleteWorkspaceOnNode('node-abc', 'ws-test', {} as any, 'user-123')
+    ).rejects.toThrow('Node Agent unreachable: DNS record for vm-node-abc may be missing');
+  });
+
   it('node agent request throws on timeout', async () => {
     vi.resetModules();
 
