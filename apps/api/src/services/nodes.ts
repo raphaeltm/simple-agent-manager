@@ -7,7 +7,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../index';
 import { decrypt } from './encryption';
 import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
-import { createServer, deleteServer, powerOffServer, SERVER_TYPES } from './hetzner';
+import { createServer, deleteServer, SERVER_TYPES } from './hetzner';
 import { signCallbackToken } from './jwt';
 
 export interface CreateNodeInput {
@@ -195,33 +195,43 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
     return;
   }
 
-  if (node.providerInstanceId) {
-    const credentials = await db
-      .select()
-      .from(schema.credentials)
-      .where(
-        and(
-          eq(schema.credentials.userId, userId),
-          eq(schema.credentials.provider, 'hetzner')
-        )
+  const credentials = await db
+    .select()
+    .from(schema.credentials)
+    .where(
+      and(
+        eq(schema.credentials.userId, userId),
+        eq(schema.credentials.provider, 'hetzner')
       )
-      .limit(1);
+    )
+    .limit(1);
 
-    const credential = credentials[0];
-    if (credential) {
-      const hetznerToken = await decrypt(credential.encryptedToken, credential.iv, env.ENCRYPTION_KEY);
-      try {
-        await powerOffServer(hetznerToken, node.providerInstanceId);
-      } catch (err) {
-        console.error('Failed to power off node server:', err);
-      }
+  const credential = credentials[0];
+
+  // Delete the Hetzner server (not just power off) since stopped nodes cannot be restarted
+  if (node.providerInstanceId && credential) {
+    const hetznerToken = await decrypt(credential.encryptedToken, credential.iv, env.ENCRYPTION_KEY);
+    try {
+      await deleteServer(hetznerToken, node.providerInstanceId);
+    } catch (err) {
+      console.error('Failed to delete node server:', err);
     }
   }
 
+  // Delete the DNS record since the node is being permanently stopped
+  if (node.backendDnsRecordId) {
+    try {
+      await deleteDNSRecord(node.backendDnsRecordId, env);
+    } catch (err) {
+      console.error('Failed to delete node backend DNS record:', err);
+    }
+  }
+
+  // Mark node and workspaces as deleted since stopped nodes are non-recoverable
   await db
     .update(schema.workspaces)
     .set({
-      status: 'stopped',
+      status: 'deleted',
       updatedAt: now,
     })
     .where(
@@ -234,7 +244,7 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
   await db
     .update(schema.nodes)
     .set({
-      status: 'stopped',
+      status: 'deleted',
       healthStatus: 'stale',
       updatedAt: now,
     })

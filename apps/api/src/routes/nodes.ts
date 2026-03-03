@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { CreateNodeRequest, NodeHealthStatus, NodeResponse } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
@@ -131,7 +131,7 @@ nodesRoutes.get('/', async (c) => {
   const nodes = await db
     .select()
     .from(schema.nodes)
-    .where(eq(schema.nodes.userId, userId))
+    .where(and(eq(schema.nodes.userId, userId), ne(schema.nodes.status, 'deleted')))
     .orderBy(desc(schema.nodes.createdAt));
 
   const hydrated = await Promise.all(nodes.map((node) => refreshNodeHealth(db, node)));
