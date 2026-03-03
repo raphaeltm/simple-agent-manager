@@ -17,22 +17,22 @@ Analyzed 6 similar open-source projects (E2B, Daytona, Gitpod, Coder, OpenHands,
 
 ## Implementation Checklist
 
-- [ ] Remove: keyboard shortcuts section, full API reference, security details, detailed architecture diagram, project structure, tech stack table, use cases section, roadmap table
-- [ ] Add: nav links row (Quick Deploy | Docs | Architecture | Contributing)
-- [ ] Rewrite value prop: focus on "self-hosted AI coding environments" angle
-- [ ] Keep comparison table but make it punchier
-- [ ] Rewrite features: 5-6 concise bullets with concrete details
-- [ ] Rewrite quickstart as "Quick Deploy" with the fork-configure-push flow (automated deployment)
-- [ ] Add brief "How It Works" section with text (link to architecture docs)
-- [ ] Add "Development" section (brief, for contributors)
-- [ ] Link to self-hosting guide for detailed instructions
-- [ ] Keep under 200 lines total
+- [x] Remove: keyboard shortcuts section, full API reference, security details, detailed architecture diagram, project structure, tech stack table, use cases section, roadmap table
+- [x] Add: nav links row (Quick Deploy | Docs | Architecture | Contributing)
+- [x] Rewrite value prop: focus on "self-hosted AI coding environments" angle
+- [x] Keep comparison table but make it punchier
+- [x] Rewrite features: 5-6 concise bullets with concrete details
+- [x] Rewrite quickstart as "Quick Deploy" with the fork-configure-push flow (automated deployment)
+- [x] Add brief "How It Works" section with text (link to architecture docs)
+- [x] Add "Development" section (brief, for contributors)
+- [x] Link to self-hosting guide for detailed instructions
+- [x] Keep under 200 lines total (result: 140 lines)
 
 ## Acceptance Criteria
 
-- [ ] README is under 200 lines
-- [ ] Leads with compelling value prop, not documentation
-- [ ] Quick deploy section uses the automated GitHub Actions flow
-- [ ] No keyboard shortcuts, API reference, or security details in README
-- [ ] Links to docs for detailed information
+- [x] README is under 200 lines (140 lines)
+- [x] Leads with compelling value prop, not documentation
+- [x] Quick deploy section uses the automated GitHub Actions flow
+- [x] No keyboard shortcuts, API reference, or security details in README
+- [x] Links to docs for detailed information
 - [ ] Passes lint/typecheck (no code changes, but verify build)
