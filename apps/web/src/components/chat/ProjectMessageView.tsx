@@ -1,6 +1,7 @@
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { getChatSession, resetIdleTimer, sendFollowUpPrompt } from '../../lib/api';
+import { VoiceButton } from '@simple-agent-manager/acp-client';
+import { getChatSession, getTranscribeApiUrl, resetIdleTimer, sendFollowUpPrompt } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
@@ -353,6 +354,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [idleCountdownMs, setIdleCountdownMs] = useState<number | null>(null);
 
   const sessionState = session ? deriveSessionState(session) : 'terminated';
+  const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
   // WebSocket with reconnection (TDF-8)
   const { connectionState, wsRef, retry: retryWs } = useChatWebSocket({
@@ -757,6 +759,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           onSend={handleSendFollowUp}
           sending={sendingFollowUp}
           placeholder="Send a message..."
+          transcribeApiUrl={transcribeApiUrl}
         />
       )}
       {sessionState === 'idle' && (
@@ -766,6 +769,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           onSend={handleSendFollowUp}
           sending={sendingFollowUp}
           placeholder="Send a follow-up to keep the session alive..."
+          transcribeApiUrl={transcribeApiUrl}
         />
       )}
       {sessionState === 'terminated' && (
@@ -819,17 +823,31 @@ function FollowUpInput({
   onSend,
   sending,
   placeholder,
+  transcribeApiUrl,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
   sending: boolean;
   placeholder: string;
+  transcribeApiUrl: string;
 }) {
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleTranscription = useCallback(
+    (text: string) => {
+      const separator = value.length > 0 && !value.endsWith(' ') ? ' ' : '';
+      onChange(value + separator + text);
+      inputRef.current?.focus();
+    },
+    [value, onChange],
+  );
+
   return (
     <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface">
       <div className="flex gap-2 items-end">
         <textarea
+          ref={inputRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
@@ -842,6 +860,11 @@ function FollowUpInput({
           disabled={sending}
           rows={1}
           className="flex-1 p-2 px-3 bg-page border border-border-default rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px]"
+        />
+        <VoiceButton
+          onTranscription={handleTranscription}
+          disabled={sending}
+          apiUrl={transcribeApiUrl}
         />
         <button
           type="button"

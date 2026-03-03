@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   listCredentials: vi.fn(),
   submitTask: vi.fn(),
   getProjectTask: vi.fn(),
+  getTranscribeApiUrl: vi.fn(() => 'https://api.test.com/api/transcribe'),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
@@ -14,6 +15,15 @@ vi.mock('../../../src/lib/api', () => ({
   listCredentials: mocks.listCredentials,
   submitTask: mocks.submitTask,
   getProjectTask: mocks.getProjectTask,
+  getTranscribeApiUrl: mocks.getTranscribeApiUrl,
+}));
+
+vi.mock('@simple-agent-manager/acp-client', () => ({
+  VoiceButton: ({ onTranscription }: { onTranscription: (text: string) => void }) => (
+    <button data-testid="voice-button" onClick={() => onTranscription('test voice input')}>
+      Voice
+    </button>
+  ),
 }));
 
 vi.mock('../../../src/components/chat/ProjectMessageView', () => ({
