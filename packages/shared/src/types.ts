@@ -93,6 +93,12 @@ export interface Repository {
   installationId: string;
 }
 
+export interface RepositoryListResponse {
+  repositories: Repository[];
+  /** Names of installations whose repo fetch failed (e.g. expired or revoked) */
+  failedInstallations?: string[];
+}
+
 export interface Branch {
   name: string;
   isDefault: boolean;

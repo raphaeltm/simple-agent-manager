@@ -58,16 +58,18 @@ describe('CreateWorkspace', () => {
       },
     ]);
     mocks.listNodes.mockResolvedValue([]);
-    mocks.listRepositories.mockResolvedValue([
-      {
-        id: 1,
-        fullName: 'octo/my-repo',
-        name: 'my-repo',
-        private: false,
-        defaultBranch: 'main',
-        installationId: 'inst-1',
-      },
-    ]);
+    mocks.listRepositories.mockResolvedValue({
+      repositories: [
+        {
+          id: 1,
+          fullName: 'octo/my-repo',
+          name: 'my-repo',
+          private: false,
+          defaultBranch: 'main',
+          installationId: 'inst-1',
+        },
+      ],
+    });
     mocks.listBranches.mockResolvedValue([
       { name: 'main' },
       { name: 'develop' },
@@ -216,6 +218,86 @@ describe('CreateWorkspace', () => {
     // Prerequisites checklist should not be visible (all passed, not in loading/missing state)
     expect(screen.queryByText('Setup Required')).not.toBeInTheDocument();
     expect(screen.queryByText('Checking prerequisites...')).not.toBeInTheDocument();
+  });
+
+  it('passes installationId to RepoSelector and re-fetches on switch', async () => {
+    // Two installations: personal + org
+    mocks.listGitHubInstallations.mockResolvedValue([
+      {
+        id: 'inst-1',
+        userId: 'user-1',
+        installationId: '12345',
+        accountType: 'personal',
+        accountName: 'octo',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'inst-2',
+        userId: 'user-1',
+        installationId: '67890',
+        accountType: 'organization',
+        accountName: 'my-org',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ]);
+
+    mocks.listRepositories.mockImplementation((installationId?: string) => {
+      if (installationId === 'inst-2') {
+        return Promise.resolve({
+          repositories: [
+            {
+              id: 10,
+              fullName: 'my-org/org-repo',
+              name: 'org-repo',
+              private: false,
+              defaultBranch: 'main',
+              installationId: 'inst-2',
+            },
+          ],
+        });
+      }
+      return Promise.resolve({
+        repositories: [
+          {
+            id: 1,
+            fullName: 'octo/my-repo',
+            name: 'my-repo',
+            private: false,
+            defaultBranch: 'main',
+            installationId: 'inst-1',
+          },
+        ],
+      });
+    });
+
+    renderCreateWorkspace();
+
+    // Wait for form to render
+    await screen.findByLabelText('Workspace Name');
+
+    // Initial fetch should be for first installation
+    await waitFor(() => {
+      expect(mocks.listRepositories).toHaveBeenCalledWith('inst-1');
+    });
+
+    // The GitHub Account selector should appear (2 installations)
+    const installSelect = screen.getByLabelText('GitHub Account');
+    expect(installSelect).toBeInTheDocument();
+
+    // Switch to org installation
+    fireEvent.change(installSelect, { target: { value: 'inst-2' } });
+
+    // Should re-fetch for the org installation
+    await waitFor(() => {
+      expect(mocks.listRepositories).toHaveBeenCalledWith('inst-2');
+    });
+
+    // Org repos should now appear in dropdown
+    fireEvent.focus(screen.getByLabelText('Repository'));
+    expect(await screen.findByText('my-org/org-repo')).toBeInTheDocument();
+    expect(screen.queryByText('octo/my-repo')).not.toBeInTheDocument();
   });
 
 });

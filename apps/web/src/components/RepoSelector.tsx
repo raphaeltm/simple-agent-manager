@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { listRepositories } from '../lib/api';
-import { Input, Spinner } from '@simple-agent-manager/ui';
+import { Alert, Input, Spinner } from '@simple-agent-manager/ui';
 import type { Repository } from '@simple-agent-manager/shared';
 
 interface RepoSelectorProps {
@@ -9,6 +9,8 @@ interface RepoSelectorProps {
   onChange: (value: string) => void;
   /** Called when a repository is selected from the dropdown with its metadata */
   onRepoSelect?: (repo: { fullName: string; defaultBranch: string; githubRepoId?: number } | null) => void;
+  /** When provided, only fetch repos for this installation (DB row ID) */
+  installationId?: string;
   disabled?: boolean;
   required?: boolean;
   placeholder?: string;
@@ -19,6 +21,7 @@ export function RepoSelector({
   value,
   onChange,
   onRepoSelect,
+  installationId,
   disabled = false,
   required = false,
   placeholder = 'https://github.com/user/repo or select from list',
@@ -28,30 +31,38 @@ export function RepoSelector({
   const [showDropdown, setShowDropdown] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fetchWarning, setFetchWarning] = useState<string | null>(null);
   const [lastCheckedRepo, setLastCheckedRepo] = useState<string>('');
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch GitHub repositories on mount
+  // Fetch GitHub repositories when installationId changes
   useEffect(() => {
     const fetchRepos = async () => {
       setLoading(true);
       setError(null);
+      setFetchWarning(null);
       try {
-        const repos = await listRepositories();
-        setRepositories(repos);
+        const result = await listRepositories(installationId);
+        setRepositories(result.repositories);
+        if (result.failedInstallations && result.failedInstallations.length > 0) {
+          setFetchWarning(
+            `Could not load repos from: ${result.failedInstallations.join(', ')}`
+          );
+        }
       } catch (err) {
         // Silently fail if GitHub not connected - user can still paste URLs
         console.log('Could not fetch GitHub repositories:', err);
         setError('GitHub not connected');
+        setRepositories([]);
       } finally {
         setLoading(false);
       }
     };
 
     fetchRepos();
-  }, []);
+  }, [installationId]);
 
   // Filter repositories based on input
   useEffect(() => {
@@ -264,6 +275,11 @@ export function RepoSelector({
         <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
           Loading repositories...
         </p>
+      )}
+      {fetchWarning && (
+        <Alert variant="warning" className="mt-1 text-xs">
+          {fetchWarning}
+        </Alert>
       )}
       {error && repositories.length === 0 && value && !value.startsWith('http') && !value.startsWith('git@') && (
         <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>

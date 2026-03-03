@@ -26,8 +26,8 @@ export function GitHubAppSection() {
       // Load repo count if there are installations
       if (data.length > 0) {
         try {
-          const repos = await listRepositories();
-          setRepoCount(Array.isArray(repos) ? repos.length : 0);
+          const result = await listRepositories();
+          setRepoCount(result.repositories.length);
         } catch {
           // Non-critical, don't show error
           setRepoCount(null);

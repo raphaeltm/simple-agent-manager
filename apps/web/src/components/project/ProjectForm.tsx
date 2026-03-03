@@ -115,20 +115,22 @@ export function ProjectForm({
   );
 
   const handleInstallationChange = (installationId: string) => {
-    handleChange('installationId', installationId);
-
     if (isEditMode) {
+      handleChange('installationId', installationId);
       return;
     }
 
-    const normalizedRepository = normalizeRepository(values.repository);
-    if (!normalizedRepository || !normalizedRepository.includes('/')) {
-      setBranches([]);
-      setBranchesError(null);
-      return;
-    }
-
-    void fetchBranches(normalizedRepository, installationId);
+    // Clear repo selection when installation changes — repos differ per installation
+    setValues((current) => ({
+      ...current,
+      installationId,
+      repository: '',
+      defaultBranch: 'main',
+      githubRepoId: undefined,
+    }));
+    setBranches([]);
+    setBranchesError(null);
+    setRepoDefaultBranch(undefined);
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -224,6 +226,7 @@ export function ProjectForm({
             value={values.repository}
             onChange={handleRepositoryChange}
             onRepoSelect={handleRepoSelect}
+            installationId={values.installationId}
             disabled={submitting}
             required
           />
