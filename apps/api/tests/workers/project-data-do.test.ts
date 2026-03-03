@@ -695,6 +695,16 @@ describe('ProjectData Durable Object', () => {
       const response = await stub.fetch(new Request('https://do.internal/unknown'));
       expect(response.status).toBe(404);
     });
+
+    it('accepts sessionId query parameter for session-scoped WebSocket', async () => {
+      const stub = getStub('project-ws-session-tag');
+      // The fetch should not reject a sessionId query param
+      const response = await stub.fetch(
+        new Request('https://do.internal/ws?sessionId=test-session-123')
+      );
+      // Without a proper Upgrade header, should still return 426 (validates URL parsing works)
+      expect(response.status).toBe(426);
+    });
   });
 
   // =========================================================================

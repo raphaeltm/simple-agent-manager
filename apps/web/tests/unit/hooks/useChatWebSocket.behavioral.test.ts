@@ -96,6 +96,13 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(MockWebSocket.instances[0]!.url).toContain('/api/projects/proj-1/sessions/ws');
   });
 
+  it('includes sessionId as query parameter in WebSocket URL', () => {
+    renderHook(() => useChatWebSocket({ ...defaultProps, sessionId: 'sess-abc' }));
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances[0]!.url).toContain('?sessionId=sess-abc');
+  });
+
   it('does not create WebSocket when disabled', () => {
     renderHook(() => useChatWebSocket({ ...defaultProps, enabled: false }));
 
@@ -664,6 +671,92 @@ describe('useChatWebSocket (behavioral)', () => {
       expect.arrayContaining([expect.objectContaining({ id: 'msg-catchup-1' })]),
       expect.any(Object),
       false,
+    );
+  });
+
+  // ===========================================================================
+  // Regression: session switch creates new connection with correct sessionId
+  // See: docs/notes/2026-03-03-chat-session-leakage-postmortem.md
+  // ===========================================================================
+
+  it('closes old connection and opens new one with correct sessionId on session switch', () => {
+    const { rerender } = renderHook(
+      (props) => useChatWebSocket(props),
+      { initialProps: { ...defaultProps, sessionId: 'sess-A' } },
+    );
+
+    const firstWs = MockWebSocket.instances[0]!;
+    act(() => {
+      firstWs.simulateOpen();
+    });
+
+    expect(firstWs.url).toContain('sessionId=sess-A');
+
+    // Switch session
+    rerender({ ...defaultProps, sessionId: 'sess-B' });
+
+    // Old socket should be closed
+    expect(firstWs.closeCode).toBe(1000);
+
+    // New socket should be created with correct sessionId
+    const secondWs = MockWebSocket.instances[MockWebSocket.instances.length - 1]!;
+    expect(secondWs.url).toContain('sessionId=sess-B');
+  });
+
+  it('does not deliver messages from old session after session switch', () => {
+    const onMessage = vi.fn();
+    const { rerender } = renderHook(
+      (props) => useChatWebSocket(props),
+      { initialProps: { ...defaultProps, sessionId: 'sess-A', onMessage } },
+    );
+
+    const firstWs = MockWebSocket.instances[0]!;
+    act(() => {
+      firstWs.simulateOpen();
+    });
+
+    // Switch to session B
+    rerender({ ...defaultProps, sessionId: 'sess-B', onMessage });
+
+    const secondWs = MockWebSocket.instances[MockWebSocket.instances.length - 1]!;
+    act(() => {
+      secondWs.simulateOpen();
+    });
+
+    // Simulate old session's message arriving on new socket
+    act(() => {
+      secondWs.simulateMessage({
+        type: 'message.new',
+        payload: {
+          sessionId: 'sess-A',
+          messageId: 'stale-msg',
+          role: 'assistant',
+          content: 'This is from session A',
+          createdAt: Date.now(),
+        },
+      });
+    });
+
+    // Should NOT be delivered — wrong session
+    expect(onMessage).not.toHaveBeenCalled();
+
+    // Correct session message should be delivered
+    act(() => {
+      secondWs.simulateMessage({
+        type: 'message.new',
+        payload: {
+          sessionId: 'sess-B',
+          messageId: 'correct-msg',
+          role: 'assistant',
+          content: 'This is from session B',
+          createdAt: Date.now(),
+        },
+      });
+    });
+
+    expect(onMessage).toHaveBeenCalledOnce();
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'This is from session B' }),
     );
   });
 });

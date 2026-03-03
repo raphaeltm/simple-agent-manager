@@ -66,4 +66,14 @@ describe('workspace messages batch endpoint source contract', () => {
     expect(file).toContain('persisted: result.persisted');
     expect(file).toContain('duplicates: result.duplicates');
   });
+
+  // Regression: session validation (2026-03-03 session leakage fix)
+  it('queries workspace chatSessionId for session validation', () => {
+    expect(file).toContain('chatSessionId: schema.workspaces.chatSessionId');
+  });
+
+  it('rejects messages targeting a session not linked to the workspace', () => {
+    expect(file).toContain('Session mismatch');
+    expect(file).toContain('workspace.chatSessionId');
+  });
 });

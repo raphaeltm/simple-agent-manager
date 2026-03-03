@@ -109,7 +109,8 @@ describe('ProjectMessageView', () => {
     expect(source).toContain('groupMessages');
   });
 
-  it('cleans up polling on unmount', () => {
+  it('cleans up polling on unmount with AbortController', () => {
+    expect(source).toContain('abortController.abort()');
     expect(source).toContain('clearInterval(pollInterval)');
   });
 
@@ -192,9 +193,13 @@ describe('ProjectChat page', () => {
     expect(source).toContain('w-72');
   });
 
-  it('uses ProjectMessageView component', () => {
+  it('uses ProjectMessageView component with key={sessionId} for session isolation', () => {
     expect(source).toContain('ProjectMessageView');
     expect(source).toContain('from \'../components/chat/ProjectMessageView\'');
+    // Regression: key={sessionId} forces clean unmount/remount on session switch,
+    // preventing stale state from leaking between sessions.
+    // See: docs/notes/2026-03-03-chat-session-leakage-postmortem.md
+    expect(source).toContain('key={sessionId}');
   });
 
   it('reads sessionId from route params', () => {
