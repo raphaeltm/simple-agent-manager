@@ -255,6 +255,9 @@ export class ProjectData extends DurableObject<Env> {
     let persisted = 0;
     let duplicates = 0;
     const now = Date.now();
+    // Get next sequence once for the whole batch (not per message) to avoid
+    // N queries and ensure monotonic assignment within the batch.
+    let nextSeq = this.nextSequence(sessionId);
     const persistedMessages: Array<{
       id: string;
       role: string;
@@ -283,7 +286,7 @@ export class ProjectData extends DurableObject<Env> {
 
       const createdAt = new Date(msg.timestamp).getTime() || now;
       // Use client-provided sequence if available, otherwise auto-assign
-      const sequence = msg.sequence ?? this.nextSequence(sessionId);
+      const sequence = msg.sequence ?? nextSeq++;
       this.sql.exec(
         `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,

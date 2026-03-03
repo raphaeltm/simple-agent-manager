@@ -143,8 +143,12 @@ export const MIGRATIONS: Migration[] = [
       // created_at timestamps. Streaming chunks from Claude Code often arrive
       // within the same millisecond, causing undefined SQLite sort order.
       sql.exec(`ALTER TABLE chat_messages ADD COLUMN sequence INTEGER`);
-      // Backfill existing rows: assign sequence based on rowid (insertion order)
+      // Backfill existing rows: assign sequence based on rowid (insertion order).
+      // DO SQLite does not auto-VACUUM, so rowid is stable.
       sql.exec(`UPDATE chat_messages SET sequence = rowid WHERE sequence IS NULL`);
+      // Drop old index — now redundant since the new composite index covers
+      // (session_id, created_at) as a prefix.
+      sql.exec(`DROP INDEX IF EXISTS idx_chat_messages_session_created`);
       // New composite index for deterministic ordering
       sql.exec(
         `CREATE INDEX idx_chat_messages_session_seq ON chat_messages(session_id, created_at, sequence)`
