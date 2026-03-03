@@ -1,3 +1,9 @@
+/**
+ * Dashboard API routes.
+ *
+ * Provides aggregated views of active tasks with session enrichment
+ * from per-project Durable Objects.
+ */
 import { Hono } from 'hono';
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
