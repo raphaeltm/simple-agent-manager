@@ -211,11 +211,9 @@ executeTaskRun():
     |
     |-- Step 3: WAIT FOR WORKSPACE READY (executionStep = 'workspace_ready')
     |   |
-    |   |-- waitForWorkspaceReady() polls D1
-    |   |   Initial interval: 500ms (WORKSPACE_READY_POLL_INTERVAL_MS)
-    |   |   Backoff: 1.5x multiplier
-    |   |   Max interval: 5s (WORKSPACE_READY_MAX_POLL_INTERVAL_MS)
-    |   |   Timeout: 10min (WORKSPACE_READY_TIMEOUT_MS)
+    |   |-- handleWorkspaceReady() waits for VM agent callback
+    |   |   Callback: POST /workspaces/{id}/ready from VM agent
+    |   |   Timeout: 30min (TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS)
     |   |
     |   |-- Checks workspace.status:
     |       'running' or 'recovery' -> proceed
@@ -463,7 +461,7 @@ Timeout measured from `task.updatedAt` (which is refreshed by `setExecutionStep(
 
 ### Workspace Provisioning Timeout (`apps/api/src/services/timeout.ts`)
 
-Also runs in the cron cycle. Marks workspaces stuck in `creating` as `error` after 10 minutes.
+Also runs in the cron cycle. Marks workspaces stuck in `creating` as `error` after 30 minutes.
 
 **Execution order in cron** (from `apps/api/src/index.ts`):
 1. `checkProvisioningTimeouts()` — marks stuck workspaces as error
@@ -555,10 +553,8 @@ The idle cleanup flow (`awaiting_followup` -> `scheduleIdleCleanup`) looks up th
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `WORKSPACE_READY_TIMEOUT_MS` | 600,000 (10 min) | Polling timeout for workspace ready |
-| `WORKSPACE_READY_POLL_INTERVAL_MS` | 500 | Initial poll interval |
-| `WORKSPACE_READY_MAX_POLL_INTERVAL_MS` | 5,000 | Max poll interval (1.5x backoff) |
-| `PROVISIONING_TIMEOUT_MS` | 600,000 (10 min) | Cron marks stuck creating workspaces |
+| `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` | 1,800,000 (30 min) | TaskRunner DO workspace-ready callback timeout |
+| `PROVISIONING_TIMEOUT_MS` | 1,800,000 (30 min) | Cron marks stuck creating workspaces |
 
 ### Warm Node Pool
 
