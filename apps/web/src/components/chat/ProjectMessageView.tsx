@@ -591,7 +591,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     }
   };
 
-  if (loading) {
+  // Initial load — only show full spinner when no data exists yet
+  if (loading && messages.length === 0 && !session) {
     return (
       <div className="flex justify-center p-8">
         <Spinner size="lg" />
@@ -599,7 +600,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     );
   }
 
-  if (error) {
+  if (error && !session) {
     return (
       <div className="p-4 text-danger text-sm">
         {error}
@@ -608,7 +609,21 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div className="flex flex-col flex-1 min-h-0 relative">
+      {/* Background refresh indicator — shown when reloading but data already visible */}
+      {loading && (session || messages.length > 0) && (
+        <div className="absolute top-2 right-2 z-10">
+          <Spinner size="sm" />
+        </div>
+      )}
+
+      {/* Inline error when session already loaded */}
+      {error && session && (
+        <div className="px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs">
+          {error}
+        </div>
+      )}
+
       {/* Connection indicator (TDF-8) */}
       {sessionState === 'active' && connectionState !== 'connected' && (
         <ConnectionBanner state={connectionState} onRetry={retryWs} />

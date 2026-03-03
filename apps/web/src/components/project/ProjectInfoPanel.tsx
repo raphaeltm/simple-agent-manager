@@ -4,7 +4,7 @@
  * Gives users visibility into what's happening in a project without leaving
  * the chat-first interface. Accessible via the info icon in the project header.
  */
-import { type FC, useCallback, useEffect, useState } from 'react';
+import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Task, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
@@ -39,18 +39,32 @@ export const ProjectInfoPanel: FC<ProjectInfoPanelProps> = ({ projectId, open, o
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const hasLoadedRef = useRef(false);
+
+  // Reset when project changes
+  useEffect(() => {
+    hasLoadedRef.current = false;
+    setLoading(true);
+  }, [projectId]);
 
   const loadData = useCallback(async () => {
     try {
-      setLoading(true);
+      if (hasLoadedRef.current) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       const [ws, taskResult] = await Promise.all([
         listWorkspaces(undefined, undefined, projectId).catch(() => [] as WorkspaceResponse[]),
         listProjectTasks(projectId, { limit: MAX_ITEMS }).catch(() => ({ tasks: [] as Task[], total: 0 })),
       ]);
       setWorkspaces(ws);
       setTasks(taskResult.tasks);
+      hasLoadedRef.current = true;
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [projectId]);
 
@@ -101,9 +115,12 @@ export const ProjectInfoPanel: FC<ProjectInfoPanelProps> = ({ projectId, open, o
       >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border-default shrink-0">
-          <h2 id="info-panel-title" className="m-0 text-base font-semibold text-fg-primary">
-            Project Status
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 id="info-panel-title" className="m-0 text-base font-semibold text-fg-primary">
+              Project Status
+            </h2>
+            {refreshing && <Spinner size="sm" />}
+          </div>
           <button
             type="button"
             onClick={onClose}
