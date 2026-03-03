@@ -130,7 +130,7 @@ export const SyntaxHighlightedCode: FC<{ content: string; language: string }> = 
                   minHeight: '1.5em',
                 }}
               >
-                <span className="inline-block w-12 text-right pr-3 text-fg-muted opacity-50 select-none shrink-0">
+                <span className="inline-block w-12 text-right pr-3 text-fg-muted opacity-50 select-none shrink-0" aria-hidden="true">
                   {lineIdx + 1}
                 </span>
                 <span className="flex-1">
@@ -229,7 +229,7 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
               }
 
               return (
-                <div className="mb-3">
+                <div className="mb-3 overflow-x-auto rounded-md">
                   <SyntaxHighlightedCode content={code} language={match[1] ?? ''} />
                 </div>
               );

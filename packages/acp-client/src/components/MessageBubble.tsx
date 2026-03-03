@@ -37,6 +37,7 @@ function HighlightedCode({ code, language }: { code: string; language: string })
                 }}
               >
                 <span
+                  aria-hidden="true"
                   style={{
                     display: 'inline-block',
                     width: '2em',
