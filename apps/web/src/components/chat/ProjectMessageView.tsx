@@ -466,7 +466,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         const data: ChatSessionDetailResponse & { session: ExtendedSession } = await getChatSession(
           projectId, sessionId, { signal: abortController.signal }
         );
-        // Guard: skip if this response is for a different session (stale closure)
+        // Guard: skip if the server returned a different session than requested
         if (data.session.id !== sessionId) return;
         const newLastId = data.messages[data.messages.length - 1]?.id ?? '';
         const taskStatus = data.session.task?.status ?? '';
