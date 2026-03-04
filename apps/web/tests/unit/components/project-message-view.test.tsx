@@ -151,20 +151,14 @@ describe('ProjectMessageView — session isolation', () => {
   });
 
   it('aborts in-flight polling requests on session switch', async () => {
-    let lastSignal: AbortSignal | undefined;
+    let pollSignal: AbortSignal | undefined;
 
     const sessionAResponse = makeSessionResponse('session-A', [
       makeMessage('msg-a1', 'session-A', 'Data from A'),
     ]);
 
-    mocks.getChatSession.mockImplementation(async (
-      _projectId: string,
-      _sessionId: string,
-      params?: { signal?: AbortSignal }
-    ) => {
-      lastSignal = params?.signal;
-      return sessionAResponse;
-    });
+    // Initial load — no signal capture (initial load effect is separate)
+    mocks.getChatSession.mockResolvedValue(sessionAResponse);
 
     const { rerender } = render(
       <ProjectMessageView projectId="proj-1" sessionId="session-A" />
@@ -174,24 +168,37 @@ describe('ProjectMessageView — session isolation', () => {
       expect(screen.getByText('Data from A')).toBeTruthy();
     });
 
-    // Advance time to trigger a poll
+    // Now capture the signal from the polling interval (fires every 3s)
+    mocks.getChatSession.mockImplementation(async (
+      _projectId: string,
+      _sessionId: string,
+      params?: { signal?: AbortSignal }
+    ) => {
+      pollSignal = params?.signal;
+      return sessionAResponse;
+    });
+
+    // Advance past the 3s poll interval so getChatSession is called with a signal
     await act(async () => {
       vi.advanceTimersByTime(3100);
     });
 
-    const signalBeforeSwitch = lastSignal;
+    // Verify the poll fired and we captured a signal
+    expect(pollSignal).toBeDefined();
+    expect(pollSignal!.aborted).toBe(false);
 
     const sessionBResponse = makeSessionResponse('session-B', [
       makeMessage('msg-b1', 'session-B', 'Data from B'),
     ]);
-    mocks.getChatSession.mockImplementation(async () => sessionBResponse);
+    mocks.getChatSession.mockResolvedValue(sessionBResponse);
 
+    // Switch sessions — cleanup should abort the poll signal
     rerender(
       <ProjectMessageView projectId="proj-1" sessionId="session-B" />
     );
 
     await waitFor(() => {
-      expect(signalBeforeSwitch?.aborted).toBe(true);
+      expect(pollSignal!.aborted).toBe(true);
     });
   });
 
