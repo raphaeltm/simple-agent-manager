@@ -429,6 +429,35 @@ func execInContainer(ctx context.Context, containerID, user, workDir string, arg
 	return stdoutBuf.String(), strings.TrimSpace(stderrBuf.String()), nil
 }
 
+// writeAuthFileToContainer writes credential content to a file inside a container.
+// It creates the parent directory with 0700 permissions and the file with 0600.
+// authFilePath is relative to the user's home directory (e.g. ".codex/auth.json").
+func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePath, content string) error {
+	// Build a shell script that:
+	// 1. Resolves $HOME for the target user
+	// 2. Creates the parent directory with restricted permissions
+	// 3. Writes the file content with restricted permissions
+	script := fmt.Sprintf(
+		`set -e; dir="$HOME/%s"; mkdir -p "$(dirname "$dir")" && chmod 700 "$(dirname "$dir")"; printf '%%s' "$AUTH_CONTENT" > "$dir" && chmod 600 "$dir"`,
+		authFilePath,
+	)
+
+	dockerArgs := []string{"exec", "-i"}
+	if user != "" {
+		dockerArgs = append(dockerArgs, "-u", user)
+	}
+	// Pass content via environment variable to avoid shell injection
+	dockerArgs = append(dockerArgs, "-e", "AUTH_CONTENT="+content)
+	dockerArgs = append(dockerArgs, containerID, "sh", "-c", script)
+
+	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker exec failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
 // installAgentBinary checks if the agent command exists in the given container
 // and installs it via the provided installCmd if missing. The install runs as
 // root to ensure permissions for system-level package installs. Returns nil if
@@ -462,10 +491,12 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 
 // agentCommandInfo holds the command, args, env var, and install command for an agent.
 type agentCommandInfo struct {
-	command    string
-	args       []string
-	envVarName string
-	installCmd string // npm install command to run if binary is missing
+	command       string
+	args          []string
+	envVarName    string
+	installCmd    string // npm install command to run if binary is missing
+	injectionMode string // "env" (default) or "auth-file" — how the credential is injected
+	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
 
 // getAgentCommandInfo returns the ACP command, args, env var name, and install command for a given agent type.
@@ -475,15 +506,25 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 	switch agentType {
 	case "claude-code":
 		if credentialKind == "oauth-token" {
-			return agentCommandInfo{"claude-agent-acp", nil, "CLAUDE_CODE_OAUTH_TOKEN", "npm install -g @zed-industries/claude-agent-acp"}
+			return agentCommandInfo{"claude-agent-acp", nil, "CLAUDE_CODE_OAUTH_TOKEN", "npm install -g @zed-industries/claude-agent-acp", "", ""}
 		}
-		return agentCommandInfo{"claude-agent-acp", nil, "ANTHROPIC_API_KEY", "npm install -g @zed-industries/claude-agent-acp"}
+		return agentCommandInfo{"claude-agent-acp", nil, "ANTHROPIC_API_KEY", "npm install -g @zed-industries/claude-agent-acp", "", ""}
 	case "openai-codex":
-		return agentCommandInfo{"codex-acp", nil, "OPENAI_API_KEY", "npm install -g @zed-industries/codex-acp"}
+		if credentialKind == "oauth-token" {
+			return agentCommandInfo{
+				command:       "codex-acp",
+				args:          nil,
+				envVarName:    "",
+				installCmd:    "npm install -g @zed-industries/codex-acp",
+				injectionMode: "auth-file",
+				authFilePath:  ".codex/auth.json",
+			}
+		}
+		return agentCommandInfo{"codex-acp", nil, "OPENAI_API_KEY", "npm install -g @zed-industries/codex-acp", "", ""}
 	case "google-gemini":
-		return agentCommandInfo{"gemini", []string{"--experimental-acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli"}
+		return agentCommandInfo{"gemini", []string{"--experimental-acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli", "", ""}
 	default:
-		return agentCommandInfo{agentType, nil, "API_KEY", ""}
+		return agentCommandInfo{agentType, nil, "API_KEY", "", "", ""}
 	}
 }
 

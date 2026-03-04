@@ -757,7 +757,20 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		}
 	}
 
-	envVars = append(envVars, fmt.Sprintf("%s=%s", info.envVarName, cred.credential))
+	// Inject credential: either as an env var or by writing an auth file into the container.
+	if info.injectionMode == "auth-file" {
+		// Write the credential to a file inside the container (e.g. ~/.codex/auth.json).
+		// This is required for agents like codex-acp that read OAuth tokens from file, not env.
+		if err := writeAuthFileToContainer(ctx, containerID, h.config.ContainerUser, info.authFilePath, cred.credential); err != nil {
+			return fmt.Errorf("failed to write auth file: %w", err)
+		}
+		// Prevent codex-acp from trying to open a browser for login
+		envVars = append(envVars, "NO_BROWSER=1")
+		slog.Info("Injected auth file into container", "path", info.authFilePath)
+	} else {
+		envVars = append(envVars, fmt.Sprintf("%s=%s", info.envVarName, cred.credential))
+	}
+
 	if settings != nil && settings.Model != "" {
 		modelEnv := getModelEnvVar(agentType)
 		if modelEnv != "" {

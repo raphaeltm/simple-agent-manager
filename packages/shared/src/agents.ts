@@ -79,6 +79,11 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     supportsAcp: true,
     credentialHelpUrl: 'https://platform.openai.com/api-keys',
     installCommand: 'npx --yes @zed-industries/codex-acp --version',
+    oauthSupport: {
+      envVarName: 'CODEX_AUTH_JSON',
+      setupInstructions: 'Run "codex login" on your local machine and sign in with your ChatGPT account, then paste the contents of ~/.codex/auth.json',
+      subscriptionUrl: 'https://openai.com/chatgpt/pricing/',
+    },
   },
   {
     id: 'google-gemini',

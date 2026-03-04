@@ -7,12 +7,14 @@ import (
 // Tests for OAuth support
 func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 	tests := []struct {
-		name           string
-		agentType      string
-		credentialKind string
-		wantCommand    string
-		wantEnvVar     string
-		wantInstallCmd string
+		name              string
+		agentType         string
+		credentialKind    string
+		wantCommand       string
+		wantEnvVar        string
+		wantInstallCmd    string
+		wantInjectionMode string
+		wantAuthFilePath  string
 	}{
 		{
 			name:           "Claude Code with OAuth token",
@@ -39,9 +41,19 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			wantInstallCmd: "npm install -g @zed-industries/claude-agent-acp",
 		},
 		{
-			name:           "OpenAI Codex always uses API key",
+			name:              "OpenAI Codex with OAuth uses auth-file injection",
+			agentType:         "openai-codex",
+			credentialKind:    "oauth-token",
+			wantCommand:       "codex-acp",
+			wantEnvVar:        "",
+			wantInstallCmd:    "npm install -g @zed-industries/codex-acp",
+			wantInjectionMode: "auth-file",
+			wantAuthFilePath:  ".codex/auth.json",
+		},
+		{
+			name:           "OpenAI Codex with API key uses env var",
 			agentType:      "openai-codex",
-			credentialKind: "oauth-token",
+			credentialKind: "api-key",
 			wantCommand:    "codex-acp",
 			wantEnvVar:     "OPENAI_API_KEY",
 			wantInstallCmd: "npm install -g @zed-industries/codex-acp",
@@ -70,6 +82,14 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 
 			if info.installCmd != tt.wantInstallCmd {
 				t.Errorf("getAgentCommandInfo() installCmd = %v, want %v", info.installCmd, tt.wantInstallCmd)
+			}
+
+			if info.injectionMode != tt.wantInjectionMode {
+				t.Errorf("getAgentCommandInfo() injectionMode = %v, want %v", info.injectionMode, tt.wantInjectionMode)
+			}
+
+			if info.authFilePath != tt.wantAuthFilePath {
+				t.Errorf("getAgentCommandInfo() authFilePath = %v, want %v", info.authFilePath, tt.wantAuthFilePath)
 			}
 
 			// Verify args for Gemini
@@ -190,6 +210,27 @@ func TestGetAgentCommandInfoOpenAICodex(t *testing.T) {
 	if info.installCmd != "npm install -g @zed-industries/codex-acp" {
 		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
 	}
+	if info.injectionMode != "" {
+		t.Fatalf("injectionMode=%q, want empty for api-key", info.injectionMode)
+	}
+}
+
+func TestGetAgentCommandInfoOpenAICodexOAuth(t *testing.T) {
+	t.Parallel()
+
+	info := getAgentCommandInfo("openai-codex", "oauth-token")
+	if info.command != "codex-acp" {
+		t.Fatalf("command=%q, want %q", info.command, "codex-acp")
+	}
+	if info.injectionMode != "auth-file" {
+		t.Fatalf("injectionMode=%q, want %q", info.injectionMode, "auth-file")
+	}
+	if info.authFilePath != ".codex/auth.json" {
+		t.Fatalf("authFilePath=%q, want %q", info.authFilePath, ".codex/auth.json")
+	}
+	if info.envVarName != "" {
+		t.Fatalf("envVarName=%q, want empty for auth-file injection", info.envVarName)
+	}
 }
 
 func TestGetAgentCommandInfoGoogleGemini(t *testing.T) {
@@ -269,10 +310,11 @@ func TestAgentCredential_ErrorMessages(t *testing.T) {
 // variable is set when starting an agent process with OAuth credentials
 func TestProcessConfig_EnvVarInjection(t *testing.T) {
 	tests := []struct {
-		name       string
-		agentType  string
-		credential *agentCredential
-		wantEnvVar string
+		name              string
+		agentType         string
+		credential        *agentCredential
+		wantEnvVar        string
+		wantInjectionMode string
 	}{
 		{
 			name:      "OAuth token uses CLAUDE_CODE_OAUTH_TOKEN",
@@ -292,18 +334,43 @@ func TestProcessConfig_EnvVarInjection(t *testing.T) {
 			},
 			wantEnvVar: "ANTHROPIC_API_KEY=sk-ant-api-key",
 		},
+		{
+			name:      "OpenAI Codex OAuth uses auth-file injection (no env var)",
+			agentType: "openai-codex",
+			credential: &agentCredential{
+				credential:     `{"auth_mode":"Chatgpt","tokens":{}}`,
+				credentialKind: "oauth-token",
+			},
+			wantInjectionMode: "auth-file",
+		},
+		{
+			name:      "OpenAI Codex API key uses env var",
+			agentType: "openai-codex",
+			credential: &agentCredential{
+				credential:     "sk-openai-key",
+				credentialKind: "api-key",
+			},
+			wantEnvVar: "OPENAI_API_KEY=sk-openai-key",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Get the command info based on credential type
 			info := getAgentCommandInfo(tt.agentType, tt.credential.credentialKind)
 
-			// Build the environment variable string
-			envVar := info.envVarName + "=" + tt.credential.credential
-
-			if envVar != tt.wantEnvVar {
-				t.Errorf("Environment variable = %v, want %v", envVar, tt.wantEnvVar)
+			if tt.wantInjectionMode != "" {
+				if info.injectionMode != tt.wantInjectionMode {
+					t.Errorf("injectionMode = %v, want %v", info.injectionMode, tt.wantInjectionMode)
+				}
+				// Auth-file mode should have empty envVarName
+				if info.envVarName != "" {
+					t.Errorf("envVarName should be empty for auth-file injection, got %v", info.envVarName)
+				}
+			} else {
+				envVar := info.envVarName + "=" + tt.credential.credential
+				if envVar != tt.wantEnvVar {
+					t.Errorf("Environment variable = %v, want %v", envVar, tt.wantEnvVar)
+				}
 			}
 		})
 	}

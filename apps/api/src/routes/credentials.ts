@@ -250,8 +250,8 @@ credentialsRoutes.put('/agent', async (c) => {
     throw errors.badRequest('Unknown agent type');
   }
 
-  // Validate credential format
-  const validation = CredentialValidator.validateCredential(credential, credentialKind);
+  // Validate credential format (agent-aware for OpenAI Codex auth.json)
+  const validation = CredentialValidator.validateCredential(credential, credentialKind, body.agentType);
   if (!validation.valid) {
     throw errors.badRequest(validation.error || 'Invalid credential format');
   }
