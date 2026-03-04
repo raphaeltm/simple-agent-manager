@@ -10,8 +10,10 @@ export function useNodeSystemInfo(
 ) {
   const [systemInfo, setSystemInfo] = useState<NodeSystemInfo | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -24,18 +26,24 @@ export function useNodeSystemInfo(
     if (!nodeId || nodeStatus !== 'running') {
       setSystemInfo(null);
       setError(null);
+      hasLoadedRef.current = false;
       return;
     }
 
     let intervalId: ReturnType<typeof setInterval> | null = null;
 
     const fetchInfo = async () => {
-      try {
+      if (hasLoadedRef.current) {
+        setIsRefreshing(true);
+      } else {
         setLoading(true);
+      }
+      try {
         const data = await getNodeSystemInfo(nodeId);
         if (mountedRef.current) {
           setSystemInfo(data);
           setError(null);
+          hasLoadedRef.current = true;
         }
       } catch (err) {
         if (mountedRef.current) {
@@ -44,6 +52,7 @@ export function useNodeSystemInfo(
       } finally {
         if (mountedRef.current) {
           setLoading(false);
+          setIsRefreshing(false);
         }
       }
     };
@@ -56,5 +65,5 @@ export function useNodeSystemInfo(
     };
   }, [nodeId, nodeStatus]);
 
-  return { systemInfo, loading, error };
+  return { systemInfo, loading, isRefreshing, error };
 }

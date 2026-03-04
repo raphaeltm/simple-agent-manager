@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ProjectSummary, ProjectDetailResponse } from '@simple-agent-manager/shared';
 import * as api from '../lib/api';
 
@@ -12,6 +12,7 @@ interface UseProjectListOptions {
 interface UseProjectListResult {
   projects: ProjectSummary[];
   loading: boolean;
+  isRefreshing: boolean;
   error: string | null;
   refresh: () => void;
 }
@@ -20,18 +21,25 @@ export function useProjectList(options: UseProjectListOptions = {}): UseProjectL
   const { status, sort, limit, pollInterval = 30000 } = options;
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasLoadedRef = useRef(false);
 
   const fetchProjects = useCallback(async () => {
+    if (hasLoadedRef.current) {
+      setIsRefreshing(true);
+    }
     try {
       const result = await api.listProjects(limit);
       // The API now returns ProjectSummary objects via ListProjectsResponse
       setProjects(result.projects as unknown as ProjectSummary[]);
       setError(null);
+      hasLoadedRef.current = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load projects');
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   }, [status, sort, limit]);
 
@@ -43,7 +51,7 @@ export function useProjectList(options: UseProjectListOptions = {}): UseProjectL
     }
   }, [fetchProjects, pollInterval]);
 
-  return { projects, loading, error, refresh: fetchProjects };
+  return { projects, loading, isRefreshing, error, refresh: fetchProjects };
 }
 
 interface UseProjectDetailResult {
