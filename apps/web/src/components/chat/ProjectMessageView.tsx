@@ -396,20 +396,22 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         createdAt: Date.now(),
       }]);
 
-      // Persist message via DO WebSocket
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'message.send',
-          sessionId,
-          content: trimmed,
-          role: 'user',
-        }));
-      }
-
-      // Forward prompt to agent via ACP WebSocket (replaces HTTP sendFollowUpPrompt)
       if (agentSession.isAgentActive) {
+        // ACP path: prompt goes to agent via WebSocket; VM agent's MessageReporter
+        // handles persistence to the DO, so we do NOT also send via DO WebSocket
+        // (that would create a duplicate with a different messageId).
         agentSession.sendPrompt(trimmed);
       } else {
+        // Fallback: persist via DO WebSocket so the message is at least saved,
+        // even though the agent won't receive it.
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: 'message.send',
+            sessionId,
+            content: trimmed,
+            role: 'user',
+          }));
+        }
         setError('Agent is not connected — message saved but prompt not delivered.');
       }
 
@@ -483,6 +485,14 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       {/* Connection indicator (TDF-8) */}
       {sessionState === 'active' && connectionState !== 'connected' && (
         <ConnectionBanner state={connectionState} onRetry={retryWs} />
+      )}
+
+      {/* ACP agent disconnect warning — shown when DO WebSocket is fine but agent is unreachable */}
+      {sessionState === 'active' && connectionState === 'connected' && session?.workspaceId &&
+        !agentSession.isAgentActive && !agentSession.isConnecting && (
+        <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-warning-tint text-warning text-xs">
+          <span>Agent offline — messages will be saved but not processed until the agent reconnects.</span>
+        </div>
       )}
 
       {/* Session header with branch/PR info */}
@@ -586,11 +596,12 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       {/* Messages area — ACP items when connected, converted DO messages as fallback */}
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto min-h-0 p-4">
         {(() => {
-          // When ACP is connected with items, use ACP rendering (richer: streaming, thinking, tool status)
+          // Show ACP items whenever they exist — even after disconnect, so the user
+          // doesn't see a jarring content switch to the lagging DO messages. ACP items
+          // are only cleared on page refresh or when a new ACP session replays history.
           const acpItems = agentSession.messages.items;
-          const useAcpRendering = agentSession.isAgentActive && acpItems.length > 0;
 
-          if (useAcpRendering) {
+          if (acpItems.length > 0) {
             return <AcpMessages items={acpItems} />;
           }
 

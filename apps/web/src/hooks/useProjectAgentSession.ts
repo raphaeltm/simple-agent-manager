@@ -155,9 +155,12 @@ export function useProjectAgentSession({
   // ACP message store — cleared on reconnect via onPrepareForReplay
   const acpMessages = useAcpMessages();
 
-  // ACP session — separate WebSocket to VM Agent gateway
+  // ACP session — separate WebSocket to VM Agent gateway.
+  // wsUrl is set to wsHost (not null) so the connection effect re-fires when
+  // the workspace changes (e.g., warm node reuse). The actual URL with token
+  // is resolved dynamically via resolveWsUrl on each connect/reconnect.
   const acpSession = useAcpSession({
-    wsUrl: enabled && wsHost ? null : null, // Always use resolver
+    wsUrl: enabled && wsHost ? wsHost : null,
     resolveWsUrl: enabled && wsHost ? resolveWsUrl : undefined,
     onAcpMessage: acpMessages.processMessage,
     onLifecycleEvent: handleLifecycleEvent,
