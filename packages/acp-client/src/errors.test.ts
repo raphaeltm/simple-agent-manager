@@ -40,6 +40,7 @@ describe('getErrorMeta', () => {
     expect(getErrorMeta('NETWORK_DISCONNECTED').severity).toBe('transient');
     expect(getErrorMeta('HEARTBEAT_TIMEOUT').severity).toBe('transient');
     expect(getErrorMeta('SERVER_RESTART').severity).toBe('transient');
+    expect(getErrorMeta('AUTH_EXPIRED').severity).toBe('transient');
   });
 
   it('returns fatal severity for non-recoverable errors', () => {
@@ -111,9 +112,25 @@ describe('errorCodeFromMessage', () => {
     expect(errorCodeFromMessage('Prompt timeout after 10 minutes')).toBe('PROMPT_TIMEOUT');
   });
 
-  it('detects auth errors', () => {
-    expect(errorCodeFromMessage('Auth token expired')).toBe('AUTH_EXPIRED');
-    expect(errorCodeFromMessage('Unauthorized: invalid credentials')).toBe('AUTH_EXPIRED');
+  it('detects auth expired errors with specific patterns', () => {
+    expect(errorCodeFromMessage('Token expired')).toBe('AUTH_EXPIRED');
+    expect(errorCodeFromMessage('Auth expired for session')).toBe('AUTH_EXPIRED');
+    expect(errorCodeFromMessage('Session expired')).toBe('AUTH_EXPIRED');
+    expect(errorCodeFromMessage('JWT expired')).toBe('AUTH_EXPIRED');
+  });
+
+  it('detects auth rejected errors', () => {
+    expect(errorCodeFromMessage('Unauthorized: invalid credentials')).toBe('AUTH_REJECTED');
+    expect(errorCodeFromMessage('Authentication failed')).toBe('AUTH_REJECTED');
+    expect(errorCodeFromMessage('Invalid token provided')).toBe('AUTH_REJECTED');
+    expect(errorCodeFromMessage('Token invalid')).toBe('AUTH_REJECTED');
+  });
+
+  it('does NOT misclassify generic "token" or "auth" messages as auth errors', () => {
+    // These should NOT match AUTH_EXPIRED — they are agent errors
+    expect(errorCodeFromMessage('Failed to fetch credential token')).toBe('AGENT_ERROR');
+    expect(errorCodeFromMessage('Could not authenticate with API')).toBe('AGENT_ERROR');
+    expect(errorCodeFromMessage('OAuth token refresh failed')).toBe('AGENT_ERROR');
   });
 
   it('returns AGENT_ERROR for generic agent messages', () => {

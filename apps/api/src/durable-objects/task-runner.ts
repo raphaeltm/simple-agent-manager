@@ -46,6 +46,7 @@ type TaskRunnerEnv = {
   DATABASE: D1Database;
   OBSERVABILITY_DATABASE: D1Database;
   NODE_LIFECYCLE: DurableObjectNamespace;
+  PROJECT_DATA: DurableObjectNamespace;
   TASK_RUNNER_STEP_MAX_RETRIES?: string;
   TASK_RUNNER_RETRY_BASE_DELAY_MS?: string;
   TASK_RUNNER_RETRY_MAX_DELAY_MS?: string;
@@ -930,6 +931,27 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       totalDurationMs: Date.now() - state.createdAt,
     });
 
+    // Best-effort: inject "started" message into chat so user gets feedback
+    if (state.stepResults.chatSessionId && state.projectId) {
+      try {
+        const { persistMessage } = await import('../services/project-data');
+        await persistMessage(
+          this.env as any,
+          state.projectId,
+          state.stepResults.chatSessionId,
+          'system',
+          'Task execution started — the agent is working on your request.',
+          null
+        );
+      } catch (chatErr) {
+        log.error('task_runner_do.chat_started_inject_failed', {
+          taskId: state.taskId,
+          sessionId: state.stepResults.chatSessionId,
+          error: chatErr instanceof Error ? chatErr.message : String(chatErr),
+        });
+      }
+    }
+
     state.currentStep = 'running';
     state.completed = true;
     await this.ctx.storage.put('state', state);
@@ -996,6 +1018,27 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         taskId: state.taskId,
         error: err instanceof Error ? err.message : String(err),
       });
+    }
+
+    // Best-effort: inject error into chat session so user sees the failure
+    if (state.stepResults.chatSessionId && state.projectId) {
+      try {
+        const { persistMessage } = await import('../services/project-data');
+        await persistMessage(
+          this.env as any,
+          state.projectId,
+          state.stepResults.chatSessionId,
+          'system',
+          `Task failed at step "${state.currentStep}": ${errorMessage}`,
+          null
+        );
+      } catch (chatErr) {
+        log.error('task_runner_do.chat_error_inject_failed', {
+          taskId: state.taskId,
+          sessionId: state.stepResults.chatSessionId,
+          error: chatErr instanceof Error ? chatErr.message : String(chatErr),
+        });
+      }
     }
 
     // Best-effort cleanup

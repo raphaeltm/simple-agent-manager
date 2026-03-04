@@ -745,8 +745,8 @@ describe('classifyCloseCode', () => {
     expect(classifyCloseCode(4000)).toBe('backoff');
   });
 
-  it('returns no-reconnect for auth expired (4001)', () => {
-    expect(classifyCloseCode(4001)).toBe('no-reconnect');
+  it('returns backoff for auth expired (4001) to allow fresh token retry', () => {
+    expect(classifyCloseCode(4001)).toBe('backoff');
   });
 
   it('returns backoff for undefined code', () => {
@@ -995,7 +995,7 @@ describe('useAcpSession structured error codes', () => {
     });
   });
 
-  it('sets AUTH_EXPIRED errorCode on close code 4001', async () => {
+  it('attempts reconnection on close code 4001 (auth expired) with backoff', async () => {
     const { result } = renderHook(() => useAcpSession({
       wsUrl: 'ws://localhost/agent/ws',
     }));
@@ -1009,10 +1009,8 @@ describe('useAcpSession structured error codes', () => {
 
     act(() => ws.close(4001, 'auth_expired'));
 
-    await waitFor(() => {
-      expect(result.current.state).toBe('error');
-      expect(result.current.errorCode).toBe('AUTH_EXPIRED' satisfies AcpErrorCode);
-    });
+    // 4001 now triggers backoff reconnection instead of giving up
+    expect(result.current.state).toBe('reconnecting');
   });
 });
 

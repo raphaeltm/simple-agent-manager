@@ -53,9 +53,9 @@ export function classifyCloseCode(code: number | undefined): CloseCodeStrategy {
     // 4000: Our custom heartbeat timeout code; retry with backoff
     case 4000:
       return 'backoff';
-    // 4001: Custom code — auth expired/invalid; don't retry blindly
+    // 4001: Custom code — auth expired/invalid; retry with backoff (fresh token via resolver)
     case 4001:
-      return 'no-reconnect';
+      return 'backoff';
     // 1006: Abnormal closure (no close frame) — network drop; retry immediately
     case 1006:
       return 'immediate';

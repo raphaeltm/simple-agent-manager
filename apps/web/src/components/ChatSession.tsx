@@ -90,8 +90,14 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
 
     // Lifecycle event callback — routes ACP lifecycle events to the error reporter
     // for CF Workers observability. Enriches with workspaceId/sessionId context.
+    // Also invalidates the WS URL cache on error/reconnecting so fresh tokens are used.
     const handleLifecycleEvent = useCallback(
       (event: AcpLifecycleEvent) => {
+        // Invalidate cached URL on error or reconnecting so reconnect fetches a fresh token
+        if (event.context?.['state'] === 'error' || event.context?.['state'] === 'reconnecting' ||
+            event.message.includes('WebSocket closed') || event.message.includes('WebSocket error')) {
+          wsUrlCacheRef.current = null;
+        }
         reportError({
           level: event.level,
           message: event.message,
