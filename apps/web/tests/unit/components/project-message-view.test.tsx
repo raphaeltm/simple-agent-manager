@@ -178,9 +178,11 @@ describe('ProjectMessageView — session isolation', () => {
       return sessionAResponse;
     });
 
-    // Advance past the 3s poll interval so getChatSession is called with a signal
+    // Advance past the 3s poll interval. Use advanceTimersByTimeAsync to
+    // properly process microtasks (the polling effect starts asynchronously
+    // after session state is committed to the DOM).
     await act(async () => {
-      vi.advanceTimersByTime(3100);
+      await vi.advanceTimersByTimeAsync(3100);
     });
 
     // Verify the poll fired and we captured a signal
