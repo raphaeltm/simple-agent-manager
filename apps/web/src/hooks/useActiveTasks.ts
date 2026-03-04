@@ -32,10 +32,10 @@ export function useActiveTasks(options: UseActiveTasksOptions = {}): UseActiveTa
       const result = await api.listActiveTasks();
       setTasks(result.tasks);
       setError(null);
-      hasLoadedRef.current = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load active tasks');
     } finally {
+      hasLoadedRef.current = true;
       setLoading(false);
       setIsRefreshing(false);
     }

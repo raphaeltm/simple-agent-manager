@@ -44,13 +44,13 @@ export function useAdminHealth(options?: UseAdminHealthOptions): UseAdminHealthR
       if (!mountedRef.current) return;
 
       setHealth(result);
-      hasLoadedRef.current = true;
     } catch (err) {
       if (mountedRef.current) {
         setError(err instanceof Error ? err.message : 'Failed to load health data');
       }
     } finally {
       if (mountedRef.current) {
+        hasLoadedRef.current = true;
         setLoading(false);
         setIsRefreshing(false);
       }

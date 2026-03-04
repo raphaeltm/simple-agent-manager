@@ -15,7 +15,7 @@ export function ProjectActivity() {
 
   const loadActivityEvents = useCallback(async (loadMore = false) => {
     try {
-      if (eventsRef.current.length === 0) {
+      if (loadMore || eventsRef.current.length === 0) {
         setActivityLoading(true);
       }
       const lastEvent = loadMore ? eventsRef.current[eventsRef.current.length - 1] : undefined;

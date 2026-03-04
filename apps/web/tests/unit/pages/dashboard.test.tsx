@@ -30,6 +30,7 @@ vi.mock('../../../src/hooks/useProjectData', () => ({
     return {
       projects: result?.projects ?? [],
       loading: false,
+      isRefreshing: false,
       error: null,
       refresh: vi.fn(),
     };

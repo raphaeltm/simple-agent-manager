@@ -44,10 +44,10 @@ export function Nodes() {
       ]);
       setNodes(nodesResponse);
       setWorkspaces(workspacesResponse);
-      hasLoadedRef.current = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load nodes');
     } finally {
+      hasLoadedRef.current = true;
       setLoading(false);
       setIsRefreshing(false);
     }

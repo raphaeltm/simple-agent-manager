@@ -34,10 +34,10 @@ export function useProjectList(options: UseProjectListOptions = {}): UseProjectL
       // The API now returns ProjectSummary objects via ListProjectsResponse
       setProjects(result.projects as unknown as ProjectSummary[]);
       setError(null);
-      hasLoadedRef.current = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load projects');
     } finally {
+      hasLoadedRef.current = true;
       setLoading(false);
       setIsRefreshing(false);
     }

@@ -43,7 +43,6 @@ export function useNodeSystemInfo(
         if (mountedRef.current) {
           setSystemInfo(data);
           setError(null);
-          hasLoadedRef.current = true;
         }
       } catch (err) {
         if (mountedRef.current) {
@@ -51,12 +50,14 @@ export function useNodeSystemInfo(
         }
       } finally {
         if (mountedRef.current) {
+          hasLoadedRef.current = true;
           setLoading(false);
           setIsRefreshing(false);
         }
       }
     };
 
+    hasLoadedRef.current = false;
     fetchInfo();
     intervalId = setInterval(fetchInfo, POLL_INTERVAL_MS);
 
