@@ -1505,3 +1505,97 @@ func TestHandlePrompt_NoReporter_StillBuffers(t *testing.T) {
 		t.Fatal("expected user_message_chunk in buffer when no reporter is configured")
 	}
 }
+
+// mockCredentialSyncer implements CredentialSyncer for testing.
+type mockCredentialSyncer struct {
+	mu          sync.Mutex
+	called      bool
+	workspaceID string
+	agentType   string
+	credKind    string
+	credential  string
+	err         error
+}
+
+func (m *mockCredentialSyncer) SyncCredential(_ context.Context, workspaceID, agentType, credKind, credential string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.called = true
+	m.workspaceID = workspaceID
+	m.agentType = agentType
+	m.credKind = credKind
+	m.credential = credential
+	return m.err
+}
+
+func TestSyncCredentialOnStop_SkipsEnvInjection(t *testing.T) {
+	t.Parallel()
+
+	syncer := &mockCredentialSyncer{}
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:        "test-session",
+			WorkspaceID:      "test-workspace",
+			CredentialSyncer: syncer,
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+
+	// Default injection mode is "" (env), so sync should be skipped.
+	host.syncCredentialOnStop()
+
+	syncer.mu.Lock()
+	defer syncer.mu.Unlock()
+	if syncer.called {
+		t.Fatal("syncCredentialOnStop should not call syncer for env injection mode")
+	}
+}
+
+func TestSyncCredentialOnStop_SkipsNilSyncer(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:   "test-session",
+			WorkspaceID: "test-workspace",
+			// CredentialSyncer is nil
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+
+	// Set auth-file injection mode but nil syncer.
+	host.credInjectionMode = "auth-file"
+	host.credAuthFilePath = ".codex/auth.json"
+	host.credKind = "oauth-token"
+
+	// Should not panic or error — just silently skip.
+	host.syncCredentialOnStop()
+}
+
+func TestCredentialMetadataTracking(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:   "test-session",
+			WorkspaceID: "test-workspace",
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+
+	// Verify initial state — no credential metadata.
+	if host.credInjectionMode != "" {
+		t.Fatalf("expected empty credInjectionMode, got %q", host.credInjectionMode)
+	}
+	if host.credAuthFilePath != "" {
+		t.Fatalf("expected empty credAuthFilePath, got %q", host.credAuthFilePath)
+	}
+	if host.credKind != "" {
+		t.Fatalf("expected empty credKind, got %q", host.credKind)
+	}
+
+	host.Stop()
+}
