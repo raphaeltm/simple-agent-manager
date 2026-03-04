@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { DEFAULT_DASHBOARD_POLL_INTERVAL_MS } from '@simple-agent-manager/shared';
 import type { DashboardTask } from '@simple-agent-manager/shared';
 import * as api from '../lib/api';
@@ -11,6 +11,7 @@ interface UseActiveTasksOptions {
 interface UseActiveTasksResult {
   tasks: DashboardTask[];
   loading: boolean;
+  isRefreshing: boolean;
   error: string | null;
   refresh: () => void;
 }
@@ -19,9 +20,14 @@ export function useActiveTasks(options: UseActiveTasksOptions = {}): UseActiveTa
   const { pollInterval = DEFAULT_DASHBOARD_POLL_INTERVAL_MS } = options;
   const [tasks, setTasks] = useState<DashboardTask[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasLoadedRef = useRef(false);
 
   const fetchTasks = useCallback(async () => {
+    if (hasLoadedRef.current) {
+      setIsRefreshing(true);
+    }
     try {
       const result = await api.listActiveTasks();
       setTasks(result.tasks);
@@ -29,7 +35,9 @@ export function useActiveTasks(options: UseActiveTasksOptions = {}): UseActiveTa
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load active tasks');
     } finally {
+      hasLoadedRef.current = true;
       setLoading(false);
+      setIsRefreshing(false);
     }
   }, []);
 
@@ -41,5 +49,5 @@ export function useActiveTasks(options: UseActiveTasksOptions = {}): UseActiveTa
     }
   }, [fetchTasks, pollInterval]);
 
-  return { tasks, loading, error, refresh: fetchTasks };
+  return { tasks, loading, isRefreshing, error, refresh: fetchTasks };
 }

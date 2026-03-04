@@ -237,7 +237,7 @@ export function Node() {
         </div>
       )}
 
-      {loading ? (
+      {loading && !node ? (
         <div className="flex flex-col gap-6">
           <div
             aria-hidden="true"

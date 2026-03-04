@@ -29,6 +29,7 @@ describe('HealthOverview', () => {
     mockUseAdminHealth.mockReturnValue({
       health: null,
       loading: true,
+      isRefreshing: false,
       error: null,
       refresh: vi.fn(),
     });
@@ -47,6 +48,7 @@ describe('HealthOverview', () => {
         timestamp: '2026-02-14T12:00:00.000Z',
       },
       loading: false,
+      isRefreshing: false,
       error: null,
       refresh: vi.fn(),
     });
@@ -73,6 +75,7 @@ describe('HealthOverview', () => {
         timestamp: '2026-02-14T12:00:00.000Z',
       },
       loading: false,
+      isRefreshing: false,
       error: null,
       refresh: vi.fn(),
     });
@@ -93,6 +96,7 @@ describe('HealthOverview', () => {
         timestamp: '2026-02-14T12:00:00.000Z',
       },
       loading: false,
+      isRefreshing: false,
       error: null,
       refresh: vi.fn(),
     });
@@ -108,6 +112,7 @@ describe('HealthOverview', () => {
     mockUseAdminHealth.mockReturnValue({
       health: null,
       loading: false,
+      isRefreshing: false,
       error: 'Failed to fetch health data',
       refresh: vi.fn(),
     });
@@ -121,6 +126,7 @@ describe('HealthOverview', () => {
     mockUseAdminHealth.mockReturnValue({
       health: null,
       loading: false,
+      isRefreshing: false,
       error: 'Network error',
       refresh: mockRefresh,
     });
@@ -141,6 +147,7 @@ describe('HealthOverview', () => {
         timestamp: '2026-02-14T12:00:00.000Z',
       },
       loading: false,
+      isRefreshing: false,
       error: null,
       refresh: vi.fn(),
     });
@@ -161,6 +168,7 @@ describe('HealthOverview', () => {
         timestamp: '2026-02-14T12:00:00.000Z',
       },
       loading: false,
+      isRefreshing: false,
       error: null,
       refresh: mockRefresh,
     });
@@ -180,7 +188,8 @@ describe('HealthOverview', () => {
         errorCount24h: 5,
         timestamp: '2026-02-14T12:00:00.000Z',
       },
-      loading: true,
+      loading: false,
+      isRefreshing: true,
       error: null,
       refresh: vi.fn(),
     });
