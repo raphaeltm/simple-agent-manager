@@ -111,6 +111,13 @@ type SessionHost struct {
 	status         SessionHostStatus
 	statusErr      string
 
+	// Credential injection metadata (set during startAgent, read during stop).
+	// These track whether the agent used file-based credential injection so
+	// that refreshed tokens can be synced back to the control plane.
+	credInjectionMode string // "env" or "auth-file"
+	credAuthFilePath  string // relative to home dir, e.g. ".codex/auth.json"
+	credKind          string // "api-key" or "oauth-token"
+
 	// Viewers (guarded by viewerMu)
 	viewerMu sync.RWMutex
 	viewers  map[string]*Viewer
@@ -698,6 +705,10 @@ func (h *SessionHost) Stop() {
 	h.stopCurrentAgentLocked()
 	h.mu.Unlock()
 
+	// Sync refreshed credentials back to the control plane before cleanup.
+	// The agent process is dead but the container is still alive.
+	h.syncCredentialOnStop()
+
 	// Cancel any pending auto-suspend timer.
 	h.viewerMu.Lock()
 	if h.suspendTimer != nil {
@@ -763,6 +774,12 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 			slog.Debug("Failed to fetch GH_TOKEN for ACP session", "error", err)
 		}
 	}
+
+	// Inject credential: either as an env var or by writing an auth file into the container.
+	// Track injection metadata for post-session credential sync-back.
+	h.credInjectionMode = info.injectionMode
+	h.credAuthFilePath = info.authFilePath
+	h.credKind = cred.credentialKind
 
 	// Inject credential: either as an env var or by writing an auth file into the container.
 	if info.injectionMode == "auth-file" {
@@ -1183,6 +1200,60 @@ func (h *SessionHost) persistLastPrompt(text string) {
 	}
 }
 
+// syncCredentialOnStop reads the auth file from the container (if the agent
+// used file-based injection) and syncs any refreshed tokens back to the
+// control plane. This must be called AFTER the agent process exits but BEFORE
+// the container is removed. Best-effort: errors are logged, not returned.
+func (h *SessionHost) syncCredentialOnStop() {
+	if h.credInjectionMode != "auth-file" || h.config.CredentialSyncer == nil {
+		return
+	}
+
+	containerID, err := h.config.ContainerResolver()
+	if err != nil {
+		slog.Warn("Cannot sync credential: container not found", "error", err)
+		return
+	}
+
+	// Use a short timeout — the container is about to be stopped/removed.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	content, err := readAuthFileFromContainer(ctx, containerID, h.config.ContainerUser, h.credAuthFilePath)
+	if err != nil {
+		slog.Warn("Failed to read auth file for sync-back",
+			"path", h.credAuthFilePath,
+			"error", err,
+		)
+		return
+	}
+
+	content = strings.TrimSpace(content)
+	if content == "" {
+		slog.Debug("Auth file is empty, skipping sync-back", "path", h.credAuthFilePath)
+		return
+	}
+
+	if err := h.config.CredentialSyncer.SyncCredential(
+		ctx,
+		h.config.WorkspaceID,
+		h.agentType,
+		h.credKind,
+		content,
+	); err != nil {
+		slog.Warn("Failed to sync credential back to control plane",
+			"agentType", h.agentType,
+			"error", err,
+		)
+		return
+	}
+
+	slog.Info("Synced refreshed credential back to control plane",
+		"agentType", h.agentType,
+		"path", h.credAuthFilePath,
+	)
+}
+
 // Suspend stops the agent process and releases in-memory resources while
 // preserving the AcpSessionID for later resumption via LoadSession.
 // Unlike Stop(), the session is NOT marked as stopped — it enters a
@@ -1208,6 +1279,9 @@ func (h *SessionHost) Suspend() (acpSessionID string, agentType string) {
 	h.status = HostStopped
 	h.statusErr = ""
 	h.mu.Unlock()
+
+	// Sync refreshed credentials back to the control plane before cleanup.
+	h.syncCredentialOnStop()
 
 	h.cancel()
 

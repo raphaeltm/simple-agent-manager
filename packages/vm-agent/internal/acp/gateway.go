@@ -60,6 +60,17 @@ type SessionLastPromptUpdater interface {
 	UpdateLastPrompt(workspaceID, sessionID, lastPrompt string) error
 }
 
+// CredentialSyncer syncs updated credentials back to the control plane.
+// This is used for agents with file-based credential injection (e.g. codex-acp
+// auth.json) where the agent may refresh tokens during a session.
+type CredentialSyncer interface {
+	// SyncCredential sends updated credential content back to the control plane.
+	// agentType identifies the agent (e.g. "openai-codex").
+	// credentialKind is "api-key" or "oauth-token".
+	// credential is the raw credential content (e.g. auth.json body).
+	SyncCredential(ctx context.Context, workspaceID, agentType, credentialKind, credential string) error
+}
+
 // MessageReporter enqueues chat messages for batched delivery to the control plane.
 // All methods must be nil-safe (a nil reporter is a no-op).
 type MessageReporter interface {
@@ -156,6 +167,9 @@ type GatewayConfig struct {
 	// injected into ACP sessions when the bootstrap-written /etc/sam/env file is
 	// missing or incomplete. Built from the vm-agent's own config at startup.
 	SAMEnvFallback []string
+	// CredentialSyncer syncs updated file-based credentials (e.g. auth.json)
+	// back to the control plane after a session ends. When nil, no sync occurs.
+	CredentialSyncer CredentialSyncer
 }
 
 // Gateway is a thin per-WebSocket relay between a browser and a SessionHost.
@@ -461,6 +475,30 @@ func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePa
 		return fmt.Errorf("docker exec failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+// readAuthFileFromContainer reads credential content from a file inside a container.
+// authFilePath is relative to the user's home directory (e.g. ".codex/auth.json").
+// Returns the file content, or an error if the file cannot be read.
+func readAuthFileFromContainer(ctx context.Context, containerID, user, authFilePath string) (string, error) {
+	// Same home directory resolution as writeAuthFileToContainer.
+	script := fmt.Sprintf(
+		`set -e; home=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6) || home="$HOME"; cat "$home/%s"`,
+		authFilePath,
+	)
+
+	dockerArgs := []string{"exec"}
+	if user != "" {
+		dockerArgs = append(dockerArgs, "-u", user)
+	}
+	dockerArgs = append(dockerArgs, containerID, "sh", "-c", script)
+
+	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("docker exec read failed: %w", err)
+	}
+	return string(output), nil
 }
 
 // installAgentBinary checks if the agent command exists in the given container
