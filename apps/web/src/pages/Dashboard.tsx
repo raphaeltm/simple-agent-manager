@@ -5,14 +5,14 @@ import { ProjectSummaryCard } from '../components/ProjectSummaryCard';
 import { ActiveTaskCard } from '../components/ActiveTaskCard';
 import { useProjectList } from '../hooks/useProjectData';
 import { useActiveTasks } from '../hooks/useActiveTasks';
-import { PageLayout, Button, Alert, EmptyState, SkeletonCard } from '@simple-agent-manager/ui';
+import { PageLayout, Button, Alert, EmptyState, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
 
 export function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  const { tasks, loading: tasksLoading, error: tasksError, refresh: refreshTasks } = useActiveTasks();
-  const { projects, loading: projectsLoading, error: projectsError, refresh: refreshProjects } = useProjectList({ sort: 'last_activity', limit: 50 });
+  const { tasks, loading: tasksLoading, isRefreshing: tasksRefreshing, error: tasksError, refresh: refreshTasks } = useActiveTasks();
+  const { projects, loading: projectsLoading, isRefreshing: projectsRefreshing, error: projectsError, refresh: refreshProjects } = useProjectList({ sort: 'last_activity', limit: 50 });
 
   return (
     <PageLayout
@@ -46,10 +46,13 @@ export function Dashboard() {
       {/* Active Tasks section */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="sam-type-section-heading m-0 text-fg-primary">Active Tasks</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="sam-type-section-heading m-0 text-fg-primary">Active Tasks</h3>
+            {tasksRefreshing && <Spinner size="sm" />}
+          </div>
         </div>
 
-        {tasksLoading ? (
+        {tasksLoading && tasks.length === 0 ? (
           <div
             role="status"
             aria-label="Loading active tasks"
@@ -77,13 +80,16 @@ export function Dashboard() {
       {/* Projects section */}
       <div>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="sam-type-section-heading m-0 text-fg-primary">Projects</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="sam-type-section-heading m-0 text-fg-primary">Projects</h3>
+            {projectsRefreshing && <Spinner size="sm" />}
+          </div>
           <Button variant="primary" size="sm" onClick={() => navigate('/projects/new')}>
             Import Project
           </Button>
         </div>
 
-        {projectsLoading ? (
+        {projectsLoading && projects.length === 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {Array.from({ length: 3 }, (_, i) => (
               <SkeletonCard key={i} lines={2} />

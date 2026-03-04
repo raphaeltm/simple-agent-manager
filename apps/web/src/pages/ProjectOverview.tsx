@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Alert, Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { ProjectForm, type ProjectFormValues } from '../components/project/ProjectForm';
@@ -26,13 +26,17 @@ export function ProjectOverview() {
   const [launchingWorkspace, setLaunchingWorkspace] = useState(false);
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [workspacesLoading, setWorkspacesLoading] = useState(true);
+  const hasLoadedWorkspacesRef = useRef(false);
 
   const fetchWorkspaces = useCallback(async () => {
     if (!projectId) return;
     try {
-      setWorkspacesLoading(true);
+      if (!hasLoadedWorkspacesRef.current) {
+        setWorkspacesLoading(true);
+      }
       const data = await listWorkspaces(undefined, undefined, projectId);
       setWorkspaces(data);
+      hasLoadedWorkspacesRef.current = true;
     } catch {
       // Silently fail — workspace list is supplementary info
     } finally {

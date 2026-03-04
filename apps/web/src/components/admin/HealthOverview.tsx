@@ -33,7 +33,7 @@ const MetricCard: FC<MetricCardProps> = ({ label, value, metricKey, warning }) =
 const ERROR_WARNING_THRESHOLD = 10;
 
 export const HealthOverview: FC = () => {
-  const { health, loading, error, refresh } = useAdminHealth();
+  const { health, loading, isRefreshing, error, refresh } = useAdminHealth();
 
   if (error && !health) {
     return (
@@ -68,9 +68,12 @@ export const HealthOverview: FC = () => {
           <Body className="text-fg-muted text-xs">
             Last updated: {lastUpdated}
           </Body>
-          <Button size="sm" variant="ghost" onClick={refresh} disabled={loading}>
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            {isRefreshing && <Spinner size="sm" />}
+            <Button size="sm" variant="ghost" onClick={refresh} disabled={loading || isRefreshing}>
+              Refresh
+            </Button>
+          </div>
         </div>
 
         {/* Metric cards grid */}

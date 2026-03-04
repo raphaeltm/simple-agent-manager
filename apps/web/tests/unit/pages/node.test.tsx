@@ -44,7 +44,7 @@ vi.mock('../../../src/lib/api', () => ({
 }));
 
 vi.mock('../../../src/hooks/useNodeSystemInfo', () => ({
-  useNodeSystemInfo: () => ({ systemInfo: null, loading: false, error: null }),
+  useNodeSystemInfo: () => ({ systemInfo: null, loading: false, isRefreshing: false, error: null }),
 }));
 
 vi.mock('../../../src/hooks/useNodeLogs', () => ({

@@ -38,6 +38,11 @@ type Reporter struct {
 	workspaceID string // dynamically set after workspace creation
 	sessionID   string // dynamically updated when warm node is reused for new task
 
+	// flushMu serializes flush() calls with outbox mutations in SetSessionID.
+	// SetSessionID acquires flushMu to ensure no in-progress flush can ship
+	// stale messages after the outbox is cleared.
+	flushMu sync.Mutex
+
 	stopC chan struct{}
 	doneC chan struct{}
 }
@@ -128,14 +133,55 @@ func (r *Reporter) SetWorkspaceID(id string) {
 // SetSessionID updates the chat session ID used for all subsequently enqueued
 // messages. Call this when a warm node is reused for a new task so that
 // messages are tagged with the correct chat session.
+//
+// Any unsent messages from the previous session are cleared from the outbox
+// to prevent cross-contamination when a warm node is reused. The flushMu
+// is held during the clear to ensure no in-progress flush can ship stale
+// messages after the outbox is cleared.
 func (r *Reporter) SetSessionID(id string) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
+	oldSessionID := r.sessionID
 	r.sessionID = id
 	r.mu.Unlock()
-	slog.Info("messagereport: session ID updated", "sessionId", id)
+
+	// Clear stale messages from the previous session to prevent
+	// cross-contamination during warm node reuse. Holding flushMu
+	// ensures any in-progress flush completes before we clear, and
+	// no new flush starts until the clear is done.
+	if oldSessionID != "" && oldSessionID != id {
+		r.flushMu.Lock()
+		cleared, err := r.clearOutboxForSession(oldSessionID)
+		r.flushMu.Unlock()
+		if err != nil {
+			slog.Error("messagereport: failed to clear outbox on session switch",
+				"error", err, "oldSessionId", oldSessionID, "newSessionId", id)
+		} else if cleared > 0 {
+			slog.Warn("messagereport: cleared stale outbox messages on session switch",
+				"cleared", cleared, "oldSessionId", oldSessionID, "newSessionId", id)
+		}
+		slog.Info("messagereport: session ID updated",
+			"sessionId", id, "previousSessionId", oldSessionID)
+	}
+}
+
+// clearOutboxForSession removes messages for a specific session from the
+// outbox. Returns the number of rows deleted. Using a session-scoped delete
+// avoids accidentally clearing messages that were already enqueued for the
+// new session in a narrow race window.
+func (r *Reporter) clearOutboxForSession(sessionID string) (int64, error) {
+	result, err := r.db.Exec("DELETE FROM message_outbox WHERE session_id = ?", sessionID)
+	if err != nil {
+		return 0, fmt.Errorf("messagereport: clear outbox for session: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		slog.Warn("messagereport: could not determine rows affected by outbox clear", "error", err)
+		n = -1
+	}
+	return n, nil
 }
 
 // Enqueue inserts a message into the SQLite outbox for eventual delivery.
@@ -212,7 +258,14 @@ func (r *Reporter) flushLoop() {
 // flush reads the oldest batch from the outbox and sends it.
 // On success the sent rows are deleted; on transient failure they remain
 // (attempts counter is bumped) for retry on the next tick.
+//
+// flushMu is held for the duration to serialize with SetSessionID's
+// outbox clear, preventing stale messages from being shipped after a
+// session switch.
 func (r *Reporter) flush() {
+	r.flushMu.Lock()
+	defer r.flushMu.Unlock()
+
 	for {
 		batch, err := r.readBatch()
 		if err != nil {

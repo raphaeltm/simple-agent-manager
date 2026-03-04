@@ -9,6 +9,7 @@ export interface UseAdminHealthOptions {
 export interface UseAdminHealthReturn {
   health: HealthSummary | null;
   loading: boolean;
+  isRefreshing: boolean;
   error: string | null;
   refresh: () => void;
 }
@@ -20,9 +21,11 @@ export function useAdminHealth(options?: UseAdminHealthOptions): UseAdminHealthR
 
   const [health, setHealth] = useState<HealthSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const mountedRef = useRef(true);
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -30,8 +33,10 @@ export function useAdminHealth(options?: UseAdminHealthOptions): UseAdminHealthR
   }, []);
 
   const fetchHealth = useCallback(async () => {
+    if (hasLoadedRef.current) {
+      setIsRefreshing(true);
+    }
     try {
-      setLoading(true);
       setError(null);
 
       const result = await fetchAdminHealth();
@@ -45,7 +50,9 @@ export function useAdminHealth(options?: UseAdminHealthOptions): UseAdminHealthR
       }
     } finally {
       if (mountedRef.current) {
+        hasLoadedRef.current = true;
         setLoading(false);
+        setIsRefreshing(false);
       }
     }
   }, []);
@@ -73,6 +80,7 @@ export function useAdminHealth(options?: UseAdminHealthOptions): UseAdminHealthR
   return {
     health,
     loading,
+    isRefreshing,
     error,
     refresh,
   };

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { NodeResponse, WorkspaceResponse, VMSize, VMLocation } from '@simple-agent-manager/shared';
-import { Alert, Button, PageLayout, Select, SkeletonCard, EmptyState } from '@simple-agent-manager/ui';
+import { Alert, Button, PageLayout, Select, SkeletonCard, EmptyState, Spinner } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { NodeCard } from '../components/node/NodeCard';
 import { createNode, listNodes, listWorkspaces, deleteNode, stopNode } from '../lib/api';
@@ -24,13 +24,18 @@ export function Nodes() {
   const [nodes, setNodes] = useState<NodeResponse[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newNodeSize, setNewNodeSize] = useState<VMSize>('medium');
   const [newNodeLocation, setNewNodeLocation] = useState<VMLocation>('nbg1');
   const [error, setError] = useState<string | null>(null);
+  const hasLoadedRef = useRef(false);
 
   const loadData = useCallback(async () => {
+    if (hasLoadedRef.current) {
+      setIsRefreshing(true);
+    }
     try {
       setError(null);
       const [nodesResponse, workspacesResponse] = await Promise.all([
@@ -42,7 +47,9 @@ export function Nodes() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load nodes');
     } finally {
+      hasLoadedRef.current = true;
       setLoading(false);
+      setIsRefreshing(false);
     }
   }, []);
 
@@ -115,9 +122,12 @@ export function Nodes() {
   return (
     <PageLayout title="Nodes" maxWidth="xl" headerRight={<UserMenu />}>
       <div className="flex justify-between items-center mb-6 gap-3 flex-wrap">
-        <p className="sam-type-secondary m-0 text-fg-muted">
-          Nodes host one or more workspaces.
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="sam-type-secondary m-0 text-fg-muted">
+            Nodes host one or more workspaces.
+          </p>
+          {isRefreshing && <Spinner size="sm" />}
+        </div>
         <Button onClick={() => setShowCreateForm((v) => !v)} disabled={creating}>
           {showCreateForm ? 'Cancel' : 'Create Node'}
         </Button>
@@ -172,7 +182,7 @@ export function Nodes() {
         </div>
       )}
 
-      {loading ? (
+      {loading && nodes.length === 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {Array.from({ length: 3 }, (_, i) => (
             <SkeletonCard key={i} lines={3} />
