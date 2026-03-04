@@ -553,7 +553,6 @@ workspacesRoutes.post('/', async (c) => {
   }
 
   const nodeCountForUser = userNodeCountVal + (mustProvisionNode ? 1 : 0);
-  const workspaceCountForUser = (userWorkspaceCount?.count ?? 0) + 1;
   const reusedExistingNode = !mustProvisionNode;
   const workspaceCountOnNodeBefore = nodeWorkspaceCountVal;
 
@@ -567,7 +566,6 @@ workspacesRoutes.post('/', async (c) => {
       reusedExistingNode,
       workspaceCountOnNodeBefore,
       nodeCountForUser,
-      workspaceCountForUser,
     },
     c.env
   );
@@ -581,7 +579,6 @@ workspacesRoutes.post('/', async (c) => {
       repository: normalizedRepository,
       reusedExistingNode,
       nodeCountForUser,
-      workspaceCountForUser,
     },
     c.env
   );
