@@ -39,7 +39,7 @@ import { getDecryptedAgentKey } from './credentials';
 import { getInstallationToken } from '../services/github-app';
 import { appendBootLog, getBootLogs } from '../services/boot-log';
 import { requireOwnedProject } from '../middleware/project-auth';
-import { decrypt } from '../services/encryption';
+import { decrypt, encrypt } from '../services/encryption';
 import * as projectDataService from '../services/project-data';
 
 const workspacesRoutes = new Hono<{ Bindings: Env }>();
@@ -56,7 +56,8 @@ workspacesRoutes.use('/*', async (c, next) => {
     path.endsWith('/git-token') ||
     path.endsWith('/boot-log') ||
     path.endsWith('/provisioning-failed') ||
-    path.endsWith('/messages')
+    path.endsWith('/messages') ||
+    path.endsWith('/agent-credential-sync')
   ) {
     return next();
   }
@@ -1329,6 +1330,87 @@ workspacesRoutes.post('/:id/agent-key', async (c) => {
     apiKey: credentialData.credential,
     credentialKind: credentialData.credentialKind,
   });
+});
+
+/**
+ * POST /:id/agent-credential-sync — VM agent callback to sync refreshed credentials.
+ * Called after a session ends when the agent used file-based credential injection
+ * (e.g. codex-acp auth.json) and the credential may have been refreshed during the session.
+ * The VM agent reads the updated auth file from the container and sends it here.
+ * Uses workspace callback auth.
+ */
+workspacesRoutes.post('/:id/agent-credential-sync', async (c) => {
+  const workspaceId = c.req.param('id');
+  await verifyWorkspaceCallbackAuth(c, workspaceId);
+
+  const body = await c.req.json<{
+    agentType: string;
+    credentialKind: string;
+    credential: string;
+  }>();
+
+  if (!body.agentType || !body.credentialKind || !body.credential) {
+    throw errors.badRequest('agentType, credentialKind, and credential are required');
+  }
+
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  // Look up the workspace to get the user ID.
+  const workspaceRows = await db
+    .select({ userId: schema.workspaces.userId })
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+
+  const workspace = workspaceRows[0];
+  if (!workspace) {
+    throw errors.notFound('Workspace');
+  }
+
+  // Find the existing credential to update.
+  const existingCreds = await db
+    .select()
+    .from(schema.credentials)
+    .where(
+      and(
+        eq(schema.credentials.userId, workspace.userId),
+        eq(schema.credentials.credentialType, 'agent-api-key'),
+        eq(schema.credentials.agentType, body.agentType),
+        eq(schema.credentials.credentialKind, body.credentialKind)
+      )
+    )
+    .limit(1);
+
+  const existing = existingCreds[0];
+  if (!existing) {
+    // No credential found — the user may have deleted it while the session was active.
+    return c.json({ success: false, reason: 'credential_not_found' });
+  }
+
+  // Decrypt the current credential to compare.
+  const currentCredential = await decrypt(
+    existing.encryptedToken,
+    existing.iv,
+    c.env.ENCRYPTION_KEY
+  );
+
+  // Only update if the credential has actually changed.
+  if (currentCredential === body.credential) {
+    return c.json({ success: true, updated: false });
+  }
+
+  // Re-encrypt with a fresh IV and update.
+  const { ciphertext, iv } = await encrypt(body.credential, c.env.ENCRYPTION_KEY);
+  await db
+    .update(schema.credentials)
+    .set({
+      encryptedToken: ciphertext,
+      iv,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.credentials.id, existing.id));
+
+  return c.json({ success: true, updated: true });
 });
 
 /**
