@@ -51,12 +51,6 @@ export const DEFAULT_BRANCH = 'main';
 // Per constitution principle XI: all values must be configurable
 // =============================================================================
 
-/** Default max workspaces per user. Override via MAX_WORKSPACES_PER_USER env var. */
-export const DEFAULT_MAX_WORKSPACES_PER_USER = 10;
-
-/** Backwards compatibility alias - use DEFAULT_MAX_WORKSPACES_PER_USER */
-export const MAX_WORKSPACES_PER_USER = DEFAULT_MAX_WORKSPACES_PER_USER;
-
 /** Default max nodes per user. Override via MAX_NODES_PER_USER env var. */
 export const DEFAULT_MAX_NODES_PER_USER = 10;
 

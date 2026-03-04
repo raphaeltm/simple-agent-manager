@@ -43,7 +43,6 @@ export default defineWorkersConfig({
             BASE_DOMAIN: 'test.example.com',
             VERSION: '0.1.0-test',
             MAX_NODES_PER_USER: '10',
-            MAX_WORKSPACES_PER_USER: '10',
             MAX_WORKSPACES_PER_NODE: '10',
             MAX_AGENT_SESSIONS_PER_WORKSPACE: '10',
             MAX_PROJECTS_PER_USER: '50',
