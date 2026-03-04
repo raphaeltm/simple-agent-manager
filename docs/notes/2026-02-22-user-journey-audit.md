@@ -160,7 +160,7 @@ The platform communicates state effectively in most places:
 - Prerequisites checking on workspace creation page prevents the most common failure: creating a workspace without Hetzner/GitHub credentials
 - Hetzner token validation against the API before storage prevents invalid tokens
 - Rate limiting prevents API abuse
-- Max limits on entities (10 nodes, 10 workspaces per user) prevent runaway resource consumption
+- Max limits on entities (10 nodes per user, 10 workspaces per node) prevent runaway resource consumption
 - Confirmation dialogs on destructive actions
 
 **Where it falls short:**

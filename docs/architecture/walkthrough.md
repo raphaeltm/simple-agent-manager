@@ -228,7 +228,8 @@ graph TB
     subgraph "Web App (apps/web/)"
         subgraph "Pages"
             Landing["/ Landing Page"]
-            Dashboard["/dashboard<br/>Nodes + Workspaces"]
+            Dashboard["/dashboard<br/>Project Cards"]
+            WSList["/workspaces<br/>All Workspaces (filterable)"]
             CreateWS["/workspaces/new<br/>Create Workspace"]
             WSView["/workspaces/:id<br/>Terminal + Agent Chat"]
             NodeList["/nodes<br/>All Nodes"]

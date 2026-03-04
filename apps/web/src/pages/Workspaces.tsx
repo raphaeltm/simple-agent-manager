@@ -101,7 +101,7 @@ export function Workspaces() {
       )}
 
       {loading ? (
-        <div className="grid grid-cols-1 gap-3">
+        <div role="status" aria-label="Loading workspaces" aria-busy="true" className="grid grid-cols-1 gap-3">
           {Array.from({ length: 3 }, (_, i) => (
             <SkeletonCard key={i} lines={2} />
           ))}

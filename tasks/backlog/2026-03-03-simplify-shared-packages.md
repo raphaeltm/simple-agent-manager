@@ -18,7 +18,7 @@ The shared packages (`packages/shared/`, `providers/`, `cloud-init/`, `terminal/
 - `packages/providers/src/hetzner.ts` has a 120-line cloud-init template duplicating `packages/cloud-init/`
 - `packages/ui/src/tokens/semantic-tokens.ts` duplicates Tokyo Night palette 3 times across modes
 - `packages/acp-client/src/transport/websocket.ts` uses duck-typing to support backward-compatible overload
-- `packages/shared/src/constants.ts` has duplicate aliases (`MAX_WORKSPACES_PER_USER` duplicates `DEFAULT_MAX_WORKSPACES_PER_USER`)
+- `packages/shared/src/constants.ts` has duplicate aliases (`HETZNER_IMAGE` duplicates `DEFAULT_HETZNER_IMAGE`)
 - `vm-agent-contract.ts` has type mismatch: `toolMetadata` is `z.string()` in Zod but `Record<string, unknown>` in types.ts
 
 ## Acceptance Criteria

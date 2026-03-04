@@ -92,6 +92,29 @@ describe('Workspaces page', () => {
     expect(screen.getByText('No workspaces yet')).toBeInTheDocument();
   });
 
+  it('shows filtered empty state message', async () => {
+    mocks.listWorkspaces.mockResolvedValue([]);
+
+    render(
+      <MemoryRouter>
+        <Workspaces />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mocks.listWorkspaces).toHaveBeenCalled();
+    });
+
+    const select = screen.getByLabelText('Filter by status');
+    fireEvent.change(select, { target: { value: 'running' } });
+
+    await waitFor(() => {
+      expect(mocks.listWorkspaces).toHaveBeenCalledWith('running');
+    });
+
+    expect(screen.getByText('No matching workspaces')).toBeInTheDocument();
+  });
+
   it('filters workspaces by status', async () => {
     render(
       <MemoryRouter>
@@ -132,6 +155,57 @@ describe('Workspaces page', () => {
       </MemoryRouter>
     );
 
+    await waitFor(() => {
+      expect(mocks.listWorkspaces).toHaveBeenCalled();
+    });
+
     expect(screen.getByText('Workspaces')).toBeInTheDocument();
+  });
+
+  it('calls deleteWorkspace and reloads when delete action is used', async () => {
+    render(
+      <MemoryRouter>
+        <Workspaces />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mocks.listWorkspaces).toHaveBeenCalled();
+    });
+
+    // Open the overflow menu for the running workspace
+    const menus = screen.getAllByRole('button', { name: /actions for/i });
+    fireEvent.click(menus[0]);
+
+    const deleteButton = await screen.findByRole('menuitem', { name: /delete/i });
+    fireEvent.click(deleteButton);
+
+    await waitFor(() => {
+      expect(mocks.deleteWorkspace).toHaveBeenCalledWith('ws-1');
+    });
+  });
+
+  it('shows error when delete fails', async () => {
+    mocks.deleteWorkspace.mockRejectedValue(new Error('Delete failed'));
+
+    render(
+      <MemoryRouter>
+        <Workspaces />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mocks.listWorkspaces).toHaveBeenCalled();
+    });
+
+    const menus = screen.getAllByRole('button', { name: /actions for/i });
+    fireEvent.click(menus[0]);
+
+    const deleteButton = await screen.findByRole('menuitem', { name: /delete/i });
+    fireEvent.click(deleteButton);
+
+    await waitFor(() => {
+      expect(screen.getByText('Delete failed')).toBeInTheDocument();
+    });
   });
 });

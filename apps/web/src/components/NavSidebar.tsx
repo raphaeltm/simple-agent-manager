@@ -41,6 +41,7 @@ export function NavSidebar({ className }: NavSidebarProps) {
           <Link
             key={item.path}
             to={item.path}
+            aria-current={active ? 'page' : undefined}
             className={`flex items-center gap-3 px-3 py-2 rounded-sm no-underline text-sm font-medium transition-all duration-150 ${
               active
                 ? 'text-accent bg-surface-hover'

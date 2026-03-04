@@ -16,7 +16,6 @@ export interface NodeRoutingMetric {
   reusedExistingNode?: boolean;
   workspaceCountOnNodeBefore?: number;
   nodeCountForUser?: number;
-  workspaceCountForUser?: number;
   statusCode?: number;
   durationMs?: number;
 }
@@ -40,7 +39,6 @@ interface MetricAggregate {
   sc006: {
     samples: number;
     totalNodesAcrossSamples: number;
-    totalWorkspacesAcrossSamples: number;
   };
 }
 
@@ -70,7 +68,6 @@ function getOrCreateAggregate(metric: TelemetryMetricName): MetricAggregate {
     sc006: {
       samples: 0,
       totalNodesAcrossSamples: 0,
-      totalWorkspacesAcrossSamples: 0,
     },
   };
 
@@ -110,7 +107,6 @@ function updateAggregate(metric: NodeRoutingMetric): MetricAggregate {
   if (metric.metric === 'sc_006_node_efficiency') {
     aggregate.sc006.samples += 1;
     aggregate.sc006.totalNodesAcrossSamples += metric.nodeCountForUser || 0;
-    aggregate.sc006.totalWorkspacesAcrossSamples += metric.workspaceCountForUser || 0;
   }
 
   return aggregate;
