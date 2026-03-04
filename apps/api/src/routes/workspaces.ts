@@ -1343,14 +1343,35 @@ workspacesRoutes.post('/:id/agent-credential-sync', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
+  // Payload size check (64KB — auth.json files are typically a few KB).
+  const contentLength = parseInt(c.req.header('content-length') || '0', 10);
+  const maxPayloadBytes = 64 * 1024;
+  if (contentLength > maxPayloadBytes) {
+    throw errors.badRequest(`Payload exceeds ${maxPayloadBytes} byte limit`);
+  }
+
   const body = await c.req.json<{
     agentType: string;
     credentialKind: string;
     credential: string;
-  }>();
+  }>().catch(() => null);
+
+  if (!body) {
+    throw errors.badRequest('Request body must be valid JSON');
+  }
 
   if (!body.agentType || !body.credentialKind || !body.credential) {
     throw errors.badRequest('agentType, credentialKind, and credential are required');
+  }
+
+  // Validate against known values.
+  const validAgentTypes = new Set(['claude-code', 'openai-codex', 'google-gemini']);
+  const validCredentialKinds = new Set(['api-key', 'oauth-token']);
+  if (!validAgentTypes.has(body.agentType)) {
+    throw errors.badRequest('Invalid agentType');
+  }
+  if (!validCredentialKinds.has(body.credentialKind)) {
+    throw errors.badRequest('Invalid credentialKind');
   }
 
   const db = drizzle(c.env.DATABASE, { schema });
@@ -1367,7 +1388,7 @@ workspacesRoutes.post('/:id/agent-credential-sync', async (c) => {
     throw errors.notFound('Workspace');
   }
 
-  // Find the existing credential to update.
+  // Find the existing active credential to update.
   const existingCreds = await db
     .select()
     .from(schema.credentials)
@@ -1376,7 +1397,8 @@ workspacesRoutes.post('/:id/agent-credential-sync', async (c) => {
         eq(schema.credentials.userId, workspace.userId),
         eq(schema.credentials.credentialType, 'agent-api-key'),
         eq(schema.credentials.agentType, body.agentType),
-        eq(schema.credentials.credentialKind, body.credentialKind)
+        eq(schema.credentials.credentialKind, body.credentialKind),
+        eq(schema.credentials.isActive, true)
       )
     )
     .limit(1);
@@ -1409,6 +1431,13 @@ workspacesRoutes.post('/:id/agent-credential-sync', async (c) => {
       updatedAt: new Date().toISOString(),
     })
     .where(eq(schema.credentials.id, existing.id));
+
+  console.log('agent-credential-sync: credential updated', {
+    workspaceId,
+    agentType: body.agentType,
+    credentialKind: body.credentialKind,
+    credentialId: existing.id,
+  });
 
   return c.json({ success: true, updated: true });
 });
