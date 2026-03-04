@@ -73,21 +73,25 @@
 ```
 1. Validate request (auth, project ownership, credentials)
 2. Generate branch name from message (R6 algorithm)
-3. Insert task record:
+3. Generate task title via AI (`generateTaskTitle()` in `services/task-title.ts`):
+     - Uses Mastra Agent with Workers AI binding for concise title (≤100 chars)
+     - Falls back to truncation if AI disabled, fails, or times out
+     - Short messages (≤100 chars) used as-is without AI call
+4. Insert task record:
      - status: 'queued'
-     - title: message (truncated to 200 chars for display)
+     - title: AI-generated title (or truncated fallback)
      - description: message (full text)
      - outputBranch: generated branch name
      - executionStep: 'node_selection'
-4. Record status event: null → 'queued' (actorType: 'user')
-5. Create chat session in ProjectData DO:
+5. Record status event: null → 'queued' (actorType: 'user')
+6. Create chat session in ProjectData DO:
      - Link to task via taskId
      - Topic: task title
-6. Record first message in chat session:
+7. Record first message in chat session:
      - role: 'user'
      - content: message
-7. Return 202 immediately
-8. via waitUntil: executeTaskRun(task, vmSize, vmLocation, nodeId)
+8. Return 202 immediately
+9. via waitUntil: executeTaskRun(task, vmSize, vmLocation, nodeId)
 ```
 
 ### Branch Name Generation (R6)
