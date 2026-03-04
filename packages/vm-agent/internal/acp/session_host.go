@@ -816,7 +816,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 	if serializeTimeout <= 0 {
 		serializeTimeout = DefaultNotifSerializeTimeout
 	}
-	orderedStdout := newOrderedPipe(process.Stdout(), processedCh, ctx.Done(), serializeTimeout)
+	orderedStdout := newOrderedPipe(process.Stdout(), processedCh, h.ctx.Done(), serializeTimeout)
 	h.acpConn = acpsdk.NewClientSideConnection(client, process.Stdin(), orderedStdout)
 
 	go h.monitorStderr(process)
@@ -1751,6 +1751,9 @@ func (c *sessionHostClient) signalProcessed() {
 		select {
 		case c.processedCh <- struct{}{}:
 		default:
+			// Buffer already has a pending signal; this can happen if two
+			// notifications were dispatched before backpressure took effect.
+			slog.Debug("orderedPipe: processedCh already has pending signal, skipping")
 		}
 	}
 }

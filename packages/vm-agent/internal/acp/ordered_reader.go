@@ -3,6 +3,7 @@ package acp
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -15,11 +16,14 @@ import (
 const DefaultNotifSerializeTimeout = 5 * time.Second
 
 // orderedPipe wraps an io.Reader (agent stdout) and delivers lines to the ACP
-// SDK one at a time through an io.Pipe. Between consecutive JSON-RPC
-// notifications (messages with a "method" field and no "id"), it waits for the
-// previous notification's handler to signal completion before delivering the
-// next line. This prevents the SDK's concurrent goroutine dispatch
-// (go c.handleInbound) from reordering session/update notifications.
+// SDK one at a time through an io.Pipe. Between consecutive session/update
+// notifications, it waits for the previous handler to signal completion before
+// delivering the next line. This prevents the SDK's concurrent goroutine
+// dispatch (go c.handleInbound) from reordering streaming tokens.
+//
+// Only session/update notifications are serialized — other notification types
+// (e.g. permission/request) pass through without blocking, since they don't
+// produce streaming token sequences that require ordering.
 //
 // The ordering guarantee works because io.Pipe is synchronous: Write blocks
 // until Read consumes the data. The SDK's bufio.Scanner calls Read, which
@@ -66,16 +70,34 @@ func newOrderedPipe(stdout io.Reader, processedCh <-chan struct{}, done <-chan s
 	return pr
 }
 
+// sessionUpdateMethod is the only notification type that produces streaming
+// token sequences requiring ordered delivery. Other notifications (e.g.
+// permission/request) are infrequent and don't need serialization.
+const sessionUpdateMethod = "session/update"
+
 // run reads lines from the real stdout and writes them to the pipe one at a
-// time, serializing notification processing.
+// time, serializing session/update notification processing.
 func (op *orderedPipe) run(processedCh <-chan struct{}, done <-chan struct{}) {
 	defer op.pw.Close()
+
+	// Background goroutine: if done fires while we are blocked in pw.Write,
+	// close the writer to unblock it. Without this, a blocked Write after the
+	// SDK stops reading would leak this goroutine.
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+	go func() {
+		select {
+		case <-done:
+			op.pw.CloseWithError(context.Canceled)
+		case <-stopCh:
+		}
+	}()
 
 	const maxBufSize = 10 * 1024 * 1024 // Match SDK's max buffer
 	scanner := bufio.NewScanner(op.reader)
 	scanner.Buffer(make([]byte, 0, 1024*1024), maxBufSize)
 
-	pendingNotification := false
+	pendingSessionUpdate := false
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -83,24 +105,32 @@ func (op *orderedPipe) run(processedCh <-chan struct{}, done <-chan struct{}) {
 			continue
 		}
 
-		// Determine if this line is a notification (method present, no id).
+		// Only serialize session/update notifications. Other notification
+		// types (e.g. permission/request) pass through without blocking.
 		var env jsonRPCEnvelope
-		isNotification := false
+		isSessionUpdate := false
 		if err := json.Unmarshal(line, &env); err == nil {
-			isNotification = env.Method != "" && env.ID == nil
+			isSessionUpdate = env.Method == sessionUpdateMethod && env.ID == nil
 		}
 
-		// If a notification is pending and this is also a notification,
-		// wait for the previous notification's handler to complete.
-		// This ensures session/update chunks are broadcast in order.
-		if pendingNotification && isNotification {
+		// If a session/update is pending and this is also a session/update,
+		// wait for the previous handler to complete before delivering.
+		if pendingSessionUpdate && isSessionUpdate {
+			timer := time.NewTimer(op.timeout)
 			select {
 			case <-processedCh:
-				// Previous notification handler completed.
-			case <-time.After(op.timeout):
+				timer.Stop()
+			case <-timer.C:
 				slog.Warn("orderedPipe: timeout waiting for notification processing, proceeding",
 					"timeout", op.timeout)
+				// Drain any stale signal that may arrive later to prevent it
+				// from being consumed as the credit for a future notification.
+				select {
+				case <-processedCh:
+				default:
+				}
 			case <-done:
+				timer.Stop()
 				return
 			}
 		}
@@ -114,12 +144,12 @@ func (op *orderedPipe) run(processedCh <-chan struct{}, done <-chan struct{}) {
 			return // Pipe closed.
 		}
 
-		if isNotification {
-			pendingNotification = true
+		if isSessionUpdate {
+			pendingSessionUpdate = true
 		}
-		// Intentionally do NOT clear pendingNotification for non-notifications.
-		// We track notification-to-notification ordering even across
-		// intervening requests. Example: notif A → request R → notif B
+		// Intentionally do NOT clear pendingSessionUpdate for non-session/update
+		// messages. We track session/update-to-session/update ordering even across
+		// intervening requests. Example: session/update A → request R → session/update B
 		// must wait for A's handler before delivering B.
 	}
 }

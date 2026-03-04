@@ -242,34 +242,34 @@ func TestOrderedPipe_TimeoutSafetyNet(t *testing.T) {
 func TestOrderedPipe_DoneChannelStopsProcessing(t *testing.T) {
 	t.Parallel()
 
-	// Two notifications, done channel closed before second can be processed.
+	// Two session/update notifications but NO processing signal.
+	// The goroutine blocks in the select waiting for processedCh before
+	// delivering the second line. Closing done should unblock it and
+	// cause EOF.
 	lines := []string{
 		makeNotification("session/update", 1),
 		makeNotification("session/update", 2),
 	}
 	input := strings.Join(lines, "\n") + "\n"
 
-	processedCh := make(chan struct{}, 1)
+	processedCh := make(chan struct{}, 1) // Intentionally never signaled.
 	done := make(chan struct{})
 
 	reader := newOrderedPipe(strings.NewReader(input), processedCh, done, 5*time.Second)
 
-	// Read the first line.
+	// Read the first notification (passes through — no prior pending).
 	scanner := bufio.NewScanner(reader)
 	if !scanner.Scan() {
 		t.Fatal("expected first line")
 	}
 
-	// Close done — the pipe should stop and not deliver the second line.
+	// Now the goroutine is blocked waiting for processedCh before second line.
+	// Close done to unblock it — it should return, closing pw, causing EOF.
 	close(done)
 
-	// Give a moment for the goroutine to react.
-	time.Sleep(50 * time.Millisecond)
-
-	// The scanner should either get nothing or EOF.
-	gotSecond := scanner.Scan()
-	if gotSecond {
-		t.Log("got second line (may have been buffered before done)")
+	// The second line must NOT be delivered.
+	if scanner.Scan() {
+		t.Error("expected no second line after done was closed, but got one")
 	}
 }
 
@@ -366,5 +366,72 @@ func TestOrderedPipe_HighThroughputOrdering(t *testing.T) {
 		if seq != i+1 {
 			t.Errorf("line %d: expected seq %d, got %d (out of order!)", i, i+1, seq)
 		}
+	}
+}
+
+// makePermissionRequest creates a permission/request notification (has method, no id).
+func makePermissionRequest(seq int) string {
+	msg := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  "permission/request",
+		"params":  map[string]interface{}{"seq": seq},
+	}
+	b, _ := json.Marshal(msg)
+	return string(b)
+}
+
+func TestOrderedPipe_PermissionRequestDoesNotBlockSessionUpdate(t *testing.T) {
+	t.Parallel()
+
+	// Sequence: session/update, permission/request, session/update
+	// permission/request is a notification (method present, no id) but is NOT
+	// session/update, so it should NOT require a processedCh signal and should
+	// NOT block the delivery of the subsequent session/update.
+	lines := []string{
+		makeNotification("session/update", 1),
+		makePermissionRequest(100),
+		makeNotification("session/update", 2),
+	}
+	input := strings.Join(lines, "\n") + "\n"
+
+	processedCh := make(chan struct{}, 1)
+	done := make(chan struct{})
+	defer close(done)
+
+	reader := newOrderedPipe(strings.NewReader(input), processedCh, done, 2*time.Second)
+
+	var received []string
+	scanner := bufio.NewScanner(reader)
+
+	lineCount := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		var env jsonRPCEnvelope
+		json.Unmarshal([]byte(line), &env)
+		received = append(received, env.Method)
+		lineCount++
+
+		// Signal only after session/update notifications.
+		if env.Method == "session/update" {
+			processedCh <- struct{}{}
+		}
+		// Notably: do NOT signal after permission/request.
+		// If ordering were applied to all notifications, this would deadlock.
+		if lineCount >= 3 {
+			break
+		}
+	}
+
+	if len(received) != 3 {
+		t.Fatalf("expected 3 lines, got %d", len(received))
+	}
+	if received[0] != "session/update" {
+		t.Errorf("line 0: expected session/update, got %s", received[0])
+	}
+	if received[1] != "permission/request" {
+		t.Errorf("line 1: expected permission/request, got %s", received[1])
+	}
+	if received[2] != "session/update" {
+		t.Errorf("line 2: expected session/update, got %s", received[2])
 	}
 }

@@ -116,7 +116,8 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `ACP_PONG_TIMEOUT` — WebSocket pong deadline after ping (default: 10s)
 - `ACP_PROMPT_TIMEOUT` — Max ACP prompt runtime before timeout (default: 10m)
 - `ACP_PROMPT_CANCEL_GRACE_PERIOD` — Grace wait after cancel before force-stop (default: 5s)
-- `ACP_NOTIF_SERIALIZE_TIMEOUT` — Max wait for previous notification processing before delivering next (default: 5s)
+- `ACP_IDLE_SUSPEND_TIMEOUT` — Idle timeout before auto-suspending agent session (default: 30m)
+- `ACP_NOTIF_SERIALIZE_TIMEOUT` — Max wait for previous session/update processing before delivering next (default: 5s)
 
 ### Events
 - `MAX_NODE_EVENTS` — Max node-level events retained in memory (default: 500)
