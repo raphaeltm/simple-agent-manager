@@ -420,6 +420,11 @@ function ErrorBanner({ session }: { session: AcpSessionHandle }) {
   const suggestedAction = meta?.suggestedAction;
   const severity = meta?.severity ?? 'recoverable';
 
+  // Show the raw error if it provides more detail than the generic userMessage
+  const detailedError = session.error && session.error !== userMessage && session.error !== meta?.userMessage
+    ? session.error
+    : null;
+
   // Color scheme based on severity
   const colors = severity === 'fatal'
     ? { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', hint: 'text-red-600' }
@@ -427,7 +432,7 @@ function ErrorBanner({ session }: { session: AcpSessionHandle }) {
       ? { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-800', hint: 'text-yellow-600' }
       : { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', hint: 'text-red-600' };
 
-  const showReconnect = severity !== 'fatal' && session.errorCode !== 'NETWORK_OFFLINE';
+  const showReconnect = severity !== 'fatal' && severity !== 'transient' && session.errorCode !== 'NETWORK_OFFLINE';
 
   return (
     <div className={`${colors.bg} border-b ${colors.border} px-4 py-2 text-sm text-center`}>
@@ -444,6 +449,9 @@ function ErrorBanner({ session }: { session: AcpSessionHandle }) {
           </button>
         )}
       </div>
+      {detailedError && (
+        <p className={`text-xs mt-0.5 ${colors.hint} truncate max-w-lg mx-auto`} title={detailedError}>{detailedError}</p>
+      )}
       {suggestedAction && (
         <p className={`text-xs mt-1 ${colors.hint}`}>{suggestedAction}</p>
       )}

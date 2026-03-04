@@ -71,9 +71,9 @@ const ERROR_REGISTRY: Record<AcpErrorCode, Omit<AcpErrorMeta, 'code'>> = {
   },
   // Authentication
   AUTH_EXPIRED: {
-    severity: 'recoverable',
-    userMessage: 'Session expired',
-    suggestedAction: 'Refresh the page to get a new session token.',
+    severity: 'transient',
+    userMessage: 'Session token expired',
+    suggestedAction: 'Reconnecting with a fresh token...',
   },
   AUTH_REJECTED: {
     severity: 'fatal',
@@ -187,8 +187,13 @@ export function errorCodeFromMessage(message: string | undefined | null): AcpErr
   if (lower.includes('timeout') && lower.includes('prompt')) {
     return 'PROMPT_TIMEOUT';
   }
-  if (lower.includes('auth') || lower.includes('token') || lower.includes('unauthorized')) {
+  if (lower.includes('token expired') || lower.includes('auth expired') ||
+      lower.includes('session expired') || lower.includes('jwt expired')) {
     return 'AUTH_EXPIRED';
+  }
+  if (lower.includes('unauthorized') || lower.includes('authentication failed') ||
+      lower.includes('invalid token') || lower.includes('token invalid')) {
+    return 'AUTH_REJECTED';
   }
   if (lower.includes('container') && lower.includes('not found')) {
     return 'AGENT_ERROR';
