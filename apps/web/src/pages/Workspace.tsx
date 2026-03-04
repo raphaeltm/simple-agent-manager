@@ -272,7 +272,17 @@ export function Workspace() {
       let sessionsData: AgentSession[] = [];
       if (wsRunning && workspaceData.url && terminalToken) {
         try {
-          sessionsData = await listAgentSessionsLive(workspaceData.url, id, terminalToken);
+          // Fetch live sessions (hostStatus/viewerCount) and control plane sessions
+          // (agentType) in parallel, then merge.
+          const [liveSessions, cpSessions] = await Promise.all([
+            listAgentSessionsLive(workspaceData.url, id, terminalToken),
+            listAgentSessions(id).catch(() => [] as AgentSession[]),
+          ]);
+          const cpMap = new Map(cpSessions.map((s) => [s.id, s]));
+          sessionsData = liveSessions.map((s) => ({
+            ...s,
+            agentType: s.agentType ?? cpMap.get(s.id)?.agentType ?? null,
+          }));
         } catch {
           // Fall back to control plane API (no live hostStatus/viewerCount)
           sessionsData = await listAgentSessions(id);
@@ -913,6 +923,7 @@ export function Workspace() {
 
       const created = await createAgentSession(id, {
         label,
+        agentType: preferredAgentId,
         worktreePath: activeWorktree ?? undefined,
       });
 
@@ -1972,6 +1983,7 @@ export function Workspace() {
                       sessionId={session.id}
                       worktreePath={session.worktreePath}
                       preferredAgentId={
+                        session.agentType ||
                         preferredAgentsBySession[session.id] ||
                         (configuredAgents.length > 0 ? configuredAgents[0]!.id : undefined)
                       }

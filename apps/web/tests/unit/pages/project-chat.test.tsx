@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const mocks = vi.hoisted(() => ({
+  listAgents: vi.fn(),
   listChatSessions: vi.fn(),
   listCredentials: vi.fn(),
   submitTask: vi.fn(),
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/lib/api', () => ({
+  listAgents: mocks.listAgents,
   listChatSessions: mocks.listChatSessions,
   listCredentials: mocks.listCredentials,
   submitTask: mocks.submitTask,
@@ -93,10 +95,25 @@ function renderProjectChat(path = `/projects/${PROJECT_ID}/chat`) {
   );
 }
 
+/** Single configured agent (most common case). */
+const AGENTS_SINGLE = {
+  agents: [
+    { id: 'claude-code', name: 'Claude Code', configured: true, supportsAcp: true },
+  ],
+};
+/** Multiple configured agents — triggers the agent selector dropdown. */
+const AGENTS_MULTI = {
+  agents: [
+    { id: 'claude-code', name: 'Claude Code', configured: true, supportsAcp: true },
+    { id: 'openai-codex', name: 'OpenAI Codex', configured: true, supportsAcp: true },
+  ],
+};
+
 describe('ProjectChat new chat button', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
   });
 
   it('shows new chat input when there are no sessions', async () => {
@@ -217,10 +234,11 @@ describe('ProjectChat new chat button', () => {
     fireEvent.change(textarea, { target: { value: 'Build a todo app' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
-    // Should submit the task and navigate to the new session
+    // Should submit the task with the default agent type and navigate to the new session
     await waitFor(() => {
       expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, {
         message: 'Build a todo app',
+        agentType: 'claude-code',
       });
     });
 
@@ -235,6 +253,7 @@ describe('ProjectChat voice input', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
   });
 
   it('renders voice button in the new chat input', async () => {
@@ -277,5 +296,84 @@ describe('ProjectChat voice input', () => {
     fireEvent.click(screen.getByTestId('voice-button'));
 
     expect(textarea).toHaveValue('existing text hello world');
+  });
+});
+
+describe('ProjectChat agent type selection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.listCredentials.mockResolvedValue([
+      { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
+    ]);
+  });
+
+  it('does not show agent selector when only one agent is configured', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+    renderProjectChat();
+
+    await waitFor(() => {
+      expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByLabelText('Agent:')).not.toBeInTheDocument();
+  });
+
+  it('shows agent selector dropdown when multiple agents are configured', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_MULTI);
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+    renderProjectChat();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Agent:')).toBeInTheDocument();
+    });
+
+    const select = screen.getByLabelText('Agent:') as HTMLSelectElement;
+    expect(select.options).toHaveLength(2);
+    expect(select.options[0]!.textContent).toBe('Claude Code');
+    expect(select.options[1]!.textContent).toBe('OpenAI Codex');
+    // Default is first agent
+    expect(select.value).toBe('claude-code');
+  });
+
+  it('submits task with selected agent type', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_MULTI);
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+    mocks.submitTask.mockResolvedValue({
+      taskId: 'task-new',
+      sessionId: 'session-new',
+      branchName: 'sam/task-new',
+      status: 'queued',
+    });
+    mocks.getProjectTask.mockResolvedValue({
+      id: 'task-new',
+      status: 'queued',
+      executionStep: null,
+      errorMessage: null,
+    });
+
+    renderProjectChat();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Agent:')).toBeInTheDocument();
+    });
+
+    // Switch to openai-codex
+    const select = screen.getByLabelText('Agent:') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'openai-codex' } });
+
+    // Type a message and submit
+    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
+    fireEvent.change(textarea, { target: { value: 'Fix the tests' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, {
+        message: 'Fix the tests',
+        agentType: 'openai-codex',
+      });
+    });
   });
 });

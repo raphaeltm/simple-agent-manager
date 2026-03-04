@@ -503,6 +503,8 @@ export interface SubmitTaskRequest {
   vmSize?: VMSize;
   vmLocation?: VMLocation;
   nodeId?: string;
+  /** Agent type to use for the task (e.g., 'claude-code', 'openai-codex') */
+  agentType?: string;
 }
 
 export interface SubmitTaskResponse {
@@ -814,6 +816,9 @@ export interface AgentSession {
   suspendedAt?: string | null;
   errorMessage?: string | null;
   label?: string | null;
+  /** Selected agent type (e.g., 'claude-code', 'openai-codex'). Persisted so the
+   *  correct agent is restored after a page refresh. */
+  agentType?: string | null;
   worktreePath?: string | null;
   /** Last user message for session discoverability in history UI. */
   lastPrompt?: string | null;
@@ -825,6 +830,7 @@ export interface AgentSession {
 
 export interface CreateAgentSessionRequest {
   label?: string;
+  agentType?: string;
   worktreePath?: string;
 }
 

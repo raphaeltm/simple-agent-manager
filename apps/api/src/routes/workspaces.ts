@@ -98,6 +98,7 @@ function toAgentSessionResponse(session: schema.AgentSession): AgentSession {
     suspendedAt: session.suspendedAt,
     errorMessage: session.errorMessage,
     label: session.label,
+    agentType: session.agentType,
     worktreePath: session.worktreePath,
     lastPrompt: session.lastPrompt,
   };
@@ -914,6 +915,7 @@ workspacesRoutes.post('/:id/agent-sessions', async (c) => {
     userId,
     status: 'running',
     label: body.label?.trim() || null,
+    agentType: body.agentType?.trim() || null,
     worktreePath: body.worktreePath?.trim() || null,
     createdAt: now,
     updatedAt: now,

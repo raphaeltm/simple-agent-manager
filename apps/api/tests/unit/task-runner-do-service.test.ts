@@ -71,7 +71,7 @@ describe('task-runner-do service', () => {
       'vmSize', 'vmLocation', 'branch', 'preferredNodeId',
       'userName', 'userEmail', 'githubId', 'taskTitle',
       'taskDescription', 'repository', 'installationId',
-      'outputBranch', 'projectDefaultVmSize',
+      'outputBranch', 'projectDefaultVmSize', 'agentType',
     ];
     for (const field of configFields) {
       expect(serviceSource).toContain(field);
@@ -100,6 +100,10 @@ describe('task-submit route uses TaskRunner DO', () => {
     expect(taskSubmitSource).toContain('userName: auth.user.name');
     expect(taskSubmitSource).toContain('userEmail: auth.user.email');
     expect(taskSubmitSource).toContain('githubId: userRow?.githubId');
+  });
+
+  it('passes agentType from request body', () => {
+    expect(taskSubmitSource).toContain('agentType: body.agentType');
   });
 });
 

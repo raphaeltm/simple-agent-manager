@@ -180,10 +180,16 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
     // Auto-select preferred agent when connected.
     // Skip if the server's session_state already indicates the agent is running
     // (e.g., reconnecting to a session where the agent kept working).
+    // Once an agent has been selected, do NOT re-select based on prop changes from
+    // polling — this prevents flip-flopping between agents when stale data arrives.
+    const hasAutoSelectedRef = useRef(false);
     useEffect(() => {
       if (!preferredAgentId) return;
       if (!connected) return;
       if (agentType === preferredAgentId) return;
+      // Once we've auto-selected and the agent is running, don't re-trigger.
+      // The user can still explicitly switch agents via the UI.
+      if (hasAutoSelectedRef.current && agentType) return;
       // Don't send select_agent while still connecting, reconnecting, initializing,
       // or replaying buffered messages from a running session.
       if (
@@ -194,6 +200,7 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
       )
         return;
 
+      hasAutoSelectedRef.current = true;
       reportError({
         level: 'info',
         message: `Auto-selecting agent: ${preferredAgentId}`,

@@ -37,20 +37,20 @@ OpenAI uses a standard **OAuth 2.0 Authorization Code flow with PKCE (S256)** fo
 **Token lifecycle:**
 - Access tokens refresh automatically (every ~8 days via `https://auth.openai.com/oauth/token`)
 - Refresh tokens provide long-lived sessions
-- Token storage: `~/.codex/auth.json` with format:
+- Token storage: `~/.codex/auth.json` with format (verified against real file 2026-03-04):
   ```json
   {
-    "auth_mode": "Chatgpt",
-    "openai_api_key": null,
+    "OPENAI_API_KEY": null,
     "tokens": {
+      "id_token": "eyJ...<OIDC JWT>",
       "access_token": "eyJ...<RS256 JWT, ~1hr expiry>",
-      "refresh_token": "rt_...<opaque, long-lived>",
-      "id_token": "eyJ...<OIDC JWT with plan_type claim>",
-      "account_id": "313b2c23-..."
+      "refresh_token": "<opaque, long-lived>",
+      "account_id": "acct-..."
     },
-    "last_refresh": "2026-01-15T10:30:00Z"
+    "last_refresh": "2026-03-03T15:32:25.189497Z"
   }
   ```
+  Note: Initial research indicated an `auth_mode: "Chatgpt"` field with `rt_` prefix on refresh tokens. Real files use `OPENAI_API_KEY: null` and opaque refresh tokens without a fixed prefix. Validation accepts both formats.
 
 ### Authentication Methods Available
 
@@ -397,22 +397,22 @@ Instead of users copying auth.json manually, SAM could implement the full OAuth 
 ## Checklist
 
 ### Implementation (Phase 1)
-- [ ] Add `oauthSupport` to OpenAI Codex entry in `packages/shared/src/agents.ts`
-- [ ] Extend `agentCommandInfo` struct in `gateway.go` to support file-based credential injection
-- [ ] Update `getAgentCommandInfo()` in `packages/vm-agent/internal/acp/gateway.go` for `openai-codex` + `oauth-token`
-- [ ] Add auth.json file injection logic in `session_host.go` `startAgent()` — write credential to `~/.codex/auth.json` with `0600` permissions, set `NO_BROWSER=1`
-- [ ] Add credential validation in `apps/api/src/services/validation.ts` — validate auth.json structure
-- [ ] Update UI to use textarea for OpenAI Codex OAuth credential input (if current input is single-line)
-- [ ] Optionally decode `id_token` JWT to display ChatGPT plan type in Settings UI
-- [ ] Add unit tests for credential injection, validation, and agent catalog changes
+- [x] Add `oauthSupport` to OpenAI Codex entry in `packages/shared/src/agents.ts`
+- [x] Extend `agentCommandInfo` struct in `gateway.go` to support file-based credential injection
+- [x] Update `getAgentCommandInfo()` in `packages/vm-agent/internal/acp/gateway.go` for `openai-codex` + `oauth-token`
+- [x] Add auth.json file injection logic in `session_host.go` `startAgent()` — write credential to `~/.codex/auth.json` with `0600` permissions, set `NO_BROWSER=1`
+- [x] Add credential validation in `apps/api/src/services/validation.ts` — validate auth.json structure
+- [x] Update UI to use textarea for OpenAI Codex OAuth credential input (if current input is single-line)
+- [x] Optionally decode `id_token` JWT to display ChatGPT plan type in Settings UI
+- [x] Add unit tests for credential injection, validation, and agent catalog changes
 - [ ] Add integration tests for end-to-end credential flow
-- [ ] Verify existing API key flow for OpenAI Codex continues to work unchanged
+- [x] Verify existing API key flow for OpenAI Codex continues to work unchanged
 - [ ] Update CLAUDE.md agent authentication section if needed
 - [ ] Test end-to-end: save auth.json → start workspace → select Codex → agent authenticates via auth.json
 
 ### Documentation
-- [ ] Update `docs/architecture/credential-security.md` with OpenAI OAuth details and auth.json injection pattern
-- [ ] Add user-facing instructions for obtaining auth.json from local Codex CLI
+- [x] Update `docs/architecture/credential-security.md` with OpenAI OAuth details and auth.json injection pattern
+- [x] Add user-facing instructions for obtaining auth.json from local Codex CLI (in oauthSupport.setupInstructions)
 
 ## Acceptance Criteria
 

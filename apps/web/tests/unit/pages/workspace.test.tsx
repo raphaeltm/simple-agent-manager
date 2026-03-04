@@ -257,7 +257,7 @@ describe('Workspace page', () => {
     });
     mocks.listWorkspaceEvents.mockResolvedValue({ events: [], nextCursor: null });
     mocks.listAgentSessions.mockResolvedValue([]);
-    mocks.listAgentSessionsLive.mockRejectedValue(new Error('not mocked'));
+    mocks.listAgentSessionsLive.mockResolvedValue([]);
     mocks.updateWorkspace.mockResolvedValue({
       id: 'ws-123',
       nodeId: 'node-1',
@@ -324,16 +324,16 @@ describe('Workspace page', () => {
   describe('multi-terminal tab lifecycle', () => {
     it('closing active terminal tab focuses a running chat tab', async () => {
       mocks.featureFlags.multiTerminal = true;
-      mocks.listAgentSessions.mockResolvedValue([
-        {
-          id: 'sess-1',
-          workspaceId: 'ws-123',
-          status: 'running',
-          label: 'Claude Chat',
-          createdAt: '2026-02-08T00:10:00.000Z',
-          updatedAt: '2026-02-08T00:10:00.000Z',
-        },
-      ]);
+      const sessionData = {
+        id: 'sess-1',
+        workspaceId: 'ws-123',
+        status: 'running',
+        label: 'Claude Chat',
+        createdAt: '2026-02-08T00:10:00.000Z',
+        updatedAt: '2026-02-08T00:10:00.000Z',
+      };
+      mocks.listAgentSessions.mockResolvedValue([sessionData]);
+      mocks.listAgentSessionsLive.mockResolvedValue([sessionData]);
 
       renderWorkspace('/workspaces/ws-123', true);
 
@@ -415,16 +415,16 @@ describe('Workspace page', () => {
   });
 
   it('supports chat tab attach flow and updates workspace query string', async () => {
-    mocks.listAgentSessions.mockResolvedValue([
-      {
-        id: 'sess-1',
-        workspaceId: 'ws-123',
-        status: 'running',
-        label: 'Claude Chat',
-        createdAt: '2026-02-08T00:10:00.000Z',
-        updatedAt: '2026-02-08T00:10:00.000Z',
-      },
-    ]);
+    const sessionData = {
+      id: 'sess-1',
+      workspaceId: 'ws-123',
+      status: 'running',
+      label: 'Claude Chat',
+      createdAt: '2026-02-08T00:10:00.000Z',
+      updatedAt: '2026-02-08T00:10:00.000Z',
+    };
+    mocks.listAgentSessions.mockResolvedValue([sessionData]);
+    mocks.listAgentSessionsLive.mockResolvedValue([sessionData]);
 
     renderWorkspace('/workspaces/ws-123', true);
 
@@ -454,10 +454,11 @@ describe('Workspace page', () => {
     };
     // Multiple mocks needed: loadWorkspaceState re-runs when workspace.status
     // changes and when terminalToken becomes available (live session fallback).
-    mocks.listAgentSessions.mockResolvedValueOnce([sessionData]);
-    mocks.listAgentSessions.mockResolvedValueOnce([sessionData]);
-    mocks.listAgentSessions.mockResolvedValueOnce([sessionData]);
-    mocks.listAgentSessions.mockResolvedValueOnce([]);
+    mocks.listAgentSessions.mockResolvedValue([sessionData]);
+    mocks.listAgentSessionsLive.mockResolvedValueOnce([sessionData]);
+    mocks.listAgentSessionsLive.mockResolvedValueOnce([sessionData]);
+    mocks.listAgentSessionsLive.mockResolvedValueOnce([sessionData]);
+    mocks.listAgentSessionsLive.mockResolvedValueOnce([]);
 
     renderWorkspace('/workspaces/ws-123?view=conversation&sessionId=sess-tab', true);
 
@@ -477,16 +478,16 @@ describe('Workspace page', () => {
   });
 
   it('provides session-aware ACP URL resolver when a sessionId is selected', async () => {
-    mocks.listAgentSessions.mockResolvedValue([
-      {
-        id: 'sess-1',
-        workspaceId: 'ws-123',
-        status: 'running',
-        label: 'Claude Chat',
-        createdAt: '2026-02-08T00:10:00.000Z',
-        updatedAt: '2026-02-08T00:10:00.000Z',
-      },
-    ]);
+    const sessionData = {
+      id: 'sess-1',
+      workspaceId: 'ws-123',
+      status: 'running',
+      label: 'Claude Chat',
+      createdAt: '2026-02-08T00:10:00.000Z',
+      updatedAt: '2026-02-08T00:10:00.000Z',
+    };
+    mocks.listAgentSessions.mockResolvedValue([sessionData]);
+    mocks.listAgentSessionsLive.mockResolvedValue([sessionData]);
 
     renderWorkspace('/workspaces/ws-123?view=conversation&sessionId=sess-1');
 
@@ -635,7 +636,11 @@ describe('Workspace page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Claude Code' }));
 
     await waitFor(() => {
-      expect(mocks.createAgentSession).toHaveBeenCalledWith('ws-123', { label: 'Claude Code 1' });
+      expect(mocks.createAgentSession).toHaveBeenCalledWith('ws-123', {
+        label: 'Claude Code 1',
+        agentType: 'claude-code',
+        worktreePath: undefined,
+      });
     });
   });
 
@@ -681,7 +686,11 @@ describe('Workspace page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Codex' }));
 
     await waitFor(() => {
-      expect(mocks.createAgentSession).toHaveBeenCalledWith('ws-123', { label: 'Codex 1' });
+      expect(mocks.createAgentSession).toHaveBeenCalledWith('ws-123', {
+        label: 'Codex 1',
+        agentType: 'openai-codex',
+        worktreePath: undefined,
+      });
     });
   });
 

@@ -3,6 +3,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { List, Settings, LayoutGrid } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
 import { VoiceButton } from '@simple-agent-manager/acp-client';
+import type { AgentInfo } from '@simple-agent-manager/shared';
 import { ProjectMessageView } from '../components/chat/ProjectMessageView';
 import { useIsMobile } from '../hooks/useIsMobile';
 import type { TaskStatus, TaskExecutionStep } from '@simple-agent-manager/shared';
@@ -12,6 +13,7 @@ import {
   TASK_EXECUTION_STEPS,
 } from '@simple-agent-manager/shared';
 import {
+  listAgents,
   listChatSessions,
   listCredentials,
   submitTask,
@@ -106,6 +108,10 @@ export function ProjectChat() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Agent type selection
+  const [configuredAgents, setConfiguredAgents] = useState<AgentInfo[]>([]);
+  const [selectedAgentType, setSelectedAgentType] = useState<string | null>(null);
+
   // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
   const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -130,6 +136,23 @@ export function ProjectChat() {
       .then((creds) => setHasCloudCredentials(creds.some((c) => c.provider === 'hetzner')))
       .catch(() => setHasCloudCredentials(false));
   }, []);
+
+  // Load configured agents
+  useEffect(() => {
+    let cancelled = false;
+    void listAgents()
+      .then((data) => {
+        if (cancelled) return;
+        const acpAgents = (data.agents || []).filter((a) => a.configured && a.supportsAcp);
+        setConfiguredAgents(acpAgents);
+        // Default to first agent if none selected
+        if (!selectedAgentType && acpAgents.length > 0) {
+          setSelectedAgentType(acpAgents[0]!.id);
+        }
+      })
+      .catch(() => { /* best-effort */ });
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadSessions = useCallback(async () => {
     try {
@@ -257,7 +280,10 @@ export function ProjectChat() {
     setSubmitError(null);
     setSubmitting(true);
     try {
-      const result = await submitTask(projectId, { message: trimmed });
+      const result = await submitTask(projectId, {
+        message: trimmed,
+        ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
+      });
       setMessage('');
       setProvisioning({
         taskId: result.taskId,
@@ -435,6 +461,9 @@ export function ProjectChat() {
               error={submitError}
               placeholder="Describe what you want the agent to do..."
               transcribeApiUrl={transcribeApiUrl}
+              agents={configuredAgents}
+              selectedAgentType={selectedAgentType}
+              onAgentTypeChange={setSelectedAgentType}
             />
           </div>
         ) : (
@@ -677,6 +706,9 @@ function ChatInput({
   error,
   placeholder,
   transcribeApiUrl,
+  agents,
+  selectedAgentType,
+  onAgentTypeChange,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -685,6 +717,9 @@ function ChatInput({
   error: string | null;
   placeholder: string;
   transcribeApiUrl: string;
+  agents: AgentInfo[];
+  selectedAgentType: string | null;
+  onAgentTypeChange: (agentType: string) => void;
 }) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -706,6 +741,24 @@ function ChatInput({
       {error && (
         <div className="p-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">
           {error}
+        </div>
+      )}
+      {agents.length > 1 && (
+        <div className="flex items-center gap-2 mb-2">
+          <label htmlFor="agent-type-select" className="text-xs text-fg-muted whitespace-nowrap">Agent:</label>
+          <select
+            id="agent-type-select"
+            value={selectedAgentType ?? ''}
+            onChange={(e) => onAgentTypeChange(e.target.value)}
+            disabled={submitting}
+            className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs outline-none cursor-pointer"
+          >
+            {agents.map((agent) => (
+              <option key={agent.id} value={agent.id}>
+                {agent.name}
+              </option>
+            ))}
+          </select>
         </div>
       )}
       <div className="flex gap-2 items-end">

@@ -115,11 +115,11 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
 
       {(!hasAnyCredential || showForm) && (
         <form onSubmit={handleSave} className="flex flex-col gap-3">
-          {supportsOAuth && agent.id === 'claude-code' && (
+          {supportsOAuth && (
             <div className="flex gap-2 mb-2">
               <button
                 type="button"
-                onClick={() => setCredentialKind('api-key')}
+                onClick={() => { setCredentialKind('api-key'); setCredential(''); }}
                 className={`py-2 px-3 border border-border-default rounded-sm text-sm cursor-pointer ${
                   credentialKind === 'api-key'
                     ? 'bg-accent text-white'
@@ -130,30 +130,45 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
               </button>
               <button
                 type="button"
-                onClick={() => setCredentialKind('oauth-token')}
+                onClick={() => { setCredentialKind('oauth-token'); setCredential(''); }}
                 className={`py-2 px-3 border border-border-default rounded-sm text-sm cursor-pointer ${
                   credentialKind === 'oauth-token'
                     ? 'bg-accent text-white'
                     : 'bg-transparent text-fg-primary'
                 }`}
               >
-                OAuth Token (Pro/Max)
+                {agent.id === 'openai-codex' ? 'ChatGPT Subscription' : 'OAuth Token (Pro/Max)'}
               </button>
             </div>
           )}
 
           <div>
-            <Input
-              type="password"
-              value={credential}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCredential(e.target.value)}
-              placeholder={
-                credentialKind === 'oauth-token'
-                  ? 'Paste your OAuth token from "claude setup-token"'
-                  : `Enter your ${agent.name} API key`
-              }
-              required
-            />
+            {credentialKind === 'oauth-token' && agent.id === 'openai-codex' ? (
+              <textarea
+                value={credential}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCredential(e.target.value)}
+                placeholder='Paste the full contents of ~/.codex/auth.json'
+                required
+                rows={6}
+                spellCheck={false}
+                autoCorrect="off"
+                autoCapitalize="off"
+                autoComplete="off"
+                className="w-full px-3 py-2 bg-transparent border border-border-default rounded-sm text-sm text-fg-primary font-mono resize-y focus:outline-none focus:border-accent"
+              />
+            ) : (
+              <Input
+                type="password"
+                value={credential}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCredential(e.target.value)}
+                placeholder={
+                  credentialKind === 'oauth-token'
+                    ? 'Paste your OAuth token from "claude setup-token"'
+                    : `Enter your ${agent.name} API key`
+                }
+                required
+              />
+            )}
             <p className="mt-1 text-xs text-fg-muted">
               {credentialKind === 'oauth-token' && agentDef?.oauthSupport ? (
                 <>
