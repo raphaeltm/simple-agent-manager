@@ -248,6 +248,63 @@ Security measures for auth.json injection (see `gateway.go:writeAuthFileToContai
 3. Content streamed via stdin to `docker exec` — avoids exposing secrets in process args or `/proc/<pid>/environ`
 4. `NO_BROWSER=1` set by `session_host.go:startAgent()` to prevent codex-acp from attempting browser-based login
 
+## Agent Credential Sync-Back (Token Refresh)
+
+Some agent credential types use **rotating refresh tokens** — the token changes during agent sessions. OpenAI OAuth is the primary example: `codex-acp` refreshes the access token using the refresh token, and OpenAI invalidates the old refresh token immediately (single-use rotation). If the refreshed token is not synced back, the stored credential becomes stale and causes `invalid_grant` errors on the next session.
+
+### How Sync-Back Works
+
+After an agent session ends (`SessionHost.Stop()` or `SessionHost.Suspend()` in `session_host.go`), the VM agent reads the credential file from the container and sends any changes back to the control plane API:
+
+```mermaid
+sequenceDiagram
+    participant SH as SessionHost
+    participant Docker as Container
+    participant API as Control Plane API
+    participant DB as D1 Database
+
+    SH->>SH: Stop agent process
+    SH->>Docker: Read auth file (docker exec cat)
+    Docker-->>SH: Current auth.json content
+    SH->>API: POST /workspaces/:id/agent-credential-sync
+    API->>DB: Decrypt stored credential
+    API->>API: Compare with incoming credential
+    alt Credential changed
+        API->>DB: Re-encrypt with fresh IV, update record
+        API-->>SH: { updated: true }
+    else Credential unchanged
+        API-->>SH: { updated: false }
+    end
+```
+
+### Sync-Back Guard Conditions
+
+Sync-back only runs when ALL conditions are met (see `session_host.go:syncCredentialOnStop()`):
+1. **Injection mode is `auth-file`** — env var credentials are not modified by agents at runtime
+2. **`CredentialSyncer` is configured** — the server must provide a syncer implementation
+3. **Container is still accessible** — the container must exist to read the file
+4. **Auth file is non-empty** — empty files are skipped
+
+### API Endpoint
+
+`POST /api/workspaces/:id/agent-credential-sync` (callback JWT auth, not user auth):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agentType` | string | Agent type (e.g., `openai-codex`) |
+| `credentialKind` | string | Credential kind (e.g., `oauth-token`) |
+| `credential` | string | Full credential content (e.g., auth.json JSON) |
+
+The endpoint decrypts the stored credential, compares it with the incoming value, and only re-encrypts and updates the DB record if the credential has changed. This avoids unnecessary writes and IV rotation.
+
+### Security Considerations
+
+- Uses **workspace callback JWT** authentication (same as other VM agent → API callbacks)
+- Credential comparison done server-side after decryption — the VM agent cannot read the stored credential
+- Fresh **AES-GCM IV** generated on every update (never reuses IVs)
+- Sync errors are logged but do not fail the session teardown (best-effort)
+- Uses `callbackretry` exponential backoff for transient HTTP failures
+
 ## Related Documentation
 
 - [Secrets Taxonomy](./secrets-taxonomy.md) - Full breakdown of all secrets
