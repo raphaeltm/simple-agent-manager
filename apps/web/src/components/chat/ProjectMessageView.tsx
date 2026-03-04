@@ -109,7 +109,7 @@ function AcpConversationItemView({ item }: { item: ConversationItem }) {
 }
 
 /** Converts DO-persisted ChatMessageResponse[] into ConversationItem[] for unified rendering. */
-function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): ConversationItem[] {
+export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): ConversationItem[] {
   return msgs.reduce<ConversationItem[]>((acc, msg) => {
     if (msg.role === 'user') {
       acc.push({ kind: 'user_message', id: msg.id, text: msg.content, timestamp: msg.createdAt });
