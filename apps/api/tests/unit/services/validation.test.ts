@@ -73,7 +73,20 @@ describe('CredentialValidator', () => {
     const validAccessToken = makeJwt({ sub: 'test', exp: Math.floor(Date.now() / 1000) + 3600 });
     const validIdToken = makeJwt({ sub: 'test', email: 'test@example.com' });
 
-    const validAuthJson = JSON.stringify({
+    // Current format (from `codex login`)
+    const validAuthJsonCurrent = JSON.stringify({
+      OPENAI_API_KEY: null,
+      tokens: {
+        access_token: validAccessToken,
+        refresh_token: 'some_refresh_token',
+        id_token: validIdToken,
+        account_id: 'acct-test',
+      },
+      last_refresh: '2026-01-15T10:30:00Z',
+    });
+
+    // Legacy format
+    const validAuthJsonLegacy = JSON.stringify({
       auth_mode: 'Chatgpt',
       tokens: {
         access_token: validAccessToken,
@@ -83,9 +96,18 @@ describe('CredentialValidator', () => {
       last_refresh: '2026-01-15T10:30:00Z',
     });
 
-    it('accepts valid auth.json for openai-codex oauth-token', () => {
+    it('accepts current-format auth.json (OPENAI_API_KEY: null)', () => {
       const validation = CredentialValidator.validateCredential(
-        validAuthJson,
+        validAuthJsonCurrent,
+        'oauth-token',
+        'openai-codex'
+      );
+      expect(validation.valid).toBe(true);
+    });
+
+    it('accepts legacy-format auth.json (auth_mode: Chatgpt)', () => {
+      const validation = CredentialValidator.validateCredential(
+        validAuthJsonLegacy,
         'oauth-token',
         'openai-codex'
       );
@@ -102,27 +124,9 @@ describe('CredentialValidator', () => {
       expect(validation.error).toContain('Invalid JSON');
     });
 
-    it('rejects auth.json with wrong auth_mode', () => {
+    it('rejects auth.json with missing tokens object', () => {
       const invalid = JSON.stringify({
-        auth_mode: 'ApiKey',
-        tokens: {
-          access_token: 'eyJtest',
-          refresh_token: 'rt_test',
-          id_token: 'eyJtest',
-        },
-      });
-      const validation = CredentialValidator.validateCredential(
-        invalid,
-        'oauth-token',
-        'openai-codex'
-      );
-      expect(validation.valid).toBe(false);
-      expect(validation.error).toContain('auth_mode');
-    });
-
-    it('rejects auth.json with missing tokens', () => {
-      const invalid = JSON.stringify({
-        auth_mode: 'Chatgpt',
+        OPENAI_API_KEY: null,
       });
       const validation = CredentialValidator.validateCredential(
         invalid,
@@ -133,48 +137,10 @@ describe('CredentialValidator', () => {
       expect(validation.error).toContain('tokens');
     });
 
-    it('rejects auth.json with invalid access_token', () => {
+    it('rejects auth.json with missing access_token', () => {
       const invalid = JSON.stringify({
-        auth_mode: 'Chatgpt',
+        OPENAI_API_KEY: null,
         tokens: {
-          access_token: 'not-a-jwt',
-          refresh_token: 'rt_test',
-          id_token: 'eyJtest',
-        },
-      });
-      const validation = CredentialValidator.validateCredential(
-        invalid,
-        'oauth-token',
-        'openai-codex'
-      );
-      expect(validation.valid).toBe(false);
-      expect(validation.error).toContain('access_token');
-    });
-
-    it('rejects auth.json with invalid refresh_token prefix', () => {
-      const invalid = JSON.stringify({
-        auth_mode: 'Chatgpt',
-        tokens: {
-          access_token: validAccessToken,
-          refresh_token: 'invalid_prefix_token',
-          id_token: validIdToken,
-        },
-      });
-      const validation = CredentialValidator.validateCredential(
-        invalid,
-        'oauth-token',
-        'openai-codex'
-      );
-      expect(validation.valid).toBe(false);
-      expect(validation.error).toContain('refresh_token');
-    });
-
-    it('rejects access_token that cannot be decoded as JWT', () => {
-      // Starts with eyJ but has invalid base64 payload
-      const invalid = JSON.stringify({
-        auth_mode: 'Chatgpt',
-        tokens: {
-          access_token: 'eyJ!!!.invalid-base64.sig',
           refresh_token: 'rt_test',
           id_token: validIdToken,
         },
@@ -186,45 +152,23 @@ describe('CredentialValidator', () => {
       );
       expect(validation.valid).toBe(false);
       expect(validation.error).toContain('access_token');
-      expect(validation.error).toContain('not a valid JWT');
     });
 
-    it('rejects access_token without exp claim', () => {
-      const noExpToken = makeJwt({ sub: 'test' }); // no exp
-      const invalid = JSON.stringify({
-        auth_mode: 'Chatgpt',
-        tokens: {
-          access_token: noExpToken,
-          refresh_token: 'rt_test',
-          id_token: validIdToken,
-        },
-      });
-      const validation = CredentialValidator.validateCredential(
-        invalid,
-        'oauth-token',
-        'openai-codex'
-      );
-      expect(validation.valid).toBe(false);
-      expect(validation.error).toContain('exp');
-    });
-
-    it('rejects id_token that cannot be decoded as JWT', () => {
-      const invalid = JSON.stringify({
-        auth_mode: 'Chatgpt',
+    it('accepts auth.json with unexpected token formats (warns but does not reject)', () => {
+      // Missing id_token, non-standard refresh_token — should still pass
+      const loose = JSON.stringify({
+        OPENAI_API_KEY: null,
         tokens: {
           access_token: validAccessToken,
-          refresh_token: 'rt_test',
-          id_token: 'eyJ!!!.invalid-base64.sig',
+          refresh_token: 'some-opaque-token',
         },
       });
       const validation = CredentialValidator.validateCredential(
-        invalid,
+        loose,
         'oauth-token',
         'openai-codex'
       );
-      expect(validation.valid).toBe(false);
-      expect(validation.error).toContain('id_token');
-      expect(validation.error).toContain('not a valid JWT');
+      expect(validation.valid).toBe(true);
     });
   });
 
@@ -248,28 +192,26 @@ describe('CredentialValidator', () => {
 });
 
 describe('validateOpenAICodexAuthJson', () => {
-  it('accepts valid auth.json and extracts metadata', () => {
-    // Build a minimal valid JWT with plan_type in the namespace claim
+  function makeJwt(payload: Record<string, unknown>): string {
     const header = btoa(JSON.stringify({ alg: 'RS256' })).replace(/=/g, '');
-    const idPayload = btoa(JSON.stringify({
-      sub: 'test-user',
-      'https://api.openai.com/auth': {
-        chatgpt_plan_type: 'plus',
-        chatgpt_account_id: 'acct-123',
-      },
-    })).replace(/=/g, '');
-    const accessPayload = btoa(JSON.stringify({
-      sub: 'test-user',
-      exp: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
-    })).replace(/=/g, '');
-    const sig = 'signature';
+    const body = btoa(JSON.stringify(payload)).replace(/=/g, '');
+    return `${header}.${body}.test-signature`;
+  }
 
+  it('accepts current-format auth.json and extracts metadata', () => {
     const validJson = JSON.stringify({
-      auth_mode: 'Chatgpt',
+      OPENAI_API_KEY: null,
       tokens: {
-        access_token: `${header}.${accessPayload}.${sig}`,
-        refresh_token: 'rt_test_refresh_token',
-        id_token: `${header}.${idPayload}.${sig}`,
+        access_token: makeJwt({ sub: 'test-user', exp: Math.floor(Date.now() / 1000) + 3600 }),
+        refresh_token: 'some_refresh',
+        id_token: makeJwt({
+          sub: 'test-user',
+          'https://api.openai.com/auth': {
+            chatgpt_plan_type: 'plus',
+            chatgpt_account_id: 'acct-123',
+          },
+        }),
+        account_id: 'acct-123',
       },
     });
 
@@ -279,27 +221,36 @@ describe('validateOpenAICodexAuthJson', () => {
     expect(result.metadata?.isExpired).toBe(false);
   });
 
-  it('detects expired access token', () => {
-    const header = btoa(JSON.stringify({ alg: 'RS256' })).replace(/=/g, '');
-    const accessPayload = btoa(JSON.stringify({
-      sub: 'test-user',
-      exp: Math.floor(Date.now() / 1000) - 3600, // 1 hour ago (expired)
-    })).replace(/=/g, '');
-    const idPayload = btoa(JSON.stringify({ sub: 'test' })).replace(/=/g, '');
-    const sig = 'signature';
-
+  it('detects expired access token as warning, still valid', () => {
     const json = JSON.stringify({
-      auth_mode: 'Chatgpt',
+      OPENAI_API_KEY: null,
       tokens: {
-        access_token: `${header}.${accessPayload}.${sig}`,
-        refresh_token: 'rt_test_refresh',
-        id_token: `${header}.${idPayload}.${sig}`,
+        access_token: makeJwt({ sub: 'test', exp: Math.floor(Date.now() / 1000) - 3600 }),
+        refresh_token: 'some_refresh',
+        id_token: makeJwt({ sub: 'test' }),
       },
     });
 
     const result = validateOpenAICodexAuthJson(json);
     expect(result.valid).toBe(true);
     expect(result.metadata?.isExpired).toBe(true);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings!.some(w => w.includes('expired'))).toBe(true);
+  });
+
+  it('accepts auth.json with missing id_token (warns)', () => {
+    const json = JSON.stringify({
+      OPENAI_API_KEY: null,
+      tokens: {
+        access_token: makeJwt({ sub: 'test', exp: Math.floor(Date.now() / 1000) + 3600 }),
+        refresh_token: 'some_refresh',
+      },
+    });
+
+    const result = validateOpenAICodexAuthJson(json);
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings!.some(w => w.includes('id_token'))).toBe(true);
   });
 
   it('rejects non-JSON input', () => {
@@ -308,20 +259,19 @@ describe('validateOpenAICodexAuthJson', () => {
     expect(result.error).toContain('Invalid JSON');
   });
 
-  it('accepts lowercase chatgpt auth_mode', () => {
-    const header = btoa(JSON.stringify({ alg: 'RS256' })).replace(/=/g, '');
-    const accessPayload = btoa(JSON.stringify({ sub: 'test', exp: Math.floor(Date.now() / 1000) + 3600 })).replace(/=/g, '');
-    const idPayload = btoa(JSON.stringify({ sub: 'test' })).replace(/=/g, '');
-    const sig = 'sig';
+  it('rejects when tokens object is missing', () => {
+    const result = validateOpenAICodexAuthJson(JSON.stringify({ OPENAI_API_KEY: null }));
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('tokens');
+  });
+
+  it('rejects when access_token is missing', () => {
     const json = JSON.stringify({
-      auth_mode: 'chatgpt',
-      tokens: {
-        access_token: `${header}.${accessPayload}.${sig}`,
-        refresh_token: 'rt_test',
-        id_token: `${header}.${idPayload}.${sig}`,
-      },
+      OPENAI_API_KEY: null,
+      tokens: { refresh_token: 'rt_test' },
     });
     const result = validateOpenAICodexAuthJson(json);
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('access_token');
   });
 });

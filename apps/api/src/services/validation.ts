@@ -10,6 +10,7 @@ const CLAUDE_OAUTH_TOKEN_PREFIX = 'sk-ant-oat';
 export interface OpenAIAuthJsonValidation {
   valid: boolean;
   error?: string;
+  warnings?: string[];
   metadata?: {
     planType?: string;
     isExpired?: boolean;
@@ -37,6 +38,21 @@ function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
 /**
  * Validate OpenAI Codex auth.json structure.
  * The credential must be a JSON blob with the structure written by `codex login`.
+ *
+ * Real auth.json format (from `codex login`):
+ * {
+ *   "OPENAI_API_KEY": null,        // null when using OAuth (subscription auth)
+ *   "tokens": {
+ *     "id_token": "eyJ...",         // OIDC JWT
+ *     "access_token": "eyJ...",     // JWT with exp claim
+ *     "refresh_token": "...",       // opaque refresh token
+ *     "account_id": "acct-..."     // ChatGPT account ID
+ *   },
+ *   "last_refresh": "2026-..."
+ * }
+ *
+ * Legacy format (older Codex versions) may include:
+ *   "auth_mode": "Chatgpt" instead of "OPENAI_API_KEY": null
  */
 export function validateOpenAICodexAuthJson(credential: string): OpenAIAuthJsonValidation {
   let parsed: Record<string, unknown>;
@@ -46,56 +62,51 @@ export function validateOpenAICodexAuthJson(credential: string): OpenAIAuthJsonV
     return { valid: false, error: 'Invalid JSON. Paste the full contents of ~/.codex/auth.json' };
   }
 
-  // Verify auth_mode
-  const authMode = parsed.auth_mode;
-  if (typeof authMode !== 'string' || (authMode !== 'Chatgpt' && authMode !== 'chatgpt')) {
-    return { valid: false, error: 'Invalid auth_mode. Expected "Chatgpt". This may not be a valid auth.json file.' };
-  }
-
-  // Verify tokens object
+  // Hard requirement: must have a tokens object with at least access_token
   const tokens = parsed.tokens as Record<string, unknown> | undefined;
   if (!tokens || typeof tokens !== 'object') {
     return { valid: false, error: 'Missing "tokens" object. Paste the full contents of ~/.codex/auth.json' };
   }
 
-  const accessToken = tokens.access_token;
-  if (typeof accessToken !== 'string' || !accessToken.startsWith('eyJ')) {
-    return { valid: false, error: 'Missing or invalid access_token. Must be a JWT (starts with eyJ).' };
+  if (typeof tokens.access_token !== 'string' || tokens.access_token.length === 0) {
+    return { valid: false, error: 'Missing access_token in tokens. This does not look like a valid auth.json.' };
   }
 
-  const refreshToken = tokens.refresh_token;
-  if (typeof refreshToken !== 'string' || !refreshToken.startsWith('rt_')) {
-    return { valid: false, error: 'Missing or invalid refresh_token. Must start with "rt_".' };
+  // Everything else is best-effort: warn but don't reject.
+  // The file came from `codex login` — trust it and inject as-is.
+  const warnings: string[] = [];
+
+  if (typeof tokens.refresh_token !== 'string' || tokens.refresh_token.length === 0) {
+    warnings.push('No refresh_token found. Token refresh may not work.');
   }
 
-  const idToken = tokens.id_token;
-  if (typeof idToken !== 'string' || !idToken.startsWith('eyJ')) {
-    return { valid: false, error: 'Missing or invalid id_token. Must be a JWT (starts with eyJ).' };
+  if (typeof tokens.id_token !== 'string' || tokens.id_token.length === 0) {
+    warnings.push('No id_token found. Plan type detection unavailable.');
   }
 
-  // Decode JWTs to verify they are structurally valid (not just prefix checks)
-  const accessClaims = decodeJwtPayload(accessToken);
-  if (!accessClaims) {
-    return { valid: false, error: 'access_token is not a valid JWT. Could not decode payload.' };
-  }
-  if (typeof accessClaims.exp !== 'number') {
-    return { valid: false, error: 'access_token JWT is missing a numeric "exp" claim.' };
-  }
+  // Try to extract metadata from JWTs for display (best-effort)
+  let planType: string | undefined;
+  let isExpired: boolean | undefined;
 
-  const idClaims = decodeJwtPayload(idToken);
-  if (!idClaims) {
-    return { valid: false, error: 'id_token is not a valid JWT. Could not decode payload.' };
+  const accessClaims = decodeJwtPayload(tokens.access_token as string);
+  if (accessClaims && typeof accessClaims.exp === 'number') {
+    isExpired = (accessClaims.exp * 1000) < Date.now();
+    if (isExpired) {
+      warnings.push('Access token appears expired. codex-acp will attempt to refresh it automatically.');
+    }
   }
 
-  // Extract metadata from id_token for display
-  const authNamespace = idClaims?.['https://api.openai.com/auth'] as Record<string, unknown> | undefined;
-  const planType = authNamespace?.chatgpt_plan_type as string | undefined;
-
-  // Check access_token expiry
-  const isExpired = (accessClaims.exp * 1000) < Date.now();
+  if (typeof tokens.id_token === 'string') {
+    const idClaims = decodeJwtPayload(tokens.id_token);
+    if (idClaims) {
+      const authNamespace = idClaims['https://api.openai.com/auth'] as Record<string, unknown> | undefined;
+      planType = authNamespace?.chatgpt_plan_type as string | undefined;
+    }
+  }
 
   return {
     valid: true,
+    warnings: warnings.length > 0 ? warnings : undefined,
     metadata: { planType, isExpired },
   };
 }

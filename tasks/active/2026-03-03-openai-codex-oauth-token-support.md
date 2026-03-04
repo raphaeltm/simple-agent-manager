@@ -37,20 +37,20 @@ OpenAI uses a standard **OAuth 2.0 Authorization Code flow with PKCE (S256)** fo
 **Token lifecycle:**
 - Access tokens refresh automatically (every ~8 days via `https://auth.openai.com/oauth/token`)
 - Refresh tokens provide long-lived sessions
-- Token storage: `~/.codex/auth.json` with format:
+- Token storage: `~/.codex/auth.json` with format (verified against real file 2026-03-04):
   ```json
   {
-    "auth_mode": "Chatgpt",
-    "openai_api_key": null,
+    "OPENAI_API_KEY": null,
     "tokens": {
+      "id_token": "eyJ...<OIDC JWT>",
       "access_token": "eyJ...<RS256 JWT, ~1hr expiry>",
-      "refresh_token": "rt_...<opaque, long-lived>",
-      "id_token": "eyJ...<OIDC JWT with plan_type claim>",
-      "account_id": "313b2c23-..."
+      "refresh_token": "<opaque, long-lived>",
+      "account_id": "acct-..."
     },
-    "last_refresh": "2026-01-15T10:30:00Z"
+    "last_refresh": "2026-03-03T15:32:25.189497Z"
   }
   ```
+  Note: Initial research indicated an `auth_mode: "Chatgpt"` field with `rt_` prefix on refresh tokens. Real files use `OPENAI_API_KEY: null` and opaque refresh tokens without a fixed prefix. Validation accepts both formats.
 
 ### Authentication Methods Available
 

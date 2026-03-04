@@ -234,10 +234,11 @@ Env var injection is performed at `session_host.go:startAgent()` line `envVars =
 Unlike Claude Code which accepts OAuth tokens via environment variable, `codex-acp` reads OAuth credentials from `~/.codex/auth.json`. There is no `CODEX_OAUTH_TOKEN` env var. The VM agent writes the auth.json file into the container before starting the agent process (see `session_host.go:startAgent()` — branches on `info.injectionMode == "auth-file"`).
 
 The auth.json file contains:
-- `auth_mode`: `"Chatgpt"` — identifies subscription-based auth
+- `OPENAI_API_KEY`: `null` — indicates OAuth mode (not API key)
 - `tokens.access_token`: JWT (RS256, ~1hr expiry, auto-refreshed by codex-acp)
-- `tokens.refresh_token`: Opaque (`rt_` prefix, long-lived)
-- `tokens.id_token`: OIDC JWT with `chatgpt_plan_type` claim
+- `tokens.refresh_token`: Opaque refresh token (long-lived)
+- `tokens.id_token`: OIDC JWT with optional `chatgpt_plan_type` claim
+- `tokens.account_id`: ChatGPT account identifier
 
 Users obtain this file by running `codex login` on their local machine and copying `~/.codex/auth.json`. The full JSON blob is stored as a single encrypted credential in D1 (validated by `validation.ts:validateOpenAICodexAuthJson()`).
 
