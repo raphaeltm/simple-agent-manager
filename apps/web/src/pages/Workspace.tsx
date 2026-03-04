@@ -913,6 +913,7 @@ export function Workspace() {
 
       const created = await createAgentSession(id, {
         label,
+        agentType: preferredAgentId,
         worktreePath: activeWorktree ?? undefined,
       });
 
@@ -1972,6 +1973,7 @@ export function Workspace() {
                       sessionId={session.id}
                       worktreePath={session.worktreePath}
                       preferredAgentId={
+                        session.agentType ||
                         preferredAgentsBySession[session.id] ||
                         (configuredAgents.length > 0 ? configuredAgents[0]!.id : undefined)
                       }

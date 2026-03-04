@@ -468,6 +468,7 @@ export const agentSessions = sqliteTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     status: text('status').notNull().default('running'),
     label: text('label'),
+    agentType: text('agent_type'),
     worktreePath: text('worktree_path'),
     stoppedAt: text('stopped_at'),
     suspendedAt: text('suspended_at'),
