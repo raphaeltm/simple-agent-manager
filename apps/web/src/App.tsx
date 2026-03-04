@@ -13,6 +13,7 @@ import { SettingsAgentKeys } from './pages/SettingsAgentKeys';
 import { SettingsAgentConfig } from './pages/SettingsAgentConfig';
 import { CreateWorkspace } from './pages/CreateWorkspace';
 import { Workspace } from './pages/Workspace';
+import { Workspaces } from './pages/Workspaces';
 import { Nodes } from './pages/Nodes';
 import { Node } from './pages/Node';
 import { UiStandards } from './pages/UiStandards';
@@ -78,6 +79,7 @@ export default function App() {
 
             <Route path="/nodes" element={<Nodes />} />
             <Route path="/nodes/:id" element={<Node />} />
+            <Route path="/workspaces" element={<Workspaces />} />
             <Route path="/workspaces/new" element={<CreateWorkspace />} />
             <Route path="/settings" element={<Settings />}>
               <Route index element={<Navigate to="cloud-provider" replace />} />
