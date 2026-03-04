@@ -279,11 +279,13 @@ sequenceDiagram
 
 ### Sync-Back Guard Conditions
 
-Sync-back only runs when ALL conditions are met (see `session_host.go:syncCredentialOnStop()`):
+Preconditions checked upfront (see `session_host.go:syncCredentialOnStop()`):
 1. **Injection mode is `auth-file`** — env var credentials are not modified by agents at runtime
 2. **`CredentialSyncer` is configured** — the server must provide a syncer implementation
-3. **Container is still accessible** — the container must exist to read the file
-4. **Auth file is non-empty** — empty files are skipped
+
+Runtime early-exit paths (logged as warnings, not returned as errors):
+3. **`ContainerResolver` is nil or fails** — container no longer accessible (e.g., forcibly removed)
+4. **Auth file is empty** — nothing to sync
 
 ### API Endpoint
 
@@ -295,7 +297,15 @@ Sync-back only runs when ALL conditions are met (see `session_host.go:syncCreden
 | `credentialKind` | string | Credential kind (e.g., `oauth-token`) |
 | `credential` | string | Full credential content (e.g., auth.json JSON) |
 
-The endpoint decrypts the stored credential, compares it with the incoming value, and only re-encrypts and updates the DB record if the credential has changed. This avoids unnecessary writes and IV rotation.
+Responses:
+
+| Response | Meaning |
+|----------|---------|
+| `{ success: false, reason: 'credential_not_found' }` | Credential was deleted while session was active |
+| `{ success: true, updated: false }` | Credential unchanged, no write performed |
+| `{ success: true, updated: true }` | Credential refreshed and re-encrypted in DB |
+
+Input validation: `agentType` must be one of `claude-code`, `openai-codex`, `google-gemini`. `credentialKind` must be `api-key` or `oauth-token`. Payload capped at 64 KB.
 
 ### Security Considerations
 
