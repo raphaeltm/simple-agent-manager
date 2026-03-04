@@ -207,8 +207,9 @@ export const DEFAULT_TASK_TITLE_MAX_LENGTH = 100;
 /** Default timeout (ms) for AI title generation. Override via TASK_TITLE_TIMEOUT_MS env var. */
 export const DEFAULT_TASK_TITLE_TIMEOUT_MS = 5000;
 
-/** Messages at or below this length are used as-is without LLM generation. */
-export const TASK_TITLE_SHORT_MESSAGE_THRESHOLD = 100;
+/** Default short-message threshold for AI title generation (messages at or below this length are used as-is).
+ * Override via TASK_TITLE_SHORT_MESSAGE_THRESHOLD env var. */
+export const DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD = 100;
 
 // =============================================================================
 // Agent Settings

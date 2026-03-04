@@ -18,7 +18,7 @@ import type {
   VMSize,
   VMLocation,
 } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import * as schema from '../db/schema';
 import { ulid } from '../lib/ulid';
@@ -127,11 +127,11 @@ taskSubmitRoutes.post('/submit', async (c) => {
   const vmSize: VMSize = body.vmSize
     ?? (project.defaultVmSize as VMSize | null)
     ?? DEFAULT_VM_SIZE;
-  const vmLocation: VMLocation = (body.vmLocation as VMLocation) ?? 'nbg1';
+  const vmLocation: VMLocation = (body.vmLocation as VMLocation) ?? DEFAULT_VM_LOCATION;
   const branch = project.defaultBranch;
 
   // Generate concise task title via AI (falls back to truncation on failure)
-  const titleConfig = getTaskTitleConfig(c.env as unknown as Record<string, string | undefined>);
+  const titleConfig = getTaskTitleConfig(c.env);
   const taskTitle = await generateTaskTitle(c.env.AI, message, titleConfig);
 
   await db.insert(schema.tasks).values({

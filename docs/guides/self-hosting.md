@@ -61,6 +61,16 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | `MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES` | Max bytes per runtime file content | `131072` |
 | `MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH` | Max runtime file path length (chars) | `256` |
 
+**Optional AI task title generation variables** (GitHub Environment variables):
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `TASK_TITLE_MODEL` | Workers AI model for task title generation | `@cf/meta/llama-3.1-8b-instruct` |
+| `TASK_TITLE_MAX_LENGTH` | Max characters in a generated title | `100` |
+| `TASK_TITLE_TIMEOUT_MS` | Timeout (ms) for AI title generation before falling back to truncation | `5000` |
+| `TASK_TITLE_GENERATION_ENABLED` | Set to `false` to disable AI generation entirely | `true` |
+| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | Messages at or below this length bypass AI | `100` |
+
 **Add environment secrets** (hidden):
 
 | Secret | Description |

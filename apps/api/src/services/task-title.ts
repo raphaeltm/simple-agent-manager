@@ -9,6 +9,11 @@
  *     → workers-ai-provider (Vercel AI SDK bridge)
  *       → Mastra Agent (structured AI interaction)
  *         → concise task title
+ *
+ * Design decision: the AI call is synchronous (awaited before DB insert)
+ * rather than async via waitUntil. This keeps the title consistent across
+ * the task record, session label, and activity event, and avoids a second
+ * DB write. The timeout (configurable, default 5s) bounds worst-case latency.
  */
 
 import { Agent } from '@mastra/core/agent';
@@ -17,19 +22,26 @@ import {
   DEFAULT_TASK_TITLE_MODEL,
   DEFAULT_TASK_TITLE_MAX_LENGTH,
   DEFAULT_TASK_TITLE_TIMEOUT_MS,
-  TASK_TITLE_SHORT_MESSAGE_THRESHOLD,
+  DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD,
 } from '@simple-agent-manager/shared';
 import { log } from '../lib/logger';
 
-const SYSTEM_INSTRUCTIONS = `You are a task title generator. Given a task description, produce a single concise title.
+/**
+ * Build the system instructions for the title generation agent.
+ * Uses a function instead of string replacement to make the maxLength
+ * dependency explicit and avoid silent no-ops if the template changes.
+ */
+function buildSystemInstructions(maxLength: number): string {
+  return `You are a task title generator. Given a task description, produce a single concise title.
 
 Rules:
 - Output ONLY the title text, nothing else
 - No quotes, no prefixes, no explanation
-- Maximum {maxLength} characters
+- Maximum ${maxLength} characters
 - Capture the core intent of the task
 - Use imperative mood (e.g., "Add dark mode toggle" not "Adding dark mode toggle")
 - Be specific — "Fix login timeout" is better than "Fix bug"`;
+}
 
 /**
  * Truncate a message to use as a task title (fallback behavior).
@@ -44,17 +56,31 @@ export interface TaskTitleConfig {
   maxLength?: number;
   timeoutMs?: number;
   enabled?: boolean;
+  shortMessageThreshold?: number;
+}
+
+/** Narrow interface for the env vars read by getTaskTitleConfig. */
+export interface TaskTitleEnvVars {
+  TASK_TITLE_MODEL?: string;
+  TASK_TITLE_MAX_LENGTH?: string;
+  TASK_TITLE_TIMEOUT_MS?: string;
+  TASK_TITLE_GENERATION_ENABLED?: string;
+  TASK_TITLE_SHORT_MESSAGE_THRESHOLD?: string;
 }
 
 /**
  * Read title generation config from environment variables.
  */
-export function getTaskTitleConfig(env: Record<string, string | undefined>): TaskTitleConfig {
+export function getTaskTitleConfig(env: TaskTitleEnvVars): TaskTitleConfig {
   return {
     model: env.TASK_TITLE_MODEL || DEFAULT_TASK_TITLE_MODEL,
     maxLength: parseInt(env.TASK_TITLE_MAX_LENGTH || String(DEFAULT_TASK_TITLE_MAX_LENGTH), 10),
     timeoutMs: parseInt(env.TASK_TITLE_TIMEOUT_MS || String(DEFAULT_TASK_TITLE_TIMEOUT_MS), 10),
     enabled: env.TASK_TITLE_GENERATION_ENABLED !== 'false',
+    shortMessageThreshold: parseInt(
+      env.TASK_TITLE_SHORT_MESSAGE_THRESHOLD || String(DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD),
+      10,
+    ),
   };
 }
 
@@ -63,7 +89,7 @@ export function getTaskTitleConfig(env: Record<string, string | undefined>): Tas
  *
  * - Short messages (≤ threshold) are returned as-is
  * - If AI generation is disabled or fails, falls back to truncation
- * - Enforces a timeout to prevent slow AI calls from blocking task submission
+ * - Uses AbortSignal.timeout for clean cancellation without timer leaks
  */
 export async function generateTaskTitle(
   ai: Ai,
@@ -74,9 +100,10 @@ export async function generateTaskTitle(
   const timeoutMs = config.timeoutMs ?? DEFAULT_TASK_TITLE_TIMEOUT_MS;
   const enabled = config.enabled ?? true;
   const modelId = config.model ?? DEFAULT_TASK_TITLE_MODEL;
+  const shortThreshold = config.shortMessageThreshold ?? DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD;
 
   // Short messages don't need AI generation
-  if (message.length <= TASK_TITLE_SHORT_MESSAGE_THRESHOLD) {
+  if (message.length <= shortThreshold) {
     return message;
   }
 
@@ -92,17 +119,15 @@ export async function generateTaskTitle(
     const agent = new Agent({
       id: 'task-title-generator',
       name: 'Task Title Generator',
-      instructions: SYSTEM_INSTRUCTIONS.replace('{maxLength}', String(maxLength)),
+      instructions: buildSystemInstructions(maxLength),
       model,
     });
 
-    // Race AI generation against timeout
-    const result = await Promise.race([
-      agent.generate(message),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Task title generation timed out')), timeoutMs)
-      ),
-    ]);
+    // Use AbortSignal.timeout for clean cancellation without timer leaks.
+    // Supported in Workers runtime since compatibility_date 2023-03-14.
+    const result = await agent.generate(message, {
+      abortSignal: AbortSignal.timeout(timeoutMs),
+    });
 
     const title = result.text?.trim();
     if (!title) {
