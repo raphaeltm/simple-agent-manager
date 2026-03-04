@@ -1543,7 +1543,8 @@ func TestSyncCredentialOnStop_SkipsEnvInjection(t *testing.T) {
 	})
 
 	// Default injection mode is "" (env), so sync should be skipped.
-	host.syncCredentialOnStop()
+	snap := credSyncSnapshot{injectionMode: ""}
+	host.syncCredentialOnStop(snap)
 
 	syncer.mu.Lock()
 	defer syncer.mu.Unlock()
@@ -1565,13 +1566,79 @@ func TestSyncCredentialOnStop_SkipsNilSyncer(t *testing.T) {
 		ViewerSendBuffer:  32,
 	})
 
-	// Set auth-file injection mode but nil syncer.
-	host.credInjectionMode = "auth-file"
-	host.credAuthFilePath = ".codex/auth.json"
-	host.credKind = "oauth-token"
+	// auth-file mode but nil syncer — should not panic.
+	snap := credSyncSnapshot{
+		injectionMode: "auth-file",
+		authFilePath:  ".codex/auth.json",
+		credKind:      "oauth-token",
+		agentType:     "openai-codex",
+	}
+	host.syncCredentialOnStop(snap)
+}
 
-	// Should not panic or error — just silently skip.
-	host.syncCredentialOnStop()
+func TestSyncCredentialOnStop_SkipsNilContainerResolver(t *testing.T) {
+	t.Parallel()
+
+	syncer := &mockCredentialSyncer{}
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:        "test-session",
+			WorkspaceID:      "test-workspace",
+			CredentialSyncer: syncer,
+			// ContainerResolver deliberately nil
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+
+	snap := credSyncSnapshot{
+		injectionMode: "auth-file",
+		authFilePath:  ".codex/auth.json",
+		credKind:      "oauth-token",
+		agentType:     "openai-codex",
+	}
+
+	// Must not panic — should skip sync when ContainerResolver is nil.
+	host.syncCredentialOnStop(snap)
+
+	syncer.mu.Lock()
+	defer syncer.mu.Unlock()
+	if syncer.called {
+		t.Fatal("syncCredentialOnStop should not call syncer when ContainerResolver is nil")
+	}
+}
+
+func TestSyncCredentialOnStop_SkipsContainerResolverError(t *testing.T) {
+	t.Parallel()
+
+	syncer := &mockCredentialSyncer{}
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:        "test-session",
+			WorkspaceID:      "test-workspace",
+			CredentialSyncer: syncer,
+			ContainerResolver: func() (string, error) {
+				return "", fmt.Errorf("container not found")
+			},
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+
+	snap := credSyncSnapshot{
+		injectionMode: "auth-file",
+		authFilePath:  ".codex/auth.json",
+		credKind:      "oauth-token",
+		agentType:     "openai-codex",
+	}
+
+	host.syncCredentialOnStop(snap)
+
+	syncer.mu.Lock()
+	defer syncer.mu.Unlock()
+	if syncer.called {
+		t.Fatal("syncCredentialOnStop should not call syncer when container resolver fails")
+	}
 }
 
 func TestCredentialMetadataTracking(t *testing.T) {

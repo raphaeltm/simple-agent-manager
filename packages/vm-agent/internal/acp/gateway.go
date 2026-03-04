@@ -480,13 +480,21 @@ func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePa
 // readAuthFileFromContainer reads credential content from a file inside a container.
 // authFilePath is relative to the user's home directory (e.g. ".codex/auth.json").
 // Returns the file content, or an error if the file cannot be read.
+// Output is capped at 1 MB to prevent memory exhaustion from unexpected content.
 func readAuthFileFromContainer(ctx context.Context, containerID, user, authFilePath string) (string, error) {
+	// Validate authFilePath to prevent shell injection. Currently always a
+	// hardcoded constant, but we defend in depth against future misuse.
+	if strings.ContainsAny(authFilePath, ";\"`'$\\") || strings.Contains(authFilePath, "..") {
+		return "", fmt.Errorf("invalid authFilePath: %q", authFilePath)
+	}
+
 	// Same home directory resolution as writeAuthFileToContainer.
 	script := fmt.Sprintf(
 		`set -e; home=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6) || home="$HOME"; cat "$home/%s"`,
 		authFilePath,
 	)
 
+	// -i not needed: no stdin, stdout captured via cmd.Output().
 	dockerArgs := []string{"exec"}
 	if user != "" {
 		dockerArgs = append(dockerArgs, "-u", user)
@@ -494,11 +502,25 @@ func readAuthFileFromContainer(ctx context.Context, containerID, user, authFileP
 	dockerArgs = append(dockerArgs, containerID, "sh", "-c", script)
 
 	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
-	output, err := cmd.Output()
+
+	// Cap output at 1 MB to guard against unexpectedly large files.
+	const maxCredentialSize = 1 << 20 // 1 MB
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		return "", fmt.Errorf("docker exec stdout pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("docker exec start failed: %w", err)
+	}
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, io.LimitReader(stdout, maxCredentialSize)); err != nil {
+		_ = cmd.Wait()
 		return "", fmt.Errorf("docker exec read failed: %w", err)
 	}
-	return string(output), nil
+	if err := cmd.Wait(); err != nil {
+		return "", fmt.Errorf("docker exec failed: %w", err)
+	}
+	return buf.String(), nil
 }
 
 // installAgentBinary checks if the agent command exists in the given container

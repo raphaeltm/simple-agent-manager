@@ -703,11 +703,18 @@ func (h *SessionHost) Stop() {
 	h.status = HostStopped
 	h.statusErr = ""
 	h.stopCurrentAgentLocked()
+	// Snapshot credential metadata while still holding the lock.
+	snap := credSyncSnapshot{
+		injectionMode: h.credInjectionMode,
+		authFilePath:  h.credAuthFilePath,
+		credKind:      h.credKind,
+		agentType:     h.agentType,
+	}
 	h.mu.Unlock()
 
 	// Sync refreshed credentials back to the control plane before cleanup.
 	// The agent process is dead but the container is still alive.
-	h.syncCredentialOnStop()
+	h.syncCredentialOnStop(snap)
 
 	// Cancel any pending auto-suspend timer.
 	h.viewerMu.Lock()
@@ -1149,6 +1156,10 @@ func (h *SessionHost) stopCurrentAgentLocked() {
 	}
 	h.acpConn = nil
 	h.sessionID = ""
+	// Clear credential metadata so stale values don't leak across agent switches.
+	h.credInjectionMode = ""
+	h.credAuthFilePath = ""
+	h.credKind = ""
 }
 
 // persistAcpSessionID saves the ACP session ID for reconnection support.
@@ -1200,12 +1211,29 @@ func (h *SessionHost) persistLastPrompt(text string) {
 	}
 }
 
+// credSyncSnapshot holds credential metadata captured under the lock for
+// safe use by syncCredentialOnStop after the lock is released.
+type credSyncSnapshot struct {
+	injectionMode string
+	authFilePath  string
+	credKind      string
+	agentType     string
+}
+
 // syncCredentialOnStop reads the auth file from the container (if the agent
 // used file-based injection) and syncs any refreshed tokens back to the
 // control plane. This must be called AFTER the agent process exits but BEFORE
 // the container is removed. Best-effort: errors are logged, not returned.
-func (h *SessionHost) syncCredentialOnStop() {
-	if h.credInjectionMode != "auth-file" || h.config.CredentialSyncer == nil {
+//
+// The snap parameter must be captured under h.mu before unlocking, to avoid
+// a data race with concurrent agent restarts.
+func (h *SessionHost) syncCredentialOnStop(snap credSyncSnapshot) {
+	if snap.injectionMode != "auth-file" || h.config.CredentialSyncer == nil {
+		return
+	}
+
+	if h.config.ContainerResolver == nil {
+		slog.Warn("syncCredentialOnStop: no ContainerResolver configured, skipping sync")
 		return
 	}
 
@@ -1216,13 +1244,14 @@ func (h *SessionHost) syncCredentialOnStop() {
 	}
 
 	// Use a short timeout — the container is about to be stopped/removed.
+	// This budget is shared between docker exec and the HTTP callback retry.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	content, err := readAuthFileFromContainer(ctx, containerID, h.config.ContainerUser, h.credAuthFilePath)
+	content, err := readAuthFileFromContainer(ctx, containerID, h.config.ContainerUser, snap.authFilePath)
 	if err != nil {
 		slog.Warn("Failed to read auth file for sync-back",
-			"path", h.credAuthFilePath,
+			"path", snap.authFilePath,
 			"error", err,
 		)
 		return
@@ -1230,27 +1259,27 @@ func (h *SessionHost) syncCredentialOnStop() {
 
 	content = strings.TrimSpace(content)
 	if content == "" {
-		slog.Debug("Auth file is empty, skipping sync-back", "path", h.credAuthFilePath)
+		slog.Debug("Auth file is empty, skipping sync-back", "path", snap.authFilePath)
 		return
 	}
 
 	if err := h.config.CredentialSyncer.SyncCredential(
 		ctx,
 		h.config.WorkspaceID,
-		h.agentType,
-		h.credKind,
+		snap.agentType,
+		snap.credKind,
 		content,
 	); err != nil {
 		slog.Warn("Failed to sync credential back to control plane",
-			"agentType", h.agentType,
+			"agentType", snap.agentType,
 			"error", err,
 		)
 		return
 	}
 
 	slog.Info("Synced refreshed credential back to control plane",
-		"agentType", h.agentType,
-		"path", h.credAuthFilePath,
+		"agentType", snap.agentType,
+		"path", snap.authFilePath,
 	)
 }
 
@@ -1278,10 +1307,17 @@ func (h *SessionHost) Suspend() (acpSessionID string, agentType string) {
 	// Mark the host as stopped so no further operations occur.
 	h.status = HostStopped
 	h.statusErr = ""
+	// Snapshot credential metadata while still holding the lock.
+	snap := credSyncSnapshot{
+		injectionMode: h.credInjectionMode,
+		authFilePath:  h.credAuthFilePath,
+		credKind:      h.credKind,
+		agentType:     h.agentType,
+	}
 	h.mu.Unlock()
 
 	// Sync refreshed credentials back to the control plane before cleanup.
-	h.syncCredentialOnStop()
+	h.syncCredentialOnStop(snap)
 
 	h.cancel()
 
