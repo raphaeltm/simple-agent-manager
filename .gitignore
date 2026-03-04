@@ -41,12 +41,12 @@ pnpm-debug.log*
 .cache/
 
 # Codex local state (CODEX_HOME defaults to ~/.codex)
+# Note: .codex/config.toml is NOT ignored — it's project-scoped config that should be tracked
 .codex/auth.json
 .codex/.credentials.json
 .codex/history.jsonl
 .codex/models_cache.json
 .codex/.personality_migration
-.codex/config.toml
 .codex/version.json
 .codex/log/
 .codex/sessions/

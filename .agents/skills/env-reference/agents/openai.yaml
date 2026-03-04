@@ -1,0 +1,4 @@
+interface:
+  display_name: "Env Reference"
+  short_description: "Full SAM environment variable reference"
+  default_prompt: "Use $env-reference to look up SAM environment variables and their configuration."

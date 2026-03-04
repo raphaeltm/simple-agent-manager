@@ -1,0 +1,4 @@
+interface:
+  display_name: "API Reference"
+  short_description: "Full SAM API endpoint reference"
+  default_prompt: "Use $api-reference to look up SAM API endpoints and their parameters."

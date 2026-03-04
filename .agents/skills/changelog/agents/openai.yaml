@@ -1,0 +1,4 @@
+interface:
+  display_name: "Changelog"
+  short_description: "Recent SAM feature changes"
+  default_prompt: "Use $changelog to review recent feature changes and implementation history."

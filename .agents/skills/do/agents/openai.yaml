@@ -1,0 +1,4 @@
+interface:
+  display_name: "Do (Task Executor)"
+  short_description: "End-to-end autonomous task execution"
+  default_prompt: "Use $do to execute a task end-to-end: research, implement, review, and merge via PR."
