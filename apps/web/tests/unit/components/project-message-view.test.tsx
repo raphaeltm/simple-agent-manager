@@ -8,7 +8,7 @@
  * Fix: Added AbortController to the polling useEffect and a session ID guard
  * that skips responses where data.session.id !== current sessionId.
  */
-import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, act, waitFor } from '@testing-library/react';
 
 // jsdom doesn't support scrollIntoView
@@ -95,9 +95,7 @@ describe('ProjectMessageView — session isolation', () => {
     ]);
 
     // First call is the initial load, subsequent calls are polls
-    let callCount = 0;
     mocks.getChatSession.mockImplementation(async (_projectId: string, sessionId: string) => {
-      callCount++;
       if (sessionId === 'session-A') return sessionAResponse;
       if (sessionId === 'session-B') return sessionBResponse;
       throw new Error(`Unexpected session: ${sessionId}`);
