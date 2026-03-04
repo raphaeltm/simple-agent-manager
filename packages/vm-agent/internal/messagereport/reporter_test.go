@@ -834,6 +834,137 @@ func TestFlush_IncludesSequenceFromOutboxID(t *testing.T) {
 	}
 }
 
+// --- Session cross-contamination regression tests ---
+// These tests verify that switching session IDs (warm node reuse)
+// does not leak messages from the old session into the new one.
+
+func TestSetSessionID_ClearsStaleOutboxMessages(t *testing.T) {
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost", "ws-1")
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer r.Shutdown()
+
+	// Enqueue messages under the initial session (sess-1)
+	for i := 0; i < 5; i++ {
+		if err := r.Enqueue(Message{
+			MessageID: fmt.Sprintf("old-%d", i),
+			SessionID: "sess-1",
+			Role:      "assistant",
+			Content:   "old message",
+			Timestamp: "2024-01-01T00:00:00Z",
+		}); err != nil {
+			t.Fatalf("enqueue old: %v", err)
+		}
+	}
+
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count)
+	if count != 5 {
+		t.Fatalf("expected 5 stale messages, got %d", count)
+	}
+
+	// Simulate warm node reuse — switch to new session
+	r.SetSessionID("sess-2")
+
+	// Stale messages should be cleared
+	db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count)
+	if count != 0 {
+		t.Fatalf("expected outbox cleared after session switch, got %d stale messages", count)
+	}
+}
+
+func TestSetSessionID_SameID_DoesNotClear(t *testing.T) {
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost", "ws-1")
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer r.Shutdown()
+
+	if err := r.Enqueue(Message{
+		MessageID: "keep-me",
+		SessionID: "sess-1",
+		Role:      "assistant",
+		Content:   "keep",
+		Timestamp: "2024-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	// Setting the same session ID should NOT clear
+	r.SetSessionID("sess-1")
+
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count)
+	if count != 1 {
+		t.Fatalf("expected 1 message to remain (same session), got %d", count)
+	}
+}
+
+func TestSetSessionID_NewMessagesUseNewSession(t *testing.T) {
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost", "ws-1")
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer r.Shutdown()
+
+	// Enqueue under old session
+	_ = r.Enqueue(Message{
+		MessageID: "old-msg",
+		SessionID: "sess-1",
+		Role:      "assistant",
+		Content:   "old",
+		Timestamp: "2024-01-01T00:00:00Z",
+	})
+
+	// Switch session (clears outbox)
+	r.SetSessionID("sess-2")
+
+	// Enqueue under new session
+	_ = r.Enqueue(Message{
+		MessageID: "new-msg",
+		SessionID: "sess-1", // intentionally pass old session in struct — reporter should override
+		Role:      "assistant",
+		Content:   "new",
+		Timestamp: "2024-01-01T00:00:01Z",
+	})
+
+	// Verify only the new message exists and has the new session ID
+	rows, err := db.Query("SELECT message_id, session_id FROM message_outbox ORDER BY id ASC")
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	defer rows.Close()
+
+	var msgs []struct{ id, sessionID string }
+	for rows.Next() {
+		var m struct{ id, sessionID string }
+		rows.Scan(&m.id, &m.sessionID)
+		msgs = append(msgs, m)
+	}
+
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if msgs[0].id != "new-msg" {
+		t.Fatalf("expected new-msg, got %s", msgs[0].id)
+	}
+	if msgs[0].sessionID != "sess-2" {
+		t.Fatalf("expected session_id=sess-2, got %s", msgs[0].sessionID)
+	}
+}
+
+func TestSetSessionID_NilReporter_DoesNotPanic(t *testing.T) {
+	var r *Reporter
+	r.SetSessionID("anything") // should not panic
+}
+
 func TestReadBatch_OrdersByID(t *testing.T) {
 	// Verify that readBatch uses ORDER BY id ASC (not created_at)
 	// so that messages with identical timestamps maintain insertion order.

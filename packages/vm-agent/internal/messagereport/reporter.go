@@ -128,14 +128,45 @@ func (r *Reporter) SetWorkspaceID(id string) {
 // SetSessionID updates the chat session ID used for all subsequently enqueued
 // messages. Call this when a warm node is reused for a new task so that
 // messages are tagged with the correct chat session.
+//
+// Any unsent messages from the previous session are cleared from the outbox
+// to prevent cross-contamination when a warm node is reused.
 func (r *Reporter) SetSessionID(id string) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
+	oldSessionID := r.sessionID
 	r.sessionID = id
 	r.mu.Unlock()
+
+	// Clear stale messages from the previous session to prevent
+	// cross-contamination during warm node reuse. Messages tagged with
+	// the old session ID would otherwise be flushed under the new
+	// workspace's endpoint.
+	if oldSessionID != "" && oldSessionID != id {
+		cleared, err := r.clearOutbox()
+		if err != nil {
+			slog.Error("messagereport: failed to clear outbox on session switch",
+				"error", err, "oldSessionId", oldSessionID, "newSessionId", id)
+		} else if cleared > 0 {
+			slog.Warn("messagereport: cleared stale outbox messages on session switch",
+				"cleared", cleared, "oldSessionId", oldSessionID, "newSessionId", id)
+		}
+	}
+
 	slog.Info("messagereport: session ID updated", "sessionId", id)
+}
+
+// clearOutbox removes all messages from the outbox. Returns the number of
+// rows deleted. Used during session switches to prevent cross-contamination.
+func (r *Reporter) clearOutbox() (int64, error) {
+	result, err := r.db.Exec("DELETE FROM message_outbox")
+	if err != nil {
+		return 0, fmt.Errorf("messagereport: clear outbox: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	return n, nil
 }
 
 // Enqueue inserts a message into the SQLite outbox for eventual delivery.

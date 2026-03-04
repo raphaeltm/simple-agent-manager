@@ -515,7 +515,7 @@ export async function listChatSessions(
 export async function getChatSession(
   projectId: string,
   sessionId: string,
-  params: { limit?: number; before?: number } = {}
+  params: { limit?: number; before?: number; signal?: AbortSignal } = {}
 ): Promise<ChatSessionDetailResponse> {
   const searchParams = new URLSearchParams();
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
@@ -526,7 +526,7 @@ export async function getChatSession(
     ? `/api/projects/${projectId}/sessions/${sessionId}?${qs}`
     : `/api/projects/${projectId}/sessions/${sessionId}`;
 
-  return request<ChatSessionDetailResponse>(endpoint);
+  return request<ChatSessionDetailResponse>(endpoint, params.signal ? { signal: params.signal } : {});
 }
 
 export async function createChatSession(
