@@ -249,9 +249,10 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	}
 
 	hostCfg := acp.SessionHostConfig{
-		GatewayConfig:     cfg,
-		MessageBufferSize: s.config.ACPMessageBufferSize,
-		ViewerSendBuffer:  s.config.ACPViewerSendBuffer,
+		GatewayConfig:         cfg,
+		MessageBufferSize:     s.config.ACPMessageBufferSize,
+		ViewerSendBuffer:      s.config.ACPViewerSendBuffer,
+		NotifSerializeTimeout: s.config.ACPNotifSerializeTimeout,
 	}
 	host := acp.NewSessionHost(hostCfg)
 	s.sessionHosts[hostKey] = host

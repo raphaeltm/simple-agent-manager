@@ -96,7 +96,8 @@ type Config struct {
 	ACPPongTimeout        time.Duration // WebSocket pong deadline after ping (default: 10s)
 	ACPPromptTimeout      time.Duration // Max prompt runtime before force-stop fallback (default: 10m)
 	ACPPromptCancelGrace  time.Duration // Wait after cancel before force-stop fallback (default: 5s)
-	ACPIdleSuspendTimeout time.Duration // Auto-suspend after this idle duration with no viewers (default: 30m, 0=disabled)
+	ACPIdleSuspendTimeout    time.Duration // Auto-suspend after this idle duration with no viewers (default: 30m, 0=disabled)
+	ACPNotifSerializeTimeout time.Duration // Max wait for previous notification processing before delivering next (default: 5s)
 
 	// Event log settings - configurable per constitution principle XI
 	MaxNodeEvents      int // Max node-level events retained in memory (default: 500)
@@ -247,7 +248,8 @@ func Load() (*Config, error) {
 		ACPPongTimeout:        getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
 		ACPPromptTimeout:      getEnvDuration("ACP_PROMPT_TIMEOUT", 60*time.Minute),
 		ACPPromptCancelGrace:  getEnvDuration("ACP_PROMPT_CANCEL_GRACE_PERIOD", 5*time.Second),
-		ACPIdleSuspendTimeout: getEnvDuration("ACP_IDLE_SUSPEND_TIMEOUT", 30*time.Minute),
+		ACPIdleSuspendTimeout:    getEnvDuration("ACP_IDLE_SUSPEND_TIMEOUT", 30*time.Minute),
+		ACPNotifSerializeTimeout: getEnvDuration("ACP_NOTIF_SERIALIZE_TIMEOUT", 5*time.Second),
 
 		// Event log settings
 		MaxNodeEvents:      getEnvInt("MAX_NODE_EVENTS", 500),
