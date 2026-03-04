@@ -29,6 +29,7 @@ import { requireOwnedProject } from '../middleware/project-auth';
 import { generateBranchName } from '../services/branch-name';
 import { startTaskRunnerDO } from '../services/task-runner-do';
 import * as projectDataService from '../services/project-data';
+import { generateTaskTitle, getTaskTitleConfig } from '../services/task-title';
 
 const MAX_MESSAGE_LENGTH = 2000;
 const VALID_VM_SIZES: VMSize[] = ['small', 'medium', 'large'];
@@ -129,8 +130,9 @@ taskSubmitRoutes.post('/submit', async (c) => {
   const vmLocation: VMLocation = (body.vmLocation as VMLocation) ?? 'nbg1';
   const branch = project.defaultBranch;
 
-  // Insert task directly as queued (skip draft → ready)
-  const taskTitle = message.length > 200 ? message.slice(0, 197) + '...' : message;
+  // Generate concise task title via AI (falls back to truncation on failure)
+  const titleConfig = getTaskTitleConfig(c.env as unknown as Record<string, string | undefined>);
+  const taskTitle = await generateTaskTitle(c.env.AI, message, titleConfig);
 
   await db.insert(schema.tasks).values({
     id: taskId,

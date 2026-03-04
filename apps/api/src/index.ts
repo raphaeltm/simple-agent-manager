@@ -173,6 +173,11 @@ export interface Env {
   // Branch name generation (chat-first submit)
   BRANCH_NAME_PREFIX?: string;
   BRANCH_NAME_MAX_LENGTH?: string;
+  // AI task title generation (Workers AI)
+  TASK_TITLE_MODEL?: string;
+  TASK_TITLE_MAX_LENGTH?: string;
+  TASK_TITLE_TIMEOUT_MS?: string;
+  TASK_TITLE_GENERATION_ENABLED?: string;
   // Idle cleanup configuration
   IDLE_CLEANUP_RETRY_DELAY_MS?: string;
   IDLE_CLEANUP_MAX_RETRIES?: string;

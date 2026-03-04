@@ -195,6 +195,22 @@ export const HETZNER_IMAGE = DEFAULT_HETZNER_IMAGE;
 // Format: https://github.com/apps/{app-slug}/installations/new
 
 // =============================================================================
+// AI Task Title Generation
+// =============================================================================
+
+/** Default Workers AI model for task title generation. Override via TASK_TITLE_MODEL env var. */
+export const DEFAULT_TASK_TITLE_MODEL = '@cf/meta/llama-3.1-8b-instruct';
+
+/** Default max generated title length. Override via TASK_TITLE_MAX_LENGTH env var. */
+export const DEFAULT_TASK_TITLE_MAX_LENGTH = 100;
+
+/** Default timeout (ms) for AI title generation. Override via TASK_TITLE_TIMEOUT_MS env var. */
+export const DEFAULT_TASK_TITLE_TIMEOUT_MS = 5000;
+
+/** Messages at or below this length are used as-is without LLM generation. */
+export const TASK_TITLE_SHORT_MESSAGE_THRESHOLD = 100;
+
+// =============================================================================
 // Agent Settings
 // =============================================================================
 
