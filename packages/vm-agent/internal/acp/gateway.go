@@ -435,11 +435,15 @@ func execInContainer(ctx context.Context, containerID, user, workDir string, arg
 // Content is streamed via stdin to avoid exposing secrets in process args or env.
 func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePath, content string) error {
 	// Shell script reads credential from stdin via cat, avoiding any env/arg exposure.
-	// 1. Resolves $HOME for the target user
+	// 1. Resolves the user's home directory reliably (docker exec -u does NOT update $HOME)
 	// 2. Creates the parent directory with restricted permissions
 	// 3. Reads stdin into the target file with restricted permissions
+	//
+	// NOTE: $HOME in docker exec -u is unreliable — it inherits the container's env
+	// (often /root even when running as a non-root user). We resolve the home directory
+	// from /etc/passwd via getent, falling back to $HOME if getent is unavailable.
 	script := fmt.Sprintf(
-		`set -e; dir="$HOME/%s"; mkdir -p "$(dirname "$dir")" && chmod 700 "$(dirname "$dir")"; cat > "$dir" && chmod 600 "$dir"`,
+		`set -e; home=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6) || home="$HOME"; dir="$home/%s"; mkdir -p "$(dirname "$dir")" && chmod 700 "$(dirname "$dir")"; cat > "$dir" && chmod 600 "$dir"`,
 		authFilePath,
 	)
 
