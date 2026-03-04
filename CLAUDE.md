@@ -168,6 +168,7 @@ Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks
 - N/A (no backend changes) (024-tailwind-adoption)
 
 ## Recent Changes
+- fix-streaming-token-ordering: ACP notification serialization via orderedPipe in VM agent; wraps agent stdout with a serializing pipe that waits for each session/update handler to complete before delivering the next, preventing the ACP SDK's concurrent goroutine dispatch from reordering streaming tokens; configurable via `ACP_NOTIF_SERIALIZE_TIMEOUT` (default: 5s)
 - 023-admin-observability: Admin observability dashboard — error storage in D1, health overview, error list with filtering, historical log viewer via CF API proxy, real-time log stream via AdminLogs DO + Tail Worker, error trends visualization
 - 022-simplified-chat-ux: Chat-first UX — project page is now a chat interface (no tabs), dashboard shows project cards, descriptive branch naming (sam/...), idle auto-push safety net (15 min DO alarm), settings drawer, agent completion git push + PR creation, gh CLI injection + token refresh wrapper, finalization guard for idempotent git push results
 - 021-task-chat-architecture: Task-driven chat with autonomous workspace execution, warm node pooling, project chat view, kanban board, task submit form, project default VM size

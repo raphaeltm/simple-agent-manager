@@ -60,6 +60,13 @@ type SessionHostConfig struct {
 	// ViewerSendBuffer is the channel buffer size per viewer. If a viewer's
 	// channel is full, messages are dropped for that viewer.
 	ViewerSendBuffer int
+
+	// NotifSerializeTimeout is the maximum time to wait for a previous
+	// notification handler to complete before delivering the next notification
+	// to the SDK. This serializes session/update processing to prevent the
+	// SDK's concurrent goroutine dispatch from reordering streaming tokens.
+	// Override via ACP_NOTIF_SERIALIZE_TIMEOUT. Default: 5s.
+	NotifSerializeTimeout time.Duration
 }
 
 // BufferedMessage holds a single message in the replay buffer.
@@ -799,8 +806,18 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 
 	h.process = process
 
-	client := &sessionHostClient{host: h}
-	h.acpConn = acpsdk.NewClientSideConnection(client, process.Stdin(), process.Stdout())
+	// Create sessionHostClient with a processedCh for notification ordering.
+	// The orderedPipe serializes notification delivery to the SDK, preventing
+	// the SDK's concurrent goroutine dispatch from reordering streaming tokens.
+	processedCh := make(chan struct{}, 1)
+	client := &sessionHostClient{host: h, processedCh: processedCh}
+
+	serializeTimeout := h.config.NotifSerializeTimeout
+	if serializeTimeout <= 0 {
+		serializeTimeout = DefaultNotifSerializeTimeout
+	}
+	orderedStdout := newOrderedPipe(process.Stdout(), processedCh, h.ctx.Done(), serializeTimeout)
+	h.acpConn = acpsdk.NewClientSideConnection(client, process.Stdin(), orderedStdout)
 
 	go h.monitorStderr(process)
 	go h.monitorProcessExit(ctx, process, agentType, cred, settings)
@@ -1723,10 +1740,27 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 // sessionHostClient implements the acp-go-sdk Client interface.
 // Instead of writing to a single WebSocket, it broadcasts to all viewers.
 type sessionHostClient struct {
-	host *SessionHost
+	host        *SessionHost
+	processedCh chan struct{} // Signaled after each notification handler completes (used by orderedPipe).
+}
+
+// signalProcessed signals the orderedPipe that this notification handler has
+// completed, allowing the next notification to be delivered to the SDK.
+func (c *sessionHostClient) signalProcessed() {
+	if c.processedCh != nil {
+		select {
+		case c.processedCh <- struct{}{}:
+		default:
+			// Buffer already has a pending signal; this can happen if two
+			// notifications were dispatched before backpressure took effect.
+			slog.Debug("orderedPipe: processedCh already has pending signal, skipping")
+		}
+	}
 }
 
 func (c *sessionHostClient) SessionUpdate(_ context.Context, params acpsdk.SessionNotification) error {
+	defer c.signalProcessed()
+
 	data, err := json.Marshal(map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  "session/update",
