@@ -150,6 +150,10 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete }: AgentKeyC
                 placeholder='Paste the full contents of ~/.codex/auth.json'
                 required
                 rows={6}
+                spellCheck={false}
+                autoCorrect="off"
+                autoCapitalize="off"
+                autoComplete="off"
                 className="w-full px-3 py-2 bg-transparent border border-border-default rounded-sm text-sm text-fg-primary font-mono resize-y focus:outline-none focus:border-accent"
               />
             ) : (

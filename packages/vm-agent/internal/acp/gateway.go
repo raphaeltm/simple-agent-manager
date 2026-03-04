@@ -432,13 +432,14 @@ func execInContainer(ctx context.Context, containerID, user, workDir string, arg
 // writeAuthFileToContainer writes credential content to a file inside a container.
 // It creates the parent directory with 0700 permissions and the file with 0600.
 // authFilePath is relative to the user's home directory (e.g. ".codex/auth.json").
+// Content is streamed via stdin to avoid exposing secrets in process args or env.
 func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePath, content string) error {
-	// Build a shell script that:
+	// Shell script reads credential from stdin via cat, avoiding any env/arg exposure.
 	// 1. Resolves $HOME for the target user
 	// 2. Creates the parent directory with restricted permissions
-	// 3. Writes the file content with restricted permissions
+	// 3. Reads stdin into the target file with restricted permissions
 	script := fmt.Sprintf(
-		`set -e; dir="$HOME/%s"; mkdir -p "$(dirname "$dir")" && chmod 700 "$(dirname "$dir")"; printf '%%s' "$AUTH_CONTENT" > "$dir" && chmod 600 "$dir"`,
+		`set -e; dir="$HOME/%s"; mkdir -p "$(dirname "$dir")" && chmod 700 "$(dirname "$dir")"; cat > "$dir" && chmod 600 "$dir"`,
 		authFilePath,
 	)
 
@@ -446,11 +447,11 @@ func writeAuthFileToContainer(ctx context.Context, containerID, user, authFilePa
 	if user != "" {
 		dockerArgs = append(dockerArgs, "-u", user)
 	}
-	// Pass content via environment variable to avoid shell injection
-	dockerArgs = append(dockerArgs, "-e", "AUTH_CONTENT="+content)
 	dockerArgs = append(dockerArgs, containerID, "sh", "-c", script)
 
 	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
+	cmd.Stdin = strings.NewReader(content)
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker exec failed: %w: %s", err, strings.TrimSpace(string(output)))

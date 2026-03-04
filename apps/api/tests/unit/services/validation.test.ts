@@ -63,12 +63,22 @@ describe('CredentialValidator', () => {
   });
 
   describe('validateCredential for OpenAI Codex OAuth', () => {
+    // Helper to build a base64url-encoded JWT payload
+    function makeJwt(payload: Record<string, unknown>): string {
+      const header = btoa(JSON.stringify({ alg: 'RS256' })).replace(/=/g, '');
+      const body = btoa(JSON.stringify(payload)).replace(/=/g, '');
+      return `${header}.${body}.test-signature`;
+    }
+
+    const validAccessToken = makeJwt({ sub: 'test', exp: Math.floor(Date.now() / 1000) + 3600 });
+    const validIdToken = makeJwt({ sub: 'test', email: 'test@example.com' });
+
     const validAuthJson = JSON.stringify({
       auth_mode: 'Chatgpt',
       tokens: {
-        access_token: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature',
+        access_token: validAccessToken,
         refresh_token: 'rt_test_refresh_token_value',
-        id_token: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature',
+        id_token: validIdToken,
       },
       last_refresh: '2026-01-15T10:30:00Z',
     });
@@ -145,9 +155,9 @@ describe('CredentialValidator', () => {
       const invalid = JSON.stringify({
         auth_mode: 'Chatgpt',
         tokens: {
-          access_token: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.sig',
+          access_token: validAccessToken,
           refresh_token: 'invalid_prefix_token',
-          id_token: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.sig',
+          id_token: validIdToken,
         },
       });
       const validation = CredentialValidator.validateCredential(
@@ -157,6 +167,64 @@ describe('CredentialValidator', () => {
       );
       expect(validation.valid).toBe(false);
       expect(validation.error).toContain('refresh_token');
+    });
+
+    it('rejects access_token that cannot be decoded as JWT', () => {
+      // Starts with eyJ but has invalid base64 payload
+      const invalid = JSON.stringify({
+        auth_mode: 'Chatgpt',
+        tokens: {
+          access_token: 'eyJ!!!.invalid-base64.sig',
+          refresh_token: 'rt_test',
+          id_token: validIdToken,
+        },
+      });
+      const validation = CredentialValidator.validateCredential(
+        invalid,
+        'oauth-token',
+        'openai-codex'
+      );
+      expect(validation.valid).toBe(false);
+      expect(validation.error).toContain('access_token');
+      expect(validation.error).toContain('not a valid JWT');
+    });
+
+    it('rejects access_token without exp claim', () => {
+      const noExpToken = makeJwt({ sub: 'test' }); // no exp
+      const invalid = JSON.stringify({
+        auth_mode: 'Chatgpt',
+        tokens: {
+          access_token: noExpToken,
+          refresh_token: 'rt_test',
+          id_token: validIdToken,
+        },
+      });
+      const validation = CredentialValidator.validateCredential(
+        invalid,
+        'oauth-token',
+        'openai-codex'
+      );
+      expect(validation.valid).toBe(false);
+      expect(validation.error).toContain('exp');
+    });
+
+    it('rejects id_token that cannot be decoded as JWT', () => {
+      const invalid = JSON.stringify({
+        auth_mode: 'Chatgpt',
+        tokens: {
+          access_token: validAccessToken,
+          refresh_token: 'rt_test',
+          id_token: 'eyJ!!!.invalid-base64.sig',
+        },
+      });
+      const validation = CredentialValidator.validateCredential(
+        invalid,
+        'oauth-token',
+        'openai-codex'
+      );
+      expect(validation.valid).toBe(false);
+      expect(validation.error).toContain('id_token');
+      expect(validation.error).toContain('not a valid JWT');
     });
   });
 
@@ -242,14 +310,15 @@ describe('validateOpenAICodexAuthJson', () => {
 
   it('accepts lowercase chatgpt auth_mode', () => {
     const header = btoa(JSON.stringify({ alg: 'RS256' })).replace(/=/g, '');
-    const payload = btoa(JSON.stringify({ sub: 'test' })).replace(/=/g, '');
+    const accessPayload = btoa(JSON.stringify({ sub: 'test', exp: Math.floor(Date.now() / 1000) + 3600 })).replace(/=/g, '');
+    const idPayload = btoa(JSON.stringify({ sub: 'test' })).replace(/=/g, '');
     const sig = 'sig';
     const json = JSON.stringify({
       auth_mode: 'chatgpt',
       tokens: {
-        access_token: `${header}.${payload}.${sig}`,
+        access_token: `${header}.${accessPayload}.${sig}`,
         refresh_token: 'rt_test',
-        id_token: `${header}.${payload}.${sig}`,
+        id_token: `${header}.${idPayload}.${sig}`,
       },
     });
     const result = validateOpenAICodexAuthJson(json);

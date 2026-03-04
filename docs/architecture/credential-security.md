@@ -217,7 +217,7 @@ Without this setting, GitHub OAuth tokens are stored as plaintext in D1. If the 
 
 ## Agent Credential Injection
 
-Agent credentials (API keys and OAuth tokens) are injected into workspaces when an ACP session starts. The injection mechanism varies by agent and credential type:
+Agent credentials (API keys and OAuth tokens) are injected into workspaces when an ACP session starts (see `session_host.go:startAgent()`). The injection mechanism varies by agent and credential type, determined by `gateway.go:getAgentCommandInfo()`:
 
 | Agent | Credential Kind | Injection Method | Details |
 |-------|----------------|------------------|---------|
@@ -227,9 +227,11 @@ Agent credentials (API keys and OAuth tokens) are injected into workspaces when 
 | OpenAI Codex | OAuth Token | File `~/.codex/auth.json` | Written into container with `0600` permissions; `NO_BROWSER=1` env var also set |
 | Google Gemini | API Key | Env var `GEMINI_API_KEY` | Standard env var injection |
 
+Env var injection is performed at `session_host.go:startAgent()` line `envVars = append(envVars, ...)`. File-based injection uses `gateway.go:writeAuthFileToContainer()`.
+
 ### OpenAI Codex auth.json Injection
 
-Unlike Claude Code which accepts OAuth tokens via environment variable, `codex-acp` reads OAuth credentials from `~/.codex/auth.json`. There is no `CODEX_OAUTH_TOKEN` env var. The VM agent writes the auth.json file into the container before starting the agent process.
+Unlike Claude Code which accepts OAuth tokens via environment variable, `codex-acp` reads OAuth credentials from `~/.codex/auth.json`. There is no `CODEX_OAUTH_TOKEN` env var. The VM agent writes the auth.json file into the container before starting the agent process (see `session_host.go:startAgent()` — branches on `info.injectionMode == "auth-file"`).
 
 The auth.json file contains:
 - `auth_mode`: `"Chatgpt"` — identifies subscription-based auth
@@ -237,13 +239,13 @@ The auth.json file contains:
 - `tokens.refresh_token`: Opaque (`rt_` prefix, long-lived)
 - `tokens.id_token`: OIDC JWT with `chatgpt_plan_type` claim
 
-Users obtain this file by running `codex login` on their local machine and copying `~/.codex/auth.json`. The full JSON blob is stored as a single encrypted credential in D1.
+Users obtain this file by running `codex login` on their local machine and copying `~/.codex/auth.json`. The full JSON blob is stored as a single encrypted credential in D1 (validated by `validation.ts:validateOpenAICodexAuthJson()`).
 
-Security measures for auth.json injection:
+Security measures for auth.json injection (see `gateway.go:writeAuthFileToContainer()`):
 1. File written with `0600` permissions (owner read/write only)
 2. Parent directory `.codex/` created with `0700` permissions
-3. Content passed via Docker environment variable to avoid shell injection
-4. `NO_BROWSER=1` prevents codex-acp from attempting browser-based login
+3. Content streamed via stdin to `docker exec` — avoids exposing secrets in process args or `/proc/<pid>/environ`
+4. `NO_BROWSER=1` set by `session_host.go:startAgent()` to prevent codex-acp from attempting browser-based login
 
 ## Related Documentation
 

@@ -73,15 +73,26 @@ export function validateOpenAICodexAuthJson(credential: string): OpenAIAuthJsonV
     return { valid: false, error: 'Missing or invalid id_token. Must be a JWT (starts with eyJ).' };
   }
 
-  // Extract metadata from id_token for display
+  // Decode JWTs to verify they are structurally valid (not just prefix checks)
+  const accessClaims = decodeJwtPayload(accessToken);
+  if (!accessClaims) {
+    return { valid: false, error: 'access_token is not a valid JWT. Could not decode payload.' };
+  }
+  if (typeof accessClaims.exp !== 'number') {
+    return { valid: false, error: 'access_token JWT is missing a numeric "exp" claim.' };
+  }
+
   const idClaims = decodeJwtPayload(idToken);
+  if (!idClaims) {
+    return { valid: false, error: 'id_token is not a valid JWT. Could not decode payload.' };
+  }
+
+  // Extract metadata from id_token for display
   const authNamespace = idClaims?.['https://api.openai.com/auth'] as Record<string, unknown> | undefined;
   const planType = authNamespace?.chatgpt_plan_type as string | undefined;
 
   // Check access_token expiry
-  const accessClaims = decodeJwtPayload(accessToken);
-  const exp = accessClaims?.exp as number | undefined;
-  const isExpired = exp ? (exp * 1000) < Date.now() : undefined;
+  const isExpired = (accessClaims.exp * 1000) < Date.now();
 
   return {
     valid: true,
