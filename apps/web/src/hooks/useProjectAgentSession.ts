@@ -30,7 +30,12 @@ const API_URL = (() => {
 /** Derive the workspace WebSocket host from API_URL.
  *  api.example.com → ws-{id}.example.com
  */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function deriveWorkspaceWsHost(workspaceId: string): string {
+  if (!UUID_RE.test(workspaceId)) {
+    return '';
+  }
   try {
     const apiUrl = new URL(API_URL);
     // Strip 'api.' prefix to get base domain
@@ -218,12 +223,13 @@ export function useProjectAgentSession({
 
   // Cancel current prompt via ACP WebSocket
   const cancelPrompt = useCallback(() => {
+    if (!isPrompting) return;
     acpSession.sendMessage({
       jsonrpc: '2.0',
       method: 'session/cancel',
       params: {},
     });
-  }, [acpSession]);
+  }, [isPrompting, acpSession]);
 
   return {
     session: acpSession,
