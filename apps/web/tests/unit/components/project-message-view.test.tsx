@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   getTranscribeApiUrl: vi.fn(() => 'https://api.test.com/api/transcribe'),
   resetIdleTimer: vi.fn(),
   sendFollowUpPrompt: vi.fn(),
+  useProjectAgentSession: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
@@ -38,11 +39,37 @@ vi.mock('../../../src/hooks/useChatWebSocket', () => ({
   }),
 }));
 
-vi.mock('@simple-agent-manager/acp-client', () => ({
-  VoiceButton: () => <button data-testid="voice-button">Voice</button>,
+function defaultAgentSession() {
+  return {
+    session: { connected: false, agentType: null, state: 'disconnected', switchAgent: vi.fn(), sendMessage: vi.fn() },
+    messages: { items: [], processMessage: vi.fn(), addUserMessage: vi.fn(), prepareForReplay: vi.fn(), clear: vi.fn(), availableCommands: [], usage: { totalTokens: 0 } },
+    isAgentActive: false,
+    isPrompting: false,
+    isConnecting: false,
+    sendPrompt: vi.fn(),
+    cancelPrompt: vi.fn(),
+    transcribeApiUrl: 'https://api.test.com/api/transcribe',
+  };
+}
+
+vi.mock('../../../src/hooks/useProjectAgentSession', () => ({
+  useProjectAgentSession: (...args: unknown[]) => mocks.useProjectAgentSession(...args),
 }));
 
-import { ProjectMessageView } from '../../../src/components/chat/ProjectMessageView';
+vi.mock('@simple-agent-manager/acp-client', () => ({
+  VoiceButton: () => <button data-testid="voice-button">Voice</button>,
+  MessageBubble: ({ text, role }: { text: string; role: string }) => (
+    <div data-testid={`acp-message-${role}`}>{text}</div>
+  ),
+  ToolCallCard: ({ toolCall }: { toolCall: { title: string } }) => (
+    <div data-testid="acp-tool-call">{toolCall.title}</div>
+  ),
+  ThinkingBlock: ({ text }: { text: string }) => (
+    <div data-testid="acp-thinking">{text}</div>
+  ),
+}));
+
+import { ProjectMessageView, chatMessagesToConversationItems } from '../../../src/components/chat/ProjectMessageView';
 
 // --- Test helpers ---
 
@@ -83,6 +110,7 @@ describe('ProjectMessageView — session isolation', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
+    mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
   });
 
   afterEach(() => {
@@ -123,20 +151,14 @@ describe('ProjectMessageView — session isolation', () => {
   });
 
   it('aborts in-flight polling requests on session switch', async () => {
-    let lastSignal: AbortSignal | undefined;
+    let pollSignal: AbortSignal | undefined;
 
     const sessionAResponse = makeSessionResponse('session-A', [
       makeMessage('msg-a1', 'session-A', 'Data from A'),
     ]);
 
-    mocks.getChatSession.mockImplementation(async (
-      _projectId: string,
-      _sessionId: string,
-      params?: { signal?: AbortSignal }
-    ) => {
-      lastSignal = params?.signal;
-      return sessionAResponse;
-    });
+    // Initial load — no signal capture (initial load effect is separate)
+    mocks.getChatSession.mockResolvedValue(sessionAResponse);
 
     const { rerender } = render(
       <ProjectMessageView projectId="proj-1" sessionId="session-A" />
@@ -146,24 +168,39 @@ describe('ProjectMessageView — session isolation', () => {
       expect(screen.getByText('Data from A')).toBeTruthy();
     });
 
-    // Advance time to trigger a poll
-    await act(async () => {
-      vi.advanceTimersByTime(3100);
+    // Now capture the signal from the polling interval (fires every 3s)
+    mocks.getChatSession.mockImplementation(async (
+      _projectId: string,
+      _sessionId: string,
+      params?: { signal?: AbortSignal }
+    ) => {
+      pollSignal = params?.signal;
+      return sessionAResponse;
     });
 
-    const signalBeforeSwitch = lastSignal;
+    // Advance past the 3s poll interval. Use advanceTimersByTimeAsync to
+    // properly process microtasks (the polling effect starts asynchronously
+    // after session state is committed to the DOM).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3100);
+    });
+
+    // Verify the poll fired and we captured a signal
+    expect(pollSignal).toBeDefined();
+    expect(pollSignal!.aborted).toBe(false);
 
     const sessionBResponse = makeSessionResponse('session-B', [
       makeMessage('msg-b1', 'session-B', 'Data from B'),
     ]);
-    mocks.getChatSession.mockImplementation(async () => sessionBResponse);
+    mocks.getChatSession.mockResolvedValue(sessionBResponse);
 
+    // Switch sessions — cleanup should abort the poll signal
     rerender(
       <ProjectMessageView projectId="proj-1" sessionId="session-B" />
     );
 
     await waitFor(() => {
-      expect(signalBeforeSwitch?.aborted).toBe(true);
+      expect(pollSignal!.aborted).toBe(true);
     });
   });
 
@@ -238,5 +275,182 @@ describe('ProjectMessageView — session isolation', () => {
 
     // Session B must remain visible — stale A data must NOT contaminate
     expect(screen.queryByText('Hello from A')).toBeNull();
+  });
+});
+
+describe('ProjectMessageView — ACP integration', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.clearAllMocks();
+    mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('shows cancel button when agent is prompting', async () => {
+    const cancelPrompt = vi.fn();
+    mocks.useProjectAgentSession.mockReturnValue({
+      ...defaultAgentSession(),
+      isAgentActive: true,
+      isPrompting: true,
+      cancelPrompt,
+    });
+
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        makeMessage('msg-1', 'session-1', 'Hello'),
+      ]),
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Agent is working...')).toBeTruthy();
+    });
+
+    const cancelButton = screen.getByText('Cancel');
+    expect(cancelButton).toBeTruthy();
+
+    // Click cancel should invoke agentSession.cancelPrompt
+    await act(async () => {
+      cancelButton.click();
+    });
+    expect(cancelPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows ACP connecting indicator when workspace has ACP connecting', async () => {
+    mocks.useProjectAgentSession.mockReturnValue({
+      ...defaultAgentSession(),
+      isConnecting: true,
+    });
+
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession('session-1'),
+      messages: [],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Connecting to agent...')).toBeTruthy();
+    });
+  });
+
+  it('shows error when sending prompt without ACP connection', async () => {
+    mocks.useProjectAgentSession.mockReturnValue({
+      ...defaultAgentSession(),
+      isAgentActive: false,
+    });
+
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession('session-1'),
+      messages: [],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    // Wait for session to load
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Send a message...')).toBeTruthy();
+    });
+
+    // Type a message
+    const textarea = screen.getByPlaceholderText('Send a message...');
+    await act(async () => {
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      (textarea as HTMLTextAreaElement).value = 'Hello agent';
+      textarea.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  });
+
+  it('renders DO messages using ACP components when ACP is not connected', async () => {
+    mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
+
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        makeMessage('msg-1', 'session-1', 'Agent response'),
+      ]),
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    // The mock AcpMessageBubble renders as <div data-testid="acp-message-agent">
+    await waitFor(() => {
+      expect(screen.getByTestId('acp-message-agent')).toBeTruthy();
+    });
+    expect(screen.getByText('Agent response')).toBeTruthy();
+  });
+});
+
+describe('chatMessagesToConversationItems', () => {
+
+  it('converts user messages', () => {
+    const items = chatMessagesToConversationItems([
+      { id: 'u1', sessionId: 's1', role: 'user', content: 'Hello', toolMetadata: null, createdAt: 1000 },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('user_message');
+    expect(items[0].text).toBe('Hello');
+  });
+
+  it('merges consecutive assistant messages', () => {
+    const items = chatMessagesToConversationItems([
+      { id: 'a1', sessionId: 's1', role: 'assistant', content: 'Part 1', toolMetadata: null, createdAt: 1000 },
+      { id: 'a2', sessionId: 's1', role: 'assistant', content: ' Part 2', toolMetadata: null, createdAt: 1001 },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('agent_message');
+    expect(items[0].text).toBe('Part 1 Part 2');
+  });
+
+  it('converts tool messages with metadata', () => {
+    const items = chatMessagesToConversationItems([
+      {
+        id: 't1', sessionId: 's1', role: 'tool', content: 'file contents',
+        toolMetadata: { kind: 'read', locations: [{ path: '/src/index.ts' }] },
+        createdAt: 1000,
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('tool_call');
+    const tool = items[0] as { toolKind: string; locations: Array<{ path: string }> };
+    expect(tool.toolKind).toBe('read');
+    expect(tool.locations[0].path).toBe('/src/index.ts');
+  });
+
+  it('skips placeholder content in tool messages', () => {
+    const items = chatMessagesToConversationItems([
+      { id: 't1', sessionId: 's1', role: 'tool', content: '(tool call)', toolMetadata: null, createdAt: 1000 },
+    ]);
+    expect(items).toHaveLength(1);
+    const tool = items[0] as { content: Array<unknown> };
+    expect(tool.content).toHaveLength(0);
+  });
+
+  it('converts system messages as agent messages', () => {
+    const items = chatMessagesToConversationItems([
+      { id: 's1', sessionId: 's1', role: 'system', content: 'Session started', toolMetadata: null, createdAt: 1000 },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('agent_message');
+    expect(items[0].text).toContain('System:');
+  });
+
+  it('does not merge assistant followed by user followed by assistant', () => {
+    const items = chatMessagesToConversationItems([
+      { id: 'a1', sessionId: 's1', role: 'assistant', content: 'Hello', toolMetadata: null, createdAt: 1000 },
+      { id: 'u1', sessionId: 's1', role: 'user', content: 'Hi', toolMetadata: null, createdAt: 1001 },
+      { id: 'a2', sessionId: 's1', role: 'assistant', content: 'World', toolMetadata: null, createdAt: 1002 },
+    ]);
+    expect(items).toHaveLength(3);
+    expect(items[0].kind).toBe('agent_message');
+    expect(items[0].text).toBe('Hello');
+    expect(items[1].kind).toBe('user_message');
+    expect(items[2].kind).toBe('agent_message');
+    expect(items[2].text).toBe('World');
   });
 });

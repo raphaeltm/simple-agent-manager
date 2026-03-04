@@ -4,6 +4,13 @@ compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 port = 8787
 
+# unicorn-magic exports toPath/traversePathUp only under the "node" condition.
+# Wrangler's esbuild resolves "default" which lacks them, breaking the
+# @mastra/core → execa → npm-run-path → unicorn-magic import chain.
+# Alias to a local shim that provides the node-condition exports.
+[alias]
+"unicorn-magic" = "./src/shims/unicorn-magic.js"
+
 [vars]
 BASE_DOMAIN = "workspaces.example.com"
 VERSION = "0.1.0"

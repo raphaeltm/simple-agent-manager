@@ -56,13 +56,11 @@ describe('ProjectMessageView', () => {
     expect(source).toContain('useEffect');
   });
 
-  it('renders message bubbles with role-based styling', () => {
-    expect(source).toContain('MessageBubble');
-    expect(source).toContain('roleStyles');
-    expect(source).toContain('user:');
-    expect(source).toContain('assistant:');
-    expect(source).toContain('system:');
-    expect(source).toContain('tool:');
+  it('uses ACP components for message rendering', () => {
+    expect(source).toContain('AcpMessageBubble');
+    expect(source).toContain('AcpToolCallCard');
+    expect(source).toContain('AcpThinkingBlock');
+    expect(source).toContain('AcpConversationItemView');
   });
 
   it('uses useChatWebSocket hook for real-time updates (TDF-8)', () => {
@@ -103,10 +101,9 @@ describe('ProjectMessageView', () => {
     expect(source).toContain('session.workspaceId');
   });
 
-  it('displays tool activity with grouped rendering', () => {
-    expect(source).toContain('toolMetadata');
-    expect(source).toContain('ToolActivityBlock');
-    expect(source).toContain('groupMessages');
+  it('converts DO messages to ConversationItem for unified rendering', () => {
+    expect(source).toContain('chatMessagesToConversationItems');
+    expect(source).toContain('ConversationItem');
   });
 
   it('cleans up polling on unmount', () => {
