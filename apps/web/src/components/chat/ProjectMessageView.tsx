@@ -1,10 +1,11 @@
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { VoiceButton } from '@simple-agent-manager/acp-client';
-import { getChatSession, getTranscribeApiUrl, resetIdleTimer, sendFollowUpPrompt } from '../../lib/api';
+import { getChatSession, getTranscribeApiUrl, resetIdleTimer } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
+import { useProjectAgentSession } from '../../hooks/useProjectAgentSession';
 import {
   FileText,
   FileEdit,
@@ -348,10 +349,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [followUp, setFollowUp] = useState('');
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
 
-  // Prompt pending state — shows "Agent is working..." indicator
-  const [promptPending, setPromptPending] = useState(false);
-  const promptPendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   // Idle timer state (TDF-8)
   const [idleCountdownMs, setIdleCountdownMs] = useState<number | null>(null);
 
@@ -364,15 +361,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     sessionId,
     enabled: session?.status === 'active',
     onMessage: useCallback((msg: ChatMessageResponse) => {
-      // Clear "Agent is working..." indicator when agent responds
-      if (msg.role === 'assistant' || msg.role === 'tool') {
-        setPromptPending(false);
-        if (promptPendingTimeoutRef.current) {
-          clearTimeout(promptPendingTimeoutRef.current);
-          promptPendingTimeoutRef.current = null;
-        }
-      }
-
       setMessages((prev) => {
         if (prev.some((m) => m.id === msg.id)) return prev;
         // Replace optimistic message if this is a server-confirmed user message with matching content
@@ -400,6 +388,15 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     onAgentCompleted: useCallback((agentCompletedAt: number) => {
       setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);
     }, []),
+  });
+
+  // ACP agent session — direct WebSocket to VM agent for prompts and cancel.
+  // Active when workspace is available and session is interactive.
+  const agentSession = useProjectAgentSession({
+    workspaceId: session?.workspaceId ?? null,
+    sessionId,
+    enabled: sessionState === 'active' || sessionState === 'idle',
+    preferredAgentType: 'claude-code',
   });
 
   const loadSession = useCallback(async () => {
@@ -522,7 +519,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     return;
   }, [sessionState, cleanupAt, agentCompletedAt]);
 
-  // Send follow-up message via WebSocket or HTTP
+  // Send follow-up message via DO WebSocket (persistence) + ACP (agent prompt)
   const handleSendFollowUp = async () => {
     const trimmed = followUp.trim();
     if (!trimmed || sendingFollowUp) return;
@@ -533,7 +530,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       if (sessionState === 'idle') {
         resetIdleTimer(projectId, sessionId)
           .then((result) => {
-            // Update countdown with server-provided cleanup time
             if (result.cleanupAt) {
               setSession((prev) => {
                 if (!prev) return prev;
@@ -557,7 +553,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         createdAt: Date.now(),
       }]);
 
-      // Try sending via WebSocket (persists message in ProjectData DO)
+      // Persist message via DO WebSocket
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({
           type: 'message.send',
@@ -565,28 +561,14 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           content: trimmed,
           role: 'user',
         }));
-      } else {
-        // WebSocket not connected — message shown optimistically but may not
-        // be delivered until the next poll cycle or WS reconnects.
-        console.warn('[ProjectMessageView] WebSocket not connected, message delivery deferred');
       }
 
-      // Forward the prompt to the running agent via API
-      setPromptPending(true);
-      // Safety timeout — clear indicator after 30s even if no response
-      promptPendingTimeoutRef.current = setTimeout(() => {
-        setPromptPending(false);
-        promptPendingTimeoutRef.current = null;
-      }, 30_000);
-
-      sendFollowUpPrompt(projectId, sessionId, trimmed).catch((err) => {
-        console.warn('[ProjectMessageView] Follow-up prompt forwarding failed:', err);
-        setPromptPending(false);
-        if (promptPendingTimeoutRef.current) {
-          clearTimeout(promptPendingTimeoutRef.current);
-          promptPendingTimeoutRef.current = null;
-        }
-      });
+      // Forward prompt to agent via ACP WebSocket (replaces HTTP sendFollowUpPrompt)
+      if (agentSession.isAgentActive) {
+        agentSession.sendPrompt(trimmed);
+      } else {
+        setError('Agent is not connected — message saved but prompt not delivered.');
+      }
 
       setFollowUp('');
     } finally {
@@ -779,11 +761,27 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Agent working indicator — shown after sending a follow-up prompt */}
-      {promptPending && (
+      {/* Agent working indicator — driven by ACP session state */}
+      {agentSession.isPrompting && (
         <div className="flex items-center gap-2 px-4 py-2 border-t border-border-default bg-surface shrink-0">
           <Spinner size="sm" />
           <span className="text-xs text-fg-muted">Agent is working...</span>
+          <button
+            type="button"
+            onClick={agentSession.cancelPrompt}
+            className="ml-auto px-2 py-1 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer"
+            style={{ color: 'var(--sam-color-danger)' }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* ACP connecting indicator */}
+      {agentSession.isConnecting && session?.workspaceId && (
+        <div className="flex items-center gap-2 px-4 py-1 border-t border-border-default bg-surface shrink-0">
+          <Spinner size="sm" />
+          <span className="text-xs text-fg-muted">Connecting to agent...</span>
         </div>
       )}
 
