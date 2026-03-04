@@ -186,7 +186,7 @@ describe('Credentials Routes - OAuth Support', () => {
 
     it('should reject OAuth token for unsupported agents', async () => {
       const request: SaveAgentCredentialRequest = {
-        agentType: 'openai-codex',
+        agentType: 'google-gemini',
         credentialKind: 'oauth-token',
         credential: 'oauth_token_that_is_long_enough_to_pass_validation_1234567890',
       };
