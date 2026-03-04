@@ -1,70 +1,25 @@
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { VoiceButton } from '@simple-agent-manager/acp-client';
+import {
+  VoiceButton,
+  MessageBubble as AcpMessageBubble,
+  ToolCallCard as AcpToolCallCard,
+  ThinkingBlock as AcpThinkingBlock,
+} from '@simple-agent-manager/acp-client';
+import type { ConversationItem } from '@simple-agent-manager/acp-client';
 import { getChatSession, getTranscribeApiUrl, resetIdleTimer } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
 import { useProjectAgentSession } from '../../hooks/useProjectAgentSession';
-import {
-  FileText,
-  FileEdit,
-  Pencil,
-  Terminal,
-  Search,
-  Wrench,
-  ChevronDown,
-  ChevronRight,
-} from 'lucide-react';
-import { RenderedMarkdown } from '../MarkdownRenderer';
-import type { LucideIcon } from 'lucide-react';
 
 interface ProjectMessageViewProps {
   projectId: string;
   sessionId: string;
 }
 
-const roleStyles: Record<string, { label: string; color: string; bg: string }> = {
-  user: { label: 'You', color: 'var(--sam-color-tn-blue)', bg: 'var(--sam-color-info-tint)' },
-  assistant: { label: 'Agent', color: 'var(--sam-color-tn-green)', bg: 'var(--sam-color-success-tint)' },
-  system: { label: 'System', color: 'var(--sam-color-tn-yellow)', bg: 'var(--sam-color-warning-tint)' },
-  tool: { label: 'Tool', color: 'var(--sam-color-tn-purple)', bg: 'var(--sam-color-info-tint)' },
-};
-
 /** Default idle timeout in ms — matches the server-side default (NODE_WARM_TIMEOUT_MS). */
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
-
-// ---------------------------------------------------------------------------
-// Tool kind → friendly label + icon mapping
-// ---------------------------------------------------------------------------
-interface ToolKindInfo {
-  label: string;
-  Icon: LucideIcon;
-}
-
-const TOOL_KINDS: Record<string, ToolKindInfo> = {
-  write: { label: 'Write file', Icon: FileEdit },
-  read: { label: 'Read file', Icon: FileText },
-  edit: { label: 'Edit file', Icon: Pencil },
-  bash: { label: 'Run command', Icon: Terminal },
-  glob: { label: 'Search files', Icon: Search },
-  grep: { label: 'Search content', Icon: Search },
-};
-
-const DEFAULT_TOOL_KIND: ToolKindInfo = { label: 'Tool', Icon: Wrench };
-
-function getToolKind(meta: Record<string, unknown> | null): ToolKindInfo {
-  if (!meta || typeof meta.kind !== 'string') return DEFAULT_TOOL_KIND;
-  return TOOL_KINDS[meta.kind] ?? DEFAULT_TOOL_KIND;
-}
-
-function getToolPath(meta: Record<string, unknown> | null): string | null {
-  if (!meta) return null;
-  const locations = meta.locations as Array<{ path?: string }> | undefined;
-  if (!locations?.length) return null;
-  const p = locations[0]?.path;
-  return p ?? null;
-}
 
 /** True for placeholder content that adds no user value. */
 function isPlaceholderContent(content: string): boolean {
@@ -104,10 +59,6 @@ export function groupMessages(msgs: ChatMessageResponse[]): MessageGroup[] {
   return groups;
 }
 
-function formatTimestamp(ts: number): string {
-  return new Date(ts).toLocaleString();
-}
-
 function formatCountdown(ms: number): string {
   if (ms <= 0) return '0:00';
   const totalSec = Math.ceil(ms / 1000);
@@ -117,196 +68,88 @@ function formatCountdown(ms: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// Message bubble components
+// ACP ConversationItem rendering — reuses exported acp-client components
 // ---------------------------------------------------------------------------
 
-/** Standard bubble for user/system messages (one message = one bubble). */
-function MessageBubble({ message }: { message: ChatMessageResponse }) {
-  const style = roleStyles[message.role] || roleStyles.system!;
-
-  return (
-    <div
-      className="p-3 px-4 rounded-md"
-      style={{
-        backgroundColor: style.bg,
-        borderLeft: `3px solid ${style.color}`,
-      }}
-    >
-      <div className="flex items-center gap-2 mb-2">
-        <span
-          className="text-xs font-semibold uppercase tracking-wide"
-          style={{ color: style.color }}
-        >
-          {style.label}
-        </span>
-        <span className="sam-type-caption text-fg-muted">
-          {formatTimestamp(message.createdAt)}
-        </span>
-      </div>
-      <RenderedMarkdown content={message.content} inline />
-    </div>
-  );
-}
-
-/** Merged assistant bubble — concatenates streaming chunks into one message. */
-function AssistantBubble({ group }: { group: MessageGroup }) {
-  const style = roleStyles.assistant!;
-  const content = group.messages.map((m) => m.content).join('');
-
-  if (!content.trim()) return null;
-
-  return (
-    <div
-      className="p-3 px-4 rounded-md"
-      style={{
-        backgroundColor: style.bg,
-        borderLeft: `3px solid ${style.color}`,
-      }}
-    >
-      <div className="flex items-center gap-2 mb-2">
-        <span
-          className="text-xs font-semibold uppercase tracking-wide"
-          style={{ color: style.color }}
-        >
-          {style.label}
-        </span>
-        <span className="sam-type-caption text-fg-muted">
-          {formatTimestamp(group.createdAt)}
-        </span>
-      </div>
-      <RenderedMarkdown content={content} inline />
-    </div>
-  );
-}
-
-/** Compact tool activity block — groups consecutive tool calls into a summary. */
-function ToolActivityBlock({ group }: { group: MessageGroup }) {
-  const [expanded, setExpanded] = useState(false);
-
-  // Build summary lines from tool messages
-  const toolLines = group.messages.map((msg) => {
-    const kind = getToolKind(msg.toolMetadata as Record<string, unknown> | null);
-    const path = getToolPath(msg.toolMetadata as Record<string, unknown> | null);
-    const hasContent = !isPlaceholderContent(msg.content);
-    return { kind, path, content: hasContent ? msg.content : null, id: msg.id };
-  });
-
-  // Deduplicate: consecutive same-kind + same-path entries collapse into one
-  const deduped: typeof toolLines = [];
-  for (const line of toolLines) {
-    const prev = deduped[deduped.length - 1];
-    if (prev && prev.kind.label === line.kind.label && prev.path === line.path && !line.content) {
-      continue; // Skip duplicate status update for same tool+path
-    }
-    deduped.push(line);
-  }
-
-  // Count how many have meaningful content for the expand toggle
-  const contentLines = deduped.filter((l) => l.content);
-
-  return (
-    <div
-      className="rounded-md border border-border-default overflow-hidden"
-      style={{ backgroundColor: 'var(--sam-color-bg-inset)' }}
-    >
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 bg-transparent border-none cursor-pointer text-left"
-      >
-        {expanded
-          ? <ChevronDown size={14} className="text-fg-muted shrink-0" />
-          : <ChevronRight size={14} className="text-fg-muted shrink-0" />
-        }
-        <span className="text-xs font-medium text-fg-muted uppercase tracking-wide">
-          Activity
-        </span>
-        <span className="text-xs text-fg-muted">
-          {deduped.length} {deduped.length === 1 ? 'action' : 'actions'}
-        </span>
-      </button>
-
-      {/* Collapsed: show compact summary of tool actions */}
-      {!expanded && (
-        <div className="px-3 pb-2 flex flex-wrap gap-x-3 gap-y-1">
-          {deduped.map((line) => (
-            <span key={line.id} className="inline-flex items-center gap-1 text-xs text-fg-muted">
-              <line.kind.Icon size={12} />
-              <span>{line.kind.label}</span>
-              {line.path && (
-                <span className="font-mono opacity-70">
-                  {line.path.split('/').pop()}
+/** Renders a single ACP ConversationItem using the shared acp-client components. */
+function AcpConversationItemView({ item }: { item: ConversationItem }) {
+  switch (item.kind) {
+    case 'user_message':
+      return <AcpMessageBubble text={item.text} role="user" />;
+    case 'agent_message':
+      return <AcpMessageBubble text={item.text} role="agent" streaming={item.streaming} />;
+    case 'thinking':
+      return <AcpThinkingBlock text={item.text} active={item.active} />;
+    case 'tool_call':
+      return <AcpToolCallCard toolCall={item} />;
+    case 'plan':
+      return (
+        <div className="my-2 border border-border-default rounded-lg p-3 bg-surface">
+          <h4 className="text-xs font-medium text-fg-muted uppercase mb-2">Plan</h4>
+          <ul className="space-y-1">
+            {item.entries.map((entry, idx) => (
+              <li key={idx} className="flex items-center space-x-2 text-sm">
+                <span className={`inline-block h-2 w-2 rounded-full ${
+                  entry.status === 'completed' ? 'bg-green-400' :
+                  entry.status === 'in_progress' ? 'bg-blue-400 animate-pulse' : 'bg-gray-300'
+                }`} />
+                <span className={entry.status === 'completed' ? 'line-through text-fg-muted' : 'text-fg-primary'}>
+                  {entry.content}
                 </span>
-              )}
-            </span>
-          ))}
+              </li>
+            ))}
+          </ul>
         </div>
-      )}
-
-      {/* Expanded: show full details */}
-      {expanded && (
-        <div className="border-t border-border-default">
-          {deduped.map((line) => (
-            <div
-              key={line.id}
-              className="flex items-start gap-2 px-3 py-1.5 border-b border-border-default last:border-b-0"
-            >
-              <line.kind.Icon size={14} className="text-fg-muted shrink-0 mt-0.5" />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-fg-secondary">
-                    {line.kind.label}
-                  </span>
-                  {line.path && (
-                    <span className="text-xs font-mono text-fg-muted truncate">
-                      {line.path}
-                    </span>
-                  )}
-                </div>
-                {line.content && (
-                  <pre className="text-xs text-fg-muted mt-1 whitespace-pre-wrap break-words max-h-[200px] overflow-auto">
-                    {line.content}
-                  </pre>
-                )}
-              </div>
-            </div>
-          ))}
-          {contentLines.length === 0 && (
-            <div className="px-3 py-2 text-xs text-fg-muted">
-              No detailed output available.
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
+      );
+    case 'raw_fallback':
+      return null; // Skip raw fallbacks in project chat — typically protocol noise
+    default:
+      return null;
+  }
 }
 
-/** Renders a message group — dispatches to the right component by role. */
-function MessageGroupView({ group }: { group: MessageGroup }) {
-  if (group.role === 'assistant') {
-    return <AssistantBubble group={group} />;
-  }
-  if (group.role === 'tool') {
-    return <ToolActivityBlock group={group} />;
-  }
-  // user / system — render each message individually (usually just one)
-  return (
-    <>
-      {group.messages.map((msg) => (
-        <MessageBubble key={msg.id} message={msg} />
-      ))}
-    </>
-  );
+/** Converts DO-persisted ChatMessageResponse[] into ConversationItem[] for unified rendering. */
+function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): ConversationItem[] {
+  return msgs.reduce<ConversationItem[]>((acc, msg) => {
+    if (msg.role === 'user') {
+      acc.push({ kind: 'user_message', id: msg.id, text: msg.content, timestamp: msg.createdAt });
+    } else if (msg.role === 'assistant') {
+      // Merge consecutive assistant chunks into one item (same as groupMessages logic)
+      const last = acc[acc.length - 1];
+      if (last?.kind === 'agent_message') {
+        (last as { text: string }).text += msg.content;
+      } else {
+        acc.push({ kind: 'agent_message', id: msg.id, text: msg.content, streaming: false, timestamp: msg.createdAt });
+      }
+    } else if (msg.role === 'tool') {
+      const meta = msg.toolMetadata as Record<string, unknown> | null;
+      const kind = meta && typeof meta.kind === 'string' ? meta.kind : 'tool';
+      const locations = (meta?.locations as Array<{ path?: string; line?: number | null }>) ?? [];
+      acc.push({
+        kind: 'tool_call',
+        id: msg.id,
+        toolCallId: msg.id,
+        title: kind,
+        toolKind: kind,
+        status: 'completed',
+        content: isPlaceholderContent(msg.content) ? [] : [{ type: 'content', text: msg.content }],
+        locations: locations.map((l) => ({ path: l.path ?? '', line: l.line ?? null })),
+        timestamp: msg.createdAt,
+      });
+    } else if (msg.role === 'system') {
+      // Render system messages as agent messages with a system note
+      acc.push({ kind: 'agent_message', id: msg.id, text: `*System:* ${msg.content}`, streaming: false, timestamp: msg.createdAt });
+    }
+    return acc;
+  }, []);
 }
 
-/** Renders all messages with grouping applied. */
-function GroupedMessages({ messages }: { messages: ChatMessageResponse[] }) {
-  const groups = useMemo(() => groupMessages(messages), [messages]);
+/** Renders ConversationItem array with the ACP-style components. */
+function AcpMessages({ items }: { items: ConversationItem[] }) {
   return (
     <div className="grid gap-3">
-      {groups.map((group) => (
-        <MessageGroupView key={group.id} group={group} />
+      {items.map((item) => (
+        <AcpConversationItemView key={item.id} item={item} />
       ))}
     </div>
   );
@@ -740,23 +583,40 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
 
-      {/* Messages area */}
+      {/* Messages area — ACP items when connected, converted DO messages as fallback */}
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto min-h-0 p-4">
-        {hasMore && (
-          <div className="text-center mb-3">
-            <Button variant="ghost" size="sm" onClick={loadMore} loading={loadingMore}>
-              Load earlier messages
-            </Button>
-          </div>
-        )}
+        {(() => {
+          // When ACP is connected with items, use ACP rendering (richer: streaming, thinking, tool status)
+          const acpItems = agentSession.messages.items;
+          const useAcpRendering = agentSession.isAgentActive && acpItems.length > 0;
 
-        {messages.length === 0 ? (
-          <div className="text-fg-muted text-sm text-center p-8">
-            {sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
-          </div>
-        ) : (
-          <GroupedMessages messages={messages} />
-        )}
+          if (useAcpRendering) {
+            return <AcpMessages items={acpItems} />;
+          }
+
+          // Fallback: convert DO-persisted messages to ConversationItem for unified rendering
+          const convertedItems = chatMessagesToConversationItems(messages);
+
+          return (
+            <>
+              {hasMore && (
+                <div className="text-center mb-3">
+                  <Button variant="ghost" size="sm" onClick={loadMore} loading={loadingMore}>
+                    Load earlier messages
+                  </Button>
+                </div>
+              )}
+
+              {convertedItems.length === 0 ? (
+                <div className="text-fg-muted text-sm text-center p-8">
+                  {sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
+                </div>
+              ) : (
+                <AcpMessages items={convertedItems} />
+              )}
+            </>
+          );
+        })()}
 
         <div ref={messagesEndRef} />
       </div>
