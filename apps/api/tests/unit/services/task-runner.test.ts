@@ -33,7 +33,6 @@ vi.mock('../../../src/services/workspace-names', () => ({
 vi.mock('../../../src/services/limits', () => ({
   getRuntimeLimits: vi.fn().mockReturnValue({
     maxNodesPerUser: 10,
-    maxWorkspacesPerUser: 10,
     maxWorkspacesPerNode: 10,
     maxAgentSessionsPerWorkspace: 10,
     nodeHeartbeatStaleSeconds: 180,

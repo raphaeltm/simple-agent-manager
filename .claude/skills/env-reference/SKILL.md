@@ -51,7 +51,6 @@ See `apps/api/.env.example` for the full list. Key variables:
 
 ### Resource Limits
 - `MAX_NODES_PER_USER` — Runtime node cap
-- `MAX_WORKSPACES_PER_USER` — Runtime workspace cap
 - `MAX_WORKSPACES_PER_NODE` — Per-node workspace cap
 - `MAX_AGENT_SESSIONS_PER_WORKSPACE` — Runtime session cap
 - `MAX_PROJECTS_PER_USER` — Runtime project cap

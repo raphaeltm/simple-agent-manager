@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, FolderKanban, Server, Settings, Shield } from 'lucide-react';
+import { Home, FolderKanban, Server, Monitor, Settings, Shield } from 'lucide-react';
 import { useAuth } from './AuthProvider';
 
 export interface NavItem {
@@ -12,6 +12,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', path: '/dashboard', icon: <Home size={18} /> },
   { label: 'Projects', path: '/projects', icon: <FolderKanban size={18} /> },
   { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
+  { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
   { label: 'Settings', path: '/settings', icon: <Settings size={18} /> },
 ];
 
@@ -40,6 +41,7 @@ export function NavSidebar({ className }: NavSidebarProps) {
           <Link
             key={item.path}
             to={item.path}
+            aria-current={active ? 'page' : undefined}
             className={`flex items-center gap-3 px-3 py-2 rounded-sm no-underline text-sm font-medium transition-all duration-150 ${
               active
                 ? 'text-accent bg-surface-hover'

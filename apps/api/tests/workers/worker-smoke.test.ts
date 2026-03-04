@@ -34,7 +34,6 @@ describe('Worker smoke tests (workerd runtime)', () => {
       }>();
 
       expect(body.limits.maxNodesPerUser).toBe(10);
-      expect(body.limits.maxWorkspacesPerUser).toBe(10);
       expect(body.limits.maxProjectsPerUser).toBe(50);
     });
   });

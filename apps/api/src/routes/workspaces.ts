@@ -447,15 +447,6 @@ workspacesRoutes.post('/', async (c) => {
   }
   const normalizedRepository = resolvedRepository.toLowerCase();
 
-  // Use COUNT instead of fetching all IDs (P1 fix).
-  const [userWorkspaceCount] = await db
-    .select({ count: count() })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.userId, userId));
-  if ((userWorkspaceCount?.count ?? 0) >= limits.maxWorkspacesPerUser) {
-    throw errors.badRequest(`Maximum ${limits.maxWorkspacesPerUser} workspaces allowed`);
-  }
-
   const installationRows = await db
     .select({ id: schema.githubInstallations.id })
     .from(schema.githubInstallations)
@@ -562,7 +553,6 @@ workspacesRoutes.post('/', async (c) => {
   }
 
   const nodeCountForUser = userNodeCountVal + (mustProvisionNode ? 1 : 0);
-  const workspaceCountForUser = (userWorkspaceCount?.count ?? 0) + 1;
   const reusedExistingNode = !mustProvisionNode;
   const workspaceCountOnNodeBefore = nodeWorkspaceCountVal;
 
@@ -576,7 +566,6 @@ workspacesRoutes.post('/', async (c) => {
       reusedExistingNode,
       workspaceCountOnNodeBefore,
       nodeCountForUser,
-      workspaceCountForUser,
     },
     c.env
   );
@@ -590,7 +579,6 @@ workspacesRoutes.post('/', async (c) => {
       repository: normalizedRepository,
       reusedExistingNode,
       nodeCountForUser,
-      workspaceCountForUser,
     },
     c.env
   );

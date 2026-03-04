@@ -4,6 +4,7 @@ import {
   Home,
   FolderKanban,
   Server,
+  Monitor,
   Settings,
   Shield,
   Plus,
@@ -175,6 +176,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
       { id: 'nav-dashboard', label: 'Dashboard', path: '/dashboard', icon: <Home size={14} /> },
       { id: 'nav-projects', label: 'Projects', path: '/projects', icon: <FolderKanban size={14} /> },
       { id: 'nav-nodes', label: 'Nodes', path: '/nodes', icon: <Server size={14} /> },
+      { id: 'nav-workspaces', label: 'Workspaces', path: '/workspaces', icon: <Monitor size={14} /> },
       { id: 'nav-settings', label: 'Settings', path: '/settings', icon: <Settings size={14} /> },
     ];
     if (isSuperadmin) {
