@@ -44,6 +44,8 @@ export async function startTaskRunnerDO(
     projectDefaultVmSize?: VMSize | null;
     /** Chat session ID created at task submit time (TDF-6) */
     chatSessionId?: string | null;
+    /** Agent type to use (e.g., 'claude-code', 'openai-codex') */
+    agentType?: string | null;
   },
 ): Promise<void> {
   const stub = getStub(env, input.taskId);
@@ -67,6 +69,7 @@ export async function startTaskRunnerDO(
       outputBranch: input.outputBranch ?? null,
       projectDefaultVmSize: input.projectDefaultVmSize ?? null,
       chatSessionId: input.chatSessionId ?? null,
+      agentType: input.agentType ?? null,
     },
   };
 

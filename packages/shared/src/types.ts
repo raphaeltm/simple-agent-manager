@@ -503,6 +503,8 @@ export interface SubmitTaskRequest {
   vmSize?: VMSize;
   vmLocation?: VMLocation;
   nodeId?: string;
+  /** Agent type to use for the task (e.g., 'claude-code', 'openai-codex') */
+  agentType?: string;
 }
 
 export interface SubmitTaskResponse {

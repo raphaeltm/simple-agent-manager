@@ -260,6 +260,7 @@ taskSubmitRoutes.post('/submit', async (c) => {
       outputBranch: branchName,
       projectDefaultVmSize: project.defaultVmSize as VMSize | null,
       chatSessionId: sessionId,
+      agentType: body.agentType ?? null,
     });
   } catch (err) {
     // TaskRunner DO startup failed — mark task as failed.

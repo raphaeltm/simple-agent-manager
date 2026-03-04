@@ -96,6 +96,8 @@ interface TaskRunConfig {
   projectDefaultVmSize: VMSize | null;
   /** Chat session ID created at task submit time (TDF-6: single session per task) */
   chatSessionId: string | null;
+  /** Agent type to use (e.g., 'claude-code', 'openai-codex'). Falls back to DEFAULT_TASK_AGENT_TYPE env var. */
+  agentType: string | null;
 }
 
 export interface TaskRunnerState {
@@ -735,12 +737,15 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       const sessionLabel = `Task: ${state.config.taskTitle.slice(0, 40)}`;
       const now = new Date().toISOString();
 
+      const agentType = state.config.agentType || this.env.DEFAULT_TASK_AGENT_TYPE || 'claude-code';
+
       await db.insert(schema.agentSessions).values({
         id: sessionId,
         workspaceId: state.stepResults.workspaceId,
         userId: state.userId,
         status: 'running',
         label: sessionLabel,
+        agentType,
         createdAt: now,
         updatedAt: now,
       });
@@ -771,7 +776,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     // a retry will skip creation and retry only the start call.
     if (!state.stepResults.agentStarted) {
       const { startAgentSessionOnNode } = await import('../services/node-agent');
-      const agentType = this.env.DEFAULT_TASK_AGENT_TYPE || 'claude-code';
+      const agentType = state.config.agentType || this.env.DEFAULT_TASK_AGENT_TYPE || 'claude-code';
       const initialPrompt = state.config.taskDescription || state.config.taskTitle;
 
       await startAgentSessionOnNode(
