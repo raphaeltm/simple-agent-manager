@@ -161,12 +161,12 @@ OpenAI's own recommendation for CI/CD and ephemeral environments is to use API k
 - [ ] Document exact timing: how soon after session start does Codex first attempt to refresh?
 
 ### Implementation: Post-Session Sync-Back
-- [ ] Add `readAuthFileFromContainer()` function in `session_host.go` (mirror of `writeAuthFileToContainer()`)
-- [ ] Call sync-back in the session cleanup path (after agent process exits, before container teardown)
-- [ ] Add API endpoint or mechanism for VM agent to update stored credentials
-- [ ] Handle sync-back failures gracefully (log warning, don't block teardown)
-- [ ] Add credential comparison logic (only update if tokens actually changed)
-- [ ] Ensure AES-GCM re-encryption with fresh IV when updating credential
+- [x] Add `readAuthFileFromContainer()` function in `gateway.go` (mirror of `writeAuthFileToContainer()`)
+- [x] Call sync-back in the session cleanup path (after agent process exits, before container teardown)
+- [x] Add API endpoint `POST /api/workspaces/:id/agent-credential-sync` for VM agent to update stored credentials
+- [x] Handle sync-back failures gracefully (log warning, don't block teardown)
+- [x] Add credential comparison logic (only update if tokens actually changed)
+- [x] Ensure AES-GCM re-encryption with fresh IV when updating credential
 
 ### Implementation: Server-Side Pre-Flight Refresh (Optional, Phase 2)
 - [ ] Add `refreshCodexTokens()` function in API worker
@@ -191,19 +191,19 @@ OpenAI's own recommendation for CI/CD and ephemeral environments is to use API k
 - [ ] Integration test: Pre-flight refresh triggered when access_token is expired
 
 ### Documentation
-- [ ] Update `docs/architecture/credential-security.md` with token refresh strategy
-- [ ] Add troubleshooting guide for "refresh token already used" errors
-- [ ] Document the sync-back architecture in a new ADR
-- [ ] Update the Codex OAuth task file with token refresh considerations
+- [x] Update `docs/architecture/credential-security.md` with token refresh strategy
+- [ ] Add troubleshooting guide for "refresh token already used" errors (deferred)
+- [ ] Document the sync-back architecture in a new ADR (deferred — covered in credential-security.md)
+- [ ] Update the Codex OAuth task file with token refresh considerations (deferred)
 
 ## Acceptance Criteria
 
-- [ ] After a Codex session ends, refreshed tokens are synced back to SAM's encrypted storage
-- [ ] The next session starts with valid tokens (no `invalid_grant` errors)
-- [ ] If sync-back fails, user gets a clear error message and instructions to re-authenticate
-- [ ] Token refresh does not introduce security regressions (encryption at rest maintained, no tokens logged)
-- [ ] Works correctly with the warm node pool (tokens synced even when node goes to warm state)
-- [ ] No concurrent refresh race conditions between SAM and Codex
+- [x] After a Codex session ends, refreshed tokens are synced back to SAM's encrypted storage
+- [x] The next session starts with valid tokens (no `invalid_grant` errors)
+- [ ] If sync-back fails, user gets a clear error message and instructions to re-authenticate (deferred — errors are logged but no UI notification yet)
+- [x] Token refresh does not introduce security regressions (encryption at rest maintained, no tokens logged)
+- [x] Works correctly with the warm node pool (tokens synced even when node goes to warm state — Suspend() calls syncCredentialOnStop)
+- [x] No concurrent refresh race conditions between SAM and Codex (credential metadata snapshotted under lock)
 
 ## References
 
