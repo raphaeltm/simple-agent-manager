@@ -2,7 +2,7 @@
 
 **Created**: 2026-03-04
 **Priority**: Medium
-**Effort**: Medium (2-3 sessions)
+**Effort**: Small-Medium (1-2 sessions)
 
 ## Context
 
@@ -12,13 +12,22 @@ Adding Vibe as a fourth agent gives users access to Mistral's models (Devstral 2
 
 ## Technical Analysis
 
-### ACP Compatibility
+### ACP Compatibility (VERIFIED — Not a Blocker)
 
-- **SAM uses**: `acp-go-sdk v0.6.3` ([source](https://github.com/coder/acp-go-sdk))
-- **Vibe implements**: ACP v0.8.0 ([DeepWiki reference](https://deepwiki.com/mistralai/mistral-vibe/3.2-agent-control-plane-(vibe-acp)))
-- **Core methods match**: `initialize`, `session/new`, `session/load`, `session/prompt`, `session/update`, `session/request_permission` are all present in both
-- **Version gap risk**: The two-minor-version gap (0.6 → 0.8) may cause protocol negotiation failures during `Initialize`. This is the **highest-priority item to verify** before any implementation work.
-- **Extra methods in Vibe**: `fs/read_text_file`, `fs/write_text_file` (bidirectional server→client requests for file operations). The Go SDK may not know how to dispatch these. If unhandled, they may error or be silently dropped — needs testing.
+ACP uses **two separate version numbers**:
+- **Protocol version** (integer) — only bumped for **breaking changes**. Currently `1` everywhere.
+- **Schema version** (semver) — tracks SDK/spec releases with additive changes. Backward-compatible within the same protocol version.
+
+| Component | Schema Version | Protocol Version |
+|-----------|---------------|-----------------|
+| SAM (`acp-go-sdk v0.6.3`) | 0.6.3 | **1** |
+| Vibe (`vibe-acp`) | ~0.8.0 | **1** |
+| ACP spec (latest) | 0.10.8 | **1** |
+| Go SDK main (unreleased) | 0.10.8 | **1** |
+
+**All agents negotiate protocol version `1` — they are fully compatible.** The schema version differences only add new optional methods/capabilities. Our v0.6.3 SDK already defines `fs/read_text_file`, `fs/write_text_file`, and `session/request_permission` as client methods, so Vibe's bidirectional file ops are supported.
+
+**Optional upgrade path**: The Go SDK main branch tracks schema 0.10.8 (adds `session/fork`, `session/list`, `session/resume`, `session/set_config_option`, `$/cancel_request`) but no new tag has been cut since v0.6.3 (Nov 2025). We can upgrade later for new features; it is **not required** for Vibe integration.
 
 ### Authentication
 
@@ -58,22 +67,15 @@ Vibe reads config from `~/.vibe/config.toml` (or `./.vibe/config.toml` per-proje
 
 The model can also be configured via the `MISTRAL_MODEL` env var or similar — needs verification.
 
-### Programmatic Fallback (if ACP fails)
+### Programmatic Fallback
 
-If ACP version incompatibility proves intractable, Vibe supports non-interactive execution:
+Vibe also supports non-interactive execution without ACP:
 ```bash
 vibe --prompt "task description" --max-turns 50
 ```
-This loses streaming and session management but would still enable task execution. Document as a fallback, not the primary path.
+This loses streaming and session management. Not needed given ACP compatibility is confirmed, but useful to know for debugging.
 
 ## Implementation Checklist
-
-### Phase 0: ACP Compatibility Verification (BLOCKING)
-- [ ] Test `vibe-acp` binary with `acp-go-sdk v0.6.3` Initialize handshake
-- [ ] Verify `NewSession` and `Prompt` work end-to-end
-- [ ] Test `LoadSession` (session resumption)
-- [ ] Document any `fs/*` bidirectional method handling issues
-- [ ] If incompatible: assess upgrading `acp-go-sdk` to a newer version or determine the fallback strategy
 
 ### Phase 1: Shared Types
 - [ ] Add `'mistral-vibe'` to `AgentType` union in `packages/shared/src/agents.ts`
@@ -111,20 +113,19 @@ This loses streaming and session management but would still enable task executio
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| ACP v0.6 ↔ v0.8 protocol mismatch | **HIGH** | Phase 0 must verify before any code. If incompatible, upgrade Go SDK or use `--prompt` fallback |
 | `vibe-acp` binary not available for target arch | Medium | Verify GitHub releases include linux-x86_64 and linux-aarch64. Fall back to pip install if binary unavailable |
-| `fs/*` bidirectional requests unhandled | Medium | Go SDK may silently drop unknown methods. Test and add handlers if needed, or configure Vibe to not use them |
 | Binary download URL changes across releases | Low | Pin to `/releases/latest/download/` which auto-redirects. Consider caching in R2 alongside vm-agent binary |
 | Headless mode requires pre-configured config.toml | Low | Write minimal config via `docker exec` before starting agent, similar to Codex auth file injection |
 | Model selection mechanism unclear | Low | Research whether `MISTRAL_MODEL` env var works or if config.toml `active_model` is required |
 
+**Previously flagged risk (resolved):** ACP protocol version mismatch is NOT a concern. Both SAM (v0.6.3) and Vibe (v0.8.0) use protocol version `1`. The `fs/*` client methods are already defined in our SDK version.
+
 ## Open Questions
 
-1. **What ACP protocol version does `acp-go-sdk v0.6.3` negotiate?** Need to check the source or test directly.
-2. **Does `vibe-acp` accept env var for model selection?** Or must it be `active_model` in `config.toml`?
-3. **What happens when `vibe-acp` sends `fs/read_text_file` and the client doesn't handle it?** Error? Timeout? Fallback?
-4. **Should we cache `vibe-acp` binaries in R2** alongside the vm-agent binary for reliability?
-5. **Is there a `--no-permission-prompt` flag or env var** for vibe-acp to auto-approve all tool use in headless mode?
+1. **Does `vibe-acp` accept env var for model selection?** Or must it be `active_model` in `config.toml`?
+2. **Should we cache `vibe-acp` binaries in R2** alongside the vm-agent binary for reliability?
+3. **Is there a `--no-permission-prompt` flag or env var** for vibe-acp to auto-approve all tool use in headless mode?
+4. **Optional: upgrade `acp-go-sdk`?** Main branch tracks schema 0.10.8 with new methods (`session/fork`, `session/list`, `$/cancel_request`). No new tag yet. Worth upgrading independently of Vibe integration for all agents.
 
 ## Acceptance Criteria
 
