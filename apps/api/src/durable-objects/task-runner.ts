@@ -333,25 +333,47 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         throw Object.assign(new Error('Specified node is not available'), { permanent: true });
       }
 
-      state.stepResults.nodeId = node.id;
-      await this.advanceToStep(state, 'workspace_creation');
-      return;
+      // Verify the VM agent is actually reachable before reusing
+      if (await this.verifyNodeAgentHealthy(node.id)) {
+        state.stepResults.nodeId = node.id;
+        await this.advanceToStep(state, 'workspace_creation');
+        return;
+      }
+      log.warn('task_runner_do.preferred_node_unhealthy', {
+        taskId: state.taskId,
+        nodeId: node.id,
+      });
+      throw Object.assign(new Error('Specified node is not reachable'), { permanent: true });
     }
 
     // Try warm pool first
     const nodeId = await this.tryClaimWarmNode(state);
     if (nodeId) {
-      state.stepResults.nodeId = nodeId;
-      await this.advanceToStep(state, 'workspace_creation');
-      return;
+      if (await this.verifyNodeAgentHealthy(nodeId)) {
+        state.stepResults.nodeId = nodeId;
+        await this.advanceToStep(state, 'workspace_creation');
+        return;
+      }
+      // Warm node agent not healthy — fall through to try other options
+      log.warn('task_runner_do.warm_node_unhealthy', {
+        taskId: state.taskId,
+        nodeId,
+      });
     }
 
     // Try existing running nodes with capacity
     const existingNodeId = await this.findNodeWithCapacity(state);
     if (existingNodeId) {
-      state.stepResults.nodeId = existingNodeId;
-      await this.advanceToStep(state, 'workspace_creation');
-      return;
+      if (await this.verifyNodeAgentHealthy(existingNodeId)) {
+        state.stepResults.nodeId = existingNodeId;
+        await this.advanceToStep(state, 'workspace_creation');
+        return;
+      }
+      // Existing node agent not healthy — fall through to provision
+      log.warn('task_runner_do.existing_node_unhealthy', {
+        taskId: state.taskId,
+        nodeId: existingNodeId,
+      });
     }
 
     // No node found — need to provision
@@ -481,13 +503,33 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       clearTimeout(timeoutId);
 
       if (response.ok) {
-        log.info('task_runner_do.step.node_agent_ready', {
+        // Verify response is actually from the VM agent, not the API Worker.
+        // The API Worker's /health also returns 200 due to Cloudflare same-zone
+        // routing, but lacks the nodeId field that the VM agent includes.
+        let identityVerified = false;
+        try {
+          const body = await response.json() as Record<string, unknown>;
+          identityVerified = body.nodeId === state.stepResults.nodeId;
+        } catch {
+          // Could not parse response — not the VM agent
+        }
+
+        if (identityVerified) {
+          log.info('task_runner_do.step.node_agent_ready', {
+            taskId: state.taskId,
+            nodeId: state.stepResults.nodeId,
+            elapsedMs: elapsed,
+          });
+          await this.advanceToStep(state, 'workspace_creation');
+          return;
+        }
+
+        log.warn('task_runner_do.step.node_agent_ready.identity_mismatch', {
           taskId: state.taskId,
           nodeId: state.stepResults.nodeId,
           elapsedMs: elapsed,
+          message: 'Health check returned 200 but response is not from the expected VM agent',
         });
-        await this.advanceToStep(state, 'workspace_creation');
-        return;
       }
     } catch {
       // Agent not ready yet — schedule another poll
@@ -1119,6 +1161,27 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
   // =========================================================================
   // Node selection helpers
   // =========================================================================
+
+  /**
+   * Verify that the VM agent on a node is actually healthy and responding.
+   * Returns true only if the health response contains the expected nodeId,
+   * which distinguishes the real VM agent from the API Worker's own /health
+   * endpoint (which also returns 200 due to Cloudflare same-zone routing).
+   */
+  private async verifyNodeAgentHealthy(nodeId: string): Promise<boolean> {
+    const baseUrl = `http://vm-${nodeId.toLowerCase()}.${this.env.BASE_DOMAIN}:8080`;
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`${baseUrl}/health`, { method: 'GET', signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (!response.ok) return false;
+      const body = await response.json() as Record<string, unknown>;
+      return body.nodeId === nodeId;
+    } catch {
+      return false;
+    }
+  }
 
   private async tryClaimWarmNode(state: TaskRunnerState): Promise<string | null> {
     if (!this.env.NODE_LIFECYCLE) return null;
