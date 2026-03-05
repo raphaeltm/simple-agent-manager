@@ -37,7 +37,7 @@ import { signCallbackToken, verifyCallbackToken } from '../services/jwt';
 import { recordNodeRoutingMetric } from '../services/telemetry';
 import { getDecryptedAgentKey } from './credentials';
 import { getInstallationToken } from '../services/github-app';
-import { appendBootLog, getBootLogs } from '../services/boot-log';
+import { appendBootLog, getBootLogs, writeBootLogs } from '../services/boot-log';
 import { requireOwnedProject } from '../middleware/project-auth';
 import { decrypt, encrypt } from '../services/encryption';
 import * as projectDataService from '../services/project-data';
@@ -732,10 +732,12 @@ workspacesRoutes.post('/:id/restart', async (c) => {
   const node = await getOwnedNode(db, workspace.nodeId, userId);
   assertNodeOperational(node, 'restart workspace');
 
+  // Clear previous error state and boot logs before starting new provisioning
   await db
     .update(schema.workspaces)
     .set({ status: 'creating', errorMessage: null, updatedAt: new Date().toISOString() })
     .where(eq(schema.workspaces.id, workspace.id));
+  await writeBootLogs(c.env.KV, workspace.id, [], c.env);
 
   c.executionCtx.waitUntil(
     (async () => {
@@ -786,10 +788,12 @@ workspacesRoutes.post('/:id/rebuild', async (c) => {
   const node = await getOwnedNode(db, workspace.nodeId, userId);
   assertNodeOperational(node, 'rebuild workspace');
 
+  // Clear previous error state and boot logs before starting new provisioning
   await db
     .update(schema.workspaces)
     .set({ status: 'creating', errorMessage: null, updatedAt: new Date().toISOString() })
     .where(eq(schema.workspaces.id, workspace.id));
+  await writeBootLogs(c.env.KV, workspace.id, [], c.env);
 
   c.executionCtx.waitUntil(
     (async () => {

@@ -611,7 +611,8 @@ export function Workspace() {
     try {
       setActionLoading(true);
       await restartWorkspace(id);
-      setWorkspace((prev) => (prev ? { ...prev, status: 'creating' } : null));
+      // Clear previous error state and boot logs for a fresh provisioning view
+      setWorkspace((prev) => (prev ? { ...prev, status: 'creating', errorMessage: null, bootLogs: [] } : null));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to restart workspace');
     } finally {
@@ -628,7 +629,8 @@ export function Workspace() {
     try {
       setActionLoading(true);
       await rebuildWorkspace(id);
-      setWorkspace((prev) => (prev ? { ...prev, status: 'creating' } : null));
+      // Clear previous error state and boot logs for a fresh provisioning view
+      setWorkspace((prev) => (prev ? { ...prev, status: 'creating', errorMessage: null, bootLogs: [] } : null));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to rebuild workspace');
     } finally {
