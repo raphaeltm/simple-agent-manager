@@ -13,11 +13,15 @@
  * Design decision: the AI call is synchronous (awaited before DB insert)
  * rather than async via waitUntil. This keeps the title consistent across
  * the task record, session label, and activity event, and avoids a second
- * DB write. The timeout (configurable, default 5s) bounds worst-case latency.
+ * DB write. The per-attempt timeout (configurable, default 5s) bounds
+ * individual AI call latency.
  *
  * Retry: Under burst load (multiple concurrent tasks), Workers AI may
- * rate-limit or respond slowly. Retry with exponential backoff (configurable,
- * default 2 retries with 1s base delay) recovers from transient failures.
+ * rate-limit requests. Retry with exponential backoff (configurable,
+ * default 2 retries with 1s base delay, 4s max delay) recovers from
+ * transient rate-limit and error failures. Timeouts are NOT retried —
+ * if Workers AI is slow, retrying immediately wastes more of the Worker's
+ * 30-second wall-clock budget.
  */
 
 import { Agent } from '@mastra/core/agent';
@@ -29,6 +33,7 @@ import {
   DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD,
   DEFAULT_TASK_TITLE_MAX_RETRIES,
   DEFAULT_TASK_TITLE_RETRY_DELAY_MS,
+  DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS,
 } from '@simple-agent-manager/shared';
 import { log } from '../lib/logger';
 
@@ -114,6 +119,7 @@ export interface TaskTitleConfig {
   shortMessageThreshold?: number;
   maxRetries?: number;
   retryDelayMs?: number;
+  retryMaxDelayMs?: number;
 }
 
 /** Narrow interface for the env vars read by getTaskTitleConfig. */
@@ -125,6 +131,7 @@ export interface TaskTitleEnvVars {
   TASK_TITLE_SHORT_MESSAGE_THRESHOLD?: string;
   TASK_TITLE_MAX_RETRIES?: string;
   TASK_TITLE_RETRY_DELAY_MS?: string;
+  TASK_TITLE_RETRY_MAX_DELAY_MS?: string;
 }
 
 /**
@@ -142,6 +149,7 @@ export function getTaskTitleConfig(env: TaskTitleEnvVars): TaskTitleConfig {
     ),
     maxRetries: parseInt(env.TASK_TITLE_MAX_RETRIES || String(DEFAULT_TASK_TITLE_MAX_RETRIES), 10),
     retryDelayMs: parseInt(env.TASK_TITLE_RETRY_DELAY_MS || String(DEFAULT_TASK_TITLE_RETRY_DELAY_MS), 10),
+    retryMaxDelayMs: parseInt(env.TASK_TITLE_RETRY_MAX_DELAY_MS || String(DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS), 10),
   };
 }
 
@@ -194,7 +202,7 @@ function sleep(ms: number): Promise<void> {
  * - Short messages (≤ threshold) are returned as-is
  * - If AI generation is disabled or fails, falls back to truncation
  * - Uses AbortSignal.timeout for clean cancellation without timer leaks
- * - Retries with exponential backoff on transient failures (timeout, rate limit)
+ * - Retries with exponential backoff on rate-limit and generic errors (NOT timeouts)
  */
 export async function generateTaskTitle(
   ai: Ai,
@@ -208,6 +216,7 @@ export async function generateTaskTitle(
   const shortThreshold = config.shortMessageThreshold ?? DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD;
   const maxRetries = config.maxRetries ?? DEFAULT_TASK_TITLE_MAX_RETRIES;
   const retryDelayMs = config.retryDelayMs ?? DEFAULT_TASK_TITLE_RETRY_DELAY_MS;
+  const retryMaxDelayMs = config.retryMaxDelayMs ?? DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS;
 
   // Short messages don't need AI generation
   if (message.length <= shortThreshold) {
@@ -219,21 +228,21 @@ export async function generateTaskTitle(
     return truncateTitle(message, maxLength);
   }
 
+  // Construct agent once outside the retry loop — no per-attempt state to reset
+  const workersAi = createWorkersAI({ binding: ai });
+  const model = workersAi(modelId as Parameters<typeof workersAi>[0]);
+  const agent = new Agent({
+    id: 'task-title-generator',
+    name: 'Task Title Generator',
+    instructions: buildSystemInstructions(maxLength),
+    model,
+  });
+
   const totalAttempts = 1 + maxRetries;
   let lastError: { category: string; message: string } | undefined;
 
   for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     try {
-      const workersAi = createWorkersAI({ binding: ai });
-      const model = workersAi(modelId as Parameters<typeof workersAi>[0]);
-
-      const agent = new Agent({
-        id: 'task-title-generator',
-        name: 'Task Title Generator',
-        instructions: buildSystemInstructions(maxLength),
-        model,
-      });
-
       // Use AbortSignal.timeout for clean cancellation without timer leaks.
       // Supported in Workers runtime since compatibility_date 2023-03-14.
       const result = await agent.generate(message, {
@@ -259,9 +268,14 @@ export async function generateTaskTitle(
       const classified = classifyError(err);
       lastError = classified;
 
-      if (attempt < totalAttempts) {
-        // Exponential backoff: baseDelay * 2^(attempt-1)
-        const delay = retryDelayMs * Math.pow(2, attempt - 1);
+      // Timeouts are not retried — if Workers AI is already slow, retrying
+      // immediately wastes more of the Worker's 30-second wall-clock budget.
+      // Only rate-limit and generic errors are worth retrying.
+      const shouldRetry = attempt < totalAttempts && classified.category !== 'timeout';
+
+      if (shouldRetry) {
+        // Exponential backoff with cap: min(baseDelay * 2^(attempt-1), maxDelay)
+        const delay = Math.min(retryDelayMs * Math.pow(2, attempt - 1), retryMaxDelayMs);
         log.warn('task_title.retrying', {
           error: classified.message,
           category: classified.category,
@@ -281,11 +295,12 @@ export async function generateTaskTitle(
           attempt,
           totalAttempts,
         });
+        break; // No more retries — exit loop
       }
     }
   }
 
-  // All attempts exhausted — fall back to truncation
+  // All attempts exhausted or non-retryable error — fall back to truncation
   log.warn('task_title.all_retries_exhausted', {
     modelId,
     messageLength: message.length,

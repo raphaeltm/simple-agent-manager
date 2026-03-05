@@ -70,8 +70,9 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | `TASK_TITLE_TIMEOUT_MS` | Timeout (ms) for AI title generation before falling back to truncation | `5000` |
 | `TASK_TITLE_GENERATION_ENABLED` | Set to `false` to disable AI generation entirely | `true` |
 | `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | Messages at or below this length bypass AI | `100` |
-| `TASK_TITLE_MAX_RETRIES` | Max retry attempts on AI generation failure (timeout, rate limit) | `2` |
+| `TASK_TITLE_MAX_RETRIES` | Max retry attempts on AI generation failure (rate limit, transient errors) | `2` |
 | `TASK_TITLE_RETRY_DELAY_MS` | Base delay (ms) between retries (exponential backoff: delay × 2^attempt) | `1000` |
+| `TASK_TITLE_RETRY_MAX_DELAY_MS` | Max delay (ms) cap for retry backoff | `4000` |
 
 **Add environment secrets** (hidden):
 

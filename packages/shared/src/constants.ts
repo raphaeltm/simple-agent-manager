@@ -217,6 +217,9 @@ export const DEFAULT_TASK_TITLE_MAX_RETRIES = 2;
 /** Default base delay (ms) between retry attempts (exponential backoff). Override via TASK_TITLE_RETRY_DELAY_MS env var. */
 export const DEFAULT_TASK_TITLE_RETRY_DELAY_MS = 1000;
 
+/** Default max delay (ms) cap for retry backoff. Override via TASK_TITLE_RETRY_MAX_DELAY_MS env var. */
+export const DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS = 4000;
+
 // =============================================================================
 // Agent Settings
 // =============================================================================

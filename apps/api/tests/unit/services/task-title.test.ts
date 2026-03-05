@@ -575,33 +575,105 @@ describe('generateTaskTitle', () => {
     expect(callCount).toBe(3);
   });
 
-  it('retries on timeout then succeeds', async () => {
+  it('does not retry on timeout — falls back immediately', async () => {
     const { Agent } = await import('@mastra/core/agent');
     let callCount = 0;
     (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
       generate: vi.fn().mockImplementation((_msg: string, options?: { abortSignal?: AbortSignal }) => {
         callCount++;
-        if (callCount === 1) {
-          // First attempt times out
-          return new Promise((resolve, reject) => {
-            const timer = setTimeout(() => resolve({ text: 'Late' }), 10000);
-            if (options?.abortSignal) {
-              options.abortSignal.addEventListener('abort', () => {
-                clearTimeout(timer);
-                reject(options.abortSignal!.reason ?? new Error('Aborted'));
-              });
-            }
-          });
-        }
-        return Promise.resolve({ text: 'Second Attempt Title' });
+        // Simulate timeout on every attempt
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => resolve({ text: 'Late' }), 10000);
+          if (options?.abortSignal) {
+            options.abortSignal.addEventListener('abort', () => {
+              clearTimeout(timer);
+              reject(options.abortSignal!.reason ?? new Error('Aborted'));
+            });
+          }
+        });
       }),
     }));
 
-    const long = 'Task that times out on first try. ' + 't'.repeat(100);
-    const config: TaskTitleConfig = { timeoutMs: 50, maxRetries: 1, retryDelayMs: 10 };
+    const long = 'Task that times out. ' + 't'.repeat(100);
+    const config: TaskTitleConfig = { timeoutMs: 50, maxRetries: 2, retryDelayMs: 10 };
     const result = await generateTaskTitle(mockAi, long, config);
-    expect(result).toBe('Second Attempt Title');
+    expect(result).toBe(truncateTitle(long, 100));
+    // Only 1 attempt — timeouts are not retried
+    expect(callCount).toBe(1);
+  });
+
+  it('retries on rate limit error then succeeds', async () => {
+    const { Agent } = await import('@mastra/core/agent');
+    let callCount = 0;
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      generate: vi.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.reject(new Error('Rate limit exceeded'));
+        }
+        return Promise.resolve({ text: 'Rate Limit Recovery Title' });
+      }),
+    }));
+
+    const long = 'Task that hits rate limit on first try. ' + 'r'.repeat(100);
+    const config: TaskTitleConfig = { maxRetries: 1, retryDelayMs: 10 };
+    const result = await generateTaskTitle(mockAi, long, config);
+    expect(result).toBe('Rate Limit Recovery Title');
     expect(callCount).toBe(2);
+  });
+
+  it('does not retry on empty AI response — falls back immediately', async () => {
+    const { Agent } = await import('@mastra/core/agent');
+    let callCount = 0;
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      generate: vi.fn().mockImplementation(() => {
+        callCount++;
+        return Promise.resolve({ text: '' });
+      }),
+    }));
+
+    const long = 'Task where AI gives empty answer. ' + 'e'.repeat(100);
+    const config: TaskTitleConfig = { maxRetries: 2, retryDelayMs: 10 };
+    const result = await generateTaskTitle(mockAi, long, config);
+    expect(result).toBe(truncateTitle(long, 100));
+    expect(callCount).toBe(1); // No retry on empty response
+  });
+
+  it('falls back when first attempt throws and retry returns empty string', async () => {
+    const { Agent } = await import('@mastra/core/agent');
+    let callCount = 0;
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      generate: vi.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.reject(new Error('Transient fail'));
+        return Promise.resolve({ text: '' }); // Empty on retry
+      }),
+    }));
+
+    const long = 'Task where retry gives empty result. ' + 'x'.repeat(100);
+    const config: TaskTitleConfig = { maxRetries: 2, retryDelayMs: 10 };
+    const result = await generateTaskTitle(mockAi, long, config);
+    expect(result).toBe(truncateTitle(long, 100));
+    expect(callCount).toBe(2); // Threw once, returned empty on second attempt
+  });
+
+  it('caps retry delay at retryMaxDelayMs', async () => {
+    const { Agent } = await import('@mastra/core/agent');
+    let callCount = 0;
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      generate: vi.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount <= 3) return Promise.reject(new Error('Fail'));
+        return Promise.resolve({ text: 'Success After Many Retries' });
+      }),
+    }));
+
+    const long = 'Task with capped delay. ' + 'c'.repeat(100);
+    // Base 100ms, max 150ms: delays would be 100, 150 (capped from 200), 150 (capped from 400)
+    const config: TaskTitleConfig = { maxRetries: 3, retryDelayMs: 100, retryMaxDelayMs: 150 };
+    const result = await generateTaskTitle(mockAi, long, config);
+    expect(result).toBe('Success After Many Retries');
+    expect(callCount).toBe(4);
   });
 
   it('does not retry when maxRetries is 0', async () => {
@@ -684,15 +756,18 @@ describe('getTaskTitleConfig (retry config)', () => {
     const config = getTaskTitleConfig({});
     expect(config.maxRetries).toBe(2);
     expect(config.retryDelayMs).toBe(1000);
+    expect(config.retryMaxDelayMs).toBe(4000);
   });
 
   it('reads retry env var overrides', () => {
     const config = getTaskTitleConfig({
       TASK_TITLE_MAX_RETRIES: '3',
       TASK_TITLE_RETRY_DELAY_MS: '500',
+      TASK_TITLE_RETRY_MAX_DELAY_MS: '2000',
     });
     expect(config.maxRetries).toBe(3);
     expect(config.retryDelayMs).toBe(500);
+    expect(config.retryMaxDelayMs).toBe(2000);
   });
 
   it('reads zero retries from env', () => {
