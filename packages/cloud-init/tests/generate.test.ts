@@ -52,6 +52,11 @@ describe('generateCloudInit', () => {
       const config = generateCloudInit(baseVariables());
       expect(config).toContain('"tag": "docker/{{.Name}}"');
     });
+
+    it('configures Docker DNS servers for container name resolution', () => {
+      const config = generateCloudInit(baseVariables());
+      expect(config).toContain('"dns": ["1.1.1.1", "8.8.8.8"]');
+    });
   });
 
   describe('projectId and chatSessionId substitution', () => {
