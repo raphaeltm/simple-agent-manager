@@ -96,7 +96,7 @@ write_files:
         "log-opts": {
           "tag": "docker/{{ docker_name_tag }}"
         },
-        "dns": ["1.1.1.1", "8.8.8.8"]
+        "dns": [{{ docker_dns_servers }}]
       }
     permissions: '0644'
 

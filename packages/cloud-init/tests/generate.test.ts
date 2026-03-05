@@ -53,9 +53,17 @@ describe('generateCloudInit', () => {
       expect(config).toContain('"tag": "docker/{{.Name}}"');
     });
 
-    it('configures Docker DNS servers for container name resolution', () => {
+    it('configures default Docker DNS servers for container name resolution', () => {
       const config = generateCloudInit(baseVariables());
       expect(config).toContain('"dns": ["1.1.1.1", "8.8.8.8"]');
+    });
+
+    it('substitutes custom Docker DNS servers when provided', () => {
+      const config = generateCloudInit(baseVariables({
+        dockerDnsServers: '"10.0.0.1", "10.0.0.2"',
+      }));
+      expect(config).toContain('"dns": ["10.0.0.1", "10.0.0.2"]');
+      expect(config).not.toContain('1.1.1.1');
     });
   });
 

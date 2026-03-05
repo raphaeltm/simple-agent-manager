@@ -21,6 +21,8 @@ export interface CloudInitVariables {
   chatSessionId?: string;
   /** Task ID for task-driven workspaces (nullable — omitted for interactive workspaces) */
   taskId?: string;
+  /** Docker daemon DNS servers as JSON array content (default: "1.1.1.1", "8.8.8.8") */
+  dockerDnsServers?: string;
 }
 
 /**
@@ -42,6 +44,7 @@ export function generateCloudInit(variables: CloudInitVariables): string {
     '{{ chat_session_id }}': variables.chatSessionId ?? '',
     '{{ task_id }}': variables.taskId ?? '',
     '{{ docker_name_tag }}': '{{.Name}}',
+    '{{ docker_dns_servers }}': variables.dockerDnsServers ?? '"1.1.1.1", "8.8.8.8"',
   };
 
   for (const [placeholder, value] of Object.entries(replacements)) {
