@@ -104,6 +104,19 @@ func defaultWorkspaceScope(workspaceID, nodeID string) string {
 	return nodeID
 }
 
+// effectivePromptTimeout returns the prompt timeout based on session type.
+// Task-driven workspaces (TaskID set) use ACPTaskPromptTimeout (default 6h).
+// Direct workspace sessions use ACPPromptTimeout (default 0 = no timeout).
+//
+// Evaluated once at server startup. The result is baked into acpConfig.PromptTimeout
+// and shared by all SessionHosts on this server instance.
+func effectivePromptTimeout(cfg *config.Config) time.Duration {
+	if cfg.TaskID != "" {
+		return cfg.ACPTaskPromptTimeout
+	}
+	return cfg.ACPPromptTimeout
+}
+
 // New creates a new server instance.
 func New(cfg *config.Config) (*Server, error) {
 	// Create JWT validator with configurable issuer and audience
@@ -176,7 +189,7 @@ func New(cfg *config.Config) (*Server, error) {
 		ErrorReporter:           errorReporter,
 		PingInterval:            cfg.ACPPingInterval,
 		PongTimeout:             cfg.ACPPongTimeout,
-		PromptTimeout:           cfg.ACPPromptTimeout,
+		PromptTimeout:           effectivePromptTimeout(cfg),
 		PromptCancelGracePeriod: cfg.ACPPromptCancelGrace,
 		SAMEnvFallback:          cfg.BuildSAMEnvFallback(),
 	}

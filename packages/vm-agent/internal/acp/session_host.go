@@ -33,8 +33,6 @@ const (
 )
 
 const (
-	// DefaultPromptTimeout bounds how long a single ACP Prompt call can run.
-	DefaultPromptTimeout = 60 * time.Minute
 	// DefaultPromptCancelGracePeriod is how long we wait after cancel before
 	// force-stopping an unresponsive agent process.
 	DefaultPromptCancelGracePeriod = 5 * time.Second
@@ -555,7 +553,13 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 	h.viewerMu.Unlock()
 
 	promptTimeout := h.promptTimeout()
-	promptCtx, promptCancel := context.WithTimeout(ctx, promptTimeout)
+	var promptCtx context.Context
+	var promptCancel context.CancelFunc
+	if promptTimeout > 0 {
+		promptCtx, promptCancel = context.WithTimeout(ctx, promptTimeout)
+	} else {
+		promptCtx, promptCancel = context.WithCancel(ctx)
+	}
 	promptID, ok := h.beginPrompt(promptCancel)
 	if !ok {
 		promptCancel()
@@ -568,8 +572,11 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 	}()
 
 	// Watchdog: if Prompt() ignores deadline/cancel, force-stop the agent.
+	// Skipped when timeout is 0 (no limit).
 	promptDone := make(chan struct{})
-	go h.watchPromptTimeout(promptID, promptCtx, promptDone, viewerID, reqID, promptTimeout)
+	if promptTimeout > 0 {
+		go h.watchPromptTimeout(promptID, promptCtx, promptDone, viewerID, reqID, promptTimeout)
+	}
 	defer close(promptDone)
 
 	// Update status to prompting
@@ -602,7 +609,11 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 	if err != nil {
 		errMsg := fmt.Sprintf("Prompt failed: %v", err)
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
-			errMsg = fmt.Sprintf("Prompt timed out after %s", promptTimeout)
+			if promptTimeout > 0 {
+				errMsg = fmt.Sprintf("Prompt timed out after %s", promptTimeout)
+			} else {
+				errMsg = "Prompt cancelled (context deadline exceeded)"
+			}
 		}
 		slog.Error("ACP Prompt failed", "error", err)
 		h.reportLifecycle("warn", "ACP Prompt failed", map[string]interface{}{
@@ -1610,11 +1621,9 @@ func (h *SessionHost) currentSessionState() (SessionHostStatus, string, string) 
 	return h.status, h.agentType, h.statusErr
 }
 
+// promptTimeout returns the configured prompt timeout. 0 means no timeout.
 func (h *SessionHost) promptTimeout() time.Duration {
-	if h.config.PromptTimeout > 0 {
-		return h.config.PromptTimeout
-	}
-	return DefaultPromptTimeout
+	return h.config.PromptTimeout
 }
 
 func (h *SessionHost) promptCancelGracePeriod() time.Duration {

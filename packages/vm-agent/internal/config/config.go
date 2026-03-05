@@ -94,7 +94,8 @@ type Config struct {
 	ACPViewerSendBuffer   int           // Per-viewer send channel buffer size
 	ACPPingInterval       time.Duration // WebSocket ping interval (default: 30s)
 	ACPPongTimeout        time.Duration // WebSocket pong deadline after ping (default: 10s)
-	ACPPromptTimeout      time.Duration // Max prompt runtime before force-stop fallback (default: 10m)
+	ACPPromptTimeout      time.Duration // Max prompt runtime; 0 = no timeout (default: 0). Used for workspace sessions; task sessions use ACPTaskPromptTimeout via effectivePromptTimeout().
+	ACPTaskPromptTimeout  time.Duration // Max prompt runtime for task-driven sessions; 0 = no timeout (default: 6h)
 	ACPPromptCancelGrace  time.Duration // Wait after cancel before force-stop fallback (default: 5s)
 	ACPIdleSuspendTimeout    time.Duration // Auto-suspend after this idle duration with no viewers (default: 30m, 0=disabled)
 	ACPNotifSerializeTimeout time.Duration // Max wait for previous notification processing before delivering next (default: 5s)
@@ -246,7 +247,8 @@ func Load() (*Config, error) {
 		ACPViewerSendBuffer:   getEnvInt("ACP_VIEWER_SEND_BUFFER", 256),
 		ACPPingInterval:       getEnvDuration("ACP_PING_INTERVAL", 30*time.Second),
 		ACPPongTimeout:        getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
-		ACPPromptTimeout:      getEnvDuration("ACP_PROMPT_TIMEOUT", 60*time.Minute),
+		ACPPromptTimeout:      getEnvDuration("ACP_PROMPT_TIMEOUT", 0),
+		ACPTaskPromptTimeout:  getEnvDuration("ACP_TASK_PROMPT_TIMEOUT", 6*time.Hour),
 		ACPPromptCancelGrace:  getEnvDuration("ACP_PROMPT_CANCEL_GRACE_PERIOD", 5*time.Second),
 		ACPIdleSuspendTimeout:    getEnvDuration("ACP_IDLE_SUSPEND_TIMEOUT", 30*time.Minute),
 		ACPNotifSerializeTimeout: getEnvDuration("ACP_NOTIF_SERIALIZE_TIMEOUT", 5*time.Second),
