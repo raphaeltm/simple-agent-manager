@@ -101,6 +101,8 @@ function AcpConversationItemView({ item }: { item: ConversationItem }) {
           </ul>
         </div>
       );
+    case 'system_message':
+      return <SystemMessageBubble text={item.text} />;
     case 'raw_fallback':
       return null; // Skip raw fallbacks in project chat — typically protocol noise
     default:
@@ -137,11 +139,45 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
         timestamp: msg.createdAt,
       });
     } else if (msg.role === 'system') {
-      // Render system messages as agent messages with a system note
-      acc.push({ kind: 'agent_message', id: msg.id, text: `*System:* ${msg.content}`, streaming: false, timestamp: msg.createdAt });
+      // System messages (task status, error logs) rendered as preformatted text
+      // to prevent markdown interpretation of build log characters (#, *, URLs)
+      acc.push({ kind: 'system_message', id: msg.id, text: msg.content, timestamp: msg.createdAt });
     }
     return acc;
   }, []);
+}
+
+/** Renders a system message (task status, error logs) as preformatted text.
+ *  Prevents markdown interpretation of build log characters (#, *, URLs). */
+function SystemMessageBubble({ text }: { text: string }) {
+  return (
+    <div className="flex justify-start mb-4">
+      <div
+        role="region"
+        aria-label="System message"
+        className="max-w-[90%] rounded-lg px-4 py-3 border"
+        style={{
+          backgroundColor: 'var(--sam-color-bg-inset)',
+          borderColor: 'var(--sam-color-border-default)',
+        }}
+      >
+        <div className="flex items-center gap-1.5 mb-2">
+          <span
+            className="text-xs font-semibold uppercase tracking-wide"
+            style={{ color: 'var(--sam-color-fg-muted)' }}
+          >
+            System
+          </span>
+        </div>
+        <pre
+          className="text-xs whitespace-pre-wrap break-words m-0 font-mono leading-relaxed"
+          style={{ color: 'var(--sam-color-fg-primary)' }}
+        >
+          {text}
+        </pre>
+      </div>
+    </div>
+  );
 }
 
 /** Renders ConversationItem array with the ACP-style components. */

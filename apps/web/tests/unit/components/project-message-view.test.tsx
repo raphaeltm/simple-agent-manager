@@ -367,6 +367,42 @@ describe('ProjectMessageView — ACP integration', () => {
     });
   });
 
+  it('renders system messages as preformatted text (not markdown)', async () => {
+    mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
+
+    const errorLog = '# Step 1/23 : FROM node:18\n* Installing dependencies...\nhttps://example.com';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession('session-1', 'stopped'),
+      messages: [{
+        id: 'sys-1',
+        sessionId: 'session-1',
+        role: 'system',
+        content: errorLog,
+        toolMetadata: null,
+        createdAt: Date.now(),
+        sequence: null,
+      }],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    // Should render the System label
+    await waitFor(() => {
+      expect(screen.getByText('System')).toBeTruthy();
+    });
+
+    // Should render content in a <pre> element (preformatted, not markdown)
+    const preElement = document.querySelector('pre');
+    expect(preElement).toBeTruthy();
+    expect(preElement!.textContent).toContain('# Step 1/23');
+    expect(preElement!.textContent).toContain('* Installing dependencies...');
+
+    // Should NOT render markdown headings (h1) or emphasis — the content is raw
+    expect(document.querySelector('h1')).toBeNull();
+    expect(document.querySelector('em')).toBeNull();
+  });
+
   it('renders DO messages using ACP components when ACP is not connected', async () => {
     mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
 
@@ -431,13 +467,60 @@ describe('chatMessagesToConversationItems', () => {
     expect(tool.content).toHaveLength(0);
   });
 
-  it('converts system messages as agent messages', () => {
+  it('converts system messages as system_message kind', () => {
     const items = chatMessagesToConversationItems([
       { id: 's1', sessionId: 's1', role: 'system', content: 'Session started', toolMetadata: null, createdAt: 1000 },
     ]);
     expect(items).toHaveLength(1);
-    expect(items[0].kind).toBe('agent_message');
-    expect(items[0].text).toContain('System:');
+    expect(items[0].kind).toBe('system_message');
+    expect(items[0].text).toBe('Session started');
+  });
+
+  it('preserves raw content in system messages without markdown prefix', () => {
+    const errorLog = '# Step 1/23 : FROM node:18\n* Installing dependencies...';
+    const items = chatMessagesToConversationItems([
+      { id: 's1', sessionId: 's1', role: 'system', content: errorLog, toolMetadata: null, createdAt: 1000 },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('system_message');
+    // Content should be preserved exactly as-is (no markdown wrapping like *System:*)
+    expect(items[0].text).toBe(errorLog);
+  });
+
+  it('converts empty system message', () => {
+    const items = chatMessagesToConversationItems([
+      { id: 's1', sessionId: 's1', role: 'system', content: '', toolMetadata: null, createdAt: 1000 },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('system_message');
+    expect(items[0].text).toBe('');
+  });
+
+  it('does not merge consecutive system messages', () => {
+    const items = chatMessagesToConversationItems([
+      { id: 's1', sessionId: 's1', role: 'system', content: 'Task started', toolMetadata: null, createdAt: 1000 },
+      { id: 's2', sessionId: 's1', role: 'system', content: 'Task failed', toolMetadata: null, createdAt: 2000 },
+    ]);
+    expect(items).toHaveLength(2);
+    expect(items[0].kind).toBe('system_message');
+    expect(items[0].text).toBe('Task started');
+    expect(items[1].kind).toBe('system_message');
+    expect(items[1].text).toBe('Task failed');
+  });
+
+  it('handles system message in mixed-role sequence', () => {
+    const items = chatMessagesToConversationItems([
+      { id: 'u1', sessionId: 's1', role: 'user', content: 'Run this task', toolMetadata: null, createdAt: 1000 },
+      { id: 'a1', sessionId: 's1', role: 'assistant', content: 'Working on it', toolMetadata: null, createdAt: 2000 },
+      { id: 's1', sessionId: 's1', role: 'system', content: 'Build failed: exit code 1', toolMetadata: null, createdAt: 3000 },
+      { id: 'a2', sessionId: 's1', role: 'assistant', content: 'The build failed', toolMetadata: null, createdAt: 4000 },
+    ]);
+    expect(items).toHaveLength(4);
+    expect(items[0].kind).toBe('user_message');
+    expect(items[1].kind).toBe('agent_message');
+    expect(items[2].kind).toBe('system_message');
+    expect(items[2].text).toBe('Build failed: exit code 1');
+    expect(items[3].kind).toBe('agent_message');
   });
 
   it('does not merge assistant followed by user followed by assistant', () => {
