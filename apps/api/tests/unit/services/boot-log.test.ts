@@ -69,4 +69,36 @@ describe('boot-log service', () => {
     expect(logs).toHaveLength(1);
     expect(logs[0].step).toBe('new-step');
   });
+
+  it('logs for different workspaces are isolated', async () => {
+    const kv = createMockKV();
+    await appendBootLog(kv, 'ws-1', makeEntry('volume', 'completed', 'Volume ready'));
+    await appendBootLog(kv, 'ws-2', makeEntry('clone', 'started', 'Cloning'));
+
+    // Clearing ws-1 should not affect ws-2
+    await writeBootLogs(kv, 'ws-1', []);
+
+    expect(await getBootLogs(kv, 'ws-1')).toEqual([]);
+    const ws2Logs = await getBootLogs(kv, 'ws-2');
+    expect(ws2Logs).toHaveLength(1);
+    expect(ws2Logs[0].step).toBe('clone');
+  });
+
+  it('clearing and re-appending simulates restart flow', async () => {
+    const kv = createMockKV();
+    // First provisioning attempt fails
+    await appendBootLog(kv, 'ws-1', makeEntry('volume', 'completed', 'Volume ready'));
+    await appendBootLog(kv, 'ws-1', makeEntry('clone', 'failed', 'Clone failed'));
+    expect(await getBootLogs(kv, 'ws-1')).toHaveLength(2);
+
+    // Restart: clear logs, then new provisioning appends fresh ones
+    await writeBootLogs(kv, 'ws-1', []);
+    expect(await getBootLogs(kv, 'ws-1')).toEqual([]);
+
+    await appendBootLog(kv, 'ws-1', makeEntry('volume', 'completed', 'Volume ready'));
+    const logs = await getBootLogs(kv, 'ws-1');
+    expect(logs).toHaveLength(1);
+    expect(logs[0].step).toBe('volume');
+    expect(logs[0].status).toBe('completed');
+  });
 });
