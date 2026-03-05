@@ -21,9 +21,31 @@ This raw markdown appears in:
 - **Severity**: Medium — cosmetic but confusing for users
 - **Inconsistency**: Out of 4 tasks submitted, 1 got a clean generated title ("Create Upgrade Plan for Project Dependencies"), 1 got a markdown-formatted title, and 2 fell back to showing the raw message text (no generated title at all)
 
-## Root Cause Investigation
+## Root Cause
 
-The LLM task title generation feature (`llm-task-title-generation` in CLAUDE.md) uses `@cf/meta/llama-3.1-8b-instruct` to generate titles. The model prompt likely doesn't sufficiently constrain the output to plain text, or the response isn't being post-processed to strip markdown formatting.
+The title generation in `apps/api/src/services/task-title.ts:generateTaskTitle()` only does `.trim()` on the AI response (line 132). No markdown stripping is applied. The prompt (`buildSystemInstructions()`, line 34-44) says "Output ONLY the title text, nothing else" but the Llama model doesn't reliably comply.
+
+## Research Findings
+
+- **Core file**: `apps/api/src/services/task-title.ts` — `generateTaskTitle()` (line 94-149)
+- **Post-processing**: Only `result.text?.trim()` (line 132) then `truncateTitle()` for length
+- **Tests**: `apps/api/tests/unit/services/task-title.test.ts` — 20+ existing tests, no markdown sanitization tests
+- **Prompt**: Lines 34-44 — instructs "Output ONLY the title text" but LLM sometimes ignores this
+- **Usage**: `apps/api/src/routes/task-submit.ts:133-141` — title stored in DB and used for session labels
+
+## Implementation Plan
+
+1. Add `stripMarkdown()` function to `task-title.ts` that removes:
+   - Bold markers (`**text**` → `text`, `__text__` → `text`)
+   - Heading markers (`# `, `## `, `### ` etc. at start of string or after newline)
+   - Backticks (`` `code` `` → `code`, ``` ```code``` ``` → `code`)
+   - Italic markers (`*text*` → `text`, `_text_` → `text` — careful not to strip underscores in words)
+   - Link syntax (`[text](url)` → `text`)
+   - Multiple spaces collapsed to single space
+2. Apply `stripMarkdown()` after `.trim()` and before `truncateTitle()` in `generateTaskTitle()`
+3. Also improve the prompt to explicitly say "No markdown formatting"
+4. Add unit tests for `stripMarkdown()` covering each pattern
+5. Add integration test: AI returns markdown-formatted title → result is clean plain text
 
 ## Acceptance Criteria
 
