@@ -58,6 +58,13 @@ export interface PlanItem {
   timestamp: number;
 }
 
+export interface SystemMessage {
+  kind: 'system_message';
+  id: string;
+  text: string;
+  timestamp: number;
+}
+
 export interface RawFallback {
   kind: 'raw_fallback';
   id: string;
@@ -68,6 +75,7 @@ export interface RawFallback {
 export type ConversationItem =
   | UserMessage
   | AgentMessage
+  | SystemMessage
   | ThinkingItem
   | ToolCallItem
   | PlanItem
