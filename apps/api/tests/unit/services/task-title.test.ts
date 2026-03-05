@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
   generateTaskTitle,
   truncateTitle,
+  stripMarkdown,
   getTaskTitleConfig,
   type TaskTitleConfig,
 } from '../../../src/services/task-title';
@@ -50,6 +51,117 @@ describe('truncateTitle', () => {
   it('handles maxLength of 3 (boundary of ellipsis width)', () => {
     const result = truncateTitle('hello', 3);
     expect(result).toBe('...');
+  });
+});
+
+describe('stripMarkdown', () => {
+  it('returns plain text unchanged', () => {
+    expect(stripMarkdown('Fix authentication timeout bug')).toBe('Fix authentication timeout bug');
+  });
+
+  it('strips bold markers (**text**)', () => {
+    expect(stripMarkdown('**README.md** Task Title Generator')).toBe('README.md Task Title Generator');
+  });
+
+  it('strips bold markers (__text__)', () => {
+    expect(stripMarkdown('__Important__ update needed')).toBe('Important update needed');
+  });
+
+  it('strips italic markers (*text*)', () => {
+    expect(stripMarkdown('*Fix* the login bug')).toBe('Fix the login bug');
+  });
+
+  it('strips italic markers (_text_) at word boundaries', () => {
+    expect(stripMarkdown('_Fix_ the login bug')).toBe('Fix the login bug');
+  });
+
+  it('preserves underscores in snake_case words', () => {
+    expect(stripMarkdown('Fix user_name validation')).toBe('Fix user_name validation');
+  });
+
+  it('strips heading markers (#)', () => {
+    expect(stripMarkdown('# Task Title Generator')).toBe('Task Title Generator');
+  });
+
+  it('strips multiple heading levels', () => {
+    expect(stripMarkdown('## Project Description')).toBe('Project Description');
+    expect(stripMarkdown('### Sub Section')).toBe('Sub Section');
+  });
+
+  it('strips inline code backticks', () => {
+    expect(stripMarkdown('Fix `calculateTotal` function')).toBe('Fix calculateTotal function');
+  });
+
+  it('strips fenced code blocks', () => {
+    expect(stripMarkdown('Run ```npm install``` to fix')).toBe('Run npm install to fix');
+  });
+
+  it('strips link syntax keeping text', () => {
+    expect(stripMarkdown('See [documentation](https://example.com) for details')).toBe('See documentation for details');
+  });
+
+  it('strips image syntax keeping alt text', () => {
+    expect(stripMarkdown('Add ![logo](https://example.com/logo.png) to header')).toBe('Add logo to header');
+  });
+
+  it('strips blockquote markers', () => {
+    expect(stripMarkdown('> Important note about the fix')).toBe('Important note about the fix');
+  });
+
+  it('collapses multiple spaces into single space', () => {
+    expect(stripMarkdown('Fix   the   bug')).toBe('Fix the bug');
+  });
+
+  it('handles the real-world garbled title from QA testing', () => {
+    const garbled = '**README.md** # Task Title Generator ## Project Description and Purpose Task Title Generator is a tool';
+    const result = stripMarkdown(garbled);
+    expect(result).not.toContain('**');
+    expect(result).not.toMatch(/(^|\s)#+ /);
+    expect(result).toBe('README.md Task Title Generator Project Description and Purpose Task Title Generator is a tool');
+  });
+
+  it('handles combined bold and heading markers', () => {
+    expect(stripMarkdown('# **Important** Update')).toBe('Important Update');
+  });
+
+  it('strips horizontal rules', () => {
+    expect(stripMarkdown('Title\n---\nDescription')).toBe('Title Description');
+  });
+
+  it('returns empty string for all-markdown input', () => {
+    expect(stripMarkdown('## ')).toBe('');
+  });
+
+  it('trims leading and trailing whitespace', () => {
+    expect(stripMarkdown('  **bold text**  ')).toBe('bold text');
+  });
+
+  it('handles empty string input', () => {
+    expect(stripMarkdown('')).toBe('');
+  });
+
+  it('strips nested bold-italic markers (**_text_**)', () => {
+    const result = stripMarkdown('**_Fix the bug_**');
+    expect(result).toBe('Fix the bug');
+    expect(result).not.toContain('*');
+    expect(result).not.toContain('_');
+  });
+
+  it('strips horizontal rules (*** form)', () => {
+    expect(stripMarkdown('Title\n***\nDescription')).toBe('Title Description');
+  });
+
+  it('strips horizontal rules (___ form)', () => {
+    expect(stripMarkdown('Title\n___\nDescription')).toBe('Title Description');
+  });
+
+  it('strips multiline fenced code blocks keeping inner content', () => {
+    const input = 'Run this:\n```\nnpm install\nnpm build\n```\nto set up';
+    expect(stripMarkdown(input)).toBe('Run this: npm install npm build to set up');
+  });
+
+  it('strips _italic_ at word boundary while preserving mid-word underscores in same string', () => {
+    expect(stripMarkdown('_Fix_ the user_name validation')).toBe('Fix the user_name validation');
   });
 });
 
@@ -344,6 +456,67 @@ describe('generateTaskTitle', () => {
     const long = 'Test binding forwarding. ' + 'b'.repeat(100);
     await generateTaskTitle(mockAi, long);
     expect(createWorkersAI).toHaveBeenCalledWith({ binding: mockAi });
+  });
+
+  // --- Markdown stripping integration ---
+
+  it('strips markdown formatting from AI-generated titles', async () => {
+    const { Agent } = await import('@mastra/core/agent');
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      generate: vi.fn().mockResolvedValue({ text: '**README.md** # Task Title Generator ## Project Description' }),
+    }));
+
+    const long = 'Write a comprehensive README.md for the project. ' + 'a'.repeat(100);
+    const result = await generateTaskTitle(mockAi, long);
+    expect(result).not.toContain('**');
+    expect(result).not.toMatch(/(^|\s)#+ /);
+    expect(result).toBe('README.md Task Title Generator Project Description');
+  });
+
+  it('strips bold markers from AI-generated titles', async () => {
+    const { Agent } = await import('@mastra/core/agent');
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      generate: vi.fn().mockResolvedValue({ text: '**Create** Upgrade Plan' }),
+    }));
+
+    const long = 'Create an upgrade plan for all project dependencies. ' + 'a'.repeat(100);
+    const result = await generateTaskTitle(mockAi, long);
+    expect(result).toBe('Create Upgrade Plan');
+  });
+
+  it('strips backticks from AI-generated titles', async () => {
+    const { Agent } = await import('@mastra/core/agent');
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      generate: vi.fn().mockResolvedValue({ text: 'Fix `calculateTotal` Function Bug' }),
+    }));
+
+    const long = 'The calculateTotal function in the billing module is broken. ' + 'a'.repeat(100);
+    const result = await generateTaskTitle(mockAi, long);
+    expect(result).toBe('Fix calculateTotal Function Bug');
+  });
+
+  it('falls back to truncation when title is empty after markdown stripping', async () => {
+    const { Agent } = await import('@mastra/core/agent');
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      generate: vi.fn().mockResolvedValue({ text: '## ' }),
+    }));
+
+    const long = 'Some task description that needs a title. ' + 'x'.repeat(100);
+    const result = await generateTaskTitle(mockAi, long);
+    expect(result).toBe(truncateTitle(long, 100));
+  });
+
+  it('includes no-markdown directive in system instructions (prevention layer)', async () => {
+    const { Agent } = await import('@mastra/core/agent');
+    let capturedInstructions = '';
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation((config: { instructions: string }) => {
+      capturedInstructions = config.instructions;
+      return { generate: vi.fn().mockResolvedValue({ text: 'Title' }) };
+    });
+
+    const long = 'Test instructions content. ' + 'i'.repeat(100);
+    await generateTaskTitle(mockAi, long);
+    expect(capturedInstructions).toContain('No markdown formatting');
   });
 
   it('substitutes maxLength into system instructions', async () => {
