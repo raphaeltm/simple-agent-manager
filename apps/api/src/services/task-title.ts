@@ -14,6 +14,10 @@
  * rather than async via waitUntil. This keeps the title consistent across
  * the task record, session label, and activity event, and avoids a second
  * DB write. The timeout (configurable, default 5s) bounds worst-case latency.
+ *
+ * Retry: Under burst load (multiple concurrent tasks), Workers AI may
+ * rate-limit or respond slowly. Retry with exponential backoff (configurable,
+ * default 2 retries with 1s base delay) recovers from transient failures.
  */
 
 import { Agent } from '@mastra/core/agent';
@@ -23,6 +27,8 @@ import {
   DEFAULT_TASK_TITLE_MAX_LENGTH,
   DEFAULT_TASK_TITLE_TIMEOUT_MS,
   DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD,
+  DEFAULT_TASK_TITLE_MAX_RETRIES,
+  DEFAULT_TASK_TITLE_RETRY_DELAY_MS,
 } from '@simple-agent-manager/shared';
 import { log } from '../lib/logger';
 
@@ -106,6 +112,8 @@ export interface TaskTitleConfig {
   timeoutMs?: number;
   enabled?: boolean;
   shortMessageThreshold?: number;
+  maxRetries?: number;
+  retryDelayMs?: number;
 }
 
 /** Narrow interface for the env vars read by getTaskTitleConfig. */
@@ -115,6 +123,8 @@ export interface TaskTitleEnvVars {
   TASK_TITLE_TIMEOUT_MS?: string;
   TASK_TITLE_GENERATION_ENABLED?: string;
   TASK_TITLE_SHORT_MESSAGE_THRESHOLD?: string;
+  TASK_TITLE_MAX_RETRIES?: string;
+  TASK_TITLE_RETRY_DELAY_MS?: string;
 }
 
 /**
@@ -130,7 +140,52 @@ export function getTaskTitleConfig(env: TaskTitleEnvVars): TaskTitleConfig {
       env.TASK_TITLE_SHORT_MESSAGE_THRESHOLD || String(DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD),
       10,
     ),
+    maxRetries: parseInt(env.TASK_TITLE_MAX_RETRIES || String(DEFAULT_TASK_TITLE_MAX_RETRIES), 10),
+    retryDelayMs: parseInt(env.TASK_TITLE_RETRY_DELAY_MS || String(DEFAULT_TASK_TITLE_RETRY_DELAY_MS), 10),
   };
+}
+
+/**
+ * Classify an error for logging purposes.
+ * Helps operators distinguish between timeout, rate limit, and other failures.
+ */
+export function classifyError(err: unknown): { category: 'timeout' | 'rate_limit' | 'error'; message: string } {
+  if (!(err instanceof Error)) {
+    return { category: 'error', message: String(err) };
+  }
+
+  const msg = err.message.toLowerCase();
+
+  // AbortSignal.timeout() throws a TimeoutError (DOMException with name "TimeoutError")
+  // or an AbortError depending on the runtime
+  if (
+    err.name === 'TimeoutError' ||
+    err.name === 'AbortError' ||
+    msg.includes('timeout') ||
+    msg.includes('abort')
+  ) {
+    return { category: 'timeout', message: err.message };
+  }
+
+  // Workers AI rate limit errors typically contain "rate limit" or HTTP 429 references
+  if (
+    msg.includes('rate limit') ||
+    msg.includes('rate_limit') ||
+    msg.includes('too many requests') ||
+    msg.includes('429')
+  ) {
+    return { category: 'rate_limit', message: err.message };
+  }
+
+  return { category: 'error', message: err.message };
+}
+
+/**
+ * Sleep for a given number of milliseconds.
+ * Used between retry attempts for backoff.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -139,6 +194,7 @@ export function getTaskTitleConfig(env: TaskTitleEnvVars): TaskTitleConfig {
  * - Short messages (≤ threshold) are returned as-is
  * - If AI generation is disabled or fails, falls back to truncation
  * - Uses AbortSignal.timeout for clean cancellation without timer leaks
+ * - Retries with exponential backoff on transient failures (timeout, rate limit)
  */
 export async function generateTaskTitle(
   ai: Ai,
@@ -150,6 +206,8 @@ export async function generateTaskTitle(
   const enabled = config.enabled ?? true;
   const modelId = config.model ?? DEFAULT_TASK_TITLE_MODEL;
   const shortThreshold = config.shortMessageThreshold ?? DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD;
+  const maxRetries = config.maxRetries ?? DEFAULT_TASK_TITLE_MAX_RETRIES;
+  const retryDelayMs = config.retryDelayMs ?? DEFAULT_TASK_TITLE_RETRY_DELAY_MS;
 
   // Short messages don't need AI generation
   if (message.length <= shortThreshold) {
@@ -161,45 +219,79 @@ export async function generateTaskTitle(
     return truncateTitle(message, maxLength);
   }
 
-  try {
-    const workersAi = createWorkersAI({ binding: ai });
-    const model = workersAi(modelId as Parameters<typeof workersAi>[0]);
+  const totalAttempts = 1 + maxRetries;
+  let lastError: { category: string; message: string } | undefined;
 
-    const agent = new Agent({
-      id: 'task-title-generator',
-      name: 'Task Title Generator',
-      instructions: buildSystemInstructions(maxLength),
-      model,
-    });
+  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+    try {
+      const workersAi = createWorkersAI({ binding: ai });
+      const model = workersAi(modelId as Parameters<typeof workersAi>[0]);
 
-    // Use AbortSignal.timeout for clean cancellation without timer leaks.
-    // Supported in Workers runtime since compatibility_date 2023-03-14.
-    const result = await agent.generate(message, {
-      abortSignal: AbortSignal.timeout(timeoutMs),
-    });
+      const agent = new Agent({
+        id: 'task-title-generator',
+        name: 'Task Title Generator',
+        instructions: buildSystemInstructions(maxLength),
+        model,
+      });
 
-    const rawTitle = result.text?.trim();
-    if (!rawTitle) {
-      log.warn('task_title.empty_response', { modelId, messageLength: message.length });
-      return truncateTitle(message, maxLength);
+      // Use AbortSignal.timeout for clean cancellation without timer leaks.
+      // Supported in Workers runtime since compatibility_date 2023-03-14.
+      const result = await agent.generate(message, {
+        abortSignal: AbortSignal.timeout(timeoutMs),
+      });
+
+      const rawTitle = result.text?.trim();
+      if (!rawTitle) {
+        log.warn('task_title.empty_response', { modelId, messageLength: message.length, attempt });
+        return truncateTitle(message, maxLength);
+      }
+
+      // Strip markdown formatting that the LLM may have included despite instructions
+      const title = stripMarkdown(rawTitle);
+      if (!title) {
+        log.warn('task_title.empty_after_strip', { modelId, rawTitle, messageLength: message.length, attempt });
+        return truncateTitle(message, maxLength);
+      }
+
+      // Enforce max length on LLM output (models sometimes exceed the limit)
+      return truncateTitle(title, maxLength);
+    } catch (err) {
+      const classified = classifyError(err);
+      lastError = classified;
+
+      if (attempt < totalAttempts) {
+        // Exponential backoff: baseDelay * 2^(attempt-1)
+        const delay = retryDelayMs * Math.pow(2, attempt - 1);
+        log.warn('task_title.retrying', {
+          error: classified.message,
+          category: classified.category,
+          modelId,
+          messageLength: message.length,
+          attempt,
+          totalAttempts,
+          nextDelayMs: delay,
+        });
+        await sleep(delay);
+      } else {
+        log.warn('task_title.generation_failed', {
+          error: classified.message,
+          category: classified.category,
+          modelId,
+          messageLength: message.length,
+          attempt,
+          totalAttempts,
+        });
+      }
     }
-
-    // Strip markdown formatting that the LLM may have included despite instructions
-    const title = stripMarkdown(rawTitle);
-    if (!title) {
-      log.warn('task_title.empty_after_strip', { modelId, rawTitle, messageLength: message.length });
-      return truncateTitle(message, maxLength);
-    }
-
-    // Enforce max length on LLM output (models sometimes exceed the limit)
-    return truncateTitle(title, maxLength);
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    log.warn('task_title.generation_failed', {
-      error: errorMsg,
-      modelId,
-      messageLength: message.length,
-    });
-    return truncateTitle(message, maxLength);
   }
+
+  // All attempts exhausted — fall back to truncation
+  log.warn('task_title.all_retries_exhausted', {
+    modelId,
+    messageLength: message.length,
+    totalAttempts,
+    lastErrorCategory: lastError?.category,
+    lastError: lastError?.message,
+  });
+  return truncateTitle(message, maxLength);
 }

@@ -211,6 +211,12 @@ export const DEFAULT_TASK_TITLE_TIMEOUT_MS = 5000;
  * Override via TASK_TITLE_SHORT_MESSAGE_THRESHOLD env var. */
 export const DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD = 100;
 
+/** Default max retry attempts for AI title generation. Override via TASK_TITLE_MAX_RETRIES env var. */
+export const DEFAULT_TASK_TITLE_MAX_RETRIES = 2;
+
+/** Default base delay (ms) between retry attempts (exponential backoff). Override via TASK_TITLE_RETRY_DELAY_MS env var. */
+export const DEFAULT_TASK_TITLE_RETRY_DELAY_MS = 1000;
+
 // =============================================================================
 // Agent Settings
 // =============================================================================
