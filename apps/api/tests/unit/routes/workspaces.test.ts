@@ -86,4 +86,16 @@ describe('workspaces routes source contract', () => {
   it('excludes deleted workspaces from list endpoint by default', () => {
     expect(file).toContain("ne(schema.workspaces.status, 'deleted')");
   });
+
+  it('clears boot logs from KV on restart before new provisioning', () => {
+    expect(file).toContain("workspacesRoutes.post('/:id/restart'");
+    expect(file).toContain('writeBootLogs(c.env.KV, workspace.id, [], c.env)');
+    // Restart clears errorMessage in DB update
+    expect(file).toContain('errorMessage: null');
+  });
+
+  it('clears boot logs from KV on rebuild before new provisioning', () => {
+    expect(file).toContain("workspacesRoutes.post('/:id/rebuild'");
+    expect(file).toContain('writeBootLogs(c.env.KV, workspace.id, [], c.env)');
+  });
 });
