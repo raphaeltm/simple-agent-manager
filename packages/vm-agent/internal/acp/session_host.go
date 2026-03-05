@@ -609,7 +609,11 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 	if err != nil {
 		errMsg := fmt.Sprintf("Prompt failed: %v", err)
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
-			errMsg = fmt.Sprintf("Prompt timed out after %s", promptTimeout)
+			if promptTimeout > 0 {
+				errMsg = fmt.Sprintf("Prompt timed out after %s", promptTimeout)
+			} else {
+				errMsg = "Prompt cancelled (context deadline exceeded)"
+			}
 		}
 		slog.Error("ACP Prompt failed", "error", err)
 		h.reportLifecycle("warn", "ACP Prompt failed", map[string]interface{}{

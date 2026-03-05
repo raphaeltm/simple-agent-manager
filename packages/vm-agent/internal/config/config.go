@@ -94,8 +94,8 @@ type Config struct {
 	ACPViewerSendBuffer   int           // Per-viewer send channel buffer size
 	ACPPingInterval       time.Duration // WebSocket ping interval (default: 30s)
 	ACPPongTimeout        time.Duration // WebSocket pong deadline after ping (default: 10s)
-	ACPPromptTimeout      time.Duration // Max prompt runtime before force-stop fallback (0 = no timeout; default: 0 for workspace sessions)
-	ACPTaskPromptTimeout  time.Duration // Max prompt runtime for task-driven sessions (default: 6h)
+	ACPPromptTimeout      time.Duration // Max prompt runtime; 0 = no timeout (default: 0). Used for workspace sessions; task sessions use ACPTaskPromptTimeout via effectivePromptTimeout().
+	ACPTaskPromptTimeout  time.Duration // Max prompt runtime for task-driven sessions; 0 = no timeout (default: 6h)
 	ACPPromptCancelGrace  time.Duration // Wait after cancel before force-stop fallback (default: 5s)
 	ACPIdleSuspendTimeout    time.Duration // Auto-suspend after this idle duration with no viewers (default: 30m, 0=disabled)
 	ACPNotifSerializeTimeout time.Duration // Max wait for previous notification processing before delivering next (default: 5s)

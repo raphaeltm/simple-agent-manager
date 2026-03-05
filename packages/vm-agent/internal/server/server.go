@@ -107,6 +107,9 @@ func defaultWorkspaceScope(workspaceID, nodeID string) string {
 // effectivePromptTimeout returns the prompt timeout based on session type.
 // Task-driven workspaces (TaskID set) use ACPTaskPromptTimeout (default 6h).
 // Direct workspace sessions use ACPPromptTimeout (default 0 = no timeout).
+//
+// Evaluated once at server startup. The result is baked into acpConfig.PromptTimeout
+// and shared by all SessionHosts on this server instance.
 func effectivePromptTimeout(cfg *config.Config) time.Duration {
 	if cfg.TaskID != "" {
 		return cfg.ACPTaskPromptTimeout
