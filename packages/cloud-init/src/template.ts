@@ -75,7 +75,7 @@ runcmd:
   - mkdir -p /etc/systemd/journald.conf.d
   - systemctl restart systemd-journald
 
-  # Restart Docker to pick up journald log driver
+  # Restart Docker to pick up journald log driver and DNS configuration
   - systemctl restart docker
 
 write_files:
@@ -95,7 +95,8 @@ write_files:
         "log-driver": "journald",
         "log-opts": {
           "tag": "docker/{{ docker_name_tag }}"
-        }
+        },
+        "dns": [{{ docker_dns_servers }}]
       }
     permissions: '0644'
 
