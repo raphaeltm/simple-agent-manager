@@ -181,6 +181,9 @@ export interface Env {
   TASK_TITLE_TIMEOUT_MS?: string;
   TASK_TITLE_GENERATION_ENABLED?: string;
   TASK_TITLE_SHORT_MESSAGE_THRESHOLD?: string;
+  TASK_TITLE_MAX_RETRIES?: string;
+  TASK_TITLE_RETRY_DELAY_MS?: string;
+  TASK_TITLE_RETRY_MAX_DELAY_MS?: string;
   // Idle cleanup configuration
   IDLE_CLEANUP_RETRY_DELAY_MS?: string;
   IDLE_CLEANUP_MAX_RETRIES?: string;
