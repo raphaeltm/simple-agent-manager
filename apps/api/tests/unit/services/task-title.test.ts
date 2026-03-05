@@ -135,6 +135,34 @@ describe('stripMarkdown', () => {
   it('trims leading and trailing whitespace', () => {
     expect(stripMarkdown('  **bold text**  ')).toBe('bold text');
   });
+
+  it('handles empty string input', () => {
+    expect(stripMarkdown('')).toBe('');
+  });
+
+  it('strips nested bold-italic markers (**_text_**)', () => {
+    const result = stripMarkdown('**_Fix the bug_**');
+    expect(result).toBe('Fix the bug');
+    expect(result).not.toContain('*');
+    expect(result).not.toContain('_');
+  });
+
+  it('strips horizontal rules (*** form)', () => {
+    expect(stripMarkdown('Title\n***\nDescription')).toBe('Title Description');
+  });
+
+  it('strips horizontal rules (___ form)', () => {
+    expect(stripMarkdown('Title\n___\nDescription')).toBe('Title Description');
+  });
+
+  it('strips multiline fenced code blocks keeping inner content', () => {
+    const input = 'Run this:\n```\nnpm install\nnpm build\n```\nto set up';
+    expect(stripMarkdown(input)).toBe('Run this: npm install npm build to set up');
+  });
+
+  it('strips _italic_ at word boundary while preserving mid-word underscores in same string', () => {
+    expect(stripMarkdown('_Fix_ the user_name validation')).toBe('Fix the user_name validation');
+  });
 });
 
 describe('getTaskTitleConfig', () => {
@@ -478,7 +506,7 @@ describe('generateTaskTitle', () => {
     expect(result).toBe(truncateTitle(long, 100));
   });
 
-  it('includes no-markdown rule in system instructions', async () => {
+  it('includes no-markdown directive in system instructions (prevention layer)', async () => {
     const { Agent } = await import('@mastra/core/agent');
     let capturedInstructions = '';
     (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation((config: { instructions: string }) => {
