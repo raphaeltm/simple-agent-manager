@@ -153,23 +153,25 @@ function SystemMessageBubble({ text }: { text: string }) {
   return (
     <div className="flex justify-start mb-4">
       <div
+        role="region"
+        aria-label="System message"
         className="max-w-[90%] rounded-lg px-4 py-3 border"
         style={{
-          backgroundColor: 'var(--sam-color-bg-inset, #f3f4f6)',
-          borderColor: 'var(--sam-color-border-default, #e5e7eb)',
+          backgroundColor: 'var(--sam-color-bg-inset)',
+          borderColor: 'var(--sam-color-border-default)',
         }}
       >
         <div className="flex items-center gap-1.5 mb-2">
           <span
             className="text-xs font-semibold uppercase tracking-wide"
-            style={{ color: 'var(--sam-color-fg-muted, #6b7280)' }}
+            style={{ color: 'var(--sam-color-fg-muted)' }}
           >
             System
           </span>
         </div>
         <pre
-          className="text-xs whitespace-pre-wrap break-words overflow-x-auto m-0 font-mono leading-relaxed"
-          style={{ color: 'var(--sam-color-fg-primary, #111827)' }}
+          className="text-xs whitespace-pre-wrap break-words m-0 font-mono leading-relaxed"
+          style={{ color: 'var(--sam-color-fg-primary)' }}
         >
           {text}
         </pre>

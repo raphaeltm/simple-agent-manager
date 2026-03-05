@@ -487,6 +487,42 @@ describe('chatMessagesToConversationItems', () => {
     expect(items[0].text).toBe(errorLog);
   });
 
+  it('converts empty system message', () => {
+    const items = chatMessagesToConversationItems([
+      { id: 's1', sessionId: 's1', role: 'system', content: '', toolMetadata: null, createdAt: 1000 },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('system_message');
+    expect(items[0].text).toBe('');
+  });
+
+  it('does not merge consecutive system messages', () => {
+    const items = chatMessagesToConversationItems([
+      { id: 's1', sessionId: 's1', role: 'system', content: 'Task started', toolMetadata: null, createdAt: 1000 },
+      { id: 's2', sessionId: 's1', role: 'system', content: 'Task failed', toolMetadata: null, createdAt: 2000 },
+    ]);
+    expect(items).toHaveLength(2);
+    expect(items[0].kind).toBe('system_message');
+    expect(items[0].text).toBe('Task started');
+    expect(items[1].kind).toBe('system_message');
+    expect(items[1].text).toBe('Task failed');
+  });
+
+  it('handles system message in mixed-role sequence', () => {
+    const items = chatMessagesToConversationItems([
+      { id: 'u1', sessionId: 's1', role: 'user', content: 'Run this task', toolMetadata: null, createdAt: 1000 },
+      { id: 'a1', sessionId: 's1', role: 'assistant', content: 'Working on it', toolMetadata: null, createdAt: 2000 },
+      { id: 's1', sessionId: 's1', role: 'system', content: 'Build failed: exit code 1', toolMetadata: null, createdAt: 3000 },
+      { id: 'a2', sessionId: 's1', role: 'assistant', content: 'The build failed', toolMetadata: null, createdAt: 4000 },
+    ]);
+    expect(items).toHaveLength(4);
+    expect(items[0].kind).toBe('user_message');
+    expect(items[1].kind).toBe('agent_message');
+    expect(items[2].kind).toBe('system_message');
+    expect(items[2].text).toBe('Build failed: exit code 1');
+    expect(items[3].kind).toBe('agent_message');
+  });
+
   it('does not merge assistant followed by user followed by assistant', () => {
     const items = chatMessagesToConversationItems([
       { id: 'a1', sessionId: 's1', role: 'assistant', content: 'Hello', toolMetadata: null, createdAt: 1000 },
