@@ -432,22 +432,24 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         createdAt: Date.now(),
       }]);
 
+      // Always persist user message via DO WebSocket so it survives
+      // workspace teardown. The DO deduplicates by content+role if needed.
+      // Note: if the DO WebSocket is closed, persistence is best-effort —
+      // the message will still reach the agent via ACP but won't appear
+      // in chat history after workspace termination.
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'message.send',
+          sessionId,
+          content: trimmed,
+          role: 'user',
+        }));
+      }
+
       if (agentSession.isAgentActive) {
-        // ACP path: prompt goes to agent via WebSocket; VM agent's MessageReporter
-        // handles persistence to the DO, so we do NOT also send via DO WebSocket
-        // (that would create a duplicate with a different messageId).
+        // Also send via ACP so the agent processes the prompt
         agentSession.sendPrompt(trimmed);
       } else {
-        // Fallback: persist via DO WebSocket so the message is at least saved,
-        // even though the agent won't receive it.
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({
-            type: 'message.send',
-            sessionId,
-            content: trimmed,
-            role: 'user',
-          }));
-        }
         setError('Agent is not connected — message saved but prompt not delivered.');
       }
 
@@ -629,20 +631,39 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
 
-      {/* Messages area — ACP items when connected, converted DO messages as fallback */}
+      {/* Messages area — merged DO (persistent) + ACP (streaming/unpersisted) */}
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto min-h-0 p-4">
         {(() => {
-          // Show ACP items whenever they exist — even after disconnect, so the user
-          // doesn't see a jarring content switch to the lagging DO messages. ACP items
-          // are only cleared on page refresh or when a new ACP session replays history.
           const acpItems = agentSession.messages.items;
+          const convertedItems = chatMessagesToConversationItems(messages);
 
-          if (acpItems.length > 0) {
+          // Merge strategy: DO messages are the persistent base. ACP items
+          // that are newer than the latest DO message are appended. This
+          // handles two cases:
+          // 1. During/after prompting, agent responses not yet persisted to DO
+          // 2. ACP-created sessions where MessageReporter isn't configured
+          //
+          // When DO has no messages yet (initial provisioning), show ACP only.
+          if (convertedItems.length === 0 && acpItems.length > 0) {
             return <AcpMessages items={acpItems} />;
           }
 
-          // Fallback: convert DO-persisted messages to ConversationItem for unified rendering
-          const convertedItems = chatMessagesToConversationItems(messages);
+          // Find ACP items newer than the latest DO message timestamp
+          const latestDoTimestamp = convertedItems.length > 0
+            ? Math.max(...convertedItems.map((item) => item.timestamp || 0))
+            : 0;
+
+          // Collect ACP-only items: items with timestamps after the latest DO
+          // message. This includes both agent responses AND user messages,
+          // since follow-up user messages sent via ACP are not persisted to
+          // the DO (MessageReporter isn't configured for ACP-created sessions).
+          const acpOnlyItems = latestDoTimestamp > 0
+            ? acpItems.filter((item) => item.timestamp > latestDoTimestamp)
+            : [];
+
+          const mergedItems = acpOnlyItems.length > 0
+            ? [...convertedItems, ...acpOnlyItems]
+            : convertedItems;
 
           return (
             <>
@@ -654,12 +675,12 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
                 </div>
               )}
 
-              {convertedItems.length === 0 ? (
+              {mergedItems.length === 0 ? (
                 <div className="text-fg-muted text-sm text-center p-8">
                   {sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
                 </div>
               ) : (
-                <AcpMessages items={convertedItems} />
+                <AcpMessages items={mergedItems} />
               )}
             </>
           );
