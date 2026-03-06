@@ -315,6 +315,12 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [followUp, setFollowUp] = useState('');
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
 
+  // Grace period: keep showing ACP view after prompting ends so DO can catch up
+  // (VM agent batches messages with ~2s delay before persisting to DO)
+  const [acpGrace, setAcpGrace] = useState(false);
+  const acpGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wasPromptingRef = useRef(false);
+
   // Idle timer state (TDF-8)
   const [idleCountdownMs, setIdleCountdownMs] = useState<number | null>(null);
 
@@ -364,6 +370,44 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     enabled: sessionState === 'active' || sessionState === 'idle',
     preferredAgentType: 'claude-code',
   });
+
+  // Reset grace state when switching sessions
+  useEffect(() => {
+    setAcpGrace(false);
+    wasPromptingRef.current = false;
+    if (acpGraceTimerRef.current) {
+      clearTimeout(acpGraceTimerRef.current);
+      acpGraceTimerRef.current = null;
+    }
+  }, [sessionId]);
+
+  // Track isPrompting transitions to manage ACP→DO handoff grace period
+  useEffect(() => {
+    const { isPrompting } = agentSession;
+    if (isPrompting) {
+      // Starting to prompt — clear any pending grace timer
+      wasPromptingRef.current = true;
+      if (acpGraceTimerRef.current) {
+        clearTimeout(acpGraceTimerRef.current);
+        acpGraceTimerRef.current = null;
+      }
+      setAcpGrace(false);
+    } else if (wasPromptingRef.current) {
+      // Just stopped prompting — start grace period for DO to catch up
+      wasPromptingRef.current = false;
+      setAcpGrace(true);
+      acpGraceTimerRef.current = setTimeout(() => {
+        setAcpGrace(false);
+        acpGraceTimerRef.current = null;
+      }, 10_000);
+    }
+    return () => {
+      if (acpGraceTimerRef.current) {
+        clearTimeout(acpGraceTimerRef.current);
+        acpGraceTimerRef.current = null;
+      }
+    };
+  }, [agentSession.isPrompting]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadSession = useCallback(async () => {
     try {
@@ -666,8 +710,15 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           // 1. During/after prompting, agent responses not yet persisted to DO
           // 2. ACP-created sessions where MessageReporter isn't configured
           //
+          // During active prompting or the grace period after prompting ends
+          // (gives DO time to receive batched messages from VM agent ~2s delay),
+          // show the full ACP view since it has the most up-to-date content.
           // When DO has no messages yet (initial provisioning), show ACP only.
-          if (convertedItems.length === 0 && acpItems.length > 0) {
+          const useFullAcpView = acpItems.length > 0 && (
+            convertedItems.length === 0 || agentSession.isPrompting || acpGrace
+          );
+
+          if (useFullAcpView) {
             return <AcpMessages items={acpItems} />;
           }
 
