@@ -434,6 +434,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       // Always persist user message via DO WebSocket so it survives
       // workspace teardown. The DO deduplicates by content+role if needed.
+      // Note: if the DO WebSocket is closed, persistence is best-effort —
+      // the message will still reach the agent via ACP but won't appear
+      // in chat history after workspace termination.
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({
           type: 'message.send',
