@@ -422,6 +422,148 @@ describe('ProjectMessageView — ACP integration', () => {
   });
 });
 
+describe('ProjectMessageView — DO + ACP message merge', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.clearAllMocks();
+    mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('shows DO messages when ACP has no items', async () => {
+    mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
+
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        makeMessage('msg-1', 'session-1', 'DO message'),
+      ]),
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('DO message')).toBeTruthy();
+    });
+  });
+
+  it('shows ACP items only when DO has no messages', async () => {
+    mocks.useProjectAgentSession.mockReturnValue({
+      ...defaultAgentSession(),
+      messages: {
+        items: [
+          { kind: 'agent_message', id: 'acp-1', text: 'ACP streaming', streaming: true, timestamp: Date.now() },
+        ],
+        processMessage: vi.fn(),
+        addUserMessage: vi.fn(),
+        prepareForReplay: vi.fn(),
+        clear: vi.fn(),
+        availableCommands: [],
+        usage: { totalTokens: 0 },
+      },
+    });
+
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession('session-1'),
+      messages: [],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('ACP streaming')).toBeTruthy();
+    });
+  });
+
+  it('merges ACP items newer than latest DO message', async () => {
+    const doTimestamp = 1000;
+    const acpTimestamp = 2000;
+
+    mocks.useProjectAgentSession.mockReturnValue({
+      ...defaultAgentSession(),
+      messages: {
+        items: [
+          { kind: 'agent_message', id: 'acp-1', text: 'ACP response', streaming: false, timestamp: acpTimestamp },
+        ],
+        processMessage: vi.fn(),
+        addUserMessage: vi.fn(),
+        prepareForReplay: vi.fn(),
+        clear: vi.fn(),
+        availableCommands: [],
+        usage: { totalTokens: 0 },
+      },
+    });
+
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession('session-1'),
+      messages: [{
+        id: 'do-1',
+        sessionId: 'session-1',
+        role: 'user' as const,
+        content: 'DO message',
+        toolMetadata: null,
+        createdAt: doTimestamp,
+        sequence: null,
+      }],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    // Both DO and ACP messages should appear
+    await waitFor(() => {
+      expect(screen.getByText('DO message')).toBeTruthy();
+      expect(screen.getByText('ACP response')).toBeTruthy();
+    });
+  });
+
+  it('does not duplicate ACP items older than latest DO message', async () => {
+    const doTimestamp = 2000;
+    const acpTimestamp = 1000; // older
+
+    mocks.useProjectAgentSession.mockReturnValue({
+      ...defaultAgentSession(),
+      messages: {
+        items: [
+          { kind: 'agent_message', id: 'acp-old', text: 'Old ACP item', streaming: false, timestamp: acpTimestamp },
+        ],
+        processMessage: vi.fn(),
+        addUserMessage: vi.fn(),
+        prepareForReplay: vi.fn(),
+        clear: vi.fn(),
+        availableCommands: [],
+        usage: { totalTokens: 0 },
+      },
+    });
+
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession('session-1'),
+      messages: [{
+        id: 'do-1',
+        sessionId: 'session-1',
+        role: 'user' as const,
+        content: 'DO message',
+        toolMetadata: null,
+        createdAt: doTimestamp,
+        sequence: null,
+      }],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('DO message')).toBeTruthy();
+    });
+
+    // Old ACP item should NOT appear since it's older than latest DO
+    expect(screen.queryByText('Old ACP item')).toBeNull();
+  });
+});
+
 describe('chatMessagesToConversationItems', () => {
 
   it('converts user messages', () => {

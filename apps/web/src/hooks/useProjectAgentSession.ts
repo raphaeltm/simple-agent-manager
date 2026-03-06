@@ -30,10 +30,11 @@ const API_URL = (() => {
 /** Derive the workspace WebSocket host from API_URL.
  *  api.example.com → ws-{id}.example.com
  */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Accept both UUIDs (8-4-4-4-12 hex) and ULIDs (26 Crockford Base32 chars) */
+const VALID_ID_RE = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-HJKMNP-TV-Z]{26})$/i;
 
 function deriveWorkspaceWsHost(workspaceId: string): string {
-  if (!UUID_RE.test(workspaceId)) {
+  if (!VALID_ID_RE.test(workspaceId)) {
     return '';
   }
   try {
