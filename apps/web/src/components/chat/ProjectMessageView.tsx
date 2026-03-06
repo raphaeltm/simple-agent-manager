@@ -629,20 +629,24 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
 
-      {/* Messages area — ACP items when connected, converted DO messages as fallback */}
+      {/* Messages area — DO messages as persistent history, ACP for active streaming */}
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto min-h-0 p-4">
         {(() => {
-          // Show ACP items whenever they exist — even after disconnect, so the user
-          // doesn't see a jarring content switch to the lagging DO messages. ACP items
-          // are only cleared on page refresh or when a new ACP session replays history.
           const acpItems = agentSession.messages.items;
+          const convertedItems = chatMessagesToConversationItems(messages);
 
-          if (acpItems.length > 0) {
+          // Use ACP items ONLY when DO has no messages yet (initial provisioning
+          // before any messages are persisted) or when the agent is actively
+          // streaming a response (isPrompting). ACP replay only contains the
+          // current session's messages, so preferring it over DO loses earlier
+          // conversation history.
+          const useAcpView = acpItems.length > 0 && (
+            convertedItems.length === 0 || agentSession.isPrompting
+          );
+
+          if (useAcpView) {
             return <AcpMessages items={acpItems} />;
           }
-
-          // Fallback: convert DO-persisted messages to ConversationItem for unified rendering
-          const convertedItems = chatMessagesToConversationItems(messages);
 
           return (
             <>
