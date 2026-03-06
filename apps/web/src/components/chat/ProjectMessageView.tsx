@@ -688,6 +688,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             ? [...convertedItems, ...acpOnlyItems]
             : convertedItems;
 
+
           return (
             <>
               {hasMore && (
