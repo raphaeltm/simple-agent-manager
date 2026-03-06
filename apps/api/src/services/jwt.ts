@@ -1,4 +1,4 @@
-import { SignJWT, jwtVerify, importPKCS8, exportJWK, importSPKI } from 'jose';
+import { SignJWT, jwtVerify, decodeJwt, importPKCS8, exportJWK, importSPKI } from 'jose';
 import type { Env } from '../index';
 
 // Key ID format: key-YYYY-MM (rotates monthly)
@@ -166,6 +166,34 @@ export async function verifyCallbackToken(
     workspace: payload.workspace,
     type: 'callback',
   };
+}
+
+/**
+ * Check whether a callback token should be refreshed.
+ * Returns true if the token is past the refresh threshold (default: 50% of lifetime).
+ *
+ * This enables automatic token renewal during heartbeats, preventing
+ * nodes from going unhealthy after the initial token expires.
+ */
+export function shouldRefreshCallbackToken(token: string, env: Env): boolean {
+  try {
+    const claims = decodeJwt(token);
+    if (typeof claims.exp !== 'number' || typeof claims.iat !== 'number') {
+      return true; // Missing claims — refresh to be safe
+    }
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const totalLifetime = claims.exp - claims.iat;
+    const elapsed = nowSeconds - claims.iat;
+
+    const ratioStr = env.CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO;
+    const ratio = ratioStr ? parseFloat(ratioStr) : 0.5;
+    const threshold = Math.max(0.1, Math.min(0.9, Number.isFinite(ratio) ? ratio : 0.5));
+
+    return elapsed >= totalLifetime * threshold;
+  } catch {
+    return true; // Can't decode — refresh to be safe
+  }
 }
 
 /**

@@ -11,7 +11,7 @@ import { requireNodeOwnership } from '../middleware/node-auth';
 import * as schema from '../db/schema';
 import { getRuntimeLimits } from '../services/limits';
 import { createNodeRecord, deleteNodeResources, provisionNode, stopNodeResources } from '../services/nodes';
-import { signCallbackToken, signNodeManagementToken, verifyCallbackToken } from '../services/jwt';
+import { shouldRefreshCallbackToken, signCallbackToken, signNodeManagementToken, verifyCallbackToken } from '../services/jwt';
 import { recordNodeRoutingMetric } from '../services/telemetry';
 import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
 import {
@@ -507,6 +507,12 @@ nodesRoutes.post('/:id/ready', async (c) => {
 nodesRoutes.post('/:id/heartbeat', async (c) => {
   const nodeId = c.req.param('id');
   await verifyNodeCallbackAuth(c, nodeId);
+
+  // Extract raw token for refresh check (auth already verified above)
+  const authHeader = c.req.header('Authorization') ?? '';
+  const rawToken = authHeader.slice(7);
+  const tokenNeedsRefresh = shouldRefreshCallbackToken(rawToken, c.env);
+
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date().toISOString();
 
@@ -546,11 +552,17 @@ nodesRoutes.post('/:id/heartbeat', async (c) => {
     throw errors.notFound('Node');
   }
 
-  return c.json({
+  const response: Record<string, unknown> = {
     status: node.status,
     lastHeartbeatAt: now,
     healthStatus: 'healthy',
-  });
+  };
+
+  if (tokenNeedsRefresh) {
+    response.refreshedToken = await signCallbackToken(nodeId, c.env);
+  }
+
+  return c.json(response);
 });
 
 /** Default max body size for VM agent error reports: 32 KB */

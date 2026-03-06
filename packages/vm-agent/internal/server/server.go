@@ -60,6 +60,8 @@ type Server struct {
 	logReader           *logreader.Reader
 	bootLogBroadcasters *BootLogBroadcasterManager
 	bootstrapComplete   bool
+	callbackTokenMu     sync.RWMutex
+	callbackToken       string
 	done                chan struct{}
 }
 
@@ -270,6 +272,7 @@ func New(cfg *config.Config) (*Server, error) {
 		worktreeCache:      make(map[string]cachedWorktreeList),
 		logReader:           logreader.NewReaderWithTimeout(cfg.LogReaderTimeout),
 		bootLogBroadcasters: NewBootLogBroadcasterManager(),
+		callbackToken:       cfg.CallbackToken,
 		done:                make(chan struct{}),
 	}
 

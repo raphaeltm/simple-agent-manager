@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -11,6 +12,40 @@ import (
 
 func nowUTC() time.Time {
 	return time.Now().UTC()
+}
+
+// getCallbackToken returns the current callback token (thread-safe).
+func (s *Server) getCallbackToken() string {
+	s.callbackTokenMu.RLock()
+	defer s.callbackTokenMu.RUnlock()
+	return s.callbackToken
+}
+
+// setCallbackToken updates the callback token and propagates it to all
+// subsystems that use it (error reporter, message reporter, ACP config,
+// workspace runtimes). This mirrors UpdateAfterBootstrap's propagation.
+func (s *Server) setCallbackToken(token string) {
+	s.callbackTokenMu.Lock()
+	s.callbackToken = token
+	s.callbackTokenMu.Unlock()
+
+	// Propagate to error reporter.
+	s.errorReporter.SetToken(token)
+
+	// Propagate to message reporter (nil-safe).
+	if s.messageReporter != nil {
+		s.messageReporter.SetToken(token)
+	}
+
+	// Update ACP gateway config.
+	s.acpConfig.CallbackToken = token
+
+	// Update all workspace runtimes.
+	s.workspaceMu.Lock()
+	for _, ws := range s.workspaces {
+		ws.CallbackToken = token
+	}
+	s.workspaceMu.Unlock()
 }
 
 func (s *Server) startNodeHealthReporter() {
@@ -41,7 +76,7 @@ func (s *Server) sendNodeReady() {
 		slog.Error("Node ready callback request create failed", "error", err)
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+s.config.CallbackToken)
+	req.Header.Set("Authorization", "Bearer "+s.getCallbackToken())
 
 	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 	if err != nil {
@@ -53,6 +88,14 @@ func (s *Server) sendNodeReady() {
 	if resp.StatusCode >= 300 {
 		slog.Warn("Node ready callback returned non-success status", "statusCode", resp.StatusCode)
 	}
+}
+
+// heartbeatResponse is the expected JSON response from the heartbeat endpoint.
+type heartbeatResponse struct {
+	Status         string `json:"status"`
+	LastHeartbeatAt string `json:"lastHeartbeatAt"`
+	HealthStatus   string `json:"healthStatus"`
+	RefreshedToken string `json:"refreshedToken,omitempty"`
 }
 
 func (s *Server) sendNodeHeartbeat() {
@@ -76,14 +119,18 @@ func (s *Server) sendNodeHeartbeat() {
 		}
 	}
 
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		slog.Error("Node heartbeat payload marshal failed", "error", err)
+		return
+	}
 
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		slog.Error("Node heartbeat request create failed", "error", err)
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+s.config.CallbackToken)
+	req.Header.Set("Authorization", "Bearer "+s.getCallbackToken())
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
@@ -95,6 +142,20 @@ func (s *Server) sendNodeHeartbeat() {
 
 	if resp.StatusCode >= 300 {
 		slog.Warn("Node heartbeat returned non-success status", "statusCode", resp.StatusCode)
+		return
+	}
+
+	// Parse response to check for a refreshed callback token.
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	if readErr != nil {
+		slog.Warn("Failed to read heartbeat response body", "error", readErr)
+		return
+	}
+
+	var hbResp heartbeatResponse
+	if json.Unmarshal(respBody, &hbResp) == nil && hbResp.RefreshedToken != "" {
+		s.setCallbackToken(hbResp.RefreshedToken)
+		slog.Info("Callback token refreshed via heartbeat response")
 	}
 }
 
