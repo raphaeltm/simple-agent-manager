@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Project } from '@simple-agent-manager/shared';
-import { Alert, Button, EmptyState, PageLayout, Skeleton } from '@simple-agent-manager/ui';
+import { Alert, Button, EmptyState, PageLayout, Skeleton, Spinner } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { listProjects } from '../lib/api';
 
@@ -9,17 +9,24 @@ export function Projects() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasLoadedRef = useRef(false);
 
   const load = useCallback(async () => {
     try {
       setError(null);
+      if (hasLoadedRef.current) {
+        setIsRefreshing(true);
+      }
       const projectResponse = await listProjects();
       setProjects(projectResponse.projects);
+      hasLoadedRef.current = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load projects');
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   }, []);
 
@@ -35,8 +42,9 @@ export function Projects() {
   return (
     <PageLayout title="Projects" maxWidth="xl" headerRight={<UserMenu />}>
       <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
-        <p className="m-0 text-fg-muted">
+        <p className="m-0 text-fg-muted flex items-center gap-2">
           Projects are repository-backed planning spaces for backlog tasks and delegation.
+          {isRefreshing && <Spinner size="sm" />}
         </p>
         <Button onClick={() => navigate('/projects/new')}>
           New Project
@@ -51,7 +59,7 @@ export function Projects() {
         </div>
       )}
 
-      {loading ? (
+      {loading && projects.length === 0 ? (
         <div className="grid gap-3">
           {Array.from({ length: 3 }, (_, index) => (
             <div
