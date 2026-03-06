@@ -68,16 +68,26 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
     }
   }, [project]);
 
+  // Runtime config refresh indicator (separate from initial loading)
+  const [runtimeConfigRefreshing, setRuntimeConfigRefreshing] = useState(false);
+  const hasLoadedRuntimeRef = useRef(false);
+
   // Load runtime config when drawer opens
   const loadRuntimeConfig = useCallback(async () => {
     try {
-      setRuntimeConfigLoading(true);
+      if (hasLoadedRuntimeRef.current) {
+        setRuntimeConfigRefreshing(true);
+      } else {
+        setRuntimeConfigLoading(true);
+      }
       const config = await getProjectRuntimeConfig(projectId);
       setRuntimeConfig(config);
+      hasLoadedRuntimeRef.current = true;
     } catch {
       toast.error('Failed to load runtime config');
     } finally {
       setRuntimeConfigLoading(false);
+      setRuntimeConfigRefreshing(false);
     }
   }, [projectId, toast]);
 
@@ -312,11 +322,12 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
 
             {/* Runtime Config */}
             <section className="grid gap-3">
-              <h3 className="sam-type-card-title m-0 text-fg-primary">
+              <h3 className="sam-type-card-title m-0 text-fg-primary flex items-center gap-2">
                 Runtime Config
+                {runtimeConfigRefreshing && <Spinner size="sm" />}
               </h3>
 
-              {runtimeConfigLoading ? (
+              {runtimeConfigLoading && runtimeConfig.envVars.length === 0 && runtimeConfig.files.length === 0 ? (
                 <div className="flex items-center gap-2">
                   <Spinner size="sm" />
                   <span className="text-[0.8125rem]">Loading...</span>
