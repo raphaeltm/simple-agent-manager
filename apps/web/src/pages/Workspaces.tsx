@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { WorkspaceResponse } from '@simple-agent-manager/shared';
-import { Alert, PageLayout, Select, SkeletonCard, EmptyState } from '@simple-agent-manager/ui';
+import { Alert, PageLayout, Select, SkeletonCard, Spinner, EmptyState } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { WorkspaceCard } from '../components/WorkspaceCard';
 import { listWorkspaces, stopWorkspace, restartWorkspace, deleteWorkspace } from '../lib/api';
@@ -17,23 +17,32 @@ const STATUS_FILTERS = [
 export function Workspaces() {
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState('');
+  const hasLoadedRef = useRef(false);
 
   const loadData = useCallback(async () => {
     try {
       setError(null);
+      if (hasLoadedRef.current) {
+        setIsRefreshing(true);
+      }
       const data = await listWorkspaces(statusFilter || undefined);
       setWorkspaces(data);
+      hasLoadedRef.current = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load workspaces');
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   }, [statusFilter]);
 
   useEffect(() => {
-    setLoading(true);
+    if (!hasLoadedRef.current) {
+      setLoading(true);
+    }
     void loadData();
     const interval = window.setInterval(() => {
       void loadData();
@@ -76,8 +85,9 @@ export function Workspaces() {
   return (
     <PageLayout title="Workspaces" maxWidth="xl" headerRight={<UserMenu />}>
       <div className="flex justify-between items-center mb-6 gap-3 flex-wrap">
-        <p className="sam-type-secondary m-0 text-fg-muted">
+        <p className="sam-type-secondary m-0 text-fg-muted flex items-center gap-2">
           All workspaces across all nodes.
+          {isRefreshing && <Spinner size="sm" />}
         </p>
         <div className="flex items-center gap-3">
           <Select
@@ -100,7 +110,7 @@ export function Workspaces() {
         </div>
       )}
 
-      {loading ? (
+      {loading && workspaces.length === 0 ? (
         <div role="status" aria-label="Loading workspaces" aria-busy="true" className="grid grid-cols-1 gap-3">
           {Array.from({ length: 3 }, (_, i) => (
             <SkeletonCard key={i} lines={2} />
