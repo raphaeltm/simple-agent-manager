@@ -432,22 +432,21 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         createdAt: Date.now(),
       }]);
 
+      // Always persist user message via DO WebSocket so it survives
+      // workspace teardown. The DO deduplicates by content+role if needed.
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'message.send',
+          sessionId,
+          content: trimmed,
+          role: 'user',
+        }));
+      }
+
       if (agentSession.isAgentActive) {
-        // ACP path: prompt goes to agent via WebSocket; VM agent's MessageReporter
-        // handles persistence to the DO, so we do NOT also send via DO WebSocket
-        // (that would create a duplicate with a different messageId).
+        // Also send via ACP so the agent processes the prompt
         agentSession.sendPrompt(trimmed);
       } else {
-        // Fallback: persist via DO WebSocket so the message is at least saved,
-        // even though the agent won't receive it.
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({
-            type: 'message.send',
-            sessionId,
-            content: trimmed,
-            role: 'user',
-          }));
-        }
         setError('Agent is not connected — message saved but prompt not delivered.');
       }
 
