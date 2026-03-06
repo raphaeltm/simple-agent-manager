@@ -728,9 +728,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             : 0;
 
           // Collect ACP-only items: items with timestamps after the latest DO
-          // message. This includes both agent responses AND user messages,
-          // since follow-up user messages sent via ACP are not persisted to
-          // the DO (MessageReporter isn't configured for ACP-created sessions).
+          // message. Includes agent responses not yet persisted to DO.
           const acpOnlyItems = latestDoTimestamp > 0
             ? acpItems.filter((item) => item.timestamp > latestDoTimestamp)
             : [];
