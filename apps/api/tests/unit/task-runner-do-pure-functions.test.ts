@@ -115,7 +115,7 @@ describe('isTransientError', () => {
 
   // --- Permanent flag (C1 fix) ---
   it('returns false when error has permanent: true flag', () => {
-    const err = Object.assign(new Error('Node agent not ready within 120000ms'), {
+    const err = Object.assign(new Error('Node agent not ready within 600000ms'), {
       permanent: true,
     });
     expect(isTransientError(err)).toBe(false);

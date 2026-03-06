@@ -20,12 +20,12 @@ import {
 // =============================================================================
 
 describe('getNodeAgentReadyTimeoutMs', () => {
-  it('returns default 120000ms when env var is undefined', () => {
-    expect(getNodeAgentReadyTimeoutMs({})).toBe(120000);
+  it('returns default 600000ms when env var is undefined', () => {
+    expect(getNodeAgentReadyTimeoutMs({})).toBe(600000);
   });
 
   it('returns default when env var is empty string', () => {
-    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: '' })).toBe(120000);
+    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: '' })).toBe(600000);
   });
 
   it('parses valid integer from env var', () => {
@@ -33,23 +33,23 @@ describe('getNodeAgentReadyTimeoutMs', () => {
   });
 
   it('returns default for non-numeric string', () => {
-    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: 'abc' })).toBe(120000);
+    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: 'abc' })).toBe(600000);
   });
 
   it('returns default for zero', () => {
-    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: '0' })).toBe(120000);
+    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: '0' })).toBe(600000);
   });
 
   it('returns default for negative number', () => {
-    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: '-5000' })).toBe(120000);
+    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: '-5000' })).toBe(600000);
   });
 
   it('returns default for NaN', () => {
-    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: 'NaN' })).toBe(120000);
+    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: 'NaN' })).toBe(600000);
   });
 
   it('returns default for Infinity', () => {
-    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: 'Infinity' })).toBe(120000);
+    expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: 'Infinity' })).toBe(600000);
   });
 
   it('parses small timeout value', () => {
