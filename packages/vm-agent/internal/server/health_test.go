@@ -9,7 +9,13 @@ import (
 	"time"
 
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/errorreport"
 )
+
+// newTestErrorReporter creates a minimal error reporter for tests.
+func newTestErrorReporter() *errorreport.Reporter {
+	return errorreport.New("http://localhost", "test", "test", errorreport.Config{})
+}
 
 func TestCallbackTokenRefresh(t *testing.T) {
 	heartbeatCount := 0
@@ -51,6 +57,7 @@ func TestCallbackTokenRefresh(t *testing.T) {
 		config:        cfg,
 		callbackToken: cfg.CallbackToken,
 		workspaces:    make(map[string]*WorkspaceRuntime),
+		errorReporter: newTestErrorReporter(),
 		done:          make(chan struct{}),
 	}
 
@@ -112,6 +119,7 @@ func TestCallbackTokenRefreshUsesNewTokenForSubsequentRequests(t *testing.T) {
 		config:        cfg,
 		callbackToken: cfg.CallbackToken,
 		workspaces:    make(map[string]*WorkspaceRuntime),
+		errorReporter: newTestErrorReporter(),
 		done:          make(chan struct{}),
 	}
 
@@ -149,6 +157,7 @@ func TestHeartbeatNoRefreshOnServerError(t *testing.T) {
 		config:        cfg,
 		callbackToken: cfg.CallbackToken,
 		workspaces:    make(map[string]*WorkspaceRuntime),
+		errorReporter: newTestErrorReporter(),
 		done:          make(chan struct{}),
 	}
 
@@ -182,6 +191,7 @@ func TestHeartbeatNoRefreshWhenFieldEmpty(t *testing.T) {
 		config:        cfg,
 		callbackToken: cfg.CallbackToken,
 		workspaces:    make(map[string]*WorkspaceRuntime),
+		errorReporter: newTestErrorReporter(),
 		done:          make(chan struct{}),
 	}
 

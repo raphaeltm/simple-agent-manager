@@ -21,11 +21,31 @@ func (s *Server) getCallbackToken() string {
 	return s.callbackToken
 }
 
-// setCallbackToken updates the callback token (thread-safe).
+// setCallbackToken updates the callback token and propagates it to all
+// subsystems that use it (error reporter, message reporter, ACP config,
+// workspace runtimes). This mirrors UpdateAfterBootstrap's propagation.
 func (s *Server) setCallbackToken(token string) {
 	s.callbackTokenMu.Lock()
-	defer s.callbackTokenMu.Unlock()
 	s.callbackToken = token
+	s.callbackTokenMu.Unlock()
+
+	// Propagate to error reporter.
+	s.errorReporter.SetToken(token)
+
+	// Propagate to message reporter (nil-safe).
+	if s.messageReporter != nil {
+		s.messageReporter.SetToken(token)
+	}
+
+	// Update ACP gateway config.
+	s.acpConfig.CallbackToken = token
+
+	// Update all workspace runtimes.
+	s.workspaceMu.Lock()
+	for _, ws := range s.workspaces {
+		ws.CallbackToken = token
+	}
+	s.workspaceMu.Unlock()
 }
 
 func (s *Server) startNodeHealthReporter() {
@@ -99,7 +119,11 @@ func (s *Server) sendNodeHeartbeat() {
 		}
 	}
 
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		slog.Error("Node heartbeat payload marshal failed", "error", err)
+		return
+	}
 
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -124,6 +148,7 @@ func (s *Server) sendNodeHeartbeat() {
 	// Parse response to check for a refreshed callback token.
 	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 8192))
 	if readErr != nil {
+		slog.Warn("Failed to read heartbeat response body", "error", readErr)
 		return
 	}
 
