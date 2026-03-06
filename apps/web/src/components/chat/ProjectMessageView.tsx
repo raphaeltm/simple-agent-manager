@@ -728,17 +728,17 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             : 0;
 
           // Collect ACP-only items: items with timestamps after the latest DO
-          // message. This includes both agent responses AND user messages,
-          // since follow-up user messages sent via ACP are not persisted to
-          // the DO (MessageReporter isn't configured for ACP-created sessions).
+          // message, excluding user messages (which are already in DO via
+          // optimistic add or DO WebSocket persistence).
           const acpOnlyItems = latestDoTimestamp > 0
-            ? acpItems.filter((item) => item.timestamp > latestDoTimestamp)
+            ? acpItems.filter((item) =>
+                item.timestamp > latestDoTimestamp && item.kind !== 'user_message'
+              )
             : [];
 
           const mergedItems = acpOnlyItems.length > 0
             ? [...convertedItems, ...acpOnlyItems]
             : convertedItems;
-
 
           return (
             <>
