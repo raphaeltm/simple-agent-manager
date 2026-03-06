@@ -9,7 +9,12 @@ import { describe, expect, it } from 'vitest';
  * This prevented the ACP WebSocket from ever connecting in project chat.
  */
 
-// Reproduce the regex from useProjectAgentSession.ts
+// Reproduce the regex from useProjectAgentSession.ts.
+// NOTE: This is a copy of the production regex. Ideally we'd import the
+// actual constant, but deriveWorkspaceWsHost and VALID_ID_RE are not
+// exported from the hook module. If the regex pattern is changed in the
+// source, this copy must be updated too. A future improvement would be
+// to export the regex or the function for direct testing.
 const VALID_ID_RE = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-HJKMNP-TV-Z]{26})$/i;
 
 describe('VALID_ID_RE (workspace ID validation)', () => {
@@ -32,6 +37,22 @@ describe('VALID_ID_RE (workspace ID validation)', () => {
 
     it('rejects ULID with wrong length (27 chars)', () => {
       expect(VALID_ID_RE.test('01HYMKQ5W1AYDM4PQZ3T5SXQJKX')).toBe(false);
+    });
+
+    it('rejects ULID containing excluded Crockford char I', () => {
+      expect(VALID_ID_RE.test('0000000000000000000000000I')).toBe(false);
+    });
+
+    it('rejects ULID containing excluded Crockford char L', () => {
+      expect(VALID_ID_RE.test('0000000000000000000000000L')).toBe(false);
+    });
+
+    it('rejects ULID containing excluded Crockford char O', () => {
+      expect(VALID_ID_RE.test('0000000000000000000000000O')).toBe(false);
+    });
+
+    it('rejects ULID containing excluded Crockford char U', () => {
+      expect(VALID_ID_RE.test('0000000000000000000000000U')).toBe(false);
     });
   });
 
