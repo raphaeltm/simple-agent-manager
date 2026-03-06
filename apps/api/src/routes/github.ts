@@ -7,7 +7,9 @@ import { requireAuth, requireApproved, getUserId, optionalAuth } from '../middle
 import { errors } from '../middleware/error';
 import {
   getInstallationRepositories,
+  getInstallationToken,
   getRepositoryBranches,
+  getAppInstallations,
   verifyWebhookSignature,
   generateAppJWT,
 } from '../services/github-app';
@@ -18,10 +20,19 @@ const githubRoutes = new Hono<{ Bindings: Env }>();
 
 /**
  * GET /api/github/installations - List user's GitHub App installations
+ *
+ * Syncs installations from GitHub on each request so that org members
+ * who didn't originally install the app still see org installations.
+ * Uses the GitHub App JWT to list all app installations, then checks
+ * each against the user's existing DB records. New accessible installations
+ * are auto-created for the user.
  */
 githubRoutes.get('/installations', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
+
+  // Sync: discover installations the user can access but doesn't have a DB record for
+  await syncUserInstallations(db, userId, c.env);
 
   const installations = await db
     .select()
@@ -279,11 +290,16 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date().toISOString();
 
-  // Check if installation already exists
+  // Check if this user already has a record for this installation
   const existing = await db
     .select()
     .from(schema.githubInstallations)
-    .where(eq(schema.githubInstallations.installationId, installationId))
+    .where(
+      and(
+        eq(schema.githubInstallations.installationId, installationId),
+        eq(schema.githubInstallations.userId, auth.user.id)
+      )
+    )
     .limit(1);
 
   if (existing.length > 0) {
@@ -357,5 +373,143 @@ githubRoutes.delete('/installations/:id', requireAuth(), requireApproved(), asyn
 
   return c.json({ success: true });
 });
+
+/**
+ * Sync GitHub App installations for a user.
+ *
+ * Fetches all installations of the GitHub App, then for org-type installations
+ * that the user doesn't already have a DB record for, checks whether the user
+ * is a member of the org. If so, creates a record so the user can see and use
+ * the installation.
+ *
+ * For personal installations, only the account owner should see them (handled
+ * by the webhook creating the initial record).
+ */
+async function syncUserInstallations(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  userId: string,
+  env: Env
+): Promise<void> {
+  try {
+    // Get the user's GitHub username for membership checks
+    const userRows = await db
+      .select({ githubId: schema.users.githubId, name: schema.users.name })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    const user = userRows[0];
+    if (!user?.githubId) return;
+
+    // Get all app installations from GitHub
+    const appInstallations = await getAppInstallations(env);
+    if (appInstallations.length === 0) return;
+
+    // Get user's existing installation records
+    const existingRecords = await db
+      .select({ installationId: schema.githubInstallations.installationId })
+      .from(schema.githubInstallations)
+      .where(eq(schema.githubInstallations.userId, userId));
+
+    const existingInstallationIds = new Set(existingRecords.map((r) => r.installationId));
+
+    // Find installations the user doesn't have a record for
+    const missingInstallations = appInstallations.filter(
+      (inst) => !existingInstallationIds.has(String(inst.id))
+    );
+
+    if (missingInstallations.length === 0) return;
+
+    const now = new Date().toISOString();
+
+    for (const inst of missingInstallations) {
+      // For org installations, check if the user is a member
+      if (inst.account.type === 'Organization') {
+        const isMember = await checkOrgMembership(
+          String(inst.id),
+          inst.account.login,
+          user.githubId,
+          env
+        );
+        if (!isMember) continue;
+      } else {
+        // Personal installations: only the account owner should see them.
+        // The webhook handler creates these records; skip if not already present.
+        continue;
+      }
+
+      // Create the record for this user
+      try {
+        await db
+          .insert(schema.githubInstallations)
+          .values({
+            id: ulid(),
+            userId,
+            installationId: String(inst.id),
+            accountType: inst.account.type === 'Organization' ? 'organization' : 'personal',
+            accountName: inst.account.login,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .onConflictDoNothing(); // Unique(userId, installationId) — skip if already exists
+      } catch {
+        // Ignore conflicts from race conditions
+      }
+    }
+  } catch (err) {
+    // Sync is best-effort — don't block the response if GitHub API is down
+    console.error('Failed to sync installations:', err instanceof Error ? err.message : err);
+  }
+}
+
+/**
+ * Check if a GitHub user is a member of an organization.
+ * Uses the installation access token to query the org members API.
+ */
+async function checkOrgMembership(
+  installationId: string,
+  orgLogin: string,
+  githubUserId: string,
+  env: Env
+): Promise<boolean> {
+  try {
+    const { token } = await getInstallationToken(installationId, env);
+
+    // List org members and check if the user's GitHub ID is among them
+    // Use per_page=100 and paginate if needed
+    const perPage = 100;
+    const maxPages = 100;
+
+    for (let page = 1; page <= maxPages; page++) {
+      const response = await fetch(
+        `https://api.github.com/orgs/${encodeURIComponent(orgLogin)}/members?per_page=${perPage}&page=${page}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+            'User-Agent': 'Simple-Agent-Manager',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        // If we can't check membership (e.g., insufficient permissions), skip
+        return false;
+      }
+
+      const members = (await response.json()) as Array<{ id: number }>;
+      if (members.some((m) => String(m.id) === githubUserId)) {
+        return true;
+      }
+
+      if (members.length < perPage) break;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
 
 export { githubRoutes };

@@ -142,21 +142,30 @@ export const credentials = sqliteTable(
 // =============================================================================
 // GitHub App Installations
 // =============================================================================
-export const githubInstallations = sqliteTable('github_installations', {
-  id: text('id').primaryKey(),
-  userId: text('user_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  installationId: text('installation_id').notNull().unique(),
-  accountType: text('account_type').notNull(),
-  accountName: text('account_name').notNull(),
-  createdAt: text('created_at')
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text('updated_at')
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
-});
+export const githubInstallations = sqliteTable(
+  'github_installations',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    installationId: text('installation_id').notNull(),
+    accountType: text('account_type').notNull(),
+    accountName: text('account_name').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    userInstallationIdx: uniqueIndex('idx_github_installations_user_installation').on(
+      table.userId,
+      table.installationId
+    ),
+  })
+);
 
 // =============================================================================
 // Projects

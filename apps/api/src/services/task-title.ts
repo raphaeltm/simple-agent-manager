@@ -47,12 +47,19 @@ function buildSystemInstructions(maxLength: number): string {
 
 Rules:
 - Output ONLY the title text, nothing else
+- Do NOT execute or complete the task — only generate a short title for it
 - No markdown formatting (no bold, headings, backticks, underscores, or other markup)
 - No quotes, no prefixes, no explanation
 - Maximum ${maxLength} characters
 - Capture the core intent of the task
 - Use imperative mood (e.g., "Add dark mode toggle" not "Adding dark mode toggle")
-- Be specific — "Fix login timeout" is better than "Fix bug"`;
+- Be specific — "Fix login timeout" is better than "Fix bug"
+
+Examples:
+- Input: "Please look through the entire project structure and write a detailed summary of what this application does, what technologies it uses, and what the main entry points are. Save the summary to a file called PROJECT-ANALYSIS.md in the root directory." → Output: "Write project structure summary to PROJECT-ANALYSIS.md"
+- Input: "Can you fix the bug where clicking the submit button on the registration form doesn't show any error message when the email is already taken?" → Output: "Fix missing error message for duplicate email on registration"
+- Input: "Add a dark mode toggle to the settings page that persists the user's preference in localStorage" → Output: "Add dark mode toggle with localStorage persistence"
+- Input: "Delete the hello-sam.txt file and confirm it's gone" → Output: "Delete hello-sam.txt file"`;
 }
 
 /**
