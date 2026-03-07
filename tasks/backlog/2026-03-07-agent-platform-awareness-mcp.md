@@ -79,13 +79,66 @@ Prefix the initial prompt with SAM context and instructions like "when done, cre
 **Pros**: Zero infrastructure changes.
 **Cons**: Fragile. No structured API. Agent can't query for info. File-watching is hacky. Doesn't work across agent types.
 
-### Recommended Approach: A + ACP Injection
+### Recommended Approach: A + ACP Injection + Bootstrap Tool Pattern
 
-1. **Build an MCP server endpoint on the API** (`/mcp/task/{taskId}`) with tools:
-   - `get_task_context` — returns task description, acceptance criteria, project info, checklist
-   - `update_task_status` — report progress (checklist updates, status changes)
-   - `complete_task` — mark task as completed with optional summary
-   - `get_project_info` — project details, repo, default branch, recent activity
+#### Core idea: `get_instructions` as the single entry point
+
+Instead of exposing many tools upfront and hoping the agent uses them correctly, expose a **single mandatory tool** — `get_instructions` — with a tool description that forces the agent to call it first:
+
+```
+"You MUST call this tool before starting any work. It provides your task
+context, project information, and instructions for reporting progress."
+```
+
+The `get_instructions` response is dynamic and returns everything the agent needs:
+
+```json
+{
+  "task": {
+    "id": "task_abc123",
+    "title": "Fix login redirect loop",
+    "description": "Users are getting stuck in a redirect...",
+    "acceptanceCriteria": ["..."],
+    "checklist": [{ "item": "...", "done": false }]
+  },
+  "project": {
+    "id": "proj_xyz",
+    "name": "my-app",
+    "repository": "user/my-app",
+    "defaultBranch": "main"
+  },
+  "instructions": [
+    "Call `update_task_status` to report progress as you complete checklist items.",
+    "Call `complete_task` with a summary when all work is done.",
+    "Push your changes before calling `complete_task`."
+  ]
+}
+```
+
+This pattern is self-bootstrapping: the agent doesn't need any prior knowledge of SAM. One tool call gets it oriented. The response can vary by task type, agent type, or project config without changing the tool schema.
+
+#### Why this works better than prompt prefixing
+
+- **Prompt prefixing** bloats the initial message with platform boilerplate that dilutes the user's actual task description
+- **`get_instructions`** keeps the initial prompt clean (just the user's task) while delivering richer, structured context via a tool call the agent is compelled to make
+- The tool description in `tools/list` is the forcing function — agents read tool descriptions and follow "MUST call" directives reliably
+- If the agent skips it, nothing catastrophic happens — the other tools still work, the agent just has less context
+
+#### Full tool surface
+
+The MCP server exposes these tools:
+
+| Tool | Purpose | When called |
+|------|---------|-------------|
+| `get_instructions` | Returns task context, project info, and behavioral guidance | **First** — before any work |
+| `update_task_status` | Report progress on checklist items or status changes | During work |
+| `complete_task` | Mark task as completed with optional summary | When done |
+
+`get_instructions` is the bootstrap. The other tools are referenced in its response, so the agent learns about them in context, not just from bare tool descriptions.
+
+#### Implementation steps
+
+1. **Build an MCP server endpoint on the API** — Hono route at `/mcp/task/{taskId}` implementing the MCP protocol (Streamable HTTP transport). Handles `tools/list`, `tools/call` for the three tools above.
 
 2. **Generate a task-scoped auth token** at task start time (short-lived JWT or KV-stored opaque token scoped to the specific task + project). Passed as a bearer token header on the MCP server.
 
@@ -94,13 +147,17 @@ Prefix the initial prompt with SAM context and instructions like "when done, cre
    - Passing MCP server details from the API to the vm-agent in the `start` request body
    - Populating `McpServers` in `session_host.go` instead of the empty slice
 
-4. **Inject behavioral guidance via initial prompt prefix** — SAM already controls the initial prompt sent to the agent (`workspaces.go:startAgentWithPrompt()`). Prepend platform instructions (e.g., "When you've completed the task, call the `complete_task` tool. Report progress using `update_task_status`.") before the user's task description. This requires no user configuration — SAM owns the prompt construction.
+4. **No prompt prefixing or CLAUDE.md needed** — tool discovery is automatic via MCP `tools/list`, and `get_instructions` delivers all behavioral guidance dynamically.
 
 ### How the Agent Learns About Tools
 
-**Tool discovery is automatic.** When MCP servers are registered via ACP `NewSessionRequest.McpServers`, Claude Code calls MCP `tools/list` and the tools appear alongside built-in tools (Read, Write, Bash, etc.). No CLAUDE.md or user config needed.
+**Tool discovery is automatic.** When MCP servers are registered via ACP `NewSessionRequest.McpServers`, Claude Code calls MCP `tools/list` and the tools appear alongside built-in tools (Read, Write, Bash, etc.). No CLAUDE.md, no user config, no prompt prefixing needed.
 
-**Behavioral guidance goes in the initial prompt prefix**, not CLAUDE.md. SAM should not rely on users configuring CLAUDE.md for platform features to work. The prompt prefix is fully platform-controlled and tells the agent *when* and *how* to use the SAM tools (e.g., "Call `complete_task` when finished"). This is analogous to how the task description is already injected today — just with additional platform instructions prepended.
+**`get_instructions` is the forcing function.** Its tool description says "MUST call before starting work." When the agent calls it, the response contains structured context about the task *and* explicit instructions on how/when to use the other SAM tools. This is better than prompt prefixing because:
+- The initial prompt stays clean (just the user's task description)
+- The context is richer and structured (JSON, not prose crammed into a prompt)
+- The guidance is dynamic (can vary by task type, project config, agent capabilities)
+- SAM controls it end-to-end with no dependency on user configuration
 
 ### Key Code Locations
 
@@ -129,7 +186,7 @@ This feature should go through speckit for proper design:
 - [ ] Agent can report incremental progress via MCP tool call
 - [ ] MCP auth token is scoped to the specific task and has a bounded lifetime
 - [ ] Works with Claude Code agent type; designed to be agent-type-agnostic
-- [ ] Platform-controlled initial prompt prefix tells the agent when/how to use SAM tools (no user CLAUDE.md required)
+- [ ] `get_instructions` bootstrap tool delivers task context + behavioral guidance dynamically (no CLAUDE.md or prompt prefix required)
 - [ ] No hardcoded URLs — MCP server URL derived from `SAM_API_URL` / `BASE_DOMAIN`
 
 ## Open Questions
