@@ -200,7 +200,10 @@ describe('Initial prompt delivery: startAgentSessionOnNode', () => {
   });
 
   it('sends agentType and initialPrompt in the request body', () => {
-    expect(nodeAgentSource).toContain('JSON.stringify({ agentType, initialPrompt })');
+    // The body is now constructed dynamically to support optional mcpServers
+    expect(nodeAgentSource).toContain('body: JSON.stringify(body)');
+    expect(nodeAgentSource).toContain('agentType');
+    expect(nodeAgentSource).toContain('initialPrompt');
   });
 });
 

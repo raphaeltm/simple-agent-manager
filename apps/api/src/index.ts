@@ -32,6 +32,7 @@ import { taskRunsRoutes } from './routes/task-runs';
 import { taskSubmitRoutes } from './routes/task-submit';
 import { adminRoutes } from './routes/admin';
 import { dashboardRoutes } from './routes/dashboard';
+import { mcpRoutes } from './routes/mcp';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
@@ -197,6 +198,8 @@ export interface Env {
   TASK_RUNNER_PROVISION_POLL_INTERVAL_MS?: string;
   // Callback token refresh threshold (ratio of token lifetime, default 0.5)
   CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO?: string;
+  // MCP token TTL in seconds (default 7200 = 2 hours)
+  MCP_TOKEN_TTL_SECONDS?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -446,6 +449,9 @@ app.route('/api/projects/:projectId/tasks', taskRunsRoutes);
 app.route('/api/projects/:projectId/tasks', taskSubmitRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/dashboard', dashboardRoutes);
+// MCP server endpoint — at /mcp (not /api/mcp) because VM agents use this URL
+// and it uses its own task-scoped Bearer token auth, not session auth.
+app.route('/mcp', mcpRoutes);
 
 // 404 handler
 app.notFound((c) => {

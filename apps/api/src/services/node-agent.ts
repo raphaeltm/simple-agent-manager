@@ -252,6 +252,12 @@ export async function createAgentSessionOnNode(
   });
 }
 
+/** MCP server configuration passed to the VM agent for ACP session injection */
+export interface McpServerConfig {
+  url: string;
+  token: string;
+}
+
 export async function startAgentSessionOnNode(
   nodeId: string,
   workspaceId: string,
@@ -259,8 +265,18 @@ export async function startAgentSessionOnNode(
   agentType: string,
   initialPrompt: string,
   env: Env,
-  userId: string
+  userId: string,
+  mcpServer?: McpServerConfig,
 ): Promise<unknown> {
+  const body: Record<string, unknown> = { agentType, initialPrompt };
+  if (mcpServer) {
+    body.mcpServers = [
+      {
+        url: mcpServer.url,
+        token: mcpServer.token,
+      },
+    ];
+  }
   return nodeAgentRequest(
     nodeId,
     env,
@@ -269,7 +285,7 @@ export async function startAgentSessionOnNode(
       method: 'POST',
       userId,
       workspaceId,
-      body: JSON.stringify({ agentType, initialPrompt }),
+      body: JSON.stringify(body),
     }
   );
 }

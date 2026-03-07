@@ -170,6 +170,18 @@ type GatewayConfig struct {
 	// CredentialSyncer syncs updated file-based credentials (e.g. auth.json)
 	// back to the control plane after a session ends. When nil, no sync occurs.
 	CredentialSyncer CredentialSyncer
+	// McpServers are MCP server configs to inject into ACP sessions.
+	// When non-empty, these are converted to acpsdk.McpServer entries
+	// and passed in NewSession/LoadSession requests.
+	McpServers []McpServerEntry
+}
+
+// McpServerEntry is a lightweight MCP server config passed from the control
+// plane for injection into ACP sessions. It represents an HTTP MCP server
+// with bearer token authentication.
+type McpServerEntry struct {
+	URL   string `json:"url"`
+	Token string `json:"token"`
 }
 
 // Gateway is a thin per-WebSocket relay between a browser and a SessionHost.
