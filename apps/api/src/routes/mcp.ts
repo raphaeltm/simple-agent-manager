@@ -17,7 +17,7 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Env } from '../index';
 import * as schema from '../db/schema';
-import { validateMcpToken, type McpTokenData } from '../services/mcp-token';
+import { validateMcpToken, revokeMcpToken, type McpTokenData } from '../services/mcp-token';
 import { log } from '../lib/logger';
 
 export const mcpRoutes = new Hono<{ Bindings: Env }>();
@@ -55,6 +55,23 @@ function jsonRpcError(
 const METHOD_NOT_FOUND = -32601;
 const INVALID_PARAMS = -32602;
 const INTERNAL_ERROR = -32603;
+
+// ─── Configurable limits ─────────────────────────────────────────────────────
+
+/** Max length for progress/summary messages stored in activity events */
+const ACTIVITY_MESSAGE_MAX_LENGTH = 500;
+/** Max length for log messages */
+const LOG_MESSAGE_MAX_LENGTH = 200;
+/** Max length for task output summary stored in D1 */
+const OUTPUT_SUMMARY_MAX_LENGTH = 2000;
+
+// MCP protocol constants
+const MCP_PROTOCOL_VERSION = '2025-03-26';
+const MCP_SERVER_NAME = 'sam-mcp';
+const MCP_SERVER_VERSION = '1.0.0';
+
+// Task status sets
+const ACTIVE_STATUSES = ['queued', 'in_progress', 'delegated', 'awaiting_followup'];
 
 // ─── MCP tool definitions ────────────────────────────────────────────────────
 
@@ -104,23 +121,26 @@ const MCP_TOOLS = [
 
 // ─── Auth middleware ─────────────────────────────────────────────────────────
 
+/** Returns [tokenData, rawToken] or [null, null] */
 async function authenticateMcpRequest(
   authHeader: string | undefined,
   kv: KVNamespace,
-): Promise<McpTokenData | null> {
+): Promise<[McpTokenData, string] | [null, null]> {
   if (!authHeader?.startsWith('Bearer ')) {
-    return null;
+    return [null, null];
   }
   const token = authHeader.slice(7);
   if (!token) {
-    return null;
+    return [null, null];
   }
-  return validateMcpToken(kv, token);
+  const data = await validateMcpToken(kv, token);
+  return data ? [data, token] : [null, null];
 }
 
 // ─── Tool handlers ───────────────────────────────────────────────────────────
 
 async function handleGetInstructions(
+  requestId: string | number | null,
   tokenData: McpTokenData,
   env: Env,
 ): Promise<JsonRpcResponse> {
@@ -140,7 +160,7 @@ async function handleGetInstructions(
 
   const task = taskRows[0];
   if (!task) {
-    return jsonRpcError(null, INTERNAL_ERROR, 'Task not found');
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Task not found');
   }
 
   // Fetch project
@@ -152,7 +172,7 @@ async function handleGetInstructions(
 
   const project = projectRows[0];
   if (!project) {
-    return jsonRpcError(null, INTERNAL_ERROR, 'Project not found');
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Project not found');
   }
 
   const result = {
@@ -178,24 +198,25 @@ async function handleGetInstructions(
     ],
   };
 
-  return jsonRpcSuccess(null, {
+  return jsonRpcSuccess(requestId, {
     content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
   });
 }
 
 async function handleUpdateTaskStatus(
+  requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env,
 ): Promise<JsonRpcResponse> {
   const message = params.message;
   if (typeof message !== 'string' || !message.trim()) {
-    return jsonRpcError(null, INVALID_PARAMS, 'message is required and must be a non-empty string');
+    return jsonRpcError(requestId, INVALID_PARAMS, 'message is required and must be a non-empty string');
   }
 
   const db = drizzle(env.DATABASE, { schema });
 
-  // Verify task exists and belongs to this project
+  // Verify task exists, belongs to this project, and is in an active state
   const taskRows = await db
     .select({ id: schema.tasks.id, status: schema.tasks.status })
     .from(schema.tasks)
@@ -209,7 +230,16 @@ async function handleUpdateTaskStatus(
 
   const task = taskRows[0];
   if (!task) {
-    return jsonRpcError(null, INTERNAL_ERROR, 'Task not found');
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Task not found');
+  }
+
+  // Reject updates on tasks in terminal states
+  if (!ACTIVE_STATUSES.includes(task.status)) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Task status updates cannot be made after task reaches status '${task.status}'`,
+    );
   }
 
   // Record the progress update as an activity event via ProjectData DO
@@ -225,7 +255,7 @@ async function handleUpdateTaskStatus(
         actorId: tokenData.workspaceId,
         metadata: {
           taskId: tokenData.taskId,
-          message: message.trim().slice(0, 500),
+          message: message.trim().slice(0, ACTIVITY_MESSAGE_MAX_LENGTH),
         },
       }),
     }));
@@ -239,62 +269,46 @@ async function handleUpdateTaskStatus(
   log.info('mcp.update_task_status', {
     taskId: tokenData.taskId,
     projectId: tokenData.projectId,
-    message: message.trim().slice(0, 200),
+    message: message.trim().slice(0, LOG_MESSAGE_MAX_LENGTH),
   });
 
-  return jsonRpcSuccess(null, {
+  return jsonRpcSuccess(requestId, {
     content: [{ type: 'text', text: 'Progress update recorded.' }],
   });
 }
 
 async function handleCompleteTask(
+  requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env,
+  rawToken: string,
 ): Promise<JsonRpcResponse> {
   const summary = typeof params.summary === 'string' ? params.summary.trim() : null;
 
-  const db = drizzle(env.DATABASE, { schema });
-
-  // Fetch the task
-  const taskRows = await db
-    .select()
-    .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.id, tokenData.taskId),
-        eq(schema.tasks.projectId, tokenData.projectId),
-      ),
-    )
-    .limit(1);
-
-  const task = taskRows[0];
-  if (!task) {
-    return jsonRpcError(null, INTERNAL_ERROR, 'Task not found');
-  }
-
-  // Only allow completion from active states
-  const completableStatuses = ['in_progress', 'delegated', 'awaiting_followup'];
-  if (!completableStatuses.includes(task.status)) {
-    return jsonRpcError(
-      null,
-      INVALID_PARAMS,
-      `Task cannot be completed from status '${task.status}'`,
-    );
-  }
-
   const now = new Date().toISOString();
 
-  // Update task status to completed
-  await db
-    .update(schema.tasks)
-    .set({
-      status: 'completed',
-      completedAt: now,
-      outputSummary: summary ? summary.slice(0, 2000) : task.outputSummary,
-      updatedAt: now,
-    })
-    .where(eq(schema.tasks.id, tokenData.taskId));
+  // Atomic conditional UPDATE — only transitions from completable statuses.
+  // This prevents the TOCTOU race of a separate SELECT + UPDATE.
+  const result = await env.DATABASE.prepare(
+    `UPDATE tasks SET status = 'completed', completed_at = ?, output_summary = COALESCE(?, output_summary), updated_at = ?
+     WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`,
+  ).bind(
+    now,
+    summary ? summary.slice(0, OUTPUT_SUMMARY_MAX_LENGTH) : null,
+    now,
+    tokenData.taskId,
+    tokenData.projectId,
+  ).run();
+
+  if (!result.meta.changes || result.meta.changes === 0) {
+    // Either task doesn't exist, wrong project, or not in a completable state
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Task cannot be completed — it may not exist or is not in a completable status',
+    );
+  }
 
   // Record completion activity event
   try {
@@ -309,7 +323,7 @@ async function handleCompleteTask(
         actorId: tokenData.workspaceId,
         metadata: {
           taskId: tokenData.taskId,
-          summary: summary?.slice(0, 500) ?? null,
+          summary: summary?.slice(0, ACTIVITY_MESSAGE_MAX_LENGTH) ?? null,
         },
       }),
     }));
@@ -320,13 +334,23 @@ async function handleCompleteTask(
     });
   }
 
+  // Revoke token — task is done, no further MCP calls needed
+  try {
+    await revokeMcpToken(env.KV, rawToken);
+  } catch (err) {
+    log.warn('mcp.complete_task.token_revoke_failed', {
+      taskId: tokenData.taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   log.info('mcp.complete_task', {
     taskId: tokenData.taskId,
     projectId: tokenData.projectId,
-    summary: summary?.slice(0, 200) ?? null,
+    summary: summary?.slice(0, LOG_MESSAGE_MAX_LENGTH) ?? null,
   });
 
-  return jsonRpcSuccess(null, {
+  return jsonRpcSuccess(requestId, {
     content: [{ type: 'text', text: 'Task marked as completed.' }],
   });
 }
@@ -334,8 +358,8 @@ async function handleCompleteTask(
 // ─── MCP endpoint ────────────────────────────────────────────────────────────
 
 mcpRoutes.post('/', async (c) => {
-  // Authenticate
-  const tokenData = await authenticateMcpRequest(
+  // Authenticate — returns both parsed token data and the raw token string
+  const [tokenData, rawToken] = await authenticateMcpRequest(
     c.req.header('Authorization'),
     c.env.KV,
   );
@@ -379,21 +403,12 @@ mcpRoutes.post('/', async (c) => {
       const toolArgs = ((rpc.params as { arguments?: Record<string, unknown> })?.arguments) ?? {};
 
       switch (toolName) {
-        case 'get_instructions': {
-          const result = await handleGetInstructions(tokenData, c.env);
-          result.id = requestId;
-          return c.json(result);
-        }
-        case 'update_task_status': {
-          const result = await handleUpdateTaskStatus(toolArgs, tokenData, c.env);
-          result.id = requestId;
-          return c.json(result);
-        }
-        case 'complete_task': {
-          const result = await handleCompleteTask(toolArgs, tokenData, c.env);
-          result.id = requestId;
-          return c.json(result);
-        }
+        case 'get_instructions':
+          return c.json(await handleGetInstructions(requestId, tokenData, c.env));
+        case 'update_task_status':
+          return c.json(await handleUpdateTaskStatus(requestId, toolArgs, tokenData, c.env));
+        case 'complete_task':
+          return c.json(await handleCompleteTask(requestId, toolArgs, tokenData, c.env, rawToken));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
       }
@@ -402,9 +417,9 @@ mcpRoutes.post('/', async (c) => {
     // MCP protocol: initialize
     case 'initialize': {
       return c.json(jsonRpcSuccess(requestId, {
-        protocolVersion: '2025-03-26',
+        protocolVersion: MCP_PROTOCOL_VERSION,
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'sam-mcp', version: '1.0.0' },
+        serverInfo: { name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION },
       }));
     }
 

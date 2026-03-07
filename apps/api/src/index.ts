@@ -449,6 +449,8 @@ app.route('/api/projects/:projectId/tasks', taskRunsRoutes);
 app.route('/api/projects/:projectId/tasks', taskSubmitRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/dashboard', dashboardRoutes);
+// MCP server endpoint — at /mcp (not /api/mcp) because VM agents use this URL
+// and it uses its own task-scoped Bearer token auth, not session auth.
 app.route('/mcp', mcpRoutes);
 
 // 404 handler

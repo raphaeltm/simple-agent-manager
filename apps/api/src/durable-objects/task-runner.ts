@@ -237,7 +237,12 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
    * Get the current DO state (for debugging/testing).
    */
   async getStatus(): Promise<TaskRunnerState | null> {
-    return this.getState();
+    const state = await this.getState();
+    if (state?.stepResults.mcpToken) {
+      // Redact raw token from external-facing status — the token is a secret
+      return { ...state, stepResults: { ...state.stepResults, mcpToken: '[redacted]' } };
+    }
+    return state;
   }
 
   // =========================================================================
@@ -1118,6 +1123,20 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
           error: chatErr instanceof Error ? chatErr.message : String(chatErr),
         });
       }
+    }
+
+    // Revoke MCP token so it cannot be used after task failure
+    if (state.stepResults.mcpToken) {
+      try {
+        const { revokeMcpToken } = await import('../services/mcp-token');
+        await revokeMcpToken(this.env.KV, state.stepResults.mcpToken);
+      } catch (err) {
+        log.warn('task_runner_do.mcp_token_revoke_failed', {
+          taskId: state.taskId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      state.stepResults.mcpToken = null;
     }
 
     // Best-effort cleanup

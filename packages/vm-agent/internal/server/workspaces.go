@@ -23,6 +23,7 @@ func (s *Server) stopSessionHost(workspaceID, sessionID string) {
 		existing.Stop()
 		delete(s.sessionHosts, hostKey)
 	}
+	delete(s.sessionMcpServers, hostKey)
 	s.sessionHostMu.Unlock()
 }
 
@@ -73,6 +74,7 @@ func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
 		}
 		host.Stop()
 		delete(s.sessionHosts, key)
+		delete(s.sessionMcpServers, key)
 	}
 }
 
@@ -626,9 +628,21 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Store MCP servers for this session before creating the SessionHost.
+	// Validate and store MCP servers for this session before creating the SessionHost.
 	// getOrCreateSessionHost reads these and wires them into GatewayConfig.
 	hostKey := workspaceID + ":" + sessionID
+	for i, srv := range body.McpServers {
+		u := strings.TrimSpace(srv.URL)
+		if u == "" {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("mcpServers[%d].url is required", i))
+			return
+		}
+		if !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("mcpServers[%d].url must be an HTTP(S) URL", i))
+			return
+		}
+		body.McpServers[i].URL = u
+	}
 	if len(body.McpServers) > 0 {
 		s.sessionHostMu.Lock()
 		s.sessionMcpServers[hostKey] = body.McpServers
@@ -835,10 +849,11 @@ func (s *Server) suspendSessionHost(workspaceID, sessionID string) (acpSessionID
 // auto-suspend fires. It removes the SessionHost from the map (the host has
 // already stopped itself) and transitions the session to suspended status.
 func (s *Server) handleAutoSuspend(workspaceID, sessionID string) {
-	// Remove the SessionHost from the map (it has already called Suspend() on itself).
+	// Remove the SessionHost and its MCP config from the map (the host has already stopped).
 	hostKey := workspaceID + ":" + sessionID
 	s.sessionHostMu.Lock()
 	delete(s.sessionHosts, hostKey)
+	delete(s.sessionMcpServers, hostKey)
 	s.sessionHostMu.Unlock()
 
 	// Transition the in-memory session to suspended.

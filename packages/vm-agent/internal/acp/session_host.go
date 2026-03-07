@@ -45,7 +45,7 @@ func buildAcpMcpServers(entries []McpServerEntry) []acpsdk.McpServer {
 		return []acpsdk.McpServer{}
 	}
 	servers := make([]acpsdk.McpServer, 0, len(entries))
-	for _, e := range entries {
+	for i, e := range entries {
 		var headers []acpsdk.HttpHeader
 		if e.Token != "" {
 			headers = append(headers, acpsdk.HttpHeader{
@@ -53,10 +53,14 @@ func buildAcpMcpServers(entries []McpServerEntry) []acpsdk.McpServer {
 				Value: "Bearer " + e.Token,
 			})
 		}
+		name := "sam-mcp"
+		if len(entries) > 1 {
+			name = fmt.Sprintf("sam-mcp-%d", i)
+		}
 		servers = append(servers, acpsdk.McpServer{
 			Http: &acpsdk.McpServerHttp{
-				Name:    "sam-mcp",
-				Type:    "streamable-http",
+				Name: name,
+				// Type is set to "http" by McpServer.MarshalJSON regardless of this field.
 				Url:     e.URL,
 				Headers: headers,
 			},

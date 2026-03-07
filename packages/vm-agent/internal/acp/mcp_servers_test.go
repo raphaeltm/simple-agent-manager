@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -36,9 +37,6 @@ func TestBuildAcpMcpServers_SingleServer(t *testing.T) {
 	}
 	if server.Http.Name != "sam-mcp" {
 		t.Errorf("expected name 'sam-mcp', got '%s'", server.Http.Name)
-	}
-	if server.Http.Type != "streamable-http" {
-		t.Errorf("expected type 'streamable-http', got '%s'", server.Http.Type)
 	}
 
 	// Should have Authorization header
@@ -86,5 +84,30 @@ func TestBuildAcpMcpServers_MultipleServers(t *testing.T) {
 	}
 	if result[1].Http.Url != "https://api2.example.com/mcp" {
 		t.Errorf("expected second URL 'https://api2.example.com/mcp', got '%s'", result[1].Http.Url)
+	}
+
+	// Multiple servers should have unique names
+	if result[0].Http.Name == result[1].Http.Name {
+		t.Errorf("expected unique names, got duplicate: %q", result[0].Http.Name)
+	}
+}
+
+func TestBuildAcpMcpServers_WireFormat(t *testing.T) {
+	entries := []McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: "tok"},
+	}
+	result := buildAcpMcpServers(entries)
+
+	b, err := json.Marshal(result[0])
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	// The ACP SDK's MarshalJSON sets type to "http" regardless of the struct field
+	if m["type"] != "http" {
+		t.Errorf("wire type should be 'http', got %q", m["type"])
 	}
 }
