@@ -5,6 +5,10 @@ description: All environment variables, secrets, and configurable settings for S
 
 SAM uses environment variables for platform configuration. User-specific settings (Hetzner tokens, agent keys) are stored encrypted in the database, not as environment variables.
 
+:::note
+This reference covers the most important configuration variables. For the complete list including advanced tuning options, see [`apps/api/src/index.ts`](https://github.com/raphaeltm/simple-agent-manager/blob/main/apps/api/src/index.ts) in the source code.
+:::
+
 ## Platform Secrets
 
 These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generates security keys on first deploy.

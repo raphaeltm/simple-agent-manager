@@ -5,6 +5,10 @@ description: SAM REST API endpoints for managing workspaces, nodes, and credenti
 
 The SAM API runs on a Cloudflare Worker at `api.{domain}`. All authenticated endpoints require a valid BetterAuth session cookie.
 
+:::note
+This reference covers the most commonly used endpoints. For the complete list of all API routes, see the [source code](https://github.com/raphaeltm/simple-agent-manager/tree/main/apps/api/src/routes).
+:::
+
 ## Authentication
 
 ### `POST /api/auth/sign-in/social`
