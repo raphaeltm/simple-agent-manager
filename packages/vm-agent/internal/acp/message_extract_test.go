@@ -147,7 +147,9 @@ func TestExtractMessages_ToolCallUpdate_WithStatus(t *testing.T) {
 	}
 
 	var meta ToolMeta
-	json.Unmarshal([]byte(msgs[0].ToolMetadata), &meta)
+	if err := json.Unmarshal([]byte(msgs[0].ToolMetadata), &meta); err != nil {
+		t.Fatalf("unmarshal tool metadata: %v", err)
+	}
 	if meta.Status != "completed" {
 		t.Fatalf("expected status=completed, got %q", meta.Status)
 	}

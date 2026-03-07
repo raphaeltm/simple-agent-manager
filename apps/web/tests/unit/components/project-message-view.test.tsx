@@ -742,6 +742,58 @@ describe('chatMessagesToConversationItems', () => {
     expect(tool.content[0].text).toBe('some output');
   });
 
+  it('preserves in_progress status from metadata', () => {
+    const items = chatMessagesToConversationItems([
+      {
+        id: 't1', sessionId: 's1', role: 'tool', content: '(tool update)',
+        toolMetadata: { kind: 'bash', status: 'in_progress' },
+        createdAt: 1000,
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    const tool = items[0] as { status: string };
+    expect(tool.status).toBe('in_progress');
+  });
+
+  it('handles null toolMetadata with real content', () => {
+    const items = chatMessagesToConversationItems([
+      {
+        id: 't1', sessionId: 's1', role: 'tool', content: 'stdout: build succeeded',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    const tool = items[0] as { title: string; content: Array<{ type: string; text: string }> };
+    expect(tool.title).toBe('tool');
+    expect(tool.content).toHaveLength(1);
+    expect(tool.content[0].text).toBe('stdout: build succeeded');
+  });
+
+  it('skips placeholder content for tool-update string', () => {
+    const items = chatMessagesToConversationItems([
+      { id: 't1', sessionId: 's1', role: 'tool', content: '(tool update)', toolMetadata: null, createdAt: 1000 },
+    ]);
+    expect(items).toHaveLength(1);
+    const tool = items[0] as { content: Array<unknown> };
+    expect(tool.content).toHaveLength(0);
+  });
+
+  it('handles terminal content type from metadata', () => {
+    const items = chatMessagesToConversationItems([
+      {
+        id: 't1', sessionId: 's1', role: 'tool', content: '(tool call)',
+        toolMetadata: { kind: 'bash', content: [{ type: 'terminal', text: 'term-1' }] },
+        createdAt: 1000,
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    const tool = items[0] as { content: Array<{ type: string; text: string }> };
+    expect(tool.content).toHaveLength(1);
+    expect(tool.content[0].type).toBe('terminal');
+    expect(tool.content[0].text).toBe('term-1');
+  });
+
   it('does not merge assistant followed by user followed by assistant', () => {
     const items = chatMessagesToConversationItems([
       { id: 'a1', sessionId: 's1', role: 'assistant', content: 'Hello', toolMetadata: null, createdAt: 1000 },

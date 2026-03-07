@@ -128,9 +128,11 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
       const kind = meta && typeof meta.kind === 'string' ? meta.kind : 'tool';
       const title = meta && typeof meta.title === 'string' && meta.title ? meta.title : kind;
       const locations = (meta?.locations as Array<{ path?: string; line?: number | null }>) ?? [];
-      const status = meta && typeof meta.status === 'string' && meta.status
-        ? meta.status as 'completed' | 'failed'
-        : 'completed';
+      const validStatuses = new Set(['pending', 'in_progress', 'completed', 'failed']);
+      const rawStatus = meta && typeof meta.status === 'string' ? meta.status : '';
+      const status = (validStatuses.has(rawStatus)
+        ? rawStatus
+        : 'completed') as 'pending' | 'in_progress' | 'completed' | 'failed';
 
       // Use structured content from metadata when available; fall back to raw content field
       const structuredContent = meta?.content as Array<{ type?: string; text?: string }> | undefined;
