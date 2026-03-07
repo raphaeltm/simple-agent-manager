@@ -16,15 +16,25 @@ type ExtractedMessage struct {
 	ToolMetadata string `json:"toolMetadata,omitempty"` // JSON string
 }
 
+// ToolContentItem represents a single structured content block from a tool call.
+// Preserves the content type (content/diff/terminal) so the frontend can render
+// diffs and terminal output with appropriate formatting.
+type ToolContentItem struct {
+	Type string `json:"type"`           // "content", "diff", or "terminal"
+	Text string `json:"text,omitempty"` // Human-readable text representation
+}
+
 // ToolMeta holds structured tool call metadata serialized as JSON into
 // the ToolMetadata field of ExtractedMessage.
 type ToolMeta struct {
+	Title     string `json:"title,omitempty"`
 	Kind      string `json:"kind,omitempty"`
 	Status    string `json:"status,omitempty"`
 	Locations []struct {
 		Path string `json:"path,omitempty"`
 		Line *int   `json:"line,omitempty"`
 	} `json:"locations,omitempty"`
+	Content []ToolContentItem `json:"content,omitempty"`
 }
 
 // ExtractMessages converts an ACP SessionNotification into zero or more
@@ -65,7 +75,10 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 	if u.ToolCall != nil {
 		content := extractToolCallContents(u.ToolCall.Content)
 		meta := ToolMeta{
-			Kind: string(u.ToolCall.Kind),
+			Title:   u.ToolCall.Title,
+			Kind:    string(u.ToolCall.Kind),
+			Status:  string(u.ToolCall.Status),
+			Content: extractStructuredContent(u.ToolCall.Content),
 		}
 		for _, loc := range u.ToolCall.Locations {
 			meta.Locations = append(meta.Locations, struct {
@@ -89,7 +102,12 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 	// Tool call update → role "tool" (status update)
 	if u.ToolCallUpdate != nil {
 		content := extractToolCallContents(u.ToolCallUpdate.Content)
-		meta := ToolMeta{}
+		meta := ToolMeta{
+			Content: extractStructuredContent(u.ToolCallUpdate.Content),
+		}
+		if u.ToolCallUpdate.Title != nil {
+			meta.Title = *u.ToolCallUpdate.Title
+		}
 		if u.ToolCallUpdate.Kind != nil {
 			meta.Kind = string(*u.ToolCallUpdate.Kind)
 		}
@@ -128,6 +146,33 @@ func extractContentBlockText(block acpsdk.ContentBlock) string {
 		return block.Text.Text
 	}
 	return ""
+}
+
+// extractStructuredContent converts ACP tool call content blocks into
+// typed ToolContentItems for structured rendering in the frontend.
+func extractStructuredContent(contents []acpsdk.ToolCallContent) []ToolContentItem {
+	var items []ToolContentItem
+	for _, c := range contents {
+		if c.Content != nil && c.Content.Content.Text != nil {
+			items = append(items, ToolContentItem{
+				Type: "content",
+				Text: c.Content.Content.Text.Text,
+			})
+		}
+		if c.Diff != nil {
+			items = append(items, ToolContentItem{
+				Type: "diff",
+				Text: c.Diff.Path,
+			})
+		}
+		if c.Terminal != nil {
+			items = append(items, ToolContentItem{
+				Type: "terminal",
+				Text: c.Terminal.TerminalId,
+			})
+		}
+	}
+	return items
 }
 
 // extractToolCallContents aggregates text from tool call content blocks.

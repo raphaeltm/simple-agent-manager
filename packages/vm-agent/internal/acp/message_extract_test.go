@@ -64,7 +64,8 @@ func TestExtractMessages_ToolCall(t *testing.T) {
 		SessionId: "sess-1",
 		Update: acpsdk.SessionUpdate{
 			ToolCall: &acpsdk.SessionUpdateToolCall{
-				Kind: acpsdk.ToolKindRead,
+				Title: "Read file /src/main.go",
+				Kind:  acpsdk.ToolKindRead,
 				Content: []acpsdk.ToolCallContent{
 					{
 						Content: &acpsdk.ToolCallContentContent{
@@ -97,6 +98,9 @@ func TestExtractMessages_ToolCall(t *testing.T) {
 	if err := json.Unmarshal([]byte(msgs[0].ToolMetadata), &meta); err != nil {
 		t.Fatalf("unmarshal tool metadata: %v", err)
 	}
+	if meta.Title != "Read file /src/main.go" {
+		t.Fatalf("expected title='Read file /src/main.go', got %q", meta.Title)
+	}
 	if meta.Kind != "read" {
 		t.Fatalf("expected kind=read, got %q", meta.Kind)
 	}
@@ -109,15 +113,27 @@ func TestExtractMessages_ToolCall(t *testing.T) {
 	if meta.Locations[0].Line == nil || *meta.Locations[0].Line != 42 {
 		t.Fatalf("expected line=42, got %v", meta.Locations[0].Line)
 	}
+	// Verify structured content
+	if len(meta.Content) != 1 {
+		t.Fatalf("expected 1 structured content item, got %d", len(meta.Content))
+	}
+	if meta.Content[0].Type != "content" {
+		t.Fatalf("expected content type='content', got %q", meta.Content[0].Type)
+	}
+	if meta.Content[0].Text != "file contents here" {
+		t.Fatalf("expected content text='file contents here', got %q", meta.Content[0].Text)
+	}
 }
 
 func TestExtractMessages_ToolCallUpdate_WithStatus(t *testing.T) {
 	status := acpsdk.ToolCallStatusCompleted
+	title := "Finished reading file"
 	notif := acpsdk.SessionNotification{
 		SessionId: "sess-1",
 		Update: acpsdk.SessionUpdate{
 			ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 				Status: &status,
+				Title:  &title,
 			},
 		},
 	}
@@ -131,9 +147,14 @@ func TestExtractMessages_ToolCallUpdate_WithStatus(t *testing.T) {
 	}
 
 	var meta ToolMeta
-	json.Unmarshal([]byte(msgs[0].ToolMetadata), &meta)
+	if err := json.Unmarshal([]byte(msgs[0].ToolMetadata), &meta); err != nil {
+		t.Fatalf("unmarshal tool metadata: %v", err)
+	}
 	if meta.Status != "completed" {
 		t.Fatalf("expected status=completed, got %q", meta.Status)
+	}
+	if meta.Title != "Finished reading file" {
+		t.Fatalf("expected title='Finished reading file', got %q", meta.Title)
 	}
 }
 
@@ -232,7 +253,8 @@ func TestExtractMessages_ToolCallDiff(t *testing.T) {
 		SessionId: "sess-1",
 		Update: acpsdk.SessionUpdate{
 			ToolCall: &acpsdk.SessionUpdateToolCall{
-				Kind: acpsdk.ToolKindEdit,
+				Title: "Edit file /src/main.go",
+				Kind:  acpsdk.ToolKindEdit,
 				Content: []acpsdk.ToolCallContent{
 					{
 						Diff: &acpsdk.ToolCallContentDiff{
@@ -251,5 +273,23 @@ func TestExtractMessages_ToolCallDiff(t *testing.T) {
 	}
 	if msgs[0].Content != "diff: /src/main.go" {
 		t.Fatalf("expected diff path in content, got %q", msgs[0].Content)
+	}
+
+	// Verify structured content preserves diff type
+	var meta ToolMeta
+	if err := json.Unmarshal([]byte(msgs[0].ToolMetadata), &meta); err != nil {
+		t.Fatalf("unmarshal tool metadata: %v", err)
+	}
+	if meta.Title != "Edit file /src/main.go" {
+		t.Fatalf("expected title='Edit file /src/main.go', got %q", meta.Title)
+	}
+	if len(meta.Content) != 1 {
+		t.Fatalf("expected 1 structured content item, got %d", len(meta.Content))
+	}
+	if meta.Content[0].Type != "diff" {
+		t.Fatalf("expected content type='diff', got %q", meta.Content[0].Type)
+	}
+	if meta.Content[0].Text != "/src/main.go" {
+		t.Fatalf("expected content text='/src/main.go', got %q", meta.Content[0].Text)
 	}
 }
