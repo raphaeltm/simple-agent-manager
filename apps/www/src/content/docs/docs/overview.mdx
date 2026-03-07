@@ -1,0 +1,50 @@
+---
+title: What is SAM?
+description: Simple Agent Manager — ephemeral AI coding environments on Cloudflare Workers + Hetzner Cloud.
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+**Simple Agent Manager (SAM)** is an open-source platform for running ephemeral AI coding agent environments. It provisions cloud VMs, sets up devcontainers, and gives you a browser-based terminal with Claude Code pre-installed.
+
+## Why SAM?
+
+AI coding agents need real development environments — not sandboxes. SAM gives each agent its own VM with a full Linux environment, Docker, and git, accessible through a web terminal.
+
+<CardGrid>
+  <Card title="Bring Your Own Cloud" icon="cloud">
+    You provide your Hetzner API token. VMs run on your infrastructure, billed to your account. The platform never stores your cloud credentials as environment variables.
+  </Card>
+  <Card title="Serverless Control Plane" icon="rocket">
+    The API runs on Cloudflare Workers — zero infrastructure to manage. D1 for storage, KV for sessions, R2 for binaries.
+  </Card>
+  <Card title="Ephemeral by Design" icon="refresh">
+    Workspaces spin up in minutes and tear down when you're done. No persistent VMs burning money overnight.
+  </Card>
+  <Card title="Self-Hostable" icon="setting">
+    Fork the repo, configure a GitHub Environment, push to main. Automated deployment via Pulumi + GitHub Actions.
+  </Card>
+</CardGrid>
+
+## How It Works
+
+1. **Sign in** with GitHub via the web UI
+2. **Add your Hetzner token** in Settings
+3. **Install the GitHub App** on your repositories
+4. **Create a workspace** — SAM provisions a VM, clones your repo, starts a devcontainer
+5. **Use the terminal** — browser-based xterm.js with WebSocket connection to the VM
+6. **Chat with Claude** — built-in agent chat powered by Claude Code
+
+## Architecture at a Glance
+
+SAM is a monorepo with four main components:
+
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| **API** | Cloudflare Worker (Hono) | Authentication, resource management, VM proxying |
+| **Web UI** | React + Vite (Cloudflare Pages) | Dashboard, terminal, agent chat |
+| **VM Agent** | Go binary | Docker management, PTY sessions, ACP gateway |
+| **Infrastructure** | Pulumi (TypeScript) | D1, KV, R2, DNS provisioning |
+
+<LinkCard title="Quickstart" href="/docs/quickstart/" description="Get up and running with SAM in minutes." />
+<LinkCard title="Architecture Overview" href="/docs/architecture/overview/" description="Deep dive into how every system fits together." />

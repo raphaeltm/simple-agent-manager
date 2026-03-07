@@ -1,0 +1,85 @@
+---
+title: Core Concepts
+description: Key concepts in SAM — workspaces, nodes, providers, and projects.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Workspaces
+
+A **workspace** is an AI coding environment: a Docker container running inside a VM, with your repository cloned and a devcontainer configured.
+
+Each workspace has:
+- A unique subdomain (`ws-{id}.example.com`)
+- A browser-based terminal (xterm.js over WebSocket)
+- An agent chat interface (Claude Code via ACP)
+- Its own lifecycle: `pending` → `creating` → `running` → `stopping` → `stopped`
+
+Workspaces are **ephemeral** — they're meant to be created for a task and deleted when done.
+
+## Nodes
+
+A **node** is a Hetzner Cloud VM that hosts one or more workspaces. When you create a workspace, SAM either assigns it to an existing healthy node or provisions a new one.
+
+Nodes have their own lifecycle:
+- `pending` → `creating` → `running` → `stopping` → `stopped`
+- Health is tracked via heartbeats from the VM Agent
+
+### VM Sizes
+
+| Size | Hetzner Type | Specs | Hourly Cost |
+|------|-------------|-------|-------------|
+| Small | CX22 | 2 vCPU, 4GB RAM | ~$0.007 |
+| Medium | CX32 | 4 vCPU, 8GB RAM | ~$0.012 |
+| Large | CX42 | 8 vCPU, 16GB RAM | ~$0.030 |
+
+<Aside type="tip">
+VMs are billed hourly until explicitly stopped or deleted. Remember to clean up workspaces you're done with.
+</Aside>
+
+## Providers
+
+A **provider** is a cloud infrastructure abstraction. Currently, SAM supports **Hetzner Cloud** as the only provider.
+
+SAM follows a **Bring Your Own Cloud (BYOC)** model: users provide their own Hetzner API tokens through the Settings UI. The platform never has cloud provider credentials — all VM costs are billed directly to the user's Hetzner account.
+
+## Projects
+
+A **project** links a GitHub repository to its workspaces, chat sessions, tasks, and activity. Projects are the primary organizational unit in SAM.
+
+Each project has:
+- A **Durable Object** with embedded SQLite for chat sessions, messages, and activity events
+- A **default VM size** for new workspaces
+- **Runtime configuration** (environment variables and files injected into workspaces)
+
+## Tasks
+
+A **task** is a unit of work assigned to an AI agent. When you submit a task:
+1. SAM provisions (or reuses) a workspace
+2. Claude Code runs autonomously with your task description
+3. The agent commits, pushes, and creates a PR when done
+4. The workspace enters a warm pool for potential reuse
+
+### Warm Node Pooling
+
+After a task completes, the node enters a **warm** state for 30 minutes (configurable via `NODE_WARM_TIMEOUT_MS`). If a new task arrives during this window, SAM reuses the warm node instead of provisioning a new one — reducing startup time from minutes to seconds.
+
+## Agent Sessions
+
+An **agent session** is a Claude Code conversation running inside a workspace container. Sessions use the **Agent Communication Protocol (ACP)** to communicate between the browser and the Claude Code process.
+
+Sessions support:
+- Streaming responses (real-time output as Claude works)
+- Multiple concurrent sessions per workspace (each in its own terminal tab)
+- Persistence across page refreshes (tabs restored from VM Agent SQLite)
+
+## Authentication
+
+SAM uses a **GitHub App** for both OAuth login and repository access. The app needs:
+- **OAuth** — for user sign-in (BetterAuth handles session management)
+- **Contents: Read and write** — for cloning repos and pushing changes
+- **Email addresses: Read-only** — for user profile information
+
+<Aside type="caution">
+User credentials (Hetzner tokens, agent API keys) are encrypted at rest using AES-256-GCM. The encryption key is a platform secret managed by Pulumi — never share it or store it in source control.
+</Aside>
