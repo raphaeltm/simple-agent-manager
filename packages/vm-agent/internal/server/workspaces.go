@@ -593,8 +593,9 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	}
 
 	var body struct {
-		AgentType     string `json:"agentType"`
-		InitialPrompt string `json:"initialPrompt"`
+		AgentType     string               `json:"agentType"`
+		InitialPrompt string               `json:"initialPrompt"`
+		McpServers    []acp.McpServerEntry  `json:"mcpServers,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -625,8 +626,18 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Create or retrieve the SessionHost for this session.
+	// Store MCP servers for this session before creating the SessionHost.
+	// getOrCreateSessionHost reads these and wires them into GatewayConfig.
 	hostKey := workspaceID + ":" + sessionID
+	if len(body.McpServers) > 0 {
+		s.sessionHostMu.Lock()
+		s.sessionMcpServers[hostKey] = body.McpServers
+		s.sessionHostMu.Unlock()
+		slog.Info("MCP servers registered for agent session",
+			"workspace", workspaceID, "session", sessionID, "count", len(body.McpServers))
+	}
+
+	// Create or retrieve the SessionHost for this session.
 	host := s.getOrCreateSessionHost(hostKey, workspaceID, sessionID, session, runtime, "")
 
 	s.appendNodeEvent(workspaceID, "info", "agent_session.starting", "Starting agent with initial prompt", map[string]interface{}{

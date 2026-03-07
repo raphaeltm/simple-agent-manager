@@ -249,6 +249,11 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 		}
 	}
 
+	// Inject per-session MCP servers if registered (e.g., by handleStartAgentSession).
+	if mcpServers, ok := s.sessionMcpServers[hostKey]; ok && len(mcpServers) > 0 {
+		cfg.McpServers = mcpServers
+	}
+
 	hostCfg := acp.SessionHostConfig{
 		GatewayConfig:         cfg,
 		MessageBufferSize:     s.config.ACPMessageBufferSize,
@@ -258,6 +263,7 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	host := acp.NewSessionHost(hostCfg)
 	s.sessionHosts[hostKey] = host
 
-	slog.Info("SessionHost created", "workspace", workspaceID, "sessionId", sessionID)
+	slog.Info("SessionHost created", "workspace", workspaceID, "sessionId", sessionID,
+		"mcpServers", len(cfg.McpServers))
 	return host
 }

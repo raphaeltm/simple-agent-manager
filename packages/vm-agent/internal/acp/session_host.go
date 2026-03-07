@@ -38,6 +38,33 @@ const (
 	DefaultPromptCancelGracePeriod = 5 * time.Second
 )
 
+// buildAcpMcpServers converts McpServerEntry configs into acpsdk.McpServer
+// entries for NewSession/LoadSession requests.
+func buildAcpMcpServers(entries []McpServerEntry) []acpsdk.McpServer {
+	if len(entries) == 0 {
+		return []acpsdk.McpServer{}
+	}
+	servers := make([]acpsdk.McpServer, 0, len(entries))
+	for _, e := range entries {
+		var headers []acpsdk.HttpHeader
+		if e.Token != "" {
+			headers = append(headers, acpsdk.HttpHeader{
+				Name:  "Authorization",
+				Value: "Bearer " + e.Token,
+			})
+		}
+		servers = append(servers, acpsdk.McpServer{
+			Http: &acpsdk.McpServerHttp{
+				Name:    "sam-mcp",
+				Type:    "streamable-http",
+				Url:     e.URL,
+				Headers: headers,
+			},
+		})
+	}
+	return servers
+}
+
 // DefaultMessageBufferSize is the default maximum number of messages buffered
 // per session for late-join replay. Override via ACP_MESSAGE_BUFFER_SIZE.
 const DefaultMessageBufferSize = 5000
@@ -901,7 +928,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		_, loadErr := h.acpConn.LoadSession(initCtx, acpsdk.LoadSessionRequest{
 			SessionId:  acpsdk.SessionId(previousAcpSessionID),
 			Cwd:        h.config.ContainerWorkDir,
-			McpServers: []acpsdk.McpServer{},
+			McpServers: buildAcpMcpServers(h.config.McpServers),
 		})
 		if loadErr == nil {
 			h.sessionID = acpsdk.SessionId(previousAcpSessionID)
@@ -938,7 +965,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 	})
 	sessResp, err := h.acpConn.NewSession(initCtx, acpsdk.NewSessionRequest{
 		Cwd:        h.config.ContainerWorkDir,
-		McpServers: []acpsdk.McpServer{},
+		McpServers: buildAcpMcpServers(h.config.McpServers),
 	})
 	if err != nil {
 		h.reportLifecycle("warn", "ACP NewSession failed", map[string]interface{}{

@@ -52,6 +52,7 @@ type Server struct {
 	acpConfig           acp.GatewayConfig
 	sessionHostMu       sync.Mutex
 	sessionHosts        map[string]*acp.SessionHost
+	sessionMcpServers   map[string][]acp.McpServerEntry // hostKey → MCP servers for ACP injection
 	store               *persistence.Store
 	errorReporter       *errorreport.Reporter
 	messageReporter     *messagereport.Reporter
@@ -266,6 +267,7 @@ func New(cfg *config.Config) (*Server, error) {
 		agentSessions:      agentsessions.NewManager(),
 		acpConfig:          acpGatewayConfig,
 		sessionHosts:       make(map[string]*acp.SessionHost),
+		sessionMcpServers:  make(map[string][]acp.McpServerEntry),
 		store:              store,
 		errorReporter:      errorReporter,
 		messageReporter:    msgReporter,

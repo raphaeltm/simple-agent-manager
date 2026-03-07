@@ -70,6 +70,7 @@ type TaskRunnerEnv = {
   TASK_RUN_CLEANUP_DELAY_MS?: string;
   DEFAULT_TASK_AGENT_TYPE?: string;
   KV: KVNamespace;
+  MCP_TOKEN_TTL_SECONDS?: string;
 };
 
 interface StepResults {
@@ -79,6 +80,8 @@ interface StepResults {
   chatSessionId: string | null;
   agentSessionId: string | null;
   agentStarted: boolean;
+  /** Opaque MCP token for agent platform awareness (stored in KV) */
+  mcpToken: string | null;
 }
 
 interface TaskRunConfig {
@@ -175,6 +178,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         chatSessionId: input.config.chatSessionId ?? null,
         agentSessionId: null,
         agentStarted: false,
+        mcpToken: null,
       },
       config: input.config,
       retryCount: 0,
@@ -814,13 +818,41 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       });
     }
 
-    // Step 2: Start the agent with the initial prompt (skip if already started)
+    // Step 2: Generate MCP token for agent platform awareness (skip if already created)
+    if (!state.stepResults.mcpToken) {
+      const { generateMcpToken, storeMcpToken } = await import('../services/mcp-token');
+      const mcpToken = generateMcpToken();
+      await storeMcpToken(
+        this.env.KV,
+        mcpToken,
+        {
+          taskId: state.taskId,
+          projectId: state.projectId,
+          userId: state.userId,
+          workspaceId: state.stepResults.workspaceId!,
+          createdAt: new Date().toISOString(),
+        },
+        this.env,
+      );
+      state.stepResults.mcpToken = mcpToken;
+      await this.ctx.storage.put('state', state);
+
+      log.info('task_runner_do.step.mcp_token_created', {
+        taskId: state.taskId,
+        projectId: state.projectId,
+      });
+    }
+
+    // Step 3: Start the agent with the initial prompt (skip if already started)
     // This two-step approach ensures that if create succeeds but start fails,
     // a retry will skip creation and retry only the start call.
     if (!state.stepResults.agentStarted) {
       const { startAgentSessionOnNode } = await import('../services/node-agent');
       const agentType = state.config.agentType || this.env.DEFAULT_TASK_AGENT_TYPE || 'claude-code';
       const initialPrompt = state.config.taskDescription || state.config.taskTitle;
+
+      // Construct MCP server URL for agent platform awareness
+      const mcpServerUrl = `https://api.${this.env.BASE_DOMAIN}/mcp`;
 
       await startAgentSessionOnNode(
         state.stepResults.nodeId,
@@ -830,6 +862,10 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         initialPrompt,
         this.env as any,
         state.userId,
+        {
+          url: mcpServerUrl,
+          token: state.stepResults.mcpToken!,
+        },
       );
 
       state.stepResults.agentStarted = true;
@@ -839,6 +875,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         taskId: state.taskId,
         agentSessionId: sessionId,
         agentType,
+        mcpServerConfigured: true,
       });
     }
 
