@@ -94,13 +94,13 @@ Prefix the initial prompt with SAM context and instructions like "when done, cre
    - Passing MCP server details from the API to the vm-agent in the `start` request body
    - Populating `McpServers` in `session_host.go` instead of the empty slice
 
-4. **Inject context via CLAUDE.md** (or initial prompt prefix) telling the agent about available MCP tools and how to use them for status reporting. This bridges the gap of "how does the agent know these tools exist" — CLAUDE.md instructions are always loaded.
+4. **Inject behavioral guidance via initial prompt prefix** — SAM already controls the initial prompt sent to the agent (`workspaces.go:startAgentWithPrompt()`). Prepend platform instructions (e.g., "When you've completed the task, call the `complete_task` tool. Report progress using `update_task_status`.") before the user's task description. This requires no user configuration — SAM owns the prompt construction.
 
 ### How the Agent Learns About Tools
 
-When MCP servers are registered via ACP (or `.mcp.json`), Claude Code automatically discovers them via the MCP `tools/list` protocol call. The tools appear in Claude Code's tool list alongside built-in tools (Read, Write, Bash, etc.). No prompt prefixing needed for tool discovery — MCP handles it.
+**Tool discovery is automatic.** When MCP servers are registered via ACP `NewSessionRequest.McpServers`, Claude Code calls MCP `tools/list` and the tools appear alongside built-in tools (Read, Write, Bash, etc.). No CLAUDE.md or user config needed.
 
-However, a CLAUDE.md section explaining *when* to use the tools (e.g., "Call `complete_task` when you've finished all work") provides behavioral guidance that pure tool descriptions can't convey.
+**Behavioral guidance goes in the initial prompt prefix**, not CLAUDE.md. SAM should not rely on users configuring CLAUDE.md for platform features to work. The prompt prefix is fully platform-controlled and tells the agent *when* and *how* to use the SAM tools (e.g., "Call `complete_task` when finished"). This is analogous to how the task description is already injected today — just with additional platform instructions prepended.
 
 ### Key Code Locations
 
@@ -129,7 +129,7 @@ This feature should go through speckit for proper design:
 - [ ] Agent can report incremental progress via MCP tool call
 - [ ] MCP auth token is scoped to the specific task and has a bounded lifetime
 - [ ] Works with Claude Code agent type; designed to be agent-type-agnostic
-- [ ] CLAUDE.md or equivalent context tells the agent when/how to use SAM tools
+- [ ] Platform-controlled initial prompt prefix tells the agent when/how to use SAM tools (no user CLAUDE.md required)
 - [ ] No hardcoded URLs — MCP server URL derived from `SAM_API_URL` / `BASE_DOMAIN`
 
 ## Open Questions
