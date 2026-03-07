@@ -339,6 +339,83 @@ describe('ProjectMessageView — ACP integration', () => {
     });
   });
 
+  it('shows agent offline banner when agent is not active and not provisioning', async () => {
+    mocks.useProjectAgentSession.mockReturnValue({
+      ...defaultAgentSession(),
+      isAgentActive: false,
+      isConnecting: false,
+    });
+
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession('session-1'),
+      messages: [],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Agent offline/)).toBeTruthy();
+    });
+  });
+
+  it('hides agent offline banner when isProvisioning is true', async () => {
+    mocks.useProjectAgentSession.mockReturnValue({
+      ...defaultAgentSession(),
+      isAgentActive: false,
+      isConnecting: false,
+    });
+
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession('session-1'),
+      messages: [],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" isProvisioning />);
+
+    // Wait for session to load
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Send a message...')).toBeTruthy();
+    });
+
+    // Agent offline banner should NOT appear during provisioning
+    expect(screen.queryByText(/Agent offline/)).toBeNull();
+  });
+
+  it('shows agent offline banner after provisioning completes and agent is still offline', async () => {
+    mocks.useProjectAgentSession.mockReturnValue({
+      ...defaultAgentSession(),
+      isAgentActive: false,
+      isConnecting: false,
+    });
+
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession('session-1'),
+      messages: [],
+      hasMore: false,
+    });
+
+    // Start with provisioning active
+    const { rerender } = render(
+      <ProjectMessageView projectId="proj-1" sessionId="session-1" isProvisioning />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Send a message...')).toBeTruthy();
+    });
+    expect(screen.queryByText(/Agent offline/)).toBeNull();
+
+    // Provisioning completes
+    rerender(
+      <ProjectMessageView projectId="proj-1" sessionId="session-1" isProvisioning={false} />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Agent offline/)).toBeTruthy();
+    });
+  });
+
   it('shows error when sending prompt without ACP connection', async () => {
     mocks.useProjectAgentSession.mockReturnValue({
       ...defaultAgentSession(),

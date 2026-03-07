@@ -16,6 +16,8 @@ import { useProjectAgentSession } from '../../hooks/useProjectAgentSession';
 interface ProjectMessageViewProps {
   projectId: string;
   sessionId: string;
+  /** When true, workspace is still provisioning — suppress "agent offline" banner. */
+  isProvisioning?: boolean;
 }
 
 /** Default idle timeout in ms — matches the server-side default (NODE_WARM_TIMEOUT_MS). */
@@ -211,6 +213,7 @@ function deriveSessionState(session: ChatSessionResponse): SessionState {
 export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   projectId,
   sessionId,
+  isProvisioning = false,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -525,9 +528,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         <ConnectionBanner state={connectionState} onRetry={retryWs} />
       )}
 
-      {/* ACP agent disconnect warning — shown when DO WebSocket is fine but agent is unreachable */}
+      {/* ACP agent disconnect warning — shown when DO WebSocket is fine but agent is unreachable.
+          Suppressed during provisioning since the agent was never online yet. */}
       {sessionState === 'active' && connectionState === 'connected' && session?.workspaceId &&
-        !agentSession.isAgentActive && !agentSession.isConnecting && (
+        !agentSession.isAgentActive && !agentSession.isConnecting && !isProvisioning && (
         <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-warning-tint text-warning text-xs">
           <span>Agent offline — messages will be saved but not processed until the agent reconnects.</span>
         </div>
