@@ -1,0 +1,43 @@
+---
+title: SAM Documentation
+description: Documentation for Simple Agent Manager — ephemeral AI coding environments on Cloudflare Workers + Hetzner Cloud.
+template: splash
+hero:
+  tagline: Everything you need to deploy and use SAM — the open-source platform for ephemeral AI coding agent environments.
+  actions:
+    - text: Get Started
+      link: /docs/quickstart/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/raphaeltm/simple-agent-manager
+      variant: minimal
+      icon: external
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+<CardGrid>
+  <Card title="Quickstart" icon="rocket">
+    Get SAM running in minutes — either on the hosted instance or self-hosted on your own infrastructure.
+  </Card>
+  <Card title="Core Concepts" icon="open-book">
+    Understand workspaces, nodes, providers, projects, and how they fit together.
+  </Card>
+  <Card title="Self-Hosting Guide" icon="setting">
+    Fork, configure, deploy. Full walkthrough for running SAM on your own Cloudflare account.
+  </Card>
+  <Card title="Architecture" icon="document">
+    Deep dive into the system design — Workers, Durable Objects, VM agents, and security model.
+  </Card>
+</CardGrid>
+
+## Browse the Docs
+
+<CardGrid>
+  <LinkCard title="What is SAM?" href="/docs/overview/" description="Platform overview and how it works." />
+  <LinkCard title="Quickstart" href="/docs/quickstart/" description="Get up and running in minutes." />
+  <LinkCard title="Core Concepts" href="/docs/concepts/" description="Workspaces, nodes, projects, and more." />
+  <LinkCard title="Self-Hosting" href="/docs/guides/self-hosting/" description="Deploy SAM on your own infrastructure." />
+  <LinkCard title="API Reference" href="/docs/reference/api/" description="REST API endpoints and authentication." />
+  <LinkCard title="Configuration" href="/docs/reference/configuration/" description="Environment variables and secrets." />
+</CardGrid>
