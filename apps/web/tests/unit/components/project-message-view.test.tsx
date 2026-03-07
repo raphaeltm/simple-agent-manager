@@ -665,6 +665,83 @@ describe('chatMessagesToConversationItems', () => {
     expect(items[3].kind).toBe('agent_message');
   });
 
+  it('uses title from toolMetadata when available', () => {
+    const items = chatMessagesToConversationItems([
+      {
+        id: 't1', sessionId: 's1', role: 'tool', content: 'file contents',
+        toolMetadata: { title: 'Read file /src/index.ts', kind: 'read', locations: [{ path: '/src/index.ts' }] },
+        createdAt: 1000,
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    const tool = items[0] as { title: string; toolKind: string };
+    expect(tool.title).toBe('Read file /src/index.ts');
+    expect(tool.toolKind).toBe('read');
+  });
+
+  it('falls back to kind when title is not in metadata', () => {
+    const items = chatMessagesToConversationItems([
+      {
+        id: 't1', sessionId: 's1', role: 'tool', content: '(tool call)',
+        toolMetadata: { kind: 'bash' },
+        createdAt: 1000,
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    const tool = items[0] as { title: string; toolKind: string };
+    expect(tool.title).toBe('bash');
+    expect(tool.toolKind).toBe('bash');
+  });
+
+  it('uses structured content from metadata when available', () => {
+    const items = chatMessagesToConversationItems([
+      {
+        id: 't1', sessionId: 's1', role: 'tool', content: 'diff: /src/main.go',
+        toolMetadata: {
+          title: 'Edit file /src/main.go',
+          kind: 'edit',
+          content: [
+            { type: 'diff', text: '/src/main.go' },
+          ],
+        },
+        createdAt: 1000,
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    const tool = items[0] as { content: Array<{ type: string; text: string }> };
+    expect(tool.content).toHaveLength(1);
+    expect(tool.content[0].type).toBe('diff');
+    expect(tool.content[0].text).toBe('/src/main.go');
+  });
+
+  it('uses status from metadata when available', () => {
+    const items = chatMessagesToConversationItems([
+      {
+        id: 't1', sessionId: 's1', role: 'tool', content: '(tool update)',
+        toolMetadata: { kind: 'bash', status: 'failed' },
+        createdAt: 1000,
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    const tool = items[0] as { status: string };
+    expect(tool.status).toBe('failed');
+  });
+
+  it('falls back to raw content when metadata has no structured content', () => {
+    const items = chatMessagesToConversationItems([
+      {
+        id: 't1', sessionId: 's1', role: 'tool', content: 'some output',
+        toolMetadata: { kind: 'bash' },
+        createdAt: 1000,
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    const tool = items[0] as { content: Array<{ type: string; text: string }> };
+    expect(tool.content).toHaveLength(1);
+    expect(tool.content[0].type).toBe('content');
+    expect(tool.content[0].text).toBe('some output');
+  });
+
   it('does not merge assistant followed by user followed by assistant', () => {
     const items = chatMessagesToConversationItems([
       { id: 'a1', sessionId: 's1', role: 'assistant', content: 'Hello', toolMetadata: null, createdAt: 1000 },
