@@ -9,6 +9,7 @@
 - [ ] `pnpm typecheck`
 - [ ] `pnpm test`
 - [ ] Additional validation run (if applicable)
+- [ ] Staging verification completed (required for all code changes; write `N/A: docs-only` if no code changed)
 - [ ] Mobile and desktop verification notes added for UI changes
 
 ## UI Compliance Checklist (Required for UI changes)

@@ -126,7 +126,34 @@ Address every bug or correctness issue raised. Push fixes and re-run quality che
 
 ---
 
-## Phase 6: Pull Request
+## Phase 6: Staging Verification
+
+If this PR includes **any code changes** (not just docs/tasks), deploy to staging and verify before creating the PR.
+
+> **Skip this phase** only for documentation-only, config-only, or task-file-only changes.
+
+1. **Deploy to staging:**
+   ```
+   pnpm deploy:setup --environment staging
+   ```
+   Or trigger the staging deployment via GitHub Actions.
+
+2. **Open the live app** using Playwright — navigate to `app.simple-agent-manager.org`.
+
+3. **Authenticate** using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`. If the file is missing, ask the human for credentials.
+
+4. **Verify the changed behavior works end-to-end:**
+   - **UI changes**: interact as a real user — click buttons, submit forms, navigate pages
+   - **API/backend changes**: verify affected endpoints respond correctly and downstream behavior works through the UI
+   - **Infrastructure/agent changes**: test workspace lifecycle, agent sessions, WebSocket connections as applicable
+
+5. **Report findings** to the user with evidence (screenshots or Playwright observations).
+
+6. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT proceed to PR creation with known staging failures.
+
+---
+
+## Phase 7: Pull Request
 
 1. **Create the PR** using `gh pr create`:
    - Title: short, under 70 characters
