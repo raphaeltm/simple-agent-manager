@@ -649,7 +649,7 @@ workspacesRoutes.post('/', async (c) => {
       projectDataService.recordActivityEvent(
         c.env, created.projectId, 'workspace.created', 'user', userId,
         workspaceId, null, null, { name: created.name, repository: resolvedRepository }
-      ).catch(() => { /* best-effort */ })
+      ).catch((e) => { console.warn('Failed to record workspace.created activity', { workspaceId, error: String(e) }); })
     );
   }
 
@@ -709,7 +709,7 @@ workspacesRoutes.post('/:id/stop', async (c) => {
       projectDataService.recordActivityEvent(
         c.env, workspace.projectId, 'workspace.stopped', 'user', userId,
         workspace.id, null, null, null
-      ).catch(() => { /* best-effort */ })
+      ).catch((e) => { console.warn('Failed to record workspace.stopped activity', { workspaceId: workspace.id, error: String(e) }); })
     );
   }
 
@@ -763,7 +763,7 @@ workspacesRoutes.post('/:id/restart', async (c) => {
       projectDataService.recordActivityEvent(
         c.env, workspace.projectId, 'workspace.restarted', 'user', userId,
         workspace.id, null, null, null
-      ).catch(() => { /* best-effort */ })
+      ).catch((e) => { console.warn('Failed to record workspace.restarted activity', { workspaceId: workspace.id, error: String(e) }); })
     );
   }
 
@@ -828,8 +828,8 @@ workspacesRoutes.delete('/:id', async (c) => {
     if (node.status === 'running' && node.healthStatus !== 'unhealthy') {
       try {
         await deleteWorkspaceOnNode(workspace.nodeId, workspace.id, c.env, userId);
-      } catch {
-        // Best-effort delete on node agent; DB delete still proceeds.
+      } catch (e) {
+        console.error('Failed to delete workspace on node agent — container may be orphaned', { workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
       }
     }
   }
@@ -1027,8 +1027,8 @@ workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop', async (c) => {
     if (workspace.nodeId) {
       try {
         await stopAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
-      } catch {
-        // Best effort
+      } catch (e) {
+        console.error('Failed to stop orphaned agent session on node', { sessionId: session.id, workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
       }
     }
     return c.json({ status: session.status });
@@ -1036,8 +1036,8 @@ workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop', async (c) => {
 
   try {
     await stopAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
-  } catch {
-    // Best effort remote stop; local state still transitions.
+  } catch (e) {
+    console.error('Failed to stop agent session on node — process may still be running', { sessionId: session.id, workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
   }
 
   await db
@@ -1087,8 +1087,8 @@ workspacesRoutes.post('/:id/agent-sessions/:sessionId/suspend', async (c) => {
 
   try {
     await suspendAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
-  } catch {
-    // Best effort remote suspend; local state still transitions.
+  } catch (e) {
+    console.warn('Failed to suspend agent session on node — local state still transitions', { sessionId: session.id, workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
   }
 
   const now = new Date().toISOString();
@@ -1151,8 +1151,8 @@ workspacesRoutes.post('/:id/agent-sessions/:sessionId/resume', async (c) => {
   if (session.status === 'suspended') {
     try {
       await resumeAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
-    } catch {
-      // Best effort — the WebSocket connection will trigger SessionHost creation anyway.
+    } catch (e) {
+      console.warn('Failed to resume agent session on node — WebSocket reconnect will retry', { sessionId: session.id, workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
     }
   }
 

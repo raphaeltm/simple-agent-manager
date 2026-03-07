@@ -101,8 +101,8 @@ describe('observability error ingestion pipeline', () => {
       expect(clientErrorsRoute).toContain('persistErrorBatch(c.env.OBSERVABILITY_DATABASE, persistInputs');
     });
 
-    it('client-errors route uses fire-and-forget pattern (catch + waitUntil)', () => {
-      expect(clientErrorsRoute).toContain('.catch(() => {})');
+    it('client-errors route uses fire-and-forget pattern (catch with logging + waitUntil)', () => {
+      expect(clientErrorsRoute).toContain('.catch((e) =>');
       expect(clientErrorsRoute).toContain('c.executionCtx.waitUntil(promise)');
     });
 
@@ -141,8 +141,8 @@ describe('observability error ingestion pipeline', () => {
       expect(nodesRoute).toContain('persistErrorBatch(c.env.OBSERVABILITY_DATABASE, persistInputs');
     });
 
-    it('nodes route uses fire-and-forget pattern (catch + waitUntil)', () => {
-      expect(nodesRoute).toContain('.catch(() => {})');
+    it('nodes route uses fire-and-forget pattern (catch with logging + waitUntil)', () => {
+      expect(nodesRoute).toContain('.catch((e) =>');
       expect(nodesRoute).toContain('c.executionCtx.waitUntil(promise)');
     });
 

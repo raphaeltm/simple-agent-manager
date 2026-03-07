@@ -818,8 +818,8 @@ export class ProjectData extends DurableObject<Env> {
         createdAt: now,
         sequence,
       });
-    } catch {
-      // Best-effort notification
+    } catch (e) {
+      console.warn('Failed to insert system message notification in ProjectData DO', { sessionId, error: String(e) });
     }
   }
 

@@ -257,7 +257,9 @@ taskRunsRoutes.post('/:taskId/run', async (c) => {
     });
     log.error('task_run.do_startup_failed', { taskId: task.id, projectId, error: errorMsg });
     // Stop the orphaned session (best-effort — it has no workspace and will never be cleaned up otherwise)
-    await projectDataService.stopSession(c.env, projectId, sessionId).catch(() => {});
+    await projectDataService.stopSession(c.env, projectId, sessionId).catch((e) => {
+      console.error('Failed to stop orphaned session after DO startup failure', { projectId, sessionId, error: String(e) });
+    });
     throw err;
   }
 

@@ -146,7 +146,7 @@ clientErrorsRoutes.post('/', async (c) => {
   // Persist to observability D1 (fire-and-forget, fail-silent)
   if (persistInputs.length > 0 && c.env.OBSERVABILITY_DATABASE) {
     const promise = persistErrorBatch(c.env.OBSERVABILITY_DATABASE, persistInputs, c.env)
-      .catch(() => {}); // Never let D1 writes impact the response
+      .catch((e) => { console.error('Failed to persist client error batch to observability DB', { count: persistInputs.length, error: String(e) }); });
     try { c.executionCtx.waitUntil(promise); } catch { /* no exec ctx (e.g. tests) */ }
   }
 

@@ -283,7 +283,9 @@ taskSubmitRoutes.post('/submit', async (c) => {
     });
     log.error('task_submit.do_startup_failed', { taskId, projectId, error: errorMsg });
     // Stop the orphaned session (best-effort — it has no workspace and will never be cleaned up otherwise)
-    await projectDataService.stopSession(c.env, projectId, sessionId).catch(() => {});
+    await projectDataService.stopSession(c.env, projectId, sessionId).catch((e) => {
+      console.error('Failed to stop orphaned session after DO startup failure', { projectId, sessionId, error: String(e) });
+    });
     throw err; // Re-throw to return 500 to the frontend
   }
 

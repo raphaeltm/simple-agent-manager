@@ -70,14 +70,14 @@ describe('task completion callback handling source contract', () => {
     expect(taskRunnerFile).toContain('cleanupAutoProvisionedNode');
   });
 
-  it('completion flow is best-effort (wrapped in catch)', () => {
+  it('completion flow is best-effort (wrapped in catch with logging)', () => {
     // Both the session stop and cleanup are wrapped in catch for best-effort
     const callbackSection = tasksRouteFile.slice(
       tasksRouteFile.indexOf("status/callback'")
     );
-    // Session stop is best-effort
-    expect(callbackSection).toContain('.catch(() =>');
-    // cleanupTaskRun is best-effort
+    // Session stop is best-effort with logging
+    expect(callbackSection).toContain('.catch((e) =>');
+    // cleanupTaskRun is best-effort with logging
     expect(callbackSection).toContain('cleanupTaskRun(taskId, c.env).catch');
   });
 
