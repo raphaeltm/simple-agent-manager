@@ -1,0 +1,53 @@
+/* SAM Starlight Theme Customization
+   Matches the dark green design system from the marketing site */
+
+@font-face {
+  font-family: 'Chillax';
+  src:
+    url('/fonts/Chillax-Variable.woff2') format('woff2'),
+    url('/fonts/Chillax-Variable.woff') format('woff');
+  font-weight: 200 700;
+  font-display: swap;
+  font-style: normal;
+}
+
+:root {
+  /* Dark theme colors — SAM brand */
+  --sl-color-accent-low: #0e2a1e;
+  --sl-color-accent: #16a34a;
+  --sl-color-accent-high: #bbf7d0;
+
+  --sl-color-white: #e6f2ee;
+  --sl-color-gray-1: #c8ddd6;
+  --sl-color-gray-2: #9fb7ae;
+  --sl-color-gray-3: #6b8a7f;
+  --sl-color-gray-4: #29423b;
+  --sl-color-gray-5: #1e332d;
+  --sl-color-gray-6: #13201d;
+  --sl-color-black: #0b1110;
+
+  --sl-font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
+  --sl-font-system-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas,
+    monospace;
+
+  /* Use Chillax for headings */
+  --sl-font-heading: 'Chillax', var(--sl-font);
+}
+
+/* Subtle refinements */
+.site-title {
+  font-family: 'Chillax', var(--sl-font) !important;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* Make the search button match the brand */
+starlight-menu-button + div button[data-open-modal] {
+  border-color: var(--sl-color-gray-4);
+}
+
+/* Improve code block appearance */
+.expressive-code {
+  --ec-brdCol: var(--sl-color-gray-4) !important;
+}
