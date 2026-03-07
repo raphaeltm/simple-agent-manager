@@ -126,15 +126,32 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
     } else if (msg.role === 'tool') {
       const meta = msg.toolMetadata as Record<string, unknown> | null;
       const kind = meta && typeof meta.kind === 'string' ? meta.kind : 'tool';
+      const title = meta && typeof meta.title === 'string' && meta.title ? meta.title : kind;
       const locations = (meta?.locations as Array<{ path?: string; line?: number | null }>) ?? [];
+      const status = meta && typeof meta.status === 'string' && meta.status
+        ? meta.status as 'completed' | 'failed'
+        : 'completed';
+
+      // Use structured content from metadata when available; fall back to raw content field
+      const structuredContent = meta?.content as Array<{ type?: string; text?: string }> | undefined;
+      let contentItems: Array<{ type: 'content' | 'diff' | 'terminal'; text?: string }>;
+      if (Array.isArray(structuredContent) && structuredContent.length > 0) {
+        contentItems = structuredContent.map((c) => ({
+          type: (c.type === 'diff' || c.type === 'terminal' ? c.type : 'content') as 'content' | 'diff' | 'terminal',
+          text: c.text,
+        }));
+      } else {
+        contentItems = isPlaceholderContent(msg.content) ? [] : [{ type: 'content' as const, text: msg.content }];
+      }
+
       acc.push({
         kind: 'tool_call',
         id: msg.id,
         toolCallId: msg.id,
-        title: kind,
+        title,
         toolKind: kind,
-        status: 'completed',
-        content: isPlaceholderContent(msg.content) ? [] : [{ type: 'content', text: msg.content }],
+        status,
+        content: contentItems,
         locations: locations.map((l) => ({ path: l.path ?? '', line: l.line ?? null })),
         timestamp: msg.createdAt,
       });
