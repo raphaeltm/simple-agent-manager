@@ -48,6 +48,7 @@ import { getRuntimeLimits } from '../services/limits';
 import { verifyCallbackToken } from '../services/jwt';
 import { cleanupTaskRun } from '../services/task-runner';
 import * as projectDataService from '../services/project-data';
+import { log } from '../lib/logger';
 
 const tasksRoutes = new Hono<{ Bindings: Env }>();
 
@@ -615,7 +616,7 @@ tasksRoutes.post('/:taskId/status', async (c) => {
     projectDataService.recordActivityEvent(
       c.env, projectId, `task.${body.toStatus}`, 'user', userId,
       null, null, taskId, { title: task.title, fromStatus: task.status, toStatus: body.toStatus }
-    ).catch((e) => { console.warn('Failed to record task activity event', { taskId, error: String(e) }); })
+    ).catch((e) => { log.warn('task.activity_event_failed', { taskId, error: String(e) }); })
   );
 
   // On terminal states, stop the chat session (best-effort).
@@ -631,7 +632,7 @@ tasksRoutes.post('/:taskId/status', async (c) => {
           if (ws?.chatSessionId) {
             await projectDataService.stopSession(c.env, updatedTask.projectId, ws.chatSessionId);
           }
-        })().catch((e) => { console.error('Failed to stop chat session on task terminal state', { taskId, projectId: updatedTask.projectId, error: String(e) }); })
+        })().catch((e) => { log.error('task.session_stop_failed', { taskId, projectId: updatedTask.projectId, error: String(e) }); })
       );
     }
   }
@@ -720,7 +721,7 @@ tasksRoutes.post('/:taskId/status/callback', async (c) => {
           executionStep: body.executionStep,
           pushed: body.gitPushResult?.pushed ?? false,
         }
-      ).catch((e) => { console.warn('Failed to record task execution step activity', { taskId, error: String(e) }); })
+      ).catch((e) => { log.warn('task.execution_step_activity_failed', { taskId, error: String(e) }); })
     );
 
     // T034: When agent signals awaiting_followup, start idle cleanup timer
@@ -798,7 +799,7 @@ tasksRoutes.post('/:taskId/status/callback', async (c) => {
     projectDataService.recordActivityEvent(
       c.env, projectId, `task.${body.toStatus}`, 'workspace_callback', payload.workspace,
       task.workspaceId, null, taskId, { title: task.title, fromStatus: task.status, toStatus: body.toStatus }
-    ).catch((e) => { console.warn('Failed to record task callback activity event', { taskId, error: String(e) }); })
+    ).catch((e) => { log.warn('task.callback_activity_event_failed', { taskId, error: String(e) }); })
   );
 
   // On terminal states, stop the chat session and handle workspace cleanup.
@@ -816,7 +817,7 @@ tasksRoutes.post('/:taskId/status/callback', async (c) => {
           if (ws?.chatSessionId) {
             await projectDataService.stopSession(c.env, updatedTask.projectId, ws.chatSessionId);
           }
-        })().catch((e) => { console.error('Failed to stop chat session on task callback terminal state', { taskId, projectId: updatedTask.projectId, error: String(e) }); })
+        })().catch((e) => { log.error('task.callback_session_stop_failed', { taskId, projectId: updatedTask.projectId, error: String(e) }); })
       );
     }
 
@@ -824,7 +825,7 @@ tasksRoutes.post('/:taskId/status/callback', async (c) => {
     // On failure/cancellation, keep workspace alive for debugging.
     if (body.toStatus === 'completed') {
       c.executionCtx.waitUntil(
-        cleanupTaskRun(taskId, c.env).catch((e) => { console.error('Failed to cleanup task run after completion', { taskId, error: String(e) }); })
+        cleanupTaskRun(taskId, c.env).catch((e) => { log.error('task.cleanup_failed', { taskId, error: String(e) }); })
       );
     }
   }

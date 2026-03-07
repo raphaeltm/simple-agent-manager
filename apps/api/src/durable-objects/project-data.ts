@@ -819,7 +819,7 @@ export class ProjectData extends DurableObject<Env> {
         sequence,
       });
     } catch (e) {
-      console.warn('Failed to insert system message notification in ProjectData DO', { sessionId, error: String(e) });
+      console.warn(JSON.stringify({ event: 'project_data.system_message_insert_failed', sessionId, error: String(e) }));
     }
   }
 

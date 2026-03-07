@@ -21,6 +21,7 @@ import {
   listNodeEventsOnNode,
   stopWorkspaceOnNode,
 } from '../services/node-agent';
+import { log } from '../lib/logger';
 
 const nodesRoutes = new Hono<{ Bindings: Env }>();
 
@@ -214,7 +215,7 @@ nodesRoutes.post('/:id/stop', async (c) => {
         try {
           await stopWorkspaceOnNode(nodeId, workspace.id, c.env, userId);
         } catch (e) {
-          console.warn('Failed to stop workspace before node power-off', { nodeId, workspaceId: workspace.id, error: String(e) });
+          log.warn('node.workspace_stop_before_power_off_failed', { nodeId, workspaceId: workspace.id, error: String(e) });
         }
       }
     }
@@ -683,7 +684,7 @@ nodesRoutes.post('/:id/errors', async (c) => {
   // Persist to observability D1 (fire-and-forget, fail-silent)
   if (persistInputs.length > 0 && c.env.OBSERVABILITY_DATABASE) {
     const promise = persistErrorBatch(c.env.OBSERVABILITY_DATABASE, persistInputs, c.env)
-      .catch((e) => { console.error('Failed to persist error batch to observability DB', { count: persistInputs.length, error: String(e) }); });
+      .catch((e) => { log.error('observability.persist_error_batch_failed', { count: persistInputs.length, error: String(e) }); });
     try { c.executionCtx.waitUntil(promise); } catch { /* no exec ctx (e.g. tests) */ }
   }
 

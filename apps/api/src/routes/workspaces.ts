@@ -41,6 +41,7 @@ import { appendBootLog, getBootLogs, writeBootLogs } from '../services/boot-log'
 import { requireOwnedProject } from '../middleware/project-auth';
 import { decrypt, encrypt } from '../services/encryption';
 import * as projectDataService from '../services/project-data';
+import { log } from '../lib/logger';
 
 const workspacesRoutes = new Hono<{ Bindings: Env }>();
 const ACTIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery'] as const);
@@ -649,7 +650,7 @@ workspacesRoutes.post('/', async (c) => {
       projectDataService.recordActivityEvent(
         c.env, created.projectId, 'workspace.created', 'user', userId,
         workspaceId, null, null, { name: created.name, repository: resolvedRepository }
-      ).catch((e) => { console.warn('Failed to record workspace.created activity', { workspaceId, error: String(e) }); })
+      ).catch((e) => { log.warn('workspace.activity_created_failed', { workspaceId, error: String(e) }); })
     );
   }
 
@@ -709,7 +710,7 @@ workspacesRoutes.post('/:id/stop', async (c) => {
       projectDataService.recordActivityEvent(
         c.env, workspace.projectId, 'workspace.stopped', 'user', userId,
         workspace.id, null, null, null
-      ).catch((e) => { console.warn('Failed to record workspace.stopped activity', { workspaceId: workspace.id, error: String(e) }); })
+      ).catch((e) => { log.warn('workspace.activity_stopped_failed', { workspaceId: workspace.id, error: String(e) }); })
     );
   }
 
@@ -763,7 +764,7 @@ workspacesRoutes.post('/:id/restart', async (c) => {
       projectDataService.recordActivityEvent(
         c.env, workspace.projectId, 'workspace.restarted', 'user', userId,
         workspace.id, null, null, null
-      ).catch((e) => { console.warn('Failed to record workspace.restarted activity', { workspaceId: workspace.id, error: String(e) }); })
+      ).catch((e) => { log.warn('workspace.activity_restarted_failed', { workspaceId: workspace.id, error: String(e) }); })
     );
   }
 
@@ -829,7 +830,7 @@ workspacesRoutes.delete('/:id', async (c) => {
       try {
         await deleteWorkspaceOnNode(workspace.nodeId, workspace.id, c.env, userId);
       } catch (e) {
-        console.error('Failed to delete workspace on node agent — container may be orphaned', { workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
+        log.error('workspace.delete_on_node_failed', { workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
       }
     }
   }
@@ -1028,7 +1029,7 @@ workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop', async (c) => {
       try {
         await stopAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
       } catch (e) {
-        console.error('Failed to stop orphaned agent session on node', { sessionId: session.id, workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
+        log.error('agent_session.orphaned_stop_failed', { sessionId: session.id, workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
       }
     }
     return c.json({ status: session.status });
@@ -1037,7 +1038,7 @@ workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop', async (c) => {
   try {
     await stopAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
   } catch (e) {
-    console.error('Failed to stop agent session on node — process may still be running', { sessionId: session.id, workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
+    log.error('agent_session.stop_on_node_failed', { sessionId: session.id, workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
   }
 
   await db
@@ -1088,7 +1089,7 @@ workspacesRoutes.post('/:id/agent-sessions/:sessionId/suspend', async (c) => {
   try {
     await suspendAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
   } catch (e) {
-    console.warn('Failed to suspend agent session on node — local state still transitions', { sessionId: session.id, workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
+    log.warn('agent_session.suspend_on_node_failed', { sessionId: session.id, workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
   }
 
   const now = new Date().toISOString();
@@ -1152,7 +1153,7 @@ workspacesRoutes.post('/:id/agent-sessions/:sessionId/resume', async (c) => {
     try {
       await resumeAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
     } catch (e) {
-      console.warn('Failed to resume agent session on node — WebSocket reconnect will retry', { sessionId: session.id, workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
+      log.warn('agent_session.resume_on_node_failed', { sessionId: session.id, workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
     }
   }
 
