@@ -472,7 +472,11 @@ export function ProjectChat() {
             {provisioning && sessionId === provisioning.sessionId && !isTerminal(provisioning.status) && (
               <ProvisioningIndicator state={provisioning} />
             )}
-            <ProjectMessageView projectId={projectId} sessionId={sessionId!} />
+            <ProjectMessageView
+              projectId={projectId}
+              sessionId={sessionId!}
+              isProvisioning={!!(provisioning && sessionId === provisioning.sessionId && !isTerminal(provisioning.status))}
+            />
           </div>
         )}
       </div>
