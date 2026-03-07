@@ -143,20 +143,19 @@ Each reviewer should:
 - If a reviewer identifies a missing test category (e.g., "this needs an integration test, not just unit tests"), add it
 - Push fixes and re-run reviewers if changes are substantial
 
-## Pre-Merge Staging Verification (Required for UX Changes)
+## Pre-Merge Staging Verification (Required for All Code Changes)
 
-Any change that affects user experience — UI changes, navigation, forms, interactive flows, error messages, or any user-visible behavior — MUST be manually verified on the live staging/production environment before merging to main.
-
-Automated tests alone are NOT sufficient for UX changes. The live environment has real OAuth, DNS, D1, KV, and VM infrastructure that local tests cannot replicate.
+Any PR that includes code changes MUST be deployed and tested on the live staging environment before merging to main. Local tests and CI alone are NOT sufficient — the live environment has real OAuth, DNS, D1, KV, Durable Objects, and VM infrastructure that local tests cannot replicate.
 
 ### When This Applies
 
-This gate is triggered by changes to ANY of:
-- `apps/web/` — UI components, pages, routing, styles
-- `apps/api/src/routes/` — API endpoints that serve user-facing data or actions
-- `packages/terminal/` — Terminal component behavior
-- `packages/vm-agent/` — Agent session UX (WebSocket, PTY interactions)
-- Any change to auth flows, redirects, or URL construction
+This gate applies to **every PR that changes code** — API routes, business logic, UI components, infrastructure, agent code, shared packages, or any other runtime code.
+
+### When This Does NOT Apply
+
+- Documentation-only changes (`.md` files, comments)
+- Configuration-only changes that don't affect runtime (`.gitignore`, editor configs)
+- Task file management (`tasks/` directory only)
 
 ### Required Steps
 
@@ -164,12 +163,13 @@ This gate is triggered by changes to ANY of:
 2. **Deploy to staging** via GitHub Actions or `pnpm deploy:setup --environment staging`
 3. **Open the live app** using Playwright (navigate to `app.simple-agent-manager.org`)
 4. **Authenticate** using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`. If the file is missing, ask the human for credentials.
-5. **Exercise the changed flows** as a real user would — click buttons, submit forms, navigate between pages, verify data loads correctly
-6. **Verify the change works end-to-end** — not just that the page renders, but that the full interaction produces the expected outcome
-7. **Report findings** to the user with evidence (screenshots or Playwright observations)
+5. **Exercise the changed flows** — for UI changes, interact as a real user would; for API/backend changes, verify affected endpoints return correct responses and downstream behavior works
+6. **Verify the change works end-to-end** — not just that the page renders or endpoint responds, but that the full interaction produces the expected outcome
+7. **Report findings** to the user with evidence (screenshots, Playwright observations, or API response verification)
 
 ### What to Check
 
+**For UI changes:**
 - Pages load without errors (check browser console)
 - Interactive elements respond correctly (buttons, links, forms)
 - Data displays accurately (lists, details, status indicators)
@@ -177,9 +177,20 @@ This gate is triggered by changes to ANY of:
 - Error states render properly (not blank pages or raw error text)
 - Mobile/responsive layout is acceptable if applicable
 
+**For API/backend changes:**
+- Affected API endpoints respond correctly (use Playwright or curl)
+- Data persists and loads correctly through the UI
+- Background processes (DOs, cron jobs) function as expected
+- Error handling returns appropriate responses
+
+**For infrastructure/agent changes:**
+- Workspace creation and lifecycle operations work
+- Agent sessions start and communicate correctly
+- WebSocket connections establish and maintain
+
 ### Failures Block Merge
 
-If staging verification reveals issues, fix them before merging. Do NOT merge with known UX regressions and track them as follow-up tasks — fix them in the same branch.
+If staging verification reveals issues, fix them before merging. Do NOT merge with known regressions and track them as follow-up tasks — fix them in the same branch.
 
 ## Post-Push CI Procedure (Required)
 
