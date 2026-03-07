@@ -13,18 +13,31 @@ This is frustrating because:
 - Starting a "new chat" loses conversational context and forces the user to re-explain what they want
 - The 15-minute idle timeout (`SESSION_IDLE_TIMEOUT_MINUTES`) is aggressive for async workflows
 
+## Hard Constraint: Node Destruction Is the Common Case
+
+The most common cleanup path is full node destruction — the Hetzner server is deleted via API, and **everything on the VM is permanently gone**. This is not an edge case; it's the normal lifecycle:
+
+- Task completes → workspace stopped → node enters warm pool → warm timeout expires → cron sweep calls `deleteNodeResources()` → Hetzner server deleted
+- Manual node delete → `deleteNodeResources()` → gone
+- Max lifetime exceeded → cron sweep → gone
+
+**All continuation approaches must assume the node no longer exists.** The only data that survives is what lives in Cloudflare infrastructure (DO SQLite, D1, KV) and what was pushed to GitHub before cleanup. There is no VM to wake up, no Docker container to restart, no volume to mount.
+
+This means every continuation path requires **full re-provisioning from scratch**: new node (or warm pool claim) → new workspace → fresh `git clone` → checkout of the output branch (if it exists on the remote). The only context available to the new agent is what we can reconstruct from the DO chat history and D1 task metadata.
+
 ## Current State
 
-### What survives workspace cleanup
+### What survives (in Cloudflare + GitHub — always available)
 - **Chat messages** — all messages (user, assistant, tool, system) in ProjectData DO SQLite (`chat_messages` table)
 - **Task metadata** — title, description, status, `output_branch`, `output_pr_url`, `output_summary` in D1 (`tasks` table)
 - **Git code** — anything pushed to the remote before cleanup (agent pushes on completion via `workspace_callbacks.go`)
 
-### What is lost
+### What is lost (on the VM — gone when node is destroyed)
 - **VM state** — Docker container, volume, working tree, uncommitted changes
 - **Agent process** — the Claude Code / Codex subprocess and its in-memory conversation context
 - **ACP session** — the `AcpSessionID` in the SessionHost is gone with the VM
 - **Unsent messages** — anything in the VM SQLite outbox that wasn't flushed
+- **Local tool state** — any files the agent created outside the git repo (temp files, caches, logs)
 
 ### Key architectural facts
 - Chat sessions are **per-project DO**, not per-workspace. The workspace link (`chat_sessions.workspace_id`) is a mutable foreign key.
@@ -123,25 +136,26 @@ This is frustrating because:
 
 ### Approach D: "Extended warm period with wake-on-message"
 
-**Concept**: Instead of destroying workspaces aggressively, keep the VM alive longer (or stop the Docker container without deleting the volume). When the user sends a follow-up, wake the container and deliver the message. The agent process is gone, but the filesystem state is intact.
+> **Note**: This approach only helps during the warm window. Once the node is destroyed (the common case), it provides no benefit. It is a complementary optimization, not a standalone solution — any design must still handle the "node is gone" case via one of the other approaches.
+
+**Concept**: Instead of destroying workspaces aggressively, keep the VM alive longer (or stop the Docker container without deleting the volume). When the user sends a follow-up during the warm window, wake the container and deliver the message. The agent process is gone, but the filesystem state is intact.
 
 **How it would work**:
 1. On task completion, stop the Docker container but don't remove it or its volume
 2. Extend `NODE_WARM_TIMEOUT_MS` significantly (hours instead of 30 min) or make it user-configurable
-3. When a follow-up arrives, `docker start` the container, start a new agent session with conversation context
-4. If the warm timeout expires, then fully destroy
+3. When a follow-up arrives during the warm window, `docker start` the container, start a new agent session with conversation context
+4. If the warm timeout expires, fully destroy — and fall back to another approach (B, C, or E)
 
 **Pros**:
-- Filesystem state is fully preserved (uncommitted changes, local files, tool state)
+- Filesystem state is fully preserved during the warm window (uncommitted changes, local files, tool state)
 - No git checkout needed — the working tree is exactly where the agent left it
 - Faster resume than full re-provision (container start vs. VM + devcontainer build)
-- The ACP session ID is lost (agent process died), but the filesystem context compensates
 
 **Cons**:
-- Cost: keeping VMs alive costs money (Hetzner charges for running servers)
+- **Only works during the warm window** — once the node is destroyed, this is useless. Requires a fallback path regardless.
+- Cost: keeping VMs alive costs money (Hetzner charges for running servers even when idle)
 - The Hetzner VM must stay alive for the Docker container to persist — volumes are local, not network-attached
-- Conflicts with BYOC model — users pay for idle VMs
-- Doesn't help once the node is actually destroyed (need a fallback anyway)
+- Conflicts with BYOC model — users pay for idle VMs they're not using
 - `NODE_WARM_TIMEOUT_MS` is already user-configurable but applies to the node, not per-workspace
 
 **Complexity**: Low-medium for the "extend warm period" part. High if adding Docker stop/start lifecycle (currently not supported — workspace stop closes sessions but doesn't stop the container).
