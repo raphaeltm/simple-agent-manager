@@ -4,6 +4,7 @@ import { optionalAuth } from '../middleware/auth';
 import { rateLimit, getRateLimit } from '../middleware/rate-limit';
 import { errors } from '../middleware/error';
 import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
+import { log } from '../lib/logger';
 
 /** Default max body size: 64 KB (configurable via MAX_CLIENT_ERROR_BODY_BYTES) */
 const DEFAULT_MAX_BODY_BYTES = 65_536;
@@ -146,7 +147,7 @@ clientErrorsRoutes.post('/', async (c) => {
   // Persist to observability D1 (fire-and-forget, fail-silent)
   if (persistInputs.length > 0 && c.env.OBSERVABILITY_DATABASE) {
     const promise = persistErrorBatch(c.env.OBSERVABILITY_DATABASE, persistInputs, c.env)
-      .catch(() => {}); // Never let D1 writes impact the response
+      .catch((e) => { log.error('observability.persist_client_error_batch_failed', { count: persistInputs.length, error: String(e) }); });
     try { c.executionCtx.waitUntil(promise); } catch { /* no exec ctx (e.g. tests) */ }
   }
 

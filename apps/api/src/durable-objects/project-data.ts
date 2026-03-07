@@ -818,8 +818,8 @@ export class ProjectData extends DurableObject<Env> {
         createdAt: now,
         sequence,
       });
-    } catch {
-      // Best-effort notification
+    } catch (e) {
+      console.warn(JSON.stringify({ event: 'project_data.system_message_insert_failed', sessionId, error: String(e) }));
     }
   }
 

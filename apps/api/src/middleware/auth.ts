@@ -92,8 +92,8 @@ export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
           },
         });
       }
-    } catch {
-      // Ignore errors in optional auth
+    } catch (e) {
+      console.warn(JSON.stringify({ event: 'optional_auth.check_failed', error: String(e) }));
     }
 
     await next();
