@@ -532,7 +532,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           Suppressed during provisioning since the agent was never online yet. */}
       {sessionState === 'active' && connectionState === 'connected' && session?.workspaceId &&
         !agentSession.isAgentActive && !agentSession.isConnecting && !isProvisioning && (
-        <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-warning-tint text-warning text-xs">
+        <div role="alert" className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-warning-tint text-warning text-xs">
           <span>Agent offline — messages will be saved but not processed until the agent reconnects.</span>
         </div>
       )}
