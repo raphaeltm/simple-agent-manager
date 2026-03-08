@@ -7,6 +7,7 @@ import {
   ThinkingBlock as AcpThinkingBlock,
 } from '@simple-agent-manager/acp-client';
 import type { ConversationItem } from '@simple-agent-manager/acp-client';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { getChatSession, getTranscribeApiUrl, resetIdleTimer } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
@@ -620,80 +621,15 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
 
-      {/* Session header with branch/PR info */}
+      {/* Session header — compact by default, expandable for details */}
       {session && (
-        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border-default flex-wrap shrink-0">
-          <span className="text-base font-semibold text-fg-primary">
-            {session.topic || `Chat ${session.id.slice(0, 8)}`}
-          </span>
-
-          {/* State indicator */}
-          <span
-            className="inline-flex items-center gap-1 text-xs font-medium"
-            style={{
-              color: sessionState === 'active' ? 'var(--sam-color-success)'
-                : sessionState === 'idle' ? 'var(--sam-color-warning, #f59e0b)'
-                : 'var(--sam-color-fg-muted)',
-            }}
-          >
-            <span className="w-[6px] h-[6px] rounded-full bg-current" />
-            {sessionState === 'active' ? 'Active' : sessionState === 'idle' ? 'Idle' : 'Stopped'}
-          </span>
-
-          {/* Background refresh indicator — inline in header */}
-          {loading && (
-            <span role="status" aria-label="Refreshing messages" className="inline-flex items-center">
-              <Spinner size="sm" />
-            </span>
-          )}
-
-          {/* Idle countdown (TDF-8) */}
-          {sessionState === 'idle' && idleCountdownMs !== null && (
-            <span
-              className="sam-type-caption font-mono"
-              style={{
-                color: idleCountdownMs < 5 * 60 * 1000
-                  ? 'var(--sam-color-danger)'
-                  : 'var(--sam-color-warning, #f59e0b)',
-              }}
-            >
-              Cleanup in {formatCountdown(idleCountdownMs)}
-            </span>
-          )}
-
-          {/* Branch name (T021) */}
-          {taskEmbed?.outputBranch && (
-            <span className="sam-type-caption text-fg-muted font-mono bg-inset px-[6px] py-[1px] rounded-sm">
-              {taskEmbed.outputBranch}
-            </span>
-          )}
-
-          {/* PR link (T021) */}
-          {taskEmbed?.outputPrUrl && (
-            <a
-              href={taskEmbed.outputPrUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="sam-type-caption font-medium no-underline"
-              style={{ color: 'var(--sam-color-accent-primary)' }}
-            >
-              View PR
-            </a>
-          )}
-
-          {session.workspaceId && sessionState === 'active' && (
-            <a
-              href={`/workspaces/${session.workspaceId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ml-auto"
-            >
-              <Button variant="ghost" size="sm">
-                Open Workspace
-              </Button>
-            </a>
-          )}
-        </div>
+        <SessionHeader
+          session={session}
+          sessionState={sessionState}
+          loading={loading}
+          idleCountdownMs={idleCountdownMs}
+          taskEmbed={taskEmbed}
+        />
       )}
 
       {/* Task error/summary display — shown whenever task has error/summary, regardless of session state */}
@@ -831,6 +767,126 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     </div>
   );
 };
+
+/** Collapsible session header — shows title + state dot, with expandable details. */
+function SessionHeader({
+  session,
+  sessionState,
+  loading,
+  idleCountdownMs,
+  taskEmbed,
+}: {
+  session: ChatSessionResponse;
+  sessionState: SessionState;
+  loading: boolean;
+  idleCountdownMs: number | null;
+  taskEmbed: ExtendedSession['task'] | null;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const hasDetails = !!(
+    taskEmbed?.outputBranch ||
+    taskEmbed?.outputPrUrl ||
+    (session.workspaceId && sessionState === 'active') ||
+    (sessionState === 'idle' && idleCountdownMs !== null)
+  );
+
+  return (
+    <div className="border-b border-border-default shrink-0">
+      {/* Compact row — always visible */}
+      <div className="flex items-center gap-2 px-4 py-2 min-h-[40px]">
+        <span className="text-sm font-semibold text-fg-primary truncate flex-1 min-w-0">
+          {session.topic || `Chat ${session.id.slice(0, 8)}`}
+        </span>
+
+        {/* State indicator */}
+        <span
+          className="inline-flex items-center gap-1 text-xs font-medium shrink-0"
+          style={{
+            color: sessionState === 'active' ? 'var(--sam-color-success)'
+              : sessionState === 'idle' ? 'var(--sam-color-warning, #f59e0b)'
+              : 'var(--sam-color-fg-muted)',
+          }}
+        >
+          <span className="w-[6px] h-[6px] rounded-full bg-current" />
+          {sessionState === 'active' ? 'Active' : sessionState === 'idle' ? 'Idle' : 'Stopped'}
+        </span>
+
+        {/* Background refresh indicator */}
+        {loading && (
+          <span role="status" aria-label="Refreshing messages" className="inline-flex items-center shrink-0">
+            <Spinner size="sm" />
+          </span>
+        )}
+
+        {/* Expand/collapse toggle — only shown when there are details to show */}
+        {hasDetails && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            aria-label={expanded ? 'Hide session details' : 'Show session details'}
+            className="shrink-0 p-1 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary transition-colors"
+          >
+            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+        )}
+      </div>
+
+      {/* Expanded details row */}
+      {expanded && hasDetails && (
+        <div className="flex items-center gap-3 px-4 py-1.5 border-t border-border-default flex-wrap bg-inset">
+          {/* Idle countdown (TDF-8) */}
+          {sessionState === 'idle' && idleCountdownMs !== null && (
+            <span
+              className="sam-type-caption font-mono"
+              style={{
+                color: idleCountdownMs < 5 * 60 * 1000
+                  ? 'var(--sam-color-danger)'
+                  : 'var(--sam-color-warning, #f59e0b)',
+              }}
+            >
+              Cleanup in {formatCountdown(idleCountdownMs)}
+            </span>
+          )}
+
+          {/* Branch name (T021) */}
+          {taskEmbed?.outputBranch && (
+            <span className="sam-type-caption text-fg-muted font-mono bg-surface px-[6px] py-[1px] rounded-sm">
+              {taskEmbed.outputBranch}
+            </span>
+          )}
+
+          {/* PR link (T021) */}
+          {taskEmbed?.outputPrUrl && (
+            <a
+              href={taskEmbed.outputPrUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="sam-type-caption font-medium no-underline"
+              style={{ color: 'var(--sam-color-accent-primary)' }}
+            >
+              View PR
+            </a>
+          )}
+
+          {session.workspaceId && sessionState === 'active' && (
+            <a
+              href={`/workspaces/${session.workspaceId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-auto"
+            >
+              <Button variant="ghost" size="sm">
+                Open Workspace
+              </Button>
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** WebSocket connection status banner (TDF-8). */
 function ConnectionBanner({ state, onRetry }: { state: ChatConnectionState; onRetry: () => void }) {
