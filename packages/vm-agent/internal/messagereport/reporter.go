@@ -211,7 +211,20 @@ func (r *Reporter) Enqueue(msg Message) error {
 	// when a warm node is reused for a new task).
 	r.mu.Lock()
 	sessionID := r.sessionID
+	workspaceID := r.workspaceID
 	r.mu.Unlock()
+
+	// Principle XIII: Fail-fast on missing session ID. Never enqueue
+	// messages without a valid session — they would be unroutable and
+	// could end up in the wrong chat session if the session ID is set later.
+	if sessionID == "" {
+		slog.Error("messagereport: refusing to enqueue message without sessionID",
+			"workspaceId", workspaceID,
+			"messageId", msg.MessageID,
+			"role", msg.Role,
+			"action", "dropped")
+		return fmt.Errorf("messagereport: no session ID set, message dropped")
+	}
 
 	// INSERT OR IGNORE for crash-recovery dedup on message_id UNIQUE constraint.
 	_, err := r.db.Exec(
