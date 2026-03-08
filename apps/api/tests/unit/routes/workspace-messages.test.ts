@@ -32,8 +32,8 @@ describe('workspace messages batch endpoint source contract', () => {
     expect(file).toContain("'Maximum 100 messages per batch'");
   });
 
-  it('validates role enum (user, assistant, system, tool)', () => {
-    expect(file).toContain("const validRoles = new Set(['user', 'assistant', 'system', 'tool'])");
+  it('validates role enum (user, assistant, system, tool, thinking, plan)', () => {
+    expect(file).toContain("const validRoles = new Set(['user', 'assistant', 'system', 'tool', 'thinking', 'plan'])");
     expect(file).toContain('!validRoles.has(msg.role)');
   });
 
