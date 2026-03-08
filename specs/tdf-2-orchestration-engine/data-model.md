@@ -124,7 +124,7 @@ All configurable via environment variables (Constitution Principle XI):
 | Retry base delay | `TASK_RUNNER_RETRY_BASE_DELAY_MS` | 5000 | Initial retry delay (ms) |
 | Retry max delay | `TASK_RUNNER_RETRY_MAX_DELAY_MS` | 60000 | Max retry delay after backoff (ms) |
 | Agent ready poll interval | `TASK_RUNNER_AGENT_POLL_INTERVAL_MS` | 5000 | Health check poll interval |
-| Agent ready timeout | `TASK_RUNNER_AGENT_READY_TIMEOUT_MS` | 120000 | Max wait for agent health |
+| Agent ready timeout | `TASK_RUNNER_AGENT_READY_TIMEOUT_MS` | 600000 | Max wait for agent health (10 min for cold-start VMs) |
 | Workspace ready timeout | `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` | 600000 | Max wait for ready callback |
 | Provisioning poll interval | `TASK_RUNNER_PROVISION_POLL_INTERVAL_MS` | 10000 | Server status poll interval |
 

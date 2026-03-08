@@ -165,8 +165,14 @@ export const DEFAULT_TASK_RUNNER_RETRY_MAX_DELAY_MS = 60_000;
 /** Default health check poll interval (ms) for agent readiness. Override via TASK_RUNNER_AGENT_POLL_INTERVAL_MS env var. */
 export const DEFAULT_TASK_RUNNER_AGENT_POLL_INTERVAL_MS = 5_000;
 
-/** Default timeout (ms) for VM agent to become healthy. Override via TASK_RUNNER_AGENT_READY_TIMEOUT_MS env var. */
-export const DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS = 120_000;
+/**
+ * Default timeout (ms) for VM agent to become healthy after node provisioning.
+ * Fresh VMs need cloud-init to complete (install Docker, pull images, start agent),
+ * which typically takes 3-5 minutes. Aligned with DEFAULT_NODE_AGENT_READY_TIMEOUT_MS
+ * in node-agent.ts to avoid divergent timeout behavior between code paths.
+ * Override via TASK_RUNNER_AGENT_READY_TIMEOUT_MS env var.
+ */
+export const DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS = 600_000;
 
 /** Default timeout (ms) for workspace-ready callback. Override via TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS env var. */
 export const DEFAULT_TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
