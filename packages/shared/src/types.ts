@@ -226,7 +226,7 @@ export interface ChatSessionDetail extends ChatSession {
 export interface ChatMessage {
   id: string;
   sessionId: string;
-  role: 'user' | 'assistant' | 'system' | 'tool';
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'thinking' | 'plan';
   content: string;
   toolMetadata: Record<string, unknown> | null;
   createdAt: number;
@@ -257,7 +257,7 @@ export interface ActivityEvent {
 }
 
 export interface PersistMessageRequest {
-  role: 'user' | 'assistant' | 'system' | 'tool';
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'thinking' | 'plan';
   content: string;
   toolMetadata?: Record<string, unknown> | null;
 }
@@ -269,7 +269,7 @@ export interface PersistMessageRequest {
 export interface PersistMessageItem {
   messageId: string;
   sessionId: string;
-  role: 'user' | 'assistant' | 'system' | 'tool';
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'thinking' | 'plan';
   content: string;
   toolMetadata?: Record<string, unknown> | null;
   timestamp: string; // ISO 8601

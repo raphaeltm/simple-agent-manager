@@ -1632,7 +1632,7 @@ workspacesRoutes.post('/:id/messages', async (c) => {
     throw errors.badRequest('Maximum 100 messages per batch');
   }
 
-  const validRoles = new Set(['user', 'assistant', 'system', 'tool']);
+  const validRoles = new Set(['user', 'assistant', 'system', 'tool', 'thinking', 'plan']);
   const maxMessageBytes = c.env.MESSAGE_SIZE_THRESHOLD
     ? parseInt(c.env.MESSAGE_SIZE_THRESHOLD, 10) : 102400; // 100KB default
 
@@ -1646,7 +1646,7 @@ workspacesRoutes.post('/:id/messages', async (c) => {
       throw errors.badRequest('Each message must have a sessionId string');
     }
     if (!msg.role || !validRoles.has(msg.role)) {
-      throw errors.badRequest(`Invalid role "${msg.role}". Must be one of: user, assistant, system, tool`);
+      throw errors.badRequest(`Invalid role "${msg.role}". Must be one of: user, assistant, system, tool, thinking, plan`);
     }
     if (!msg.content || typeof msg.content !== 'string') {
       throw errors.badRequest('Each message must have non-empty content');

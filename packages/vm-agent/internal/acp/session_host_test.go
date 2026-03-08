@@ -1158,15 +1158,14 @@ func TestSessionUpdate_EmptyUpdate_NoEnqueue(t *testing.T) {
 
 	client := &sessionHostClient{host: host}
 
-	// Send an update type that ExtractMessages ignores (AgentThoughtChunk).
-	// Note: ACP SDK's SessionUpdate requires at least one union field to be
-	// set for MarshalJSON to succeed, so we can't use a truly empty update.
+	// Send an update with an AgentThoughtChunk that has empty text.
+	// ExtractMessages skips thought chunks with empty text content.
 	notif := acpsdk.SessionNotification{
 		SessionId: "acp-sess",
 		Update: acpsdk.SessionUpdate{
 			AgentThoughtChunk: &acpsdk.SessionUpdateAgentThoughtChunk{
 				Content: acpsdk.ContentBlock{
-					Text: &acpsdk.ContentBlockText{Text: "thinking..."},
+					Text: &acpsdk.ContentBlockText{Text: ""},
 				},
 			},
 		},
@@ -1178,7 +1177,7 @@ func TestSessionUpdate_EmptyUpdate_NoEnqueue(t *testing.T) {
 
 	msgs := reporter.Messages()
 	if len(msgs) != 0 {
-		t.Fatalf("expected 0 enqueued messages for empty update, got %d", len(msgs))
+		t.Fatalf("expected 0 enqueued messages for empty thought text, got %d", len(msgs))
 	}
 }
 

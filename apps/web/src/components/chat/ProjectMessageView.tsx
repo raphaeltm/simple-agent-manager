@@ -47,7 +47,7 @@ export function groupMessages(msgs: ChatMessageResponse[]): MessageGroup[] {
   for (const msg of msgs) {
     const last = groups[groups.length - 1];
     // Merge into existing group if same role and both are groupable roles
-    if (last && last.role === msg.role && (msg.role === 'assistant' || msg.role === 'tool')) {
+    if (last && last.role === msg.role && (msg.role === 'assistant' || msg.role === 'tool' || msg.role === 'thinking')) {
       last.messages.push(msg);
     } else {
       groups.push({
@@ -114,7 +114,9 @@ function AcpConversationItemView({ item }: { item: ConversationItem }) {
 
 /** Converts DO-persisted ChatMessageResponse[] into ConversationItem[] for unified rendering. */
 export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): ConversationItem[] {
-  return msgs.reduce<ConversationItem[]>((acc, msg) => {
+  // First pass: build items, tracking tool calls by toolCallId for deduplication
+  const toolCallMap = new Map<string, number>(); // toolCallId → index in acc
+  const items = msgs.reduce<ConversationItem[]>((acc, msg) => {
     if (msg.role === 'user') {
       acc.push({ kind: 'user_message', id: msg.id, text: msg.content, timestamp: msg.createdAt });
     } else if (msg.role === 'assistant') {
@@ -125,8 +127,47 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
       } else {
         acc.push({ kind: 'agent_message', id: msg.id, text: msg.content, streaming: false, timestamp: msg.createdAt });
       }
+    } else if (msg.role === 'thinking') {
+      // Merge consecutive thinking chunks (same pattern as assistant messages)
+      const last = acc[acc.length - 1];
+      if (last?.kind === 'thinking') {
+        (last as { text: string }).text += msg.content;
+      } else {
+        acc.push({ kind: 'thinking', id: msg.id, text: msg.content, active: false, timestamp: msg.createdAt });
+      }
+    } else if (msg.role === 'plan') {
+      // Parse plan entries from JSON content
+      let entries: Array<{ content: string; priority: 'high' | 'medium' | 'low'; status: 'pending' | 'in_progress' | 'completed' }> = [];
+      try {
+        const parsed = JSON.parse(msg.content);
+        if (Array.isArray(parsed)) {
+          entries = parsed.map((e: Record<string, unknown>) => ({
+            content: typeof e.content === 'string' ? e.content : '',
+            priority: (['high', 'medium', 'low'].includes(e.priority as string) ? e.priority : 'medium') as 'high' | 'medium' | 'low',
+            status: (['pending', 'in_progress', 'completed'].includes(e.status as string) ? e.status : 'pending') as 'pending' | 'in_progress' | 'completed',
+          }));
+        }
+      } catch {
+        // Invalid JSON — skip this plan message
+      }
+      if (entries.length > 0) {
+        // Plans are replaced wholesale — find existing plan and update it
+        const existingIdx = acc.findIndex((i) => i.kind === 'plan');
+        const planItem: ConversationItem = {
+          kind: 'plan',
+          id: existingIdx >= 0 ? (acc[existingIdx]?.id ?? msg.id) : msg.id,
+          entries,
+          timestamp: msg.createdAt,
+        };
+        if (existingIdx >= 0) {
+          acc[existingIdx] = planItem;
+        } else {
+          acc.push(planItem);
+        }
+      }
     } else if (msg.role === 'tool') {
       const meta = msg.toolMetadata as Record<string, unknown> | null;
+      const toolCallId = meta && typeof meta.toolCallId === 'string' ? meta.toolCallId : '';
       const kind = meta && typeof meta.kind === 'string' ? meta.kind : 'tool';
       const title = meta && typeof meta.title === 'string' && meta.title ? meta.title : kind;
       const locations = (meta?.locations as Array<{ path?: string; line?: number | null }>) ?? [];
@@ -137,28 +178,49 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
         : 'completed') as 'pending' | 'in_progress' | 'completed' | 'failed';
 
       // Use structured content from metadata when available; fall back to raw content field
-      const structuredContent = meta?.content as Array<{ type?: string; text?: string }> | undefined;
-      let contentItems: Array<{ type: 'content' | 'diff' | 'terminal'; text?: string }>;
+      const structuredContent = meta?.content as Array<{ type?: string; text?: string; path?: string; oldText?: string | null; newText?: string }> | undefined;
+      let contentItems: Array<{ type: 'content' | 'diff' | 'terminal'; text?: string; data?: unknown }>;
       if (Array.isArray(structuredContent) && structuredContent.length > 0) {
-        contentItems = structuredContent.map((c) => ({
-          type: (c.type === 'diff' || c.type === 'terminal' ? c.type : 'content') as 'content' | 'diff' | 'terminal',
-          text: c.text,
-        }));
+        contentItems = structuredContent.map((c) => {
+          const type = (c.type === 'diff' || c.type === 'terminal' ? c.type : 'content') as 'content' | 'diff' | 'terminal';
+          const item: { type: 'content' | 'diff' | 'terminal'; text?: string; data?: unknown } = { type, text: c.text };
+          // Pass through diff data so ToolCallCard can render it (matches workspace chat data field)
+          if (type === 'diff') {
+            item.data = { type: 'diff', path: c.path ?? c.text, oldText: c.oldText, newText: c.newText };
+          }
+          return item;
+        });
       } else {
         contentItems = isPlaceholderContent(msg.content) ? [] : [{ type: 'content' as const, text: msg.content }];
       }
 
-      acc.push({
-        kind: 'tool_call',
-        id: msg.id,
-        toolCallId: msg.id,
-        title,
-        toolKind: kind,
-        status,
-        content: contentItems,
-        locations: locations.map((l) => ({ path: l.path ?? '', line: l.line ?? null })),
-        timestamp: msg.createdAt,
-      });
+      // Deduplicate tool calls by toolCallId: merge updates into existing tool call
+      if (toolCallId && toolCallMap.has(toolCallId)) {
+        const existingIdx = toolCallMap.get(toolCallId)!;
+        const existing = acc[existingIdx] as { status: string; title: string; content: unknown[]; locations: unknown[]; toolKind?: string };
+        // Update with latest status, title, content, and locations
+        if (rawStatus) existing.status = status;
+        if (title !== kind) existing.title = title;
+        if (contentItems.length > 0) existing.content = contentItems;
+        if (locations.length > 0) existing.locations = locations.map((l) => ({ path: l.path ?? '', line: l.line ?? null }));
+        if (kind !== 'tool') existing.toolKind = kind;
+      } else {
+        const idx = acc.length;
+        acc.push({
+          kind: 'tool_call',
+          id: msg.id,
+          toolCallId: toolCallId || msg.id,
+          title,
+          toolKind: kind,
+          status,
+          content: contentItems,
+          locations: locations.map((l) => ({ path: l.path ?? '', line: l.line ?? null })),
+          timestamp: msg.createdAt,
+        });
+        if (toolCallId) {
+          toolCallMap.set(toolCallId, idx);
+        }
+      }
     } else if (msg.role === 'system') {
       // System messages (task status, error logs) rendered as preformatted text
       // to prevent markdown interpretation of build log characters (#, *, URLs)
@@ -166,6 +228,8 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
     }
     return acc;
   }, []);
+
+  return items;
 }
 
 /** Renders a system message (task status, error logs) as preformatted text.
