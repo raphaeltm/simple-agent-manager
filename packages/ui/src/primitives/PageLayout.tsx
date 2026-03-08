@@ -7,8 +7,6 @@ interface PageLayoutProps {
   onBack?: () => void;
   headerRight?: ReactNode;
   maxWidth?: 'sm' | 'md' | 'lg' | 'xl';
-  /** When true, the header bar is hidden (useful on mobile where AppShell provides its own header). */
-  hideHeader?: boolean;
   /** When true, use compact padding suitable for mobile viewports. */
   compact?: boolean;
 }
@@ -38,7 +36,6 @@ export function PageLayout({
   onBack,
   headerRight,
   maxWidth = 'lg',
-  hideHeader = false,
   compact = false,
 }: PageLayoutProps) {
   const mwClass = maxWidthClasses[maxWidth];
@@ -53,32 +50,30 @@ export function PageLayout({
 
   return (
     <div className={`min-h-screen bg-canvas ${compact ? 'flex flex-col' : ''}`}>
-      {!hideHeader && (
-        <header className="hidden md:block bg-surface border-b border-border-default">
-          <div
-            className={`${mwClass} mx-auto flex items-center justify-between`}
-            style={headerPaddingStyle}
-          >
-            <div className="flex items-center gap-4">
-              {(backTo || onBack) && (
-                <button
-                  onClick={handleBack}
-                  className="bg-transparent border-none text-fg-muted cursor-pointer p-1 flex items-center"
-                  aria-label="Go back"
-                >
-                  <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                  </svg>
-                </button>
-              )}
-              <h1 className="font-semibold text-fg-primary m-0" style={{ fontSize: 'clamp(1.125rem, 2vw, 1.375rem)', lineHeight: 1.3 }}>
-                {title}
-              </h1>
-            </div>
-            {headerRight && <div className="flex items-center gap-4">{headerRight}</div>}
+      <header className="hidden md:block bg-surface border-b border-border-default">
+        <div
+          className={`${mwClass} mx-auto flex items-center justify-between`}
+          style={headerPaddingStyle}
+        >
+          <div className="flex items-center gap-4">
+            {(backTo || onBack) && (
+              <button
+                onClick={handleBack}
+                className="bg-transparent border-none text-fg-muted cursor-pointer p-1 flex items-center"
+                aria-label="Go back"
+              >
+                <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+            )}
+            <h1 className="font-semibold text-fg-primary m-0" style={{ fontSize: 'clamp(1.125rem, 2vw, 1.375rem)', lineHeight: 1.3 }}>
+              {title}
+            </h1>
           </div>
-        </header>
-      )}
+          {headerRight && <div className="flex items-center gap-4">{headerRight}</div>}
+        </div>
+      </header>
       <main
         className={`${mwClass} mx-auto ${compact ? 'flex flex-col flex-1 min-h-0' : ''}`}
         style={compact ? compactPaddingStyle : mainPaddingStyle}
