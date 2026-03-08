@@ -101,8 +101,7 @@ export function Project() {
     <PageLayout
       title="Project"
       maxWidth="xl"
-      headerRight={isMobile ? undefined : <UserMenu />}
-      hideHeader={isMobile}
+      headerRight={<UserMenu />}
       compact={isMobile}
     >
       {/* Breadcrumb */}
