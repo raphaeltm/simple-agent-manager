@@ -2,10 +2,23 @@ package acp
 
 import (
 	"encoding/json"
+	"os"
+	"strconv"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/google/uuid"
 )
+
+// maxToolContentSize is the maximum size (in bytes) for diff oldText/newText
+// fields to prevent excessive storage. Configurable via MAX_TOOL_CONTENT_SIZE.
+var maxToolContentSize = func() int {
+	if v := os.Getenv("MAX_TOOL_CONTENT_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 100 * 1024 // 100KB default
+}()
 
 // ExtractedMessage represents a chat message extracted from an ACP
 // SessionNotification for persistence to the control plane.
@@ -20,17 +33,21 @@ type ExtractedMessage struct {
 // Preserves the content type (content/diff/terminal) so the frontend can render
 // diffs and terminal output with appropriate formatting.
 type ToolContentItem struct {
-	Type string `json:"type"`           // "content", "diff", or "terminal"
-	Text string `json:"text,omitempty"` // Human-readable text representation
+	Type    string  `json:"type"`              // "content", "diff", or "terminal"
+	Text    string  `json:"text,omitempty"`    // Human-readable text representation
+	Path    string  `json:"path,omitempty"`    // File path (for diffs)
+	OldText *string `json:"oldText,omitempty"` // Original content before edit (for diffs)
+	NewText string  `json:"newText,omitempty"` // New content after edit (for diffs)
 }
 
 // ToolMeta holds structured tool call metadata serialized as JSON into
 // the ToolMetadata field of ExtractedMessage.
 type ToolMeta struct {
-	Title     string `json:"title,omitempty"`
-	Kind      string `json:"kind,omitempty"`
-	Status    string `json:"status,omitempty"`
-	Locations []struct {
+	ToolCallId string `json:"toolCallId,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Locations  []struct {
 		Path string `json:"path,omitempty"`
 		Line *int   `json:"line,omitempty"`
 	} `json:"locations,omitempty"`
@@ -40,9 +57,8 @@ type ToolMeta struct {
 // ExtractMessages converts an ACP SessionNotification into zero or more
 // ExtractedMessage values suitable for the message reporter.
 //
-// Not every notification type produces a message. Only user/assistant text
-// chunks and tool calls generate output. Thought chunks and plan updates
-// are ignored to avoid flooding the chat history.
+// Extracts user/assistant text chunks, tool calls, thinking blocks, and
+// plan updates for persistence to the control plane.
 func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 	u := notif.Update
 	var msgs []ExtractedMessage
@@ -71,14 +87,39 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 		}
 	}
 
+	// Agent thought chunk → role "thinking"
+	if u.AgentThoughtChunk != nil {
+		text := extractContentBlockText(u.AgentThoughtChunk.Content)
+		if text != "" {
+			msgs = append(msgs, ExtractedMessage{
+				MessageID: uuid.NewString(),
+				Role:      "thinking",
+				Content:   text,
+			})
+		}
+	}
+
+	// Plan update → role "plan"
+	if u.Plan != nil {
+		planJSON, err := json.Marshal(u.Plan.Entries)
+		if err == nil && len(u.Plan.Entries) > 0 {
+			msgs = append(msgs, ExtractedMessage{
+				MessageID: uuid.NewString(),
+				Role:      "plan",
+				Content:   string(planJSON),
+			})
+		}
+	}
+
 	// Tool call → role "tool"
 	if u.ToolCall != nil {
 		content := extractToolCallContents(u.ToolCall.Content)
 		meta := ToolMeta{
-			Title:   u.ToolCall.Title,
-			Kind:    string(u.ToolCall.Kind),
-			Status:  string(u.ToolCall.Status),
-			Content: extractStructuredContent(u.ToolCall.Content),
+			ToolCallId: string(u.ToolCall.ToolCallId),
+			Title:      u.ToolCall.Title,
+			Kind:       string(u.ToolCall.Kind),
+			Status:     string(u.ToolCall.Status),
+			Content:    extractStructuredContent(u.ToolCall.Content),
 		}
 		for _, loc := range u.ToolCall.Locations {
 			meta.Locations = append(meta.Locations, struct {
@@ -103,7 +144,8 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 	if u.ToolCallUpdate != nil {
 		content := extractToolCallContents(u.ToolCallUpdate.Content)
 		meta := ToolMeta{
-			Content: extractStructuredContent(u.ToolCallUpdate.Content),
+			ToolCallId: string(u.ToolCallUpdate.ToolCallId),
+			Content:    extractStructuredContent(u.ToolCallUpdate.Content),
 		}
 		if u.ToolCallUpdate.Title != nil {
 			meta.Title = *u.ToolCallUpdate.Title
@@ -148,6 +190,15 @@ func extractContentBlockText(block acpsdk.ContentBlock) string {
 	return ""
 }
 
+// truncateContent truncates text to maxToolContentSize bytes, appending
+// a marker if truncated.
+func truncateContent(s string) string {
+	if len(s) <= maxToolContentSize {
+		return s
+	}
+	return s[:maxToolContentSize] + "\n... [truncated]"
+}
+
 // extractStructuredContent converts ACP tool call content blocks into
 // typed ToolContentItems for structured rendering in the frontend.
 func extractStructuredContent(contents []acpsdk.ToolCallContent) []ToolContentItem {
@@ -160,10 +211,17 @@ func extractStructuredContent(contents []acpsdk.ToolCallContent) []ToolContentIt
 			})
 		}
 		if c.Diff != nil {
-			items = append(items, ToolContentItem{
-				Type: "diff",
-				Text: c.Diff.Path,
-			})
+			item := ToolContentItem{
+				Type:    "diff",
+				Text:    c.Diff.Path,
+				Path:    c.Diff.Path,
+				NewText: truncateContent(c.Diff.NewText),
+			}
+			if c.Diff.OldText != nil {
+				truncated := truncateContent(*c.Diff.OldText)
+				item.OldText = &truncated
+			}
+			items = append(items, item)
 		}
 		if c.Terminal != nil {
 			items = append(items, ToolContentItem{
