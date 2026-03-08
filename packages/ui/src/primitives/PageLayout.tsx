@@ -54,7 +54,7 @@ export function PageLayout({
   return (
     <div className={`min-h-screen bg-canvas ${compact ? 'flex flex-col' : ''}`}>
       {!hideHeader && (
-        <header className="bg-surface border-b border-border-default">
+        <header className="hidden md:block bg-surface border-b border-border-default">
           <div
             className={`${mwClass} mx-auto flex items-center justify-between`}
             style={headerPaddingStyle}
