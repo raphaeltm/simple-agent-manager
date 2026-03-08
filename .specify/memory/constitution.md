@@ -1,14 +1,14 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version Change: 1.6.0 → 1.7.0
-Bump Rationale: MINOR - Added Principle XII (Zero-to-Production Deployability)
+Version Change: 1.7.0 → 1.8.0
+Bump Rationale: MINOR - Added Principle XIII (Fail-Fast Error Detection)
 
 Modified Principles: None
 Modified Sections: None
 
 Added Sections:
-  - Principle XII: Zero-to-Production Deployability (NON-NEGOTIABLE)
+  - Principle XIII: Fail-Fast Error Detection (NON-NEGOTIABLE)
 
 Templates Status:
   - plan-template.md: ✅ Compatible (Constitution Check section references this file)
@@ -16,9 +16,7 @@ Templates Status:
   - tasks-template.md: ✅ Compatible (test-first aligns with Principle II)
   - checklist-template.md: ✅ Compatible (no direct dependency)
 
-Follow-up TODOs:
-  - Update spec 018 plan.md Constitution Check to include Principle XII validation
-  - Ensure Durable Object namespace provisioning is in Pulumi stack
+Follow-up TODOs: None
 -->
 
 # Simple Agent Manager Constitution
@@ -248,6 +246,37 @@ scratch to their own infrastructure accounts.
 **Rationale:** Open source infrastructure software lives or dies by self-hostability. If deploying from
 scratch is painful or undocumented, the project is effectively closed-source in practice. Every
 architectural choice that makes self-hosting harder narrows the user base and contradicts Principle I.
+
+### XIII. Fail-Fast Error Detection (NON-NEGOTIABLE)
+
+Errors MUST be detected and surfaced at the earliest possible point. Silent failures that propagate invalid state across system boundaries cause data corruption, misrouted data, and bugs that are extremely difficult to diagnose. When in doubt, reject and log rather than silently accept.
+
+**Rules:**
+- **Validate identity at every boundary**: When data crosses a system boundary (API endpoint, Durable Object, VM agent, WebSocket), validate ALL identity fields (workspaceId, projectId, sessionId, taskId, userId) before processing. Never trust that upstream already validated.
+- **Fail loudly on ID mismatches**: If a message claims to belong to session X but the workspace is linked to session Y, reject the message with an explicit error. Never silently route it to session X or any other destination.
+- **Drop rather than misroute**: When identity validation fails, it is always better to drop a message (and log the failure) than to deliver it to the wrong destination. Misrouted data is worse than missing data.
+- **Structured logging on every rejection**: Every validation failure MUST be logged with full diagnostic context: the IDs involved (workspace, project, session, task), what was expected vs. what was received, and the action taken (rejected, dropped, etc.).
+- **No silent no-ops on nil/empty IDs**: If a critical identity field (sessionId, workspaceId, projectId) is nil, empty, or missing where it is required, fail immediately with an error. Do not silently skip processing.
+- **Assert preconditions at function entry**: Functions that require specific state (e.g., "sessionId must be set") MUST assert that state at entry, not discover it mid-execution.
+
+**Correct Pattern:**
+```typescript
+// GOOD: Validate and fail early with context
+if (workspace.chatSessionId && workspace.chatSessionId !== sessionId) {
+  console.error('Message routing mismatch', {
+    workspaceId, expectedSessionId: workspace.chatSessionId,
+    receivedSessionId: sessionId, action: 'rejected'
+  });
+  throw errors.badRequest(
+    `Session mismatch: workspace is linked to session ${workspace.chatSessionId}`
+  );
+}
+
+// BAD: Silently accept whatever sessionId is provided
+const result = await persistMessage(sessionId, content);
+```
+
+**Rationale:** The workspace message routing bug demonstrated that silent acceptance of unvalidated identity fields causes messages to appear in wrong chat sessions. This class of bug is undetectable by users and erodes trust in the system. Fail-fast validation at every boundary prevents data corruption and makes failures immediately visible in logs for rapid diagnosis.
 
 ## Code Organization Guidelines
 
@@ -831,4 +860,4 @@ and other project documentation, this Constitution takes precedence.
 - Violations should be addressed constructively with reference to specific principles
 - Repeated violations may result in contribution restrictions per Code of Conduct
 
-**Version**: 1.7.0 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-02-22
+**Version**: 1.8.0 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-03-08
