@@ -214,16 +214,18 @@ func (r *Reporter) Enqueue(msg Message) error {
 	workspaceID := r.workspaceID
 	r.mu.Unlock()
 
-	// Principle XIII: Fail-fast on missing session ID. Never enqueue
-	// messages without a valid session — they would be unroutable and
-	// could end up in the wrong chat session if the session ID is set later.
+	// Principle XIII (Fail-Fast): Reject messages when no session ID is set.
+	// This is a defensive check — by construction, a non-nil Reporter should
+	// always have sessionID set via New() or SetSessionID(). But during warm
+	// node transitions, there's a brief window where sessionID could be empty.
+	// Rejecting here prevents unroutable messages from being enqueued.
 	if sessionID == "" {
-		slog.Error("messagereport: refusing to enqueue message without sessionID",
+		slog.Error("messagereport: rejected message with empty session ID",
 			"workspaceId", workspaceID,
 			"messageId", msg.MessageID,
 			"role", msg.Role,
-			"action", "dropped")
-		return fmt.Errorf("messagereport: no session ID set, message dropped")
+			"action", "rejected")
+		return fmt.Errorf("messagereport: cannot enqueue message without session ID")
 	}
 
 	// INSERT OR IGNORE for crash-recovery dedup on message_id UNIQUE constraint.

@@ -967,8 +967,10 @@ func TestSetSessionID_NilReporter_DoesNotPanic(t *testing.T) {
 
 // TestEnqueue_EmptySessionID_Rejects verifies that Enqueue rejects messages
 // when no session ID is set (Principle XIII: Fail-Fast Error Detection).
-// This prevents unroutable messages from being enqueued and potentially
-// delivered to the wrong session if a session ID is set later.
+// This is a defensive check — by construction, a non-nil Reporter always has
+// sessionID set via New(). But during warm node transitions, there's a brief
+// window where sessionID could be empty. This test ensures the defensive
+// check works correctly.
 func TestEnqueue_EmptySessionID_Rejects(t *testing.T) {
 	db := openTestDB(t)
 	cfg := testConfig("http://localhost", "ws-1")
