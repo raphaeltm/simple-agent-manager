@@ -1005,6 +1005,62 @@ describe('ProjectMessageView — collapsible session header', () => {
     });
   });
 
+  it('sets aria-expanded attribute correctly on toggle', async () => {
+    const session = {
+      ...makeSession('sess-aria', 'active'),
+      task: {
+        id: 'task-1',
+        outputBranch: 'sam/aria-test',
+        outputPrUrl: null,
+        status: 'in_progress',
+        executionStep: null,
+        errorMessage: null,
+        outputSummary: null,
+        finalizedAt: null,
+      },
+    };
+    const response = {
+      session,
+      messages: [makeMessage('m1', 'sess-aria', 'Hi')],
+      hasMore: false,
+    };
+    mocks.getChatSession.mockResolvedValue(response);
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-aria" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Session sess-aria')).toBeTruthy();
+    });
+
+    const expandButton = screen.getByRole('button', { name: /show session details/i });
+    expect(expandButton.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(expandButton);
+
+    await waitFor(() => {
+      const collapseButton = screen.getByRole('button', { name: /hide session details/i });
+      expect(collapseButton.getAttribute('aria-expanded')).toBe('true');
+    });
+  });
+
+  it('shows stopped state indicator', async () => {
+    const session = makeSession('sess-stopped', 'stopped');
+    const response = {
+      session,
+      messages: [makeMessage('m1', 'sess-stopped', 'Done')],
+      hasMore: false,
+    };
+    mocks.getChatSession.mockResolvedValue(response);
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-stopped" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Session sess-stopped')).toBeTruthy();
+    });
+
+    expect(screen.getByText('Stopped')).toBeTruthy();
+  });
+
   it('does not show expand toggle when there are no details', async () => {
     // Session without branch, PR, or workspace link
     const session = makeSession('sess-4', 'stopped');
