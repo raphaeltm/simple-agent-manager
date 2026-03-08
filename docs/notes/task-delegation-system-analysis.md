@@ -80,7 +80,7 @@ flowchart TD
     D --> E{Found node?}
     E -->|Yes| H
     E -->|No| F["node_provisioning<br/>Create node DB record + Hetzner server"]
-    F --> G["node_agent_ready<br/>Poll health endpoint<br/>Timeout: 120s, interval: 5s"]
+    F --> G["node_agent_ready<br/>Poll health endpoint<br/>Timeout: 600s (10min), interval: 5s"]
     C --> H["workspace_creation<br/>Insert workspace in D1 (creating)<br/>POST /workspaces to VM agent (202)"]
     G --> H
     H --> I["TRANSITION: queued → delegated<br/>(optimistic locking: WHERE status = queued)"]

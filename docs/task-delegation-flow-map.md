@@ -188,7 +188,7 @@ executeTaskRun():
     |       |
     |       |-- Step 1c: WAIT FOR AGENT (executionStep = 'node_agent_ready')
     |           waitForNodeAgentReady() -> polls VM health endpoint
-    |           Timeout: 120s, interval: 5s
+    |           Timeout: 600s (10 min), interval: 5s
     |
     |-- Step 2: WORKSPACE CREATION (executionStep = 'workspace_creation')
     |   |
