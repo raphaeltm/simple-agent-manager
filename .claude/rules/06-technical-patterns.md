@@ -69,6 +69,22 @@ Conflict: Effect undoes the handler's intent
 Fix: Add newChatIntentRef to distinguish "user clicked New" from "initial page load"
 ```
 
+## Credential Lifecycle Alignment (Required)
+
+When implementing credential revocation, cleanup, or expiration, you MUST verify that the credential's lifecycle matches the connection or session that depends on it.
+
+### Why This Rule Exists
+
+The MCP token revocation bug (see `docs/notes/2026-03-08-mcp-token-revocation-postmortem.md`) was caused by revoking a task-scoped token when the MCP connection that used it was scoped to the entire ACP session. Once revoked, the client had no mechanism to obtain a new token, breaking all subsequent tool calls permanently.
+
+### Required Steps
+
+1. **Identify all consumers** of the credential being revoked/expired
+2. **Map the credential lifecycle** vs the connection/session lifecycle that uses it
+3. **If the connection outlives the credential**, do NOT revoke eagerly — rely on TTL expiration or provide a refresh mechanism
+4. **If the credential outlives the connection**, verify cleanup happens when the connection closes
+5. **Write a test** that exercises the lifecycle boundary: perform the credential-invalidating action, then verify subsequent operations on the same connection still work (or fail gracefully with refresh)
+
 ## Adding New Features
 
 1. Check if types need to be added to `packages/shared`
