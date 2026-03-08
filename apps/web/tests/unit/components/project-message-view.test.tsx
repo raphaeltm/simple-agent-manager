@@ -9,7 +9,7 @@
  * are cancelled when the session changes.
  */
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, act, waitFor } from '@testing-library/react';
+import { render, screen, act, waitFor, fireEvent } from '@testing-library/react';
 
 // jsdom doesn't support scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
@@ -883,5 +883,146 @@ describe('chatMessagesToConversationItems', () => {
     expect(items[1].kind).toBe('user_message');
     expect(items[2].kind).toBe('agent_message');
     expect(items[2].text).toBe('World');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Collapsible session header
+// ---------------------------------------------------------------------------
+
+describe('ProjectMessageView — collapsible session header', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.clearAllMocks();
+    mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('shows session title and state indicator in compact header', async () => {
+    const response = {
+      session: makeSession('sess-1', 'active'),
+      messages: [makeMessage('m1', 'sess-1', 'Hi')],
+      hasMore: false,
+    };
+    mocks.getChatSession.mockResolvedValue(response);
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Session sess-1')).toBeTruthy();
+    });
+
+    // State indicator should be visible
+    expect(screen.getByText('Active')).toBeTruthy();
+  });
+
+  it('hides branch/PR details by default and reveals them on toggle', async () => {
+    const session = {
+      ...makeSession('sess-2', 'active'),
+      task: {
+        id: 'task-1',
+        outputBranch: 'sam/my-feature',
+        outputPrUrl: 'https://github.com/test/pr/1',
+        status: 'in_progress',
+        executionStep: null,
+        errorMessage: null,
+        outputSummary: null,
+        finalizedAt: null,
+      },
+    };
+    const response = {
+      session,
+      messages: [makeMessage('m1', 'sess-2', 'Hi')],
+      hasMore: false,
+    };
+    mocks.getChatSession.mockResolvedValue(response);
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-2" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Session sess-2')).toBeTruthy();
+    });
+
+    // Branch and PR should NOT be visible initially
+    expect(screen.queryByText('sam/my-feature')).toBeNull();
+    expect(screen.queryByText('View PR')).toBeNull();
+
+    // Click the expand toggle
+    const expandButton = screen.getByRole('button', { name: /show session details/i });
+    fireEvent.click(expandButton);
+
+    // Now branch and PR should be visible
+    await waitFor(() => {
+      expect(screen.getByText('sam/my-feature')).toBeTruthy();
+      expect(screen.getByText('View PR')).toBeTruthy();
+    });
+  });
+
+  it('collapses details when toggle is clicked again', async () => {
+    const session = {
+      ...makeSession('sess-3', 'active'),
+      task: {
+        id: 'task-1',
+        outputBranch: 'sam/collapse-test',
+        outputPrUrl: null,
+        status: 'in_progress',
+        executionStep: null,
+        errorMessage: null,
+        outputSummary: null,
+        finalizedAt: null,
+      },
+    };
+    const response = {
+      session,
+      messages: [makeMessage('m1', 'sess-3', 'Hi')],
+      hasMore: false,
+    };
+    mocks.getChatSession.mockResolvedValue(response);
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-3" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Session sess-3')).toBeTruthy();
+    });
+
+    // Expand
+    const expandButton = screen.getByRole('button', { name: /show session details/i });
+    fireEvent.click(expandButton);
+
+    await waitFor(() => {
+      expect(screen.getByText('sam/collapse-test')).toBeTruthy();
+    });
+
+    // Collapse
+    const collapseButton = screen.getByRole('button', { name: /hide session details/i });
+    fireEvent.click(collapseButton);
+
+    await waitFor(() => {
+      expect(screen.queryByText('sam/collapse-test')).toBeNull();
+    });
+  });
+
+  it('does not show expand toggle when there are no details', async () => {
+    // Session without branch, PR, or workspace link
+    const session = makeSession('sess-4', 'stopped');
+    const response = {
+      session,
+      messages: [makeMessage('m1', 'sess-4', 'Done')],
+      hasMore: false,
+    };
+    mocks.getChatSession.mockResolvedValue(response);
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-4" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Session sess-4')).toBeTruthy();
+    });
+
+    // No toggle should exist
+    expect(screen.queryByRole('button', { name: /show session details/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /hide session details/i })).toBeNull();
   });
 });
