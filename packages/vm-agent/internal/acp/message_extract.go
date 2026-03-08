@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"strconv"
+	"unicode/utf8"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/google/uuid"
@@ -191,12 +192,18 @@ func extractContentBlockText(block acpsdk.ContentBlock) string {
 }
 
 // truncateContent truncates text to maxToolContentSize bytes, appending
-// a marker if truncated.
+// a marker if truncated. It ensures the cut point falls on a valid UTF-8
+// boundary to avoid producing garbled output.
 func truncateContent(s string) string {
 	if len(s) <= maxToolContentSize {
 		return s
 	}
-	return s[:maxToolContentSize] + "\n... [truncated]"
+	// Walk backwards from the limit to find a valid UTF-8 boundary.
+	truncated := s[:maxToolContentSize]
+	for len(truncated) > 0 && !utf8.ValidString(truncated) {
+		truncated = truncated[:len(truncated)-1]
+	}
+	return truncated + "\n... [truncated]"
 }
 
 // extractStructuredContent converts ACP tool call content blocks into

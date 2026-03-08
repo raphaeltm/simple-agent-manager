@@ -2,7 +2,9 @@ package acp
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+	utf8pkg "unicode/utf8"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 )
@@ -458,5 +460,22 @@ func TestTruncateContent(t *testing.T) {
 	}
 	if result[:10] != long[:10] {
 		t.Fatalf("expected truncated content to start with original, got %q", result)
+	}
+
+	// Test UTF-8 safety: a multi-byte char at the boundary must not be split.
+	// "héllo wörld" — 'é' is 2 bytes (0xC3 0xA9), 'ö' is 2 bytes (0xC3 0xB6).
+	// With limit=3, naive s[:3] would split 'é' (at bytes h + 0xC3 + 0xA9 = "hé"
+	// is exactly 4 bytes). Set limit=3 so the cut falls inside 'é'.
+	maxToolContentSize = 3
+	utf8Input := "héllo"
+	utf8Result := truncateContent(utf8Input)
+	// Should contain only "h" (1 byte) since "hé" is 4 bytes > 3, and "h\xC3" is invalid.
+	if !strings.Contains(utf8Result, "\n... [truncated]") {
+		t.Fatalf("expected truncation marker for UTF-8 input, got %q", utf8Result)
+	}
+	// The prefix before the marker must be valid UTF-8.
+	prefix := strings.SplitN(utf8Result, "\n", 2)[0]
+	if !utf8pkg.ValidString(prefix) {
+		t.Fatalf("truncated prefix is not valid UTF-8: %q", prefix)
 	}
 }
