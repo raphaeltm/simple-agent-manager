@@ -58,6 +58,20 @@ describe('workspace messages batch endpoint source contract', () => {
     expect(file).toContain("'Workspace is not linked to a project'");
   });
 
+  it('fetches chatSessionId alongside projectId for session validation', () => {
+    expect(file).toContain('chatSessionId: schema.workspaces.chatSessionId');
+  });
+
+  it('validates session ID matches workspace linked session (Principle XIII)', () => {
+    expect(file).toContain('workspace.chatSessionId !== sessionId');
+    expect(file).toContain('Session mismatch: workspace is linked to session');
+    expect(file).toContain('Message routing mismatch');
+  });
+
+  it('logs warning when workspace has no linked chatSessionId', () => {
+    expect(file).toContain('Workspace has no linked chatSessionId');
+  });
+
   it('delegates to persistMessageBatch on ProjectData DO', () => {
     expect(file).toContain('projectDataService.persistMessageBatch');
   });
