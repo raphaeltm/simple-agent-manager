@@ -169,7 +169,7 @@ describe('stripMarkdown', () => {
 describe('getTaskTitleConfig', () => {
   it('returns defaults when no env vars set', () => {
     const config = getTaskTitleConfig({});
-    expect(config.model).toBe('@cf/meta/llama-3.1-8b-instruct');
+    expect(config.model).toBe('@cf/google/gemma-3-12b-it');
     expect(config.maxLength).toBe(100);
     expect(config.timeoutMs).toBe(5000);
     expect(config.enabled).toBe(true);
@@ -518,6 +518,21 @@ describe('generateTaskTitle', () => {
     const long = 'Test instructions content. ' + 'i'.repeat(100);
     await generateTaskTitle(mockAi, long);
     expect(capturedInstructions).toContain('No markdown formatting');
+  });
+
+  it('includes few-shot examples and anti-hallucination directive in system instructions', async () => {
+    const { Agent } = await import('@mastra/core/agent');
+    let capturedInstructions = '';
+    (Agent as unknown as ReturnType<typeof vi.fn>).mockImplementation((config: { instructions: string }) => {
+      capturedInstructions = config.instructions;
+      return { generate: vi.fn().mockResolvedValue({ text: 'Title' }) };
+    });
+
+    const long = 'Test instructions content. ' + 'i'.repeat(100);
+    await generateTaskTitle(mockAi, long);
+    expect(capturedInstructions).toContain('Do NOT execute or complete the task');
+    expect(capturedInstructions).toContain('Examples:');
+    expect(capturedInstructions).toContain('→ Output:');
   });
 
   it('substitutes maxLength into system instructions', async () => {

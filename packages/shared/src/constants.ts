@@ -205,7 +205,7 @@ export const HETZNER_IMAGE = DEFAULT_HETZNER_IMAGE;
 // =============================================================================
 
 /** Default Workers AI model for task title generation. Override via TASK_TITLE_MODEL env var. */
-export const DEFAULT_TASK_TITLE_MODEL = '@cf/meta/llama-3.1-8b-instruct';
+export const DEFAULT_TASK_TITLE_MODEL = '@cf/google/gemma-3-12b-it';
 
 /** Default max generated title length. Override via TASK_TITLE_MAX_LENGTH env var. */
 export const DEFAULT_TASK_TITLE_MAX_LENGTH = 100;
