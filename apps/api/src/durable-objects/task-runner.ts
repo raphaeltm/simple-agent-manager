@@ -416,7 +416,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     // Check user node limit
     const maxNodes = parseEnvInt(this.env.MAX_NODES_PER_USER, 10);
     const countResult = await this.env.DATABASE.prepare(
-      `SELECT COUNT(*) as c FROM nodes WHERE user_id = ?`
+      `SELECT COUNT(*) as c FROM nodes WHERE user_id = ? AND status IN ('running', 'creating', 'recovery')`
     ).bind(state.userId).first<{ c: number }>();
 
     if ((countResult?.c ?? 0) >= maxNodes) {

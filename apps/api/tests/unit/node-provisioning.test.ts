@@ -85,7 +85,17 @@ describe('node limit enforcement', () => {
         doSource.indexOf('private async handleNodeProvisioning('),
         doSource.indexOf('private async handleNodeAgentReady(')
       );
-      expect(section).toContain("SELECT COUNT(*) as c FROM nodes WHERE user_id = ?");
+      expect(section).toContain("SELECT COUNT(*) as c FROM nodes WHERE user_id = ? AND status IN ('running', 'creating', 'recovery')");
+    });
+
+    it('only counts active nodes (excludes deleted/stopped) in limit check', () => {
+      const section = doSource.slice(
+        doSource.indexOf('private async handleNodeProvisioning('),
+        doSource.indexOf('private async handleNodeAgentReady(')
+      );
+      // Must filter by active statuses to avoid false limit hits from deleted/stopped nodes.
+      // See: 2026-03-09-fix-node-workspace-limit-count-filters
+      expect(section).toContain("status IN ('running', 'creating', 'recovery')");
     });
 
     it('throws permanent error when at or over limit', () => {
