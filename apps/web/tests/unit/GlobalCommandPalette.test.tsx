@@ -31,6 +31,25 @@ vi.mock('../../src/lib/api', () => ({
     { id: 'n1', name: 'node-hetzner-1' },
     { id: 'n2', name: 'node-hetzner-2' },
   ]),
+  listChatSessions: vi.fn().mockImplementation((projectId: string) => {
+    const sessionsByProject: Record<string, { sessions: Array<{ id: string; topic: string | null; createdAt: number; status: string; messageCount: number; startedAt: number; endedAt: number | null; workspaceId: string | null; taskId: string | null }>; total: number }> = {
+      p1: {
+        sessions: [
+          { id: 's1', topic: 'Fix auth bug', createdAt: 1000, status: 'active', messageCount: 5, startedAt: 1000, endedAt: null, workspaceId: null, taskId: null },
+          { id: 's2', topic: null, createdAt: 500, status: 'stopped', messageCount: 2, startedAt: 500, endedAt: 600, workspaceId: null, taskId: null },
+        ],
+        total: 2,
+      },
+      p2: {
+        sessions: [
+          { id: 's3', topic: 'Refactor dashboard layout', createdAt: 2000, status: 'active', messageCount: 10, startedAt: 2000, endedAt: null, workspaceId: null, taskId: null },
+        ],
+        total: 1,
+      },
+      p3: { sessions: [], total: 0 },
+    };
+    return Promise.resolve(sessionsByProject[projectId] || { sessions: [], total: 0 });
+  }),
 }));
 
 function renderPalette(onClose = vi.fn()) {
@@ -58,7 +77,7 @@ describe('GlobalCommandPalette', () => {
 
   it('renders search input with correct placeholder', () => {
     renderPalette();
-    expect(screen.getByPlaceholderText('Search pages, projects, nodes...')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search pages, projects, chats, nodes...')).toBeInTheDocument();
   });
 
   it('auto-focuses the search input', () => {
@@ -100,9 +119,11 @@ describe('GlobalCommandPalette', () => {
   it('shows projects after loading', async () => {
     renderPalette();
     await waitFor(() => {
-      expect(screen.getByText('My API Worker')).toBeInTheDocument();
+      // "My API Worker" appears both as a project and as a chat's project label
+      expect(screen.getAllByText('My API Worker').length).toBeGreaterThanOrEqual(1);
     });
-    expect(screen.getByText('Frontend Dashboard')).toBeInTheDocument();
+    // "Frontend Dashboard" may also appear as a chat project label
+    expect(screen.getAllByText('Frontend Dashboard').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Auth Service')).toBeInTheDocument();
   });
 
@@ -630,5 +651,151 @@ describe('GlobalCommandPalette', () => {
     const group = quickActionsHeader.closest('[role="group"]');
     expect(group).not.toBeNull();
     expect(group?.getAttribute('aria-labelledby')).toBe('gcp-category-Quick Actions');
+  });
+
+  // ── Chat search ──
+
+  it('shows Chats category after loading sessions', async () => {
+    renderPalette();
+
+    await waitFor(() => {
+      expect(screen.getByText('Chats')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Fix auth bug')).toBeInTheDocument();
+    expect(screen.getByText('Refactor dashboard layout')).toBeInTheDocument();
+  });
+
+  it('shows "Untitled Chat" for sessions without a topic', async () => {
+    renderPalette();
+
+    await waitFor(() => {
+      expect(screen.getByText('Chats')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Untitled Chat')).toBeInTheDocument();
+  });
+
+  it('shows project name next to chat results', async () => {
+    renderPalette();
+
+    await waitFor(() => {
+      expect(screen.getByText('Fix auth bug')).toBeInTheDocument();
+    });
+
+    // Chat results should include the project name as secondary text
+    // Find the chat option and verify it contains the project name
+    const options = screen.getAllByRole('option');
+    const authBugOption = options.find((o) => o.textContent?.includes('Fix auth bug'));
+    expect(authBugOption?.textContent).toContain('My API Worker');
+
+    const refactorOption = options.find((o) => o.textContent?.includes('Refactor dashboard layout'));
+    expect(refactorOption?.textContent).toContain('Frontend Dashboard');
+  });
+
+  it('orders chats by most recent first when no query', async () => {
+    renderPalette();
+
+    await waitFor(() => {
+      expect(screen.getByText('Chats')).toBeInTheDocument();
+    });
+
+    const options = screen.getAllByRole('option');
+    const chatOptions = options.filter(
+      (o) =>
+        o.textContent?.includes('Fix auth bug') ||
+        o.textContent?.includes('Refactor dashboard layout') ||
+        o.textContent?.includes('Untitled Chat'),
+    );
+
+    // Most recent (createdAt: 2000) should come first
+    expect(chatOptions[0]?.textContent).toContain('Refactor dashboard layout');
+    expect(chatOptions[1]?.textContent).toContain('Fix auth bug');
+    expect(chatOptions[2]?.textContent).toContain('Untitled Chat');
+  });
+
+  it('filters chats by topic with fuzzy matching', async () => {
+    renderPalette();
+    const input = screen.getByRole('combobox');
+
+    await waitFor(() => {
+      expect(screen.getByText('Fix auth bug')).toBeInTheDocument();
+    });
+
+    fireEvent.change(input, { target: { value: 'auth' } });
+
+    const options = screen.getAllByRole('option');
+    const authOption = options.find((o) => o.textContent?.includes('Fix auth bug'));
+    expect(authOption).toBeDefined();
+
+    // "Refactor dashboard layout" should be filtered out
+    const refactorOption = options.find((o) => o.textContent?.includes('Refactor dashboard layout'));
+    expect(refactorOption).toBeUndefined();
+  });
+
+  it('navigates to chat session when chat result is clicked', async () => {
+    const onClose = vi.fn();
+    renderPalette(onClose);
+
+    await waitFor(() => {
+      expect(screen.getByText('Fix auth bug')).toBeInTheDocument();
+    });
+
+    const options = screen.getAllByRole('option');
+    const chatOption = options.find((o) => o.textContent?.includes('Fix auth bug'));
+    fireEvent.click(chatOption!);
+
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/chat/s1');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('navigates to correct project for cross-project chat results', async () => {
+    const onClose = vi.fn();
+    renderPalette(onClose);
+
+    await waitFor(() => {
+      expect(screen.getByText('Refactor dashboard layout')).toBeInTheDocument();
+    });
+
+    const options = screen.getAllByRole('option');
+    const chatOption = options.find((o) => o.textContent?.includes('Refactor dashboard layout'));
+    fireEvent.click(chatOption!);
+
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/p2/chat/s3');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('Chats category has correct ARIA structure', async () => {
+    renderPalette();
+
+    await waitFor(() => {
+      expect(screen.getByText('Chats')).toBeInTheDocument();
+    });
+
+    const chatsHeader = screen.getByText('Chats');
+    expect(chatsHeader.getAttribute('id')).toBe('gcp-category-Chats');
+
+    const group = chatsHeader.closest('[role="group"]');
+    expect(group).not.toBeNull();
+    expect(group?.getAttribute('aria-labelledby')).toBe('gcp-category-Chats');
+  });
+
+  it('gracefully handles chat session fetch failure', async () => {
+    const { listChatSessions } = await import('../../src/lib/api');
+    // Reject all per-project session fetches (one per project)
+    vi.mocked(listChatSessions)
+      .mockRejectedValueOnce(new Error('Network error'))
+      .mockRejectedValueOnce(new Error('Network error'))
+      .mockRejectedValueOnce(new Error('Network error'));
+
+    renderPalette();
+
+    // Should still show other categories
+    await waitFor(() => {
+      expect(screen.getByText('Dashboard')).toBeInTheDocument();
+    });
+
+    // Chats category should not appear
+    expect(screen.queryByText('Chats')).not.toBeInTheDocument();
   });
 });
