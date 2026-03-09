@@ -42,11 +42,31 @@ describe('queryCloudflareLogs()', () => {
     },
   };
 
-  it('should call CF Observability API with correct URL and auth', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
+  /** Helper: build a CF API response with the new events structure */
+  function cfResponse(events: Array<Record<string, unknown>> = [], cursor: string | null = null) {
+    return {
       ok: true,
-      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
-    });
+      json: () => Promise.resolve({
+        result: {
+          events: { events },
+          run: cursor ? { offset: cursor } : {},
+        },
+      }),
+    };
+  }
+
+  /** Helper: build a legacy CF API response (events as a flat array) */
+  function legacyCfResponse(events: Array<Record<string, unknown>> = [], cursor: string | null = null) {
+    return {
+      ok: true,
+      json: () => Promise.resolve({
+        result: { events, cursor },
+      }),
+    };
+  }
+
+  it('should call CF Observability API with correct URL and auth', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(cfResponse());
     globalThis.fetch = mockFetch;
 
     await queryCloudflareLogs(baseInput);
@@ -61,10 +81,7 @@ describe('queryCloudflareLogs()', () => {
   });
 
   it('should include a queryId string in the request body', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
-    });
+    const mockFetch = vi.fn().mockResolvedValue(cfResponse());
     globalThis.fetch = mockFetch;
 
     await queryCloudflareLogs(baseInput);
@@ -76,10 +93,7 @@ describe('queryCloudflareLogs()', () => {
   });
 
   it('should generate a unique queryId per request when not provided', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
-    });
+    const mockFetch = vi.fn().mockResolvedValue(cfResponse());
     globalThis.fetch = mockFetch;
 
     await queryCloudflareLogs(baseInput);
@@ -91,10 +105,7 @@ describe('queryCloudflareLogs()', () => {
   });
 
   it('should use caller-supplied queryId when provided', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
-    });
+    const mockFetch = vi.fn().mockResolvedValue(cfResponse());
     globalThis.fetch = mockFetch;
 
     await queryCloudflareLogs({
@@ -107,10 +118,7 @@ describe('queryCloudflareLogs()', () => {
   });
 
   it('should return queryId in the response', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
-    });
+    const mockFetch = vi.fn().mockResolvedValue(cfResponse());
     globalThis.fetch = mockFetch;
 
     const result = await queryCloudflareLogs(baseInput);
@@ -121,10 +129,7 @@ describe('queryCloudflareLogs()', () => {
   });
 
   it('should return the same queryId in the response when caller-supplied', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
-    });
+    const mockFetch = vi.fn().mockResolvedValue(cfResponse());
     globalThis.fetch = mockFetch;
 
     const result = await queryCloudflareLogs({
@@ -136,10 +141,7 @@ describe('queryCloudflareLogs()', () => {
   });
 
   it('should send timeframe with epoch milliseconds', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
-    });
+    const mockFetch = vi.fn().mockResolvedValue(cfResponse());
     globalThis.fetch = mockFetch;
 
     await queryCloudflareLogs(baseInput);
@@ -152,11 +154,18 @@ describe('queryCloudflareLogs()', () => {
     expect(requestBody).not.toHaveProperty('timeRange');
   });
 
-  it('should build filter for levels', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
-    });
+  it('should send view=events at top level', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(cfResponse());
+    globalThis.fetch = mockFetch;
+
+    await queryCloudflareLogs(baseInput);
+
+    const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(requestBody.view).toBe('events');
+  });
+
+  it('should nest filters inside parameters object with type field', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(cfResponse());
     globalThis.fetch = mockFetch;
 
     await queryCloudflareLogs({
@@ -165,18 +174,20 @@ describe('queryCloudflareLogs()', () => {
     });
 
     const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(requestBody.filters).toContainEqual({
+    // Filters should be inside parameters, not at top level
+    expect(requestBody.parameters).toBeDefined();
+    expect(requestBody.parameters.filters).toContainEqual({
       key: '$workers.event.level',
       operation: 'in',
+      type: 'string',
       value: ['error', 'warn'],
     });
+    // Should NOT have filters at top level
+    expect(requestBody).not.toHaveProperty('filters');
   });
 
-  it('should build filter for search text', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
-    });
+  it('should use needle for search text instead of filter', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(cfResponse());
     globalThis.fetch = mockFetch;
 
     await queryCloudflareLogs({
@@ -185,18 +196,29 @@ describe('queryCloudflareLogs()', () => {
     });
 
     const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(requestBody.filters).toContainEqual({
-      key: '$workers.event.message',
-      operation: 'includes',
+    expect(requestBody.parameters.needle).toEqual({
       value: 'database error',
+      isRegex: false,
+      matchCase: false,
     });
   });
 
-  it('should pass cursor when provided', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
+  it('should include datasets and orderBy in parameters', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(cfResponse());
+    globalThis.fetch = mockFetch;
+
+    await queryCloudflareLogs(baseInput);
+
+    const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(requestBody.parameters.datasets).toEqual([]);
+    expect(requestBody.parameters.orderBy).toEqual({
+      value: 'timestamp',
+      order: 'desc',
     });
+  });
+
+  it('should pass cursor as offset when provided', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(cfResponse());
     globalThis.fetch = mockFetch;
 
     await queryCloudflareLogs({
@@ -205,14 +227,11 @@ describe('queryCloudflareLogs()', () => {
     });
 
     const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(requestBody.cursor).toBe('next-page-token');
+    expect(requestBody.offset).toBe('next-page-token');
   });
 
   it('should enforce max limit of 500', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ result: { events: [], cursor: null } }),
-    });
+    const mockFetch = vi.fn().mockResolvedValue(cfResponse());
     globalThis.fetch = mockFetch;
 
     await queryCloudflareLogs({
@@ -224,25 +243,38 @@ describe('queryCloudflareLogs()', () => {
     expect(requestBody.limit).toBe(500);
   });
 
-  it('should normalize CF API response to LogQueryResponse', async () => {
+  it('should normalize CF API response with $metadata format', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
         result: {
-          events: [
-            {
-              timestamp: '2026-02-14T12:00:00.000Z',
-              event: {
-                type: 'http.request',
-                level: 'error',
-                message: 'Something failed',
-                method: 'GET',
-                path: '/api/health',
+          events: {
+            events: [
+              {
+                $metadata: {
+                  id: 'evt-1',
+                  level: 'error',
+                  message: 'Something failed',
+                  type: 'http.request',
+                  requestId: 'req-123',
+                },
+                $workers: {
+                  scriptName: 'my-worker',
+                  requestId: 'req-123',
+                  eventType: 'fetch',
+                  outcome: 'exception',
+                  event: {
+                    method: 'GET',
+                    path: '/api/health',
+                  },
+                },
+                timestamp: 1707912000000,
+                dataset: 'workers',
+                source: 'worker',
               },
-              invocationId: 'inv-123',
-            },
-          ],
-          cursor: 'page-2',
+            ],
+          },
+          run: { offset: 'page-2' },
         },
       }),
     });
@@ -251,12 +283,38 @@ describe('queryCloudflareLogs()', () => {
     const result = await queryCloudflareLogs(baseInput);
 
     expect(result.logs).toHaveLength(1);
-    expect(result.logs[0].timestamp).toBe('2026-02-14T12:00:00.000Z');
+    expect(result.logs[0].timestamp).toBe(new Date(1707912000000).toISOString());
     expect(result.logs[0].level).toBe('error');
     expect(result.logs[0].event).toBe('http.request');
     expect(result.logs[0].message).toBe('Something failed');
-    expect(result.logs[0].invocationId).toBe('inv-123');
+    expect(result.logs[0].invocationId).toBe('req-123');
     expect(result.cursor).toBe('page-2');
+  });
+
+  it('should handle legacy CF API response format (flat events array)', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(legacyCfResponse(
+      [
+        {
+          timestamp: '2026-02-14T12:00:00.000Z',
+          event: {
+            type: 'http.request',
+            level: 'error',
+            message: 'Legacy format',
+            method: 'GET',
+          },
+          invocationId: 'inv-legacy',
+        },
+      ],
+      'legacy-cursor',
+    ));
+    globalThis.fetch = mockFetch;
+
+    const result = await queryCloudflareLogs(baseInput);
+
+    expect(result.logs).toHaveLength(1);
+    expect(result.logs[0].message).toBe('Legacy format');
+    expect(result.logs[0].level).toBe('error');
+    expect(result.cursor).toBe('legacy-cursor');
   });
 
   it('should strip sensitive fields from details', async () => {
@@ -357,10 +415,7 @@ describe('queryCloudflareLogs()', () => {
   });
 
   it('should return empty logs when CF returns no events', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ result: { events: [] } }),
-    });
+    globalThis.fetch = vi.fn().mockResolvedValue(cfResponse());
 
     const result = await queryCloudflareLogs(baseInput);
 
@@ -368,6 +423,75 @@ describe('queryCloudflareLogs()', () => {
     expect(result.hasMore).toBe(false);
     expect(result.cursor).toBeNull();
   });
+
+  // Regression test: this test verifies the fix for the "Query not found" error.
+  // The old code sent filters, orderBy, and limit at the top level of the request body,
+  // which caused the CF API to interpret queryId as a saved query reference.
+  // With the fix, these fields are nested inside a `parameters` object, and
+  // `view: 'events'` is set at top level, making it a valid ad-hoc query.
+  it('should structure request body correctly to avoid "Query not found" error', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(cfResponse());
+    globalThis.fetch = mockFetch;
+
+    await queryCloudflareLogs({
+      ...baseInput,
+      levels: ['error'],
+      search: 'test search',
+    });
+
+    const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+
+    // Top-level required fields
+    expect(requestBody).toHaveProperty('queryId');
+    expect(requestBody).toHaveProperty('timeframe');
+    expect(requestBody).toHaveProperty('view', 'events');
+    expect(requestBody).toHaveProperty('parameters');
+
+    // Parameters structure
+    expect(requestBody.parameters).toHaveProperty('datasets');
+    expect(requestBody.parameters).toHaveProperty('filters');
+    expect(requestBody.parameters).toHaveProperty('orderBy');
+    expect(requestBody.parameters).toHaveProperty('needle');
+
+    // Filters must include type field (CF API requirement)
+    for (const filter of requestBody.parameters.filters) {
+      expect(filter).toHaveProperty('type');
+    }
+
+    // orderBy must be an object, not a string
+    expect(typeof requestBody.parameters.orderBy).toBe('object');
+    expect(requestBody.parameters.orderBy).toHaveProperty('value');
+    expect(requestBody.parameters.orderBy).toHaveProperty('order');
+
+    // These should NOT be at the top level
+    expect(requestBody).not.toHaveProperty('filters');
+    expect(requestBody).not.toHaveProperty('orderBy');
+    expect(requestBody).not.toHaveProperty('order');
+  });
+
+  it('should convert numeric timestamps to ISO strings in response', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        result: {
+          events: {
+            events: [
+              {
+                $metadata: { id: 'e1', level: 'info', message: 'test' },
+                timestamp: 1707912000000,
+                dataset: 'workers',
+                source: 'worker',
+              },
+            ],
+          },
+          run: {},
+        },
+      }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const result = await queryCloudflareLogs(baseInput);
+
+    expect(result.logs[0].timestamp).toBe(new Date(1707912000000).toISOString());
+  });
 });
-
-

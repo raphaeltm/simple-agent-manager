@@ -503,21 +503,17 @@ export async function queryCloudflareLogs(
   const queryId = input.queryId || crypto.randomUUID();
 
   // Build the CF Observability API query
-  const filters: Array<{ key: string; operation: string; value: unknown }> = [];
+  // See: https://developers.cloudflare.com/api/resources/workers/subresources/observability/subresources/telemetry/methods/query/
+  // The CF Telemetry API requires filters, orderBy, needle, etc. inside a `parameters` object.
+  // Top-level fields are: queryId, timeframe, view, limit, parameters.
+  const filters: Array<{ key: string; operation: string; type: string; value: unknown }> = [];
 
   if (input.levels && input.levels.length > 0) {
     filters.push({
       key: '$workers.event.level',
       operation: 'in',
+      type: 'string',
       value: input.levels,
-    });
-  }
-
-  if (input.search) {
-    filters.push({
-      key: '$workers.event.message',
-      operation: 'includes',
-      value: input.search,
     });
   }
 
@@ -525,8 +521,25 @@ export async function queryCloudflareLogs(
     filters.push({
       key: '$workers.scriptName',
       operation: 'eq',
+      type: 'string',
       value: input.scriptName,
     });
+  }
+
+  const parameters: Record<string, unknown> = {
+    datasets: [],
+    filters,
+    orderBy: { value: 'timestamp', order: 'desc' },
+    limit,
+  };
+
+  // Use needle for full-text search (the CF API's dedicated search mechanism)
+  if (input.search) {
+    parameters.needle = {
+      value: input.search,
+      isRegex: false,
+      matchCase: false,
+    };
   }
 
   const body: Record<string, unknown> = {
@@ -535,14 +548,13 @@ export async function queryCloudflareLogs(
       from: new Date(input.timeRange.start).getTime(),
       to: new Date(input.timeRange.end).getTime(),
     },
-    filters,
+    view: 'events',
     limit,
-    orderBy: 'timestamp',
-    order: 'desc',
+    parameters,
   };
 
   if (input.cursor) {
-    body.cursor = input.cursor;
+    body.offset = input.cursor;
   }
 
   const url = `${CF_OBSERVABILITY_API_BASE}/${input.cfAccountId}/workers/observability/telemetry/query`;
@@ -590,20 +602,55 @@ export async function queryCloudflareLogs(
     throw new CfApiError('Invalid response from Cloudflare Observability API');
   }
 
-  // Normalize CF response to our LogQueryResponse shape
+  // Normalize CF response to our LogQueryResponse shape.
+  // The CF Telemetry API response structure (from cloudflare-typescript SDK):
+  //   result.events.events — array of telemetry event objects
+  //   Each event: { $metadata: { id, level, message, type, ... }, $workers: { scriptName, event, ... }, timestamp, dataset, source }
   const result = data.result as Record<string, unknown> | undefined;
-  const events = (result?.events ?? result?.data ?? []) as Array<Record<string, unknown>>;
-  const nextCursor = (result?.cursor ?? data.cursor ?? null) as string | null;
+
+  // Extract events: result.events.events (new format) or result.events (legacy fallback)
+  let events: Array<Record<string, unknown>> = [];
+  const eventsContainer = result?.events as Record<string, unknown> | Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(eventsContainer)) {
+    // Legacy format: result.events is directly an array
+    events = eventsContainer;
+  } else if (eventsContainer && Array.isArray(eventsContainer.events)) {
+    // New format: result.events.events is the array
+    events = eventsContainer.events as Array<Record<string, unknown>>;
+  } else if (result?.data && Array.isArray(result.data)) {
+    // Fallback: result.data
+    events = result.data as Array<Record<string, unknown>>;
+  }
+
+  // Extract cursor for pagination from the run object
+  const run = result?.run as Record<string, unknown> | undefined;
+  const nextCursor = (run?.offset ?? result?.cursor ?? data.cursor ?? null) as string | null;
 
   const logs = events.map((event) => {
-    const log = event.event as Record<string, unknown> | undefined;
+    // New format: $metadata contains level, message, type; $workers contains scriptName, event details
+    const metadata = event.$metadata as Record<string, unknown> | undefined;
+    const workers = event.$workers as Record<string, unknown> | undefined;
+    const workerEvent = workers?.event as Record<string, unknown> | undefined;
+    // Legacy format fallback
+    const legacyEvent = event.event as Record<string, unknown> | undefined;
+
+    const timestamp = event.timestamp;
+    const timestampStr = typeof timestamp === 'number'
+      ? new Date(timestamp).toISOString()
+      : (timestamp ?? event.eventTimestamp ?? '') as string;
+
     return {
-      timestamp: (event.timestamp ?? event.eventTimestamp ?? '') as string,
-      level: (log?.level ?? event.level ?? 'info') as string,
-      event: (log?.type ?? event.type ?? 'unknown') as string,
-      message: (log?.message ?? event.message ?? '') as string,
-      details: stripSensitiveFields(log ?? event),
-      invocationId: (event.invocationId ?? event.traceId) as string | undefined,
+      timestamp: timestampStr,
+      level: (metadata?.level ?? legacyEvent?.level ?? event.level ?? 'info') as string,
+      event: (metadata?.type ?? workers?.eventType ?? legacyEvent?.type ?? event.type ?? 'unknown') as string,
+      message: (metadata?.message ?? legacyEvent?.message ?? event.message ?? '') as string,
+      details: stripSensitiveFields({
+        ...(workerEvent ?? legacyEvent ?? {}),
+        scriptName: workers?.scriptName,
+        requestId: metadata?.requestId ?? workers?.requestId,
+        outcome: workers?.outcome,
+      }),
+      invocationId: (metadata?.requestId ?? workers?.requestId ?? event.invocationId ?? event.traceId) as string | undefined,
     };
   });
 
