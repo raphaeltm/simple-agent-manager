@@ -22,6 +22,7 @@ import {
 } from '../lib/api';
 import type { ChatSessionResponse } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
+import { stripMarkdown } from '../lib/text-utils';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -507,7 +508,7 @@ function SessionItem({
           style={{ backgroundColor: dotColor }}
         />
         <span className={`text-sm overflow-hidden text-ellipsis whitespace-nowrap flex-1 ${isSelected ? 'font-semibold text-fg-primary' : 'font-medium text-fg-primary'}`}>
-          {session.topic || `Chat ${session.id.slice(0, 8)}`}
+          {session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`}
         </span>
       </div>
       <div className="flex items-center gap-2 text-xs text-fg-muted pl-[calc(6px+8px)]">
@@ -708,6 +709,14 @@ function ChatInput({
     inputRef.current?.focus();
   }, []);
 
+  // Auto-grow: resize textarea to fit content up to max-height
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [value]);
+
   const handleTranscription = useCallback(
     (text: string) => {
       const separator = value.length > 0 && !value.endsWith(' ') ? ' ' : '';
@@ -756,7 +765,7 @@ function ChatInput({
           placeholder={placeholder}
           disabled={submitting}
           rows={1}
-          className="flex-1 p-2 px-3 bg-page border border-border-default rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px]"
+          className="flex-1 p-2 px-3 bg-page border border-border-default rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px] overflow-y-auto"
         />
         <VoiceButton
           onTranscription={handleTranscription}

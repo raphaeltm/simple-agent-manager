@@ -1768,7 +1768,7 @@ export function Workspace() {
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
-              maxWidth: isMobile ? '120px' : undefined,
+              maxWidth: isMobile ? 'calc(100vw - 200px)' : undefined,
             }}
           >
             {workspace?.displayName || workspace?.name}
