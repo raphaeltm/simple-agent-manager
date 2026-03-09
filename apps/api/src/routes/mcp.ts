@@ -17,7 +17,7 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Env } from '../index';
 import * as schema from '../db/schema';
-import { validateMcpToken, revokeMcpToken, type McpTokenData } from '../services/mcp-token';
+import { validateMcpToken, type McpTokenData } from '../services/mcp-token';
 import { log } from '../lib/logger';
 
 export const mcpRoutes = new Hono<{ Bindings: Env }>();
@@ -282,7 +282,6 @@ async function handleCompleteTask(
   params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env,
-  rawToken: string,
 ): Promise<JsonRpcResponse> {
   const summary = typeof params.summary === 'string' ? params.summary.trim() : null;
 
@@ -334,15 +333,12 @@ async function handleCompleteTask(
     });
   }
 
-  // Revoke token — task is done, no further MCP calls needed
-  try {
-    await revokeMcpToken(env.KV, rawToken);
-  } catch (err) {
-    log.warn('mcp.complete_task.token_revoke_failed', {
-      taskId: tokenData.taskId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  // Note: Token is NOT revoked here. The MCP connection outlives individual
+  // tasks (scoped to the ACP session / workspace lifetime). Revoking on
+  // complete_task would break all subsequent MCP calls in the same session.
+  // Token cleanup is handled by:
+  //   1. KV TTL auto-expiration (default 2 hours, configurable via MCP_TOKEN_TTL_SECONDS)
+  //   2. Task-runner DO cleanup on failure (task-runner.ts)
 
   log.info('mcp.complete_task', {
     taskId: tokenData.taskId,
@@ -358,8 +354,9 @@ async function handleCompleteTask(
 // ─── MCP endpoint ────────────────────────────────────────────────────────────
 
 mcpRoutes.post('/', async (c) => {
-  // Authenticate — returns both parsed token data and the raw token string
-  const [tokenData, rawToken] = await authenticateMcpRequest(
+  // Authenticate — returns parsed token data (raw token no longer needed
+  // since token revocation was removed from complete_task)
+  const [tokenData] = await authenticateMcpRequest(
     c.req.header('Authorization'),
     c.env.KV,
   );
@@ -408,7 +405,7 @@ mcpRoutes.post('/', async (c) => {
         case 'update_task_status':
           return c.json(await handleUpdateTaskStatus(requestId, toolArgs, tokenData, c.env));
         case 'complete_task':
-          return c.json(await handleCompleteTask(requestId, toolArgs, tokenData, c.env, rawToken));
+          return c.json(await handleCompleteTask(requestId, toolArgs, tokenData, c.env));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
       }

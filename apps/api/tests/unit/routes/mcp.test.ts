@@ -290,4 +290,102 @@ describe('MCP Routes', () => {
       expect(body.error.code).toBe(-32602);
     });
   });
+
+  // ─── Token lifecycle across task completion ──────────────────────────
+
+  describe('Token lifecycle', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should NOT revoke token when complete_task succeeds', async () => {
+      // Mock the D1 update to indicate a successful completion
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'complete_task',
+        arguments: { summary: 'Done' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.result).toBeDefined();
+      expect(body.result.content[0].text).toContain('completed');
+
+      // Token must NOT be deleted from KV — the MCP connection outlives
+      // individual tasks (scoped to ACP session / workspace lifetime)
+      expect(mockKV.delete).not.toHaveBeenCalled();
+    });
+
+    it('should allow tool calls after complete_task (token still valid)', async () => {
+      // First call: complete_task
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+      const completeRes = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'complete_task',
+        arguments: { summary: 'Task done' },
+      }));
+      expect(completeRes.status).toBe(200);
+
+      // Token was NOT revoked, so KV still returns valid data
+      expect(mockKV.delete).not.toHaveBeenCalled();
+
+      // Second call: get_instructions should still authenticate successfully
+      // (KV.get still returns valid token data since it was not revoked)
+      // get_instructions makes two queries: tasks then projects
+      mockD1._stmt.all
+        .mockResolvedValueOnce({
+          results: [{
+            id: 'task-123',
+            title: 'Test task',
+            description: 'A test task',
+            status: 'completed',
+            priority: 0,
+            outputBranch: 'sam/test',
+          }],
+        })
+        .mockResolvedValueOnce({
+          results: [{
+            id: 'proj-456',
+            name: 'Test Project',
+            repository: 'user/repo',
+            defaultBranch: 'main',
+          }],
+        });
+
+      const instructionsRes = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_instructions',
+        arguments: {},
+      }));
+      // The key assertion: request authenticates (200, not 401)
+      // because the token was NOT revoked after complete_task
+      expect(instructionsRes.status).toBe(200);
+    });
+
+    it('should allow update_task_status after complete_task (token still valid)', async () => {
+      // First: complete_task
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+      await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'complete_task',
+        arguments: { summary: 'Done' },
+      }));
+
+      expect(mockKV.delete).not.toHaveBeenCalled();
+
+      // Second: update_task_status — token still valid, but handler may
+      // reject based on task state (which is correct business logic,
+      // not an auth failure)
+      mockD1._stmt.all.mockResolvedValue({
+        results: [{ id: 'task-123', status: 'completed' }],
+      });
+
+      const updateRes = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_task_status',
+        arguments: { message: 'Follow-up update' },
+      }));
+      expect(updateRes.status).toBe(200);
+      // The request should authenticate successfully (200, not 401)
+      // The handler may reject based on task state, but that's business
+      // logic — the auth layer should not block the request
+    });
+  });
 });
