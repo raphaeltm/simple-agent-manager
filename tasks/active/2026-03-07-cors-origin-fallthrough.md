@@ -14,6 +14,6 @@ Discovered during security review of the MCP server feature (PR #agent-platform-
 
 ## Acceptance Criteria
 
-- [ ] CORS `origin` callback returns `null` for unrecognized origins (only allow `localhost` and `*.baseDomain`)
-- [ ] Existing CORS tests updated to verify unknown origins are rejected
-- [ ] MCP endpoint (`/mcp`) has explicit CORS override: `credentials: false`, `origin: '*'` (token auth, no cookies)
+- [x] CORS `origin` callback returns `null` for unrecognized origins (only allow `localhost` and `*.baseDomain`)
+- [x] Existing CORS tests updated to verify unknown origins are rejected
+- [x] MCP endpoint (`/mcp`) has explicit CORS override: `credentials: false`, `origin: '*'` (token auth, no cookies)

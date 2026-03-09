@@ -59,6 +59,7 @@ describe('Worker smoke tests (workerd runtime)', () => {
       expect(response.headers.get('access-control-allow-origin')).toBe(
         'https://app.test.example.com'
       );
+      expect(response.headers.get('access-control-allow-credentials')).toBe('true');
     });
 
     it('handles OPTIONS preflight requests', async () => {
@@ -72,6 +73,31 @@ describe('Worker smoke tests (workerd runtime)', () => {
       });
       // CORS preflight should succeed
       expect(response.status).toBeLessThan(400);
+    });
+
+    it('rejects unknown origins by not setting Access-Control-Allow-Origin', async () => {
+      const response = await SELF.fetch('https://api.test.example.com/health', {
+        headers: { Origin: 'https://evil.com' },
+      });
+      expect(response.status).toBe(200);
+      // The key security assertion: unknown origins must NOT get an allow-origin header
+      expect(response.headers.get('access-control-allow-origin')).toBeNull();
+    });
+
+    it('rejects origins that contain baseDomain as substring but are not subdomains', async () => {
+      const response = await SELF.fetch('https://api.test.example.com/health', {
+        headers: { Origin: 'https://nottest.example.com.evil.com' },
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('access-control-allow-origin')).toBeNull();
+    });
+
+    it('allows localhost origins for development', async () => {
+      const response = await SELF.fetch('https://api.test.example.com/health', {
+        headers: { Origin: 'http://localhost:5173' },
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:5173');
     });
   });
 
