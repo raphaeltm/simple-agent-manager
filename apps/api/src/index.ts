@@ -367,12 +367,28 @@ app.use('*', async (c, next) => {
 app.use('*', logger());
 app.use('*', cors({
   origin: (origin, c) => {
+    if (!origin) return null;
     const baseDomain = c.env?.BASE_DOMAIN || '';
     // Allow localhost for development
-    if (origin?.includes('localhost')) return origin;
-    // Allow same domain and subdomains
-    if (origin?.includes(baseDomain)) return origin;
-    return origin;
+    try {
+      const url = new URL(origin);
+      if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return origin;
+    } catch {
+      // Malformed origin — reject
+      return null;
+    }
+    // Allow subdomains of the configured BASE_DOMAIN (e.g., app.example.com, api.example.com)
+    if (baseDomain) {
+      try {
+        const url = new URL(origin);
+        if (url.hostname === baseDomain || url.hostname.endsWith(`.${baseDomain}`)) return origin;
+      } catch {
+        return null;
+      }
+    }
+    // Reject all other origins — returning null prevents Access-Control-Allow-Origin
+    // from being set, which blocks credentialed cross-origin requests from unknown sites.
+    return null;
   },
   credentials: true,
   allowHeaders: ['Content-Type', 'Authorization'],
@@ -449,6 +465,21 @@ app.route('/api/projects/:projectId/tasks', taskRunsRoutes);
 app.route('/api/projects/:projectId/tasks', taskSubmitRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/dashboard', dashboardRoutes);
+// MCP endpoint CORS override — MCP uses Bearer token auth (not cookies/sessions),
+// so it needs credentials: false + origin: '*' to allow VM agent requests from any origin.
+// This must run after the global CORS middleware to overwrite its headers.
+app.use('/mcp/*', cors({
+  origin: '*',
+  credentials: false,
+  allowHeaders: ['Content-Type', 'Authorization'],
+  allowMethods: ['GET', 'POST', 'OPTIONS'],
+}));
+// Explicitly remove Access-Control-Allow-Credentials set by the global CORS middleware.
+// origin: '*' + credentials: true is invalid in the CORS spec and browsers reject it.
+app.use('/mcp/*', async (c, next) => {
+  await next();
+  c.res.headers.delete('Access-Control-Allow-Credentials');
+});
 // MCP server endpoint — at /mcp (not /api/mcp) because VM agents use this URL
 // and it uses its own task-scoped Bearer token auth, not session auth.
 app.route('/mcp', mcpRoutes);

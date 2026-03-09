@@ -85,6 +85,22 @@ The MCP token revocation bug (see `docs/notes/2026-03-08-mcp-token-revocation-po
 4. **If the credential outlives the connection**, verify cleanup happens when the connection closes
 5. **Write a test** that exercises the lifecycle boundary: perform the credential-invalidating action, then verify subsequent operations on the same connection still work (or fail gracefully with refresh)
 
+## CORS Origin Validation (Required)
+
+When adding or modifying CORS middleware, the origin callback MUST default to **deny** (return `null`) for unrecognized origins. Never use a fallthrough that reflects the requesting origin.
+
+### Why This Rule Exists
+
+The CORS origin fallthrough bug (see `docs/notes/2026-03-09-cors-origin-fallthrough-postmortem.md`) allowed any website to make credentialed cross-origin requests because the origin callback returned the requesting origin for all cases, including unknown ones.
+
+### Required Steps
+
+1. **Origin callbacks must default-deny**: The fallthrough/default case must return `null` (or `undefined`), not the origin string
+2. **Use proper subdomain checks**: Use `hostname === baseDomain || hostname.endsWith('.baseDomain')` instead of `origin.includes(baseDomain)` which matches substrings
+3. **Parse origins as URLs**: Use `new URL(origin)` to extract the hostname for comparison, catching malformed origins
+4. **Write negative tests**: Every CORS configuration must have at least one test verifying that unknown origins are rejected (no `Access-Control-Allow-Origin` header)
+5. **Separate credentials for token-auth endpoints**: Endpoints using Bearer token auth (not cookies) should use `credentials: false` + `origin: '*'`
+
 ## Adding New Features
 
 1. Check if types need to be added to `packages/shared`
