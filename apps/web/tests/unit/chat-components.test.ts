@@ -203,10 +203,9 @@ describe('ProjectChat page', () => {
     expect(source).toContain('listChatSessions(projectId');
   });
 
-  it('auto-selects most recent session when none selected', () => {
-    expect(source).toContain('!sessionId && sessions.length > 0');
-    expect(source).toContain('sessions[0]');
-    expect(source).toContain('replace: true');
+  it('defaults to new chat when no session selected', () => {
+    expect(source).toContain('showNewChatInput');
+    expect(source).toContain('What do you want to build?');
   });
 
   it('renders flex layout with sidebar and content', () => {
