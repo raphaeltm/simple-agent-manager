@@ -87,6 +87,18 @@ describe('workspaces routes source contract', () => {
     expect(file).toContain("ne(schema.workspaces.status, 'deleted')");
   });
 
+  it('filters node count by active status when checking MAX_NODES_PER_USER', () => {
+    // The node count query must only count active nodes — not deleted/stopped ones.
+    // See: 2026-03-09-fix-node-workspace-limit-count-filters
+    expect(file).toContain("inArray(schema.nodes.status, ['running', 'creating', 'recovery'])");
+  });
+
+  it('filters workspace count by active status when checking MAX_WORKSPACES_PER_NODE', () => {
+    // The workspace count query must only count active workspaces — not deleted/stopped ones.
+    // See: 2026-03-09-fix-node-workspace-limit-count-filters
+    expect(file).toContain("inArray(schema.workspaces.status, ['running', 'creating', 'recovery'])");
+  });
+
   it('clears boot logs from KV on restart before new provisioning', () => {
     expect(file).toContain("workspacesRoutes.post('/:id/restart'");
     expect(file).toContain('writeBootLogs(c.env.KV, workspace.id, [], c.env)');

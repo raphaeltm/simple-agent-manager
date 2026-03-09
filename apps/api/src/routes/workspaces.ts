@@ -470,10 +470,14 @@ workspacesRoutes.post('/', async (c) => {
   let nodeId = body.nodeId;
   let mustProvisionNode = false;
   // Use COUNT instead of fetching all node IDs (P1 fix).
+  // Exclude deleted/stopped nodes — only active ones count toward the limit.
   const [userNodeCount] = await db
     .select({ count: count() })
     .from(schema.nodes)
-    .where(eq(schema.nodes.userId, userId));
+    .where(and(
+      eq(schema.nodes.userId, userId),
+      inArray(schema.nodes.status, ['running', 'creating', 'recovery'])
+    ));
   const userNodeCountVal = userNodeCount?.count ?? 0;
 
   if (nodeId) {
@@ -503,10 +507,15 @@ workspacesRoutes.post('/', async (c) => {
   }
 
   // Use COUNT instead of fetching all workspace IDs per node (P1 fix).
+  // Exclude deleted/stopped workspaces — only active ones count toward the limit.
   const [nodeWorkspaceCount] = await db
     .select({ count: count() })
     .from(schema.workspaces)
-    .where(and(eq(schema.workspaces.userId, userId), eq(schema.workspaces.nodeId, targetNodeId)));
+    .where(and(
+      eq(schema.workspaces.userId, userId),
+      eq(schema.workspaces.nodeId, targetNodeId),
+      inArray(schema.workspaces.status, ['running', 'creating', 'recovery'])
+    ));
   const nodeWorkspaceCountVal = nodeWorkspaceCount?.count ?? 0;
 
   if (nodeWorkspaceCountVal >= limits.maxWorkspacesPerNode) {
