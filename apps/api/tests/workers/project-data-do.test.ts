@@ -353,7 +353,6 @@ describe('ProjectData Durable Object', () => {
 
       const before = Date.now();
       const { cleanupAt: scheduled } = await stub.scheduleIdleCleanup(sessionId, 'ws-cleanup', null);
-      const after = Date.now();
 
       const cleanupAt = await stub.getCleanupAt(sessionId);
       expect(cleanupAt).toBeTruthy();
