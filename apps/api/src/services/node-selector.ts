@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import {
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
+  DEFAULT_MAX_WORKSPACES_PER_NODE,
 } from '@simple-agent-manager/shared';
 import type { NodeMetrics } from '@simple-agent-manager/shared';
 import * as schema from '../db/schema';
@@ -125,8 +126,8 @@ export async function selectNodeForTaskRun(
     DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT
   );
   const maxWorkspacesPerNode = env.MAX_WORKSPACES_PER_NODE
-    ? Number.parseInt(env.MAX_WORKSPACES_PER_NODE, 10) || 10
-    : 10;
+    ? Number.parseInt(env.MAX_WORKSPACES_PER_NODE, 10) || DEFAULT_MAX_WORKSPACES_PER_NODE
+    : DEFAULT_MAX_WORKSPACES_PER_NODE;
 
   // Step 0: Try to claim a warm node (fast startup for sequential tasks)
   if (taskId && env.NODE_LIFECYCLE) {

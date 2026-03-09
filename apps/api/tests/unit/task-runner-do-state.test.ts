@@ -461,12 +461,12 @@ describe('TaskRunner DO warm node selection', () => {
     expect(doSource).toContain('private async findNodeWithCapacity(');
   });
 
-  it('respects CPU and memory thresholds', () => {
-    expect(doSource).toContain('TASK_RUN_NODE_CPU_THRESHOLD_PERCENT');
-    expect(doSource).toContain('TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT');
+  it('respects CPU and memory thresholds via shared constants', () => {
+    expect(doSource).toContain('DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT');
+    expect(doSource).toContain('DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT');
   });
 
-  it('respects max workspaces per node', () => {
-    expect(doSource).toContain('MAX_WORKSPACES_PER_NODE');
+  it('respects max workspaces per node via shared constant', () => {
+    expect(doSource).toContain('DEFAULT_MAX_WORKSPACES_PER_NODE');
   });
 });

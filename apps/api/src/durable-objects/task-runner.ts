@@ -34,6 +34,9 @@ import {
   DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS,
   DEFAULT_TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS,
   DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS,
+  DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
+  DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
+  DEFAULT_MAX_WORKSPACES_PER_NODE,
 } from '@simple-agent-manager/shared';
 import { log } from '../lib/logger';
 
@@ -1291,12 +1294,12 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
 
   private async findNodeWithCapacity(state: TaskRunnerState): Promise<string | null> {
     const cpuThreshold = parseEnvInt(
-      this.env.TASK_RUN_NODE_CPU_THRESHOLD_PERCENT, 80,
+      this.env.TASK_RUN_NODE_CPU_THRESHOLD_PERCENT, DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
     );
     const memThreshold = parseEnvInt(
-      this.env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT, 85,
+      this.env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT, DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
     );
-    const maxWsPerNode = parseEnvInt(this.env.MAX_WORKSPACES_PER_NODE, 10);
+    const maxWsPerNode = parseEnvInt(this.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE);
 
     const nodes = await this.env.DATABASE.prepare(
       `SELECT id, vm_size, vm_location, health_status, last_metrics FROM nodes
