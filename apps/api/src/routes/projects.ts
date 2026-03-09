@@ -13,6 +13,7 @@ import type {
   UpsertProjectRuntimeFileRequest,
   UpdateProjectRequest,
 } from '@simple-agent-manager/shared';
+import { isValidAgentType } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import * as schema from '../db/schema';
 import { ulid } from '../lib/ulid';
@@ -96,6 +97,7 @@ function toProjectResponse(project: schema.Project): Project {
     repository: project.repository,
     defaultBranch: project.defaultBranch,
     defaultVmSize: (project.defaultVmSize as Project['defaultVmSize']) ?? null,
+    defaultAgentType: project.defaultAgentType ?? null,
     status: (project.status as 'active' | 'detached') || 'active',
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
@@ -720,7 +722,8 @@ projectsRoutes.patch('/:id', async (c) => {
     body.name === undefined &&
     body.description === undefined &&
     body.defaultBranch === undefined &&
-    body.defaultVmSize === undefined
+    body.defaultVmSize === undefined &&
+    body.defaultAgentType === undefined
   ) {
     throw errors.badRequest('At least one field is required');
   }
@@ -739,6 +742,10 @@ projectsRoutes.patch('/:id', async (c) => {
   const validVmSizes = ['small', 'medium', 'large'];
   if (body.defaultVmSize !== undefined && body.defaultVmSize !== null && !validVmSizes.includes(body.defaultVmSize)) {
     throw errors.badRequest('defaultVmSize must be small, medium, or large');
+  }
+
+  if (body.defaultAgentType !== undefined && body.defaultAgentType !== null && !isValidAgentType(body.defaultAgentType)) {
+    throw errors.badRequest('defaultAgentType must be a valid agent type');
   }
 
   await assertRepositoryAccess(
@@ -773,6 +780,7 @@ projectsRoutes.patch('/:id', async (c) => {
       description: body.description === undefined ? existing.description : body.description?.trim() || null,
       defaultBranch: nextDefaultBranch,
       defaultVmSize: body.defaultVmSize === undefined ? existing.defaultVmSize : (body.defaultVmSize ?? null),
+      defaultAgentType: body.defaultAgentType === undefined ? existing.defaultAgentType : (body.defaultAgentType ?? null),
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)));

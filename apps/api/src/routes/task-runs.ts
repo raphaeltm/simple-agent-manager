@@ -238,6 +238,7 @@ taskRunsRoutes.post('/:taskId/run', async (c) => {
       installationId: project.installationId,
       projectDefaultVmSize: project.defaultVmSize as VMSize | null,
       chatSessionId: sessionId,
+      agentType: project.defaultAgentType ?? null,
     });
   } catch (err) {
     const failedAt = new Date().toISOString();
