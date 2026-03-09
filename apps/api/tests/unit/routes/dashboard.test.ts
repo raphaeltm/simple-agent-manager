@@ -1,7 +1,9 @@
 /**
- * Behavioral tests for the dashboard /active-tasks route.
+ * Behavioral tests for the dashboard routes.
  *
- * Tests exercise the route's business logic:
+ * Tests exercise route business logic:
+ *
+ * /active-tasks:
  * - Auth gating
  * - D1 query filtering (only active statuses, only caller's tasks)
  * - Early return for zero tasks
@@ -10,6 +12,13 @@
  * - isActive calculation against DASHBOARD_INACTIVE_THRESHOLD_MS
  * - Sorting: tasks with recent messages first, then tasks without messages by createdAt
  * - Response shape matches DashboardActiveTasksResponse
+ *
+ * /recent-tasks:
+ * - Fetches terminal tasks (completed, failed, cancelled) within time window
+ * - Sorts by completed_at descending
+ * - Enriches with session IDs from project DOs
+ * - Configurable limit and time window via env vars
+ * - Response shape matches DashboardRecentTasksResponse
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
@@ -445,5 +454,156 @@ describe('GET /dashboard/active-tasks', () => {
     const body = await res.json() as { tasks: any[] };
 
     expect(body.tasks[0].startedAt).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /dashboard/recent-tasks
+// ---------------------------------------------------------------------------
+
+describe('GET /dashboard/recent-tasks', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** Build a mock D1 prepare/bind/all chain for raw SQL queries. */
+  function buildMockD1(rows: Record<string, unknown>[]) {
+    const mockAll = vi.fn().mockResolvedValue({ results: rows });
+    const mockBind = vi.fn().mockReturnValue({ all: mockAll });
+    const mockPrepare = vi.fn().mockReturnValue({ bind: mockBind });
+    return {
+      prepare: mockPrepare,
+      _bind: mockBind,
+      _all: mockAll,
+    };
+  }
+
+  /** Build a recent task row as would be returned by raw SQL query. */
+  function makeRecentTaskRow(overrides: Partial<{
+    id: string;
+    title: string;
+    status: string;
+    project_id: string;
+    project_name: string;
+    created_at: string;
+    completed_at: string | null;
+    output_branch: string | null;
+    output_pr_url: string | null;
+    output_summary: string | null;
+  }> = {}) {
+    return {
+      id: overrides.id ?? 'task-recent-1',
+      title: overrides.title ?? 'Completed task',
+      status: overrides.status ?? 'completed',
+      project_id: overrides.project_id ?? 'proj-1',
+      project_name: overrides.project_name ?? 'my-project',
+      created_at: overrides.created_at ?? new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      completed_at: overrides.completed_at ?? new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+      output_branch: overrides.output_branch ?? 'sam/fix-bug',
+      output_pr_url: overrides.output_pr_url ?? null,
+      output_summary: overrides.output_summary ?? 'Fixed the bug',
+    };
+  }
+
+  it('returns empty tasks array when no recent tasks exist', async () => {
+    const d1 = buildMockD1([]);
+    // Also need drizzle mock for active-tasks (middleware uses same db)
+    buildMockDB([]);
+    (projectDataService.getSessionsByTaskIds as any).mockResolvedValue([]);
+
+    const envWithD1 = { ...mockEnv, DATABASE: d1 as unknown as D1Database } as unknown as Env;
+
+    const app = buildApp();
+    const res = await app.request('/dashboard/recent-tasks', {}, envWithD1);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { tasks: unknown[] };
+    expect(body.tasks).toEqual([]);
+  });
+
+  it('returns completed tasks with correct shape', async () => {
+    const row = makeRecentTaskRow({
+      id: 'task-done',
+      title: 'Done task',
+      status: 'completed',
+      project_id: 'proj-X',
+      project_name: 'Project X',
+      output_branch: 'sam/done',
+      output_summary: 'All done',
+    });
+    const d1 = buildMockD1([row]);
+    buildMockDB([]);
+    (projectDataService.getSessionsByTaskIds as any).mockResolvedValue([
+      { id: 'ses-done', taskId: 'task-done' },
+    ]);
+
+    const envWithD1 = { ...mockEnv, DATABASE: d1 as unknown as D1Database } as unknown as Env;
+
+    const app = buildApp();
+    const res = await app.request('/dashboard/recent-tasks', {}, envWithD1);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { tasks: any[] };
+    expect(body.tasks).toHaveLength(1);
+
+    const task = body.tasks[0];
+    expect(task).toHaveProperty('id', 'task-done');
+    expect(task).toHaveProperty('title', 'Done task');
+    expect(task).toHaveProperty('status', 'completed');
+    expect(task).toHaveProperty('projectId', 'proj-X');
+    expect(task).toHaveProperty('projectName', 'Project X');
+    expect(task).toHaveProperty('sessionId', 'ses-done');
+    expect(task).toHaveProperty('createdAt');
+    expect(task).toHaveProperty('completedAt');
+    expect(task).toHaveProperty('outputBranch', 'sam/done');
+    expect(task).toHaveProperty('outputSummary', 'All done');
+  });
+
+  it('returns tasks with null sessionId when DO has no matching session', async () => {
+    const d1 = buildMockD1([makeRecentTaskRow({ id: 'task-no-session' })]);
+    buildMockDB([]);
+    (projectDataService.getSessionsByTaskIds as any).mockResolvedValue([]);
+
+    const envWithD1 = { ...mockEnv, DATABASE: d1 as unknown as D1Database } as unknown as Env;
+
+    const app = buildApp();
+    const res = await app.request('/dashboard/recent-tasks', {}, envWithD1);
+
+    const body = await res.json() as { tasks: any[] };
+    expect(body.tasks[0].sessionId).toBeNull();
+  });
+
+  it('includes failed and cancelled tasks', async () => {
+    const d1 = buildMockD1([
+      makeRecentTaskRow({ id: 'task-failed', status: 'failed' }),
+      makeRecentTaskRow({ id: 'task-cancelled', status: 'cancelled' }),
+    ]);
+    buildMockDB([]);
+    (projectDataService.getSessionsByTaskIds as any).mockResolvedValue([]);
+
+    const envWithD1 = { ...mockEnv, DATABASE: d1 as unknown as D1Database } as unknown as Env;
+
+    const app = buildApp();
+    const res = await app.request('/dashboard/recent-tasks', {}, envWithD1);
+
+    const body = await res.json() as { tasks: any[] };
+    expect(body.tasks).toHaveLength(2);
+    expect(body.tasks.map((t: any) => t.status)).toEqual(['failed', 'cancelled']);
+  });
+
+  it('tolerates DO failures gracefully', async () => {
+    const d1 = buildMockD1([makeRecentTaskRow({ id: 'task-1' })]);
+    buildMockDB([]);
+    (projectDataService.getSessionsByTaskIds as any).mockRejectedValue(new Error('DO down'));
+
+    const envWithD1 = { ...mockEnv, DATABASE: d1 as unknown as D1Database } as unknown as Env;
+
+    const app = buildApp();
+    const res = await app.request('/dashboard/recent-tasks', {}, envWithD1);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { tasks: any[] };
+    expect(body.tasks).toHaveLength(1);
+    expect(body.tasks[0].sessionId).toBeNull();
   });
 });
