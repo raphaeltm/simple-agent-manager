@@ -931,7 +931,9 @@ workspacesRoutes.post('/:id/agent-sessions', async (c) => {
       sessionId,
       body.label?.trim() || null,
       c.env,
-      userId
+      userId,
+      workspace.chatSessionId,
+      workspace.projectId,
     );
   } catch (err) {
     await db

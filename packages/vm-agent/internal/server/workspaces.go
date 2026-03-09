@@ -529,6 +529,7 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		SessionID     string `json:"sessionId"`
 		Label         string `json:"label"`
 		ChatSessionID string `json:"chatSessionId"` // Chat session ID for message routing (warm node reuse)
+		ProjectID     string `json:"projectId"`      // Project ID for late-init of message reporter (manual nodes)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -539,11 +540,19 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Update the message reporter's session ID when the control plane provides
-	// a chat session ID. This is critical for warm node reuse — the original
-	// CHAT_SESSION_ID from cloud-init is stale when a new task starts.
-	if chatSID := strings.TrimSpace(body.ChatSessionID); chatSID != "" && s.messageReporter != nil {
-		s.messageReporter.SetSessionID(chatSID)
+	chatSID := strings.TrimSpace(body.ChatSessionID)
+	projectID := strings.TrimSpace(body.ProjectID)
+
+	if chatSID != "" {
+		if s.messageReporter != nil {
+			// Reporter already exists (task runner path or warm node reuse) —
+			// update the session ID for subsequent messages.
+			s.messageReporter.SetSessionID(chatSID)
+		} else if projectID != "" {
+			// Reporter is nil because the node was manually provisioned without
+			// PROJECT_ID/CHAT_SESSION_ID in cloud-init. Late-initialize it now.
+			s.lateInitMessageReporter(workspaceID, projectID, chatSID)
+		}
 	}
 
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))

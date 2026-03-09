@@ -27,6 +27,9 @@ func TestAgentSessionsSourceContract(t *testing.T) {
 		"ViewerCount",
 		"host.Status()",
 		"host.ViewerCount()",
+		// Late-init message reporter for manually provisioned nodes
+		"lateInitMessageReporter",
+		`"projectId"`,
 	} {
 		if !strings.Contains(content, needle) {
 			t.Fatalf("expected %q in %s", needle, path)

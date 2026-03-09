@@ -598,6 +598,49 @@ func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 	})
 }
 
+// lateInitMessageReporter creates the message reporter at runtime when a
+// manually provisioned node receives its first agent session with project
+// context. This handles the case where cloud-init didn't have PROJECT_ID or
+// CHAT_SESSION_ID (manual node provisioning), but the control plane provides
+// them when creating the agent session.
+func (s *Server) lateInitMessageReporter(workspaceID, projectID, chatSessionID string) {
+	cfg := messagereport.LoadConfigFromEnv()
+	cfg.ProjectID = projectID
+	cfg.SessionID = chatSessionID
+	cfg.WorkspaceID = workspaceID
+	cfg.Endpoint = s.config.ControlPlaneURL
+
+	msgDB, err := openSQLiteDB(s.config.PersistenceDBPath)
+	if err != nil {
+		slog.Error("Failed to open message reporter DB for late init", "error", err)
+		return
+	}
+
+	reporter, err := messagereport.New(msgDB, cfg)
+	if err != nil {
+		slog.Error("Failed to late-init message reporter", "error", err)
+		msgDB.Close()
+		return
+	}
+
+	s.messageReporter = reporter
+	s.acpConfig.MessageReporter = &messageReporterAdapter{r: reporter}
+
+	// Set the auth token so the reporter can authenticate with the control plane.
+	s.callbackTokenMu.RLock()
+	token := s.callbackToken
+	s.callbackTokenMu.RUnlock()
+	if token != "" {
+		reporter.SetToken(token)
+	}
+
+	slog.Info("Message reporter late-initialized",
+		"workspaceId", workspaceID,
+		"projectId", projectID,
+		"chatSessionId", chatSessionID,
+	)
+}
+
 // messageReporterAdapter bridges acp.MessageReporter (which uses
 // acp.MessageReportEntry) to messagereport.Reporter (which uses
 // messagereport.Message). This adapter exists to avoid circular imports
