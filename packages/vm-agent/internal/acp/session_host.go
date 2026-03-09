@@ -646,7 +646,7 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 				errMsg = "Prompt cancelled (context deadline exceeded)"
 			}
 		}
-		slog.Error("ACP Prompt failed", "error", err)
+		slog.Warn("ACP Prompt failed (non-fatal)", "error", err)
 		h.reportLifecycle("warn", "ACP Prompt failed", map[string]interface{}{
 			"error":    errMsg,
 			"duration": time.Since(promptStart).String(),
@@ -1215,7 +1215,7 @@ func (h *SessionHost) persistAcpSessionID(agentType string) {
 		if err := h.config.SessionManager.UpdateAcpSessionID(
 			h.config.WorkspaceID, h.config.SessionID, sessionID, agentType,
 		); err != nil {
-			slog.Error("Failed to persist ACP session ID to session manager", "error", err)
+			slog.Warn("Failed to persist ACP session ID to session manager", "error", err)
 		} else {
 			slog.Info("ACP session ID persisted to session manager", "sessionID", sessionID)
 		}
@@ -1223,7 +1223,7 @@ func (h *SessionHost) persistAcpSessionID(agentType string) {
 
 	if h.config.TabStore != nil && h.config.SessionID != "" {
 		if err := h.config.TabStore.UpdateTabAcpSessionID(h.config.SessionID, sessionID); err != nil {
-			slog.Error("Failed to persist ACP session ID to tab store", "error", err)
+			slog.Warn("Failed to persist ACP session ID to tab store", "error", err)
 		} else {
 			slog.Info("ACP session ID persisted to tab store", "sessionID", sessionID)
 		}
@@ -1242,13 +1242,13 @@ func (h *SessionHost) persistLastPrompt(text string) {
 		if err := h.config.SessionLastPromptManager.UpdateLastPrompt(
 			h.config.WorkspaceID, h.config.SessionID, text,
 		); err != nil {
-			slog.Error("Failed to persist last prompt to session manager", "error", err)
+			slog.Warn("Failed to persist last prompt to session manager", "error", err)
 		}
 	}
 
 	if h.config.TabLastPromptStore != nil && h.config.SessionID != "" {
 		if err := h.config.TabLastPromptStore.UpdateTabLastPrompt(h.config.SessionID, text); err != nil {
-			slog.Error("Failed to persist last prompt to tab store", "error", err)
+			slog.Warn("Failed to persist last prompt to tab store", "error", err)
 		}
 	}
 }
@@ -1555,7 +1555,7 @@ func (h *SessionHost) viewerWritePump(viewer *Viewer) {
 			}
 			viewer.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := viewer.conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				slog.Error("SessionHost: viewer write failed", "sessionID", h.config.SessionID, "viewerID", viewer.ID, "error", err)
+				slog.Warn("SessionHost: viewer write failed", "sessionID", h.config.SessionID, "viewerID", viewer.ID, "error", err)
 				return
 			}
 		case <-viewer.done:
@@ -1851,13 +1851,13 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 
 	body, err := json.Marshal(map[string]string{"agentType": agentType})
 	if err != nil {
-		slog.Error("Failed to marshal agent settings request", "error", err)
+		slog.Warn("Failed to marshal agent settings request", "error", err)
 		return nil
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, byteReader(body))
 	if err != nil {
-		slog.Error("Failed to create agent settings request", "error", err)
+		slog.Warn("Failed to create agent settings request", "error", err)
 		return nil
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -1865,7 +1865,7 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		slog.Error("Failed to fetch agent settings", "error", err)
+		slog.Warn("Failed to fetch agent settings", "error", err)
 		return nil
 	}
 	defer resp.Body.Close()
@@ -1877,7 +1877,7 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 
 	var result agentSettingsPayload
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		slog.Error("Failed to decode agent settings", "error", err)
+		slog.Warn("Failed to decode agent settings", "error", err)
 		return nil
 	}
 
