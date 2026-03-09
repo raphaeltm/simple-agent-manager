@@ -127,7 +127,7 @@ describe('ProjectMessageView', () => {
     expect(source).toContain('taskEmbed?.errorMessage');
     expect(source).toContain('taskEmbed?.outputSummary');
     expect(source).toContain('Task failed:');
-    expect(source).toContain('Summary:');
+    expect(source).toContain('TruncatedSummary');
   });
 });
 
