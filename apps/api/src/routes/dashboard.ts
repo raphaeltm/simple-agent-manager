@@ -28,7 +28,6 @@ const dashboardRoutes = new Hono<{ Bindings: Env }>();
 dashboardRoutes.use('/*', requireAuth(), requireApproved());
 
 const ACTIVE_TASK_STATUSES: TaskStatus[] = ['queued', 'delegated', 'in_progress'];
-const TERMINAL_TASK_STATUSES: TaskStatus[] = ['completed', 'failed', 'cancelled'];
 
 dashboardRoutes.get('/active-tasks', async (c) => {
   const userId = getUserId(c);

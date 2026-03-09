@@ -38,9 +38,9 @@ describe('ActiveTaskCard', () => {
     expect(screen.getByText('my-project')).toBeInTheDocument();
   });
 
-  it('shows active indicator when task is active', () => {
+  it('shows responding indicator when task is active', () => {
     render(<ActiveTaskCard task={makeTask({ isActive: true })} />);
-    expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.getByText('Responding')).toBeInTheDocument();
   });
 
   it('shows idle indicator when task is inactive', () => {
