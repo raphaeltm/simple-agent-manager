@@ -83,7 +83,11 @@ func (b *BootLogBroadcaster) Broadcast(step, status, message string, detail ...s
 }
 
 // AddClient registers a WebSocket connection and sends all buffered entries as catch-up.
+// Nil-safe: no-ops when called on a nil receiver.
 func (b *BootLogBroadcaster) AddClient(conn *websocket.Conn) {
+	if b == nil {
+		return
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -112,7 +116,11 @@ func (b *BootLogBroadcaster) AddClient(conn *websocket.Conn) {
 }
 
 // RemoveClient removes a WebSocket connection from the broadcast list.
+// Nil-safe: no-ops when called on a nil receiver.
 func (b *BootLogBroadcaster) RemoveClient(conn *websocket.Conn) {
+	if b == nil {
+		return
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.clients, conn)
@@ -121,7 +129,11 @@ func (b *BootLogBroadcaster) RemoveClient(conn *websocket.Conn) {
 // MarkComplete sends a "complete" event to all connected clients and marks
 // the broadcaster as done. Late-joining clients will receive history + complete
 // immediately.
+// Nil-safe: no-ops when called on a nil receiver.
 func (b *BootLogBroadcaster) MarkComplete() {
+	if b == nil {
+		return
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 

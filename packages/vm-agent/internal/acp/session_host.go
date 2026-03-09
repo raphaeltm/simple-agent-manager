@@ -1048,13 +1048,9 @@ func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentComman
 		return fmt.Errorf("failed to discover devcontainer: %w", err)
 	}
 
-	checkArgs := []string{"exec", containerID, "which", info.command}
-	checkCmd := exec.CommandContext(ctx, "docker", checkArgs...)
-	if err := checkCmd.Run(); err == nil {
-		slog.Info("Agent binary is already installed", "command", info.command)
-		return nil
-	}
-
+	// installAgentBinary handles the "already installed" fast path internally
+	// (with and without mutex), so we skip the redundant `which` check here
+	// and just broadcast the installing status before delegating.
 	h.broadcastAgentStatus(StatusInstalling, info.command, "")
 	return installAgentBinary(ctx, containerID, info)
 }
