@@ -50,7 +50,7 @@ export function Dialog({ isOpen, onClose, children, maxWidth = 'md' }: DialogPro
       <div
         ref={dialogRef}
         tabIndex={-1}
-        className={`relative w-full rounded-lg border border-border-default bg-surface p-6 shadow-overlay ${maxWidthClasses[maxWidth]}`}
+        className={`relative w-full max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg border border-border-default bg-surface p-6 shadow-overlay ${maxWidthClasses[maxWidth]}`}
       >
         {children}
       </div>

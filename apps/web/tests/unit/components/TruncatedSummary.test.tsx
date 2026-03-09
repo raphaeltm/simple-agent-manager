@@ -93,6 +93,19 @@ describe('TruncatedSummary', () => {
     expect(screen.queryByText('Task Summary')).not.toBeInTheDocument();
   });
 
+  it('opens modal with scrollable overflow for long content', async () => {
+    const user = userEvent.setup();
+    renderWithTruncation('A very long summary that would overflow on mobile');
+
+    await user.click(screen.getByText('Read more'));
+
+    // The dialog panel should have overflow-y-auto and max-height constraint
+    const dialogPanel = screen.getByRole('dialog').querySelector('[tabindex="-1"]');
+    expect(dialogPanel).toBeInTheDocument();
+    expect(dialogPanel?.className).toContain('overflow-y-auto');
+    expect(dialogPanel?.className).toMatch(/max-h-/);
+  });
+
   it('closes modal on Escape key', async () => {
     const user = userEvent.setup();
     renderWithTruncation('Summary text for escape test');
