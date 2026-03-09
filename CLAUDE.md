@@ -167,6 +167,8 @@ Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks
 - Cloudflare D1 (new `OBSERVABILITY_DATABASE` for errors) + existing D1 (`DATABASE` for health queries) + Cloudflare Workers Observability API (historical logs, 7-day retention) (023-admin-observability)
 - TypeScript 5.x (React 18 + Vite 5) + Tailwind CSS v4, `@tailwindcss/vite` plugin, React 18, Vite 5, Lucide React (024-tailwind-adoption)
 - N/A (no backend changes) (024-tailwind-adoption)
+- TypeScript 5.x (React 18 + Vite) + React 18, `@simple-agent-manager/acp-client` (shared components), Tailwind CSS v4 (026-chat-message-parity)
+- N/A (frontend-only changes; no database or API changes) (026-chat-message-parity)
 
 ## Recent Changes
 - codex-oauth-token-sync: Post-session credential sync-back for file-based agent credentials (e.g., codex-acp auth.json); reads updated auth file from container after session ends via `syncCredentialOnStop()`, sends to API via `POST /api/workspaces/:id/agent-credential-sync` with callbackretry; re-encrypts with fresh AES-GCM IV on change; guards: injectionMode=auth-file + CredentialSyncer configured; best-effort (errors logged, teardown not blocked)
