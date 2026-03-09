@@ -3,8 +3,10 @@ import { useAuth } from '../components/AuthProvider';
 import { UserMenu } from '../components/UserMenu';
 import { ProjectSummaryCard } from '../components/ProjectSummaryCard';
 import { ActiveTaskCard } from '../components/ActiveTaskCard';
+import { RecentTaskCard } from '../components/RecentTaskCard';
 import { useProjectList } from '../hooks/useProjectData';
 import { useActiveTasks } from '../hooks/useActiveTasks';
+import { useRecentTasks } from '../hooks/useRecentTasks';
 import { PageLayout, Button, Alert, EmptyState, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
 
 export function Dashboard() {
@@ -12,6 +14,7 @@ export function Dashboard() {
   const navigate = useNavigate();
 
   const { tasks, loading: tasksLoading, isRefreshing: tasksRefreshing, error: tasksError, refresh: refreshTasks } = useActiveTasks();
+  const { tasks: recentTasks, loading: recentLoading, isRefreshing: recentRefreshing, error: recentError, refresh: refreshRecent } = useRecentTasks();
   const { projects, loading: projectsLoading, isRefreshing: projectsRefreshing, error: projectsError, refresh: refreshProjects } = useProjectList({ sort: 'last_activity', limit: 50 });
 
   return (
@@ -35,6 +38,13 @@ export function Dashboard() {
           </Alert>
         </div>
       )}
+      {recentError && (
+        <div className="mb-4">
+          <Alert variant="error" onDismiss={() => void refreshRecent()}>
+            {recentError}
+          </Alert>
+        </div>
+      )}
       {projectsError && (
         <div className="mb-4">
           <Alert variant="error" onDismiss={() => void refreshProjects()}>
@@ -43,11 +53,11 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Active Tasks section */}
+      {/* Running Tasks section */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <h3 className="sam-type-section-heading m-0 text-fg-primary">Active Tasks</h3>
+            <h3 className="sam-type-section-heading m-0 text-fg-primary">Running Tasks</h3>
             {tasksRefreshing && <Spinner size="sm" />}
           </div>
         </div>
@@ -55,7 +65,7 @@ export function Dashboard() {
         {tasksLoading && tasks.length === 0 ? (
           <div
             role="status"
-            aria-label="Loading active tasks"
+            aria-label="Loading running tasks"
             aria-busy="true"
             className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
           >
@@ -65,7 +75,7 @@ export function Dashboard() {
           </div>
         ) : tasks.length === 0 ? (
           <EmptyState
-            heading="No active tasks"
+            heading="No running tasks"
             description="Submit a task from a project to get started."
           />
         ) : (
@@ -76,6 +86,37 @@ export function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Recent Tasks section */}
+      {(recentLoading || recentTasks.length > 0) && (
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <h3 className="sam-type-section-heading m-0 text-fg-primary">Recent Tasks</h3>
+              {recentRefreshing && <Spinner size="sm" />}
+            </div>
+          </div>
+
+          {recentLoading && recentTasks.length === 0 ? (
+            <div
+              role="status"
+              aria-label="Loading recent tasks"
+              aria-busy="true"
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+            >
+              {Array.from({ length: 2 }, (_, i) => (
+                <SkeletonCard key={i} lines={2} />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {recentTasks.map((task) => (
+                <RecentTaskCard key={task.id} task={task} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Projects section */}
       <div>

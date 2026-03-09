@@ -131,6 +131,8 @@ export interface Env {
   ACP_MAX_RESTART_ATTEMPTS?: string;
   // Dashboard configuration
   DASHBOARD_INACTIVE_THRESHOLD_MS?: string;
+  DASHBOARD_RECENT_TASKS_LIMIT?: string;
+  DASHBOARD_RECENT_TASKS_WINDOW_MS?: string;
   // Boot log configuration
   BOOT_LOG_TTL_SECONDS?: string;
   BOOT_LOG_MAX_ENTRIES?: string;

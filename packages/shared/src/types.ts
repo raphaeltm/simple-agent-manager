@@ -577,6 +577,25 @@ export interface DashboardActiveTasksResponse {
   tasks: DashboardTask[];
 }
 
+/** A recently completed/failed/cancelled task for the dashboard history section. */
+export interface DashboardRecentTask {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  projectId: string;
+  projectName: string;
+  sessionId: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  outputBranch: string | null;
+  outputPrUrl: string | null;
+  outputSummary: string | null;
+}
+
+export interface DashboardRecentTasksResponse {
+  tasks: DashboardRecentTask[];
+}
+
 // =============================================================================
 // Workspace
 // =============================================================================
