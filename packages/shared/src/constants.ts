@@ -55,7 +55,7 @@ export const DEFAULT_BRANCH = 'main';
 export const DEFAULT_MAX_NODES_PER_USER = 10;
 
 /** Default max workspaces per node. Override via MAX_WORKSPACES_PER_NODE env var. */
-export const DEFAULT_MAX_WORKSPACES_PER_NODE = 10;
+export const DEFAULT_MAX_WORKSPACES_PER_NODE = 3;
 
 /** Default max agent sessions per workspace. Override via MAX_AGENT_SESSIONS_PER_WORKSPACE env var. */
 export const DEFAULT_MAX_AGENT_SESSIONS_PER_WORKSPACE = 10;
@@ -107,10 +107,10 @@ export const WORKSPACE_NAME_MAX_LENGTH = 64;
 // =============================================================================
 
 /** Default CPU usage threshold (%) above which a node is considered full. Override via TASK_RUN_NODE_CPU_THRESHOLD_PERCENT env var. */
-export const DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT = 80;
+export const DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT = 50;
 
 /** Default memory usage threshold (%) above which a node is considered full. Override via TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT env var. */
-export const DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT = 80;
+export const DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT = 50;
 
 /** Default delay (ms) after task completion before cleanup. Override via TASK_RUN_CLEANUP_DELAY_MS env var. */
 export const DEFAULT_TASK_RUN_CLEANUP_DELAY_MS = 5000;

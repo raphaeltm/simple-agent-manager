@@ -218,16 +218,16 @@ describe('selectNodeForTaskRun threshold configuration', () => {
     expect(selectorSource).toContain('env.MAX_WORKSPACES_PER_NODE');
   });
 
-  it('defaults CPU threshold to shared constant (80)', () => {
+  it('defaults CPU threshold to shared constant', () => {
     expect(selectorSource).toContain('DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT');
   });
 
-  it('defaults memory threshold to shared constant (80)', () => {
+  it('defaults memory threshold to shared constant', () => {
     expect(selectorSource).toContain('DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT');
   });
 
-  it('defaults max workspaces per node to 10', () => {
-    expect(selectorSource).toContain('|| 10');
+  it('defaults max workspaces per node to shared constant', () => {
+    expect(selectorSource).toContain('DEFAULT_MAX_WORKSPACES_PER_NODE');
   });
 
   it('parseThreshold rejects values < 0 or > 100', () => {
