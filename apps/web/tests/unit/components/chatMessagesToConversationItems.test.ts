@@ -337,6 +337,61 @@ describe('chatMessagesToConversationItems', () => {
     expect(toolItem.content[0]?.type).toBe('terminal');
   });
 
+  it('populates data field for terminal structured content (parity with workspace chat)', () => {
+    const structuredContent = [{ type: 'terminal', text: 'term-123' }];
+    const meta = {
+      toolCallId: 'tc-term-data',
+      kind: 'execute',
+      status: 'completed',
+      content: structuredContent,
+    };
+    const input = [msg({ role: 'tool', content: '(tool call)', toolMetadata: meta as unknown as null })];
+    const items = chatMessagesToConversationItems(input);
+
+    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
+    expect(toolItem.content[0]?.data).toBeTruthy();
+    expect(toolItem.content[0]?.data).toMatchObject({ type: 'terminal', text: 'term-123' });
+  });
+
+  it('populates data field for content structured content (parity with workspace chat)', () => {
+    const structuredContent = [{ type: 'content', text: 'some output text' }];
+    const meta = {
+      toolCallId: 'tc-content-data',
+      kind: 'read',
+      status: 'completed',
+      content: structuredContent,
+    };
+    const input = [msg({ role: 'tool', content: 'some output text', toolMetadata: meta as unknown as null })];
+    const items = chatMessagesToConversationItems(input);
+
+    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
+    expect(toolItem.content[0]?.data).toBeTruthy();
+    expect(toolItem.content[0]?.data).toMatchObject({ type: 'content', text: 'some output text' });
+  });
+
+  it('populates data field for ALL content types consistently (diff, terminal, content)', () => {
+    const structuredContent = [
+      { type: 'content', text: 'hello' },
+      { type: 'diff', text: '/src/a.ts', path: '/src/a.ts', oldText: 'x', newText: 'y' },
+      { type: 'terminal', text: 'term-99' },
+    ];
+    const meta = {
+      toolCallId: 'tc-all-types',
+      kind: 'multi',
+      status: 'completed',
+      content: structuredContent,
+    };
+    const input = [msg({ role: 'tool', content: 'mixed', toolMetadata: meta as unknown as null })];
+    const items = chatMessagesToConversationItems(input);
+
+    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
+    expect(toolItem.content).toHaveLength(3);
+    // All content types should have a data field
+    for (const c of toolItem.content) {
+      expect(c.data).toBeTruthy();
+    }
+  });
+
   it('treats unknown structured content type as "content"', () => {
     const structuredContent = [{ type: 'unknown_future_type', text: 'raw' }];
     const meta = { toolCallId: 'tc-x', kind: 'read', status: 'completed', content: structuredContent };

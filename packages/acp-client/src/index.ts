@@ -37,3 +37,5 @@ export { StickyPlanButton } from './components/StickyPlanButton';
 export type { StickyPlanButtonProps } from './components/StickyPlanButton';
 export { PlanModal } from './components/PlanModal';
 export type { PlanModalProps } from './components/PlanModal';
+export { PlanView } from './components/PlanView';
+export { RawFallbackView } from './components/RawFallbackView';

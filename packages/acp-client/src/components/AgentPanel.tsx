@@ -16,6 +16,8 @@ import { ChatSettingsPanel } from './ChatSettingsPanel';
 import type { ChatSettingsData } from './ChatSettingsPanel';
 import { StickyPlanButton } from './StickyPlanButton';
 import { PlanModal } from './PlanModal';
+import { PlanView } from './PlanView';
+import { RawFallbackView } from './RawFallbackView';
 
 // =============================================================================
 // Client-side commands (not forwarded to agent)
@@ -477,33 +479,9 @@ const ConversationItemView = React.memo(function ConversationItemView({ item }: 
     case 'tool_call':
       return <ToolCallCard toolCall={item} />;
     case 'plan':
-      return (
-        <div className="my-2 border border-gray-200 rounded-lg p-3 bg-white">
-          <h4 className="text-xs font-medium text-gray-500 uppercase mb-2">Plan</h4>
-          <ul className="space-y-1">
-            {item.entries.map((entry, idx) => (
-              <li key={idx} className="flex items-center space-x-2 text-sm">
-                <span className={`inline-block h-2 w-2 rounded-full ${
-                  entry.status === 'completed' ? 'bg-green-400' :
-                  entry.status === 'in_progress' ? 'bg-blue-400 animate-pulse' : 'bg-gray-300'
-                }`} />
-                <span className={entry.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-700'}>
-                  {entry.content}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      );
+      return <PlanView plan={item} />;
     case 'raw_fallback':
-      return (
-        <div className="my-2 border border-orange-200 bg-orange-50 rounded-lg p-3">
-          <p className="text-xs text-orange-600 font-medium mb-1">Rich rendering unavailable</p>
-          <pre className="text-xs text-gray-600 font-mono whitespace-pre-wrap overflow-auto max-h-40">
-            {JSON.stringify(item.data, null, 2)}
-          </pre>
-        </div>
-      );
+      return <RawFallbackView item={item} />;
     default:
       return null;
   }

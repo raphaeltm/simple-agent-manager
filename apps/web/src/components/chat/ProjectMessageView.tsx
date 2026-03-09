@@ -5,6 +5,8 @@ import {
   MessageBubble as AcpMessageBubble,
   ToolCallCard as AcpToolCallCard,
   ThinkingBlock as AcpThinkingBlock,
+  PlanView,
+  RawFallbackView,
 } from '@simple-agent-manager/acp-client';
 import type { ConversationItem } from '@simple-agent-manager/acp-client';
 import { ChevronDown, ChevronUp } from 'lucide-react';
@@ -87,28 +89,11 @@ function AcpConversationItemView({ item }: { item: ConversationItem }) {
     case 'tool_call':
       return <AcpToolCallCard toolCall={item} />;
     case 'plan':
-      return (
-        <div className="my-2 border border-border-default rounded-lg p-3 bg-surface">
-          <h4 className="text-xs font-medium text-fg-muted uppercase mb-2">Plan</h4>
-          <ul className="space-y-1">
-            {item.entries.map((entry, idx) => (
-              <li key={idx} className="flex items-center space-x-2 text-sm">
-                <span className={`inline-block h-2 w-2 rounded-full ${
-                  entry.status === 'completed' ? 'bg-green-400' :
-                  entry.status === 'in_progress' ? 'bg-blue-400 animate-pulse' : 'bg-gray-300'
-                }`} />
-                <span className={entry.status === 'completed' ? 'line-through text-fg-muted' : 'text-fg-primary'}>
-                  {entry.content}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      );
+      return <PlanView plan={item} />;
     case 'system_message':
       return <SystemMessageBubble text={item.text} />;
     case 'raw_fallback':
-      return null; // Skip raw fallbacks in project chat — typically protocol noise
+      return <RawFallbackView item={item} />;
     default:
       return null;
   }
@@ -185,8 +170,11 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
       if (Array.isArray(structuredContent) && structuredContent.length > 0) {
         contentItems = structuredContent.map((c) => {
           const type = (c.type === 'diff' || c.type === 'terminal' ? c.type : 'content') as 'content' | 'diff' | 'terminal';
-          const item: { type: 'content' | 'diff' | 'terminal'; text?: string; data?: unknown } = { type, text: c.text };
-          // Pass through diff data so ToolCallCard can render it (matches workspace chat data field)
+          // Pass through the full structured content object as `data` for ALL content types.
+          // This matches workspace chat's `mapToolCallContent()` which always sets `data: c`,
+          // ensuring the JSON fallback rendering works when `text` is empty.
+          const item: { type: 'content' | 'diff' | 'terminal'; text?: string; data?: unknown } = { type, text: c.text, data: c };
+          // For diffs, provide structured data so ToolCallCard can render it properly
           if (type === 'diff') {
             item.data = { type: 'diff', path: c.path ?? c.text, oldText: c.oldText, newText: c.newText };
           }
