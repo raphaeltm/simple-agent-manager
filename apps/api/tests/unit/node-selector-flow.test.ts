@@ -1,19 +1,120 @@
 /**
- * Source contract tests for selectNodeForTaskRun() flow (TDF-3).
+ * Tests for node selection logic (TDF-3).
  *
- * Validates the complete node selection algorithm:
- * - Warm pool path: nodes with warmSince selected first, sorted by size/location match
- * - Warm pool miss: no warm nodes -> falls through to capacity check
- * - Capacity path: running nodes filtered by health/workspace count/CPU/memory thresholds
- * - Capacity scoring: verify score = cpu * 0.4 + memory * 0.6 picks lowest-load node
- * - No available node: returns null
- * - Edge cases: zero nodes, all unhealthy, all at capacity, size/location mismatch fallback
- * - Threshold overrides from env vars
- * - Defense-in-depth: re-check D1 status before DO call
+ * Includes:
+ * - Behavioral tests for nodeHasCapacity() and scoreNodeLoad() with actual function calls
+ * - Source contract tests for selectNodeForTaskRun() algorithm structure
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { nodeHasCapacity, scoreNodeLoad } from '../../src/services/node-selector';
+import type { NodeMetrics } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
+  DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
+  DEFAULT_MAX_WORKSPACES_PER_NODE,
+} from '@simple-agent-manager/shared';
+
+// =============================================================================
+// Behavioral tests — nodeHasCapacity()
+// =============================================================================
+
+describe('nodeHasCapacity', () => {
+  const cpuThreshold = DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT; // 50
+  const memThreshold = DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT; // 50
+  const maxWs = DEFAULT_MAX_WORKSPACES_PER_NODE; // 3
+
+  it('returns true when all metrics are below thresholds', () => {
+    const metrics: NodeMetrics = { cpuLoadAvg1: 30, memoryPercent: 30, diskPercent: 20 };
+    expect(nodeHasCapacity(metrics, 1, maxWs, cpuThreshold, memThreshold)).toBe(true);
+  });
+
+  it('returns false when CPU exceeds threshold', () => {
+    const metrics: NodeMetrics = { cpuLoadAvg1: 51, memoryPercent: 30, diskPercent: 20 };
+    expect(nodeHasCapacity(metrics, 1, maxWs, cpuThreshold, memThreshold)).toBe(false);
+  });
+
+  it('returns false when memory exceeds threshold', () => {
+    const metrics: NodeMetrics = { cpuLoadAvg1: 30, memoryPercent: 51, diskPercent: 20 };
+    expect(nodeHasCapacity(metrics, 1, maxWs, cpuThreshold, memThreshold)).toBe(false);
+  });
+
+  it('returns false when CPU equals threshold exactly', () => {
+    const metrics: NodeMetrics = { cpuLoadAvg1: 50, memoryPercent: 30, diskPercent: 20 };
+    expect(nodeHasCapacity(metrics, 1, maxWs, cpuThreshold, memThreshold)).toBe(false);
+  });
+
+  it('returns false when memory equals threshold exactly', () => {
+    const metrics: NodeMetrics = { cpuLoadAvg1: 30, memoryPercent: 50, diskPercent: 20 };
+    expect(nodeHasCapacity(metrics, 1, maxWs, cpuThreshold, memThreshold)).toBe(false);
+  });
+
+  it('returns true just below threshold', () => {
+    const metrics: NodeMetrics = { cpuLoadAvg1: 49, memoryPercent: 49, diskPercent: 20 };
+    expect(nodeHasCapacity(metrics, 1, maxWs, cpuThreshold, memThreshold)).toBe(true);
+  });
+
+  it('returns false when workspace count equals max', () => {
+    const metrics: NodeMetrics = { cpuLoadAvg1: 10, memoryPercent: 10, diskPercent: 10 };
+    expect(nodeHasCapacity(metrics, 3, maxWs, cpuThreshold, memThreshold)).toBe(false);
+  });
+
+  it('returns false when workspace count exceeds max', () => {
+    const metrics: NodeMetrics = { cpuLoadAvg1: 10, memoryPercent: 10, diskPercent: 10 };
+    expect(nodeHasCapacity(metrics, 4, maxWs, cpuThreshold, memThreshold)).toBe(false);
+  });
+
+  it('returns true when workspace count is below max', () => {
+    const metrics: NodeMetrics = { cpuLoadAvg1: 10, memoryPercent: 10, diskPercent: 10 };
+    expect(nodeHasCapacity(metrics, 2, maxWs, cpuThreshold, memThreshold)).toBe(true);
+  });
+
+  it('returns true with null metrics if workspace count is under limit', () => {
+    expect(nodeHasCapacity(null, 2, maxWs, cpuThreshold, memThreshold)).toBe(true);
+  });
+
+  it('returns false with null metrics if workspace count is at limit', () => {
+    expect(nodeHasCapacity(null, 3, maxWs, cpuThreshold, memThreshold)).toBe(false);
+  });
+
+  it('uses the correct default thresholds (50% CPU, 50% memory, 3 max workspaces)', () => {
+    expect(DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT).toBe(50);
+    expect(DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT).toBe(50);
+    expect(DEFAULT_MAX_WORKSPACES_PER_NODE).toBe(3);
+  });
+});
+
+// =============================================================================
+// Behavioral tests — scoreNodeLoad()
+// =============================================================================
+
+describe('scoreNodeLoad', () => {
+  it('returns null for null metrics', () => {
+    expect(scoreNodeLoad(null)).toBeNull();
+  });
+
+  it('returns 0 for idle node', () => {
+    expect(scoreNodeLoad({ cpuLoadAvg1: 0, memoryPercent: 0, diskPercent: 0 })).toBe(0);
+  });
+
+  it('weights memory 60% and CPU 40%', () => {
+    const score = scoreNodeLoad({ cpuLoadAvg1: 100, memoryPercent: 0, diskPercent: 0 });
+    expect(score).toBe(40); // 100 * 0.4 + 0 * 0.6
+
+    const score2 = scoreNodeLoad({ cpuLoadAvg1: 0, memoryPercent: 100, diskPercent: 0 });
+    expect(score2).toBe(60); // 0 * 0.4 + 100 * 0.6
+  });
+
+  it('computes weighted average correctly', () => {
+    const score = scoreNodeLoad({ cpuLoadAvg1: 50, memoryPercent: 50, diskPercent: 50 });
+    expect(score).toBe(50); // 50 * 0.4 + 50 * 0.6
+  });
+});
+
+// =============================================================================
+// Source contract tests
+// =============================================================================
 
 const selectorSource = readFileSync(
   resolve(process.cwd(), 'src/services/node-selector.ts'),
