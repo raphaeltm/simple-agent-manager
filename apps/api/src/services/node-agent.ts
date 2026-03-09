@@ -243,12 +243,18 @@ export async function createAgentSessionOnNode(
   env: Env,
   userId: string,
   chatSessionId?: string | null,
+  projectId?: string | null,
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/agent-sessions`, {
     method: 'POST',
     userId,
     workspaceId,
-    body: JSON.stringify({ sessionId, label, chatSessionId: chatSessionId ?? undefined }),
+    body: JSON.stringify({
+      sessionId,
+      label,
+      chatSessionId: chatSessionId ?? undefined,
+      projectId: projectId ?? undefined,
+    }),
   });
 }
 

@@ -813,6 +813,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         this.env as any,
         state.userId,
         state.stepResults.chatSessionId,
+        state.projectId,
       );
 
       log.info('task_runner_do.step.agent_session_created', {
