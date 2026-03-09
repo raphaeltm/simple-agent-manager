@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { List, Settings, LayoutGrid } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
 import { VoiceButton } from '@simple-agent-manager/acp-client';
@@ -115,14 +115,6 @@ export function ProjectChat() {
   // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
   const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Track "New Chat" intent so auto-select doesn't override it.
-  // Initialize from navigation state to support external navigation
-  // (e.g., command palette "New Chat" action).
-  const location = useLocation();
-  const newChatIntentRef = useRef(
-    (location.state as { newChat?: boolean } | null)?.newChat === true,
-  );
 
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
@@ -253,17 +245,6 @@ export function ProjectChat() {
     };
   }, []);
 
-  // Auto-select the most recent session on initial load
-  useEffect(() => {
-    if (!sessionId && sessions.length > 0 && !loading && !provisioning) {
-      if (newChatIntentRef.current) return;
-      const mostRecent = sessions[0];
-      if (mostRecent) {
-        navigate(`/projects/${projectId}/chat/${mostRecent.id}`, { replace: true });
-      }
-    }
-  }, [sessionId, sessions, loading, projectId, navigate, provisioning]);
-
   // ---------------------------------------------------------------------------
   // Handlers (all preserved from original)
   // ---------------------------------------------------------------------------
@@ -294,7 +275,6 @@ export function ProjectChat() {
         errorMessage: null,
         startedAt: Date.now(),
       });
-      newChatIntentRef.current = false;
       navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
       void loadSessions();
     } catch (err) {
@@ -305,7 +285,6 @@ export function ProjectChat() {
   };
 
   const handleNewChat = useCallback(() => {
-    newChatIntentRef.current = true;
     navigate(`/projects/${projectId}/chat`, { replace: true });
     setMessage('');
     setSubmitError(null);
@@ -313,7 +292,6 @@ export function ProjectChat() {
   }, [navigate, projectId]);
 
   const handleSelect = (id: string) => {
-    newChatIntentRef.current = false;
     setProvisioning(null);
     setSidebarOpen(false);
     navigate(`/projects/${projectId}/chat/${id}`);

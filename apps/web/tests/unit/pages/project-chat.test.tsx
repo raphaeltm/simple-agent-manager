@@ -126,7 +126,7 @@ describe('ProjectChat new chat button', () => {
     });
   });
 
-  it('auto-selects most recent session on initial load', async () => {
+  it('defaults to new chat input when sessions exist', async () => {
     mocks.listChatSessions.mockResolvedValue({
       sessions: [SESSION_1, SESSION_2],
       total: 2,
@@ -134,13 +134,16 @@ describe('ProjectChat new chat button', () => {
 
     renderProjectChat();
 
-    // Should auto-navigate to the most recent session and show the message view
+    // Should show new chat input, not auto-select a session
     await waitFor(() => {
-      expect(screen.getByTestId('message-view')).toHaveTextContent('session-1');
+      expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
     });
+
+    // Verify message view is NOT shown
+    expect(screen.queryByTestId('message-view')).not.toBeInTheDocument();
   });
 
-  it('shows new chat input after clicking "+ New" instead of auto-selecting', async () => {
+  it('shows new chat input after clicking "+ New Chat" from a session', async () => {
     mocks.listChatSessions.mockResolvedValue({
       sessions: [SESSION_1, SESSION_2],
       total: 2,
@@ -157,35 +160,29 @@ describe('ProjectChat new chat button', () => {
     // Click the "+ New Chat" button in the sidebar
     fireEvent.click(screen.getByRole('button', { name: '+ New Chat' }));
 
-    // Should show the new chat input, NOT redirect back to session-1
+    // Should show the new chat input
     await waitFor(() => {
       expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
     });
 
-    // Verify message view is NOT shown (we're on new chat, not an existing session)
+    // Verify message view is NOT shown
     expect(screen.queryByTestId('message-view')).not.toBeInTheDocument();
   });
 
-  it('clears new chat intent when selecting an existing session', async () => {
+  it('navigates to existing session when clicking it in the sidebar', async () => {
     mocks.listChatSessions.mockResolvedValue({
       sessions: [SESSION_1, SESSION_2],
       total: 2,
     });
 
-    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_1.id}`);
+    renderProjectChat();
 
+    // Wait for sessions to load
     await waitFor(() => {
       expect(screen.getByText('First chat')).toBeInTheDocument();
     });
 
-    // Click "+ New Chat"
-    fireEvent.click(screen.getByRole('button', { name: '+ New Chat' }));
-
-    await waitFor(() => {
-      expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
-    });
-
-    // Now click on an existing session
+    // Click on an existing session
     fireEvent.click(screen.getByText('Second chat'));
 
     // Should show that session's messages
