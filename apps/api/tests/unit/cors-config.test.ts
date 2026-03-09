@@ -1,6 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { Hono } from 'hono';
-import { cors } from 'hono/cors';
 
 /**
  * Unit tests for the CORS origin callback logic.
