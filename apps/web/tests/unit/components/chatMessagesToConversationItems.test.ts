@@ -514,14 +514,32 @@ describe('chatMessagesToConversationItems', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Unknown role is ignored
+  // Unknown roles render as raw_fallback (not silently dropped)
   // -------------------------------------------------------------------------
 
-  it('ignores messages with unknown roles', () => {
-    const input = [msg({ role: 'future_unknown_role', content: 'mystery' })];
+  it('renders messages with unknown roles as raw_fallback items', () => {
+    const input = [msg({ role: 'future_unknown_role', content: 'mystery content' })];
     const items = chatMessagesToConversationItems(input);
 
-    expect(items).toHaveLength(0);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: 'raw_fallback',
+      data: { role: 'future_unknown_role', content: 'mystery content' },
+    });
+  });
+
+  it('preserves unknown role messages in order alongside known roles', () => {
+    const input = [
+      msg({ role: 'user', content: 'hello' }),
+      msg({ role: 'exotic_role', content: 'exotic data' }),
+      msg({ role: 'assistant', content: 'response' }),
+    ];
+    const items = chatMessagesToConversationItems(input);
+
+    expect(items).toHaveLength(3);
+    expect(items[0]).toMatchObject({ kind: 'user_message' });
+    expect(items[1]).toMatchObject({ kind: 'raw_fallback' });
+    expect(items[2]).toMatchObject({ kind: 'agent_message' });
   });
 
   // -------------------------------------------------------------------------

@@ -267,6 +267,114 @@ describe('ProjectData Durable Object', () => {
   });
 
   // =========================================================================
+  // Agent Completion & Idle State
+  // =========================================================================
+
+  describe('agent completion and idle state', () => {
+    it('markAgentCompleted sets agentCompletedAt and isIdle on getSession', async () => {
+      const stub = getStub('project-agent-completed-getsession');
+      const sessionId = await stub.createSession(null, 'Agent session');
+
+      await stub.markAgentCompleted(sessionId);
+
+      const session = await stub.getSession(sessionId);
+      expect(session).not.toBeNull();
+      expect(session!.agentCompletedAt).toBeTruthy();
+      expect(typeof session!.agentCompletedAt).toBe('number');
+      expect(session!.isIdle).toBe(true);
+    });
+
+    it('markAgentCompleted sets agentCompletedAt and isIdle on listSessions', async () => {
+      const stub = getStub('project-agent-completed-listsessions');
+      const sessionId = await stub.createSession(null, 'Agent list session');
+
+      await stub.markAgentCompleted(sessionId);
+
+      const { sessions } = await stub.listSessions(null);
+      const session = sessions.find((s) => s.id === sessionId);
+      expect(session).toBeTruthy();
+      expect(session!.agentCompletedAt).toBeTruthy();
+      expect(session!.isIdle).toBe(true);
+    });
+
+    it('markAgentCompleted sets agentCompletedAt and isIdle on getSessionsByTaskIds', async () => {
+      const stub = getStub('project-agent-completed-bytaskids');
+      const sessionId = await stub.createSession(null, 'Task agent session', 'task-agent-complete');
+
+      await stub.markAgentCompleted(sessionId);
+
+      const results = await stub.getSessionsByTaskIds(['task-agent-complete']);
+      expect(results).toHaveLength(1);
+      expect(results[0]!.agentCompletedAt).toBeTruthy();
+      expect(results[0]!.isIdle).toBe(true);
+    });
+
+    it('agentCompletedAt is null for sessions without agent completion', async () => {
+      const stub = getStub('project-agent-not-completed');
+      const sessionId = await stub.createSession(null, 'Fresh session');
+
+      const session = await stub.getSession(sessionId);
+      expect(session).not.toBeNull();
+      expect(session!.agentCompletedAt).toBeNull();
+      expect(session!.isIdle).toBe(false);
+    });
+
+    it('isIdle is false for stopped sessions even with agentCompletedAt set', async () => {
+      const stub = getStub('project-stopped-not-idle');
+      const sessionId = await stub.createSession(null, 'Stopped agent session');
+
+      await stub.markAgentCompleted(sessionId);
+      await stub.stopSession(sessionId);
+
+      const session = await stub.getSession(sessionId);
+      expect(session).not.toBeNull();
+      expect(session!.status).toBe('stopped');
+      // isIdle should be false because the session is stopped, not active
+      expect(session!.isIdle).toBe(false);
+    });
+  });
+
+  // =========================================================================
+  // Idle Cleanup Schedule
+  // =========================================================================
+
+  describe('getCleanupAt', () => {
+    it('returns null when no cleanup is scheduled', async () => {
+      const stub = getStub('project-no-cleanup');
+      const sessionId = await stub.createSession(null, 'No cleanup session');
+
+      const cleanupAt = await stub.getCleanupAt(sessionId);
+      expect(cleanupAt).toBeNull();
+    });
+
+    it('returns cleanup timestamp after scheduling idle cleanup', async () => {
+      const stub = getStub('project-cleanup-scheduled');
+      const sessionId = await stub.createSession('ws-cleanup', 'Cleanup session');
+
+      const before = Date.now();
+      const { cleanupAt: scheduled } = await stub.scheduleIdleCleanup(sessionId, 'ws-cleanup', null);
+      const after = Date.now();
+
+      const cleanupAt = await stub.getCleanupAt(sessionId);
+      expect(cleanupAt).toBeTruthy();
+      expect(cleanupAt).toBe(scheduled);
+      // Should be in the future (timeout added to current time)
+      expect(cleanupAt!).toBeGreaterThan(before);
+    });
+
+    it('returns null after cancelling idle cleanup', async () => {
+      const stub = getStub('project-cleanup-cancelled');
+      const sessionId = await stub.createSession('ws-cancel', 'Cancel session');
+
+      await stub.scheduleIdleCleanup(sessionId, 'ws-cancel', null);
+      await stub.cancelIdleCleanup(sessionId);
+
+      const cleanupAt = await stub.getCleanupAt(sessionId);
+      expect(cleanupAt).toBeNull();
+    });
+  });
+
+  // =========================================================================
   // Batch Message Persistence
   // =========================================================================
 
