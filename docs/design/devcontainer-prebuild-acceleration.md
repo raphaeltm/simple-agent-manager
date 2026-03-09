@@ -2,7 +2,7 @@
 
 **Status**: Draft
 **Date**: 2026-03-09
-**Author**: AI-assisted
+**Author**: AI-assisted (with human direction)
 
 ## Problem
 
