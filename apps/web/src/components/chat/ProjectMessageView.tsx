@@ -215,6 +215,15 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
       // System messages (task status, error logs) rendered as preformatted text
       // to prevent markdown interpretation of build log characters (#, *, URLs)
       acc.push({ kind: 'system_message', id: msg.id, text: msg.content, timestamp: msg.createdAt });
+    } else {
+      // Unknown roles render as raw fallback (matches workspace chat behavior)
+      // to ensure no messages are silently dropped.
+      acc.push({
+        kind: 'raw_fallback' as const,
+        id: msg.id,
+        data: { role: msg.role, content: msg.content, toolMetadata: msg.toolMetadata },
+        timestamp: msg.createdAt,
+      });
     }
     return acc;
   }, []);
@@ -268,17 +277,9 @@ function AcpMessages({ items }: { items: ConversationItem[] }) {
 
 type SessionState = 'active' | 'idle' | 'terminated';
 
-interface ExtendedSession extends ChatSessionResponse {
-  agentCompletedAt?: number | null;
-  isIdle?: boolean;
-  cleanupAt?: number | null;
-  task?: { id: string; status?: string; executionStep?: string | null; errorMessage?: string | null; outputBranch?: string | null; outputPrUrl?: string | null; outputSummary?: string | null; finalizedAt?: string | null };
-}
-
 function deriveSessionState(session: ChatSessionResponse): SessionState {
   if (session.status === 'stopped') return 'terminated';
-  const s = session as ExtendedSession;
-  if (s.isIdle || s.agentCompletedAt) return 'idle';
+  if (session.isIdle || session.agentCompletedAt) return 'idle';
   if (session.status === 'active') return 'active';
   return 'terminated';
 }
@@ -293,7 +294,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const isLoadingMoreRef = useRef(false);
 
   const [session, setSession] = useState<ChatSessionResponse | null>(null);
-  const [taskEmbed, setTaskEmbed] = useState<ExtendedSession['task'] | null>(null);
+  const [taskEmbed, setTaskEmbed] = useState<ChatSessionResponse['task'] | null>(null);
   const [messages, setMessages] = useState<ChatMessageResponse[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -402,7 +403,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     try {
       setError(null);
       setLoading(true);
-      const data: ChatSessionDetailResponse & { session: ExtendedSession } = await getChatSession(projectId, sessionId);
+      const data: ChatSessionDetailResponse = await getChatSession(projectId, sessionId);
       setSession(data.session);
       setMessages(data.messages);
       setHasMore(data.hasMore);
@@ -459,7 +460,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     let lastPollFingerprint = '';
     const pollInterval = setInterval(async () => {
       try {
-        const data: ChatSessionDetailResponse & { session: ExtendedSession } = await getChatSession(
+        const data: ChatSessionDetailResponse = await getChatSession(
           projectId, sessionId, { signal: abortController.signal }
         );
         // Guard: skip if the server returned a different session than requested
@@ -490,9 +491,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
   // Idle timer countdown (TDF-8)
   // Extract primitive values to avoid re-firing on every session object change
-  const ext = session as ExtendedSession | null;
-  const cleanupAt = ext?.cleanupAt ?? null;
-  const agentCompletedAt = ext?.agentCompletedAt ?? null;
+  const cleanupAt = session?.cleanupAt ?? null;
+  const agentCompletedAt = session?.agentCompletedAt ?? null;
 
   useEffect(() => {
     if (sessionState !== 'idle') {
@@ -811,7 +811,7 @@ function SessionHeader({
   sessionState: SessionState;
   loading: boolean;
   idleCountdownMs: number | null;
-  taskEmbed: ExtendedSession['task'] | null;
+  taskEmbed: ChatSessionResponse['task'] | null;
 }) {
   const [expanded, setExpanded] = useState(false);
 

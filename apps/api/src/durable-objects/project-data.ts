@@ -403,7 +403,7 @@ export class ProjectData extends DurableObject<Env> {
 
     const rows = this.sql
       .exec(
-        `SELECT id, workspace_id, task_id, topic, status, message_count, started_at, ended_at, created_at, updated_at FROM chat_sessions ${whereClause} ORDER BY started_at DESC LIMIT ? OFFSET ?`,
+        `SELECT id, workspace_id, task_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at FROM chat_sessions ${whereClause} ORDER BY started_at DESC LIMIT ? OFFSET ?`,
         ...params,
         limit,
         offset
@@ -428,7 +428,7 @@ export class ProjectData extends DurableObject<Env> {
     const placeholders = taskIds.map(() => '?').join(', ');
     const rows = this.sql
       .exec(
-        `SELECT id, workspace_id, task_id, topic, status, message_count, started_at, ended_at, created_at, updated_at
+        `SELECT id, workspace_id, task_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at
          FROM chat_sessions
          WHERE task_id IN (${placeholders})
          ORDER BY updated_at DESC`,
@@ -442,7 +442,7 @@ export class ProjectData extends DurableObject<Env> {
   async getSession(sessionId: string): Promise<Record<string, unknown> | null> {
     const rows = this.sql
       .exec(
-        'SELECT id, workspace_id, task_id, topic, status, message_count, started_at, ended_at, created_at, updated_at FROM chat_sessions WHERE id = ?',
+        'SELECT id, workspace_id, task_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at FROM chat_sessions WHERE id = ?',
         sessionId
       )
       .toArray();
@@ -634,6 +634,16 @@ export class ProjectData extends DurableObject<Env> {
 
     await this.recalculateAlarm();
     return { cleanupAt };
+  }
+
+  /**
+   * Get the scheduled cleanup time for a session, if any.
+   */
+  async getCleanupAt(sessionId: string): Promise<number | null> {
+    const row = this.sql
+      .exec('SELECT cleanup_at FROM idle_cleanup_schedule WHERE session_id = ?', sessionId)
+      .toArray()[0];
+    return row ? (row.cleanup_at as number) : null;
   }
 
   /**
