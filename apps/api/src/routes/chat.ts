@@ -166,16 +166,8 @@ chatRoutes.get('/:sessionId', async (c) => {
     }
   }
 
-  // Fetch cleanup schedule for idle countdown display (best-effort)
-  let cleanupAt: number | null = null;
-  try {
-    cleanupAt = await projectDataService.getCleanupAt(c.env, projectId, sessionId);
-  } catch {
-    // Non-fatal — session still works without cleanup info
-  }
-
   return c.json({
-    session: { ...session, task, cleanupAt },
+    session: { ...session, task },
     messages: messagesResult.messages,
     hasMore: messagesResult.hasMore,
   });

@@ -524,7 +524,19 @@ describe('chatMessagesToConversationItems', () => {
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
       kind: 'raw_fallback',
-      data: { role: 'future_unknown_role', content: 'mystery content' },
+      data: { role: 'future_unknown_role', content: 'mystery content', toolMetadata: null },
+    });
+  });
+
+  it('renders unknown roles with non-null toolMetadata in raw_fallback', () => {
+    const meta = { customField: 'value' };
+    const input = [msg({ role: 'exotic_role', content: 'exotic data', toolMetadata: meta as unknown as null })];
+    const items = chatMessagesToConversationItems(input);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: 'raw_fallback',
+      data: { role: 'exotic_role', content: 'exotic data', toolMetadata: { customField: 'value' } },
     });
   });
 

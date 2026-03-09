@@ -442,7 +442,13 @@ export class ProjectData extends DurableObject<Env> {
   async getSession(sessionId: string): Promise<Record<string, unknown> | null> {
     const rows = this.sql
       .exec(
-        'SELECT id, workspace_id, task_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at FROM chat_sessions WHERE id = ?',
+        `SELECT cs.id, cs.workspace_id, cs.task_id, cs.topic, cs.status,
+                cs.message_count, cs.started_at, cs.ended_at, cs.created_at,
+                cs.updated_at, cs.agent_completed_at,
+                ics.cleanup_at
+         FROM chat_sessions cs
+         LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id
+         WHERE cs.id = ?`,
         sessionId
       )
       .toArray();
@@ -983,6 +989,7 @@ export class ProjectData extends DurableObject<Env> {
       isIdle: status === 'active' && agentCompletedAt != null,
       isTerminated: status === 'stopped',
       workspaceUrl: workspaceId && baseDomain ? `https://ws-${workspaceId}.${baseDomain}` : null,
+      cleanupAt: (row.cleanup_at as number) ?? null,
     };
   }
 
