@@ -143,6 +143,15 @@ export async function getMessages(
   return stub.getMessages(sessionId, limit, before);
 }
 
+export async function getCleanupAt(
+  env: Env,
+  projectId: string,
+  sessionId: string
+): Promise<number | null> {
+  const stub = await getStub(env, projectId);
+  return stub.getCleanupAt(sessionId);
+}
+
 export async function markAgentCompleted(
   env: Env,
   projectId: string,

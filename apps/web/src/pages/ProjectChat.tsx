@@ -54,8 +54,7 @@ type SessionState = 'active' | 'idle' | 'terminated';
 
 function getSessionState(session: ChatSessionResponse): SessionState {
   if (session.status === 'stopped') return 'terminated';
-  const s = session as ChatSessionResponse & { agentCompletedAt?: number | null; isIdle?: boolean };
-  if (s.isIdle || s.agentCompletedAt) return 'idle';
+  if (session.isIdle || session.agentCompletedAt) return 'idle';
   if (session.status === 'active') return 'active';
   return 'terminated';
 }

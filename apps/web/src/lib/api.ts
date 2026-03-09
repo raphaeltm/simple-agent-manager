@@ -477,6 +477,29 @@ export interface ChatSessionResponse {
   startedAt: number;
   endedAt: number | null;
   createdAt: number;
+  /** Timestamp when the agent completed its work (null if still running or never started). */
+  agentCompletedAt?: number | null;
+  /** Timestamp of the last message in the session. */
+  lastMessageAt?: number | null;
+  /** Whether the session is idle (agent completed but session still active). */
+  isIdle?: boolean;
+  /** Whether the session has been stopped. */
+  isTerminated?: boolean;
+  /** Full workspace URL for direct access. */
+  workspaceUrl?: string | null;
+  /** Scheduled cleanup timestamp for idle sessions (from idle_cleanup_schedule). */
+  cleanupAt?: number | null;
+  /** Embedded task summary (populated in session detail response). */
+  task?: {
+    id: string;
+    status?: string;
+    executionStep?: string | null;
+    errorMessage?: string | null;
+    outputBranch?: string | null;
+    outputPrUrl?: string | null;
+    outputSummary?: string | null;
+    finalizedAt?: string | null;
+  };
 }
 
 export interface ChatMessageResponse {
