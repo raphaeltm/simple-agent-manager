@@ -27,7 +27,7 @@ User creates workspace
   → Total: 5-15 minutes
 ```
 
-The cloud-init template (`packages/cloud-init/src/template.ts`) also runs `devcontainer up` during initial node provisioning, adding to the first-workspace delay.
+The cloud-init template (`packages/cloud-init/src/template.ts`) installs the devcontainer CLI during node provisioning but does NOT run `devcontainer up`. The actual container build is deferred to workspace creation time when the VM agent calls `ensureDevcontainerReady()`. This means the first workspace on a new node also waits for the CLI installation to complete before the build can start.
 
 ## Proposed Flow
 
@@ -137,18 +137,23 @@ The VM agent attempts to pull `latest` first. If the user's workspace targets a 
 
 ### Decision 5: VM Agent Integration
 
-Modify `bootstrap.go:ensureDevcontainerReady()` to check for a pre-built image before building:
+Modify `bootstrap.go:ensureDevcontainerReady()` to check for a pre-built image before building. The existing function already has multi-stage fallback logic (skip if container running, detect repo config, two-tier fallback). The pre-built image pull inserts into this flow:
 
 ```
 ensureDevcontainerReady()
-  → Check if repo has devcontainer.json
-  → Compute expected image name: ghcr.io/{owner}/{repo}/devcontainer:latest
-  → docker pull {image} (with timeout)
-  → If pull succeeds:
-      → devcontainer up --workspace-folder {dir} with pre-built image
-  → If pull fails:
-      → Fall back to current behavior (build from scratch)
+  → If container already running: return (existing skip logic)
+  → Wait for devcontainer CLI (async race with cloud-init install)
+  → Check if repo has devcontainer.json (existing hasDevcontainerConfig())
+  → [NEW] Compute expected image name: ghcr.io/{owner}/{repo}/devcontainer:latest
+  → [NEW] docker pull {image} (with configurable timeout)
+  → [NEW] If pull succeeds: devcontainer up with pre-built image
+  → If pull fails or no image: fall through to existing logic:
+      → If repo has devcontainer.json: devcontainer up with repo config
+      → If that fails: remove stale containers, retry with default image
+      → If no devcontainer.json: devcontainer up with default image
 ```
+
+Note: The default image (`mcr.microsoft.com/devcontainers/base:ubuntu`) is already a named constant (`DefaultDevcontainerImage` in `config.go`) with an env var override (`DEFAULT_DEVCONTAINER_IMAGE`). The pre-build implementation should reference this constant rather than hardcoding the image name.
 
 This is a **graceful enhancement** — the existing build path remains as a fallback, so no workspace creation is broken if the registry is unavailable or no pre-built image exists.
 
