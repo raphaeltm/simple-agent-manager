@@ -535,12 +535,21 @@ func readAuthFileFromContainer(ctx context.Context, containerID, user, authFileP
 	return buf.String(), nil
 }
 
+// agentInstallMu serializes concurrent agent binary installs to prevent
+// npm ENOTEMPTY errors when two SelectAgent calls race.
+var agentInstallMu sync.Mutex
+
 // installAgentBinary checks if the agent command exists in the given container
 // and installs it via the provided installCmd if missing. The install runs as
 // root to ensure permissions for system-level package installs. Returns nil if
 // the binary was already present or was installed successfully.
+//
+// A package-level mutex serializes installs so that concurrent SelectAgent
+// calls do not race on npm global installs (which causes ENOTEMPTY errors).
+// The fast-path `which` check runs without the mutex; only the slow install
+// path acquires it, with a double-check after acquisition.
 func installAgentBinary(ctx context.Context, containerID string, info agentCommandInfo) error {
-	// Check if the command already exists
+	// Fast path: check without mutex — avoids contention when already installed.
 	checkArgs := []string{"exec", containerID, "which", info.command}
 	checkCmd := exec.CommandContext(ctx, "docker", checkArgs...)
 	if err := checkCmd.Run(); err == nil {
@@ -548,7 +557,29 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 		return nil
 	}
 
+	// Slow path: acquire mutex to serialize installs.
+	agentInstallMu.Lock()
+	defer agentInstallMu.Unlock()
+
+	// Double-check after acquiring mutex — another goroutine may have installed it.
+	recheckCmd := exec.CommandContext(ctx, "docker", checkArgs...)
+	if err := recheckCmd.Run(); err == nil {
+		slog.Info("Agent binary was installed by another goroutine", "command", info.command)
+		return nil
+	}
+
 	slog.Info("Agent binary not found in container, installing", "command", info.command)
+
+	// Clean up stale partial install directories left by previous failed npm installs.
+	// npm renames the target directory to a temp name (with random suffix) during install;
+	// if the install fails, these directories can block subsequent installs with ENOTEMPTY.
+	cleanupScript := fmt.Sprintf(
+		`rm -rf /usr/local/lib/node_modules/@zed-industries/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/@zed-industries/.%s-* 2>/dev/null; true`,
+		info.command, info.command,
+	)
+	cleanupArgs := []string{"exec", "-u", "root", containerID, "sh", "-c", cleanupScript}
+	cleanupCmd := exec.CommandContext(ctx, "docker", cleanupArgs...)
+	_ = cleanupCmd.Run() // best-effort cleanup
 
 	installScript := fmt.Sprintf(
 		`which npm >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq nodejs npm; }; %s`,
