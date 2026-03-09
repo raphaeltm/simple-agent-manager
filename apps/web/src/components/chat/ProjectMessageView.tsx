@@ -8,6 +8,7 @@ import {
 } from '@simple-agent-manager/acp-client';
 import type { ConversationItem } from '@simple-agent-manager/acp-client';
 import { ChevronDown, ChevronUp } from 'lucide-react';
+import { TruncatedSummary } from './TruncatedSummary';
 import { getChatSession, getTranscribeApiUrl, resetIdleTimer } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
@@ -688,14 +689,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
       {taskEmbed?.outputSummary && (
-        <div className="px-4 py-2 bg-success-tint border-b border-border-default">
-          <span className="sam-type-caption text-success font-medium">
-            Summary:
-          </span>{' '}
-          <span className="sam-type-caption text-fg-primary break-words">
-            {taskEmbed.outputSummary}
-          </span>
-        </div>
+        <TruncatedSummary summary={taskEmbed.outputSummary} />
       )}
 
       {/* Messages area — merged DO (persistent) + ACP (streaming/unpersisted) */}
