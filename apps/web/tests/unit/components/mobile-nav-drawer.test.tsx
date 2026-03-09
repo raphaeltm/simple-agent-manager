@@ -116,4 +116,29 @@ describe('MobileNavDrawer', () => {
     const dashboardButton = screen.getByText('Dashboard');
     expect(dashboardButton.className).not.toContain('text-accent');
   });
+
+  describe('command palette button', () => {
+    it('renders search button when onOpenCommandPalette is provided', () => {
+      const onOpenCommandPalette = vi.fn();
+      render(<MobileNavDrawer {...defaultProps} onOpenCommandPalette={onOpenCommandPalette} />);
+
+      expect(screen.getByLabelText('Open command palette')).toBeInTheDocument();
+      expect(screen.getByText('Search...')).toBeInTheDocument();
+    });
+
+    it('does not render search button when onOpenCommandPalette is not provided', () => {
+      render(<MobileNavDrawer {...defaultProps} />);
+
+      expect(screen.queryByLabelText('Open command palette')).not.toBeInTheDocument();
+    });
+
+    it('calls onOpenCommandPalette when search button is clicked', () => {
+      const onOpenCommandPalette = vi.fn();
+      render(<MobileNavDrawer {...defaultProps} onOpenCommandPalette={onOpenCommandPalette} />);
+
+      fireEvent.click(screen.getByLabelText('Open command palette'));
+
+      expect(onOpenCommandPalette).toHaveBeenCalledTimes(1);
+    });
+  });
 });

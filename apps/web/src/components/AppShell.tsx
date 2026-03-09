@@ -85,6 +85,7 @@ export function AppShell({ children }: AppShellProps) {
             currentPath={location.pathname}
             onNavigate={(path) => { navigate(path); setDrawerOpen(false); }}
             onSignOut={handleSignOut}
+            onOpenCommandPalette={() => { setDrawerOpen(false); commandPalette.open(); }}
           />
         )}
 
