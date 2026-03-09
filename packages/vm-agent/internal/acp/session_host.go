@@ -272,11 +272,8 @@ func (h *SessionHost) AttachViewer(id string, conn *websocket.Conn) *Viewer {
 	// Replay buffered messages
 	h.replayToViewer(viewer)
 
-	// Signal replay complete. Use sendToViewerWithTimeout (blocking) instead
-	// of sendToViewerPriority here — priority sends evict a queued message
-	// when the channel is full, which drops replay data that the write pump
-	// hasn't drained yet. Blocking ensures all replay messages are delivered.
-	h.sendToViewerWithTimeout(viewer, h.marshalControl(MsgSessionReplayDone, nil), 5*time.Second)
+	// Signal replay complete
+	h.sendToViewerPriority(viewer, h.marshalControl(MsgSessionReplayDone, nil))
 
 	// Send a post-replay authoritative state snapshot with replayCount=0.
 	// This closes the race where prompt status changes during replay and the
@@ -284,9 +281,8 @@ func (h *SessionHost) AttachViewer(id string, conn *websocket.Conn) *Viewer {
 	// the replay has already been delivered — a non-zero value would cause the
 	// browser to re-enter replay mode, calling prepareForReplay() which wipes
 	// all just-replayed messages.
-	// Uses sendToViewerWithTimeout for the same reason as replay_complete above.
 	finalStatus, finalAgentType, finalErr := h.currentSessionState()
-	h.sendToViewerWithTimeout(viewer, h.marshalSessionStateWithReplayCount(finalStatus, finalAgentType, finalErr, 0), 5*time.Second)
+	h.sendToViewerPriority(viewer, h.marshalSessionStateWithReplayCount(finalStatus, finalAgentType, finalErr, 0))
 
 	return viewer
 }
