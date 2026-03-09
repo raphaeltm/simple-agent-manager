@@ -1665,10 +1665,13 @@ workspacesRoutes.post('/:id/messages', async (c) => {
     }
   }
 
-  // Resolve workspace to project
+  // Resolve workspace to project and validate session linkage (Principle XIII: Fail-Fast)
   const db = drizzle(c.env.DATABASE, { schema });
   const workspaceRows = await db
-    .select({ projectId: schema.workspaces.projectId })
+    .select({
+      projectId: schema.workspaces.projectId,
+      chatSessionId: schema.workspaces.chatSessionId,
+    })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
@@ -1679,6 +1682,35 @@ workspacesRoutes.post('/:id/messages', async (c) => {
   }
   if (!workspace.projectId) {
     throw errors.badRequest('Workspace is not linked to a project');
+  }
+
+  // Validate session ID matches workspace's linked session.
+  // If the workspace has a chatSessionId, messages MUST target that session.
+  // Messages targeting a different session are rejected to prevent misrouting.
+  if (workspace.chatSessionId && workspace.chatSessionId !== sessionId) {
+    console.error('Message routing mismatch: workspace linked to different session', {
+      workspaceId,
+      projectId: workspace.projectId,
+      expectedSessionId: workspace.chatSessionId,
+      receivedSessionId: sessionId,
+      messageCount: body.messages.length,
+      action: 'rejected_batch',
+    });
+    throw errors.badRequest(
+      `Session mismatch: workspace is linked to session ${workspace.chatSessionId}, ` +
+      `but messages target session ${sessionId}`
+    );
+  }
+
+  // If workspace has no chatSessionId, log a warning — messages will be routed
+  // to whatever sessionId was provided, but this may indicate a setup issue.
+  if (!workspace.chatSessionId) {
+    console.warn('Workspace has no linked chatSessionId, routing messages by provided sessionId', {
+      workspaceId,
+      projectId: workspace.projectId,
+      providedSessionId: sessionId,
+      messageCount: body.messages.length,
+    });
   }
 
   // Delegate to ProjectData DO

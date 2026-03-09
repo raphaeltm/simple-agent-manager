@@ -965,6 +965,47 @@ func TestSetSessionID_NilReporter_DoesNotPanic(t *testing.T) {
 	r.SetSessionID("anything") // should not panic
 }
 
+// TestEnqueue_EmptySessionID_Rejects verifies that Enqueue rejects messages
+// when no session ID is set (Principle XIII: Fail-Fast Error Detection).
+// This is a defensive check — by construction, a non-nil Reporter always has
+// sessionID set via New(). But during warm node transitions, there's a brief
+// window where sessionID could be empty. This test ensures the defensive
+// check works correctly.
+func TestEnqueue_EmptySessionID_Rejects(t *testing.T) {
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost", "ws-1")
+	cfg.SessionID = "initial-session" // Reporter requires non-empty to initialize
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer r.Shutdown()
+
+	// Clear the session ID to simulate a state where it hasn't been set yet
+	r.mu.Lock()
+	r.sessionID = ""
+	r.mu.Unlock()
+
+	err = r.Enqueue(Message{
+		MessageID: "should-be-dropped",
+		SessionID: "ignored", // struct field is overridden by reporter's sessionID
+		Role:      "user",
+		Content:   "this should not be enqueued",
+		Timestamp: "2024-01-01T00:00:00Z",
+	})
+
+	if err == nil {
+		t.Fatal("expected error when enqueueing with empty session ID")
+	}
+
+	// Verify no message was inserted into the outbox
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM message_outbox").Scan(&count)
+	if count != 0 {
+		t.Fatalf("expected outbox empty when session ID is empty, got %d", count)
+	}
+}
+
 func TestSetSessionID_ConcurrentFlushDoesNotLeakStaleMessages(t *testing.T) {
 	// Verify that no messages tagged with the old session ID are delivered
 	// to the server after SetSessionID returns. This tests the flushMu
