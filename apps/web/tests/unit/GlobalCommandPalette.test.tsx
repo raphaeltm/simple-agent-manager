@@ -782,7 +782,11 @@ describe('GlobalCommandPalette', () => {
 
   it('gracefully handles chat session fetch failure', async () => {
     const { listChatSessions } = await import('../../src/lib/api');
-    vi.mocked(listChatSessions).mockRejectedValue(new Error('Network error'));
+    // Reject all per-project session fetches (one per project)
+    vi.mocked(listChatSessions)
+      .mockRejectedValueOnce(new Error('Network error'))
+      .mockRejectedValueOnce(new Error('Network error'))
+      .mockRejectedValueOnce(new Error('Network error'));
 
     renderPalette();
 

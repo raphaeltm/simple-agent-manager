@@ -593,6 +593,11 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
                     ref={isSelected ? selectedRef : undefined}
                     role="option"
                     aria-selected={isSelected}
+                    aria-label={
+                      result.kind === 'chat'
+                        ? `${result.label}, ${result.projectName}`
+                        : result.label
+                    }
                     onClick={() => executeResult(result)}
                     onMouseEnter={() => setSelectedIndex(currentFlatIndex)}
                     className={`flex items-center gap-3 px-4 py-2 cursor-pointer transition-colors duration-100 ${
@@ -600,12 +605,14 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
                     }`}
                   >
                     <span className="text-fg-muted shrink-0">{iconForResult(result)}</span>
-                    <span className="text-sm text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap flex-1">
+                    <span className="text-sm text-fg-primary min-w-0 overflow-hidden text-ellipsis whitespace-nowrap flex-1">
                       <HighlightedText text={result.label} matches={result.matches} />
-                      {result.kind === 'chat' && (
-                        <span className="text-xs text-fg-muted ml-2">{result.projectName}</span>
-                      )}
                     </span>
+                    {result.kind === 'chat' && (
+                      <span className="text-xs text-fg-muted shrink-0 ml-1 max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap">
+                        {result.projectName}
+                      </span>
+                    )}
                     {isSelected && (
                       <ArrowRight size={12} className="text-fg-muted shrink-0" />
                     )}
