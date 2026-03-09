@@ -140,5 +140,31 @@ describe('MobileNavDrawer', () => {
 
       expect(onOpenCommandPalette).toHaveBeenCalledTimes(1);
     });
+
+    it('does not trigger onClose when search button is clicked', () => {
+      const onClose = vi.fn();
+      const onOpenCommandPalette = vi.fn();
+      render(
+        <MobileNavDrawer
+          {...defaultProps}
+          onClose={onClose}
+          onOpenCommandPalette={onOpenCommandPalette}
+        />
+      );
+
+      fireEvent.click(screen.getByLabelText('Open command palette'));
+
+      expect(onOpenCommandPalette).toHaveBeenCalledTimes(1);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('search button is a focusable button element', () => {
+      const onOpenCommandPalette = vi.fn();
+      render(<MobileNavDrawer {...defaultProps} onOpenCommandPalette={onOpenCommandPalette} />);
+
+      const button = screen.getByLabelText('Open command palette');
+      expect(button.tagName).toBe('BUTTON');
+      expect(button.tabIndex).not.toBe(-1);
+    });
   });
 });
