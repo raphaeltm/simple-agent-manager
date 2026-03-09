@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { Search } from 'lucide-react';
 
 interface NavItem {
   label: string;
@@ -12,6 +13,7 @@ interface MobileNavDrawerProps {
   currentPath: string;
   onNavigate: (path: string) => void;
   onSignOut: () => void;
+  onOpenCommandPalette?: () => void;
 }
 
 function isNavItemActive(path: string, pathname: string): boolean {
@@ -28,6 +30,7 @@ export function MobileNavDrawer({
   currentPath,
   onNavigate,
   onSignOut,
+  onOpenCommandPalette,
 }: MobileNavDrawerProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -86,6 +89,20 @@ export function MobileNavDrawer({
             </svg>
           </button>
         </div>
+
+        {/* Command palette trigger */}
+        {onOpenCommandPalette && (
+          <div className="px-3 pt-3">
+            <button
+              onClick={onOpenCommandPalette}
+              className="flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-transparent border border-border-default text-fg-muted text-sm cursor-pointer hover:bg-surface-hover hover:text-fg-primary transition-colors"
+              aria-label="Open command palette"
+            >
+              <Search size={14} />
+              <span className="flex-1 text-left">Search...</span>
+            </button>
+          </div>
+        )}
 
         {/* Nav items */}
         <nav aria-label="Primary navigation" className="flex-1 pt-2">
