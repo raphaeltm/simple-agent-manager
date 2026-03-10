@@ -1768,7 +1768,8 @@ export function Workspace() {
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
-              maxWidth: isMobile ? 'calc(100vw - 200px)' : undefined,
+              // No maxWidth needed — flex: 1 + minWidth: 0 on parent + overflow: hidden
+              // handles truncation correctly at any viewport width.
             }}
           >
             {workspace?.displayName || workspace?.name}

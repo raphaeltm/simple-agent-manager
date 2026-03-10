@@ -6,16 +6,8 @@ describe('stripMarkdown', () => {
     expect(stripMarkdown('**bold text**')).toBe('bold text');
   });
 
-  it('strips italic markers with asterisks', () => {
-    expect(stripMarkdown('*italic text*')).toBe('italic text');
-  });
-
   it('strips bold markers with underscores', () => {
     expect(stripMarkdown('__bold text__')).toBe('bold text');
-  });
-
-  it('strips italic markers with underscores', () => {
-    expect(stripMarkdown('_italic text_')).toBe('italic text');
   });
 
   it('strips strikethrough markers', () => {
@@ -54,5 +46,23 @@ describe('stripMarkdown', () => {
 
   it('handles empty string', () => {
     expect(stripMarkdown('')).toBe('');
+  });
+
+  // Regression: single-marker italic patterns must NOT be stripped because
+  // they corrupt snake_case identifiers common in LLM-generated titles.
+  it('preserves snake_case identifiers with underscores', () => {
+    expect(stripMarkdown('fix user_profile_update handler')).toBe('fix user_profile_update handler');
+  });
+
+  it('preserves asterisks in glob patterns', () => {
+    expect(stripMarkdown('update *.ts imports')).toBe('update *.ts imports');
+  });
+
+  it('preserves single-underscore italic markers', () => {
+    expect(stripMarkdown('_italic text_')).toBe('_italic text_');
+  });
+
+  it('preserves single-asterisk italic markers', () => {
+    expect(stripMarkdown('*italic text*')).toBe('*italic text*');
   });
 });
