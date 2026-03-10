@@ -1,8 +1,8 @@
 import { type FC, useState, useCallback } from 'react';
 import { Card, Spinner, Button, Body } from '@simple-agent-manager/ui';
-import { Copy, Check } from 'lucide-react';
 import { useAdminLogQuery, type LogLevel, type LogTimeRange } from '../../hooks/useAdminLogQuery';
 import { LogEntryRow, LEVEL_COLORS, formatLogEntries } from './LogEntryRow';
+import { CopyButton } from '../shared/log';
 
 const LEVEL_OPTIONS: { value: LogLevel; label: string }[] = [
   { value: 'error', label: 'Error' },
@@ -34,7 +34,6 @@ export const LogViewer: FC = () => {
   } = useAdminLogQuery();
 
   const [searchInput, setSearchInput] = useState('');
-  const [copiedAll, setCopiedAll] = useState(false);
 
   const handleSearchSubmit = useCallback(() => {
     setSearch(searchInput);
@@ -48,14 +47,7 @@ export const LogViewer: FC = () => {
     );
   }, [filter.levels, setLevels]);
 
-  const handleCopyAll = useCallback(() => {
-    if (logs.length === 0) return;
-    const text = formatLogEntries(logs);
-    navigator.clipboard.writeText(text).then(() => {
-      setCopiedAll(true);
-      setTimeout(() => setCopiedAll(false), 1500);
-    });
-  }, [logs]);
+  const getCopyAllText = useCallback(() => formatLogEntries(logs), [logs]);
 
   return (
     <div>
@@ -127,15 +119,12 @@ export const LogViewer: FC = () => {
 
           {/* Copy All */}
           {logs.length > 0 && (
-            <button
-              onClick={handleCopyAll}
-              className="p-2.5 rounded-sm border border-border-default bg-surface text-fg-muted cursor-pointer flex items-center justify-center min-w-[44px] min-h-[44px]"
-              aria-label="Copy all visible logs"
-              title="Copy all visible logs"
-              data-testid="copy-all-button"
-            >
-              {copiedAll ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
-            </button>
+            <CopyButton
+              getText={getCopyAllText}
+              label="Copy all visible logs"
+              testId="copy-all-button"
+              variant="toolbar"
+            />
           )}
         </div>
 
