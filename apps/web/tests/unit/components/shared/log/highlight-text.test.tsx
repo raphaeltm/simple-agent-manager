@@ -44,4 +44,22 @@ describe('highlightText', () => {
     const result = highlightText('fileXts', 'file.ts');
     expect(result).toBe('fileXts'); // no match — plain string returned
   });
+
+  it('highlights all consecutive occurrences without skipping (lastIndex regression)', () => {
+    // This catches the global regex lastIndex bug where regex.test() skips alternating matches
+    const result = highlightText('aaa bbb aaa bbb aaa', 'aaa');
+    const { container } = render(<span>{result}</span>);
+    const marks = container.querySelectorAll('mark');
+    expect(marks.length).toBe(3);
+    expect(marks[0]!.textContent).toBe('aaa');
+    expect(marks[1]!.textContent).toBe('aaa');
+    expect(marks[2]!.textContent).toBe('aaa');
+  });
+
+  it('highlights term at start and end of text', () => {
+    const result = highlightText('err something err', 'err');
+    const { container } = render(<span>{result}</span>);
+    const marks = container.querySelectorAll('mark');
+    expect(marks.length).toBe(2);
+  });
 });

@@ -122,4 +122,77 @@ describe('LogsSection', () => {
     render(<LogsSection nodeId="node-1" nodeStatus="running" />);
     expect(screen.getAllByTestId('skeleton').length).toBeGreaterThan(0);
   });
+
+  it('shows error banner when error is set', () => {
+    mockUseNodeLogs.mockReturnValue(defaultHook({ error: 'Connection lost' }));
+    render(<LogsSection nodeId="node-1" nodeStatus="running" />);
+    expect(screen.getByText('Connection lost')).toBeInTheDocument();
+  });
+
+  it('calls togglePause when pause button is clicked', () => {
+    const togglePause = vi.fn();
+    mockUseNodeLogs.mockReturnValue(
+      defaultHook({ entries: [createEntry()], streaming: true, togglePause }),
+    );
+    render(<LogsSection nodeId="node-1" nodeStatus="running" />);
+
+    const pauseBtn = screen.getByTitle('Pause streaming');
+    fireEvent.click(pauseBtn);
+    expect(togglePause).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows resume button when paused', () => {
+    mockUseNodeLogs.mockReturnValue(
+      defaultHook({ entries: [createEntry()], streaming: true, paused: true }),
+    );
+    render(<LogsSection nodeId="node-1" nodeStatus="running" />);
+    expect(screen.getByTitle('Resume streaming')).toBeInTheDocument();
+  });
+
+  it('calls refresh when refresh button is clicked', () => {
+    const refresh = vi.fn();
+    mockUseNodeLogs.mockReturnValue(defaultHook({ entries: [createEntry()], refresh }));
+    render(<LogsSection nodeId="node-1" nodeStatus="running" />);
+
+    const refreshBtn = screen.getByTitle('Refresh logs');
+    fireEvent.click(refreshBtn);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows Load More button when hasMore is true and calls loadMore on click', () => {
+    const loadMore = vi.fn();
+    mockUseNodeLogs.mockReturnValue(
+      defaultHook({ entries: [createEntry()], hasMore: true, loadMore }),
+    );
+    render(<LogsSection nodeId="node-1" nodeStatus="running" />);
+
+    const loadMoreBtn = screen.getByText('Load older entries');
+    fireEvent.click(loadMoreBtn);
+    expect(loadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows LIVE indicator when streaming', () => {
+    mockUseNodeLogs.mockReturnValue(
+      defaultHook({ entries: [createEntry()], streaming: true }),
+    );
+    render(<LogsSection nodeId="node-1" nodeStatus="running" />);
+    expect(screen.getByText('LIVE')).toBeInTheDocument();
+  });
+
+  it('shows DISCONNECTED indicator when not streaming', () => {
+    mockUseNodeLogs.mockReturnValue(defaultHook({ entries: [createEntry()] }));
+    render(<LogsSection nodeId="node-1" nodeStatus="running" />);
+    expect(screen.getByText('DISCONNECTED')).toBeInTheDocument();
+  });
+
+  it('shows search match count when searching with results', () => {
+    mockUseNodeLogs.mockReturnValue(
+      defaultHook({
+        entries: [createEntry(), createEntry()],
+        filter: { source: 'all', level: 'info', search: 'session', container: '' },
+      }),
+    );
+    render(<LogsSection nodeId="node-1" nodeStatus="running" />);
+    expect(screen.getByText(/2 entries matching/)).toBeInTheDocument();
+  });
 });

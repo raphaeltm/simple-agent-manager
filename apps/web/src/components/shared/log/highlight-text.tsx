@@ -15,8 +15,9 @@ export function highlightText(text: string, term: string | undefined): ReactNode
 
   if (parts.length === 1) return text; // no match
 
+  // When split() uses a capturing group, captured matches appear at odd indices
   return parts.map((part, i) =>
-    regex.test(part) ? (
+    i % 2 === 1 ? (
       <mark key={i} className="bg-accent-tint text-fg-primary rounded-[2px] px-px">
         {part}
       </mark>
