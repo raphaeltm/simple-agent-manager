@@ -222,15 +222,21 @@ func TestExtractMessages_ToolCall(t *testing.T) {
 	if meta.Locations[0].Line == nil || *meta.Locations[0].Line != 42 {
 		t.Fatalf("expected line=42, got %v", meta.Locations[0].Line)
 	}
-	// Verify structured content
+	// Verify structured content — raw JSON preserves ACP wire format
 	if len(meta.Content) != 1 {
 		t.Fatalf("expected 1 structured content item, got %d", len(meta.Content))
 	}
-	if meta.Content[0].Type != "content" {
-		t.Fatalf("expected content type='content', got %q", meta.Content[0].Type)
+	var c0 map[string]interface{}
+	if err := json.Unmarshal(meta.Content[0], &c0); err != nil {
+		t.Fatalf("unmarshal content[0]: %v", err)
 	}
-	if meta.Content[0].Text != "file contents here" {
-		t.Fatalf("expected content text='file contents here', got %q", meta.Content[0].Text)
+	if c0["type"] != "content" {
+		t.Fatalf("expected content type='content', got %v", c0["type"])
+	}
+	// Raw ACP format nests text inside content.content.text
+	inner, _ := c0["content"].(map[string]interface{})
+	if inner == nil || inner["text"] != "file contents here" {
+		t.Fatalf("expected nested content.text='file contents here', got %v", inner)
 	}
 }
 
@@ -387,21 +393,21 @@ func TestExtractMessages_ToolCallDiff_WithContent(t *testing.T) {
 	if len(meta.Content) != 1 {
 		t.Fatalf("expected 1 structured content item, got %d", len(meta.Content))
 	}
-	if meta.Content[0].Type != "diff" {
-		t.Fatalf("expected content type='diff', got %q", meta.Content[0].Type)
+	var d0 map[string]interface{}
+	if err := json.Unmarshal(meta.Content[0], &d0); err != nil {
+		t.Fatalf("unmarshal content[0]: %v", err)
 	}
-	if meta.Content[0].Path != "/src/main.go" {
-		t.Fatalf("expected path='/src/main.go', got %q", meta.Content[0].Path)
+	if d0["type"] != "diff" {
+		t.Fatalf("expected content type='diff', got %v", d0["type"])
 	}
-	if meta.Content[0].OldText == nil || *meta.Content[0].OldText != "old content" {
-		t.Fatalf("expected oldText='old content', got %v", meta.Content[0].OldText)
+	if d0["path"] != "/src/main.go" {
+		t.Fatalf("expected path='/src/main.go', got %v", d0["path"])
 	}
-	if meta.Content[0].NewText != "new content" {
-		t.Fatalf("expected newText='new content', got %q", meta.Content[0].NewText)
+	if d0["oldText"] != "old content" {
+		t.Fatalf("expected oldText='old content', got %v", d0["oldText"])
 	}
-	// Text field should still contain the path for backward compat
-	if meta.Content[0].Text != "/src/main.go" {
-		t.Fatalf("expected text='/src/main.go', got %q", meta.Content[0].Text)
+	if d0["newText"] != "new content" {
+		t.Fatalf("expected newText='new content', got %v", d0["newText"])
 	}
 }
 
@@ -433,11 +439,15 @@ func TestExtractMessages_ToolCallDiff_NoOldText(t *testing.T) {
 	if err := json.Unmarshal([]byte(msgs[0].ToolMetadata), &meta); err != nil {
 		t.Fatalf("unmarshal tool metadata: %v", err)
 	}
-	if meta.Content[0].OldText != nil {
-		t.Fatalf("expected nil oldText for new file, got %v", meta.Content[0].OldText)
+	var d0 map[string]interface{}
+	if err := json.Unmarshal(meta.Content[0], &d0); err != nil {
+		t.Fatalf("unmarshal content[0]: %v", err)
 	}
-	if meta.Content[0].NewText != "new file content" {
-		t.Fatalf("expected newText='new file content', got %q", meta.Content[0].NewText)
+	if _, hasOld := d0["oldText"]; hasOld {
+		t.Fatalf("expected no oldText for new file, got %v", d0["oldText"])
+	}
+	if d0["newText"] != "new file content" {
+		t.Fatalf("expected newText='new file content', got %v", d0["newText"])
 	}
 }
 

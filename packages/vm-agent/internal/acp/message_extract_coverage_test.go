@@ -4,11 +4,11 @@ package acp
 //
 // Coverage gaps addressed:
 //   - extractContentBlockText: nil block (no Text pointer) — line 188 false branch
-//   - extractStructuredContent: terminal content item — line 226-230
-//   - extractToolCallContents: terminal content item (no text accumulated) — line 248-252
-//   - ExtractMessages / ToolCallUpdate: update with no content and no status (skip path) — line 167
-//   - ExtractMessages / ToolCallUpdate: update with Kind pointer set — line 154
-//   - MAX_TOOL_CONTENT_SIZE env var: truncation applied inside extractStructuredContent
+//   - marshalRawContent: terminal content item
+//   - extractToolCallContents: terminal content item (no text accumulated)
+//   - ExtractMessages / ToolCallUpdate: update with no content and no status (skip path)
+//   - ExtractMessages / ToolCallUpdate: update with Kind pointer set
+//   - MAX_TOOL_CONTENT_SIZE env var: truncation applied inside marshalRawContent
 
 import (
 	"encoding/json"
@@ -16,6 +16,16 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 )
+
+// unmarshalRawItem is a test helper that unmarshals a json.RawMessage into a map.
+func unmarshalRawItem(t *testing.T, raw json.RawMessage) map[string]interface{} {
+	t.Helper()
+	var m map[string]interface{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal raw content item: %v", err)
+	}
+	return m
+}
 
 // ---------------------------------------------------------------------------
 // extractContentBlockText: nil Text pointer → empty string
@@ -48,10 +58,10 @@ func TestExtractMessages_AgentChunk_NilText(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// extractStructuredContent: terminal content type
+// marshalRawContent: terminal content type
 // ---------------------------------------------------------------------------
 
-func TestExtractStructuredContent_TerminalItem(t *testing.T) {
+func TestMarshalRawContent_TerminalItem(t *testing.T) {
 	contents := []acpsdk.ToolCallContent{
 		{
 			Terminal: &acpsdk.ToolCallContentTerminal{
@@ -60,15 +70,16 @@ func TestExtractStructuredContent_TerminalItem(t *testing.T) {
 		},
 	}
 
-	items := extractStructuredContent(contents)
+	items := marshalRawContent(contents)
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(items))
 	}
-	if items[0].Type != "terminal" {
-		t.Fatalf("expected type=terminal, got %q", items[0].Type)
+	m := unmarshalRawItem(t, items[0])
+	if m["type"] != "terminal" {
+		t.Fatalf("expected type=terminal, got %v", m["type"])
 	}
-	if items[0].Text != "term-42" {
-		t.Fatalf("expected text=term-42, got %q", items[0].Text)
+	if m["terminalId"] != "term-42" {
+		t.Fatalf("expected terminalId=term-42, got %v", m["terminalId"])
 	}
 }
 
@@ -110,11 +121,12 @@ func TestExtractMessages_ToolCall_TerminalContent(t *testing.T) {
 	if len(meta.Content) != 1 {
 		t.Fatalf("expected 1 structured content item, got %d", len(meta.Content))
 	}
-	if meta.Content[0].Type != "terminal" {
-		t.Fatalf("expected structured type=terminal, got %q", meta.Content[0].Type)
+	m := unmarshalRawItem(t, meta.Content[0])
+	if m["type"] != "terminal" {
+		t.Fatalf("expected type=terminal, got %v", m["type"])
 	}
-	if meta.Content[0].Text != "term-99" {
-		t.Fatalf("expected terminal id as text, got %q", meta.Content[0].Text)
+	if m["terminalId"] != "term-99" {
+		t.Fatalf("expected terminalId=term-99, got %v", m["terminalId"])
 	}
 }
 
@@ -267,10 +279,10 @@ func TestExtractMessages_ToolCallUpdate_StatusOnly_FallbackContent(t *testing.T)
 }
 
 // ---------------------------------------------------------------------------
-// Truncation applied inside extractStructuredContent for diff fields
+// Truncation applied inside marshalRawContent for diff fields
 // ---------------------------------------------------------------------------
 
-func TestExtractStructuredContent_TruncatesDiffFields(t *testing.T) {
+func TestMarshalRawContent_TruncatesDiffFields(t *testing.T) {
 	orig := maxToolContentSize
 	defer func() { maxToolContentSize = orig }()
 	maxToolContentSize = 5
@@ -286,23 +298,29 @@ func TestExtractStructuredContent_TruncatesDiffFields(t *testing.T) {
 		},
 	}
 
-	items := extractStructuredContent(contents)
+	items := marshalRawContent(contents)
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(items))
 	}
+	m := unmarshalRawItem(t, items[0])
 
-	if len(items[0].NewText) <= 5 {
-		t.Fatalf("expected truncated newText to include marker, got %q", items[0].NewText)
+	newText, ok := m["newText"].(string)
+	if !ok {
+		t.Fatalf("expected newText to be string, got %T", m["newText"])
 	}
-	if items[0].NewText[:5] != "new c" {
-		t.Fatalf("expected newText to start with original prefix, got %q", items[0].NewText)
+	if len(newText) <= 5 {
+		t.Fatalf("expected truncated newText to include marker, got %q", newText)
+	}
+	if newText[:5] != "new c" {
+		t.Fatalf("expected newText to start with original prefix, got %q", newText)
 	}
 
-	if items[0].OldText == nil {
-		t.Fatal("expected non-nil oldText")
+	oldTextVal, ok := m["oldText"].(string)
+	if !ok {
+		t.Fatalf("expected oldText to be string, got %T", m["oldText"])
 	}
-	if len(*items[0].OldText) <= 5 {
-		t.Fatalf("expected truncated oldText to include marker, got %q", *items[0].OldText)
+	if len(oldTextVal) <= 5 {
+		t.Fatalf("expected truncated oldText to include marker, got %q", oldTextVal)
 	}
 }
 
@@ -329,11 +347,11 @@ func TestExtractMessages_Plan_NilEntries(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// extractStructuredContent: empty content slice returns nil (not panic)
+// marshalRawContent: empty content slice returns nil (not panic)
 // ---------------------------------------------------------------------------
 
-func TestExtractStructuredContent_Empty(t *testing.T) {
-	items := extractStructuredContent(nil)
+func TestMarshalRawContent_Empty(t *testing.T) {
+	items := marshalRawContent(nil)
 	if items != nil {
 		t.Fatalf("expected nil for empty input, got %v", items)
 	}
@@ -389,11 +407,13 @@ func TestExtractMessages_ToolCall_MixedContentAndDiff(t *testing.T) {
 	if len(meta.Content) != 2 {
 		t.Fatalf("expected 2 structured content items, got %d", len(meta.Content))
 	}
-	if meta.Content[0].Type != "content" {
-		t.Fatalf("expected first item type=content, got %q", meta.Content[0].Type)
+	m0 := unmarshalRawItem(t, meta.Content[0])
+	if m0["type"] != "content" {
+		t.Fatalf("expected first item type=content, got %v", m0["type"])
 	}
-	if meta.Content[1].Type != "diff" {
-		t.Fatalf("expected second item type=diff, got %q", meta.Content[1].Type)
+	m1 := unmarshalRawItem(t, meta.Content[1])
+	if m1["type"] != "diff" {
+		t.Fatalf("expected second item type=diff, got %v", m1["type"])
 	}
 }
 
