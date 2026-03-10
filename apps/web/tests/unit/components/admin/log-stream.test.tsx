@@ -210,4 +210,32 @@ describe('LogStream', () => {
     render(<LogStream />);
     expect(screen.getByText('(1 client)')).toBeInTheDocument();
   });
+
+  it('should show Copy All button when entries exist', () => {
+    mockUseAdminLogStream.mockReturnValue(defaultHookReturn({
+      entries: [createMockEntry()],
+    }));
+
+    render(<LogStream />);
+    expect(screen.getByTestId('copy-all-button')).toBeInTheDocument();
+  });
+
+  it('should not show Copy All button when no entries', () => {
+    mockUseAdminLogStream.mockReturnValue(defaultHookReturn());
+
+    render(<LogStream />);
+    expect(screen.queryByTestId('copy-all-button')).not.toBeInTheDocument();
+  });
+
+  it('should pass search term to log entries for highlighting', () => {
+    mockUseAdminLogStream.mockReturnValue(defaultHookReturn({
+      entries: [createMockEntry({ message: 'session timeout error' })],
+      filter: { levels: [], search: 'timeout' },
+    }));
+
+    render(<LogStream />);
+    const marks = document.querySelectorAll('mark');
+    expect(marks.length).toBe(1);
+    expect(marks[0]!.textContent).toBe('timeout');
+  });
 });

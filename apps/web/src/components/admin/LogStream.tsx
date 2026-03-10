@@ -1,12 +1,8 @@
 import { type FC, useEffect, useRef, useState, useCallback } from 'react';
 import { Card, Button, Body } from '@simple-agent-manager/ui';
+import { Copy, Check } from 'lucide-react';
 import { useAdminLogStream, type StreamConnectionState } from '../../hooks/useAdminLogStream';
-
-const LEVEL_COLORS: Record<string, string> = {
-  error: '#f87171',
-  warn: '#fbbf24',
-  info: '#60a5fa',
-};
+import { LogEntryRow, LEVEL_COLORS, formatLogEntries } from './LogEntryRow';
 
 const STATE_COLORS: Record<StreamConnectionState, string> = {
   connected: '#4ade80',
@@ -23,50 +19,6 @@ const STATE_LABELS: Record<StreamConnectionState, string> = {
 };
 
 const LEVEL_OPTIONS = ['error', 'warn', 'info'] as const;
-
-interface LogEntryRowProps {
-  entry: { timestamp: string; level: string; event: string; message: string; details: Record<string, unknown>; scriptName: string };
-}
-
-const LogEntryRow: FC<LogEntryRowProps> = ({ entry }) => {
-  const [expanded, setExpanded] = useState(false);
-  const hasDetails = Object.keys(entry.details).length > 0;
-
-  return (
-    <div
-      className="px-4 py-2 border-b border-border-default text-sm"
-      style={{ cursor: hasDetails ? 'pointer' : 'default' }}
-      onClick={() => hasDetails && setExpanded(!expanded)}
-      role={hasDetails ? 'button' : undefined}
-      tabIndex={hasDetails ? 0 : undefined}
-      aria-expanded={hasDetails ? expanded : undefined}
-    >
-      <div className="flex gap-2 items-baseline flex-wrap">
-        <span
-          className="font-semibold uppercase text-[0.7rem] min-w-[3rem]"
-          style={{ color: LEVEL_COLORS[entry.level] ?? 'var(--sam-color-fg-muted)' }}
-        >
-          {entry.level}
-        </span>
-        <span className="text-fg-muted text-xs">
-          {new Date(entry.timestamp).toLocaleTimeString()}
-        </span>
-        <span className="text-fg-muted text-[0.7rem] opacity-70">
-          {entry.event}
-        </span>
-      </div>
-      <div className="overflow-hidden text-ellipsis whitespace-nowrap mt-0.5">
-        {entry.message}
-      </div>
-
-      {expanded && hasDetails && (
-        <pre className="mt-2 p-2 bg-inset rounded-sm text-xs overflow-auto whitespace-pre-wrap break-all" style={{ maxHeight: '200px' }}>
-          {JSON.stringify(entry.details, null, 2)}
-        </pre>
-      )}
-    </div>
-  );
-};
 
 export const LogStream: FC = () => {
   const {
@@ -85,6 +37,7 @@ export const LogStream: FC = () => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [searchInput, setSearchInput] = useState('');
+  const [copiedAll, setCopiedAll] = useState(false);
 
   // Auto-scroll to bottom when new entries arrive
   useEffect(() => {
@@ -112,6 +65,15 @@ export const LogStream: FC = () => {
   const handleSearchSubmit = useCallback(() => {
     setSearch(searchInput);
   }, [searchInput, setSearch]);
+
+  const handleCopyAll = useCallback(() => {
+    if (entries.length === 0) return;
+    const text = formatLogEntries(entries);
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedAll(true);
+      setTimeout(() => setCopiedAll(false), 1500);
+    });
+  }, [entries]);
 
   return (
     <div>
@@ -186,6 +148,19 @@ export const LogStream: FC = () => {
             </Button>
           )}
 
+          {/* Copy All */}
+          {entries.length > 0 && (
+            <button
+              onClick={handleCopyAll}
+              className="p-2.5 rounded-sm border border-border-default bg-surface text-fg-muted cursor-pointer flex items-center justify-center min-w-[44px] min-h-[44px]"
+              aria-label="Copy all visible logs"
+              title="Copy all visible logs"
+              data-testid="copy-all-button"
+            >
+              {copiedAll ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+            </button>
+          )}
+
           {/* Entry count */}
           <span className="text-[0.7rem] text-fg-muted ml-auto">
             {entries.length} entries
@@ -214,7 +189,7 @@ export const LogStream: FC = () => {
             </div>
           ) : (
             entries.map((entry, i) => (
-              <LogEntryRow key={`${entry.timestamp}-${i}`} entry={entry} />
+              <LogEntryRow key={`${entry.timestamp}-${i}`} entry={entry} searchTerm={filter.search} />
             ))
           )}
         </div>
