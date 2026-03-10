@@ -84,6 +84,32 @@ describe('LogEntry', () => {
 
     expect(screen.queryByText(/"key"/)).not.toBeInTheDocument();
   });
+
+  it('expands metadata on Enter key press (keyboard accessibility)', () => {
+    render(
+      <LogEntry entry={createEntry({ metadata: { requestId: 'abc' } })} />,
+    );
+
+    const row = screen.getByRole('button', { expanded: false });
+    fireEvent.keyDown(row, { key: 'Enter' });
+
+    expect(screen.getByText(/"requestId"/)).toBeInTheDocument();
+  });
+
+  it('collapses metadata on second click', () => {
+    render(
+      <LogEntry entry={createEntry({ metadata: { requestId: 'abc' } })} />,
+    );
+
+    const row = screen.getByRole('button', { expanded: false });
+    fireEvent.click(row);
+    expect(screen.getByText(/"requestId"/)).toBeInTheDocument();
+
+    // After expanding, aria-expanded is true
+    const expandedRow = screen.getByRole('button', { expanded: true });
+    fireEvent.click(expandedRow);
+    expect(screen.queryByText(/"requestId"/)).not.toBeInTheDocument();
+  });
 });
 
 describe('formatNodeLogEntry', () => {

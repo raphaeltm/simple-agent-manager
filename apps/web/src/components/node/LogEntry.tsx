@@ -67,6 +67,15 @@ export const LogEntry: FC<LogEntryProps> = ({ entry, searchTerm }) => {
         cursor: hasMetadata ? 'pointer' : 'default',
       }}
       onClick={hasMetadata ? () => setExpanded(!expanded) : undefined}
+      onKeyDown={hasMetadata ? (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          setExpanded(!expanded);
+        }
+      } : undefined}
+      role={hasMetadata ? 'button' : undefined}
+      tabIndex={hasMetadata ? 0 : undefined}
+      aria-expanded={hasMetadata ? expanded : undefined}
     >
       {/* Timestamp */}
       <span className="shrink-0 whitespace-nowrap" style={{ color: 'var(--sam-color-fg-disabled, #6b7280)' }}>
