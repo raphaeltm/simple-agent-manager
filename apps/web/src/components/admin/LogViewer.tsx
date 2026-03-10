@@ -1,6 +1,8 @@
 import { type FC, useState, useCallback } from 'react';
 import { Card, Spinner, Button, Body } from '@simple-agent-manager/ui';
+import { Copy, Check } from 'lucide-react';
 import { useAdminLogQuery, type LogLevel, type LogTimeRange } from '../../hooks/useAdminLogQuery';
+import { LogEntryRow, LEVEL_COLORS, formatLogEntries } from './LogEntryRow';
 
 const LEVEL_OPTIONS: { value: LogLevel; label: string }[] = [
   { value: 'error', label: 'Error' },
@@ -17,58 +19,6 @@ const TIME_RANGE_OPTIONS: { value: LogTimeRange; label: string }[] = [
   { value: '7d', label: 'Last 7 days' },
 ];
 
-interface LogEntryRowProps {
-  log: { timestamp: string; level: string; event: string; message: string; details: Record<string, unknown>; invocationId?: string };
-}
-
-const LEVEL_COLORS: Record<string, string> = {
-  error: '#f87171',
-  warn: '#fbbf24',
-  info: '#60a5fa',
-  debug: '#a78bfa',
-  log: 'var(--sam-color-fg-muted)',
-};
-
-const LogEntryRow: FC<LogEntryRowProps> = ({ log }) => {
-  const [expanded, setExpanded] = useState(false);
-  const hasDetails = Object.keys(log.details).length > 0;
-
-  return (
-    <div
-      className="px-4 py-2 border-b border-border-default text-sm"
-      style={{ cursor: hasDetails ? 'pointer' : 'default' }}
-      onClick={() => hasDetails && setExpanded(!expanded)}
-      role={hasDetails ? 'button' : undefined}
-      tabIndex={hasDetails ? 0 : undefined}
-      aria-expanded={hasDetails ? expanded : undefined}
-    >
-      <div className="flex gap-2 items-baseline flex-wrap">
-        <span
-          className="font-semibold uppercase text-[0.7rem] min-w-[3rem]"
-          style={{ color: LEVEL_COLORS[log.level] ?? 'var(--sam-color-fg-muted)' }}
-        >
-          {log.level}
-        </span>
-        <span className="text-fg-muted text-xs">
-          {new Date(log.timestamp).toLocaleTimeString()}
-        </span>
-        <span className="text-fg-muted text-[0.7rem] opacity-70">
-          {log.event}
-        </span>
-      </div>
-      <div className="overflow-hidden text-ellipsis whitespace-nowrap mt-0.5">
-        {log.message}
-      </div>
-
-      {expanded && hasDetails && (
-        <pre className="mt-2 p-2 bg-inset rounded-sm text-xs overflow-auto whitespace-pre-wrap break-all" style={{ maxHeight: '200px' }}>
-          {JSON.stringify(log.details, null, 2)}
-        </pre>
-      )}
-    </div>
-  );
-};
-
 export const LogViewer: FC = () => {
   const {
     logs,
@@ -84,6 +34,7 @@ export const LogViewer: FC = () => {
   } = useAdminLogQuery();
 
   const [searchInput, setSearchInput] = useState('');
+  const [copiedAll, setCopiedAll] = useState(false);
 
   const handleSearchSubmit = useCallback(() => {
     setSearch(searchInput);
@@ -96,6 +47,15 @@ export const LogViewer: FC = () => {
         : [...filter.levels, level]
     );
   }, [filter.levels, setLevels]);
+
+  const handleCopyAll = useCallback(() => {
+    if (logs.length === 0) return;
+    const text = formatLogEntries(logs);
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedAll(true);
+      setTimeout(() => setCopiedAll(false), 1500);
+    });
+  }, [logs]);
 
   return (
     <div>
@@ -164,6 +124,19 @@ export const LogViewer: FC = () => {
           <Button size="sm" variant="ghost" onClick={refresh} disabled={loading}>
             Refresh
           </Button>
+
+          {/* Copy All */}
+          {logs.length > 0 && (
+            <button
+              onClick={handleCopyAll}
+              className="p-1.5 rounded-sm border border-border-default bg-surface text-fg-muted cursor-pointer"
+              aria-label="Copy all visible logs"
+              title="Copy all visible logs"
+              data-testid="copy-all-button"
+            >
+              {copiedAll ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+            </button>
+          )}
         </div>
 
         {/* Log entries */}
@@ -180,7 +153,7 @@ export const LogViewer: FC = () => {
         ) : (
           <>
             {logs.map((log, i) => (
-              <LogEntryRow key={`${log.timestamp}-${i}`} log={log} />
+              <LogEntryRow key={`${log.timestamp}-${i}`} entry={log} searchTerm={filter.search} />
             ))}
 
             {hasMore && (
