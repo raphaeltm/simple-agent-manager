@@ -145,4 +145,33 @@ describe('LogViewer', () => {
     // Small spinner for pagination
     expect(screen.getByTestId('spinner-sm')).toBeInTheDocument();
   });
+
+  it('should show Copy All button when logs exist', () => {
+    mockUseAdminLogQuery.mockReturnValue(defaultHookReturn({
+      logs: [createMockLog()],
+    }));
+
+    render(<LogViewer />);
+    expect(screen.getByTestId('copy-all-button')).toBeInTheDocument();
+  });
+
+  it('should not show Copy All button when no logs', () => {
+    mockUseAdminLogQuery.mockReturnValue(defaultHookReturn());
+
+    render(<LogViewer />);
+    expect(screen.queryByTestId('copy-all-button')).not.toBeInTheDocument();
+  });
+
+  it('should pass search term to log entries for highlighting', () => {
+    mockUseAdminLogQuery.mockReturnValue(defaultHookReturn({
+      logs: [createMockLog({ message: 'health check ok' })],
+      filter: { levels: [], search: 'health', timeRange: '1h' },
+    }));
+
+    render(<LogViewer />);
+    // The search term should cause highlighting
+    const marks = document.querySelectorAll('mark');
+    expect(marks.length).toBe(1);
+    expect(marks[0]!.textContent).toBe('health');
+  });
 });
