@@ -468,7 +468,7 @@ export function useAcpMessages(): AcpMessagesHandle {
 // Helpers
 // =============================================================================
 
-function mapToolCallContent(c: { type: string } & Record<string, unknown>): ToolCallContentItem {
+export function mapToolCallContent(c: { type: string } & Record<string, unknown>): ToolCallContentItem {
   const text = extractToolCallText(c);
 
   switch (c.type) {

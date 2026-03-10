@@ -30,17 +30,6 @@ type ExtractedMessage struct {
 	ToolMetadata string `json:"toolMetadata,omitempty"` // JSON string
 }
 
-// ToolContentItem represents a single structured content block from a tool call.
-// Preserves the content type (content/diff/terminal) so the frontend can render
-// diffs and terminal output with appropriate formatting.
-type ToolContentItem struct {
-	Type    string  `json:"type"`              // "content", "diff", or "terminal"
-	Text    string  `json:"text,omitempty"`    // Human-readable text representation
-	Path    string  `json:"path,omitempty"`    // File path (for diffs)
-	OldText *string `json:"oldText,omitempty"` // Original content before edit (for diffs)
-	NewText string  `json:"newText,omitempty"` // New content after edit (for diffs)
-}
-
 // ToolMeta holds structured tool call metadata serialized as JSON into
 // the ToolMetadata field of ExtractedMessage.
 type ToolMeta struct {
@@ -52,7 +41,11 @@ type ToolMeta struct {
 		Path string `json:"path,omitempty"`
 		Line *int   `json:"line,omitempty"`
 	} `json:"locations,omitempty"`
-	Content []ToolContentItem `json:"content,omitempty"`
+	// Content stores each ACP ToolCallContent block as raw JSON, preserving
+	// the exact wire format the frontend expects (including type discriminator,
+	// nested content blocks, and all fields). This ensures the persisted path
+	// produces the same shape as the real-time ACP WebSocket path.
+	Content []json.RawMessage `json:"content,omitempty"`
 }
 
 // ExtractMessages converts an ACP SessionNotification into zero or more
@@ -120,7 +113,7 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 			Title:      u.ToolCall.Title,
 			Kind:       string(u.ToolCall.Kind),
 			Status:     string(u.ToolCall.Status),
-			Content:    extractStructuredContent(u.ToolCall.Content),
+			Content:    marshalRawContent(u.ToolCall.Content),
 		}
 		for _, loc := range u.ToolCall.Locations {
 			meta.Locations = append(meta.Locations, struct {
@@ -146,7 +139,7 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 		content := extractToolCallContents(u.ToolCallUpdate.Content)
 		meta := ToolMeta{
 			ToolCallId: string(u.ToolCallUpdate.ToolCallId),
-			Content:    extractStructuredContent(u.ToolCallUpdate.Content),
+			Content:    marshalRawContent(u.ToolCallUpdate.Content),
 		}
 		if u.ToolCallUpdate.Title != nil {
 			meta.Title = *u.ToolCallUpdate.Title
@@ -206,35 +199,30 @@ func truncateContent(s string) string {
 	return truncated + "\n... [truncated]"
 }
 
-// extractStructuredContent converts ACP tool call content blocks into
-// typed ToolContentItems for structured rendering in the frontend.
-func extractStructuredContent(contents []acpsdk.ToolCallContent) []ToolContentItem {
-	var items []ToolContentItem
+// marshalRawContent serializes ACP tool call content blocks to raw JSON,
+// preserving the exact ACP wire format. This ensures the persisted path
+// produces the same shape as the real-time ACP WebSocket path.
+// Large diff fields (oldText/newText) are truncated before marshaling.
+func marshalRawContent(contents []acpsdk.ToolCallContent) []json.RawMessage {
+	var items []json.RawMessage
 	for _, c := range contents {
-		if c.Content != nil && c.Content.Content.Text != nil {
-			items = append(items, ToolContentItem{
-				Type: "content",
-				Text: c.Content.Content.Text.Text,
-			})
-		}
+		// Truncate large diff fields before marshaling to prevent
+		// excessive storage while preserving the full structure.
+		// Copy the struct to preserve all fields (including _meta).
 		if c.Diff != nil {
-			item := ToolContentItem{
-				Type:    "diff",
-				Text:    c.Diff.Path,
-				Path:    c.Diff.Path,
-				NewText: truncateContent(c.Diff.NewText),
-			}
+			diffCopy := *c.Diff
+			diffCopy.NewText = truncateContent(c.Diff.NewText)
 			if c.Diff.OldText != nil {
-				truncated := truncateContent(*c.Diff.OldText)
-				item.OldText = &truncated
+				t := truncateContent(*c.Diff.OldText)
+				diffCopy.OldText = &t
 			}
-			items = append(items, item)
+			c.Diff = &diffCopy
 		}
-		if c.Terminal != nil {
-			items = append(items, ToolContentItem{
-				Type: "terminal",
-				Text: c.Terminal.TerminalId,
-			})
+		raw, err := json.Marshal(c)
+		// Skip zero-variant items: SDK returns empty []byte when all
+		// variant pointers are nil; also catches degenerate "{}" objects.
+		if err == nil && len(raw) > 2 {
+			items = append(items, raw)
 		}
 	}
 	return items

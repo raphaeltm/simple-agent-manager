@@ -9,6 +9,7 @@ import {
   RawFallbackView,
 } from '@simple-agent-manager/acp-client';
 import type { ConversationItem } from '@simple-agent-manager/acp-client';
+import { mapToolCallContent } from '@simple-agent-manager/acp-client';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { TruncatedSummary } from './TruncatedSummary';
 import { stripMarkdown } from '../../lib/text-utils';
@@ -180,22 +181,13 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
         ? rawStatus
         : 'completed') as 'pending' | 'in_progress' | 'completed' | 'failed';
 
-      // Use structured content from metadata when available; fall back to raw content field
-      const structuredContent = meta?.content as Array<{ type?: string; text?: string; path?: string; oldText?: string | null; newText?: string }> | undefined;
+      // Use structured content from metadata when available; fall back to raw content field.
+      // Content items are now stored as raw ACP JSON (same shape as real-time WebSocket),
+      // so we pass them through mapToolCallContent — the same function the real-time path uses.
+      const structuredContent = meta?.content as Array<{ type: string } & Record<string, unknown>> | undefined;
       let contentItems: Array<{ type: 'content' | 'diff' | 'terminal'; text?: string; data?: unknown }>;
       if (Array.isArray(structuredContent) && structuredContent.length > 0) {
-        contentItems = structuredContent.map((c) => {
-          const type = (c.type === 'diff' || c.type === 'terminal' ? c.type : 'content') as 'content' | 'diff' | 'terminal';
-          // Pass through the full structured content object as `data` for ALL content types.
-          // This matches workspace chat's `mapToolCallContent()` which always sets `data: c`,
-          // ensuring the JSON fallback rendering works when `text` is empty.
-          const item: { type: 'content' | 'diff' | 'terminal'; text?: string; data?: unknown } = { type, text: c.text, data: c };
-          // For diffs, provide structured data so ToolCallCard can render it properly
-          if (type === 'diff') {
-            item.data = { type: 'diff', path: c.path ?? c.text, oldText: c.oldText, newText: c.newText };
-          }
-          return item;
-        });
+        contentItems = structuredContent.map((c) => mapToolCallContent(c));
       } else {
         contentItems = isPlaceholderContent(msg.content) ? [] : [{ type: 'content' as const, text: msg.content }];
       }

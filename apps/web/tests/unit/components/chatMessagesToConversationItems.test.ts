@@ -403,6 +403,58 @@ describe('chatMessagesToConversationItems', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Tool messages — raw ACP wire format (from Go marshalRawContent)
+  // These test the exact JSON shapes the Go VM agent now stores.
+  // -------------------------------------------------------------------------
+
+  it('handles raw ACP wire format for diff content (flat fields, no "text" key)', () => {
+    // Exact shape from Go: {"type":"diff","path":"/foo.go","oldText":"old","newText":"new"}
+    const rawDiff = { type: 'diff', path: '/foo.go', oldText: 'old', newText: 'new' };
+    const meta = { toolCallId: 'tc-raw-diff', kind: 'edit', status: 'completed', content: [rawDiff] };
+    const input = [msg({ role: 'tool', content: 'diff: /foo.go', toolMetadata: meta as unknown as null })];
+    const items = chatMessagesToConversationItems(input);
+
+    const toolItem = items[0] as { content: Array<{ type: string; data?: Record<string, unknown> }> };
+    expect(toolItem.content).toHaveLength(1);
+    expect(toolItem.content[0]?.type).toBe('diff');
+    // data carries the full raw object for ToolCallCard rendering
+    expect(toolItem.content[0]?.data).toMatchObject({
+      type: 'diff',
+      path: '/foo.go',
+      oldText: 'old',
+      newText: 'new',
+    });
+  });
+
+  it('handles raw ACP wire format for content type (nested content block)', () => {
+    // Exact shape from Go: {"type":"content","content":{"type":"text","text":"hello"}}
+    const rawContent = { type: 'content', content: { type: 'text', text: 'hello' } };
+    const meta = { toolCallId: 'tc-raw-content', kind: 'read', status: 'completed', content: [rawContent] };
+    const input = [msg({ role: 'tool', content: 'hello', toolMetadata: meta as unknown as null })];
+    const items = chatMessagesToConversationItems(input);
+
+    const toolItem = items[0] as { content: Array<{ type: string; text?: string; data?: unknown }> };
+    expect(toolItem.content).toHaveLength(1);
+    expect(toolItem.content[0]?.type).toBe('content');
+    // extractToolCallText traverses content.content.text to find "hello"
+    expect(toolItem.content[0]?.text).toBe('hello');
+  });
+
+  it('handles raw ACP wire format for terminal type (terminalId field)', () => {
+    // Exact shape from Go: {"type":"terminal","terminalId":"term-1"}
+    const rawTerminal = { type: 'terminal', terminalId: 'term-1' };
+    const meta = { toolCallId: 'tc-raw-term', kind: 'execute', status: 'completed', content: [rawTerminal] };
+    const input = [msg({ role: 'tool', content: '(tool call)', toolMetadata: meta as unknown as null })];
+    const items = chatMessagesToConversationItems(input);
+
+    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
+    expect(toolItem.content).toHaveLength(1);
+    expect(toolItem.content[0]?.type).toBe('terminal');
+    // data carries the raw object with terminalId
+    expect(toolItem.content[0]?.data).toMatchObject({ type: 'terminal', terminalId: 'term-1' });
+  });
+
+  // -------------------------------------------------------------------------
   // Tool messages — placeholder content suppression
   // -------------------------------------------------------------------------
 
