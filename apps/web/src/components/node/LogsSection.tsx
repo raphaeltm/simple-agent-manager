@@ -3,8 +3,9 @@ import { ScrollText, Pause, Play, RefreshCw } from 'lucide-react';
 import { Skeleton } from '@simple-agent-manager/ui';
 import { SectionHeader } from './SectionHeader';
 import { Section } from './Section';
-import { LogEntry } from './LogEntry';
+import { LogEntry, formatNodeLogEntries } from './LogEntry';
 import { LogFilters } from './LogFilters';
+import { CopyButton } from '../shared/log';
 import { useNodeLogs } from '../../hooks/useNodeLogs';
 
 interface LogsSectionProps {
@@ -51,6 +52,8 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
   }, []);
 
   const isRunning = nodeStatus === 'running';
+
+  const getCopyAllText = useCallback(() => formatNodeLogEntries(entries), [entries]);
 
   return (
     <Section>
@@ -121,6 +124,16 @@ export const LogsSection: FC<LogsSectionProps> = ({ nodeId, nodeStatus }) => {
               >
                 <RefreshCw size={14} />
               </button>
+
+              {/* Copy All */}
+              {entries.length > 0 && (
+                <CopyButton
+                  getText={getCopyAllText}
+                  label="Copy all visible logs"
+                  testId="copy-all-button"
+                  variant="toolbar"
+                />
+              )}
             </div>
           </div>
 

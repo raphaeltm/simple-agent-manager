@@ -1,5 +1,6 @@
-import { type FC, useState } from 'react';
+import { type FC, useState, useCallback } from 'react';
 import type { NodeLogEntry } from '@simple-agent-manager/shared';
+import { highlightText, CopyButton } from '../shared/log';
 
 interface LogEntryProps {
   entry: NodeLogEntry;
@@ -32,35 +33,20 @@ function formatTimestamp(ts: string): string {
   }
 }
 
-function highlightSearch(text: string, term: string): (string | JSX.Element)[] {
-  if (!term) return [text];
-  const parts: (string | JSX.Element)[] = [];
-  const lower = text.toLowerCase();
-  const termLower = term.toLowerCase();
-  let lastIdx = 0;
-
-  let idx = lower.indexOf(termLower);
-  while (idx !== -1) {
-    if (idx > lastIdx) parts.push(text.slice(lastIdx, idx));
-    parts.push(
-      <mark
-        key={idx}
-        style={{
-          backgroundColor: 'rgba(250, 204, 21, 0.3)',
-          color: 'inherit',
-          borderRadius: 2,
-          padding: '0 1px',
-        }}
-      >
-        {text.slice(idx, idx + term.length)}
-      </mark>
-    );
-    lastIdx = idx + term.length;
-    idx = lower.indexOf(termLower, lastIdx);
+/** Format a node log entry as copyable plain text. */
+export function formatNodeLogEntry(entry: NodeLogEntry): string {
+  const ts = new Date(entry.timestamp).toISOString();
+  const level = entry.level.toUpperCase().padEnd(5);
+  let text = `[${ts}] ${level} [${entry.source}] ${entry.message}`;
+  if (entry.metadata && Object.keys(entry.metadata).length > 0) {
+    text += '\n' + JSON.stringify(entry.metadata, null, 2);
   }
+  return text;
+}
 
-  if (lastIdx < text.length) parts.push(text.slice(lastIdx));
-  return parts;
+/** Format multiple node log entries for bulk copy. */
+export function formatNodeLogEntries(entries: NodeLogEntry[]): string {
+  return entries.map(formatNodeLogEntry).join('\n');
 }
 
 export const LogEntry: FC<LogEntryProps> = ({ entry, searchTerm }) => {
@@ -68,9 +54,11 @@ export const LogEntry: FC<LogEntryProps> = ({ entry, searchTerm }) => {
   const { color, bg } = getLevelStyle(entry.level);
   const hasMetadata = entry.metadata && Object.keys(entry.metadata).length > 0;
 
+  const getCopyText = useCallback(() => formatNodeLogEntry(entry), [entry]);
+
   return (
     <div
-      className="flex items-start gap-2 px-2 font-mono leading-relaxed"
+      className="group flex items-start gap-2 px-2 font-mono leading-relaxed relative"
       style={{
         padding: '2px var(--sam-space-2)',
         fontSize: 'var(--sam-type-caption-size, 0.75rem)',
@@ -79,6 +67,15 @@ export const LogEntry: FC<LogEntryProps> = ({ entry, searchTerm }) => {
         cursor: hasMetadata ? 'pointer' : 'default',
       }}
       onClick={hasMetadata ? () => setExpanded(!expanded) : undefined}
+      onKeyDown={hasMetadata ? (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          setExpanded(!expanded);
+        }
+      } : undefined}
+      role={hasMetadata ? 'button' : undefined}
+      tabIndex={hasMetadata ? 0 : undefined}
+      aria-expanded={hasMetadata ? expanded : undefined}
     >
       {/* Timestamp */}
       <span className="shrink-0 whitespace-nowrap" style={{ color: 'var(--sam-color-fg-disabled, #6b7280)' }}>
@@ -110,14 +107,22 @@ export const LogEntry: FC<LogEntryProps> = ({ entry, searchTerm }) => {
       </span>
 
       {/* Message */}
-      <span className="text-fg-primary flex-1 break-words">
-        {searchTerm ? highlightSearch(entry.message, searchTerm) : entry.message}
+      <span className="text-fg-primary flex-1 break-words pr-8">
+        {highlightText(entry.message, searchTerm)}
         {hasMetadata && (
           <span className="ml-1" style={{ color: 'var(--sam-color-fg-disabled)' }}>
             {expanded ? '\u25BC' : '\u25B6'}
           </span>
         )}
       </span>
+
+      {/* Copy button — visible on hover */}
+      <CopyButton
+        getText={getCopyText}
+        label="Copy log entry"
+        testId="copy-entry-button"
+        variant="inline"
+      />
 
       {/* Expanded metadata */}
       {expanded && hasMetadata && (
