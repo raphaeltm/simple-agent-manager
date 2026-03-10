@@ -129,7 +129,7 @@ export const LogViewer: FC = () => {
           {logs.length > 0 && (
             <button
               onClick={handleCopyAll}
-              className="p-1.5 rounded-sm border border-border-default bg-surface text-fg-muted cursor-pointer"
+              className="p-2.5 rounded-sm border border-border-default bg-surface text-fg-muted cursor-pointer flex items-center justify-center min-w-[44px] min-h-[44px]"
               aria-label="Copy all visible logs"
               title="Copy all visible logs"
               data-testid="copy-all-button"

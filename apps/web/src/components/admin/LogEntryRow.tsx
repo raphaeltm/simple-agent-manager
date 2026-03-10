@@ -107,6 +107,12 @@ export const LogEntryRow: FC<LogEntryRowProps> = ({ entry, searchTerm }) => {
       className="group px-4 py-2 border-b border-border-default text-sm relative"
       style={{ cursor: hasDetails ? 'pointer' : 'default' }}
       onClick={() => hasDetails && setExpanded(!expanded)}
+      onKeyDown={hasDetails ? (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          setExpanded(!expanded);
+        }
+      } : undefined}
       role={hasDetails ? 'button' : undefined}
       tabIndex={hasDetails ? 0 : undefined}
       aria-expanded={hasDetails ? expanded : undefined}
@@ -132,8 +138,8 @@ export const LogEntryRow: FC<LogEntryRowProps> = ({ entry, searchTerm }) => {
       {/* Copy button — visible on hover (desktop) or always visible (touch) */}
       <button
         onClick={handleCopy}
-        className="absolute right-2 top-2 p-1.5 rounded-sm border border-border-default bg-surface text-fg-muted opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity cursor-pointer touch:opacity-100"
-        style={{ minWidth: '28px', minHeight: '28px' }}
+        className="absolute right-2 top-1 p-2.5 rounded-sm border border-border-default bg-surface text-fg-muted opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus:opacity-100 transition-opacity cursor-pointer"
+        style={{ minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         aria-label="Copy log entry"
         title="Copy log entry"
         data-testid="copy-entry-button"

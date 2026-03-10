@@ -137,6 +137,19 @@ describe('LogEntryRow', () => {
     expect(document.querySelectorAll('mark').length).toBe(0);
   });
 
+  it('expands details on Enter key press (keyboard accessibility)', () => {
+    render(
+      <LogEntryRow
+        entry={createEntry({ details: { key: 'value' } })}
+      />,
+    );
+
+    const row = screen.getByRole('button', { expanded: false });
+    fireEvent.keyDown(row, { key: 'Enter' });
+
+    expect(screen.getByText(/"key"/)).toBeInTheDocument();
+  });
+
   it('escapes regex special chars in search term', () => {
     render(
       <LogEntryRow
