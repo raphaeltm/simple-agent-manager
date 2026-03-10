@@ -11,6 +11,7 @@ import {
 import type { ConversationItem } from '@simple-agent-manager/acp-client';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { TruncatedSummary } from './TruncatedSummary';
+import { stripMarkdown } from '../../lib/text-utils';
 import { getChatSession, getTranscribeApiUrl, resetIdleTimer } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
@@ -101,9 +102,18 @@ function AcpConversationItemView({ item }: { item: ConversationItem }) {
 
 /** Converts DO-persisted ChatMessageResponse[] into ConversationItem[] for unified rendering. */
 export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): ConversationItem[] {
+  // Deduplicate by message ID — the same message can arrive through multiple
+  // channels (initial REST load, WebSocket onMessage, onCatchUp, polling).
+  const seenIds = new Set<string>();
+  const dedupedMsgs = msgs.filter((msg) => {
+    if (seenIds.has(msg.id)) return false;
+    seenIds.add(msg.id);
+    return true;
+  });
+
   // First pass: build items, tracking tool calls by toolCallId for deduplication
   const toolCallMap = new Map<string, number>(); // toolCallId → index in acc
-  const items = msgs.reduce<ConversationItem[]>((acc, msg) => {
+  const items = dedupedMsgs.reduce<ConversationItem[]>((acc, msg) => {
     if (msg.role === 'user') {
       acc.push({ kind: 'user_message', id: msg.id, text: msg.content, timestamp: msg.createdAt });
     } else if (msg.role === 'assistant') {
@@ -156,7 +166,13 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
       const meta = msg.toolMetadata as Record<string, unknown> | null;
       const toolCallId = meta && typeof meta.toolCallId === 'string' ? meta.toolCallId : '';
       const kind = meta && typeof meta.kind === 'string' ? meta.kind : 'tool';
-      const title = meta && typeof meta.title === 'string' && meta.title ? meta.title : kind;
+      // Build a meaningful title: prefer the explicit title from metadata,
+      // then humanize the kind (e.g. "read" → "Read"), and only fall back
+      // to the generic "Tool Call" if kind is also just "tool".
+      const rawTitle = meta && typeof meta.title === 'string' && meta.title ? meta.title : '';
+      const title = rawTitle || (kind && kind !== 'tool'
+        ? kind.charAt(0).toUpperCase() + kind.slice(1)
+        : 'Tool Call');
       const locations = (meta?.locations as Array<{ path?: string; line?: number | null }>) ?? [];
       const validStatuses = new Set(['pending', 'in_progress', 'completed', 'failed']);
       const rawStatus = meta && typeof meta.status === 'string' ? meta.status : '';
@@ -201,7 +217,7 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
           id: msg.id,
           toolCallId: toolCallId || msg.id,
           title,
-          toolKind: kind,
+          toolKind: kind !== 'tool' ? kind : undefined,
           status,
           content: contentItems,
           locations: locations.map((l) => ({ path: l.path ?? '', line: l.line ?? null })),
@@ -711,8 +727,11 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
           // Collect ACP-only items: items with timestamps after the latest DO
           // message. Includes agent responses not yet persisted to DO.
+          // Also deduplicate by ID to prevent overlap when ACP and DO timestamps
+          // are identical (same message persisted to DO while ACP still holds it).
+          const doIds = new Set(convertedItems.map((item) => item.id));
           const acpOnlyItems = latestDoTimestamp > 0
-            ? acpItems.filter((item) => item.timestamp > latestDoTimestamp)
+            ? acpItems.filter((item) => item.timestamp > latestDoTimestamp && !doIds.has(item.id))
             : [];
 
           const mergedItems = acpOnlyItems.length > 0
@@ -827,7 +846,7 @@ function SessionHeader({
       {/* Compact row — always visible */}
       <div className="flex items-center gap-2 px-4 py-2 min-h-[40px]">
         <span className="text-sm font-semibold text-fg-primary truncate flex-1 min-w-0">
-          {session.topic || `Chat ${session.id.slice(0, 8)}`}
+          {session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`}
         </span>
 
         {/* State indicator */}

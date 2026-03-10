@@ -766,7 +766,7 @@ describe('chatMessagesToConversationItems', () => {
     ]);
     expect(items).toHaveLength(1);
     const tool = items[0] as { title: string; toolKind: string };
-    expect(tool.title).toBe('bash');
+    expect(tool.title).toBe('Bash');
     expect(tool.toolKind).toBe('bash');
   });
 
@@ -842,7 +842,7 @@ describe('chatMessagesToConversationItems', () => {
     ]);
     expect(items).toHaveLength(1);
     const tool = items[0] as { title: string; content: Array<{ type: string; text: string }> };
-    expect(tool.title).toBe('tool');
+    expect(tool.title).toBe('Tool Call');
     expect(tool.content).toHaveLength(1);
     expect(tool.content[0].text).toBe('stdout: build succeeded');
   });
