@@ -357,6 +357,63 @@ func TestMarshalRawContent_Empty(t *testing.T) {
 	}
 }
 
+// Zero-variant ToolCallContent (all pointers nil) should be dropped.
+func TestMarshalRawContent_ZeroVariant_Dropped(t *testing.T) {
+	contents := []acpsdk.ToolCallContent{{}} // all variants nil
+	items := marshalRawContent(contents)
+	if len(items) != 0 {
+		t.Fatalf("expected zero-variant item to be dropped, got %d items: %s", len(items), items[0])
+	}
+}
+
+// Verify exact wire format matches what the frontend expects.
+func TestMarshalRawContent_WireFormat(t *testing.T) {
+	oldText := "old"
+	contents := []acpsdk.ToolCallContent{
+		{Content: &acpsdk.ToolCallContentContent{Content: acpsdk.ContentBlock{Text: &acpsdk.ContentBlockText{Text: "hello"}}}},
+		{Diff: &acpsdk.ToolCallContentDiff{Path: "/foo.go", OldText: &oldText, NewText: "new"}},
+		{Terminal: &acpsdk.ToolCallContentTerminal{TerminalId: "term-1"}},
+	}
+	items := marshalRawContent(contents)
+	if len(items) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(items))
+	}
+
+	// Content: flat with nested content block
+	c := unmarshalRawItem(t, items[0])
+	if c["type"] != "content" {
+		t.Fatalf("content: expected type=content, got %v", c["type"])
+	}
+	inner, ok := c["content"].(map[string]interface{})
+	if !ok || inner["text"] != "hello" {
+		t.Fatalf("content: expected nested content.text=hello, got %v", c["content"])
+	}
+
+	// Diff: flat fields at top level
+	d := unmarshalRawItem(t, items[1])
+	if d["type"] != "diff" {
+		t.Fatalf("diff: expected type=diff, got %v", d["type"])
+	}
+	if d["path"] != "/foo.go" {
+		t.Fatalf("diff: expected path=/foo.go, got %v", d["path"])
+	}
+	if d["oldText"] != "old" {
+		t.Fatalf("diff: expected oldText=old, got %v", d["oldText"])
+	}
+	if d["newText"] != "new" {
+		t.Fatalf("diff: expected newText=new, got %v", d["newText"])
+	}
+
+	// Terminal: flat with terminalId field
+	tm := unmarshalRawItem(t, items[2])
+	if tm["type"] != "terminal" {
+		t.Fatalf("terminal: expected type=terminal, got %v", tm["type"])
+	}
+	if tm["terminalId"] != "term-1" {
+		t.Fatalf("terminal: expected terminalId=term-1, got %v", tm["terminalId"])
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Multiple content types in one ToolCall (mixed content + diff)
 // ---------------------------------------------------------------------------

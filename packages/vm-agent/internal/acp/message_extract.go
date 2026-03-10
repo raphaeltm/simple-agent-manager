@@ -208,21 +208,20 @@ func marshalRawContent(contents []acpsdk.ToolCallContent) []json.RawMessage {
 	for _, c := range contents {
 		// Truncate large diff fields before marshaling to prevent
 		// excessive storage while preserving the full structure.
+		// Copy the struct to preserve all fields (including _meta).
 		if c.Diff != nil {
-			truncatedNew := truncateContent(c.Diff.NewText)
-			var truncatedOld *string
+			diffCopy := *c.Diff
+			diffCopy.NewText = truncateContent(c.Diff.NewText)
 			if c.Diff.OldText != nil {
 				t := truncateContent(*c.Diff.OldText)
-				truncatedOld = &t
+				diffCopy.OldText = &t
 			}
-			c.Diff = &acpsdk.ToolCallContentDiff{
-				Path:    c.Diff.Path,
-				OldText: truncatedOld,
-				NewText: truncatedNew,
-			}
+			c.Diff = &diffCopy
 		}
 		raw, err := json.Marshal(c)
-		if err == nil && len(raw) > 2 { // Skip empty objects "{}"
+		// Skip zero-variant items: SDK returns empty []byte when all
+		// variant pointers are nil; also catches degenerate "{}" objects.
+		if err == nil && len(raw) > 2 {
 			items = append(items, raw)
 		}
 	}
