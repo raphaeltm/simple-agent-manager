@@ -998,7 +998,7 @@ function FollowUpInput({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !sending) {
+            if (e.key === 'Enter' && e.shiftKey && !sending) {
               e.preventDefault();
               onSend();
             }
