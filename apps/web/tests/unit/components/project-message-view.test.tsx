@@ -56,18 +56,22 @@ vi.mock('../../../src/hooks/useProjectAgentSession', () => ({
   useProjectAgentSession: (...args: unknown[]) => mocks.useProjectAgentSession(...args),
 }));
 
-vi.mock('@simple-agent-manager/acp-client', () => ({
-  VoiceButton: () => <button data-testid="voice-button">Voice</button>,
-  MessageBubble: ({ text, role }: { text: string; role: string }) => (
-    <div data-testid={`acp-message-${role}`}>{text}</div>
-  ),
-  ToolCallCard: ({ toolCall }: { toolCall: { title: string } }) => (
-    <div data-testid="acp-tool-call">{toolCall.title}</div>
-  ),
-  ThinkingBlock: ({ text }: { text: string }) => (
-    <div data-testid="acp-thinking">{text}</div>
-  ),
-}));
+vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@simple-agent-manager/acp-client')>();
+  return {
+    ...actual,
+    VoiceButton: () => <button data-testid="voice-button">Voice</button>,
+    MessageBubble: ({ text, role }: { text: string; role: string }) => (
+      <div data-testid={`acp-message-${role}`}>{text}</div>
+    ),
+    ToolCallCard: ({ toolCall }: { toolCall: { title: string } }) => (
+      <div data-testid="acp-tool-call">{toolCall.title}</div>
+    ),
+    ThinkingBlock: ({ text }: { text: string }) => (
+      <div data-testid="acp-thinking">{text}</div>
+    ),
+  };
+});
 
 import { ProjectMessageView, chatMessagesToConversationItems } from '../../../src/components/chat/ProjectMessageView';
 
