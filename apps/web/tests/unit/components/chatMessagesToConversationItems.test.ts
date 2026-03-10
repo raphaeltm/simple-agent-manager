@@ -219,7 +219,7 @@ describe('chatMessagesToConversationItems', () => {
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
       kind: 'tool_call',
-      title: 'tool', // kind used as title fallback when no title in meta
+      title: 'Tool Call', // generic fallback when no title or specific kind
     });
   });
 
@@ -612,5 +612,77 @@ describe('chatMessagesToConversationItems', () => {
 
     const toolItem = items[0] as { content: Array<{ text?: string }> };
     expect(toolItem.content[0]?.text).toBe('final output');
+  });
+
+  // -------------------------------------------------------------------------
+  // Tool name fallback (fix for "tool tool" display)
+  // -------------------------------------------------------------------------
+
+  it('uses humanized kind as title when title is missing and kind is specific', () => {
+    const meta = { toolCallId: 'tc-kind', kind: 'read', status: 'completed' };
+    const input = [msg({ role: 'tool', content: 'output', toolMetadata: meta as unknown as null })];
+    const items = chatMessagesToConversationItems(input);
+
+    const tool = items[0] as { title: string };
+    expect(tool.title).toBe('Read');
+  });
+
+  it('uses "Tool Call" as title when both title and kind are generic "tool"', () => {
+    const meta = { toolCallId: 'tc-generic', kind: 'tool', status: 'completed' };
+    const input = [msg({ role: 'tool', content: 'output', toolMetadata: meta as unknown as null })];
+    const items = chatMessagesToConversationItems(input);
+
+    const tool = items[0] as { title: string };
+    expect(tool.title).toBe('Tool Call');
+  });
+
+  it('suppresses generic "tool" kind from toolKind badge', () => {
+    const meta = { toolCallId: 'tc-badge', kind: 'tool', status: 'completed' };
+    const input = [msg({ role: 'tool', content: 'output', toolMetadata: meta as unknown as null })];
+    const items = chatMessagesToConversationItems(input);
+
+    const tool = items[0] as { toolKind?: string };
+    expect(tool.toolKind).toBeUndefined();
+  });
+
+  it('preserves specific kind in toolKind badge', () => {
+    const meta = { toolCallId: 'tc-specific', kind: 'execute', status: 'completed' };
+    const input = [msg({ role: 'tool', content: 'output', toolMetadata: meta as unknown as null })];
+    const items = chatMessagesToConversationItems(input);
+
+    const tool = items[0] as { toolKind?: string };
+    expect(tool.toolKind).toBe('execute');
+  });
+
+  it('prefers explicit title over kind when both are available', () => {
+    const meta = { toolCallId: 'tc-both', kind: 'read', title: 'Read /src/main.go', status: 'completed' };
+    const input = [msg({ role: 'tool', content: 'output', toolMetadata: meta as unknown as null })];
+    const items = chatMessagesToConversationItems(input);
+
+    const tool = items[0] as { title: string };
+    expect(tool.title).toBe('Read /src/main.go');
+  });
+
+  // -------------------------------------------------------------------------
+  // Message ID deduplication
+  // -------------------------------------------------------------------------
+
+  it('deduplicates messages with the same ID', () => {
+    const input = [
+      msg({ id: 'dup-1', role: 'user', content: 'hello' }),
+      msg({ id: 'dup-1', role: 'user', content: 'hello' }),
+    ];
+    const items = chatMessagesToConversationItems(input);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'user_message', text: 'hello' });
+  });
+
+  it('keeps messages with different IDs', () => {
+    const input = [
+      msg({ id: 'a', role: 'user', content: 'first' }),
+      msg({ id: 'b', role: 'user', content: 'second' }),
+    ];
+    const items = chatMessagesToConversationItems(input);
+    expect(items).toHaveLength(2);
   });
 });
