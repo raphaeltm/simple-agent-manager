@@ -813,4 +813,216 @@ projectsRoutes.delete('/:id', async (c) => {
   return c.json({ success: true });
 });
 
+// =========================================================================
+// ACP Sessions (Spec 027 — DO-Owned Session Lifecycle)
+// =========================================================================
+
+import type {
+  AcpSessionStatus,
+  AcpSessionForkRequest,
+  AcpSessionAssignRequest,
+  AcpSessionStatusReport,
+  AcpSessionHeartbeatRequest,
+} from '@simple-agent-manager/shared';
+
+/** POST /:id/acp-sessions — Create a new ACP session */
+projectsRoutes.post('/:id/acp-sessions', async (c) => {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
+  await requireOwnedProject(db, projectId, userId);
+
+  const body = await c.req.json<{
+    chatSessionId: string;
+    initialPrompt?: string;
+    agentType?: string;
+  }>();
+
+  if (!body.chatSessionId) {
+    throw errors.badRequest('chatSessionId is required');
+  }
+
+  const session = await projectDataService.createAcpSession(
+    c.env,
+    projectId,
+    body.chatSessionId,
+    body.initialPrompt ?? null,
+    body.agentType ?? null
+  );
+
+  return c.json(session, 201);
+});
+
+/** GET /:id/acp-sessions — List ACP sessions */
+projectsRoutes.get('/:id/acp-sessions', async (c) => {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
+  await requireOwnedProject(db, projectId, userId);
+
+  const status = c.req.query('status') as AcpSessionStatus | undefined;
+  const chatSessionId = c.req.query('chatSessionId');
+  const limit = parsePositiveInt(c.req.query('limit'), 50);
+  const offset = parsePositiveInt(c.req.query('offset'), 0);
+
+  const result = await projectDataService.listAcpSessions(c.env, projectId, {
+    status,
+    chatSessionId,
+    limit,
+    offset,
+  });
+
+  return c.json(result);
+});
+
+/** GET /:id/acp-sessions/:sessionId — Get a single ACP session */
+projectsRoutes.get('/:id/acp-sessions/:sessionId', async (c) => {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+  await requireOwnedProject(db, projectId, userId);
+
+  const session = await projectDataService.getAcpSession(c.env, projectId, sessionId);
+  if (!session) {
+    throw errors.notFound('ACP session not found');
+  }
+
+  return c.json(session);
+});
+
+/** POST /:id/acp-sessions/:sessionId/assign — Assign workspace + node to session */
+projectsRoutes.post('/:id/acp-sessions/:sessionId/assign', async (c) => {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+  await requireOwnedProject(db, projectId, userId);
+
+  const body = await c.req.json<AcpSessionAssignRequest>();
+  if (!body.workspaceId || !body.nodeId) {
+    throw errors.badRequest('workspaceId and nodeId are required');
+  }
+
+  // US3: Validate workspace belongs to this project
+  const workspace = await db.query.workspaces.findFirst({
+    where: eq(schema.workspaces.id, body.workspaceId),
+  });
+  if (!workspace) {
+    throw errors.notFound('Workspace not found');
+  }
+  if (workspace.projectId !== projectId) {
+    throw errors.badRequest(
+      `Workspace ${body.workspaceId} belongs to project ${workspace.projectId ?? 'none'}, not ${projectId}`
+    );
+  }
+
+  const session = await projectDataService.transitionAcpSession(
+    c.env,
+    projectId,
+    sessionId,
+    'assigned',
+    {
+      actorType: 'system',
+      actorId: userId,
+      reason: 'Workspace assigned',
+      workspaceId: body.workspaceId,
+      nodeId: body.nodeId,
+    }
+  );
+
+  return c.json(session);
+});
+
+/** POST /:id/acp-sessions/:sessionId/status — VM agent reports status change */
+projectsRoutes.post('/:id/acp-sessions/:sessionId/status', async (c) => {
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+
+  const body = await c.req.json<AcpSessionStatusReport>();
+  if (!body.status || !body.nodeId) {
+    throw errors.badRequest('status and nodeId are required');
+  }
+
+  if (body.status === 'running' && !body.acpSdkSessionId) {
+    throw errors.badRequest('acpSdkSessionId is required when reporting running status');
+  }
+
+  // Validate node matches assigned node
+  const existing = await projectDataService.getAcpSession(c.env, projectId, sessionId);
+  if (!existing) {
+    throw errors.notFound('ACP session not found');
+  }
+  if (existing.nodeId !== body.nodeId) {
+    throw errors.forbidden(
+      `Node mismatch: session assigned to ${existing.nodeId}, report from ${body.nodeId}`
+    );
+  }
+
+  const session = await projectDataService.transitionAcpSession(
+    c.env,
+    projectId,
+    sessionId,
+    body.status,
+    {
+      actorType: 'vm-agent',
+      actorId: body.nodeId,
+      reason: body.status === 'failed' ? body.errorMessage : undefined,
+      acpSdkSessionId: body.acpSdkSessionId,
+      errorMessage: body.errorMessage,
+    }
+  );
+
+  return c.json(session);
+});
+
+/** POST /:id/acp-sessions/:sessionId/heartbeat — VM agent heartbeat */
+projectsRoutes.post('/:id/acp-sessions/:sessionId/heartbeat', async (c) => {
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+
+  const body = await c.req.json<AcpSessionHeartbeatRequest>();
+  if (!body.nodeId) {
+    throw errors.badRequest('nodeId is required');
+  }
+
+  await projectDataService.updateAcpSessionHeartbeat(c.env, projectId, sessionId, body.nodeId);
+  return c.body(null, 204);
+});
+
+/** POST /:id/acp-sessions/:sessionId/fork — Fork a completed/interrupted session */
+projectsRoutes.post('/:id/acp-sessions/:sessionId/fork', async (c) => {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+  await requireOwnedProject(db, projectId, userId);
+
+  const body = await c.req.json<AcpSessionForkRequest>();
+  if (!body.contextSummary) {
+    throw errors.badRequest('contextSummary is required');
+  }
+
+  const forked = await projectDataService.forkAcpSession(
+    c.env,
+    projectId,
+    sessionId,
+    body.contextSummary
+  );
+
+  return c.json(forked, 201);
+});
+
+/** GET /:id/acp-sessions/:sessionId/lineage — Get fork lineage tree */
+projectsRoutes.get('/:id/acp-sessions/:sessionId/lineage', async (c) => {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+  await requireOwnedProject(db, projectId, userId);
+
+  const sessions = await projectDataService.getAcpSessionLineage(c.env, projectId, sessionId);
+  return c.json({ sessions });
+});
+
 export { projectsRoutes };
