@@ -22,6 +22,9 @@ const statusConfig: Record<string, { label: string; bg: string; fg: string }> = 
   completed: { label: 'Completed', bg: 'rgba(34, 197, 94, 0.2)', fg: '#22c55e' },
   failed: { label: 'Failed', bg: 'rgba(239, 68, 68, 0.15)', fg: '#f87171' },
   cancelled: { label: 'Cancelled', bg: 'rgba(159, 183, 174, 0.15)', fg: '#9fb7ae' },
+  // ACP session statuses (spec 027)
+  assigned: { label: 'Assigned', bg: 'rgba(99, 102, 241, 0.15)', fg: '#a5b4fc' },
+  interrupted: { label: 'Interrupted', bg: 'rgba(245, 158, 11, 0.15)', fg: '#fbbf24' },
 };
 
 interface StatusBadgeProps {

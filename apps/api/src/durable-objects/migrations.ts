@@ -155,6 +155,57 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    name: '008-acp-sessions',
+    run: (sql) => {
+      // ACP sessions — DO-owned session lifecycle (spec 027)
+      sql.exec(`
+        CREATE TABLE acp_sessions (
+          id TEXT PRIMARY KEY,
+          chat_session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          workspace_id TEXT,
+          node_id TEXT,
+          acp_sdk_session_id TEXT,
+          parent_session_id TEXT REFERENCES acp_sessions(id),
+          status TEXT NOT NULL DEFAULT 'pending',
+          agent_type TEXT,
+          initial_prompt TEXT,
+          error_message TEXT,
+          last_heartbeat_at INTEGER,
+          fork_depth INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+          assigned_at INTEGER,
+          started_at INTEGER,
+          completed_at INTEGER,
+          interrupted_at INTEGER
+        )
+      `);
+      sql.exec(`CREATE INDEX idx_acp_sessions_chat ON acp_sessions(chat_session_id)`);
+      sql.exec(`CREATE INDEX idx_acp_sessions_workspace ON acp_sessions(workspace_id)`);
+      sql.exec(`CREATE INDEX idx_acp_sessions_node ON acp_sessions(node_id)`);
+      sql.exec(`CREATE INDEX idx_acp_sessions_parent ON acp_sessions(parent_session_id)`);
+      sql.exec(`CREATE INDEX idx_acp_sessions_status ON acp_sessions(status)`);
+
+      // ACP session events — audit log of state transitions
+      sql.exec(`
+        CREATE TABLE acp_session_events (
+          id TEXT PRIMARY KEY,
+          acp_session_id TEXT NOT NULL REFERENCES acp_sessions(id) ON DELETE CASCADE,
+          from_status TEXT,
+          to_status TEXT NOT NULL,
+          actor_type TEXT NOT NULL,
+          actor_id TEXT,
+          reason TEXT,
+          metadata TEXT,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+        )
+      `);
+      sql.exec(
+        `CREATE INDEX idx_acp_session_events_session ON acp_session_events(acp_session_id, created_at)`
+      );
+    },
+  },
 ];
 
 /**

@@ -35,6 +35,7 @@
     "setup:local": "tsx scripts/deploy/setup-local-dev.ts",
     "quality:preflight": "tsx scripts/quality/check-preflight-evidence.ts",
     "quality:wrangler-bindings": "tsx scripts/quality/check-wrangler-bindings.ts",
+    "quality:ast-checks": "tsx scripts/quality/ast-checks.ts",
     "test:infra": "pnpm --filter @simple-agent-manager/infra test",
     "prepare": "husky"
   },
@@ -43,14 +44,15 @@
   },
   "devDependencies": {
     "@commitlint/cli": "^19.0.0",
-    "@types/iarna__toml": "^2.0.5",
     "@commitlint/config-conventional": "^19.0.0",
+    "@types/iarna__toml": "^2.0.5",
     "@types/node": "^20.0.0",
     "husky": "^9.0.0",
     "lint-staged": "^15.0.0",
     "prettier": "^3.0.0",
-    "turbo": "^2.0.0",
+    "ts-morph": "^27.0.2",
     "tsx": "^4.0.0",
+    "turbo": "^2.0.0",
     "typescript": "^5.0.0",
     "zod": "^3.23.0"
   },

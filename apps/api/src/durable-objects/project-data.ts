@@ -10,6 +10,17 @@
 import { DurableObject } from 'cloudflare:workers';
 import { runMigrations } from './migrations';
 
+import type {
+  AcpSession,
+  AcpSessionStatus,
+  AcpSessionEventActorType,
+} from '@simple-agent-manager/shared';
+import {
+  ACP_SESSION_VALID_TRANSITIONS,
+  ACP_SESSION_TERMINAL_STATUSES,
+  ACP_SESSION_DEFAULTS,
+} from '@simple-agent-manager/shared';
+
 type Env = {
   DATABASE: D1Database;
   BASE_DOMAIN?: string;
@@ -20,6 +31,8 @@ type Env = {
   SESSION_IDLE_TIMEOUT_MINUTES?: string;
   IDLE_CLEANUP_RETRY_DELAY_MS?: string;
   IDLE_CLEANUP_MAX_RETRIES?: string;
+  ACP_SESSION_DETECTION_WINDOW_MS?: string;
+  ACP_SESSION_MAX_FORK_DEPTH?: string;
 };
 
 interface SummaryData {
@@ -658,6 +671,9 @@ export class ProjectData extends DurableObject<Env> {
    * workspaces for cron cleanup in D1. Retries on failure.
    */
   async alarm(): Promise<void> {
+    // Check for ACP session heartbeat timeouts first
+    await this.checkHeartbeatTimeouts();
+
     const now = Date.now();
     const maxRetries = parseInt(this.env.IDLE_CLEANUP_MAX_RETRIES || '1', 10);
     const retryDelay = parseInt(this.env.IDLE_CLEANUP_RETRY_DELAY_MS || '300000', 10);
@@ -740,15 +756,36 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   /**
-   * Recalculate the DO alarm based on the earliest scheduled cleanup.
+   * Recalculate the DO alarm based on the earliest scheduled cleanup
+   * AND the earliest active ACP session heartbeat expiry.
    */
   private async recalculateAlarm(): Promise<void> {
-    const row = this.sql
+    const idleRow = this.sql
       .exec('SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule')
       .toArray()[0];
+    const idleEarliest = idleRow?.earliest as number | null;
 
-    if (row?.earliest) {
-      await this.ctx.storage.setAlarm(row.earliest as number);
+    // Compute heartbeat alarm from earliest last_heartbeat_at among active sessions
+    const earliestHbRow = this.sql
+      .exec(
+        `SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions
+         WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NOT NULL`
+      )
+      .toArray()[0];
+
+    let heartbeatTime: number | null = null;
+    const earliestHb = earliestHbRow?.earliest as number | null;
+    if (earliestHb !== null) {
+      const detectionWindow = parseInt(
+        this.env.ACP_SESSION_DETECTION_WINDOW_MS || String(ACP_SESSION_DEFAULTS.DETECTION_WINDOW_MS),
+        10
+      );
+      heartbeatTime = earliestHb + detectionWindow;
+    }
+
+    const candidates = [idleEarliest, heartbeatTime].filter((t): t is number => t !== null);
+    if (candidates.length > 0) {
+      await this.ctx.storage.setAlarm(Math.min(...candidates));
     } else {
       await this.ctx.storage.deleteAlarm();
     }
@@ -837,6 +874,564 @@ export class ProjectData extends DurableObject<Env> {
     } catch (e) {
       console.warn(JSON.stringify({ event: 'project_data.system_message_insert_failed', sessionId, error: String(e) }));
     }
+  }
+
+  // =========================================================================
+  // ACP Session Lifecycle (Spec 027 — DO-Owned Sessions)
+  // =========================================================================
+
+  /**
+   * Create a new ACP session in "pending" state.
+   * The session tracks the execution of an agent within a chat session.
+   */
+  async createAcpSession(opts: {
+    chatSessionId: string;
+    initialPrompt: string | null;
+    agentType: string | null;
+    parentSessionId?: string | null;
+    forkDepth?: number;
+  }): Promise<AcpSession> {
+    // Validate chat session exists
+    const chatSession = this.sql
+      .exec('SELECT id FROM chat_sessions WHERE id = ?', opts.chatSessionId)
+      .toArray()[0];
+    if (!chatSession) {
+      throw new Error(`Chat session ${opts.chatSessionId} not found`);
+    }
+
+    const id = generateId();
+    const now = Date.now();
+
+    this.sql.exec(
+      `INSERT INTO acp_sessions (id, chat_session_id, parent_session_id, status, agent_type, initial_prompt, fork_depth, created_at, updated_at)
+       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+      id,
+      opts.chatSessionId,
+      opts.parentSessionId ?? null,
+      opts.agentType ?? null,
+      opts.initialPrompt ?? null,
+      opts.forkDepth ?? 0,
+      now,
+      now
+    );
+
+    this.recordAcpSessionEvent(id, null, 'pending', 'system', null, 'Session created');
+
+    const projectId = this.getProjectId();
+    console.log(JSON.stringify({
+      event: 'acp_session.created',
+      sessionId: id,
+      chatSessionId: opts.chatSessionId,
+      projectId,
+      parentSessionId: opts.parentSessionId ?? null,
+      forkDepth: opts.forkDepth ?? 0,
+    }));
+
+    return this.getAcpSessionOrThrow(id);
+  }
+
+  /**
+   * Get a single ACP session by ID.
+   */
+  async getAcpSession(sessionId: string): Promise<AcpSession | null> {
+    const row = this.sql
+      .exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId)
+      .toArray()[0];
+    return row ? this.mapAcpSessionRow(row) : null;
+  }
+
+  /**
+   * List ACP sessions for this project, optionally filtered by chat session or status.
+   */
+  async listAcpSessions(opts?: {
+    chatSessionId?: string;
+    status?: AcpSessionStatus;
+    nodeId?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ sessions: AcpSession[]; total: number }> {
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
+
+    if (opts?.chatSessionId) {
+      conditions.push('chat_session_id = ?');
+      params.push(opts.chatSessionId);
+    }
+    if (opts?.status) {
+      conditions.push('status = ?');
+      params.push(opts.status);
+    }
+    if (opts?.nodeId) {
+      conditions.push('node_id = ?');
+      params.push(opts.nodeId);
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = opts?.limit ?? 50;
+    const offset = opts?.offset ?? 0;
+
+    const totalRow = this.sql
+      .exec(`SELECT COUNT(*) as cnt FROM acp_sessions ${where}`, ...params)
+      .toArray()[0];
+
+    const rows = this.sql
+      .exec(
+        `SELECT * FROM acp_sessions ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+        ...params,
+        limit,
+        offset
+      )
+      .toArray();
+
+    return {
+      sessions: rows.map((row) => this.mapAcpSessionRow(row)),
+      total: (totalRow?.cnt as number) || 0,
+    };
+  }
+
+  /**
+   * Transition an ACP session to a new state with validation.
+   * Enforces the state machine — invalid transitions return an error.
+   */
+  async transitionAcpSession(
+    sessionId: string,
+    toStatus: AcpSessionStatus,
+    opts: {
+      actorType: AcpSessionEventActorType;
+      actorId?: string | null;
+      reason?: string | null;
+      metadata?: Record<string, unknown> | null;
+      workspaceId?: string;
+      nodeId?: string;
+      acpSdkSessionId?: string;
+      errorMessage?: string;
+    }
+  ): Promise<AcpSession> {
+    const session = this.sql
+      .exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId)
+      .toArray()[0];
+
+    if (!session) {
+      throw new Error(`ACP session ${sessionId} not found`);
+    }
+
+    const fromStatus = session.status as AcpSessionStatus;
+    const validTargets = ACP_SESSION_VALID_TRANSITIONS[fromStatus];
+
+    if (!validTargets.includes(toStatus)) {
+      const projectId = this.getProjectId();
+      console.error(JSON.stringify({
+        event: 'acp_session.invalid_transition',
+        sessionId,
+        chatSessionId: session.chat_session_id,
+        projectId,
+        fromStatus,
+        toStatus,
+        action: 'rejected',
+      }));
+      throw new Error(
+        `Invalid ACP session transition: ${fromStatus} → ${toStatus} (session ${sessionId})`
+      );
+    }
+
+    const now = Date.now();
+
+    // Atomic single-UPDATE per transition type — never split status + fields across statements.
+    // All values are parameterized to prevent SQL injection.
+    if (toStatus === 'assigned') {
+      this.sql.exec(
+        `UPDATE acp_sessions SET status = ?, workspace_id = ?, node_id = ?, assigned_at = ?, last_heartbeat_at = ?, updated_at = ? WHERE id = ?`,
+        toStatus, opts.workspaceId ?? null, opts.nodeId ?? null, now, now, now, sessionId
+      );
+    } else if (toStatus === 'running') {
+      this.sql.exec(
+        `UPDATE acp_sessions SET status = ?, acp_sdk_session_id = ?, started_at = ?, updated_at = ? WHERE id = ?`,
+        toStatus, opts.acpSdkSessionId ?? null, now, now, sessionId
+      );
+    } else if (toStatus === 'completed' || toStatus === 'failed') {
+      this.sql.exec(
+        `UPDATE acp_sessions SET status = ?, completed_at = ?, error_message = ?, updated_at = ? WHERE id = ?`,
+        toStatus, now, opts.errorMessage ?? null, now, sessionId
+      );
+    } else if (toStatus === 'interrupted') {
+      this.sql.exec(
+        `UPDATE acp_sessions SET status = ?, interrupted_at = ?, error_message = ?, updated_at = ? WHERE id = ?`,
+        toStatus, now, opts.errorMessage ?? null, now, sessionId
+      );
+    } else {
+      this.sql.exec(
+        `UPDATE acp_sessions SET status = ?, updated_at = ? WHERE id = ?`,
+        toStatus, now, sessionId
+      );
+    }
+
+    this.recordAcpSessionEvent(
+      sessionId,
+      fromStatus,
+      toStatus,
+      opts.actorType,
+      opts.actorId ?? null,
+      opts.reason ?? null,
+      opts.metadata ?? null
+    );
+
+    const projectId = this.getProjectId();
+    console.log(JSON.stringify({
+      event: 'acp_session.transitioned',
+      sessionId,
+      chatSessionId: session.chat_session_id,
+      workspaceId: opts.workspaceId ?? session.workspace_id,
+      nodeId: opts.nodeId ?? session.node_id,
+      projectId,
+      fromStatus,
+      toStatus,
+    }));
+
+    // Schedule heartbeat detection alarm when session becomes active
+    if (toStatus === 'assigned' || toStatus === 'running') {
+      await this.scheduleHeartbeatAlarm();
+    }
+
+    return this.getAcpSessionOrThrow(sessionId);
+  }
+
+  /**
+   * Update heartbeat timestamp for a session. Resets the detection alarm.
+   */
+  async updateHeartbeat(sessionId: string, nodeId: string): Promise<void> {
+    const session = this.sql
+      .exec('SELECT id, node_id, status FROM acp_sessions WHERE id = ?', sessionId)
+      .toArray()[0];
+
+    if (!session) {
+      throw new Error(`ACP session ${sessionId} not found`);
+    }
+
+    if (session.node_id !== nodeId) {
+      const projectId = this.getProjectId();
+      console.error(JSON.stringify({
+        event: 'acp_session.heartbeat_node_mismatch',
+        sessionId,
+        expectedNodeId: session.node_id,
+        receivedNodeId: nodeId,
+        projectId,
+        action: 'rejected',
+      }));
+      throw new Error(`Node mismatch: session assigned to ${session.node_id}, heartbeat from ${nodeId}`);
+    }
+
+    const status = session.status as string;
+    if (!['assigned', 'running'].includes(status)) {
+      const projectId = this.getProjectId();
+      console.warn(JSON.stringify({
+        event: 'acp_session.heartbeat_for_inactive_session',
+        sessionId,
+        nodeId,
+        projectId,
+        sessionStatus: status,
+        action: 'rejected',
+      }));
+      throw new Error(
+        `Heartbeat rejected: session ${sessionId} is in "${status}" state, not assigned or running`
+      );
+    }
+
+    const now = Date.now();
+    this.sql.exec(
+      'UPDATE acp_sessions SET last_heartbeat_at = ?, updated_at = ? WHERE id = ?',
+      now,
+      now,
+      sessionId
+    );
+
+    await this.scheduleHeartbeatAlarm();
+  }
+
+  /**
+   * Fork a completed/interrupted session, creating a new session with context.
+   */
+  async forkAcpSession(
+    sessionId: string,
+    contextSummary: string
+  ): Promise<AcpSession> {
+    const parent = this.sql
+      .exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId)
+      .toArray()[0];
+
+    if (!parent) {
+      throw new Error(`ACP session ${sessionId} not found`);
+    }
+
+    const parentStatus = parent.status as AcpSessionStatus;
+    if (!ACP_SESSION_TERMINAL_STATUSES.includes(parentStatus)) {
+      const projectId = this.getProjectId();
+      console.warn(JSON.stringify({
+        event: 'acp_session.fork_invalid_state',
+        sessionId,
+        projectId,
+        parentStatus,
+        action: 'rejected',
+      }));
+      throw new Error(
+        `Cannot fork session in "${parentStatus}" state — must be completed, failed, or interrupted`
+      );
+    }
+
+    const parentDepth = parent.fork_depth as number;
+    const maxDepth = parseInt(
+      this.env.ACP_SESSION_MAX_FORK_DEPTH || String(ACP_SESSION_DEFAULTS.MAX_FORK_DEPTH),
+      10
+    );
+    if (parentDepth >= maxDepth) {
+      const projectId = this.getProjectId();
+      console.warn(JSON.stringify({
+        event: 'acp_session.fork_depth_exceeded',
+        sessionId,
+        projectId,
+        parentDepth,
+        maxDepth,
+        action: 'rejected',
+      }));
+      throw new Error(
+        `Fork depth ${parentDepth + 1} exceeds maximum ${maxDepth}`
+      );
+    }
+
+    return this.createAcpSession({
+      chatSessionId: parent.chat_session_id as string,
+      initialPrompt: contextSummary,
+      agentType: parent.agent_type as string | null,
+      parentSessionId: sessionId,
+      forkDepth: parentDepth + 1,
+    });
+  }
+
+  /**
+   * Get the fork lineage for a session — walks up to root and collects all descendants.
+   */
+  async getAcpSessionLineage(sessionId: string): Promise<AcpSession[]> {
+    // Find the root session first, with cycle guard
+    let rootId = sessionId;
+    const visited = new Set<string>([rootId]);
+    let current = this.sql
+      .exec('SELECT id, parent_session_id FROM acp_sessions WHERE id = ?', rootId)
+      .toArray()[0];
+
+    while (current?.parent_session_id) {
+      const parentId = current.parent_session_id as string;
+      if (visited.has(parentId)) break; // cycle guard
+      visited.add(parentId);
+      rootId = parentId;
+      current = this.sql
+        .exec('SELECT id, parent_session_id FROM acp_sessions WHERE id = ?', rootId)
+        .toArray()[0];
+    }
+
+    // Get all sessions in the lineage tree using recursive CTE
+    const rows = this.sql
+      .exec(
+        `WITH RECURSIVE lineage AS (
+          SELECT * FROM acp_sessions WHERE id = ?
+          UNION ALL
+          SELECT s.* FROM acp_sessions s
+          INNER JOIN lineage l ON s.parent_session_id = l.id
+        )
+        SELECT * FROM lineage ORDER BY fork_depth, created_at`,
+        rootId
+      )
+      .toArray();
+
+    return rows.map((row) => this.mapAcpSessionRow(row));
+  }
+
+  /**
+   * List ACP sessions by node ID across all statuses matching the filter.
+   * Used for VM agent reconciliation on startup.
+   */
+  async listAcpSessionsByNode(
+    nodeId: string,
+    statuses: AcpSessionStatus[]
+  ): Promise<AcpSession[]> {
+    if (statuses.length === 0) return [];
+    const placeholders = statuses.map(() => '?').join(', ');
+    const rows = this.sql
+      .exec(
+        `SELECT * FROM acp_sessions WHERE node_id = ? AND status IN (${placeholders})`,
+        nodeId,
+        ...statuses
+      )
+      .toArray();
+    return rows.map((row) => this.mapAcpSessionRow(row));
+  }
+
+  /**
+   * Check for ACP sessions that have missed their heartbeat window.
+   * Called from the DO alarm handler.
+   */
+  private async checkHeartbeatTimeouts(): Promise<void> {
+    const detectionWindow = parseInt(
+      this.env.ACP_SESSION_DETECTION_WINDOW_MS || String(ACP_SESSION_DEFAULTS.DETECTION_WINDOW_MS),
+      10
+    );
+    const cutoff = Date.now() - detectionWindow;
+
+    const staleSessions = this.sql
+      .exec(
+        `SELECT id, chat_session_id, workspace_id, node_id, last_heartbeat_at FROM acp_sessions
+         WHERE status IN ('assigned', 'running')
+         AND last_heartbeat_at IS NOT NULL
+         AND last_heartbeat_at < ?`,
+        cutoff
+      )
+      .toArray();
+
+    const failures: Array<{ sessionId: string; error: string }> = [];
+    for (const session of staleSessions) {
+      const sessionId = session.id as string;
+      try {
+        await this.transitionAcpSession(sessionId, 'interrupted', {
+          actorType: 'alarm',
+          reason: 'Heartbeat timeout exceeded detection window',
+          errorMessage: `Heartbeat timeout: last heartbeat at ${session.last_heartbeat_at}, cutoff was ${cutoff}`,
+          metadata: {
+            detectionWindowMs: detectionWindow,
+            lastHeartbeatAt: session.last_heartbeat_at,
+            cutoff,
+          },
+        });
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        console.error(JSON.stringify({
+          event: 'acp_session.heartbeat_timeout_transition_failed',
+          sessionId,
+          error: errorMsg,
+        }));
+        failures.push({ sessionId, error: errorMsg });
+      }
+    }
+
+    if (failures.length > 0) {
+      console.error(JSON.stringify({
+        event: 'acp_session.heartbeat_timeout_batch_failures',
+        failureCount: failures.length,
+        totalStale: staleSessions.length,
+        failures,
+      }));
+    }
+
+    // Reschedule alarm if there are still active sessions
+    const activeCount = this.sql
+      .exec("SELECT COUNT(*) as cnt FROM acp_sessions WHERE status IN ('assigned', 'running')")
+      .toArray()[0];
+    if ((activeCount?.cnt as number) > 0) {
+      await this.scheduleHeartbeatAlarm();
+    }
+  }
+
+  /**
+   * Record an ACP session state transition event.
+   */
+  private recordAcpSessionEvent(
+    acpSessionId: string,
+    fromStatus: AcpSessionStatus | null,
+    toStatus: AcpSessionStatus,
+    actorType: AcpSessionEventActorType,
+    actorId: string | null,
+    reason: string | null,
+    metadata: Record<string, unknown> | null = null
+  ): void {
+    const id = generateId();
+    const now = Date.now();
+    this.sql.exec(
+      `INSERT INTO acp_session_events (id, acp_session_id, from_status, to_status, actor_type, actor_id, reason, metadata, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      acpSessionId,
+      fromStatus,
+      toStatus,
+      actorType,
+      actorId,
+      reason,
+      metadata ? JSON.stringify(metadata) : null,
+      now
+    );
+  }
+
+  /**
+   * Get an ACP session or throw if not found.
+   */
+  private getAcpSessionOrThrow(sessionId: string): AcpSession {
+    const row = this.sql
+      .exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId)
+      .toArray()[0];
+    if (!row) {
+      throw new Error(`ACP session ${sessionId} not found`);
+    }
+    return this.mapAcpSessionRow(row);
+  }
+
+  /**
+   * Map a raw SQLite row to an AcpSession interface.
+   */
+  private mapAcpSessionRow(row: Record<string, unknown>): AcpSession {
+    return {
+      id: row.id as string,
+      chatSessionId: row.chat_session_id as string,
+      workspaceId: (row.workspace_id as string) ?? null,
+      nodeId: (row.node_id as string) ?? null,
+      acpSdkSessionId: (row.acp_sdk_session_id as string) ?? null,
+      parentSessionId: (row.parent_session_id as string) ?? null,
+      status: row.status as AcpSessionStatus,
+      agentType: (row.agent_type as string) ?? null,
+      initialPrompt: (row.initial_prompt as string) ?? null,
+      errorMessage: (row.error_message as string) ?? null,
+      lastHeartbeatAt: (row.last_heartbeat_at as number) ?? null,
+      forkDepth: (row.fork_depth as number) ?? 0,
+      createdAt: row.created_at as number,
+      updatedAt: row.updated_at as number,
+      assignedAt: (row.assigned_at as number) ?? null,
+      startedAt: (row.started_at as number) ?? null,
+      completedAt: (row.completed_at as number) ?? null,
+      interruptedAt: (row.interrupted_at as number) ?? null,
+    };
+  }
+
+  /**
+   * Schedule a DO alarm for heartbeat detection.
+   * Computes alarm time from the EARLIEST last_heartbeat_at among active sessions,
+   * so stale sessions are detected promptly even when other sessions heartbeat actively.
+   */
+  private async scheduleHeartbeatAlarm(): Promise<void> {
+    const detectionWindow = parseInt(
+      this.env.ACP_SESSION_DETECTION_WINDOW_MS || String(ACP_SESSION_DEFAULTS.DETECTION_WINDOW_MS),
+      10
+    );
+
+    // Find the earliest heartbeat among active sessions — that one will expire first
+    const earliestRow = this.sql
+      .exec(
+        `SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions
+         WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NOT NULL`
+      )
+      .toArray()[0];
+
+    const earliestHeartbeat = earliestRow?.earliest as number | null;
+    if (earliestHeartbeat === null) {
+      // No active sessions with heartbeats — just recalculate (handles idle cleanup alarm)
+      await this.recalculateAlarm();
+      return;
+    }
+
+    const heartbeatAlarmTime = earliestHeartbeat + detectionWindow;
+
+    // We share the alarm with idle cleanup — pick the earliest time
+    const idleRow = this.sql
+      .exec('SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule')
+      .toArray()[0];
+    const idleEarliest = idleRow?.earliest as number | null;
+
+    const earliest = idleEarliest ? Math.min(heartbeatAlarmTime, idleEarliest) : heartbeatAlarmTime;
+    await this.ctx.storage.setAlarm(earliest);
   }
 
   // =========================================================================

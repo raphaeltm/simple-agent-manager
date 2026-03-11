@@ -211,6 +211,42 @@ export const NodeManagementTokenClaimsSchema = z.object({
 export type NodeManagementTokenClaims = z.infer<typeof NodeManagementTokenClaimsSchema>;
 
 // =============================================================================
+// ACP Session Reconciliation (VM Agent → Control Plane)
+// Spec 027: DO-Owned ACP Session Lifecycle
+// =============================================================================
+
+export const AcpSessionStatusReportSchema = z.object({
+  status: z.enum(['running', 'completed', 'failed']),
+  acpSdkSessionId: z.string().optional(),
+  errorMessage: z.string().optional(),
+  nodeId: z.string().min(1),
+});
+
+export type AcpSessionStatusReportContract = z.infer<typeof AcpSessionStatusReportSchema>;
+
+export const AcpSessionHeartbeatSchema = z.object({
+  nodeId: z.string().min(1),
+  acpSdkSessionId: z.string().optional(),
+});
+
+export type AcpSessionHeartbeatContract = z.infer<typeof AcpSessionHeartbeatSchema>;
+
+export const AcpSessionReconciliationItemSchema = z.object({
+  id: z.string(),
+  chatSessionId: z.string(),
+  workspaceId: z.string(),
+  status: z.enum(['assigned', 'running']),
+  initialPrompt: z.string().nullable(),
+  agentType: z.string().nullable(),
+});
+
+export const AcpSessionReconciliationResponseSchema = z.object({
+  sessions: z.array(AcpSessionReconciliationItemSchema),
+});
+
+export type AcpSessionReconciliationResponse = z.infer<typeof AcpSessionReconciliationResponseSchema>;
+
+// =============================================================================
 // Contract Constants
 // =============================================================================
 

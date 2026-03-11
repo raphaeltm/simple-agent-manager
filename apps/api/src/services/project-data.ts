@@ -233,6 +233,118 @@ export async function listActivityEvents(
 }
 
 // =========================================================================
+// ACP Sessions (Spec 027 — DO-Owned Lifecycle)
+// =========================================================================
+
+import type {
+  AcpSession,
+  AcpSessionStatus,
+  AcpSessionEventActorType,
+} from '@simple-agent-manager/shared';
+
+export async function createAcpSession(
+  env: Env,
+  projectId: string,
+  chatSessionId: string,
+  initialPrompt: string | null,
+  agentType: string | null,
+  parentSessionId: string | null = null,
+  forkDepth: number = 0
+): Promise<AcpSession> {
+  const stub = await getStub(env, projectId);
+  return stub.createAcpSession({
+    chatSessionId,
+    initialPrompt,
+    agentType,
+    parentSessionId,
+    forkDepth,
+  });
+}
+
+export async function getAcpSession(
+  env: Env,
+  projectId: string,
+  sessionId: string
+): Promise<AcpSession | null> {
+  const stub = await getStub(env, projectId);
+  return stub.getAcpSession(sessionId);
+}
+
+export async function listAcpSessions(
+  env: Env,
+  projectId: string,
+  opts?: {
+    chatSessionId?: string;
+    status?: AcpSessionStatus;
+    nodeId?: string;
+    limit?: number;
+    offset?: number;
+  }
+): Promise<{ sessions: AcpSession[]; total: number }> {
+  const stub = await getStub(env, projectId);
+  return stub.listAcpSessions(opts);
+}
+
+export async function transitionAcpSession(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  toStatus: AcpSessionStatus,
+  opts: {
+    actorType: AcpSessionEventActorType;
+    actorId?: string | null;
+    reason?: string | null;
+    metadata?: Record<string, unknown> | null;
+    workspaceId?: string;
+    nodeId?: string;
+    acpSdkSessionId?: string;
+    errorMessage?: string;
+  }
+): Promise<AcpSession> {
+  const stub = await getStub(env, projectId);
+  return stub.transitionAcpSession(sessionId, toStatus, opts);
+}
+
+export async function updateAcpSessionHeartbeat(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  nodeId: string
+): Promise<void> {
+  const stub = await getStub(env, projectId);
+  return stub.updateHeartbeat(sessionId, nodeId);
+}
+
+export async function forkAcpSession(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  contextSummary: string
+): Promise<AcpSession> {
+  const stub = await getStub(env, projectId);
+  return stub.forkAcpSession(sessionId, contextSummary);
+}
+
+export async function getAcpSessionLineage(
+  env: Env,
+  projectId: string,
+  sessionId: string
+): Promise<AcpSession[]> {
+  const stub = await getStub(env, projectId);
+  return stub.getAcpSessionLineage(sessionId);
+}
+
+export async function listAcpSessionsByNode(
+  env: Env,
+  projectId: string,
+  nodeId: string,
+  statuses: AcpSessionStatus[]
+): Promise<AcpSession[]> {
+  const stub = await getStub(env, projectId);
+  return stub.listAcpSessionsByNode(nodeId, statuses);
+}
+
+// =========================================================================
 // Summary
 // =========================================================================
 
