@@ -7,7 +7,6 @@
 import { env } from 'cloudflare:test';
 import { describe, it, expect } from 'vitest';
 import type { ProjectData } from '../../src/durable-objects/project-data';
-import type { AcpSessionStatus } from '@simple-agent-manager/shared';
 
 function getStub(projectId: string): DurableObjectStub<ProjectData> {
   const id = env.PROJECT_DATA.idFromName(projectId);
