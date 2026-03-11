@@ -756,15 +756,32 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   /**
-   * Recalculate the DO alarm based on the earliest scheduled cleanup.
+   * Recalculate the DO alarm based on the earliest scheduled cleanup
+   * AND any active ACP sessions needing heartbeat detection.
    */
   private async recalculateAlarm(): Promise<void> {
-    const row = this.sql
+    const idleRow = this.sql
       .exec('SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule')
       .toArray()[0];
+    const idleEarliest = idleRow?.earliest as number | null;
 
-    if (row?.earliest) {
-      await this.ctx.storage.setAlarm(row.earliest as number);
+    // Check if there are active ACP sessions needing heartbeat monitoring
+    const activeCount = this.sql
+      .exec("SELECT COUNT(*) as cnt FROM acp_sessions WHERE status IN ('assigned', 'running')")
+      .toArray()[0];
+
+    let heartbeatTime: number | null = null;
+    if ((activeCount?.cnt as number) > 0) {
+      const detectionWindow = parseInt(
+        this.env.ACP_SESSION_DETECTION_WINDOW_MS || String(ACP_SESSION_DEFAULTS.DETECTION_WINDOW_MS),
+        10
+      );
+      heartbeatTime = Date.now() + detectionWindow;
+    }
+
+    const candidates = [idleEarliest, heartbeatTime].filter((t): t is number => t !== null);
+    if (candidates.length > 0) {
+      await this.ctx.storage.setAlarm(Math.min(...candidates));
     } else {
       await this.ctx.storage.deleteAlarm();
     }
@@ -1166,14 +1183,18 @@ export class ProjectData extends DurableObject<Env> {
    * Get the fork lineage for a session — walks up to root and collects all descendants.
    */
   async getAcpSessionLineage(sessionId: string): Promise<AcpSession[]> {
-    // Find the root session first
+    // Find the root session first, with cycle guard
     let rootId = sessionId;
+    const visited = new Set<string>([rootId]);
     let current = this.sql
       .exec('SELECT id, parent_session_id FROM acp_sessions WHERE id = ?', rootId)
       .toArray()[0];
 
     while (current?.parent_session_id) {
-      rootId = current.parent_session_id as string;
+      const parentId = current.parent_session_id as string;
+      if (visited.has(parentId)) break; // cycle guard
+      visited.add(parentId);
+      rootId = parentId;
       current = this.sql
         .exec('SELECT id, parent_session_id FROM acp_sessions WHERE id = ?', rootId)
         .toArray()[0];
@@ -1229,7 +1250,7 @@ export class ProjectData extends DurableObject<Env> {
 
     const staleSessions = this.sql
       .exec(
-        `SELECT id, chat_session_id, workspace_id, node_id FROM acp_sessions
+        `SELECT id, chat_session_id, workspace_id, node_id, last_heartbeat_at FROM acp_sessions
          WHERE status IN ('assigned', 'running')
          AND last_heartbeat_at IS NOT NULL
          AND last_heartbeat_at < ?`,
