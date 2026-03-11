@@ -842,6 +842,12 @@ projectsRoutes.post('/:id/acp-sessions', async (c) => {
     throw errors.badRequest('chatSessionId is required');
   }
 
+  // Validate initialPrompt length (64 KB max)
+  const MAX_PROMPT_BYTES = 65536;
+  if (body.initialPrompt && new TextEncoder().encode(body.initialPrompt).length > MAX_PROMPT_BYTES) {
+    throw errors.badRequest(`initialPrompt exceeds maximum size of ${MAX_PROMPT_BYTES} bytes`);
+  }
+
   const session = await projectDataService.createAcpSession(
     c.env,
     projectId,
@@ -944,6 +950,12 @@ projectsRoutes.post('/:id/acp-sessions/:sessionId/status', async (c) => {
     throw errors.badRequest('status and nodeId are required');
   }
 
+  // Runtime allowlist — VM agents can only report these statuses
+  const ALLOWED_REPORTED_STATUSES = ['running', 'completed', 'failed'] as const;
+  if (!(ALLOWED_REPORTED_STATUSES as readonly string[]).includes(body.status)) {
+    throw errors.badRequest('status must be running, completed, or failed');
+  }
+
   if (body.status === 'running' && !body.acpSdkSessionId) {
     throw errors.badRequest('acpSdkSessionId is required when reporting running status');
   }
@@ -954,9 +966,15 @@ projectsRoutes.post('/:id/acp-sessions/:sessionId/status', async (c) => {
     throw errors.notFound('ACP session not found');
   }
   if (existing.nodeId !== body.nodeId) {
-    throw errors.forbidden(
-      `Node mismatch: session assigned to ${existing.nodeId}, report from ${body.nodeId}`
-    );
+    console.error(JSON.stringify({
+      event: 'acp_session.status_node_mismatch',
+      sessionId,
+      projectId,
+      expectedNodeId: existing.nodeId,
+      receivedNodeId: body.nodeId,
+      action: 'rejected',
+    }));
+    throw errors.forbidden('Node identity verification failed');
   }
 
   const session = await projectDataService.transitionAcpSession(
@@ -1001,6 +1019,12 @@ projectsRoutes.post('/:id/acp-sessions/:sessionId/fork', async (c) => {
   const body = await c.req.json<AcpSessionForkRequest>();
   if (!body.contextSummary) {
     throw errors.badRequest('contextSummary is required');
+  }
+
+  // Validate contextSummary length (64 KB max)
+  const MAX_CONTEXT_BYTES = 65536;
+  if (new TextEncoder().encode(body.contextSummary).length > MAX_CONTEXT_BYTES) {
+    throw errors.badRequest(`contextSummary exceeds maximum size of ${MAX_CONTEXT_BYTES} bytes`);
   }
 
   const forked = await projectDataService.forkAcpSession(

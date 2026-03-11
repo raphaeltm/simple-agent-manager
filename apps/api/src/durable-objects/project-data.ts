@@ -1014,37 +1014,40 @@ export class ProjectData extends DurableObject<Env> {
     }
 
     const now = Date.now();
-    const updates: string[] = [`status = '${toStatus}'`, `updated_at = ${now}`];
+
+    // Use fully parameterized queries — never interpolate caller-controlled values into SQL
+    this.sql.exec(
+      `UPDATE acp_sessions SET status = ?, updated_at = ? WHERE id = ?`,
+      toStatus, now, sessionId
+    );
 
     if (toStatus === 'assigned') {
-      if (opts.workspaceId) updates.push(`workspace_id = '${opts.workspaceId}'`);
-      if (opts.nodeId) updates.push(`node_id = '${opts.nodeId}'`);
-      updates.push(`assigned_at = ${now}`);
-      updates.push(`last_heartbeat_at = ${now}`);
+      this.sql.exec(
+        `UPDATE acp_sessions SET workspace_id = ?, node_id = ?, assigned_at = ?, last_heartbeat_at = ? WHERE id = ?`,
+        opts.workspaceId ?? null, opts.nodeId ?? null, now, now, sessionId
+      );
     }
 
     if (toStatus === 'running') {
-      if (opts.acpSdkSessionId) updates.push(`acp_sdk_session_id = '${opts.acpSdkSessionId}'`);
-      updates.push(`started_at = ${now}`);
+      this.sql.exec(
+        `UPDATE acp_sessions SET acp_sdk_session_id = ?, started_at = ? WHERE id = ?`,
+        opts.acpSdkSessionId ?? null, now, sessionId
+      );
     }
 
     if (toStatus === 'completed' || toStatus === 'failed') {
-      updates.push(`completed_at = ${now}`);
-      if (opts.errorMessage) {
-        // Use parameterized update for error message to avoid SQL injection
-        this.sql.exec(
-          `UPDATE acp_sessions SET error_message = ? WHERE id = ?`,
-          opts.errorMessage,
-          sessionId
-        );
-      }
+      this.sql.exec(
+        `UPDATE acp_sessions SET completed_at = ?, error_message = ? WHERE id = ?`,
+        now, opts.errorMessage ?? null, sessionId
+      );
     }
 
     if (toStatus === 'interrupted') {
-      updates.push(`interrupted_at = ${now}`);
+      this.sql.exec(
+        `UPDATE acp_sessions SET interrupted_at = ? WHERE id = ?`,
+        now, sessionId
+      );
     }
-
-    this.sql.exec(`UPDATE acp_sessions SET ${updates.join(', ')} WHERE id = ?`, sessionId);
 
     this.recordAcpSessionEvent(
       sessionId,
