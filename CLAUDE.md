@@ -17,6 +17,7 @@ packages/
 tasks/            # Task tracking (backlog -> active -> archive)
 specs/            # Feature specifications
 docs/             # Documentation
+strategy/         # Strategic planning (competitive, business, marketing, engineering, content)
 ```
 
 ## Common Commands
@@ -151,6 +152,20 @@ When you discover bugs or errors during testing — even if unrelated to your cu
 ## Task Tracking
 
 Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks/README.md` for conventions.
+
+## Strategy Planning
+
+Strategic planning artifacts live in `strategy/` — see `strategy/README.md` for full structure.
+
+| Domain | Directory | Skill | Key Artifacts |
+|--------|-----------|-------|--------------|
+| Competitive Research | `strategy/competitive/` | `/competitive-research` | Competitor profiles, feature matrix, positioning map, SWOT |
+| Marketing | `strategy/marketing/` | `/marketing-strategy` | Positioning doc, messaging guide, content calendar, gap analysis |
+| Business | `strategy/business/` | `/business-strategy` | Market sizing (TAM/SAM/SOM), pricing, business model, GTM plan |
+| Engineering | `strategy/engineering/` | `/engineering-strategy` | Roadmap (Now/Next/Later), tech radar, tech debt register |
+| Content | `strategy/content/` | `/content-create` | Social posts, blog drafts, changelogs, launch copy |
+
+Domains chain together: competitive research feeds marketing and business strategy, which feed engineering priorities and content creation.
 
 ## Active Technologies
 - TypeScript 5.x (API Worker) + @mastra/core (AI agent orchestration), workers-ai-provider (Vercel AI SDK bridge to Workers AI), Cloudflare Workers AI binding (llm-task-title-generation)
