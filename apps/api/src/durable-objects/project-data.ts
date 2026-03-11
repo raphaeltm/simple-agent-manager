@@ -757,7 +757,7 @@ export class ProjectData extends DurableObject<Env> {
 
   /**
    * Recalculate the DO alarm based on the earliest scheduled cleanup
-   * AND any active ACP sessions needing heartbeat detection.
+   * AND the earliest active ACP session heartbeat expiry.
    */
   private async recalculateAlarm(): Promise<void> {
     const idleRow = this.sql
@@ -765,18 +765,22 @@ export class ProjectData extends DurableObject<Env> {
       .toArray()[0];
     const idleEarliest = idleRow?.earliest as number | null;
 
-    // Check if there are active ACP sessions needing heartbeat monitoring
-    const activeCount = this.sql
-      .exec("SELECT COUNT(*) as cnt FROM acp_sessions WHERE status IN ('assigned', 'running')")
+    // Compute heartbeat alarm from earliest last_heartbeat_at among active sessions
+    const earliestHbRow = this.sql
+      .exec(
+        `SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions
+         WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NOT NULL`
+      )
       .toArray()[0];
 
     let heartbeatTime: number | null = null;
-    if ((activeCount?.cnt as number) > 0) {
+    const earliestHb = earliestHbRow?.earliest as number | null;
+    if (earliestHb !== null) {
       const detectionWindow = parseInt(
         this.env.ACP_SESSION_DETECTION_WINDOW_MS || String(ACP_SESSION_DEFAULTS.DETECTION_WINDOW_MS),
         10
       );
-      heartbeatTime = Date.now() + detectionWindow;
+      heartbeatTime = earliestHb + detectionWindow;
     }
 
     const candidates = [idleEarliest, heartbeatTime].filter((t): t is number => t !== null);
@@ -1032,37 +1036,32 @@ export class ProjectData extends DurableObject<Env> {
 
     const now = Date.now();
 
-    // Use fully parameterized queries — never interpolate caller-controlled values into SQL
-    this.sql.exec(
-      `UPDATE acp_sessions SET status = ?, updated_at = ? WHERE id = ?`,
-      toStatus, now, sessionId
-    );
-
+    // Atomic single-UPDATE per transition type — never split status + fields across statements.
+    // All values are parameterized to prevent SQL injection.
     if (toStatus === 'assigned') {
       this.sql.exec(
-        `UPDATE acp_sessions SET workspace_id = ?, node_id = ?, assigned_at = ?, last_heartbeat_at = ? WHERE id = ?`,
-        opts.workspaceId ?? null, opts.nodeId ?? null, now, now, sessionId
+        `UPDATE acp_sessions SET status = ?, workspace_id = ?, node_id = ?, assigned_at = ?, last_heartbeat_at = ?, updated_at = ? WHERE id = ?`,
+        toStatus, opts.workspaceId ?? null, opts.nodeId ?? null, now, now, now, sessionId
       );
-    }
-
-    if (toStatus === 'running') {
+    } else if (toStatus === 'running') {
       this.sql.exec(
-        `UPDATE acp_sessions SET acp_sdk_session_id = ?, started_at = ? WHERE id = ?`,
-        opts.acpSdkSessionId ?? null, now, sessionId
+        `UPDATE acp_sessions SET status = ?, acp_sdk_session_id = ?, started_at = ?, updated_at = ? WHERE id = ?`,
+        toStatus, opts.acpSdkSessionId ?? null, now, now, sessionId
       );
-    }
-
-    if (toStatus === 'completed' || toStatus === 'failed') {
+    } else if (toStatus === 'completed' || toStatus === 'failed') {
       this.sql.exec(
-        `UPDATE acp_sessions SET completed_at = ?, error_message = ? WHERE id = ?`,
-        now, opts.errorMessage ?? null, sessionId
+        `UPDATE acp_sessions SET status = ?, completed_at = ?, error_message = ?, updated_at = ? WHERE id = ?`,
+        toStatus, now, opts.errorMessage ?? null, now, sessionId
       );
-    }
-
-    if (toStatus === 'interrupted') {
+    } else if (toStatus === 'interrupted') {
       this.sql.exec(
-        `UPDATE acp_sessions SET interrupted_at = ? WHERE id = ?`,
-        now, sessionId
+        `UPDATE acp_sessions SET status = ?, interrupted_at = ?, error_message = ?, updated_at = ? WHERE id = ?`,
+        toStatus, now, opts.errorMessage ?? null, now, sessionId
+      );
+    } else {
+      this.sql.exec(
+        `UPDATE acp_sessions SET status = ?, updated_at = ? WHERE id = ?`,
+        toStatus, now, sessionId
       );
     }
 
@@ -1381,14 +1380,31 @@ export class ProjectData extends DurableObject<Env> {
 
   /**
    * Schedule a DO alarm for heartbeat detection.
-   * The alarm checks for stale sessions that have missed their heartbeat window.
+   * Computes alarm time from the EARLIEST last_heartbeat_at among active sessions,
+   * so stale sessions are detected promptly even when other sessions heartbeat actively.
    */
   private async scheduleHeartbeatAlarm(): Promise<void> {
     const detectionWindow = parseInt(
       this.env.ACP_SESSION_DETECTION_WINDOW_MS || String(ACP_SESSION_DEFAULTS.DETECTION_WINDOW_MS),
       10
     );
-    const alarmTime = Date.now() + detectionWindow;
+
+    // Find the earliest heartbeat among active sessions — that one will expire first
+    const earliestRow = this.sql
+      .exec(
+        `SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions
+         WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NOT NULL`
+      )
+      .toArray()[0];
+
+    const earliestHeartbeat = earliestRow?.earliest as number | null;
+    if (earliestHeartbeat === null) {
+      // No active sessions with heartbeats — just recalculate (handles idle cleanup alarm)
+      await this.recalculateAlarm();
+      return;
+    }
+
+    const heartbeatAlarmTime = earliestHeartbeat + detectionWindow;
 
     // We share the alarm with idle cleanup — pick the earliest time
     const idleRow = this.sql
@@ -1396,7 +1412,7 @@ export class ProjectData extends DurableObject<Env> {
       .toArray()[0];
     const idleEarliest = idleRow?.earliest as number | null;
 
-    const earliest = idleEarliest ? Math.min(alarmTime, idleEarliest) : alarmTime;
+    const earliest = idleEarliest ? Math.min(heartbeatAlarmTime, idleEarliest) : heartbeatAlarmTime;
     await this.ctx.storage.setAlarm(earliest);
   }
 
