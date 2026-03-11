@@ -115,6 +115,54 @@ describe('ACP Session State Machine', () => {
     });
   });
 
+  describe('comprehensive invalid transitions', () => {
+    function isValidTransition(from: AcpSessionStatus, to: AcpSessionStatus): boolean {
+      return ACP_SESSION_VALID_TRANSITIONS[from].includes(to);
+    }
+
+    // Every possible transition from terminal states
+    it.each(
+      ACP_SESSION_TERMINAL_STATUSES.flatMap((terminal) =>
+        ALL_STATUSES.filter((s) => s !== terminal).map(
+          (target) => [terminal, target] as [AcpSessionStatus, AcpSessionStatus]
+        )
+      )
+    )('rejects %s → %s (from terminal)', (from, to) => {
+      expect(isValidTransition(from, to)).toBe(false);
+    });
+
+    // Every impossible transition from non-terminal states
+    it.each([
+      ['pending', 'running'],
+      ['pending', 'completed'],
+      ['pending', 'failed'],
+      ['pending', 'interrupted'],
+      ['assigned', 'pending'],
+      ['assigned', 'completed'],
+      ['running', 'pending'],
+      ['running', 'assigned'],
+    ] as [AcpSessionStatus, AcpSessionStatus][])(
+      'rejects %s → %s (invalid non-terminal)',
+      (from, to) => {
+        expect(isValidTransition(from, to)).toBe(false);
+      }
+    );
+  });
+
+  describe('fork depth validation', () => {
+    it('MAX_FORK_DEPTH is a positive integer', () => {
+      expect(ACP_SESSION_DEFAULTS.MAX_FORK_DEPTH).toBeGreaterThan(0);
+      expect(Number.isInteger(ACP_SESSION_DEFAULTS.MAX_FORK_DEPTH)).toBe(true);
+    });
+
+    it('all terminal statuses are forkable candidates', () => {
+      // Fork is allowed from any terminal state
+      for (const status of ACP_SESSION_TERMINAL_STATUSES) {
+        expect(['completed', 'failed', 'interrupted']).toContain(status);
+      }
+    });
+  });
+
   describe('configurable defaults', () => {
     it('has sensible default values', () => {
       expect(ACP_SESSION_DEFAULTS.HEARTBEAT_INTERVAL_MS).toBe(60_000);

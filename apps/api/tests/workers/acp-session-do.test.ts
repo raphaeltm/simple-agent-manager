@@ -3,6 +3,18 @@
  *
  * Runs inside the workerd runtime via @cloudflare/vitest-pool-workers,
  * exercising real SQLite storage, DO lifecycle, and migrations.
+ *
+ * BLOCKED: These tests cannot run due to a pre-existing Mastra/workerd
+ * incompatibility ("No such module" for @mastra/core/dist/fs/promises).
+ * Same issue blocks existing project-data-do.test.ts.
+ *
+ * DOCUMENTED COVERAGE GAPS (to add when workerd issue is resolved):
+ * - alarm() / checkHeartbeatTimeouts: stale session → interrupted transition
+ * - listAcpSessionsByNode: reconciliation filtering by node + statuses
+ * - forkAcpSession: max depth rejection, fork from failed session
+ * - updateHeartbeat: silent ignore for terminal sessions
+ * - transitionAcpSession: nonexistent session error
+ * - listAcpSessions: chatSessionId filter, pagination, total count
  */
 import { env } from 'cloudflare:test';
 import { describe, it, expect } from 'vitest';
