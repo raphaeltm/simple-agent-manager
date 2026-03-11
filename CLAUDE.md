@@ -184,6 +184,8 @@ Domains chain together: competitive research feeds marketing and business strate
 - N/A (no backend changes) (024-tailwind-adoption)
 - TypeScript 5.x (React 18 + Vite) + React 18, `@simple-agent-manager/acp-client` (shared components), Tailwind CSS v4 (026-chat-message-parity)
 - N/A (frontend-only changes; no database or API changes) (026-chat-message-parity)
+- TypeScript 5.x (API Worker + Web UI), Go 1.24+ (VM Agent) + Hono (API), Drizzle ORM (D1), React 18 + Vite (Web), Cloudflare Workers SDK (Durable Objects), `creack/pty` + `gorilla/websocket` (VM Agent), ACP Go SDK (027-do-session-ownership)
+- Cloudflare D1 (cross-project queries), Durable Objects with SQLite (per-project session data), VM-local SQLite (message outbox) (027-do-session-ownership)
 
 ## Recent Changes
 - codex-oauth-token-sync: Post-session credential sync-back for file-based agent credentials (e.g., codex-acp auth.json); reads updated auth file from container after session ends via `syncCredentialOnStop()`, sends to API via `POST /api/workspaces/:id/agent-credential-sync` with callbackretry; re-encrypts with fresh AES-GCM IV on change; guards: injectionMode=auth-file + CredentialSyncer configured; best-effort (errors logged, teardown not blocked)
