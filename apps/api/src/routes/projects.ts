@@ -940,8 +940,17 @@ projectsRoutes.post('/:id/acp-sessions/:sessionId/assign', async (c) => {
   return c.json(session);
 });
 
-/** POST /:id/acp-sessions/:sessionId/status — VM agent reports status change */
+/**
+ * POST /:id/acp-sessions/:sessionId/status — VM agent reports status change.
+ *
+ * Auth model: JWT auth via requireAuth() middleware (line 30) + nodeId verification
+ * in the DO (rejects if body.nodeId doesn't match session's assigned node).
+ * We don't use requireOwnedProject because the VM agent authenticates as the
+ * workspace owner, not necessarily the project owner, and the nodeId check
+ * provides identity verification at the session level.
+ */
 projectsRoutes.post('/:id/acp-sessions/:sessionId/status', async (c) => {
+  const userId = getUserId(c);
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
@@ -970,6 +979,7 @@ projectsRoutes.post('/:id/acp-sessions/:sessionId/status', async (c) => {
       event: 'acp_session.status_node_mismatch',
       sessionId,
       projectId,
+      callerUserId: userId,
       expectedNodeId: existing.nodeId,
       receivedNodeId: body.nodeId,
       action: 'rejected',
@@ -994,8 +1004,12 @@ projectsRoutes.post('/:id/acp-sessions/:sessionId/status', async (c) => {
   return c.json(session);
 });
 
-/** POST /:id/acp-sessions/:sessionId/heartbeat — VM agent heartbeat */
+/**
+ * POST /:id/acp-sessions/:sessionId/heartbeat — VM agent heartbeat.
+ * Auth: JWT + nodeId verification in DO (same model as /status above).
+ */
 projectsRoutes.post('/:id/acp-sessions/:sessionId/heartbeat', async (c) => {
+  getUserId(c); // Ensure authenticated (JWT validated by requireAuth middleware)
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 

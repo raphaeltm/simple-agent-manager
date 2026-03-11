@@ -1164,6 +1164,14 @@ export class ProjectData extends DurableObject<Env> {
 
     const parentStatus = parent.status as AcpSessionStatus;
     if (!ACP_SESSION_TERMINAL_STATUSES.includes(parentStatus)) {
+      const projectId = this.getProjectId();
+      console.warn(JSON.stringify({
+        event: 'acp_session.fork_invalid_state',
+        sessionId,
+        projectId,
+        parentStatus,
+        action: 'rejected',
+      }));
       throw new Error(
         `Cannot fork session in "${parentStatus}" state — must be completed, failed, or interrupted`
       );
@@ -1175,6 +1183,15 @@ export class ProjectData extends DurableObject<Env> {
       10
     );
     if (parentDepth >= maxDepth) {
+      const projectId = this.getProjectId();
+      console.warn(JSON.stringify({
+        event: 'acp_session.fork_depth_exceeded',
+        sessionId,
+        projectId,
+        parentDepth,
+        maxDepth,
+        action: 'rejected',
+      }));
       throw new Error(
         `Fork depth ${parentDepth + 1} exceeds maximum ${maxDepth}`
       );
@@ -1275,6 +1292,7 @@ export class ProjectData extends DurableObject<Env> {
         await this.transitionAcpSession(sessionId, 'interrupted', {
           actorType: 'alarm',
           reason: 'Heartbeat timeout exceeded detection window',
+          errorMessage: `Heartbeat timeout: last heartbeat at ${session.last_heartbeat_at}, cutoff was ${cutoff}`,
           metadata: {
             detectionWindowMs: detectionWindow,
             lastHeartbeatAt: session.last_heartbeat_at,
