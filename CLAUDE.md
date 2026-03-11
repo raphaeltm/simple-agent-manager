@@ -64,7 +64,7 @@ Merge to `main` automatically deploys to production via GitHub Actions.
 - **Node**: VM host that runs multiple workspaces
 - **Provider**: Cloud infrastructure abstraction (currently Hetzner only)
 - **Project**: Primary organizational unit linking a GitHub repo to workspaces, chat sessions, tasks, and activity
-- **ProjectData DO**: Per-project Durable Object with embedded SQLite for chat sessions, messages, activity events. Accessed via `env.PROJECT_DATA.idFromName(projectId)`
+- **ProjectData DO**: Per-project Durable Object with embedded SQLite for chat sessions, messages, activity events, and ACP sessions (spec 027). Accessed via `env.PROJECT_DATA.idFromName(projectId)`
 - **NodeLifecycle DO**: Per-node Durable Object managing warm pool state machine (active → warm → destroying). Accessed via `env.NODE_LIFECYCLE.idFromName(nodeId)`. Handles idle timeout alarms; actual infrastructure teardown delegated to cron sweep.
 - **Warm Node Pooling**: After task completion, auto-provisioned nodes enter "warm" state for 30 min (configurable via `NODE_WARM_TIMEOUT_MS`) for fast reuse. Three-layer defense against orphans: DO alarm + cron sweep + max lifetime.
 - **Task Runner**: Autonomous task execution — selects/provisions nodes, creates workspaces, runs agents, cleans up. VM size precedence: explicit override > project default > platform default.
@@ -188,6 +188,7 @@ Domains chain together: competitive research feeds marketing and business strate
 - Cloudflare D1 (cross-project queries), Durable Objects with SQLite (per-project session data), VM-local SQLite (message outbox) (027-do-session-ownership)
 
 ## Recent Changes
+- 027-do-session-ownership: DO-owned ACP session lifecycle — shifts session state machine (pending→assigned→running→completed/failed/interrupted) from VM agent in-memory maps to ProjectData DO SQLite; heartbeat-based VM failure detection via DO alarm; session forking with lineage tracking; workspace-project binding enforcement; configurable via ACP_SESSION_DETECTION_WINDOW_MS, ACP_SESSION_MAX_FORK_DEPTH
 - codex-oauth-token-sync: Post-session credential sync-back for file-based agent credentials (e.g., codex-acp auth.json); reads updated auth file from container after session ends via `syncCredentialOnStop()`, sends to API via `POST /api/workspaces/:id/agent-credential-sync` with callbackretry; re-encrypts with fresh AES-GCM IV on change; guards: injectionMode=auth-file + CredentialSyncer configured; best-effort (errors logged, teardown not blocked)
 - llm-task-title-generation: AI-powered task title generation via Cloudflare Workers AI (Mastra + workers-ai-provider + @cf/meta/llama-3.1-8b-instruct); generates concise titles (≤100 chars) from full message text at task submit time; falls back to truncation on failure or timeout; short messages (≤100 chars) bypass AI; configurable via TASK_TITLE_MODEL, TASK_TITLE_MAX_LENGTH, TASK_TITLE_TIMEOUT_MS, TASK_TITLE_GENERATION_ENABLED, TASK_TITLE_SHORT_MESSAGE_THRESHOLD
 - fix-streaming-token-ordering: ACP notification serialization via orderedPipe in VM agent; wraps agent stdout with a serializing pipe that waits for each session/update handler to complete before delivering the next, preventing the ACP SDK's concurrent goroutine dispatch from reordering streaming tokens; configurable via `ACP_NOTIF_SERIALIZE_TIMEOUT` (default: 5s)
