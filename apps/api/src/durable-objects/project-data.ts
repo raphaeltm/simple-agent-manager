@@ -1123,7 +1123,18 @@ export class ProjectData extends DurableObject<Env> {
 
     const status = session.status as string;
     if (!['assigned', 'running'].includes(status)) {
-      return; // Ignore heartbeats for terminal sessions
+      const projectId = this.getProjectId();
+      console.warn(JSON.stringify({
+        event: 'acp_session.heartbeat_for_inactive_session',
+        sessionId,
+        nodeId,
+        projectId,
+        sessionStatus: status,
+        action: 'rejected',
+      }));
+      throw new Error(
+        `Heartbeat rejected: session ${sessionId} is in "${status}" state, not assigned or running`
+      );
     }
 
     const now = Date.now();
@@ -1258,6 +1269,7 @@ export class ProjectData extends DurableObject<Env> {
       )
       .toArray();
 
+    const failures: Array<{ sessionId: string; error: string }> = [];
     for (const session of staleSessions) {
       const sessionId = session.id as string;
       try {
@@ -1271,12 +1283,23 @@ export class ProjectData extends DurableObject<Env> {
           },
         });
       } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
         console.error(JSON.stringify({
           event: 'acp_session.heartbeat_timeout_transition_failed',
           sessionId,
-          error: err instanceof Error ? err.message : String(err),
+          error: errorMsg,
         }));
+        failures.push({ sessionId, error: errorMsg });
       }
+    }
+
+    if (failures.length > 0) {
+      console.error(JSON.stringify({
+        event: 'acp_session.heartbeat_timeout_batch_failures',
+        failureCount: failures.length,
+        totalStale: staleSessions.length,
+        failures,
+      }));
     }
 
     // Reschedule alarm if there are still active sessions
