@@ -32,10 +32,8 @@ func (s *Server) setCallbackToken(token string) {
 	// Propagate to error reporter.
 	s.errorReporter.SetToken(token)
 
-	// Propagate to message reporter (nil-safe).
-	if s.messageReporter != nil {
-		s.messageReporter.SetToken(token)
-	}
+	// Propagate to all per-workspace message reporters.
+	s.setTokenAllReporters(token)
 
 	// Update ACP gateway config.
 	s.acpConfig.CallbackToken = token

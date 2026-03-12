@@ -201,6 +201,13 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	cfg := s.acpConfig
 	cfg.WorkspaceID = workspaceID
 	cfg.SessionID = sessionID
+
+	// Use per-workspace message reporter to prevent cross-workspace contamination.
+	s.messageReportersMu.Lock()
+	if r, ok := s.messageReporters[workspaceID]; ok {
+		cfg.MessageReporter = &messageReporterAdapter{r: r}
+	}
+	s.messageReportersMu.Unlock()
 	cfg.SessionManager = s.agentSessions
 	cfg.TabStore = s.store
 	cfg.TabLastPromptStore = s.store

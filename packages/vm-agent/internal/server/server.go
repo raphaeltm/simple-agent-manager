@@ -55,7 +55,8 @@ type Server struct {
 	sessionMcpServers   map[string][]acp.McpServerEntry // hostKey → MCP servers for ACP injection
 	store               *persistence.Store
 	errorReporter       *errorreport.Reporter
-	messageReporter     *messagereport.Reporter
+	messageReportersMu  sync.Mutex
+	messageReporters    map[string]*messagereport.Reporter // keyed by workspaceID
 	worktreeCacheMu     sync.RWMutex
 	worktreeCache       map[string]cachedWorktreeList
 	logReader           *logreader.Reader
@@ -207,37 +208,33 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("open persistence store: %w", err)
 	}
 
-	// Create message reporter for chat message persistence (project-linked workspaces only).
-	// Opens a separate SQLite connection to the same DB file used by the persistence store.
-	// Returns nil if ProjectID or ChatSessionID is empty (intentional no-op).
-	msgReporterCfg := messagereport.LoadConfigFromEnv()
-	msgReporterCfg.ProjectID = cfg.ProjectID
-	msgReporterCfg.SessionID = cfg.ChatSessionID
-	msgReporterCfg.WorkspaceID = defaultWorkspaceScope(cfg.WorkspaceID, cfg.NodeID)
-	msgReporterCfg.Endpoint = cfg.ControlPlaneURL
-
-	var msgReporter *messagereport.Reporter
+	// Per-workspace message reporters for chat message persistence.
+	// Each workspace gets its own reporter instance with isolated outbox DB,
+	// preventing cross-workspace message contamination on multi-workspace nodes.
+	messageReporters := make(map[string]*messagereport.Reporter)
 	if cfg.ProjectID != "" && cfg.ChatSessionID != "" {
-		msgDB, dbErr := openSQLiteDB(cfg.PersistenceDBPath)
+		wsID := defaultWorkspaceScope(cfg.WorkspaceID, cfg.NodeID)
+		dbPath := messageReporterDBPath(cfg.PersistenceDBPath, wsID)
+		msgDB, dbErr := openSQLiteDB(dbPath)
 		if dbErr != nil {
 			slog.Warn("Failed to open message reporter DB; chat persistence disabled", "error", dbErr)
 		} else {
+			msgReporterCfg := messagereport.LoadConfigFromEnv()
+			msgReporterCfg.ProjectID = cfg.ProjectID
+			msgReporterCfg.SessionID = cfg.ChatSessionID
+			msgReporterCfg.WorkspaceID = wsID
+			msgReporterCfg.Endpoint = cfg.ControlPlaneURL
 			r, rErr := messagereport.New(msgDB, msgReporterCfg)
 			if rErr != nil {
 				slog.Warn("Failed to create message reporter; chat persistence disabled", "error", rErr)
 				msgDB.Close()
 			} else {
-				msgReporter = r
-				slog.Info("Message reporter enabled", "projectId", cfg.ProjectID, "sessionId", cfg.ChatSessionID)
+				messageReporters[wsID] = r
+				// Set on acpConfig for the boot-time workspace (single-workspace path).
+				acpGatewayConfig.MessageReporter = &messageReporterAdapter{r: r}
+				slog.Info("Message reporter enabled", "workspaceId", wsID, "projectId", cfg.ProjectID, "sessionId", cfg.ChatSessionID)
 			}
 		}
-	}
-
-	// Set message reporter on ACP gateway config so all SessionHosts inherit it.
-	// Wrap in an adapter since the acp package uses MessageReportEntry (to avoid
-	// circular imports) while messagereport uses its own Message type.
-	if msgReporter != nil {
-		acpGatewayConfig.MessageReporter = &messageReporterAdapter{r: msgReporter}
 	}
 
 	// Wire task completion callback for task-driven workspaces.
@@ -270,7 +267,7 @@ func New(cfg *config.Config) (*Server, error) {
 		sessionMcpServers:  make(map[string][]acp.McpServerEntry),
 		store:              store,
 		errorReporter:      errorReporter,
-		messageReporter:    msgReporter,
+		messageReporters:   messageReporters,
 		worktreeCache:      make(map[string]cachedWorktreeList),
 		logReader:           logreader.NewReaderWithTimeout(cfg.LogReaderTimeout),
 		bootLogBroadcasters: NewBootLogBroadcasterManager(),
@@ -363,10 +360,8 @@ func (s *Server) UpdateAfterBootstrap(cfg *config.Config) {
 	// Propagate callback token to error reporter.
 	s.errorReporter.SetToken(cfg.CallbackToken)
 
-	// Propagate callback token to message reporter (nil-safe).
-	if s.messageReporter != nil {
-		s.messageReporter.SetToken(cfg.CallbackToken)
-	}
+	// Propagate callback token to all per-workspace message reporters.
+	s.setTokenAllReporters(cfg.CallbackToken)
 
 	// Update ACP gateway config with the callback token.
 	s.acpConfig.CallbackToken = cfg.CallbackToken
@@ -472,10 +467,8 @@ func (s *Server) Stop(ctx context.Context) error {
 	// Flush and stop error reporter
 	s.errorReporter.Shutdown()
 
-	// Flush and stop message reporter (nil-safe)
-	if s.messageReporter != nil {
-		s.messageReporter.Shutdown()
-	}
+	// Flush and stop all per-workspace message reporters
+	s.shutdownAllReporters()
 
 	// Close persistence store
 	if s.store != nil {
@@ -598,33 +591,37 @@ func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 	})
 }
 
-// lateInitMessageReporter creates the message reporter at runtime when a
-// manually provisioned node receives its first agent session with project
-// context. This handles the case where cloud-init didn't have PROJECT_ID or
-// CHAT_SESSION_ID (manual node provisioning), but the control plane provides
-// them when creating the agent session.
-func (s *Server) lateInitMessageReporter(workspaceID, projectID, chatSessionID string) {
+// getOrCreateReporter returns the per-workspace message reporter, creating one
+// if it doesn't exist yet. This handles both auto-provisioned nodes (reporter
+// created at boot) and manually provisioned nodes (late-initialized here).
+// Returns nil if creation fails (errors are logged, not propagated).
+func (s *Server) getOrCreateReporter(workspaceID, projectID, chatSessionID string) *messagereport.Reporter {
+	s.messageReportersMu.Lock()
+	defer s.messageReportersMu.Unlock()
+
+	if r, ok := s.messageReporters[workspaceID]; ok {
+		return r
+	}
+
 	cfg := messagereport.LoadConfigFromEnv()
 	cfg.ProjectID = projectID
 	cfg.SessionID = chatSessionID
 	cfg.WorkspaceID = workspaceID
 	cfg.Endpoint = s.config.ControlPlaneURL
 
-	msgDB, err := openSQLiteDB(s.config.PersistenceDBPath)
+	dbPath := messageReporterDBPath(s.config.PersistenceDBPath, workspaceID)
+	msgDB, err := openSQLiteDB(dbPath)
 	if err != nil {
-		slog.Error("Failed to open message reporter DB for late init", "error", err)
-		return
+		slog.Error("Failed to open message reporter DB", "workspaceId", workspaceID, "error", err)
+		return nil
 	}
 
 	reporter, err := messagereport.New(msgDB, cfg)
 	if err != nil {
-		slog.Error("Failed to late-init message reporter", "error", err)
+		slog.Error("Failed to create message reporter", "workspaceId", workspaceID, "error", err)
 		msgDB.Close()
-		return
+		return nil
 	}
-
-	s.messageReporter = reporter
-	s.acpConfig.MessageReporter = &messageReporterAdapter{r: reporter}
 
 	// Set the auth token so the reporter can authenticate with the control plane.
 	s.callbackTokenMu.RLock()
@@ -634,11 +631,69 @@ func (s *Server) lateInitMessageReporter(workspaceID, projectID, chatSessionID s
 		reporter.SetToken(token)
 	}
 
-	slog.Info("Message reporter late-initialized",
+	s.messageReporters[workspaceID] = reporter
+	slog.Info("Message reporter created for workspace",
 		"workspaceId", workspaceID,
 		"projectId", projectID,
 		"chatSessionId", chatSessionID,
 	)
+	return reporter
+}
+
+// shutdownReporter shuts down the message reporter for a workspace (if any),
+// performing a final flush before cleanup.
+func (s *Server) shutdownReporter(workspaceID string) {
+	s.messageReportersMu.Lock()
+	r, ok := s.messageReporters[workspaceID]
+	if ok {
+		delete(s.messageReporters, workspaceID)
+	}
+	s.messageReportersMu.Unlock()
+
+	if r != nil {
+		r.Shutdown()
+		slog.Info("Message reporter shut down", "workspaceId", workspaceID)
+	}
+}
+
+// shutdownAllReporters shuts down all per-workspace reporters.
+func (s *Server) shutdownAllReporters() {
+	s.messageReportersMu.Lock()
+	reporters := make(map[string]*messagereport.Reporter, len(s.messageReporters))
+	for k, v := range s.messageReporters {
+		reporters[k] = v
+	}
+	s.messageReporters = make(map[string]*messagereport.Reporter)
+	s.messageReportersMu.Unlock()
+
+	for wsID, r := range reporters {
+		r.Shutdown()
+		slog.Info("Message reporter shut down", "workspaceId", wsID)
+	}
+}
+
+// setTokenAllReporters propagates an auth token to all active reporters.
+func (s *Server) setTokenAllReporters(token string) {
+	s.messageReportersMu.Lock()
+	defer s.messageReportersMu.Unlock()
+	for _, r := range s.messageReporters {
+		r.SetToken(token)
+	}
+}
+
+// messageReporterDBPath returns the SQLite DB path for a workspace's message
+// reporter. Each workspace gets an isolated DB to prevent cross-workspace
+// contamination in the outbox.
+func messageReporterDBPath(basePath, workspaceID string) string {
+	dir := filepath.Dir(basePath)
+	return filepath.Join(dir, "messages-"+workspaceID+".db")
+}
+
+// lateInitMessageReporter creates the message reporter at runtime when a
+// manually provisioned node receives its first agent session with project
+// context. Delegates to getOrCreateReporter.
+func (s *Server) lateInitMessageReporter(workspaceID, projectID, chatSessionID string) {
+	s.getOrCreateReporter(workspaceID, projectID, chatSessionID)
 }
 
 // messageReporterAdapter bridges acp.MessageReporter (which uses
