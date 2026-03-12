@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { ulid } from '../../lib/ulid';
 import type { Env } from '../../index';
+import { requireAuth, requireApproved } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import * as schema from '../../db/schema';
 import type { BootLogEntry, BootstrapTokenData } from '@simple-agent-manager/shared';
@@ -484,7 +485,9 @@ runtimeRoutes.post('/:id/messages', async (c) => {
 });
 
 // Legacy compatibility endpoint for node-side bootstrap exchange.
-runtimeRoutes.post('/:id/bootstrap-token', async (c) => {
+// This route requires BOTH user session auth AND callback token auth
+// (it was not in the original auth skip list in workspaces.ts).
+runtimeRoutes.post('/:id/bootstrap-token', requireAuth(), requireApproved(), async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
