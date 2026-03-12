@@ -3,15 +3,15 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 describe('agent sessions source contract', () => {
-  const workspacesFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces.ts'), 'utf8');
+  const workspacesFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/agent-sessions.ts'), 'utf8');
   const nodeAgentFile = readFileSync(resolve(process.cwd(), 'src/services/node-agent.ts'), 'utf8');
   const agentWsFile = readFileSync(resolve(process.cwd(), '../../packages/vm-agent/internal/server/agent_ws.go'), 'utf8');
 
   it('defines session list/create/stop/resume endpoints in control plane', () => {
-    expect(workspacesFile).toContain("workspacesRoutes.get('/:id/agent-sessions'");
-    expect(workspacesFile).toContain("workspacesRoutes.post('/:id/agent-sessions'");
-    expect(workspacesFile).toContain("workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop'");
-    expect(workspacesFile).toContain("workspacesRoutes.post('/:id/agent-sessions/:sessionId/resume'");
+    expect(workspacesFile).toContain("agentSessionRoutes.get('/:id/agent-sessions'");
+    expect(workspacesFile).toContain("agentSessionRoutes.post('/:id/agent-sessions'");
+    expect(workspacesFile).toContain("agentSessionRoutes.post('/:id/agent-sessions/:sessionId/stop'");
+    expect(workspacesFile).toContain("agentSessionRoutes.post('/:id/agent-sessions/:sessionId/resume'");
   });
 
   it('supports session lifecycle operations on node agent client', () => {

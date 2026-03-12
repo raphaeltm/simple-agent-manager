@@ -5,7 +5,7 @@
  *
  * Combines task creation, branch name generation, chat session creation,
  * first message recording, and task run initiation into one atomic operation.
- * Skips the draft → ready → queued intermediary states.
+ * Skips the draft -> ready -> queued intermediary states.
  *
  * See: specs/022-simplified-chat-ux/contracts/task-submit.md
  */
@@ -19,25 +19,25 @@ import type {
   VMLocation,
 } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION } from '@simple-agent-manager/shared';
-import type { Env } from '../index';
-import * as schema from '../db/schema';
-import { ulid } from '../lib/ulid';
-import { log } from '../lib/logger';
-import { getAuth, requireAuth, requireApproved } from '../middleware/auth';
-import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
-import { generateBranchName } from '../services/branch-name';
-import { startTaskRunnerDO } from '../services/task-runner-do';
-import * as projectDataService from '../services/project-data';
-import { generateTaskTitle, getTaskTitleConfig } from '../services/task-title';
+import type { Env } from '../../index';
+import * as schema from '../../db/schema';
+import { ulid } from '../../lib/ulid';
+import { log } from '../../lib/logger';
+import { getAuth, requireAuth, requireApproved } from '../../middleware/auth';
+import { errors } from '../../middleware/error';
+import { requireOwnedProject } from '../../middleware/project-auth';
+import { generateBranchName } from '../../services/branch-name';
+import { startTaskRunnerDO } from '../../services/task-runner-do';
+import * as projectDataService from '../../services/project-data';
+import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 
 const MAX_MESSAGE_LENGTH = 2000;
 const VALID_VM_SIZES: VMSize[] = ['small', 'medium', 'large'];
 const VALID_VM_LOCATIONS: VMLocation[] = ['nbg1', 'fsn1', 'hel1'];
 
-const taskSubmitRoutes = new Hono<{ Bindings: Env }>();
+const submitRoutes = new Hono<{ Bindings: Env }>();
 
-taskSubmitRoutes.use('/*', requireAuth(), requireApproved());
+submitRoutes.use('/*', requireAuth(), requireApproved());
 
 /**
  * POST /projects/:projectId/tasks/submit
@@ -45,7 +45,7 @@ taskSubmitRoutes.use('/*', requireAuth(), requireApproved());
  * Single-action task submission. Creates task, session, and kicks off execution.
  * Returns 202 immediately — frontend tracks progress via WebSocket/polling.
  */
-taskSubmitRoutes.post('/submit', async (c) => {
+submitRoutes.post('/submit', async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
   const projectId = c.req.param('projectId');
@@ -149,7 +149,7 @@ taskSubmitRoutes.post('/submit', async (c) => {
     updatedAt: now,
   });
 
-  // Record status event: null → queued
+  // Record status event: null -> queued
   await db.insert(schema.taskStatusEvents).values({
     id: ulid(),
     taskId,
@@ -299,4 +299,4 @@ taskSubmitRoutes.post('/submit', async (c) => {
   return c.json(response, 202);
 });
 
-export { taskSubmitRoutes };
+export { submitRoutes };

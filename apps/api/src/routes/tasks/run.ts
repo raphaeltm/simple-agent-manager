@@ -15,21 +15,21 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { RunTaskRequest, RunTaskResponse, TaskStatus, VMSize, VMLocation } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
-import type { Env } from '../index';
-import * as schema from '../db/schema';
-import { ulid } from '../lib/ulid';
-import { getAuth, requireAuth, requireApproved } from '../middleware/auth';
-import { errors } from '../middleware/error';
-import { requireOwnedProject, requireOwnedTask } from '../middleware/project-auth';
-import { startTaskRunnerDO } from '../services/task-runner-do';
-import { cleanupTaskRun } from '../services/task-runner';
-import { isTaskBlocked } from '../services/task-graph';
-import * as projectDataService from '../services/project-data';
-import { log } from '../lib/logger';
+import type { Env } from '../../index';
+import * as schema from '../../db/schema';
+import { ulid } from '../../lib/ulid';
+import { getAuth, requireAuth, requireApproved } from '../../middleware/auth';
+import { errors } from '../../middleware/error';
+import { requireOwnedProject, requireOwnedTask } from '../../middleware/project-auth';
+import { startTaskRunnerDO } from '../../services/task-runner-do';
+import { cleanupTaskRun } from '../../services/task-runner';
+import { isTaskBlocked } from '../../services/task-graph';
+import * as projectDataService from '../../services/project-data';
+import { log } from '../../lib/logger';
 
-const taskRunsRoutes = new Hono<{ Bindings: Env }>();
+const runRoutes = new Hono<{ Bindings: Env }>();
 
-taskRunsRoutes.use('/*', requireAuth(), requireApproved());
+runRoutes.use('/*', requireAuth(), requireApproved());
 
 /**
  * POST /projects/:projectId/tasks/:taskId/run
@@ -46,7 +46,7 @@ taskRunsRoutes.use('/*', requireAuth(), requireApproved());
  * Response 202:
  *   taskId, status, workspaceId, nodeId, autoProvisionedNode
  */
-taskRunsRoutes.post('/:taskId/run', async (c) => {
+runRoutes.post('/:taskId/run', async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
   const projectId = c.req.param('projectId');
@@ -282,7 +282,7 @@ taskRunsRoutes.post('/:taskId/run', async (c) => {
  * Stops the workspace and optionally the auto-provisioned node.
  * This can be called manually or is triggered automatically by the callback mechanism.
  */
-taskRunsRoutes.post('/:taskId/run/cleanup', async (c) => {
+runRoutes.post('/:taskId/run/cleanup', async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
   const projectId = c.req.param('projectId');
@@ -312,4 +312,4 @@ taskRunsRoutes.post('/:taskId/run/cleanup', async (c) => {
   return c.json({ success: true, message: 'Cleanup initiated' });
 });
 
-export { taskRunsRoutes };
+export { runRoutes };
