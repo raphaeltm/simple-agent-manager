@@ -38,14 +38,22 @@ The deploy script generates a wildcard Worker route `*.domain/*` which matches A
 2. **Miniflare doesn't simulate same-zone routing** — All tests passed
 3. **No end-to-end task execution test** — Staging verification didn't exercise the full DO alarm → VM communication pipeline
 
-## Fix: Two-Level VM Subdomains
+## Fix: Two-Level VM Subdomains + Route Exclusion
 
-Changed VM backend hostnames from single-level to two-level subdomains:
+Changed VM backend hostnames from single-level to two-level subdomains AND added a Cloudflare route exclusion:
 
-- **Before**: `vm-{nodeId}.domain` (1 subdomain level → matches `*.domain/*`)
-- **After**: `{nodeId}.vm.domain` (2 subdomain levels → does NOT match `*.domain/*`)
+- **Before**: `vm-{nodeId}.domain` (single subdomain → matches `*.domain/*`)
+- **After**: `{nodeId}.vm.domain` (two-level subdomain → matches `*.vm.domain/*` exclusion)
 
-Cloudflare wildcard route `*.domain/*` matches exactly ONE subdomain level. By using `{nodeId}.vm.{domain}` (two levels), Worker subrequests bypass same-zone routing entirely and reach the VM directly.
+### Why Two-Level Subdomains Alone Didn't Work
+
+**CRITICAL CORRECTION**: Cloudflare Worker route wildcards are **greedy** — `*` matches one or more characters INCLUDING dots. This means `*.domain/*` matches `a.b.domain/path` (multi-level). The initial assumption that CF wildcards match exactly one subdomain level (like DNS wildcards) was wrong.
+
+The actual fix requires both:
+1. **Two-level subdomains** (`{nodeId}.vm.{domain}`) — provides a distinct hostname pattern
+2. **Route exclusion** (`*.vm.{domain}/*` with no script) — explicitly excludes VM hostnames from Worker routing
+
+Cloudflare evaluates `*.vm.domain/*` as more specific than `*.domain/*`, so the exclusion takes precedence. With no `scriptName`, requests pass straight to origin (the VM via proxied DNS) — including Worker/DO subrequests.
 
 ### Changes Made
 
@@ -58,6 +66,7 @@ Cloudflare wildcard route `*.domain/*` matches exactly ONE subdomain level. By u
 | `apps/api/src/index.ts` | Workspace proxy backend hostname updated |
 | `apps/api/src/routes/nodes.ts` | Log stream URL and node token response URL updated |
 | `infra/resources/origin-ca.ts` | Added `*.vm.{domain}` SAN to Origin CA cert |
+| `infra/resources/dns.ts` | Added `*.vm.{domain}/*` route exclusion (Pulumi `WorkerRoute`, no script) |
 
 ### SSL/TLS Impact
 
@@ -74,7 +83,7 @@ The D1-based health check from the first fix remains as defense-in-depth. Even t
 
 **Platform routing interaction**: Infrastructure behavior (CF same-zone routing) that is invisible in local dev, invisible in most tests, and only manifests when a Worker makes subrequests to hostnames within its own zone that match its route patterns.
 
-**Key insight**: CF wildcards match exactly one subdomain level. Two-level subdomains (`x.y.domain`) bypass `*.domain/*` routes entirely. This is the correct architectural fix for all Worker→VM communication.
+**Key insight**: CF Worker route wildcards are GREEDY (unlike DNS wildcards). `*.domain/*` matches multi-level subdomains. The fix requires BOTH a distinct hostname pattern (two-level subdomains) AND a route exclusion (`*.vm.domain/*` with no script) to prevent Worker interception. The exclusion route takes precedence via CF's "most specific match" rule.
 
 ## Migration
 

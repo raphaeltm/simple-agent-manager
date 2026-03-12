@@ -40,6 +40,26 @@ export const wildcardDnsRecord = new cloudflare.Record(`${prefix}-dns-wildcard`,
   comment: `${prefix.toUpperCase()} Workspaces - managed by Pulumi`,
 });
 
+/**
+ * Worker route exclusion for *.vm.{domain}.
+ *
+ * The wildcard Worker route *.{domain}/* uses a GREEDY wildcard that matches
+ * any number of subdomain levels (including a.b.domain). This means
+ * {nodeId}.vm.{domain} requests are intercepted by the Worker, causing
+ * same-zone routing loops for DO alarm subrequests to VM agents.
+ *
+ * This exclusion route *.vm.{domain}/* is MORE SPECIFIC than *.{domain}/*,
+ * so it takes precedence. With no scriptName, requests pass straight to
+ * origin (the VM, via proxied DNS) — including Worker subrequests.
+ *
+ * See docs/notes/2026-03-12-same-zone-routing-postmortem.md.
+ */
+export const vmRouteExclusion = new cloudflare.WorkerRoute(`${prefix}-route-vm-exclusion`, {
+  zoneId: zoneId,
+  pattern: `*.vm.${baseDomain}/*`,
+  // No scriptName → route exclusion (requests bypass Worker, go to origin)
+});
+
 export const dnsRecordIds = {
   api: apiDnsRecord.id,
   app: appDnsRecord.id,
@@ -49,4 +69,5 @@ export const dnsRecordIds = {
 export const dnsHostnames = {
   api: pulumi.interpolate`api.${baseDomain}`,
   app: pulumi.interpolate`app.${baseDomain}`,
+  vmBackend: pulumi.interpolate`*.vm.${baseDomain}`,
 };

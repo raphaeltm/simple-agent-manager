@@ -15,6 +15,7 @@ import {
   apiDnsRecord,
   appDnsRecord,
   wildcardDnsRecord,
+  vmRouteExclusion,
   dnsRecordIds,
   dnsHostnames,
 } from "./resources/dns";
@@ -40,6 +41,7 @@ export {
   apiDnsRecord,
   appDnsRecord,
   wildcardDnsRecord,
+  vmRouteExclusion,
 };
 
 // Export outputs for use by deployment scripts (sync-wrangler-config.ts)
