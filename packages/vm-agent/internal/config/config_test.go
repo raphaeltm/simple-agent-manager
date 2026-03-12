@@ -274,6 +274,82 @@ func TestBuildSAMEnvFallbackOmitsEmptyValues(t *testing.T) {
 	}
 }
 
+func TestTLSEnabledWhenBothPathsSet(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("TLS_CERT_PATH", "/etc/sam/tls/origin-ca.pem")
+	t.Setenv("TLS_KEY_PATH", "/etc/sam/tls/origin-ca-key.pem")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if !cfg.TLSEnabled {
+		t.Fatal("TLSEnabled should be true when both cert and key paths are set")
+	}
+	if cfg.TLSCertPath != "/etc/sam/tls/origin-ca.pem" {
+		t.Fatalf("TLSCertPath=%q, want /etc/sam/tls/origin-ca.pem", cfg.TLSCertPath)
+	}
+	if cfg.TLSKeyPath != "/etc/sam/tls/origin-ca-key.pem" {
+		t.Fatalf("TLSKeyPath=%q, want /etc/sam/tls/origin-ca-key.pem", cfg.TLSKeyPath)
+	}
+}
+
+func TestTLSDisabledByDefault(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.TLSEnabled {
+		t.Fatal("TLSEnabled should be false when no TLS paths are set")
+	}
+}
+
+func TestTLSDisabledWhenOnlyOnePathSet(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("TLS_CERT_PATH", "/etc/sam/tls/origin-ca.pem")
+	// TLS_KEY_PATH not set
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.TLSEnabled {
+		t.Fatal("TLSEnabled should be false when only cert path is set")
+	}
+}
+
+func TestVMAgentPortDefault(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Port != 8080 {
+		t.Fatalf("Port=%d, want 8080", cfg.Port)
+	}
+}
+
+func TestVMAgentPortOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("VM_AGENT_PORT", "8443")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Port != 8443 {
+		t.Fatalf("Port=%d, want 8443", cfg.Port)
+	}
+}
+
 // splitFirst splits s on the first occurrence of sep.
 func splitFirst(s, sep string) []string {
 	idx := len(sep)
