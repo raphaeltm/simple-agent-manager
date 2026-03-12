@@ -94,6 +94,8 @@ describe('useChatWebSocket (behavioral)', () => {
 
     expect(MockWebSocket.instances).toHaveLength(1);
     expect(MockWebSocket.instances[0]!.url).toContain('/api/projects/proj-1/sessions/ws');
+    // Session-scoped server-side filtering: sessionId must be in WS URL query params
+    expect(MockWebSocket.instances[0]!.url).toContain('sessionId=');
   });
 
   it('does not create WebSocket when disabled', () => {

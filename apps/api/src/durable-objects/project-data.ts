@@ -127,7 +127,8 @@ export class ProjectData extends DurableObject<Env> {
     this.recordActivityEventInternal('session.started', 'system', null, workspaceId, id, taskId, null);
     this.scheduleSummarySync();
 
-    // Broadcast session.created event to connected WebSocket clients
+    // Intentional project-wide broadcast (no sessionId) — all clients need to
+    // know about new sessions for sidebar/session-list updates.
     this.broadcastEvent('session.created', {
       id,
       workspaceId,
@@ -531,6 +532,7 @@ export class ProjectData extends DurableObject<Env> {
       payload
     );
     this.scheduleSummarySync();
+    // Intentional project-wide broadcast — activity events are cross-session.
     this.broadcastEvent('activity.new', { eventType, id });
     return id;
   }
@@ -1479,6 +1481,11 @@ export class ProjectData extends DurableObject<Env> {
       const sessionId = url.searchParams.get('sessionId');
       const tags: string[] = [];
       if (sessionId) {
+        // Validate sessionId format — UUIDs are 36 chars of hex + hyphens.
+        // Reject malformed values to prevent invalid WebSocket tags.
+        if (!/^[0-9a-f-]{36}$/i.test(sessionId)) {
+          return new Response('Invalid sessionId format', { status: 400 });
+        }
         tags.push(`session:${sessionId}`);
       }
       this.ctx.acceptWebSocket(pair[1], tags);

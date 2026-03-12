@@ -127,7 +127,7 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
 
       try {
         await pd.fetch(
-          new Request('https://do.internal/ws?sessionId=my-session', {
+          new Request('https://do.internal/ws?sessionId=a1b2c3d4-e5f6-7890-abcd-ef1234567890', {
             headers: { Upgrade: 'websocket' },
           })
         );
@@ -135,7 +135,7 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
         // Expected in Node.js — status 101 not supported
       }
 
-      expect(freshCtx.acceptWebSocket).toHaveBeenCalledWith(serverWs, ['session:my-session']);
+      expect(freshCtx.acceptWebSocket).toHaveBeenCalledWith(serverWs, ['session:a1b2c3d4-e5f6-7890-abcd-ef1234567890']);
     });
 
     it('accepts WebSocket without tags when no sessionId param', async () => {
@@ -164,6 +164,21 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
 
       expect(freshCtx.acceptWebSocket).toHaveBeenCalledWith(serverWs, []);
     });
+
+    it('rejects WebSocket upgrade with malformed sessionId', async () => {
+      const freshCtx = createMockCtx([]);
+      const pd = new ProjectData(freshCtx as any, createMockEnv() as any);
+
+      const response = await pd.fetch(
+        new Request('https://do.internal/ws?sessionId=../../../etc/passwd', {
+          headers: { Upgrade: 'websocket' },
+        })
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.text()).toBe('Invalid sessionId format');
+      expect(freshCtx.acceptWebSocket).not.toHaveBeenCalled();
+    });
   });
 
   describe('session-scoped message broadcast', () => {
@@ -178,7 +193,7 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
             rowsWritten: 0,
           };
         }
-        if (query.includes('MAX(sequence)')) {
+        if (query.includes('MAX(sequence)') || query.includes('COALESCE')) {
           return {
             toArray: () => [{ max_seq: 0 }],
             columnNames: [],
@@ -213,8 +228,11 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
       expect(sentUntagged.payload.sessionId).toBe('session-a');
     });
 
-    it('sends session.created to ALL sockets (project-wide event)', async () => {
+    it('sends session.created to ALL sockets (intentional project-wide event)', async () => {
       mockCtx.storage.sql.exec = vi.fn((query: string) => {
+        if (query.includes('COUNT(*)')) {
+          return { toArray: () => [{ cnt: 0 }], columnNames: [], rowsRead: 1, rowsWritten: 0 };
+        }
         if (query.includes('MAX(sort_order)')) {
           return { toArray: () => [{ max_sort: 0 }], columnNames: [], rowsRead: 1, rowsWritten: 0 };
         }
