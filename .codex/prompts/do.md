@@ -124,6 +124,8 @@ Dispatch review based on what the PR touches:
 
 Address every bug or correctness issue raised. Push fixes and re-run quality checks.
 
+**STOP: Wait for all review agents to complete before proceeding.** If you launched reviewers in background, you MUST wait for their results and address findings before moving to Phase 6. Do NOT use idle time to jump ahead to PR creation.
+
 ---
 
 ## Phase 6: Staging Verification (BLOCKING — DO NOT SKIP)
@@ -166,6 +168,14 @@ If the PR touches **any** of: `packages/cloud-init/`, `packages/vm-agent/`, `scr
 **If infrastructure verification fails, DO NOT create the PR. DO NOT merge. Fix the issue first.**
 
 > **Why this is mandatory**: The TLS YAML indentation bug (`docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md`) shipped to production because staging verification only checked UI rendering and API responses. Nobody provisioned a VM. The result: all workspace provisioning broke for ~2.5 hours in production.
+
+### No Self-Exemptions
+
+**Fixing a broken gate does not exempt you from the gate.** If staging is currently broken by the bug you are fixing, deploy your fix branch to staging and verify it *fixes* the broken state. "This is the fix for the thing the gate tests" is the **strongest** reason to run the gate, not a reason to skip it.
+
+### If You Already Created the PR Without Completing Phase 6
+
+You made a mistake. Close the PR, complete staging verification, then re-open. Do NOT merge a PR that skipped Phase 6 and "verify post-merge" — that is how bugs reach production.
 
 ---
 

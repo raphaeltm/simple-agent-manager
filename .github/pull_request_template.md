@@ -10,7 +10,7 @@
 - [ ] `pnpm test`
 - [ ] Additional validation run (if applicable)
 - [ ] Staging verification completed (required for all code changes; write `N/A: docs-only` if no code changed)
-- [ ] Infrastructure verification completed — VM provisioned and heartbeat confirmed (required for changes to cloud-init, VM agent, DNS, TLS, scripts/deploy; write `N/A: no infra changes` if not applicable)
+- [ ] Infrastructure verification completed — VM provisioned and heartbeat confirmed (required for changes to cloud-init, VM agent, DNS, TLS, scripts/deploy). If this PR touches infrastructure, this checkbox MUST be checked — not N/A'd. Write `N/A: no infra changes` ONLY if the PR does not touch any infrastructure paths.
 - [ ] Mobile and desktop verification notes added for UI changes
 
 ## UI Compliance Checklist (Required for UI changes)

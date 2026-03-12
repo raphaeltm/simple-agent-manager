@@ -169,9 +169,13 @@ This gate applies when a PR modifies ANY of:
 
 If VM provisioning fails, heartbeats do not arrive, or the workspace is unreachable, the PR MUST NOT be merged. Fix the issue and re-verify.
 
+### No Self-Exemptions
+
+**Fixing a broken gate does not exempt you from the gate.** If staging is currently broken by the bug you are fixing, you MUST still deploy your fix branch to staging and verify it *fixes* the broken state. "This is the fix for the thing the gate tests" is not a valid N/A rationale — it is the *strongest* reason to run the gate. The TLS YAML fix PR (#322) was merged without infrastructure verification despite modifying `packages/cloud-init/` — the exact scenario this gate exists to prevent.
+
 ### Why This Gate Exists
 
-The TLS YAML indentation bug (see `docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md`) shipped to production because staging verification only checked UI rendering and API responses — nobody provisioned a VM to verify the cloud-init output actually worked. Unit tests used unrealistic 3-line PEM data that survived the broken indentation by coincidence.
+The TLS YAML indentation bug (see `docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md`) shipped to production because staging verification only checked UI rendering and API responses — nobody provisioned a VM to verify the cloud-init output actually worked. Unit tests used unrealistic 3-line PEM data that survived the broken indentation by coincidence. The fix PR then repeated the same mistake — skipping verification because the agent rationalized that "this is the fix, not a new change."
 
 ## Template Output Verification (Required)
 
