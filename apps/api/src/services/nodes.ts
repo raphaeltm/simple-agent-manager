@@ -127,6 +127,8 @@ export async function provisionNode(
       chatSessionId: taskContext?.chatSessionId,
       taskId: taskContext?.taskId,
       dockerDnsServers: env.DOCKER_DNS_SERVERS,
+      originCaCert: env.ORIGIN_CA_CERT,
+      originCaKey: env.ORIGIN_CA_KEY,
     });
 
     if (!validateCloudInitSize(cloudInit)) {

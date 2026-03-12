@@ -160,6 +160,11 @@ type Config struct {
 	LogReaderTimeout     time.Duration // Timeout for journalctl read commands (default: 30s)
 	LogStreamPingInterval time.Duration // WebSocket ping interval for log stream (default: 30s)
 	LogStreamPongTimeout  time.Duration // WebSocket pong deadline for log stream (default: 90s)
+
+	// TLS settings - configurable per constitution principle XI
+	TLSCertPath string // Path to TLS certificate PEM (env: TLS_CERT_PATH)
+	TLSKeyPath  string // Path to TLS private key PEM (env: TLS_KEY_PATH)
+	TLSEnabled  bool   // Derived: true when both TLSCertPath and TLSKeyPath are set
 }
 
 // Load reads configuration from environment variables.
@@ -312,7 +317,14 @@ func Load() (*Config, error) {
 		LogReaderTimeout:      getEnvDuration("LOG_READER_TIMEOUT", 30*time.Second),
 		LogStreamPingInterval: getEnvDuration("LOG_STREAM_PING_INTERVAL", 30*time.Second),
 		LogStreamPongTimeout:  getEnvDuration("LOG_STREAM_PONG_TIMEOUT", 90*time.Second),
+
+		// TLS settings - configurable per constitution principle XI
+		TLSCertPath: getEnv("TLS_CERT_PATH", ""),
+		TLSKeyPath:  getEnv("TLS_KEY_PATH", ""),
 	}
+
+	// Derive TLS enabled state from cert/key paths
+	cfg.TLSEnabled = cfg.TLSCertPath != "" && cfg.TLSKeyPath != ""
 
 	// Validate required fields
 	if cfg.ControlPlaneURL == "" {

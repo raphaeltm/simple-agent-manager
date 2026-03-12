@@ -223,12 +223,11 @@ export async function cleanupWorkspaceDNSRecords(
 }
 
 /**
- * Create a DNS-only (non-proxied) A record for a workspace VM backend.
- * This is used by the Worker proxy to reach the VM — Cloudflare Workers cannot
- * fetch IP addresses directly (causes Error 1003), so we use a DNS hostname.
+ * Create a proxied (orange-clouded) A record for a workspace VM backend.
+ * Cloudflare's edge terminates TLS using the domain's SSL/TLS settings and
+ * re-encrypts to the origin using the Origin CA certificate served by the VM agent.
  *
- * Uses the `vm-{id}` subdomain prefix to distinguish from proxied `ws-{id}` subdomains.
- * DNS-only (grey-clouded) ensures the subrequest goes directly to the VM IP.
+ * Uses the `vm-{id}` subdomain prefix to distinguish from `ws-{id}` subdomains.
  */
 export async function createBackendDNSRecord(
   workspaceId: string,
@@ -239,7 +238,9 @@ export async function createBackendDNSRecord(
 }
 
 /**
- * Create a DNS-only (non-proxied) A record for a node VM backend.
+ * Create a proxied (orange-clouded) A record for a node VM backend.
+ * Cloudflare's edge handles TLS termination; the VM agent serves HTTPS
+ * with an Origin CA certificate that CF trusts.
  * Uses vm-{nodeId}.{BASE_DOMAIN}.
  */
 export async function createNodeBackendDNSRecord(
@@ -261,7 +262,7 @@ export async function createNodeBackendDNSRecord(
         name: `vm-${nodeId.toLowerCase()}`,
         content: ip,
         ttl: getDnsTTL(env),
-        proxied: false, // DNS-only — Worker subrequests go directly to VM IP
+        proxied: true, // Orange-clouded — CF edge terminates TLS, re-encrypts to Origin CA
       }),
     },
     timeoutMs

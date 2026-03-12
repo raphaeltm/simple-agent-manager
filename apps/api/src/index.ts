@@ -203,6 +203,12 @@ export interface Env {
   CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO?: string;
   // MCP token TTL in seconds (default 7200 = 2 hours)
   MCP_TOKEN_TTL_SECONDS?: string;
+  // VM agent TLS configuration
+  VM_AGENT_PROTOCOL?: string;  // "https" (default) or "http"
+  VM_AGENT_PORT?: string;      // "8443" (default) or custom port
+  // Origin CA certificate/key (injected into cloud-init for VM TLS)
+  ORIGIN_CA_CERT?: string;
+  ORIGIN_CA_KEY?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -262,8 +268,9 @@ app.use('*', async (c, next) => {
 
 // Proxy requests for workspace subdomains (ws-{id}.*) to the VM agent.
 // The wildcard DNS *.{domain} routes through this Worker, so we must proxy
-// workspace requests to the actual VM running the agent on port 8080.
-// This handles both HTTP and WebSocket (Upgrade) requests.
+// workspace requests to the actual VM running the agent on the configured port.
+// vm-{id} DNS records are orange-clouded; CF edge terminates TLS and re-encrypts
+// to the VM agent's Origin CA cert. This handles both HTTP and WebSocket requests.
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
   const hostname = url.hostname;
@@ -325,10 +332,12 @@ app.use('*', async (c, next) => {
     nodeId: workspace.nodeId || workspaceId,
     workspaceId,
   }, c.env);
+  const vmAgentProtocol = c.env.VM_AGENT_PROTOCOL || 'https';
+  const vmAgentPort = c.env.VM_AGENT_PORT || '8443';
   const vmUrl = new URL(c.req.url);
-  vmUrl.protocol = 'http:';
+  vmUrl.protocol = `${vmAgentProtocol}:`;
   vmUrl.hostname = backendHostname;
-  vmUrl.port = '8080';
+  vmUrl.port = vmAgentPort;
 
   // Strip client-supplied routing headers and inject trusted routing context.
   const headers = new Headers(c.req.raw.headers);
