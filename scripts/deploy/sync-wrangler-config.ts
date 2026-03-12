@@ -128,9 +128,23 @@ function generateApiWorkerEnv(
 
     // Custom domain routes
     // IMPORTANT: patterns MUST end with /* to match all paths, not just the root
+    //
+    // We use explicit subdomain patterns instead of a single wildcard (*.domain/*)
+    // to avoid intercepting Worker subrequests to vm-{nodeId}.domain. Cloudflare
+    // same-zone routing sends subrequests matching Worker routes back to the Worker
+    // instead of the origin, which breaks all VM agent communication (health checks,
+    // workspace creation, agent sessions, etc.). The vm-* DNS records are DNS-only
+    // (grey-clouded) specifically so requests reach the VM directly — but Worker
+    // routes take precedence over DNS for same-zone subrequests.
+    //
+    // Subdomains the Worker handles: api.*, app.*, www.*, bare domain, ws-*.*
+    // Subdomains the Worker must NOT catch: vm-*.* (direct to VM agent)
     routes: [
       { pattern: `api.${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain },
-      { pattern: `*.${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain },
+      { pattern: `app.${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain },
+      { pattern: `www.${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain },
+      { pattern: `${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain },
+      { pattern: `ws-*.${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain },
     ],
 
     // Workers Observability

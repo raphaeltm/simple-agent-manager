@@ -1,11 +1,13 @@
 /**
- * Tests for node agent health check identity validation in TaskRunner DO.
+ * Tests for node agent health check in TaskRunner DO.
  *
- * The health check must verify that the response is from the actual VM agent
- * (which includes a `nodeId` field) and not from the API Worker's own /health
- * endpoint (which also returns 200 but lacks `nodeId`). This prevents the
- * task runner from advancing to workspace_creation when the VM agent is not
- * actually ready — a bug caused by Cloudflare same-zone subrequest routing.
+ * The task runner checks VM agent readiness via D1 heartbeat records instead
+ * of fetching the VM agent directly. This avoids Cloudflare same-zone
+ * subrequest routing, which intercepts Worker fetch() calls to vm-* hostnames
+ * and routes them back to the API Worker instead of the VM agent.
+ *
+ * The VM agent sends POST /api/nodes/:id/ready on startup and
+ * POST /api/nodes/:id/heartbeat periodically, both updating D1.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -17,83 +19,82 @@ const doSource = readFileSync(
 );
 
 describe('verifyNodeAgentHealthy helper', () => {
+  const section = (() => {
+    const start = doSource.indexOf('private async verifyNodeAgentHealthy(');
+    const end = doSource.indexOf('private async tryClaimWarmNode(');
+    return doSource.slice(start, end);
+  })();
+
   it('exists as a private method', () => {
-    expect(doSource).toContain('private async verifyNodeAgentHealthy(nodeId: string): Promise<boolean>');
+    expect(section).toContain('private async verifyNodeAgentHealthy(nodeId: string): Promise<boolean>');
   });
 
-  it('fetches the VM agent health endpoint using env-configured protocol and port', () => {
-    const section = doSource.slice(
-      doSource.indexOf('private async verifyNodeAgentHealthy('),
-      doSource.indexOf('private async tryClaimWarmNode(')
-    );
-    expect(section).toContain("this.env.VM_AGENT_PROTOCOL || 'https'");
-    expect(section).toContain("this.env.VM_AGENT_PORT || '8443'");
-    expect(section).toContain('/health');
+  it('queries D1 for health_status and last_heartbeat_at', () => {
+    expect(section).toContain('health_status');
+    expect(section).toContain('last_heartbeat_at');
+    expect(section).toContain('this.env.DATABASE.prepare');
   });
 
-  it('validates response contains matching nodeId', () => {
-    const section = doSource.slice(
-      doSource.indexOf('private async verifyNodeAgentHealthy('),
-      doSource.indexOf('private async tryClaimWarmNode(')
-    );
-    expect(section).toContain('body.nodeId === nodeId');
+  it('does NOT fetch the VM agent directly (same-zone bypass)', () => {
+    // The old approach used fetch() to vm-{nodeId}.domain — this MUST NOT be present
+    expect(section).not.toContain('fetch(');
+    expect(section).not.toContain('AbortController');
   });
 
-  it('returns false on non-ok response', () => {
-    const section = doSource.slice(
-      doSource.indexOf('private async verifyNodeAgentHealthy('),
-      doSource.indexOf('private async tryClaimWarmNode(')
-    );
-    expect(section).toContain('if (!response.ok) return false');
+  it('checks heartbeat age against stale threshold', () => {
+    expect(section).toContain('NODE_HEARTBEAT_STALE_SECONDS');
+    expect(section).toContain('heartbeatAge');
   });
 
-  it('returns false on fetch error (network failure, timeout)', () => {
-    const section = doSource.slice(
-      doSource.indexOf('private async verifyNodeAgentHealthy('),
-      doSource.indexOf('private async tryClaimWarmNode(')
-    );
-    expect(section).toContain('catch');
+  it('returns false when node is not healthy', () => {
+    expect(section).toContain("health_status !== 'healthy'");
     expect(section).toContain('return false');
   });
 
-  it('uses a 5-second timeout to avoid blocking', () => {
-    const section = doSource.slice(
-      doSource.indexOf('private async verifyNodeAgentHealthy('),
-      doSource.indexOf('private async tryClaimWarmNode(')
-    );
-    expect(section).toContain('setTimeout(() => controller.abort(), 5000)');
+  it('returns false on database error', () => {
+    expect(section).toContain('catch');
+    expect(section).toContain('return false');
   });
 });
 
-describe('handleNodeAgentReady identity validation', () => {
+describe('handleNodeAgentReady D1-based health check', () => {
   const agentReadySection = (() => {
     const start = doSource.indexOf('private async handleNodeAgentReady(');
     const end = doSource.indexOf('private async handleWorkspaceCreation(');
     return doSource.slice(start, end);
   })();
 
-  it('parses health response body as JSON', () => {
-    expect(agentReadySection).toContain('response.json()');
+  it('queries D1 for node health status', () => {
+    expect(agentReadySection).toContain('this.env.DATABASE.prepare');
+    expect(agentReadySection).toContain('health_status');
+    expect(agentReadySection).toContain('last_heartbeat_at');
   });
 
-  it('checks nodeId in response matches expected node', () => {
-    expect(agentReadySection).toContain('body.nodeId === state.stepResults.nodeId');
+  it('does NOT fetch the VM agent directly (same-zone bypass)', () => {
+    expect(agentReadySection).not.toContain("fetch(healthUrl");
+    expect(agentReadySection).not.toContain('VM_AGENT_PROTOCOL');
   });
 
-  it('does NOT advance to workspace_creation if nodeId does not match', () => {
-    // The advanceToStep call must be INSIDE the identityVerified check
-    expect(agentReadySection).toContain('if (identityVerified)');
+  it('verifies heartbeat is recent (not stale from previous boot)', () => {
+    expect(agentReadySection).toContain('heartbeatIsRecent');
+    expect(agentReadySection).toContain('agentReadyStartedAt');
+  });
+
+  it('advances to workspace_creation when heartbeat is healthy and recent', () => {
     expect(agentReadySection).toContain("advanceToStep(state, 'workspace_creation')");
   });
 
-  it('logs identity mismatch as a warning for observability', () => {
-    expect(agentReadySection).toContain('task_runner_do.step.node_agent_ready.identity_mismatch');
+  it('logs stale heartbeat for observability', () => {
+    expect(agentReadySection).toContain('task_runner_do.step.node_agent_ready.stale_heartbeat');
   });
 
-  it('falls through to schedule another poll on identity mismatch', () => {
-    // After the identity mismatch warning, control should fall through
-    // to the "schedule another poll" setAlarm at the bottom
+  it('schedules another poll when not ready', () => {
     expect(agentReadySection).toContain('this.getAgentPollIntervalMs()');
+  });
+
+  it('documents the same-zone routing issue in comments', () => {
+    expect(agentReadySection).toContain('same-zone routing');
+    expect(agentReadySection).toContain('wildcard Worker route');
   });
 });
 
@@ -105,7 +106,6 @@ describe('handleNodeSelection health pre-checks for node reuse', () => {
   })();
 
   it('verifies preferred node agent health before reusing', () => {
-    // The preferred node path must call verifyNodeAgentHealthy
     const preferredSection = nodeSelectionSection.slice(
       nodeSelectionSection.indexOf('preferredNodeId'),
       nodeSelectionSection.indexOf('tryClaimWarmNode')
@@ -138,8 +138,6 @@ describe('handleNodeSelection health pre-checks for node reuse', () => {
   });
 
   it('falls through to provisioning when reusable nodes fail health checks', () => {
-    // Warm and existing node paths should fall through (not throw)
-    // when health check fails, allowing the system to provision a new node
     expect(nodeSelectionSection).toContain("advanceToStep(state, 'node_provisioning')");
   });
 

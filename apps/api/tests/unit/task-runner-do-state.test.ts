@@ -255,9 +255,10 @@ describe('TaskRunner DO step handlers', () => {
       expect(doSource).toContain('Node agent not ready within');
     });
 
-    it('checks agent health via HTTP', () => {
-      expect(doSource).toContain('/health');
-      expect(doSource).toContain('response.ok');
+    it('checks agent health via D1 heartbeat records', () => {
+      expect(doSource).toContain('health_status');
+      expect(doSource).toContain('last_heartbeat_at');
+      expect(doSource).toContain('heartbeatIsRecent');
     });
 
     it('schedules poll alarm if not ready', () => {

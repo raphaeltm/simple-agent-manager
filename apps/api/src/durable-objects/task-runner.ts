@@ -76,6 +76,7 @@ type TaskRunnerEnv = {
   MCP_TOKEN_TTL_SECONDS?: string;
   VM_AGENT_PROTOCOL?: string;
   VM_AGENT_PORT?: string;
+  NODE_HEARTBEAT_STALE_SECONDS?: string;
 };
 
 interface StepResults {
@@ -506,49 +507,49 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       );
     }
 
-    // Check agent health
-    const vmProtocol = this.env.VM_AGENT_PROTOCOL || 'https';
-    const vmPort = this.env.VM_AGENT_PORT || '8443';
-    const baseUrl = `${vmProtocol}://vm-${state.stepResults.nodeId.toLowerCase()}.${this.env.BASE_DOMAIN}:${vmPort}`;
-    const healthUrl = `${baseUrl}/health`;
+    // Check agent health via D1 heartbeat records.
+    //
+    // IMPORTANT: We do NOT fetch the VM agent directly via its vm-{nodeId} hostname.
+    // Cloudflare same-zone routing intercepts Worker subrequests to hostnames matching
+    // the wildcard Worker route (*.domain/*), routing them back to the API Worker
+    // instead of the VM. The identity verification detects this (the API's /health
+    // lacks nodeId), but the request never reaches the actual VM agent.
+    //
+    // Instead, we check D1 for the node's heartbeat status. The VM agent sends
+    // POST /api/nodes/:id/ready on startup and POST /api/nodes/:id/heartbeat
+    // periodically, which update healthStatus and lastHeartbeatAt in D1.
+    const node = await this.env.DATABASE.prepare(
+      `SELECT health_status, last_heartbeat_at, status FROM nodes WHERE id = ?`
+    ).bind(state.stepResults.nodeId).first<{
+      health_status: string | null;
+      last_heartbeat_at: string | null;
+      status: string;
+    }>();
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      const response = await fetch(healthUrl, { method: 'GET', signal: controller.signal });
-      clearTimeout(timeoutId);
+    if (node?.health_status === 'healthy' && node.last_heartbeat_at) {
+      // Verify the heartbeat is recent (not stale from a previous boot)
+      const heartbeatTime = new Date(node.last_heartbeat_at).getTime();
+      const heartbeatIsRecent = heartbeatTime > (state.agentReadyStartedAt! - 30_000);
 
-      if (response.ok) {
-        // Verify response is actually from the VM agent, not the API Worker.
-        // The API Worker's /health also returns 200 due to Cloudflare same-zone
-        // routing, but lacks the nodeId field that the VM agent includes.
-        let identityVerified = false;
-        try {
-          const body = await response.json() as Record<string, unknown>;
-          identityVerified = body.nodeId === state.stepResults.nodeId;
-        } catch {
-          // Could not parse response — not the VM agent
-        }
-
-        if (identityVerified) {
-          log.info('task_runner_do.step.node_agent_ready', {
-            taskId: state.taskId,
-            nodeId: state.stepResults.nodeId,
-            elapsedMs: elapsed,
-          });
-          await this.advanceToStep(state, 'workspace_creation');
-          return;
-        }
-
-        log.warn('task_runner_do.step.node_agent_ready.identity_mismatch', {
+      if (heartbeatIsRecent) {
+        log.info('task_runner_do.step.node_agent_ready', {
           taskId: state.taskId,
           nodeId: state.stepResults.nodeId,
           elapsedMs: elapsed,
-          message: 'Health check returned 200 but response is not from the expected VM agent',
+          lastHeartbeatAt: node.last_heartbeat_at,
         });
+        await this.advanceToStep(state, 'workspace_creation');
+        return;
       }
-    } catch {
-      // Agent not ready yet — schedule another poll
+
+      log.info('task_runner_do.step.node_agent_ready.stale_heartbeat', {
+        taskId: state.taskId,
+        nodeId: state.stepResults.nodeId,
+        elapsedMs: elapsed,
+        lastHeartbeatAt: node.last_heartbeat_at,
+        agentReadyStartedAt: new Date(state.agentReadyStartedAt!).toISOString(),
+        message: 'Node has heartbeat but it predates this provisioning cycle',
+      });
     }
 
     // Not ready — schedule another poll
@@ -1242,23 +1243,28 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
   // =========================================================================
 
   /**
-   * Verify that the VM agent on a node is actually healthy and responding.
-   * Returns true only if the health response contains the expected nodeId,
-   * which distinguishes the real VM agent from the API Worker's own /health
-   * endpoint (which also returns 200 due to Cloudflare same-zone routing).
+   * Verify that the VM agent on a node is actually healthy by checking D1
+   * heartbeat records. We cannot fetch the VM directly because Cloudflare
+   * same-zone routing intercepts Worker subrequests to vm-* hostnames,
+   * routing them back to this API Worker instead of the VM agent.
    */
   private async verifyNodeAgentHealthy(nodeId: string): Promise<boolean> {
-    const vmProtocol = this.env.VM_AGENT_PROTOCOL || 'https';
-    const vmPort = this.env.VM_AGENT_PORT || '8443';
-    const baseUrl = `${vmProtocol}://vm-${nodeId.toLowerCase()}.${this.env.BASE_DOMAIN}:${vmPort}`;
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      const response = await fetch(`${baseUrl}/health`, { method: 'GET', signal: controller.signal });
-      clearTimeout(timeoutId);
-      if (!response.ok) return false;
-      const body = await response.json() as Record<string, unknown>;
-      return body.nodeId === nodeId;
+      const node = await this.env.DATABASE.prepare(
+        `SELECT health_status, last_heartbeat_at FROM nodes WHERE id = ?`
+      ).bind(nodeId).first<{
+        health_status: string | null;
+        last_heartbeat_at: string | null;
+      }>();
+
+      if (!node || node.health_status !== 'healthy' || !node.last_heartbeat_at) {
+        return false;
+      }
+
+      // Consider node healthy if heartbeat is within the stale threshold
+      const staleSeconds = parseInt(this.env.NODE_HEARTBEAT_STALE_SECONDS || '180', 10);
+      const heartbeatAge = (Date.now() - new Date(node.last_heartbeat_at).getTime()) / 1000;
+      return heartbeatAge < staleSeconds;
     } catch {
       return false;
     }

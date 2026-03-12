@@ -326,34 +326,37 @@ describe('handleNodeAgentReady', () => {
     expect(section).toContain('this.getAgentReadyTimeoutMs()');
   });
 
-  it('checks health via HTTP GET to /health endpoint', () => {
+  it('checks health via D1 heartbeat query (not direct VM fetch)', () => {
     const section = doSource.slice(
       doSource.indexOf('private async handleNodeAgentReady('),
       doSource.indexOf('private async handleWorkspaceCreation(')
     );
-    expect(section).toContain('/health');
-    expect(section).toContain("method: 'GET'");
+    expect(section).toContain('this.env.DATABASE.prepare');
+    expect(section).toContain('health_status');
+    expect(section).toContain('last_heartbeat_at');
+    // Must NOT use direct fetch to VM (same-zone routing intercepts it)
+    expect(section).not.toContain('fetch(healthUrl');
   });
 
-  it('constructs health URL from nodeId and BASE_DOMAIN', () => {
+  it('verifies heartbeat is recent (not stale from previous boot)', () => {
     const section = doSource.slice(
       doSource.indexOf('private async handleNodeAgentReady('),
       doSource.indexOf('private async handleWorkspaceCreation(')
     );
-    expect(section).toContain('state.stepResults.nodeId.toLowerCase()');
-    expect(section).toContain('this.env.BASE_DOMAIN');
+    expect(section).toContain('heartbeatIsRecent');
+    expect(section).toContain('agentReadyStartedAt');
   });
 
-  it('advances to workspace_creation on successful health check', () => {
+  it('advances to workspace_creation on healthy + recent heartbeat', () => {
     const section = doSource.slice(
       doSource.indexOf('private async handleNodeAgentReady('),
       doSource.indexOf('private async handleWorkspaceCreation(')
     );
-    expect(section).toContain('response.ok');
+    expect(section).toContain("health_status === 'healthy'");
     expect(section).toContain("advanceToStep(state, 'workspace_creation')");
   });
 
-  it('schedules poll alarm on failed health check', () => {
+  it('schedules poll alarm when not ready', () => {
     const section = doSource.slice(
       doSource.indexOf('private async handleNodeAgentReady('),
       doSource.indexOf('private async handleWorkspaceCreation(')
@@ -362,14 +365,12 @@ describe('handleNodeAgentReady', () => {
     expect(section).toContain('setAlarm');
   });
 
-  it('uses AbortController with 5s timeout for health check request', () => {
+  it('documents same-zone routing issue in comments', () => {
     const section = doSource.slice(
       doSource.indexOf('private async handleNodeAgentReady('),
       doSource.indexOf('private async handleWorkspaceCreation(')
     );
-    expect(section).toContain('AbortController');
-    expect(section).toContain('5000');
-    expect(section).toContain('controller.abort()');
+    expect(section).toContain('same-zone routing');
   });
 });
 
