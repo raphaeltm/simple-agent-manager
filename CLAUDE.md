@@ -186,6 +186,8 @@ Domains chain together: competitive research feeds marketing and business strate
 - N/A (frontend-only changes; no database or API changes) (026-chat-message-parity)
 - TypeScript 5.x (API Worker + Web UI), Go 1.24+ (VM Agent) + Hono (API), Drizzle ORM (D1), React 18 + Vite (Web), Cloudflare Workers SDK (Durable Objects), `creack/pty` + `gorilla/websocket` (VM Agent), ACP Go SDK (027-do-session-ownership)
 - Cloudflare D1 (cross-project queries), Durable Objects with SQLite (per-project session data), VM-local SQLite (message outbox) (027-do-session-ownership)
+- TypeScript 5.x (Cloudflare Workers runtime) + Hono (API framework), Drizzle ORM (D1), `@simple-agent-manager/shared`, `@simple-agent-manager/cloud-init` (028-provider-infrastructure)
+- Cloudflare D1 (credentials table with AES-GCM encrypted tokens) (028-provider-infrastructure)
 
 ## Recent Changes
 - 027-do-session-ownership: DO-owned ACP session lifecycle — shifts session state machine (pending→assigned→running→completed/failed/interrupted) from VM agent in-memory maps to ProjectData DO SQLite; heartbeat-based VM failure detection via DO alarm; session forking with lineage tracking; workspace-project binding enforcement; configurable via ACP_SESSION_DETECTION_WINDOW_MS, ACP_SESSION_MAX_FORK_DEPTH
