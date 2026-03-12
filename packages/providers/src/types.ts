@@ -1,40 +1,35 @@
 import type { VMSize } from '@simple-agent-manager/shared';
 
 /**
- * Configuration for creating a VM
- *
- * Note: anthropicApiKey is NOT included.
- * Users authenticate via `claude login` in the terminal.
- * ANTHROPIC_API_KEY env var must NOT be set on VMs.
+ * Configuration for creating a VM.
+ * Contains ONLY non-secret operational parameters.
+ * Secrets (API tokens, auth passwords, GitHub tokens) belong in cloud-init generation,
+ * not in the provider layer.
  */
 export interface VMConfig {
-  /** Unique identifier for the workspace */
-  workspaceId: string;
-
-  /** Human-readable name */
+  /** Server name */
   name: string;
-
-  /** Git repository URL */
-  repoUrl: string;
 
   /** VM size tier */
   size: VMSize;
 
-  /** Auto-generated basic auth password */
-  authPassword: string;
+  /** Datacenter/region identifier */
+  location: string;
 
-  /** API token for cleanup callback */
-  apiToken: string;
+  /** Pre-generated cloud-init script (opaque to provider) */
+  userData: string;
 
-  /** Base domain for DNS */
-  baseDomain: string;
+  /** Metadata labels for the VM */
+  labels?: Record<string, string>;
 
-  /** API URL for cleanup callback */
-  apiUrl: string;
-
-  /** GitHub installation token for private repos (optional) */
-  githubToken?: string;
+  /** OS image override (default: provider-specific) */
+  image?: string;
 }
+
+/**
+ * VM status as reported by the provider
+ */
+export type VMStatus = 'initializing' | 'running' | 'off' | 'starting' | 'stopping';
 
 /**
  * VM instance as returned by provider
@@ -50,7 +45,7 @@ export interface VMInstance {
   ip: string;
 
   /** Provider-reported status */
-  status: 'initializing' | 'running' | 'off' | 'starting' | 'stopping';
+  status: VMStatus;
 
   /** Server type (e.g., "cx23") */
   serverType: string;
@@ -83,50 +78,75 @@ export interface SizeConfig {
 }
 
 /**
- * Result of executing a command in a workspace
- */
-export interface ExecResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
-
-/**
- * Cloud provider interface
+ * Cloud provider interface.
+ * Implementations handle VM lifecycle through their respective cloud APIs.
  */
 export interface Provider {
-  /** Provider identifier */
+  /** Provider identifier matching CredentialProvider type */
   readonly name: string;
 
-  /** Create a new VM */
+  /** Available datacenter/region identifiers */
+  readonly locations: readonly string[];
+
+  /** Available VM size configurations */
+  readonly sizes: Readonly<Record<VMSize, SizeConfig>>;
+
+  /** Provision a new VM */
   createVM(config: VMConfig): Promise<VMInstance>;
 
-  /** Delete a VM by ID */
+  /** Delete a VM. MUST be idempotent (no error on 404). */
   deleteVM(id: string): Promise<void>;
 
-  /** List all managed VMs */
-  listVMs(): Promise<VMInstance[]>;
-
-  /** Get a single VM by ID */
+  /** Get VM by ID. Returns null if not found (no throw). */
   getVM(id: string): Promise<VMInstance | null>;
 
-  /** Get size configuration */
-  getSizeConfig(size: VMSize): SizeConfig;
+  /** List VMs with optional label-based filtering */
+  listVMs(labels?: Record<string, string>): Promise<VMInstance[]>;
 
-  /** Generate cloud-init script */
-  generateCloudInit(config: VMConfig): string;
+  /** Power off a VM */
+  powerOff(id: string): Promise<void>;
 
-  /** Execute a command in a workspace (optional, not all providers support this) */
-  exec?(workspaceId: string, command: string): Promise<ExecResult>;
+  /** Power on a VM */
+  powerOn(id: string): Promise<void>;
+
+  /** Validate provider credentials. Returns true if valid, throws ProviderError on failure. */
+  validateToken(): Promise<boolean>;
 }
 
 /**
- * Provider configuration
+ * Provider configuration — discriminated union per provider type.
+ * Accepts explicit credentials; MUST NOT access process.env.
  */
-export interface ProviderConfig {
-  /** API token for the provider */
-  apiToken: string;
+export type ProviderConfig = HetznerProviderConfig | UpCloudProviderConfig;
 
-  /** Default datacenter/region */
+export interface HetznerProviderConfig {
+  provider: 'hetzner';
+  apiToken: string;
   datacenter?: string;
+}
+
+export interface UpCloudProviderConfig {
+  provider: 'upcloud';
+  username: string;
+  password: string;
+}
+
+/**
+ * Normalized error for all provider operations.
+ * Wraps HTTP errors, timeouts, and domain-specific failures with provider context.
+ */
+export class ProviderError extends Error {
+  override readonly name = 'ProviderError';
+
+  constructor(
+    /** Provider that produced the error */
+    public readonly providerName: string,
+    /** HTTP status code (if from API call) */
+    public readonly statusCode: number | undefined,
+    message: string,
+    /** Original error */
+    options?: { cause?: Error },
+  ) {
+    super(message, options);
+  }
 }

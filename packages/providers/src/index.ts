@@ -1,27 +1,39 @@
-// Import types and providers
-import type { Provider } from './types';
+import type { Provider, ProviderConfig } from './types';
+import { ProviderError } from './types';
 import { HetznerProvider } from './hetzner';
-import { DevcontainerProvider } from './devcontainer';
 
 // Re-export types
-export type { Provider, ProviderConfig, SizeConfig, VMConfig, VMInstance, ExecResult } from './types';
+export type {
+  Provider,
+  ProviderConfig,
+  HetznerProviderConfig,
+  UpCloudProviderConfig,
+  SizeConfig,
+  VMConfig,
+  VMInstance,
+  VMStatus,
+} from './types';
+export { ProviderError } from './types';
+
+// Re-export utilities
+export { providerFetch, getTimeoutMs } from './provider-fetch';
 
 // Re-export providers
 export { HetznerProvider } from './hetzner';
-export { DevcontainerProvider } from './devcontainer';
 
-// Provider factory
-export function createProvider(type?: 'hetzner' | 'devcontainer'): Provider {
-  // Use environment variable if type not specified
-  const providerType = type || process.env.PROVIDER_TYPE || 'hetzner';
-
-  switch (providerType) {
-    case 'devcontainer':
-      return new DevcontainerProvider();
+/**
+ * Create a provider instance from explicit configuration.
+ * MUST NOT access process.env or any Node.js-only APIs.
+ */
+export function createProvider(config: ProviderConfig): Provider {
+  switch (config.provider) {
     case 'hetzner':
+      return new HetznerProvider(config.apiToken, config.datacenter);
     default:
-      return new HetznerProvider({
-        apiToken: process.env.HETZNER_TOKEN || '',
-      });
+      throw new ProviderError(
+        'factory',
+        undefined,
+        `Unsupported provider: ${(config as { provider: string }).provider}`,
+      );
   }
 }
