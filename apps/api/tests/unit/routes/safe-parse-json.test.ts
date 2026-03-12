@@ -6,7 +6,7 @@
  * caused ALL valid JSON objects to be rejected (since 'constructor' is on Object.prototype).
  */
 import { describe, expect, it } from 'vitest';
-import { safeParseJson } from '../../../src/routes/workspaces';
+import { safeParseJson } from '../../../src/routes/workspaces/_helpers';
 
 // The old buggy version for regression testing — demonstrates the bug
 function safeParseJsonBuggy(s: string): Record<string, unknown> | null {
