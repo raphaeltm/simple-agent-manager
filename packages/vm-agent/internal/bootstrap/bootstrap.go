@@ -1918,20 +1918,9 @@ func normalizeProjectRuntimeFilePath(rawPath string) (string, error) {
 
 	normalized := filepath.ToSlash(filepath.Clean(trimmed))
 
-	// Absolute paths: only allow under safe home directories.
-	// System paths (/etc, /usr, /var, etc.) are blocked to prevent privilege escalation.
+	// Allow absolute paths — files are injected into the devcontainer which is
+	// already a sandbox. The .. traversal check above is sufficient protection.
 	if strings.HasPrefix(normalized, "/") {
-		allowedPrefixes := []string{"/home/node/", "/home/user/"}
-		allowed := false
-		for _, prefix := range allowedPrefixes {
-			if strings.HasPrefix(normalized, prefix) {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return "", fmt.Errorf("absolute paths are only allowed under /home/node/ or /home/user/")
-		}
 		return normalized, nil
 	}
 

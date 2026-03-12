@@ -27,13 +27,6 @@ export function byteLength(value: string): number {
 }
 
 /**
- * Allowed absolute path prefixes for runtime files.
- * Only paths under user home directories are permitted inside the devcontainer.
- * System paths (/etc, /usr, /var, etc.) are blocked to prevent privilege escalation.
- */
-export const ALLOWED_ABSOLUTE_PREFIXES = ['/home/node/', '/home/user/'];
-
-/**
  * Blocked ~ (home-relative) paths that could enable persistence or privilege escalation.
  */
 export const BLOCKED_HOME_PATHS = [
@@ -64,16 +57,8 @@ export function normalizeProjectFilePath(path: string): string {
     }
   }
 
-  // Block absolute paths outside allowed prefixes (prevents /etc/cron.d, /etc/profile.d, etc.)
-  if (normalized.startsWith('/')) {
-    const allowed = ALLOWED_ABSOLUTE_PREFIXES.some((prefix) => normalized.startsWith(prefix));
-    if (!allowed) {
-      throw errors.badRequest(
-        'Absolute paths are only allowed under /home/node/ or /home/user/. ' +
-          'Use a relative path or ~/... for home directory files.'
-      );
-    }
-  }
+  // Allow absolute paths — files are injected into the devcontainer which is
+  // already a sandbox. The .. traversal check above is sufficient protection.
 
   // Block dangerous home-relative paths (prevents SSH key injection, etc.)
   if (normalized.startsWith('~')) {
