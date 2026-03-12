@@ -26,9 +26,11 @@ import { getOwnedWorkspace, getOwnedNode, scheduleWorkspaceCreateOnNode } from '
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
 
-crudRoutes.use('/*', requireAuth(), requireApproved());
+// Auth applied per-route (NOT via use('/*', ...)) to prevent middleware leakage
+// to other subrouters (lifecycle, runtime) mounted at the same base path.
+// See docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md
 
-crudRoutes.get('/', async (c) => {
+crudRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const status = c.req.query('status');
   const nodeId = c.req.query('nodeId');
@@ -59,7 +61,7 @@ crudRoutes.get('/', async (c) => {
   return c.json(rows.map((workspace) => toWorkspaceResponse(workspace, c.env.BASE_DOMAIN)));
 });
 
-crudRoutes.get('/:id', async (c) => {
+crudRoutes.get('/:id', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -75,7 +77,7 @@ crudRoutes.get('/:id', async (c) => {
   return c.json(response);
 });
 
-crudRoutes.patch('/:id', async (c) => {
+crudRoutes.patch('/:id', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -108,7 +110,7 @@ crudRoutes.patch('/:id', async (c) => {
   return c.json(toWorkspaceResponse(updated, c.env.BASE_DOMAIN));
 });
 
-crudRoutes.post('/', async (c) => {
+crudRoutes.post('/', requireAuth(), requireApproved(), async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
   const db = drizzle(c.env.DATABASE, { schema });
@@ -368,7 +370,7 @@ crudRoutes.post('/', async (c) => {
   return c.json(toWorkspaceResponse(created, c.env.BASE_DOMAIN), 201);
 });
 
-crudRoutes.delete('/:id', async (c) => {
+crudRoutes.delete('/:id', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
