@@ -1743,7 +1743,7 @@ workspacesRoutes.post('/:id/messages', async (c) => {
     console.warn('Rejecting messages: workspace has no linked chatSessionId', context);
     await persistError(c.env.OBSERVABILITY_DATABASE, {
       source: 'api',
-      level: 'warning',
+      level: 'warn',
       message: `Rejecting messages for workspace ${workspaceId}: no chatSessionId linked yet`,
       context,
       workspaceId,
