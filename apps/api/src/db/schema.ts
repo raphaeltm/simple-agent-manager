@@ -460,6 +460,9 @@ export const workspaces = sqliteTable(
       table.status
     ),
     nodeStatusIdx: index('idx_workspaces_node_status').on(table.nodeId, table.status),
+    chatSessionIdUnique: uniqueIndex('idx_workspaces_chat_session_id_unique')
+      .on(table.chatSessionId)
+      .where(sql`chat_session_id IS NOT NULL`),
   })
 );
 

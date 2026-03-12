@@ -451,6 +451,7 @@ export function ProjectChat() {
               <ProvisioningIndicator state={provisioning} />
             )}
             <ProjectMessageView
+              key={sessionId}
               projectId={projectId}
               sessionId={sessionId!}
               isProvisioning={!!(provisioning && sessionId === provisioning.sessionId && !isTerminal(provisioning.status))}
