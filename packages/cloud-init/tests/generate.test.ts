@@ -122,6 +122,64 @@ describe('generateCloudInit', () => {
     });
   });
 
+  describe('TLS certificate injection', () => {
+    const fakeCert = '-----BEGIN CERTIFICATE-----\nMIIBxTCCAW...\n-----END CERTIFICATE-----';
+    const fakeKey = '-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAK...\n-----END RSA PRIVATE KEY-----';
+
+    it('writes cert and key files when originCaCert/Key provided', () => {
+      const config = generateCloudInit(baseVariables({
+        originCaCert: fakeCert,
+        originCaKey: fakeKey,
+      }));
+
+      expect(config).toContain('/etc/sam/tls/origin-ca.pem');
+      expect(config).toContain('/etc/sam/tls/origin-ca-key.pem');
+      expect(config).toContain('BEGIN CERTIFICATE');
+      expect(config).toContain('BEGIN RSA PRIVATE KEY');
+    });
+
+    it('sets VM_AGENT_PORT=8443 and TLS paths when cert provided', () => {
+      const config = generateCloudInit(baseVariables({
+        originCaCert: fakeCert,
+        originCaKey: fakeKey,
+      }));
+
+      expect(config).toContain('Environment=VM_AGENT_PORT=8443');
+      expect(config).toContain('Environment=TLS_CERT_PATH=/etc/sam/tls/origin-ca.pem');
+      expect(config).toContain('Environment=TLS_KEY_PATH=/etc/sam/tls/origin-ca-key.pem');
+    });
+
+    it('sets VM_AGENT_PORT=8080 and empty TLS paths when no cert', () => {
+      const config = generateCloudInit(baseVariables());
+
+      expect(config).toContain('Environment=VM_AGENT_PORT=8080');
+      expect(config).toContain('Environment=TLS_CERT_PATH=');
+      expect(config).toContain('Environment=TLS_KEY_PATH=');
+    });
+
+    it('config with TLS cert stays within 32KB limit', () => {
+      const config = generateCloudInit(baseVariables({
+        originCaCert: fakeCert,
+        originCaKey: fakeKey,
+        projectId: 'proj-123',
+        chatSessionId: 'sess-456',
+      }));
+
+      expect(validateCloudInitSize(config)).toBe(true);
+    });
+
+    it('key file has restricted permissions (0600)', () => {
+      const config = generateCloudInit(baseVariables({
+        originCaCert: fakeCert,
+        originCaKey: fakeKey,
+      }));
+
+      // Verify the key file write_files entry has 0600 permissions
+      // Match the YAML block: path line followed eventually by permissions line
+      expect(config).toMatch(/origin-ca-key\.pem[\s\S]*?permissions:\s*'0600'/);
+    });
+  });
+
   describe('no template placeholders remain', () => {
     it('all {{ ... }} placeholders are replaced', () => {
       const config = generateCloudInit(baseVariables({

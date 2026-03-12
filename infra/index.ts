@@ -23,6 +23,10 @@ import {
   jwtPrivateKey,
   jwtPublicKey,
 } from "./resources/secrets";
+import {
+  originCaCertPem,
+  originCaKeyPem,
+} from "./resources/origin-ca";
 import { pagesProject, pagesProjectName, pagesCustomDomain } from "./resources/pages";
 
 // Export resource references for internal use
@@ -53,6 +57,9 @@ export const hostnames = dnsHostnames;
 // Export security keys (persisted in Pulumi state, encrypted in R2)
 // These are marked as secrets - use `pulumi stack output --show-secrets` to view
 export { encryptionKey, jwtPrivateKey, jwtPublicKey };
+
+// Export Origin CA certificate (for TLS between Cloudflare edge and VM agents)
+export { originCaCertPem, originCaKeyPem };
 
 // Stack summary output
 const config = new pulumi.Config();

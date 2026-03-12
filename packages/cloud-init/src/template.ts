@@ -56,6 +56,9 @@ runcmd:
     Environment=PROJECT_ID={{ project_id }}
     Environment=CHAT_SESSION_ID={{ chat_session_id }}
     Environment=TASK_ID={{ task_id }}
+    Environment=VM_AGENT_PORT={{ vm_agent_port }}
+    Environment=TLS_CERT_PATH={{ tls_cert_path }}
+    Environment=TLS_KEY_PATH={{ tls_key_path }}
     ExecStart=/usr/local/bin/vm-agent
     Restart=always
     RestartSec=5
@@ -107,6 +110,16 @@ write_files:
         "control_plane_url": "{{ control_plane_url }}"
       }
     permissions: '0644'
+
+  - path: /etc/sam/tls/origin-ca.pem
+    content: |
+      {{ origin_ca_cert }}
+    permissions: '0644'
+
+  - path: /etc/sam/tls/origin-ca-key.pem
+    content: |
+      {{ origin_ca_key }}
+    permissions: '0600'
 
 final_message: "Simple Agent Manager node {{ node_id }} provisioning started!"
 `;

@@ -160,6 +160,11 @@ type Config struct {
 	LogReaderTimeout     time.Duration // Timeout for journalctl read commands (default: 30s)
 	LogStreamPingInterval time.Duration // WebSocket ping interval for log stream (default: 30s)
 	LogStreamPongTimeout  time.Duration // WebSocket pong deadline for log stream (default: 90s)
+
+	// TLS settings - configurable per constitution principle XI
+	TLSCertPath string // Path to TLS certificate PEM (env: TLS_CERT_PATH)
+	TLSKeyPath  string // Path to TLS private key PEM (env: TLS_KEY_PATH)
+	TLSEnabled  bool   // Derived: true when both TLSCertPath and TLSKeyPath are set
 }
 
 // Load reads configuration from environment variables.
@@ -312,6 +317,29 @@ func Load() (*Config, error) {
 		LogReaderTimeout:      getEnvDuration("LOG_READER_TIMEOUT", 30*time.Second),
 		LogStreamPingInterval: getEnvDuration("LOG_STREAM_PING_INTERVAL", 30*time.Second),
 		LogStreamPongTimeout:  getEnvDuration("LOG_STREAM_PONG_TIMEOUT", 90*time.Second),
+
+		// TLS settings - configurable per constitution principle XI
+		TLSCertPath: getEnv("TLS_CERT_PATH", ""),
+		TLSKeyPath:  getEnv("TLS_KEY_PATH", ""),
+	}
+
+	// Derive TLS enabled state from cert/key paths
+	certSet := cfg.TLSCertPath != ""
+	keySet := cfg.TLSKeyPath != ""
+	if certSet != keySet {
+		return nil, fmt.Errorf(
+			"TLS misconfiguration: TLS_CERT_PATH and TLS_KEY_PATH must both be set or both be empty "+
+				"(cert=%q, key=%q)", cfg.TLSCertPath, cfg.TLSKeyPath)
+	}
+	cfg.TLSEnabled = certSet && keySet
+
+	if cfg.TLSEnabled {
+		if _, err := os.Stat(cfg.TLSCertPath); err != nil {
+			return nil, fmt.Errorf("TLS_CERT_PATH %q: %w", cfg.TLSCertPath, err)
+		}
+		if _, err := os.Stat(cfg.TLSKeyPath); err != nil {
+			return nil, fmt.Errorf("TLS_KEY_PATH %q: %w", cfg.TLSKeyPath, err)
+		}
 	}
 
 	// Validate required fields

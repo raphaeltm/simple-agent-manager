@@ -331,6 +331,8 @@ export const REQUIRED_SECRETS = [
   'ENCRYPTION_KEY',
   'JWT_PRIVATE_KEY',
   'JWT_PUBLIC_KEY',
+  'ORIGIN_CA_CERT',
+  'ORIGIN_CA_KEY',
 ] as const;
 
 // Note: HETZNER_TOKEN is NOT a platform secret.

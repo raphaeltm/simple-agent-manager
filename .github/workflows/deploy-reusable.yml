@@ -250,6 +250,20 @@ jobs:
           echo "$JWT_PUBLIC_KEY" >> $GITHUB_OUTPUT
           echo "$DELIMITER" >> $GITHUB_OUTPUT
 
+          echo "Reading Origin CA certificate..."
+          ORIGIN_CA_CERT=$(pulumi stack output originCaCertPem --show-secrets 2>/dev/null || echo "")
+          DELIMITER="EOF_CERT_$(date +%s)"
+          echo "origin_ca_cert<<$DELIMITER" >> $GITHUB_OUTPUT
+          echo "$ORIGIN_CA_CERT" >> $GITHUB_OUTPUT
+          echo "$DELIMITER" >> $GITHUB_OUTPUT
+
+          echo "Reading Origin CA key..."
+          ORIGIN_CA_KEY=$(pulumi stack output originCaKeyPem --show-secrets 2>/dev/null || echo "")
+          DELIMITER="EOF_CAKEY_$(date +%s)"
+          echo "origin_ca_key<<$DELIMITER" >> $GITHUB_OUTPUT
+          echo "$ORIGIN_CA_KEY" >> $GITHUB_OUTPUT
+          echo "$DELIMITER" >> $GITHUB_OUTPUT
+
           echo "Security keys read from Pulumi state"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -396,6 +410,8 @@ jobs:
           PULUMI_ENCRYPTION_KEY: ${{ steps.pulumi_keys.outputs.encryption_key }}
           PULUMI_JWT_PRIVATE_KEY: ${{ steps.pulumi_keys.outputs.jwt_private_key }}
           PULUMI_JWT_PUBLIC_KEY: ${{ steps.pulumi_keys.outputs.jwt_public_key }}
+          PULUMI_ORIGIN_CA_CERT: ${{ steps.pulumi_keys.outputs.origin_ca_cert }}
+          PULUMI_ORIGIN_CA_KEY: ${{ steps.pulumi_keys.outputs.origin_ca_key }}
           SECRET_ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
           SECRET_JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
           SECRET_JWT_PUBLIC_KEY: ${{ secrets.JWT_PUBLIC_KEY }}

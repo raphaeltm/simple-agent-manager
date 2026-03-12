@@ -27,7 +27,7 @@ describe('node-agent readiness helpers', () => {
     );
   });
 
-  it('returns once node agent health endpoint responds with success', async () => {
+  it('uses HTTPS URL by default (TLS enabled)', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
@@ -39,9 +39,26 @@ describe('node-agent readiness helpers', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit | undefined];
-    expect(url).toBe('http://vm-node_abc.example.com:8080/health');
+    expect(url).toBe('https://vm-node_abc.example.com:8443/health');
     expect(init?.method).toBe('GET');
     expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('uses HTTP URL when VM_AGENT_PROTOCOL=http', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    await waitForNodeAgentReady('NODE_HTTP', {
+      BASE_DOMAIN: 'example.com',
+      VM_AGENT_PROTOCOL: 'http',
+      VM_AGENT_PORT: '8080',
+      NODE_AGENT_READY_TIMEOUT_MS: '5000',
+      NODE_AGENT_READY_POLL_INTERVAL_MS: '1000',
+    } as never);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe('http://vm-node_http.example.com:8080/health');
   });
 
   it('throws after timeout when node agent health never becomes reachable', async () => {

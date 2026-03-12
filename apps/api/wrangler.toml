@@ -26,6 +26,8 @@ ACTIVITY_RETENTION_DAYS = "90"
 SESSION_IDLE_TIMEOUT_MINUTES = "60"
 DO_SUMMARY_SYNC_DEBOUNCE_MS = "5000"
 DEFAULT_TASK_AGENT_TYPE = "claude-code"
+VM_AGENT_PROTOCOL = "https"
+VM_AGENT_PORT = "8443"
 
 # D1 Database
 [[d1_databases]]
@@ -112,3 +114,5 @@ crons = ["*/5 * * * *"]
 # - JWT_PRIVATE_KEY
 # - JWT_PUBLIC_KEY
 # - ENCRYPTION_KEY
+# - ORIGIN_CA_CERT (Origin CA certificate for VM agent TLS)
+# - ORIGIN_CA_KEY (Origin CA private key for VM agent TLS)

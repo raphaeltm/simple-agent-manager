@@ -9,7 +9,9 @@ const DEFAULT_NODE_AGENT_READY_TIMEOUT_MS = 600_000;
 const DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS = 5000;
 
 function getNodeBackendBaseUrl(nodeId: string, env: Env): string {
-  return `http://vm-${nodeId.toLowerCase()}.${env.BASE_DOMAIN}:8080`;
+  const protocol = env.VM_AGENT_PROTOCOL || 'https';
+  const port = env.VM_AGENT_PORT || '8443';
+  return `${protocol}://vm-${nodeId.toLowerCase()}.${env.BASE_DOMAIN}:${port}`;
 }
 
 interface NodeAgentRequestOptions extends RequestInit {

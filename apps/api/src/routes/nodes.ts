@@ -399,7 +399,9 @@ nodesRoutes.get('/:id/logs/stream', async (c) => {
 
   // Build the VM agent WebSocket URL with all query params
   const clientUrl = new URL(c.req.url);
-  const vmUrl = new URL(`http://vm-${nodeId.toLowerCase()}.${c.env.BASE_DOMAIN}:8080/logs/stream`);
+  const vmProtocol = c.env.VM_AGENT_PROTOCOL || 'https';
+  const vmPort = c.env.VM_AGENT_PORT || '8443';
+  const vmUrl = new URL(`${vmProtocol}://vm-${nodeId.toLowerCase()}.${c.env.BASE_DOMAIN}:${vmPort}/logs/stream`);
   vmUrl.searchParams.set('token', token);
 
   // Forward filter params from client
@@ -439,7 +441,7 @@ nodesRoutes.post('/:id/token', async (c) => {
   }
 
   const { token, expiresAt } = await signNodeManagementToken(userId, nodeId, null, c.env);
-  const nodeAgentUrl = `https://vm-${nodeId.toLowerCase()}.${c.env.BASE_DOMAIN}:8080`;
+  const nodeAgentUrl = `https://vm-${nodeId.toLowerCase()}.${c.env.BASE_DOMAIN}:${c.env.VM_AGENT_PORT || '8443'}`;
 
   return c.json({ token, expiresAt, nodeAgentUrl });
 });

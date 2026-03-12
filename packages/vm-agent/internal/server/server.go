@@ -400,12 +400,17 @@ func (s *Server) UpdateAfterBootstrap(cfg *config.Config) {
 	}
 }
 
-// Start starts the HTTP server.
+// Start starts the HTTP server (plain HTTP or TLS based on config).
 func (s *Server) Start() error {
 	s.startNodeHealthReporter()
 
 	// Start error reporter background flush
 	s.errorReporter.Start()
+
+	if s.config.TLSEnabled {
+		slog.Info("Starting VM Agent with TLS", "addr", s.httpServer.Addr, "cert", s.config.TLSCertPath, "key", s.config.TLSKeyPath)
+		return s.httpServer.ListenAndServeTLS(s.config.TLSCertPath, s.config.TLSKeyPath)
+	}
 
 	slog.Info("Starting VM Agent", "addr", s.httpServer.Addr)
 	return s.httpServer.ListenAndServe()

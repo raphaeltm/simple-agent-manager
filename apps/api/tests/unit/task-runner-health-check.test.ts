@@ -21,12 +21,13 @@ describe('verifyNodeAgentHealthy helper', () => {
     expect(doSource).toContain('private async verifyNodeAgentHealthy(nodeId: string): Promise<boolean>');
   });
 
-  it('fetches the VM agent health endpoint on port 8080', () => {
+  it('fetches the VM agent health endpoint using env-configured protocol and port', () => {
     const section = doSource.slice(
       doSource.indexOf('private async verifyNodeAgentHealthy('),
       doSource.indexOf('private async tryClaimWarmNode(')
     );
-    expect(section).toContain('vm-${nodeId.toLowerCase()}.${this.env.BASE_DOMAIN}:8080');
+    expect(section).toContain("this.env.VM_AGENT_PROTOCOL || 'https'");
+    expect(section).toContain("this.env.VM_AGENT_PORT || '8443'");
     expect(section).toContain('/health');
   });
 

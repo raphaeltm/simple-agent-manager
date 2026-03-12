@@ -74,6 +74,8 @@ type TaskRunnerEnv = {
   DEFAULT_TASK_AGENT_TYPE?: string;
   KV: KVNamespace;
   MCP_TOKEN_TTL_SECONDS?: string;
+  VM_AGENT_PROTOCOL?: string;
+  VM_AGENT_PORT?: string;
 };
 
 interface StepResults {
@@ -505,7 +507,9 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     }
 
     // Check agent health
-    const baseUrl = `http://vm-${state.stepResults.nodeId.toLowerCase()}.${this.env.BASE_DOMAIN}:8080`;
+    const vmProtocol = this.env.VM_AGENT_PROTOCOL || 'https';
+    const vmPort = this.env.VM_AGENT_PORT || '8443';
+    const baseUrl = `${vmProtocol}://vm-${state.stepResults.nodeId.toLowerCase()}.${this.env.BASE_DOMAIN}:${vmPort}`;
     const healthUrl = `${baseUrl}/health`;
 
     try {
@@ -1244,7 +1248,9 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
    * endpoint (which also returns 200 due to Cloudflare same-zone routing).
    */
   private async verifyNodeAgentHealthy(nodeId: string): Promise<boolean> {
-    const baseUrl = `http://vm-${nodeId.toLowerCase()}.${this.env.BASE_DOMAIN}:8080`;
+    const vmProtocol = this.env.VM_AGENT_PROTOCOL || 'https';
+    const vmPort = this.env.VM_AGENT_PORT || '8443';
+    const baseUrl = `${vmProtocol}://vm-${nodeId.toLowerCase()}.${this.env.BASE_DOMAIN}:${vmPort}`;
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
