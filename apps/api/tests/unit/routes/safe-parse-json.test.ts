@@ -1,31 +1,14 @@
 /**
- * Tests for safeParseJson — the function that parses tool metadata JSON.
+ * Behavioral tests for safeParseJson — the function that parses tool metadata JSON.
  *
- * This function is defined inline in workspaces.ts. Since it's not exported,
- * we reproduce its logic here to test the fix for the prototype chain bug.
+ * Tests the exported function directly from workspaces.ts.
  * The bug: using `'constructor' in parsed` instead of `Object.hasOwn(parsed, 'constructor')`
  * caused ALL valid JSON objects to be rejected (since 'constructor' is on Object.prototype).
  */
 import { describe, expect, it } from 'vitest';
+import { safeParseJson } from '../../../src/routes/workspaces';
 
-// Exact copy of the fixed function from workspaces.ts
-function safeParseJson(s: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(s);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
-    if (
-      Object.hasOwn(parsed, '__proto__') ||
-      Object.hasOwn(parsed, 'constructor') ||
-      Object.hasOwn(parsed, 'prototype')
-    )
-      return null;
-    return parsed as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-// The old buggy version for regression testing
+// The old buggy version for regression testing — demonstrates the bug
 function safeParseJsonBuggy(s: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(s);
@@ -93,6 +76,14 @@ describe('safeParseJson', () => {
 
     it('returns null for booleans', () => {
       expect(safeParseJson('true')).toBeNull();
+    });
+
+    it('returns null for empty string', () => {
+      expect(safeParseJson('')).toBeNull();
+    });
+
+    it('returns null for whitespace', () => {
+      expect(safeParseJson('  ')).toBeNull();
     });
   });
 
