@@ -122,8 +122,9 @@ function safeParseJson(s: string): Record<string, unknown> | null {
       Object.hasOwn(parsed, '__proto__') ||
       Object.hasOwn(parsed, 'constructor') ||
       Object.hasOwn(parsed, 'prototype')
-    )
+    ) {
       return null;
+    }
     return parsed as Record<string, unknown>;
   } catch {
     return null;
@@ -1726,13 +1727,15 @@ workspacesRoutes.post('/:id/messages', async (c) => {
       action: 'rejected_batch',
     };
     console.error('Message routing mismatch: workspace linked to different session', context);
-    await persistError(c.env.OBSERVABILITY_DATABASE, {
-      source: 'api',
-      level: 'error',
-      message: `Message routing mismatch: workspace ${workspaceId} linked to session ${workspace.chatSessionId}, but messages target ${sessionId}`,
-      context,
-      workspaceId,
-    });
+    c.executionCtx.waitUntil(
+      persistError(c.env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'error',
+        message: `Message routing mismatch: workspace ${workspaceId} linked to session ${workspace.chatSessionId}, but messages target ${sessionId}`,
+        context,
+        workspaceId,
+      })
+    );
     throw errors.badRequest(
       `Session mismatch: workspace is linked to session ${workspace.chatSessionId}, ` +
       `but messages target session ${sessionId}`
@@ -1751,14 +1754,18 @@ workspacesRoutes.post('/:id/messages', async (c) => {
       action: 'rejected_no_session_link',
     };
     console.warn('Rejecting messages: workspace has no linked chatSessionId', context);
-    await persistError(c.env.OBSERVABILITY_DATABASE, {
-      source: 'api',
-      level: 'warn',
-      message: `Rejecting messages for workspace ${workspaceId}: no chatSessionId linked yet`,
-      context,
-      workspaceId,
-    });
-    throw errors.badRequest(
+    c.executionCtx.waitUntil(
+      persistError(c.env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'warn',
+        message: `Rejecting messages for workspace ${workspaceId}: no chatSessionId linked yet`,
+        context,
+        workspaceId,
+      })
+    );
+    // Use 409 Conflict (not 400) so the VM agent's outbox retries the batch.
+    // This is a transient condition: chatSessionId will be set once ensureSessionLinked() completes.
+    throw errors.conflict(
       'Workspace has no linked chat session yet — messages cannot be routed safely'
     );
   }
