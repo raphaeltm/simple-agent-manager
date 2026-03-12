@@ -98,7 +98,7 @@ export function useChatWebSocket({
     }
 
     const API_URL = import.meta.env.VITE_API_URL || '';
-    const wsUrl = API_URL.replace(/^http/, 'ws') + `/api/projects/${projectId}/sessions/ws`;
+    const wsUrl = API_URL.replace(/^http/, 'ws') + `/api/projects/${projectId}/sessions/ws?sessionId=${encodeURIComponent(sessionId)}`;
 
     try {
       const ws = new WebSocket(wsUrl);

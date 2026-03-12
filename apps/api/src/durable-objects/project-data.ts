@@ -169,7 +169,7 @@ export class ProjectData extends DurableObject<Env> {
     }
 
     this.scheduleSummarySync();
-    this.broadcastEvent('session.stopped', { sessionId });
+    this.broadcastEvent('session.stopped', { sessionId }, sessionId);
   }
 
   async persistMessage(
@@ -237,7 +237,7 @@ export class ProjectData extends DurableObject<Env> {
       toolMetadata: toolMetadata ? JSON.parse(toolMetadata) : null,
       createdAt: now,
       sequence,
-    });
+    }, sessionId);
     return id;
   }
 
@@ -355,7 +355,7 @@ export class ProjectData extends DurableObject<Env> {
         sessionId,
         messages: persistedMessages,
         count: persisted,
-      });
+      }, sessionId);
     }
 
     return { persisted, duplicates };
@@ -387,7 +387,7 @@ export class ProjectData extends DurableObject<Env> {
       sessionId
     );
 
-    this.broadcastEvent('session.updated', { sessionId, workspaceId });
+    this.broadcastEvent('session.updated', { sessionId, workspaceId }, sessionId);
   }
 
   async listSessions(
@@ -587,7 +587,7 @@ export class ProjectData extends DurableObject<Env> {
       now,
       sessionId
     );
-    this.broadcastEvent('session.agent_completed', { sessionId, agentCompletedAt: now });
+    this.broadcastEvent('session.agent_completed', { sessionId, agentCompletedAt: now }, sessionId);
   }
 
   // =========================================================================
@@ -714,7 +714,7 @@ export class ProjectData extends DurableObject<Env> {
           taskId,
           JSON.stringify({ retryCount })
         );
-        this.broadcastEvent('session.idle_cleanup', { sessionId, workspaceId, taskId });
+        this.broadcastEvent('session.idle_cleanup', { sessionId, workspaceId, taskId }, sessionId);
         this.scheduleSummarySync();
       } catch (err) {
         console.error('Idle cleanup failed for session', sessionId, err);
@@ -870,7 +870,7 @@ export class ProjectData extends DurableObject<Env> {
         toolMetadata: null,
         createdAt: now,
         sequence,
-      });
+      }, sessionId);
     } catch (e) {
       console.warn(JSON.stringify({ event: 'project_data.system_message_insert_failed', sessionId, error: String(e) }));
     }
@@ -1473,7 +1473,15 @@ export class ProjectData extends DurableObject<Env> {
       }
 
       const pair = new WebSocketPair();
-      this.ctx.acceptWebSocket(pair[1]);
+      // Tag the WebSocket with the subscribed sessionId for server-side filtering.
+      // Clients that pass ?sessionId=X only receive events for that session
+      // (plus project-wide events). Clients without a sessionId get all events.
+      const sessionId = url.searchParams.get('sessionId');
+      const tags: string[] = [];
+      if (sessionId) {
+        tags.push(`session:${sessionId}`);
+      }
+      this.ctx.acceptWebSocket(pair[1], tags);
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
 
@@ -1603,14 +1611,54 @@ export class ProjectData extends DurableObject<Env> {
     return ((row?.max_seq as number) ?? 0) + 1;
   }
 
-  private broadcastEvent(type: string, payload: Record<string, unknown>): void {
-    const sockets = this.ctx.getWebSockets();
+  /**
+   * Broadcast an event to connected WebSocket clients.
+   * When sessionId is provided, only sends to sockets subscribed to that session
+   * (tagged with `session:{id}`) plus untagged sockets (project-wide listeners).
+   * When sessionId is omitted, sends to all connected sockets.
+   */
+  private broadcastEvent(
+    type: string,
+    payload: Record<string, unknown>,
+    sessionId?: string
+  ): void {
     const message = JSON.stringify({ type, payload });
-    for (const ws of sockets) {
-      try {
-        ws.send(message);
-      } catch {
-        // Socket may be closed; ignore
+
+    if (sessionId) {
+      // Send to session-subscribed sockets
+      const sessionSockets = this.ctx.getWebSockets(`session:${sessionId}`);
+      const allSockets = this.ctx.getWebSockets();
+      const sent = new Set<WebSocket>();
+      for (const ws of sessionSockets) {
+        try {
+          ws.send(message);
+          sent.add(ws);
+        } catch {
+          // Socket may be closed; ignore
+        }
+      }
+      // Send to any untagged sockets (those listening to all events)
+      for (const ws of allSockets) {
+        if (sent.has(ws)) continue;
+        // Check if this socket has a session tag — if so, skip (it's subscribed to a different session)
+        const tags = this.ctx.getTags(ws);
+        const hasSessionTag = tags.some((t) => t.startsWith('session:'));
+        if (hasSessionTag) continue;
+        try {
+          ws.send(message);
+        } catch {
+          // Socket may be closed; ignore
+        }
+      }
+    } else {
+      // Project-wide event: send to all sockets
+      const sockets = this.ctx.getWebSockets();
+      for (const ws of sockets) {
+        try {
+          ws.send(message);
+        } catch {
+          // Socket may be closed; ignore
+        }
       }
     }
   }

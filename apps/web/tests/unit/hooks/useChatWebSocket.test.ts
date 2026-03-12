@@ -80,10 +80,13 @@ describe('useChatWebSocket hook', () => {
     expect(hookSource).toContain("setConnectionState('disconnected')");
   });
 
-  it('constructs WebSocket URL from VITE_API_URL', () => {
+  it('constructs WebSocket URL from VITE_API_URL with sessionId query param', () => {
     expect(hookSource).toContain('VITE_API_URL');
     expect(hookSource).toContain("replace(/^http/, 'ws')");
     expect(hookSource).toContain('/sessions/ws');
+    // Session-scoped WebSocket filtering: client must pass sessionId for server-side filtering
+    expect(hookSource).toContain('sessionId=');
+    expect(hookSource).toContain('encodeURIComponent(sessionId)');
   });
 
   it('schedules reconnect on abnormal close', () => {
