@@ -101,7 +101,7 @@ flowchart TD
     WSProxy --> LookupDB["Lookup workspace in D1<br/>Get nodeId, status"]
     LookupDB --> StatusCheck{"status in {running,recovery}?"}
     StatusCheck -->|No| Return503["503 Not Ready"]
-    StatusCheck -->|Yes| ResolveNode["Resolve backend:<br/><code>vm-{nodeId}.domain:8080</code>"]
+    StatusCheck -->|Yes| ResolveNode["Resolve backend:<br/><code>{nodeId}.vm.domain:8443</code>"]
     ResolveNode --> ProxyVM["Proxy request to VM Agent<br/>Inject X-SAM-Node-Id,<br/>X-SAM-Workspace-Id headers"]
 
     APIRoutes --> CORS["CORS Middleware"]
@@ -115,10 +115,10 @@ flowchart TD
 |---------|-------------|-----|
 | `app.{domain}` | Cloudflare Pages | Worker proxies to `{project}.pages.dev` |
 | `api.{domain}` | Worker API routes | Direct handling by Hono router |
-| `ws-{id}.{domain}` | VM Agent on port 8080 | Worker proxies via DNS-only `vm-{nodeId}.{domain}` |
+| `ws-{id}.{domain}` | VM Agent on port 8443 | Worker proxies via proxied `{nodeId}.vm.{domain}` |
 | `*.{domain}` (other) | 404 | No matching route |
 
-> **Why DNS-only backend hostnames?** Cloudflare Workers cannot fetch IP addresses directly (Error 1003). We create non-proxied DNS A records (`vm-{nodeId}.{domain}` → VM IP) and the Worker fetches through those hostnames.
+> **Why two-level backend subdomains?** Cloudflare Workers cannot fetch IP addresses directly (Error 1003), and the wildcard route `*.{domain}/*` causes same-zone routing for single-level VM subdomains. We use `{nodeId}.vm.{domain}` (two levels, bypasses the wildcard) with orange-clouded (proxied) A records. CF edge terminates TLS and re-encrypts to the VM's Origin CA cert.
 
 ---
 
@@ -666,7 +666,7 @@ sequenceDiagram
     Agent->>Agent: Load config from environment
     Agent->>Agent: Run bootstrap sequence
     Agent->>API: POST /api/nodes/:id/ready
-    API->>API: Create DNS record (vm-{id}.domain → IP)
+    API->>API: Create DNS record ({id}.vm.domain → IP)
     API->>API: Update node status → running
 
     Note over API: Node is ready for workspaces
@@ -713,7 +713,7 @@ sequenceDiagram
 
     Browser->>Worker: WSS ws-{id}.domain/workspaces/{id}/shell?token=...
     Worker->>Worker: Lookup workspace in D1
-    Worker->>Agent: Proxy WebSocket to vm-{nodeId}.domain:8080
+    Worker->>Agent: Proxy WebSocket to {nodeId}.vm.domain:8443
 
     Agent->>Agent: Validate JWT (via JWKS)
     Agent->>PTY: Create or reattach PTY session

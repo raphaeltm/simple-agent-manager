@@ -1,58 +1,84 @@
-# Post-Mortem: Cloudflare Same-Zone Routing Breaks VM Agent Health Checks
+# Post-Mortem: Cloudflare Same-Zone Routing Breaks All Worker→VM Communication
 
 **Date**: 2026-03-12
 **Severity**: P0 — All task execution broken in production
 **Duration**: Until fix deployed
-**Root cause**: Task runner health check used direct `fetch()` to VM agent, which Cloudflare same-zone routing intercepts
+**Root cause**: Worker subrequests to `vm-{nodeId}.domain` matched the wildcard route `*.domain/*`, causing Cloudflare same-zone routing to loop requests back to the Worker instead of forwarding to the VM
 
 ## What Broke
 
-Task submission via project chat fails with "Node agent not ready within 600000ms". The task runner provisions a VM successfully, but the health check poll never succeeds — the task times out after 10 minutes.
+Task submission via project chat fails completely. Two distinct failure modes were discovered:
+
+1. **Health check failure**: Task stuck at "node_agent_ready" — health check poll to `vm-{nodeId}.domain:8443/health` looped back to the Worker for 10 minutes, then timed out.
+2. **Workspace creation failure**: After fixing health checks with D1, task stuck at "workspace_creation" — `createWorkspaceOnNode()` fetch to `vm-{nodeId}.domain` also looped back to the Worker. The workspace was created in D1 but the VM never received the creation command.
+
+All 15 `nodeAgentRequest` functions (workspace CRUD, agent sessions, logs, system-info) were affected.
 
 ## Root Cause
 
 Cloudflare **same-zone subrequest routing**: when a Worker makes a `fetch()` to a hostname that matches one of its own routes within the same zone, Cloudflare intercepts the request and routes it back to the Worker instead of the origin.
 
-The deploy script generates a wildcard Worker route `*.domain/*` which matches ALL subdomains, including `vm-{nodeId}.domain`. When the task runner DO calls `fetch(vm-{nodeId}.domain:8443/health)`, the request goes back to the API Worker's own `/health` endpoint instead of the VM agent.
+The deploy script generates a wildcard Worker route `*.domain/*` which matches ALL single-level subdomains, including `vm-{nodeId}.domain`. Any Worker-initiated subrequest (from DO alarms, cron, or internal fetch) to these hostnames gets routed back to the API Worker.
 
-The task runner had identity verification (`body.nodeId === state.stepResults.nodeId`) which correctly rejected the API Worker's response (it lacks `nodeId`), but this meant the health check simply never succeeded.
+**Critical distinction**: Same-zone routing only affects Worker-INITIATED subrequests. Subrequests made while handling external requests (e.g., workspace proxy from browser → `ws-{id}.domain`) are NOT intercepted. This is why terminals and the web UI worked while task execution (driven by DO alarms) did not.
 
-**Why we can't use explicit routes to fix this**: Cloudflare route patterns only support wildcards at the BEGINNING of the hostname (e.g., `*.domain/*`). Patterns like `ws-*.domain/*` are rejected with error 10022. Since the Worker needs to handle `ws-*` subdomains for workspace proxying, we must use the wildcard `*.domain/*`, which inherently catches `vm-*` too.
+**Why we can't use explicit routes**: Cloudflare route patterns only support wildcards at the BEGINNING of the hostname (e.g., `*.domain/*`). Patterns like `ws-*.domain/*` are rejected with error 10022.
 
 ## Timeline
 
-1. **Unknown date**: Wildcard route `*.domain/*` deployed (was present before TLS change)
-2. **2026-03-12**: User submits task in production → VM provisions successfully → health check loops for 10 minutes → task fails
-3. **2026-03-12**: Investigation via CF observability reveals the same-zone routing issue
-4. **2026-03-12**: Fix implemented: D1-based health check replaces direct VM fetch
+1. **Unknown date**: Wildcard route `*.domain/*` deployed
+2. **2026-03-12**: User submits task → VM provisions → health check times out (10 min)
+3. **2026-03-12**: First fix: D1-based health check bypasses same-zone routing for health checks
+4. **2026-03-12**: Task gets past health check but stuck at workspace creation — same root cause
+5. **2026-03-12**: Root fix: Two-level VM subdomains bypass same-zone routing for ALL communication
 
 ## Why It Wasn't Caught
 
-1. **The wildcard route worked for the web UI** — `app.*`, `api.*`, `ws-*.*` all function correctly via external browser requests. Same-zone routing only affects Worker subrequests (internal `fetch()` calls).
-2. **No automated test exercises the CF routing layer** — Tests use Miniflare which doesn't simulate same-zone routing behavior.
-3. **Staging verification gaps** — The process gates didn't enforce actual task execution through the full pipeline including VM provisioning and health checks.
+1. **Browser requests worked fine** — Same-zone routing only affects Worker subrequests, not external browser requests
+2. **Miniflare doesn't simulate same-zone routing** — All tests passed
+3. **No end-to-end task execution test** — Staging verification didn't exercise the full DO alarm → VM communication pipeline
 
-## Fix: D1-Based Health Check
+## Fix: Two-Level VM Subdomains
 
-Replaced direct `fetch()` to `vm-{nodeId}.domain/health` with D1 heartbeat query in both `handleNodeAgentReady` and `verifyNodeAgentHealthy`. The VM agent already sends `POST /api/nodes/:id/ready` on startup and `POST /api/nodes/:id/heartbeat` periodically — these update `health_status` and `last_heartbeat_at` in D1. The task runner now reads these D1 records instead of fetching the VM directly.
+Changed VM backend hostnames from single-level to two-level subdomains:
 
-This completely sidesteps the same-zone routing issue because D1 queries don't use `fetch()` to VM hostnames.
+- **Before**: `vm-{nodeId}.domain` (1 subdomain level → matches `*.domain/*`)
+- **After**: `{nodeId}.vm.domain` (2 subdomain levels → does NOT match `*.domain/*`)
 
-**Note on route patterns**: We cannot split the wildcard into explicit subdomain routes because Cloudflare rejects mid-hostname wildcards (`ws-*.domain/*` → error 10022). The wildcard route `*.domain/*` remains, but all health check code paths now use D1 instead of direct fetch, making the route configuration irrelevant for health checks.
+Cloudflare wildcard route `*.domain/*` matches exactly ONE subdomain level. By using `{nodeId}.vm.{domain}` (two levels), Worker subrequests bypass same-zone routing entirely and reach the VM directly.
+
+### Changes Made
+
+| File | Change |
+|------|--------|
+| `apps/api/src/services/node-agent.ts` | `getNodeBackendBaseUrl()`: `vm-{id}.{domain}` → `{id}.vm.{domain}` |
+| `apps/api/src/services/dns.ts` | `createNodeBackendDNSRecord()`: DNS name `vm-{id}` → `{id}.vm` |
+| `apps/api/src/services/dns.ts` | `getNodeBackendHostname()`: hostname construction updated |
+| `apps/api/src/services/dns.ts` | `cleanupWorkspaceDNSRecords()`: handles both old and new formats |
+| `apps/api/src/index.ts` | Workspace proxy backend hostname updated |
+| `apps/api/src/routes/nodes.ts` | Log stream URL and node token response URL updated |
+| `infra/resources/origin-ca.ts` | Added `*.vm.{domain}` SAN to Origin CA cert |
+
+### SSL/TLS Impact
+
+The VM records are orange-clouded (proxied). Universal SSL covers `*.domain` but NOT `*.vm.domain`. However:
+- Worker subrequests to proxied hostnames stay within CF's infrastructure — edge cert validation doesn't apply
+- Browsers never access VM hostnames directly (they use `ws-{id}.domain` and `api.domain`)
+- The Origin CA cert was updated with `*.vm.{domain}` SAN for the CF edge → VM hop
+
+### D1 Health Checks (Defense-in-Depth)
+
+The D1-based health check from the first fix remains as defense-in-depth. Even though two-level subdomains fix same-zone routing, D1 health checks are more reliable (no network round-trip to VM, no DNS dependency).
 
 ## Class of Bug
 
-**Platform routing interaction**: Infrastructure behavior (CF same-zone routing) that is invisible in local dev, invisible in most tests, and only manifests when a Worker makes subrequests to hostnames within its own zone that match its route patterns. This is a class of bug that requires:
-- Avoiding direct `fetch()` to VM hostnames from within the Worker
-- Using indirect communication (D1, KV, DO) for Worker-to-VM status checks
-- Any remaining direct VM fetches (workspace creation, agent sessions) must be tested against same-zone routing behavior
+**Platform routing interaction**: Infrastructure behavior (CF same-zone routing) that is invisible in local dev, invisible in most tests, and only manifests when a Worker makes subrequests to hostnames within its own zone that match its route patterns.
 
-## Process Fix
+**Key insight**: CF wildcards match exactly one subdomain level. Two-level subdomains (`x.y.domain`) bypass `*.domain/*` routes entirely. This is the correct architectural fix for all Worker→VM communication.
 
-1. Added detailed comments in `sync-wrangler-config.ts` explaining the wildcard route constraint and D1 workaround
-2. D1-based health check is now the primary mechanism — eliminates the most critical same-zone routing failure
-3. Infrastructure verification gate (from TLS post-mortem) would catch this if enforced — requires actual VM provisioning test before merge
+## Migration
 
-## Known Remaining Risk
-
-Other VM agent subrequests (`createWorkspaceOnNode`, `startAgentSessionOnNode`) still use direct `fetch()` to VM hostnames. These may also be affected by same-zone routing. If task execution fails at the workspace creation step after this fix, these subrequests will need similar D1-based or indirect communication patterns.
+- **New VMs**: Get `{nodeId}.vm.{domain}` DNS records immediately
+- **Old VMs**: Keep existing `vm-{nodeId}.{domain}` records until destroyed (warm pool timeout or manual cleanup)
+- DNS cleanup function handles both formats during transition
+- No manual migration needed — old VMs die naturally

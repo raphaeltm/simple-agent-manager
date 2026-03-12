@@ -131,14 +131,15 @@ function generateApiWorkerEnv(
     //
     // We use a wildcard *.domain/* because Cloudflare route patterns only support
     // wildcards at the BEGINNING of the hostname — patterns like ws-*.domain/* are
-    // rejected (error 10022). This wildcard catches all subdomains including vm-*,
-    // which means Cloudflare same-zone routing will intercept Worker subrequests to
-    // vm-{nodeId}.domain hostnames, routing them back to this Worker instead of the VM.
+    // rejected (error 10022). This wildcard matches exactly ONE subdomain level.
     //
-    // To work around this, all VM agent health checks use D1 heartbeat queries
-    // instead of direct fetch() (see task-runner.ts handleNodeAgentReady and
-    // verifyNodeAgentHealthy). The VM agent sends POST /api/nodes/:id/ready and
-    // /heartbeat which update D1 records that the task runner polls.
+    // VM backend communication uses two-level subdomains ({nodeId}.vm.{domain})
+    // which do NOT match *.{domain}/* — this bypasses Cloudflare same-zone routing
+    // so Worker subrequests (from DO alarms) reach the VM directly.
+    // See docs/notes/2026-03-12-same-zone-routing-postmortem.md.
+    //
+    // Health checks additionally use D1 heartbeat queries as defense-in-depth
+    // (see task-runner.ts handleNodeAgentReady and verifyNodeAgentHealthy).
     routes: [
       { pattern: `api.${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain },
       { pattern: `*.${outputs.stackSummary.baseDomain}/*`, zone_name: outputs.stackSummary.baseDomain },

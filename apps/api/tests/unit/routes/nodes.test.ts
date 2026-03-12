@@ -23,7 +23,7 @@ describe('nodes routes source contract', () => {
     expect(file).toContain("eq(schema.workspaces.status, 'creating')");
   });
 
-  it('proxies node events from VM Agent (vm-* DNS records lack SSL termination)', () => {
+  it('proxies node events from VM Agent (proxied via {nodeId}.vm.{domain})', () => {
     expect(file).toContain("nodesRoutes.get('/:id/events',");
     expect(file).toContain('listNodeEventsOnNode');
     expect(file).toContain('signNodeManagementToken');
