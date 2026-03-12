@@ -175,9 +175,12 @@ export async function updateDNSRecord(
 }
 
 /**
- * Find and delete any DNS records matching a workspace by name.
+ * Find and delete any DNS records matching a workspace/node by name.
  * This handles the case where we lost the record ID but a stale A record still exists.
- * Cleans up both ws-{id} (proxied) and vm-{id} (backend) DNS records.
+ * Cleans up:
+ *   - ws-{id}.{domain} (workspace proxied records)
+ *   - vm-{id}.{domain} (legacy backend records, pre two-level subdomain migration)
+ *   - {id}.vm.{domain} (current backend records, two-level subdomain format)
  */
 export async function cleanupWorkspaceDNSRecords(
   workspaceId: string,
@@ -186,12 +189,15 @@ export async function cleanupWorkspaceDNSRecords(
   const baseDomain = env.BASE_DOMAIN;
   const id = workspaceId.toLowerCase();
 
-  // Clean up both ws-{id} (old proxied) and vm-{id} (backend) records
-  const prefixes = ['ws', 'vm'];
+  // Search for all possible DNS record name formats
+  const recordNames = [
+    `ws-${id}.${baseDomain}`,       // workspace proxied
+    `vm-${id}.${baseDomain}`,       // legacy backend (pre migration)
+    `${id}.vm.${baseDomain}`,       // current backend (two-level subdomain)
+  ];
   let deleted = 0;
 
-  for (const prefix of prefixes) {
-    const recordName = `${prefix}-${id}.${baseDomain}`;
+  for (const recordName of recordNames) {
     const searchUrl = `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records?name=${encodeURIComponent(recordName)}`;
     const cfTimeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
     const response = await fetchWithTimeout(searchUrl, {
@@ -227,7 +233,9 @@ export async function cleanupWorkspaceDNSRecords(
  * Cloudflare's edge terminates TLS using the domain's SSL/TLS settings and
  * re-encrypts to the origin using the Origin CA certificate served by the VM agent.
  *
- * Uses the `vm-{id}` subdomain prefix to distinguish from `ws-{id}` subdomains.
+ * Uses `{id}.vm.{BASE_DOMAIN}` (two-level subdomain) to bypass Cloudflare
+ * same-zone routing. The wildcard Worker route *.{domain}/* only matches
+ * single-level subdomains, so {id}.vm.{domain} is NOT intercepted.
  */
 export async function createBackendDNSRecord(
   workspaceId: string,
@@ -241,7 +249,11 @@ export async function createBackendDNSRecord(
  * Create a proxied (orange-clouded) A record for a node VM backend.
  * Cloudflare's edge handles TLS termination; the VM agent serves HTTPS
  * with an Origin CA certificate that CF trusts.
- * Uses vm-{nodeId}.{BASE_DOMAIN}.
+ *
+ * Uses {nodeId}.vm.{BASE_DOMAIN} (two-level subdomain) to bypass Cloudflare
+ * same-zone routing. The wildcard Worker route *.{domain}/* only matches
+ * single-level subdomains, so {nodeId}.vm.{domain} is NOT intercepted.
+ * This allows Worker subrequests (from DO alarms) to reach the VM directly.
  */
 export async function createNodeBackendDNSRecord(
   nodeId: string,
@@ -259,7 +271,7 @@ export async function createNodeBackendDNSRecord(
       },
       body: JSON.stringify({
         type: 'A',
-        name: `vm-${nodeId.toLowerCase()}`,
+        name: `${nodeId.toLowerCase()}.vm`,
         content: ip,
         ttl: getDnsTTL(env),
         proxied: true, // Orange-clouded — CF edge terminates TLS, re-encrypts to Origin CA
@@ -288,10 +300,10 @@ export function getBackendHostname(workspaceId: string, baseDomain: string): str
 
 /**
  * Get the backend hostname for a node VM.
- * Uses vm-{nodeId}.{BASE_DOMAIN}.
+ * Uses {nodeId}.vm.{BASE_DOMAIN} (two-level subdomain to bypass same-zone routing).
  */
 export function getNodeBackendHostname(nodeId: string, baseDomain: string): string {
-  return `vm-${nodeId.toLowerCase()}.${baseDomain}`;
+  return `${nodeId.toLowerCase()}.vm.${baseDomain}`;
 }
 
 /**

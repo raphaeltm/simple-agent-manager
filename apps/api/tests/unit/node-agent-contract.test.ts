@@ -754,7 +754,7 @@ describe('Node Agent client functions send correct payloads', () => {
 
     // Verify URL
     expect(capturedUrl).toContain('/workspaces');
-    expect(capturedUrl).toContain('vm-node-abc.example.com');
+    expect(capturedUrl).toContain('node-abc.vm.example.com');
 
     // Verify body shape matches contract
     const parsedBody = JSON.parse(capturedBody!);
@@ -918,7 +918,7 @@ describe('Node Agent client functions send correct payloads', () => {
 
     await expect(
       deleteWorkspaceOnNode('node-abc', 'ws-test', {} as any, 'user-123')
-    ).rejects.toThrow('Node Agent unreachable: DNS record for vm-node-abc may be missing');
+    ).rejects.toThrow('Node Agent unreachable: DNS record for node-abc.vm may be missing');
   });
 
   it('node agent request throws on timeout', async () => {
@@ -937,7 +937,7 @@ describe('Node Agent client functions send correct payloads', () => {
 
     vi.doMock('../../src/services/fetch-timeout', () => ({
       fetchWithTimeout: vi.fn().mockRejectedValue(
-        new Error('Request timed out after 30000ms: https://vm-node-abc.example.com:8443/workspaces/ws-test')
+        new Error('Request timed out after 30000ms: https://node-abc.vm.example.com:8443/workspaces/ws-test')
       ),
       getTimeoutMs: vi.fn().mockReturnValue(30000),
     }));

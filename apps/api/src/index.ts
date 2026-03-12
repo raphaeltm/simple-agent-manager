@@ -312,11 +312,12 @@ app.use('*', async (c, next) => {
     }
   }
 
-  // Proxy to the VM agent via its DNS-only backend hostname.
+  // Proxy to the VM agent via its proxied (orange-clouded) backend hostname.
   // Cloudflare Workers cannot fetch IP addresses directly (Error 1003),
-  // so we use the vm-{id}.{domain} hostname which resolves directly to the VM IP.
+  // so we use the {id}.vm.{domain} hostname. The two-level subdomain bypasses
+  // the wildcard Worker route *.{domain}/* (which only matches one level).
   const routedNodeId = (workspace.nodeId || workspaceId).toLowerCase();
-  const backendHostname = `vm-${routedNodeId}.${baseDomain}`;
+  const backendHostname = `${routedNodeId}.vm.${baseDomain}`;
   console.log(JSON.stringify({
     event: 'ws_proxy_route',
     workspaceId,
