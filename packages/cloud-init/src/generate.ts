@@ -51,8 +51,8 @@ export function generateCloudInit(variables: CloudInitVariables): string {
     '{{ task_id }}': variables.taskId ?? '',
     '{{ docker_name_tag }}': '{{.Name}}',
     '{{ docker_dns_servers }}': variables.dockerDnsServers ?? '"1.1.1.1", "8.8.8.8"',
-    '{{ origin_ca_cert }}': variables.originCaCert ?? '',
-    '{{ origin_ca_key }}': variables.originCaKey ?? '',
+    '{{ origin_ca_cert }}': indentForYamlBlock(variables.originCaCert ?? '', 6),
+    '{{ origin_ca_key }}': indentForYamlBlock(variables.originCaKey ?? '', 6),
     '{{ vm_agent_port }}': variables.vmAgentPort ?? (variables.originCaCert ? '8443' : '8080'),
     '{{ tls_cert_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca.pem' : '',
     '{{ tls_key_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca-key.pem' : '',
@@ -63,6 +63,25 @@ export function generateCloudInit(variables: CloudInitVariables): string {
   }
 
   return config;
+}
+
+/**
+ * Indent multi-line content for YAML literal block scalars (`|`).
+ *
+ * In YAML `|` blocks, the indentation level is set by the first content line.
+ * All subsequent lines must maintain at least that indentation, or the block
+ * terminates. The template already provides the correct indent for the first
+ * line (via the placeholder position), but replacement content after the first
+ * newline starts at column 0. This function adds the required padding to every
+ * line after the first so the YAML block scalar remains valid.
+ */
+export function indentForYamlBlock(content: string, indent: number): string {
+  if (!content || !content.includes('\n')) return content;
+  const pad = ' '.repeat(indent);
+  return content
+    .split('\n')
+    .map((line, i) => (i === 0 ? line : pad + line))
+    .join('\n');
 }
 
 function escapeRegExp(str: string): string {

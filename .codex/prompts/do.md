@@ -126,11 +126,13 @@ Address every bug or correctness issue raised. Push fixes and re-run quality che
 
 ---
 
-## Phase 6: Staging Verification
+## Phase 6: Staging Verification (BLOCKING — DO NOT SKIP)
 
 If this PR includes **any code changes** (not just docs/tasks), deploy to staging and verify before creating the PR.
 
 > **Skip this phase** only for documentation-only, config-only, or task-file-only changes.
+
+### 6a. Standard Verification (All Code Changes)
 
 1. **Deploy to staging:**
    ```
@@ -145,11 +147,25 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
 4. **Verify the changed behavior works end-to-end:**
    - **UI changes**: interact as a real user — click buttons, submit forms, navigate pages
    - **API/backend changes**: verify affected endpoints respond correctly and downstream behavior works through the UI
-   - **Infrastructure/agent changes**: test workspace lifecycle, agent sessions, WebSocket connections as applicable
 
 5. **Report findings** to the user with evidence (screenshots or Playwright observations).
 
 6. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT proceed to PR creation with known staging failures.
+
+### 6b. Infrastructure Verification (MANDATORY for Infrastructure Changes)
+
+If the PR touches **any** of: `packages/cloud-init/`, `packages/vm-agent/`, DNS record logic, TLS certificates, VM agent port/protocol, or provisioning infrastructure — you MUST complete these additional steps. **This is not optional. This is the gate that prevents catastrophic production failures.**
+
+1. **Provision a real VM** — create a test workspace on staging that triggers full VM provisioning via cloud-init.
+2. **Wait for heartbeat** — verify that the VM agent starts and sends heartbeats to the control plane within 2 minutes. If heartbeats do not arrive, the change is broken.
+3. **Verify workspace access** — confirm the workspace is reachable via its `ws-*` subdomain and that terminal/agent sessions function.
+4. **If TLS-related** — verify HTTPS connections to the VM agent succeed with valid certificate negotiation.
+5. **Clean up** — delete the test workspace and node.
+6. **Record evidence** — report to the user: "VM provisioned, heartbeat received at [time], workspace accessible at [URL]" or "FAILED: [specific failure]".
+
+**If infrastructure verification fails, DO NOT create the PR. DO NOT merge. Fix the issue first.**
+
+> **Why this is mandatory**: The TLS YAML indentation bug (`docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md`) shipped to production because staging verification only checked UI rendering and API responses. Nobody provisioned a VM. The result: all workspace provisioning broke for ~2.5 hours in production.
 
 ---
 
