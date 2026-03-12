@@ -23,9 +23,11 @@ import { getOwnedWorkspace, getOwnedNode, assertNodeOperational } from './_helpe
 
 const agentSessionRoutes = new Hono<{ Bindings: Env }>();
 
-agentSessionRoutes.use('/*', requireAuth(), requireApproved());
+// Auth applied per-route (NOT via use('/*', ...)) to prevent middleware leakage
+// to other subrouters (lifecycle, runtime) mounted at the same base path.
+// See docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md
 
-agentSessionRoutes.get('/:id/agent-sessions', async (c) => {
+agentSessionRoutes.get('/:id/agent-sessions', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -49,7 +51,7 @@ agentSessionRoutes.get('/:id/agent-sessions', async (c) => {
   return c.json(sessions.map(toAgentSessionResponse));
 });
 
-agentSessionRoutes.post('/:id/agent-sessions', async (c) => {
+agentSessionRoutes.post('/:id/agent-sessions', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -129,7 +131,7 @@ agentSessionRoutes.post('/:id/agent-sessions', async (c) => {
   return c.json(toAgentSessionResponse(rows[0]!), 201);
 });
 
-agentSessionRoutes.patch('/:id/agent-sessions/:sessionId', async (c) => {
+agentSessionRoutes.patch('/:id/agent-sessions/:sessionId', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
@@ -178,7 +180,7 @@ agentSessionRoutes.patch('/:id/agent-sessions/:sessionId', async (c) => {
   return c.json(toAgentSessionResponse({ ...session, label, updatedAt: new Date().toISOString() }));
 });
 
-agentSessionRoutes.post('/:id/agent-sessions/:sessionId/stop', async (c) => {
+agentSessionRoutes.post('/:id/agent-sessions/:sessionId/stop', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
@@ -237,7 +239,7 @@ agentSessionRoutes.post('/:id/agent-sessions/:sessionId/stop', async (c) => {
   return c.json({ status: 'stopped' });
 });
 
-agentSessionRoutes.post('/:id/agent-sessions/:sessionId/suspend', async (c) => {
+agentSessionRoutes.post('/:id/agent-sessions/:sessionId/suspend', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
@@ -297,7 +299,7 @@ agentSessionRoutes.post('/:id/agent-sessions/:sessionId/suspend', async (c) => {
   );
 });
 
-agentSessionRoutes.post('/:id/agent-sessions/:sessionId/resume', async (c) => {
+agentSessionRoutes.post('/:id/agent-sessions/:sessionId/resume', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
