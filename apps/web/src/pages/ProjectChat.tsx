@@ -103,6 +103,9 @@ export function ProjectChat() {
   const [hasCloudCredentials, setHasCloudCredentials] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Track explicit "new chat" intent so auto-select doesn't override it
+  const newChatIntentRef = useRef(false);
+
   // New chat input state
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -156,11 +159,19 @@ export function ProjectChat() {
     }
   }, [projectId]);
 
-  // Initial load
+  // Initial load — auto-select the most recent session when navigating to the
+  // project without a specific sessionId (e.g., from the dashboard). This
+  // prevents users from accidentally creating a new session when they intended
+  // to continue an existing conversation. The "+ New Chat" button sets
+  // newChatIntentRef to bypass this behavior.
   useEffect(() => {
     setLoading(true);
-    void loadSessions().finally(() => setLoading(false));
-  }, [loadSessions]);
+    void loadSessions().then((loaded) => {
+      if (!sessionId && !newChatIntentRef.current && loaded.length > 0) {
+        navigate(`/projects/${projectId}/chat/${loaded[0]!.id}`, { replace: true });
+      }
+    }).finally(() => setLoading(false));
+  }, [loadSessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll task status during provisioning
   useEffect(() => {
@@ -275,6 +286,7 @@ export function ProjectChat() {
         errorMessage: null,
         startedAt: Date.now(),
       });
+      newChatIntentRef.current = false;
       navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
       void loadSessions();
     } catch (err) {
@@ -285,6 +297,7 @@ export function ProjectChat() {
   };
 
   const handleNewChat = useCallback(() => {
+    newChatIntentRef.current = true;
     navigate(`/projects/${projectId}/chat`, { replace: true });
     setMessage('');
     setSubmitError(null);
@@ -292,6 +305,7 @@ export function ProjectChat() {
   }, [navigate, projectId]);
 
   const handleSelect = (id: string) => {
+    newChatIntentRef.current = false;
     setProvisioning(null);
     setSidebarOpen(false);
     navigate(`/projects/${projectId}/chat/${id}`);
