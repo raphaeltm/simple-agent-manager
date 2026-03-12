@@ -3,7 +3,13 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 describe('workspaces routes source contract', () => {
-  const file = readFileSync(resolve(process.cwd(), 'src/routes/workspaces.ts'), 'utf8');
+  const file = [
+    readFileSync(resolve(process.cwd(), 'src/routes/workspaces/_helpers.ts'), 'utf8'),
+    readFileSync(resolve(process.cwd(), 'src/routes/workspaces/crud.ts'), 'utf8'),
+    readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8'),
+    readFileSync(resolve(process.cwd(), 'src/routes/workspaces/agent-sessions.ts'), 'utf8'),
+    readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime.ts'), 'utf8'),
+  ].join('\n');
   const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
   const migrationFile = readFileSync(
     resolve(process.cwd(), 'src/db/migrations/0007_multi_workspace_nodes.sql'),
@@ -12,7 +18,7 @@ describe('workspaces routes source contract', () => {
 
   it('defines node-scoped workspace list/filter and rename endpoints', () => {
     expect(file).toContain("const nodeId = c.req.query('nodeId')");
-    expect(file).toContain("workspacesRoutes.patch('/:id'");
+    expect(file).toContain("crudRoutes.patch('/:id'");
     expect(file).toContain('resolveUniqueWorkspaceDisplayName');
     expect(file).toContain('UpdateWorkspaceRequest');
     expect(file).toContain('body.displayName?.trim()');
@@ -20,11 +26,11 @@ describe('workspaces routes source contract', () => {
   });
 
   it('defines agent sessions endpoints (events moved to direct VM Agent access)', () => {
-    expect(file).not.toContain("workspacesRoutes.get('/:id/events'");
+    expect(file).not.toContain("crudRoutes.get('/:id/events'");
     expect(file).not.toContain('fetchWorkspaceEvents');
-    expect(file).toContain("workspacesRoutes.get('/:id/agent-sessions'");
-    expect(file).toContain("workspacesRoutes.post('/:id/agent-sessions'");
-    expect(file).toContain("workspacesRoutes.post('/:id/agent-sessions/:sessionId/stop'");
+    expect(file).toContain("agentSessionRoutes.get('/:id/agent-sessions'");
+    expect(file).toContain("agentSessionRoutes.post('/:id/agent-sessions'");
+    expect(file).toContain("agentSessionRoutes.post('/:id/agent-sessions/:sessionId/stop'");
   });
 
   it('uses DB-backed node-scoped unique display names for create and rename', () => {
@@ -50,8 +56,7 @@ describe('workspaces routes source contract', () => {
   it('accepts node-scoped callback tokens for workspace callbacks', () => {
     expect(file).toContain('payload.workspace === workspace.nodeId');
     expect(file).toContain("throw errors.forbidden('Token workspace mismatch')");
-    expect(file).toContain("path.endsWith('/provisioning-failed')");
-    expect(file).toContain("workspacesRoutes.post('/:id/provisioning-failed'");
+    expect(file).toContain("lifecycleRoutes.post('/:id/provisioning-failed'");
     expect(file).toContain("reason: 'workspace_not_creating'");
   });
 
@@ -63,10 +68,8 @@ describe('workspaces routes source contract', () => {
   });
 
   it('exposes callback-auth runtime metadata for node recovery', () => {
-    expect(file).toContain("path.endsWith('/runtime')");
-    expect(file).toContain("path.endsWith('/runtime-assets')");
-    expect(file).toContain("workspacesRoutes.get('/:id/runtime'");
-    expect(file).toContain("workspacesRoutes.get('/:id/runtime-assets'");
+    expect(file).toContain("runtimeRoutes.get('/:id/runtime'");
+    expect(file).toContain("runtimeRoutes.get('/:id/runtime-assets'");
     expect(file).toContain('repository: schema.workspaces.repository');
     expect(file).toContain('branch: schema.workspaces.branch');
   });
@@ -100,14 +103,14 @@ describe('workspaces routes source contract', () => {
   });
 
   it('clears boot logs from KV on restart before new provisioning', () => {
-    expect(file).toContain("workspacesRoutes.post('/:id/restart'");
+    expect(file).toContain("lifecycleRoutes.post('/:id/restart'");
     expect(file).toContain('writeBootLogs(c.env.KV, workspace.id, [], c.env)');
     // Restart clears errorMessage in DB update
     expect(file).toContain('errorMessage: null');
   });
 
   it('clears boot logs from KV on rebuild before new provisioning', () => {
-    expect(file).toContain("workspacesRoutes.post('/:id/rebuild'");
+    expect(file).toContain("lifecycleRoutes.post('/:id/rebuild'");
     expect(file).toContain('writeBootLogs(c.env.KV, workspace.id, [], c.env)');
   });
 });

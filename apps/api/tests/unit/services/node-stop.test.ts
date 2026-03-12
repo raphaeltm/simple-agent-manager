@@ -91,7 +91,7 @@ describe('deleted status consistency across deletion paths', () => {
   });
 
   it('getOwnedWorkspace rejects deleted workspaces', () => {
-    const wsFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces.ts'), 'utf8');
+    const wsFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/_helpers.ts'), 'utf8');
     expect(wsFile).toContain("workspace.status === 'deleted'");
   });
 });

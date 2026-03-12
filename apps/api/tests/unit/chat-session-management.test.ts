@@ -12,11 +12,11 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const taskSubmitSource = readFileSync(
-  resolve(process.cwd(), 'src/routes/task-submit.ts'),
+  resolve(process.cwd(), 'src/routes/tasks/submit.ts'),
   'utf8'
 );
 const taskRunsSource = readFileSync(
-  resolve(process.cwd(), 'src/routes/task-runs.ts'),
+  resolve(process.cwd(), 'src/routes/tasks/run.ts'),
   'utf8'
 );
 const taskRunnerDoSource = readFileSync(
@@ -267,7 +267,7 @@ describe('TDF-6 Fix 4: Required session and message persistence', () => {
 
 describe('TDF-6 Fix 5: task-runs route creates session (no regression)', () => {
   it('task-runs imports projectDataService', () => {
-    expect(taskRunsSource).toContain("import * as projectDataService from '../services/project-data'");
+    expect(taskRunsSource).toContain("import * as projectDataService from '../../services/project-data'");
   });
 
   it('task-runs creates a session via projectDataService.createSession', () => {

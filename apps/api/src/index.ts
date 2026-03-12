@@ -28,8 +28,6 @@ import { projectsRoutes } from './routes/projects';
 import { tasksRoutes } from './routes/tasks';
 import { chatRoutes } from './routes/chat';
 import { activityRoutes } from './routes/activity';
-import { taskRunsRoutes } from './routes/task-runs';
-import { taskSubmitRoutes } from './routes/task-submit';
 import { adminRoutes } from './routes/admin';
 import { dashboardRoutes } from './routes/dashboard';
 import { mcpRoutes } from './routes/mcp';
@@ -473,8 +471,6 @@ app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
-app.route('/api/projects/:projectId/tasks', taskRunsRoutes);
-app.route('/api/projects/:projectId/tasks', taskSubmitRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 // MCP endpoint CORS override — MCP uses Bearer token auth (not cookies/sessions),

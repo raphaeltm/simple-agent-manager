@@ -13,17 +13,17 @@ const serviceSource = readFileSync(
   'utf8'
 );
 const taskSubmitSource = readFileSync(
-  resolve(process.cwd(), 'src/routes/task-submit.ts'),
+  resolve(process.cwd(), 'src/routes/tasks/submit.ts'),
   'utf8'
 );
 const taskRunsSource = readFileSync(
-  resolve(process.cwd(), 'src/routes/task-runs.ts'),
+  resolve(process.cwd(), 'src/routes/tasks/run.ts'),
   'utf8'
 );
-const workspacesSource = readFileSync(
-  resolve(process.cwd(), 'src/routes/workspaces.ts'),
-  'utf8'
-);
+const workspacesSource = [
+  readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime.ts'), 'utf8'),
+].join('\n');
 const stuckTasksSource = readFileSync(
   resolve(process.cwd(), 'src/scheduled/stuck-tasks.ts'),
   'utf8'
@@ -81,7 +81,7 @@ describe('task-runner-do service', () => {
 
 describe('task-submit route uses TaskRunner DO', () => {
   it('imports startTaskRunnerDO (not executeTaskRun)', () => {
-    expect(taskSubmitSource).toContain("import { startTaskRunnerDO } from '../services/task-runner-do'");
+    expect(taskSubmitSource).toContain("import { startTaskRunnerDO } from '../../services/task-runner-do'");
     expect(taskSubmitSource).not.toContain('executeTaskRun');
     expect(taskSubmitSource).not.toContain('initiateTaskRun');
   });
@@ -109,12 +109,12 @@ describe('task-submit route uses TaskRunner DO', () => {
 
 describe('task-runs route uses TaskRunner DO', () => {
   it('imports startTaskRunnerDO (not initiateTaskRun)', () => {
-    expect(taskRunsSource).toContain("import { startTaskRunnerDO } from '../services/task-runner-do'");
+    expect(taskRunsSource).toContain("import { startTaskRunnerDO } from '../../services/task-runner-do'");
     expect(taskRunsSource).not.toContain('initiateTaskRun');
   });
 
   it('still imports cleanupTaskRun for cleanup endpoint', () => {
-    expect(taskRunsSource).toContain("import { cleanupTaskRun } from '../services/task-runner'");
+    expect(taskRunsSource).toContain("import { cleanupTaskRun } from '../../services/task-runner'");
   });
 
   it('transitions task to queued before starting DO', () => {

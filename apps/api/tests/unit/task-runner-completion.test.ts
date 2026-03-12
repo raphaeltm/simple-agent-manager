@@ -12,11 +12,11 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 describe('task completion callback handling source contract', () => {
-  const tasksRouteFile = readFileSync(resolve(process.cwd(), 'src/routes/tasks.ts'), 'utf8');
+  const tasksRouteFile = readFileSync(resolve(process.cwd(), 'src/routes/tasks/crud.ts'), 'utf8');
   const taskRunnerFile = readFileSync(resolve(process.cwd(), 'src/services/task-runner.ts'), 'utf8');
 
   it('imports cleanupTaskRun in tasks route', () => {
-    expect(tasksRouteFile).toContain("import { cleanupTaskRun } from '../services/task-runner'");
+    expect(tasksRouteFile).toContain("import { cleanupTaskRun } from '../../services/task-runner'");
   });
 
   it('callback endpoint triggers cleanupTaskRun on completed status', () => {
@@ -84,7 +84,7 @@ describe('task completion callback handling source contract', () => {
   it('user-initiated status change also stops chat session on terminal states', () => {
     // The user-facing status endpoint should also stop chat session.
     // Find the section between the user status handler and the callback handler.
-    const callbackRouteIdx = tasksRouteFile.indexOf("tasksRoutes.post('/:taskId/status/callback'");
+    const callbackRouteIdx = tasksRouteFile.indexOf("crudRoutes.post('/:taskId/status/callback'");
     const beforeCallback = tasksRouteFile.slice(0, callbackRouteIdx);
     expect(beforeCallback).toContain('projectDataService.stopSession');
     expect(beforeCallback).toContain("body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled'");

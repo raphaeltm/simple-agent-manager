@@ -9,16 +9,14 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 describe('workspace messages batch endpoint source contract', () => {
-  const file = readFileSync(resolve(process.cwd(), 'src/routes/workspaces.ts'), 'utf8');
+  const file = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime.ts'), 'utf8');
 
   it('defines the batch messages POST endpoint', () => {
-    expect(file).toContain("workspacesRoutes.post('/:id/messages'");
+    expect(file).toContain("runtimeRoutes.post('/:id/messages'");
   });
 
   it('uses callback JWT auth (not user auth)', () => {
-    // The /messages path is in the callback auth bypass list
-    expect(file).toContain("path.endsWith('/messages')");
-    // The handler calls verifyWorkspaceCallbackAuth
+    // The handler calls verifyWorkspaceCallbackAuth directly (no user auth middleware)
     expect(file).toContain('verifyWorkspaceCallbackAuth(c, workspaceId)');
   });
 

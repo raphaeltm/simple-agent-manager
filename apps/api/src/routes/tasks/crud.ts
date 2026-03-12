@@ -5,7 +5,6 @@ import {
   desc,
   eq,
   gte,
-  inArray,
   lt,
 } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
@@ -17,42 +16,48 @@ import {
   type DelegateTaskRequest,
   type ListTaskEventsResponse,
   type ListTasksResponse,
-  type Task,
   type TaskActorType,
-  type TaskDependency,
   type TaskDetailResponse,
-  type TaskSortOrder,
   type TaskStatus,
   type UpdateTaskRequest,
   type UpdateTaskStatusRequest,
 } from '@simple-agent-manager/shared';
-import type { Env } from '../index';
-import * as schema from '../db/schema';
-import { ulid } from '../lib/ulid';
-import { getUserId, requireAuth, requireApproved } from '../middleware/auth';
-import { errors } from '../middleware/error';
-import { requireOwnedProject, requireOwnedTask, requireOwnedWorkspace } from '../middleware/project-auth';
+import type { Env } from '../../index';
+import * as schema from '../../db/schema';
+import { ulid } from '../../lib/ulid';
+import { getUserId, requireAuth, requireApproved } from '../../middleware/auth';
+import { errors } from '../../middleware/error';
+import { requireOwnedProject, requireOwnedTask, requireOwnedWorkspace } from '../../middleware/project-auth';
 import {
   canTransitionTaskStatus,
   getAllowedTaskTransitions,
   isExecutableTaskStatus,
   isTaskStatus,
-} from '../services/task-status';
+} from '../../services/task-status';
 import {
-  getBlockedTaskIds,
-  isTaskBlocked,
   wouldCreateTaskDependencyCycle,
   type TaskDependencyEdge,
-} from '../services/task-graph';
-import { getRuntimeLimits } from '../services/limits';
-import { verifyCallbackToken } from '../services/jwt';
-import { cleanupTaskRun } from '../services/task-runner';
-import * as projectDataService from '../services/project-data';
-import { log } from '../lib/logger';
+} from '../../services/task-graph';
+import { getRuntimeLimits } from '../../services/limits';
+import { verifyCallbackToken } from '../../services/jwt';
+import { cleanupTaskRun } from '../../services/task-runner';
+import * as projectDataService from '../../services/project-data';
+import { log } from '../../lib/logger';
+import { toTaskResponse, toDependencyResponse } from '../../lib/mappers';
+import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
+import {
+  parseTaskSortOrder,
+  requireOwnedTaskById,
+  appendStatusEvent,
+  getTaskDependencies,
+  computeBlockedForTask,
+  computeBlockedSet,
+  setTaskStatus,
+} from './_helpers';
 
-const tasksRoutes = new Hono<{ Bindings: Env }>();
+const crudRoutes = new Hono<{ Bindings: Env }>();
 
-tasksRoutes.use('/*', async (c, next) => {
+crudRoutes.use('/*', async (c, next) => {
   if (c.req.path.endsWith('/status/callback')) {
     return next();
   }
@@ -61,263 +66,7 @@ tasksRoutes.use('/*', async (c, next) => {
   });
 });
 
-function requireRouteParam(
-  c: { req: { param: (name: string) => string | undefined } },
-  name: string
-): string {
-  const value = c.req.param(name);
-  if (!value) {
-    throw errors.badRequest(`${name} is required`);
-  }
-  return value;
-}
-
-function parsePositiveInt(value: string | undefined, fallback: number): number {
-  if (!value) {
-    return fallback;
-  }
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return fallback;
-  }
-  return parsed;
-}
-
-function parseTaskSortOrder(value: string | undefined): TaskSortOrder {
-  if (value === 'updatedAtDesc' || value === 'priorityDesc') {
-    return value;
-  }
-  return 'createdAtDesc';
-}
-
-function toTaskResponse(task: schema.Task, blocked = false): Task {
-  return {
-    id: task.id,
-    projectId: task.projectId,
-    userId: task.userId,
-    parentTaskId: task.parentTaskId,
-    workspaceId: task.workspaceId,
-    title: task.title,
-    description: task.description,
-    status: task.status as TaskStatus,
-    executionStep: isTaskExecutionStep(task.executionStep) ? task.executionStep : null,
-    priority: task.priority,
-    agentProfileHint: task.agentProfileHint,
-    blocked,
-    startedAt: task.startedAt,
-    completedAt: task.completedAt,
-    errorMessage: task.errorMessage,
-    outputSummary: task.outputSummary,
-    outputBranch: task.outputBranch,
-    outputPrUrl: task.outputPrUrl,
-    finalizedAt: task.finalizedAt ?? null,
-    createdAt: task.createdAt,
-    updatedAt: task.updatedAt,
-  };
-}
-
-function toDependencyResponse(dependency: schema.TaskDependency): TaskDependency {
-  return {
-    taskId: dependency.taskId,
-    dependsOnTaskId: dependency.dependsOnTaskId,
-    createdAt: dependency.createdAt,
-  };
-}
-
-async function requireOwnedTaskById(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  taskId: string,
-  userId: string
-): Promise<schema.Task> {
-  const rows = await db
-    .select()
-    .from(schema.tasks)
-    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, userId)))
-    .limit(1);
-
-  const task = rows[0];
-  if (!task) {
-    throw errors.notFound('Task');
-  }
-
-  return task;
-}
-
-async function appendStatusEvent(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  taskId: string,
-  fromStatus: TaskStatus | null,
-  toStatus: TaskStatus,
-  actorType: TaskActorType,
-  actorId: string | null,
-  reason?: string
-): Promise<void> {
-  await db.insert(schema.taskStatusEvents).values({
-    id: ulid(),
-    taskId,
-    fromStatus,
-    toStatus,
-    actorType,
-    actorId,
-    reason: reason ?? null,
-    createdAt: new Date().toISOString(),
-  });
-}
-
-async function getTaskDependencies(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  taskId: string
-): Promise<schema.TaskDependency[]> {
-  return db
-    .select()
-    .from(schema.taskDependencies)
-    .where(eq(schema.taskDependencies.taskId, taskId));
-}
-
-async function computeBlockedForTask(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  taskId: string
-): Promise<boolean> {
-  const dependencies = await getTaskDependencies(db, taskId);
-  if (dependencies.length === 0) {
-    return false;
-  }
-
-  const dependencyIds = dependencies.map((dependency) => dependency.dependsOnTaskId);
-  const dependencyTasks = await db
-    .select({ id: schema.tasks.id, status: schema.tasks.status })
-    .from(schema.tasks)
-    .where(inArray(schema.tasks.id, dependencyIds));
-
-  const statusMap: Record<string, TaskStatus> = {};
-  for (const dependencyTask of dependencyTasks) {
-    statusMap[dependencyTask.id] = dependencyTask.status as TaskStatus;
-  }
-
-  return isTaskBlocked(taskId, dependencies, statusMap);
-}
-
-async function computeBlockedSet(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  taskIds: string[]
-): Promise<Set<string>> {
-  if (taskIds.length === 0) {
-    return new Set<string>();
-  }
-
-  const dependencies = await db
-    .select({
-      taskId: schema.taskDependencies.taskId,
-      dependsOnTaskId: schema.taskDependencies.dependsOnTaskId,
-    })
-    .from(schema.taskDependencies)
-    .where(inArray(schema.taskDependencies.taskId, taskIds));
-
-  if (dependencies.length === 0) {
-    return new Set<string>();
-  }
-
-  const dependencyTaskIds = [...new Set(dependencies.map((dependency) => dependency.dependsOnTaskId))];
-  const dependencyTasks = dependencyTaskIds.length === 0
-    ? []
-    : await db
-      .select({ id: schema.tasks.id, status: schema.tasks.status })
-      .from(schema.tasks)
-      .where(inArray(schema.tasks.id, dependencyTaskIds));
-
-  const statusMap: Record<string, TaskStatus> = {};
-  for (const dependencyTask of dependencyTasks) {
-    statusMap[dependencyTask.id] = dependencyTask.status as TaskStatus;
-  }
-
-  return getBlockedTaskIds(taskIds, dependencies, statusMap);
-}
-
-async function setTaskStatus(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  task: schema.Task,
-  toStatus: TaskStatus,
-  actorType: TaskActorType,
-  actorId: string | null,
-  options: {
-    reason?: string;
-    outputSummary?: string;
-    outputBranch?: string;
-    outputPrUrl?: string;
-    errorMessage?: string;
-  } = {}
-): Promise<schema.Task> {
-  const now = new Date().toISOString();
-
-  const nextValues: Partial<schema.NewTask> = {
-    status: toStatus,
-    updatedAt: now,
-  };
-
-  if (toStatus === 'in_progress' && !task.startedAt) {
-    nextValues.startedAt = now;
-  }
-
-  if (toStatus === 'completed' || toStatus === 'failed' || toStatus === 'cancelled') {
-    nextValues.completedAt = now;
-    nextValues.executionStep = null;
-  }
-
-  if (toStatus === 'ready') {
-    nextValues.workspaceId = null;
-    nextValues.startedAt = null;
-    nextValues.completedAt = null;
-    nextValues.errorMessage = null;
-    nextValues.executionStep = null;
-  }
-
-  if (options.outputSummary !== undefined) {
-    nextValues.outputSummary = options.outputSummary?.trim() || null;
-  }
-
-  if (options.outputBranch !== undefined) {
-    nextValues.outputBranch = options.outputBranch?.trim() || null;
-  }
-
-  if (options.outputPrUrl !== undefined) {
-    nextValues.outputPrUrl = options.outputPrUrl?.trim() || null;
-  }
-
-  if (toStatus === 'failed') {
-    nextValues.errorMessage = options.errorMessage?.trim() || task.errorMessage || 'Task failed';
-  } else if (options.errorMessage !== undefined) {
-    nextValues.errorMessage = options.errorMessage?.trim() || null;
-  }
-
-  await db
-    .update(schema.tasks)
-    .set(nextValues)
-    .where(eq(schema.tasks.id, task.id));
-
-  await appendStatusEvent(
-    db,
-    task.id,
-    task.status as TaskStatus,
-    toStatus,
-    actorType,
-    actorId,
-    options.reason
-  );
-
-  const rows = await db
-    .select()
-    .from(schema.tasks)
-    .where(eq(schema.tasks.id, task.id))
-    .limit(1);
-  const updatedTask = rows[0];
-  if (!updatedTask) {
-    throw errors.notFound('Task');
-  }
-
-  return updatedTask;
-}
-
-tasksRoutes.post('/', async (c) => {
+crudRoutes.post('/', async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -384,7 +133,7 @@ tasksRoutes.post('/', async (c) => {
   return c.json(toTaskResponse(task, false), 201);
 });
 
-tasksRoutes.get('/', async (c) => {
+crudRoutes.get('/', async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -454,7 +203,7 @@ tasksRoutes.get('/', async (c) => {
   return c.json(response);
 });
 
-tasksRoutes.get('/:taskId', async (c) => {
+crudRoutes.get('/:taskId', async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -474,7 +223,7 @@ tasksRoutes.get('/:taskId', async (c) => {
   return c.json(response);
 });
 
-tasksRoutes.patch('/:taskId', async (c) => {
+crudRoutes.patch('/:taskId', async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -555,7 +304,7 @@ tasksRoutes.patch('/:taskId', async (c) => {
   return c.json(toTaskResponse(updatedTask, blocked));
 });
 
-tasksRoutes.delete('/:taskId', async (c) => {
+crudRoutes.delete('/:taskId', async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -578,7 +327,7 @@ tasksRoutes.delete('/:taskId', async (c) => {
   return c.json({ success: true });
 });
 
-tasksRoutes.post('/:taskId/status', async (c) => {
+crudRoutes.post('/:taskId/status', async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -641,7 +390,7 @@ tasksRoutes.post('/:taskId/status', async (c) => {
   return c.json(toTaskResponse(updatedTask, nextBlocked));
 });
 
-tasksRoutes.post('/:taskId/status/callback', async (c) => {
+crudRoutes.post('/:taskId/status/callback', async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -834,7 +583,7 @@ tasksRoutes.post('/:taskId/status/callback', async (c) => {
   return c.json(toTaskResponse(updatedTask, blocked));
 });
 
-tasksRoutes.post('/:taskId/dependencies', async (c) => {
+crudRoutes.post('/:taskId/dependencies', async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -911,7 +660,7 @@ tasksRoutes.post('/:taskId/dependencies', async (c) => {
   }, 201);
 });
 
-tasksRoutes.delete('/:taskId/dependencies', async (c) => {
+crudRoutes.delete('/:taskId/dependencies', async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -942,7 +691,7 @@ tasksRoutes.delete('/:taskId/dependencies', async (c) => {
   return c.json({ success: true });
 });
 
-tasksRoutes.post('/:taskId/delegate', async (c) => {
+crudRoutes.post('/:taskId/delegate', async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -998,7 +747,7 @@ tasksRoutes.post('/:taskId/delegate', async (c) => {
   return c.json(toTaskResponse(updatedTask, false));
 });
 
-tasksRoutes.get('/:taskId/events', async (c) => {
+crudRoutes.get('/:taskId/events', async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
@@ -1034,4 +783,4 @@ tasksRoutes.get('/:taskId/events', async (c) => {
   return c.json(response);
 });
 
-export { tasksRoutes };
+export { crudRoutes };

@@ -9,7 +9,10 @@ function readSource(relativePath: string): string {
 }
 
 describe('Project default VM size — API endpoint', () => {
-  const projectsSource = readSource('routes/projects.ts');
+  const projectsSource = [
+    readSource('routes/projects/crud.ts'),
+    readSource('lib/mappers.ts'),
+  ].join('\n');
 
   it('PATCH endpoint accepts defaultVmSize field', () => {
     expect(projectsSource).toContain('body.defaultVmSize');
@@ -30,8 +33,8 @@ describe('Project default VM size — API endpoint', () => {
 });
 
 describe('Project default VM size — task run routes', () => {
-  const taskRunsSource = readSource('routes/task-runs.ts');
-  const taskSubmitSource = readSource('routes/task-submit.ts');
+  const taskRunsSource = readSource('routes/tasks/run.ts');
+  const taskSubmitSource = readSource('routes/tasks/submit.ts');
 
   it('task-runs imports DEFAULT_VM_SIZE from shared constants', () => {
     expect(taskRunsSource).toContain('DEFAULT_VM_SIZE');

@@ -9,7 +9,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 describe('workspace creation chat session hook source contract', () => {
-  const routesFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces.ts'), 'utf8');
+  const routesFile = [
+    readFileSync(resolve(process.cwd(), 'src/routes/workspaces/crud.ts'), 'utf8'),
+    readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime.ts'), 'utf8'),
+  ].join('\n');
   const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
 
   it('creates chat session when workspace is linked to a project', () => {

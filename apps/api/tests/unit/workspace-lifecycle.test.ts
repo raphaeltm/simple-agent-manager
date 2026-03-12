@@ -15,10 +15,10 @@ const doSource = readFileSync(
   resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),
   'utf8'
 );
-const routeSource = readFileSync(
-  resolve(process.cwd(), 'src/routes/workspaces.ts'),
-  'utf8'
-);
+const routeSource = [
+  readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime.ts'), 'utf8'),
+].join('\n');
 
 // ============================================================================
 // handleWorkspaceReady — Pure Callback-Driven (No D1 Polling)
@@ -173,9 +173,9 @@ describe('advanceWorkspaceReady — callback signal handling', () => {
 
 describe('/ready route — inline DO notification (TDF-5)', () => {
   // Extract the /ready handler
-  const readyHandlerStart = routeSource.indexOf("workspacesRoutes.post('/:id/ready'");
+  const readyHandlerStart = routeSource.indexOf("lifecycleRoutes.post('/:id/ready'");
   const readyHandlerEnd = routeSource.indexOf(
-    "workspacesRoutes.post('/:id/provisioning-failed'"
+    "lifecycleRoutes.post('/:id/provisioning-failed'"
   );
   const readyHandler = routeSource.slice(readyHandlerStart, readyHandlerEnd);
 
@@ -188,7 +188,7 @@ describe('/ready route — inline DO notification (TDF-5)', () => {
   });
 
   it('imports advanceTaskRunnerWorkspaceReady from task-runner-do service', () => {
-    expect(readyHandler).toContain("import('../services/task-runner-do')");
+    expect(readyHandler).toContain("import('../../services/task-runner-do')");
   });
 
   it('looks up task by workspace ID', () => {
@@ -244,10 +244,10 @@ describe('/ready route — inline DO notification (TDF-5)', () => {
 describe('/provisioning-failed route — inline DO notification (TDF-5)', () => {
   // Extract the /provisioning-failed handler
   const failedHandlerStart = routeSource.indexOf(
-    "workspacesRoutes.post('/:id/provisioning-failed'"
+    "lifecycleRoutes.post('/:id/provisioning-failed'"
   );
   const failedHandlerEnd = routeSource.indexOf(
-    "workspacesRoutes.post('/:id/agent-key'"
+    "runtimeRoutes.post('/:id/agent-key'"
   );
   const failedHandler = routeSource.slice(failedHandlerStart, failedHandlerEnd);
 
@@ -260,7 +260,7 @@ describe('/provisioning-failed route — inline DO notification (TDF-5)', () => 
   });
 
   it('imports advanceTaskRunnerWorkspaceReady from task-runner-do service', () => {
-    expect(failedHandler).toContain("import('../services/task-runner-do')");
+    expect(failedHandler).toContain("import('../../services/task-runner-do')");
   });
 
   it('passes error message to DO', () => {

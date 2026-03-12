@@ -1,0 +1,215 @@
+/**
+ * Shared task route helpers — used across crud.ts, run.ts, and submit.ts.
+ *
+ * Extracted from the original tasks.ts to avoid duplication across sub-routers.
+ */
+import { and, eq, inArray } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import type { TaskActorType, TaskSortOrder, TaskStatus } from '@simple-agent-manager/shared';
+import * as schema from '../../db/schema';
+import { ulid } from '../../lib/ulid';
+import { errors } from '../../middleware/error';
+import {
+  isTaskBlocked,
+  getBlockedTaskIds,
+} from '../../services/task-graph';
+
+export function parseTaskSortOrder(value: string | undefined): TaskSortOrder {
+  if (value === 'updatedAtDesc' || value === 'priorityDesc') {
+    return value;
+  }
+  return 'createdAtDesc';
+}
+
+export async function requireOwnedTaskById(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  taskId: string,
+  userId: string
+): Promise<schema.Task> {
+  const rows = await db
+    .select()
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, userId)))
+    .limit(1);
+
+  const task = rows[0];
+  if (!task) {
+    throw errors.notFound('Task');
+  }
+
+  return task;
+}
+
+export async function appendStatusEvent(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  taskId: string,
+  fromStatus: TaskStatus | null,
+  toStatus: TaskStatus,
+  actorType: TaskActorType,
+  actorId: string | null,
+  reason?: string
+): Promise<void> {
+  await db.insert(schema.taskStatusEvents).values({
+    id: ulid(),
+    taskId,
+    fromStatus,
+    toStatus,
+    actorType,
+    actorId,
+    reason: reason ?? null,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+export async function getTaskDependencies(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  taskId: string
+): Promise<schema.TaskDependency[]> {
+  return db
+    .select()
+    .from(schema.taskDependencies)
+    .where(eq(schema.taskDependencies.taskId, taskId));
+}
+
+export async function computeBlockedForTask(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  taskId: string
+): Promise<boolean> {
+  const dependencies = await getTaskDependencies(db, taskId);
+  if (dependencies.length === 0) {
+    return false;
+  }
+
+  const dependencyIds = dependencies.map((dependency) => dependency.dependsOnTaskId);
+  const dependencyTasks = await db
+    .select({ id: schema.tasks.id, status: schema.tasks.status })
+    .from(schema.tasks)
+    .where(inArray(schema.tasks.id, dependencyIds));
+
+  const statusMap: Record<string, TaskStatus> = {};
+  for (const dependencyTask of dependencyTasks) {
+    statusMap[dependencyTask.id] = dependencyTask.status as TaskStatus;
+  }
+
+  return isTaskBlocked(taskId, dependencies, statusMap);
+}
+
+export async function computeBlockedSet(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  taskIds: string[]
+): Promise<Set<string>> {
+  if (taskIds.length === 0) {
+    return new Set<string>();
+  }
+
+  const dependencies = await db
+    .select({
+      taskId: schema.taskDependencies.taskId,
+      dependsOnTaskId: schema.taskDependencies.dependsOnTaskId,
+    })
+    .from(schema.taskDependencies)
+    .where(inArray(schema.taskDependencies.taskId, taskIds));
+
+  if (dependencies.length === 0) {
+    return new Set<string>();
+  }
+
+  const dependencyTaskIds = [...new Set(dependencies.map((dependency) => dependency.dependsOnTaskId))];
+  const dependencyTasks = dependencyTaskIds.length === 0
+    ? []
+    : await db
+      .select({ id: schema.tasks.id, status: schema.tasks.status })
+      .from(schema.tasks)
+      .where(inArray(schema.tasks.id, dependencyTaskIds));
+
+  const statusMap: Record<string, TaskStatus> = {};
+  for (const dependencyTask of dependencyTasks) {
+    statusMap[dependencyTask.id] = dependencyTask.status as TaskStatus;
+  }
+
+  return getBlockedTaskIds(taskIds, dependencies, statusMap);
+}
+
+export async function setTaskStatus(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  task: schema.Task,
+  toStatus: TaskStatus,
+  actorType: TaskActorType,
+  actorId: string | null,
+  options: {
+    reason?: string;
+    outputSummary?: string;
+    outputBranch?: string;
+    outputPrUrl?: string;
+    errorMessage?: string;
+  } = {}
+): Promise<schema.Task> {
+  const now = new Date().toISOString();
+
+  const nextValues: Partial<schema.NewTask> = {
+    status: toStatus,
+    updatedAt: now,
+  };
+
+  if (toStatus === 'in_progress' && !task.startedAt) {
+    nextValues.startedAt = now;
+  }
+
+  if (toStatus === 'completed' || toStatus === 'failed' || toStatus === 'cancelled') {
+    nextValues.completedAt = now;
+    nextValues.executionStep = null;
+  }
+
+  if (toStatus === 'ready') {
+    nextValues.workspaceId = null;
+    nextValues.startedAt = null;
+    nextValues.completedAt = null;
+    nextValues.errorMessage = null;
+    nextValues.executionStep = null;
+  }
+
+  if (options.outputSummary !== undefined) {
+    nextValues.outputSummary = options.outputSummary?.trim() || null;
+  }
+
+  if (options.outputBranch !== undefined) {
+    nextValues.outputBranch = options.outputBranch?.trim() || null;
+  }
+
+  if (options.outputPrUrl !== undefined) {
+    nextValues.outputPrUrl = options.outputPrUrl?.trim() || null;
+  }
+
+  if (toStatus === 'failed') {
+    nextValues.errorMessage = options.errorMessage?.trim() || task.errorMessage || 'Task failed';
+  } else if (options.errorMessage !== undefined) {
+    nextValues.errorMessage = options.errorMessage?.trim() || null;
+  }
+
+  await db
+    .update(schema.tasks)
+    .set(nextValues)
+    .where(eq(schema.tasks.id, task.id));
+
+  await appendStatusEvent(
+    db,
+    task.id,
+    task.status as TaskStatus,
+    toStatus,
+    actorType,
+    actorId,
+    options.reason
+  );
+
+  const rows = await db
+    .select()
+    .from(schema.tasks)
+    .where(eq(schema.tasks.id, task.id))
+    .limit(1);
+  const updatedTask = rows[0];
+  if (!updatedTask) {
+    throw errors.notFound('Task');
+  }
+
+  return updatedTask;
+}

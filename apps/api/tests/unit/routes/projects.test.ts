@@ -3,20 +3,23 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 describe('projects routes source contract', () => {
-  const file = readFileSync(resolve(process.cwd(), 'src/routes/projects.ts'), 'utf8');
+  const indexFile = readFileSync(resolve(process.cwd(), 'src/routes/projects/index.ts'), 'utf8');
+  const crudFile = readFileSync(resolve(process.cwd(), 'src/routes/projects/crud.ts'), 'utf8');
+  const helpersFile = readFileSync(resolve(process.cwd(), 'src/routes/projects/_helpers.ts'), 'utf8');
+  const file = indexFile + '\n' + crudFile + '\n' + helpersFile;
 
   it('defines authenticated CRUD endpoints for projects', () => {
     expect(file).toContain("projectsRoutes.use('/*', requireAuth(), requireApproved())");
-    expect(file).toContain("projectsRoutes.post('/',");
-    expect(file).toContain("projectsRoutes.get('/',");
-    expect(file).toContain("projectsRoutes.get('/:id',");
-    expect(file).toContain("projectsRoutes.get('/:id/runtime-config'");
-    expect(file).toContain("projectsRoutes.post('/:id/runtime/env-vars'");
-    expect(file).toContain("projectsRoutes.delete('/:id/runtime/env-vars/:envKey'");
-    expect(file).toContain("projectsRoutes.post('/:id/runtime/files'");
-    expect(file).toContain("projectsRoutes.delete('/:id/runtime/files'");
-    expect(file).toContain("projectsRoutes.patch('/:id',");
-    expect(file).toContain("projectsRoutes.delete('/:id',");
+    expect(file).toContain("crudRoutes.post('/',");
+    expect(file).toContain("crudRoutes.get('/',");
+    expect(file).toContain("crudRoutes.get('/:id',");
+    expect(file).toContain("crudRoutes.get('/:id/runtime-config'");
+    expect(file).toContain("crudRoutes.post('/:id/runtime/env-vars'");
+    expect(file).toContain("crudRoutes.delete('/:id/runtime/env-vars/:envKey'");
+    expect(file).toContain("crudRoutes.post('/:id/runtime/files'");
+    expect(file).toContain("crudRoutes.delete('/:id/runtime/files'");
+    expect(file).toContain("crudRoutes.patch('/:id',");
+    expect(file).toContain("crudRoutes.delete('/:id',");
   });
 
   it('enforces normalized name uniqueness and per-user project limits', () => {
