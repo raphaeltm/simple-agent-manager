@@ -60,6 +60,23 @@ function byteLength(value: string): number {
   return textEncoder.encode(value).length;
 }
 
+/**
+ * Allowed absolute path prefixes for runtime files.
+ * Only paths under user home directories are permitted inside the devcontainer.
+ * System paths (/etc, /usr, /var, etc.) are blocked to prevent privilege escalation.
+ */
+const ALLOWED_ABSOLUTE_PREFIXES = ['/home/node/', '/home/user/'];
+
+/**
+ * Blocked ~ (home-relative) paths that could enable persistence or privilege escalation.
+ */
+const BLOCKED_HOME_PATHS = [
+  '~/.ssh/authorized_keys',
+  '~/.ssh/authorized_keys2',
+  '~/.ssh/rc',
+  '~/.ssh/environment',
+];
+
 function normalizeProjectFilePath(path: string): string {
   const normalized = path.trim().replace(/\\/g, '/');
   if (!normalized) {
@@ -69,9 +86,6 @@ function normalizeProjectFilePath(path: string): string {
     throw errors.badRequest('path contains invalid characters');
   }
 
-  // Allow absolute paths (e.g., /home/node/.npmrc) and ~ paths (e.g., ~/.ssh/config).
-  // Files are injected into the devcontainer, which is already a sandbox —
-  // there is no host filesystem exposure.
   const segments = normalized.split('/');
   // For absolute paths, the first segment will be empty (from leading /). Skip it.
   const checkSegments = normalized.startsWith('/') ? segments.slice(1) : segments;
@@ -81,6 +95,25 @@ function normalizeProjectFilePath(path: string): string {
     const seg = checkSegments[i];
     if (seg === '' || seg === '.' || seg === '..') {
       throw errors.badRequest('path must not contain empty, dot, or dot-dot segments');
+    }
+  }
+
+  // Block absolute paths outside allowed prefixes (prevents /etc/cron.d, /etc/profile.d, etc.)
+  if (normalized.startsWith('/')) {
+    const allowed = ALLOWED_ABSOLUTE_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+    if (!allowed) {
+      throw errors.badRequest(
+        'Absolute paths are only allowed under /home/node/ or /home/user/. ' +
+          'Use a relative path or ~/... for home directory files.'
+      );
+    }
+  }
+
+  // Block dangerous home-relative paths (prevents SSH key injection, etc.)
+  if (normalized.startsWith('~')) {
+    const blocked = BLOCKED_HOME_PATHS.some((p) => normalized === p);
+    if (blocked) {
+      throw errors.badRequest(`Path ${normalized} is not allowed for security reasons`);
     }
   }
 
@@ -1009,13 +1042,32 @@ projectsRoutes.post('/:id/acp-sessions/:sessionId/status', async (c) => {
  * Auth: JWT + nodeId verification in DO (same model as /status above).
  */
 projectsRoutes.post('/:id/acp-sessions/:sessionId/heartbeat', async (c) => {
-  getUserId(c); // Ensure authenticated (JWT validated by requireAuth middleware)
+  const userId = getUserId(c); // Ensure authenticated (JWT validated by requireAuth middleware)
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
   const body = await c.req.json<AcpSessionHeartbeatRequest>();
   if (!body.nodeId) {
     throw errors.badRequest('nodeId is required');
+  }
+
+  // Validate node matches assigned node — prevents cross-user session manipulation.
+  // See AUTH-VULN-05 in Shannon security assessment.
+  const existing = await projectDataService.getAcpSession(c.env, projectId, sessionId);
+  if (!existing) {
+    throw errors.notFound('ACP session');
+  }
+  if (existing.nodeId !== body.nodeId) {
+    console.error(JSON.stringify({
+      event: 'acp_session.heartbeat_node_mismatch',
+      sessionId,
+      projectId,
+      callerUserId: userId,
+      expectedNodeId: existing.nodeId,
+      receivedNodeId: body.nodeId,
+      action: 'rejected',
+    }));
+    throw errors.forbidden('Node identity verification failed');
   }
 
   await projectDataService.updateAcpSessionHeartbeat(c.env, projectId, sessionId, body.nodeId);
