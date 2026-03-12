@@ -465,6 +465,16 @@ workspacesRoutes.post('/', async (c) => {
 
   const vmSize = body.vmSize ?? 'medium';
   const vmLocation = body.vmLocation ?? 'nbg1';
+
+  // Validate branch name — reject shell metacharacters to prevent command injection.
+  // Git branch names allow: alphanumeric, hyphens, underscores, slashes, dots.
+  // See INJ-VULN-02 in Shannon security assessment.
+  const SAFE_BRANCH_PATTERN = /^[a-zA-Z0-9._\-/]+$/;
+  if (!SAFE_BRANCH_PATTERN.test(resolvedBranch)) {
+    throw errors.badRequest(
+      'branch contains invalid characters. Only alphanumeric, hyphens, underscores, slashes, and dots are allowed.'
+    );
+  }
   const branch = resolvedBranch;
 
   let nodeId = body.nodeId;

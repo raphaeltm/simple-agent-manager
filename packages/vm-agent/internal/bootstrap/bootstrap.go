@@ -1789,7 +1789,10 @@ func buildSAMEnvScript(cfg *config.Config, githubToken string) string {
 	sb.WriteString("# SAM workspace environment variables (auto-generated)\n")
 	for _, e := range entries {
 		if e.value != "" {
-			sb.WriteString(fmt.Sprintf("export %s=%q\n", e.key, e.value))
+			// Use single-quoted values to prevent shell expansion of $(), backticks, etc.
+			// See INJ-VULN-02 in Shannon security assessment: %q (double-quote) allows
+			// POSIX shell command substitution inside the quoted string.
+			sb.WriteString(fmt.Sprintf("export %s=%s\n", e.key, shellSingleQuote(e.value)))
 		}
 	}
 
@@ -1915,9 +1918,36 @@ func normalizeProjectRuntimeFilePath(rawPath string) (string, error) {
 
 	normalized := filepath.ToSlash(filepath.Clean(trimmed))
 
-	// Allow absolute paths (e.g., /home/node/.npmrc) and ~ paths (e.g., ~/.ssh/config).
-	// Files are injected into the devcontainer which is already a sandbox.
-	if strings.HasPrefix(normalized, "/") || strings.HasPrefix(normalized, "~/") {
+	// Absolute paths: only allow under safe home directories.
+	// System paths (/etc, /usr, /var, etc.) are blocked to prevent privilege escalation.
+	if strings.HasPrefix(normalized, "/") {
+		allowedPrefixes := []string{"/home/node/", "/home/user/"}
+		allowed := false
+		for _, prefix := range allowedPrefixes {
+			if strings.HasPrefix(normalized, prefix) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return "", fmt.Errorf("absolute paths are only allowed under /home/node/ or /home/user/")
+		}
+		return normalized, nil
+	}
+
+	// Home-relative paths (~/.ssh/config is ok, ~/.ssh/authorized_keys is not)
+	if strings.HasPrefix(normalized, "~/") {
+		blockedPaths := []string{
+			"~/.ssh/authorized_keys",
+			"~/.ssh/authorized_keys2",
+			"~/.ssh/rc",
+			"~/.ssh/environment",
+		}
+		for _, blocked := range blockedPaths {
+			if normalized == blocked {
+				return "", fmt.Errorf("path %s is not allowed for security reasons", normalized)
+			}
+		}
 		return normalized, nil
 	}
 

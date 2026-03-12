@@ -166,6 +166,15 @@ githubRoutes.get('/branches', requireAuth(), requireApproved(), async (c) => {
     throw errors.notFound('Installation');
   }
 
+  // Validate the repository owner matches the installation's account.
+  // Prevents using the installation token to enumerate arbitrary repositories.
+  // See SSRF-VULN-03 in Shannon security assessment.
+  if (owner!.toLowerCase() !== targetInstallation.accountName.toLowerCase()) {
+    throw errors.forbidden(
+      `Repository owner "${owner}" does not match installation account "${targetInstallation.accountName}"`
+    );
+  }
+
   try {
     const defaultBranch = c.req.query('default_branch') || undefined;
     const branches = await getRepositoryBranches(

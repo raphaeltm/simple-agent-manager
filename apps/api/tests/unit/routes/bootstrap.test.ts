@@ -2,6 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Hono } from 'hono';
 import type { BootstrapTokenData, BootstrapResponse } from '@simple-agent-manager/shared';
 
+// Mock rate-limit middleware to be a passthrough (tested separately)
+vi.mock('../../../src/middleware/rate-limit', () => ({
+  rateLimit: () => vi.fn(async (_c: any, next: any) => { await next(); }),
+  getRateLimit: vi.fn(),
+}));
+
 // Mock KV namespace
 const mockKV = {
   put: vi.fn(),

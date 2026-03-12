@@ -335,12 +335,12 @@ func TestBuildSAMEnvScript(t *testing.T) {
 
 	// Verify all expected variables are present.
 	for _, want := range []string{
-		`export SAM_API_URL="https://api.example.com"`,
-		`export SAM_BRANCH="main"`,
-		`export SAM_NODE_ID="node-456"`,
-		`export SAM_REPOSITORY="octo/repo"`,
-		`export SAM_WORKSPACE_ID="ws-123"`,
-		`export SAM_WORKSPACE_URL="https://ws-ws-123.example.com"`,
+		`export SAM_API_URL='https://api.example.com'`,
+		`export SAM_BRANCH='main'`,
+		`export SAM_NODE_ID='node-456'`,
+		`export SAM_REPOSITORY='octo/repo'`,
+		`export SAM_WORKSPACE_ID='ws-123'`,
+		`export SAM_WORKSPACE_URL='https://ws-ws-123.example.com'`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script missing %q\ngot:\n%s", want, script)
@@ -416,7 +416,7 @@ func TestBuildSAMEnvScriptIncludesGitHubToken(t *testing.T) {
 
 	script := buildSAMEnvScript(cfg, "ghs_test_token_abc123")
 
-	want := `export GH_TOKEN="ghs_test_token_abc123"`
+	want := `export GH_TOKEN='ghs_test_token_abc123'`
 	if !strings.Contains(script, want) {
 		t.Errorf("script missing %q\ngot:\n%s", want, script)
 	}
@@ -437,7 +437,7 @@ func TestBuildSAMEnvScriptTrimsGitHubTokenWhitespace(t *testing.T) {
 
 	script := buildSAMEnvScript(cfg, "  ghs_token  ")
 
-	want := `export GH_TOKEN="ghs_token"`
+	want := `export GH_TOKEN='ghs_token'`
 	if !strings.Contains(script, want) {
 		t.Errorf("expected trimmed token in script, got:\n%s", script)
 	}
@@ -551,9 +551,9 @@ func TestBuildSAMEnvScriptIncludesProjectContext(t *testing.T) {
 	script := buildSAMEnvScript(cfg, "")
 
 	for _, want := range []string{
-		`export SAM_PROJECT_ID="proj-789"`,
-		`export SAM_CHAT_SESSION_ID="session-abc"`,
-		`export SAM_TASK_ID="task-def"`,
+		`export SAM_PROJECT_ID='proj-789'`,
+		`export SAM_CHAT_SESSION_ID='session-abc'`,
+		`export SAM_TASK_ID='task-def'`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script missing %q\ngot:\n%s", want, script)
@@ -603,7 +603,7 @@ func TestNormalizeProjectRuntimeFilePath(t *testing.T) {
 		{name: "relative path", input: ".env.local", want: ".env.local"},
 		{name: "nested path", input: "config/app/env.txt", want: "config/app/env.txt"},
 		{name: "absolute path", input: "/home/node/.npmrc", want: "/home/node/.npmrc"},
-		{name: "absolute etc path", input: "/etc/apt/sources.list.d/custom.list", want: "/etc/apt/sources.list.d/custom.list"},
+		{name: "absolute etc path", input: "/etc/apt/sources.list.d/custom.list", wantErr: true},
 		{name: "home tilde path", input: "~/.ssh/config", want: "~/.ssh/config"},
 		{name: "home tilde nested", input: "~/.config/gh/hosts.yml", want: "~/.config/gh/hosts.yml"},
 		{name: "reject absolute with dotdot", input: "/home/node/../../etc/shadow", wantErr: true},

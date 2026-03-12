@@ -10,8 +10,18 @@ import type { Env } from '../index';
 import type { BootstrapResponse } from '@simple-agent-manager/shared';
 import { redeemBootstrapToken } from '../services/bootstrap';
 import { decrypt } from '../services/encryption';
+import { rateLimit } from '../middleware/rate-limit';
 
 export const bootstrapRoutes = new Hono<{ Bindings: Env }>();
+
+// IP-based rate limiting — prevents brute-force token enumeration.
+// See AUTH-VULN-01 in Shannon security assessment.
+const bootstrapRateLimit = rateLimit({
+  limit: 10,
+  windowSeconds: 60,
+  keyPrefix: 'rl:bootstrap',
+  useIp: true,
+});
 
 /**
  * Log bootstrap redemption attempt for security auditing.
@@ -46,7 +56,7 @@ function logBootstrapAttempt(
  * @returns BootstrapResponse with decrypted credentials
  * @returns 401 if token is invalid or expired
  */
-bootstrapRoutes.post('/:token', async (c) => {
+bootstrapRoutes.post('/:token', bootstrapRateLimit, async (c) => {
   const token = c.req.param('token');
   const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown';
   const requestTime = Date.now();
