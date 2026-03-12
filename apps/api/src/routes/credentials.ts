@@ -6,7 +6,7 @@ import type { Env } from '../index';
 import { requireAuth, requireApproved, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { encrypt, decrypt } from '../services/encryption';
-import { validateHetznerToken } from '../services/hetzner';
+import { createProvider } from '@simple-agent-manager/providers';
 import { CredentialValidator } from '../services/validation';
 import * as schema from '../db/schema';
 import type { CredentialResponse, AgentCredentialInfo, SaveAgentCredentialRequest, CredentialKind, AgentType } from '@simple-agent-manager/shared';
@@ -68,7 +68,8 @@ credentialsRoutes.post('/', async (c) => {
   // Validate the token
   // Note: We sanitize error messages to avoid leaking details about the Hetzner API
   try {
-    await validateHetznerToken(body.token);
+    const provider = createProvider({ provider: body.provider, apiToken: body.token });
+    await provider.validateToken();
   } catch (err) {
     // Log the actual error for debugging, but return a generic message to the user
     console.error('Hetzner token validation failed:', err instanceof Error ? err.message : err);

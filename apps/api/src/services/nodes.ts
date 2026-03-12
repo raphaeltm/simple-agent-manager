@@ -7,7 +7,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../index';
 import { decrypt } from './encryption';
 import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
-import { createServer, deleteServer, SERVER_TYPES } from './hetzner';
+import { createProvider } from '@simple-agent-manager/providers';
 import { signCallbackToken } from './jwt';
 
 export interface CreateNodeInput {
@@ -136,12 +136,17 @@ export async function provisionNode(
       throw new Error('Cloud-init config exceeds size limit');
     }
 
-    const server = await createServer(hetznerToken, {
+    const provider = createProvider({
+      provider: 'hetzner',
+      apiToken: hetznerToken,
+    });
+
+    const vm = await provider.createVM({
       name: `node-${node.id.toLowerCase()}`,
-      serverType: SERVER_TYPES[node.vmSize] || 'cx33',
+      size: node.vmSize as 'small' | 'medium' | 'large',
       location: node.vmLocation,
-      image: HETZNER_IMAGE,
       userData: cloudInit,
+      image: HETZNER_IMAGE,
       labels: {
         node: node.id,
         managed: 'simple-agent-manager',
@@ -150,7 +155,7 @@ export async function provisionNode(
 
     let backendDnsRecordId: string | null = null;
     try {
-      backendDnsRecordId = await createNodeBackendDNSRecord(node.id, server.publicNet.ipv4.ip, env);
+      backendDnsRecordId = await createNodeBackendDNSRecord(node.id, vm.ip, env);
     } catch (dnsErr) {
       console.error('Failed to create node backend DNS record:', dnsErr);
     }
@@ -158,8 +163,8 @@ export async function provisionNode(
     await db
       .update(schema.nodes)
       .set({
-        providerInstanceId: String(server.id),
-        ipAddress: server.publicNet.ipv4.ip,
+        providerInstanceId: vm.id,
+        ipAddress: vm.ip,
         backendDnsRecordId,
         status: 'running',
         healthStatus: 'stale',
@@ -216,7 +221,8 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
   if (node.providerInstanceId && credential) {
     const hetznerToken = await decrypt(credential.encryptedToken, credential.iv, env.ENCRYPTION_KEY);
     try {
-      await deleteServer(hetznerToken, node.providerInstanceId);
+      const provider = createProvider({ provider: 'hetzner', apiToken: hetznerToken });
+      await provider.deleteVM(node.providerInstanceId);
     } catch (err) {
       console.error('Failed to delete node server:', err);
     }
@@ -294,7 +300,8 @@ export async function deleteNodeResources(nodeId: string, userId: string, env: E
   if (credential && node.providerInstanceId) {
     const hetznerToken = await decrypt(credential.encryptedToken, credential.iv, env.ENCRYPTION_KEY);
     try {
-      await deleteServer(hetznerToken, node.providerInstanceId);
+      const provider = createProvider({ provider: 'hetzner', apiToken: hetznerToken });
+      await provider.deleteVM(node.providerInstanceId);
     } catch (err) {
       console.error('Failed to delete node server:', err);
     }
