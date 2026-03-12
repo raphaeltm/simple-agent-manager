@@ -59,7 +59,7 @@ export const MessageActions = React.memo(function MessageActions({ text, timesta
 
   // Sync speaking state with speechSynthesis events
   useEffect(() => {
-    if (!('speechSynthesis' in window)) return;
+    if (!window.speechSynthesis) return;
 
     function handleEnd() {
       setIsSpeaking(false);
@@ -76,7 +76,7 @@ export const MessageActions = React.memo(function MessageActions({ text, timesta
   }, []);
 
   const toggleSpeak = useCallback(() => {
-    if (!('speechSynthesis' in window)) return;
+    if (!window.speechSynthesis) return;
 
     if (isSpeaking) {
       window.speechSynthesis.cancel();
@@ -97,7 +97,7 @@ export const MessageActions = React.memo(function MessageActions({ text, timesta
   // Clean up speech on unmount
   useEffect(() => {
     return () => {
-      if ('speechSynthesis' in window && isSpeaking) {
+      if (window.speechSynthesis && isSpeaking) {
         window.speechSynthesis.cancel();
       }
     };
@@ -131,7 +131,7 @@ export const MessageActions = React.memo(function MessageActions({ text, timesta
       </button>
 
       {/* Speaker button */}
-      {'speechSynthesis' in window && (
+      {window.speechSynthesis && (
         <button
           type="button"
           onClick={toggleSpeak}

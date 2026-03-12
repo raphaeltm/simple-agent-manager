@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import { MessageActions } from './MessageActions';
 
 // Mock speechSynthesis API
@@ -10,7 +10,7 @@ const mockRemoveEventListener = vi.fn();
 
 let capturedUtterance: { text: string; onend?: () => void; onerror?: () => void } | null = null;
 
-beforeEach(() => {
+function installSpeechMocks() {
   capturedUtterance = null;
   mockSpeak.mockImplementation((utterance: { text: string; onend?: () => void; onerror?: () => void }) => {
     capturedUtterance = utterance;
@@ -30,7 +30,6 @@ beforeEach(() => {
     configurable: true,
   });
 
-  // Mock SpeechSynthesisUtterance
   vi.stubGlobal('SpeechSynthesisUtterance', class {
     text: string;
     onend: (() => void) | null = null;
@@ -39,11 +38,22 @@ beforeEach(() => {
       this.text = text;
     }
   });
+}
+
+beforeEach(() => {
+  installSpeechMocks();
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+/** Helper: find the text content next to a label like "Words:" inside the dialog. */
+function getMetadataValue(dialog: HTMLElement, label: string): string {
+  const labelEl = within(dialog).getByText(new RegExp(`${label}:`));
+  // The value is the text node sibling inside the same parent div
+  return labelEl.parentElement?.textContent?.replace(`${label}:`, '').trim() ?? '';
+}
 
 describe('MessageActions', () => {
   const defaultProps = {
@@ -57,6 +67,20 @@ describe('MessageActions', () => {
 
       expect(screen.getByLabelText('Message info')).toBeTruthy();
       expect(screen.getByLabelText('Read aloud')).toBeTruthy();
+    });
+
+    it('does not render speaker button when speechSynthesis is absent', () => {
+      // Remove speechSynthesis from window
+      Object.defineProperty(window, 'speechSynthesis', {
+        value: undefined,
+        writable: true,
+        configurable: true,
+      });
+
+      render(<MessageActions {...defaultProps} />);
+
+      expect(screen.getByLabelText('Message info')).toBeTruthy();
+      expect(screen.queryByLabelText('Read aloud')).toBeNull();
     });
   });
 
@@ -77,8 +101,8 @@ describe('MessageActions', () => {
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
-      // "one two three four five" = 5 words
-      expect(screen.getByText('5')).toBeTruthy();
+      const dialog = screen.getByRole('dialog');
+      expect(getMetadataValue(dialog, 'Words')).toBe('5');
     });
 
     it('displays correct character count', () => {
@@ -86,17 +110,50 @@ describe('MessageActions', () => {
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
-      expect(screen.getByText('5')).toBeTruthy();
+      const dialog = screen.getByRole('dialog');
+      expect(getMetadataValue(dialog, 'Characters')).toBe('5');
+      expect(getMetadataValue(dialog, 'Words')).toBe('1');
     });
 
-    it('strips markdown from word/char counts', () => {
-      // "Use the function" after stripping `console.log` inline code
+    it('handles empty text gracefully', () => {
+      render(<MessageActions text="" timestamp={defaultProps.timestamp} />);
+
+      fireEvent.click(screen.getByLabelText('Message info'));
+
+      const dialog = screen.getByRole('dialog');
+      expect(getMetadataValue(dialog, 'Words')).toBe('0');
+      expect(getMetadataValue(dialog, 'Characters')).toBe('0');
+    });
+
+    it('strips inline code from word/char counts', () => {
       render(<MessageActions text="Use the `console.log` function" timestamp={defaultProps.timestamp} />);
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
+      const dialog = screen.getByRole('dialog');
       // "Use the  function" stripped → "Use the function" = 3 words
-      expect(screen.getByText('3')).toBeTruthy();
+      expect(getMetadataValue(dialog, 'Words')).toBe('3');
+    });
+
+    it('strips fenced code blocks from word/char counts', () => {
+      // After stripping ```...```, remaining text is "start end" = 2 words
+      render(<MessageActions text={'start\n```js\nconst x = 1;\n```\nend'} timestamp={defaultProps.timestamp} />);
+
+      fireEvent.click(screen.getByLabelText('Message info'));
+
+      const dialog = screen.getByRole('dialog');
+      expect(getMetadataValue(dialog, 'Words')).toBe('2');
+    });
+
+    it('displays formatted timestamp', () => {
+      render(<MessageActions {...defaultProps} />);
+
+      fireEvent.click(screen.getByLabelText('Message info'));
+
+      const dialog = screen.getByRole('dialog');
+      const timeValue = getMetadataValue(dialog, 'Time');
+      // Should contain year 2024 from the timestamp
+      expect(timeValue).toContain('2024');
     });
 
     it('hides metadata popover when clicked again (toggle)', () => {
@@ -107,6 +164,22 @@ describe('MessageActions', () => {
       expect(screen.getByRole('dialog')).toBeTruthy();
 
       fireEvent.click(btn);
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    it('closes metadata popover on outside click', () => {
+      render(
+        <div>
+          <button data-testid="outside">Outside</button>
+          <MessageActions {...defaultProps} />
+        </div>
+      );
+
+      fireEvent.click(screen.getByLabelText('Message info'));
+      expect(screen.getByRole('dialog')).toBeTruthy();
+
+      // Click outside the component
+      fireEvent.mouseDown(screen.getByTestId('outside'));
       expect(screen.queryByRole('dialog')).toBeNull();
     });
 
@@ -176,13 +249,16 @@ describe('MessageActions', () => {
 
       expect(screen.getByLabelText('Read aloud')).toBeTruthy();
     });
-  });
-});
 
-describe('MessageActions in MessageBubble', () => {
-  // Integration-style tests to verify MessageActions appears correctly in MessageBubble
-  it('is covered by MessageBubble integration — see MessageBubble.test.tsx', () => {
-    // This is a marker test — the actual integration tests are in MessageBubble.test.tsx
-    expect(true).toBe(true);
+    it('cancels speech on unmount while speaking', () => {
+      const { unmount } = render(<MessageActions {...defaultProps} />);
+
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+      mockCancel.mockReset();
+
+      unmount();
+
+      expect(mockCancel).toHaveBeenCalled();
+    });
   });
 });
