@@ -937,7 +937,7 @@ describe('Node Agent client functions send correct payloads', () => {
 
     vi.doMock('../../src/services/fetch-timeout', () => ({
       fetchWithTimeout: vi.fn().mockRejectedValue(
-        new Error('Request timed out after 30000ms: http://vm-node-abc.example.com:8080/workspaces/ws-test')
+        new Error('Request timed out after 30000ms: https://vm-node-abc.example.com:8443/workspaces/ws-test')
       ),
       getTimeoutMs: vi.fn().mockReturnValue(30000),
     }));

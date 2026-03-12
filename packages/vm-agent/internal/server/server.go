@@ -408,7 +408,7 @@ func (s *Server) Start() error {
 	s.errorReporter.Start()
 
 	if s.config.TLSEnabled {
-		slog.Info("Starting VM Agent with TLS", "addr", s.httpServer.Addr, "cert", s.config.TLSCertPath)
+		slog.Info("Starting VM Agent with TLS", "addr", s.httpServer.Addr, "cert", s.config.TLSCertPath, "key", s.config.TLSKeyPath)
 		return s.httpServer.ListenAndServeTLS(s.config.TLSCertPath, s.config.TLSKeyPath)
 	}
 

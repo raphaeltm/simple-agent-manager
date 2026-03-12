@@ -2,6 +2,8 @@ package config
 
 import (
 	"path/filepath"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -275,23 +277,49 @@ func TestBuildSAMEnvFallbackOmitsEmptyValues(t *testing.T) {
 }
 
 func TestTLSEnabledWhenBothPathsSet(t *testing.T) {
+	// Create temp files so os.Stat succeeds during validation
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "cert.pem")
+	keyPath := filepath.Join(dir, "key.pem")
+	if err := os.WriteFile(certPath, []byte("cert"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte("key"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("WORKSPACE_ID", "ws-123")
-	t.Setenv("TLS_CERT_PATH", "/etc/sam/tls/origin-ca.pem")
-	t.Setenv("TLS_KEY_PATH", "/etc/sam/tls/origin-ca-key.pem")
+	t.Setenv("TLS_CERT_PATH", certPath)
+	t.Setenv("TLS_KEY_PATH", keyPath)
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
 	if !cfg.TLSEnabled {
-		t.Fatal("TLSEnabled should be true when both cert and key paths are set")
+		t.Fatal("TLSEnabled should be true when both paths are set")
 	}
-	if cfg.TLSCertPath != "/etc/sam/tls/origin-ca.pem" {
-		t.Fatalf("TLSCertPath=%q, want /etc/sam/tls/origin-ca.pem", cfg.TLSCertPath)
+	if cfg.TLSCertPath != certPath {
+		t.Fatalf("TLSCertPath=%q, want %q", cfg.TLSCertPath, certPath)
 	}
-	if cfg.TLSKeyPath != "/etc/sam/tls/origin-ca-key.pem" {
-		t.Fatalf("TLSKeyPath=%q, want /etc/sam/tls/origin-ca-key.pem", cfg.TLSKeyPath)
+	if cfg.TLSKeyPath != keyPath {
+		t.Fatalf("TLSKeyPath=%q, want %q", cfg.TLSKeyPath, keyPath)
+	}
+}
+
+func TestTLSFailsWhenFilesDoNotExist(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("TLS_CERT_PATH", "/nonexistent/cert.pem")
+	t.Setenv("TLS_KEY_PATH", "/nonexistent/key.pem")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load should return error when TLS files do not exist")
+	}
+	if !strings.Contains(err.Error(), "TLS_CERT_PATH") {
+		t.Fatalf("expected TLS_CERT_PATH error, got: %v", err)
 	}
 }
 
@@ -308,18 +336,33 @@ func TestTLSDisabledByDefault(t *testing.T) {
 	}
 }
 
-func TestTLSDisabledWhenOnlyOnePathSet(t *testing.T) {
+func TestTLSPartialConfigIsAnError(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("WORKSPACE_ID", "ws-123")
 	t.Setenv("TLS_CERT_PATH", "/etc/sam/tls/origin-ca.pem")
-	// TLS_KEY_PATH not set
+	// TLS_KEY_PATH not set — partial config should error
 
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load returned error: %v", err)
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load should return error when only one TLS path is set")
 	}
-	if cfg.TLSEnabled {
-		t.Fatal("TLSEnabled should be false when only cert path is set")
+	if !strings.Contains(err.Error(), "TLS misconfiguration") {
+		t.Fatalf("expected TLS misconfiguration error, got: %v", err)
+	}
+}
+
+func TestTLSPartialConfigKeyOnlyIsAnError(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("TLS_KEY_PATH", "/etc/sam/tls/origin-ca-key.pem")
+	// TLS_CERT_PATH not set — partial config should error
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load should return error when only key path is set")
+	}
+	if !strings.Contains(err.Error(), "TLS misconfiguration") {
+		t.Fatalf("expected TLS misconfiguration error, got: %v", err)
 	}
 }
 

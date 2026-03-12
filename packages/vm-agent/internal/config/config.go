@@ -324,7 +324,23 @@ func Load() (*Config, error) {
 	}
 
 	// Derive TLS enabled state from cert/key paths
-	cfg.TLSEnabled = cfg.TLSCertPath != "" && cfg.TLSKeyPath != ""
+	certSet := cfg.TLSCertPath != ""
+	keySet := cfg.TLSKeyPath != ""
+	if certSet != keySet {
+		return nil, fmt.Errorf(
+			"TLS misconfiguration: TLS_CERT_PATH and TLS_KEY_PATH must both be set or both be empty "+
+				"(cert=%q, key=%q)", cfg.TLSCertPath, cfg.TLSKeyPath)
+	}
+	cfg.TLSEnabled = certSet && keySet
+
+	if cfg.TLSEnabled {
+		if _, err := os.Stat(cfg.TLSCertPath); err != nil {
+			return nil, fmt.Errorf("TLS_CERT_PATH %q: %w", cfg.TLSCertPath, err)
+		}
+		if _, err := os.Stat(cfg.TLSKeyPath); err != nil {
+			return nil, fmt.Errorf("TLS_KEY_PATH %q: %w", cfg.TLSKeyPath, err)
+		}
+	}
 
 	// Validate required fields
 	if cfg.ControlPlaneURL == "" {

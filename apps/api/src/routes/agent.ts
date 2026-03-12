@@ -124,7 +124,7 @@ Type=simple
 ExecStart=/usr/local/bin/vm-agent
 Restart=always
 RestartSec=5
-Environment=VM_AGENT_PORT=8080
+Environment=VM_AGENT_PORT=8443
 
 [Install]
 WantedBy=multi-user.target

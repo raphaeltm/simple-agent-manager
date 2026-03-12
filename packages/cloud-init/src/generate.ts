@@ -27,6 +27,8 @@ export interface CloudInitVariables {
   originCaCert?: string;
   /** Origin CA private key PEM for TLS (nullable) */
   originCaKey?: string;
+  /** VM agent port override (default: 8443 with TLS, 8080 without) */
+  vmAgentPort?: string;
 }
 
 /**
@@ -51,7 +53,7 @@ export function generateCloudInit(variables: CloudInitVariables): string {
     '{{ docker_dns_servers }}': variables.dockerDnsServers ?? '"1.1.1.1", "8.8.8.8"',
     '{{ origin_ca_cert }}': variables.originCaCert ?? '',
     '{{ origin_ca_key }}': variables.originCaKey ?? '',
-    '{{ vm_agent_port }}': variables.originCaCert ? '8443' : '8080',
+    '{{ vm_agent_port }}': variables.vmAgentPort ?? (variables.originCaCert ? '8443' : '8080'),
     '{{ tls_cert_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca.pem' : '',
     '{{ tls_key_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca-key.pem' : '',
   };
