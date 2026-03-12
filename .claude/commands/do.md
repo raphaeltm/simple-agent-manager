@@ -21,9 +21,9 @@ You are an autonomous task executor. The user has described a task above. Your j
    - Any constraints or preferences stated
 
 2. **Research the codebase.** Before writing anything:
-   - Use Grep, Glob, and Read to find all relevant code paths
+   - Search and read to find all relevant code paths
    - Read related docs in `docs/`, `specs/`, `.claude/rules/`
-   - Use Context7 MCP or WebFetch for external library/API docs if needed
+   - Use web search for external library/API docs if needed
    - Identify existing patterns, conventions, and test approaches in the affected areas
 
 3. **Create a task file** in `tasks/backlog/` using the format `YYYY-MM-DD-descriptive-name.md`:
@@ -50,7 +50,7 @@ You are an autonomous task executor. The user has described a task above. Your j
    ```
    git worktree add ../sam-<short-name> -b <branch-name>
    ```
-   - Branch naming: use a descriptive kebab-case name (e.g., `fix-chat-scroll-regression`, `add-workspace-tags`)
+   - Branch naming: use a descriptive kebab-case name
    - Worktree location: `../sam-<short-name>` (sibling to the main repo directory)
 
 2. **Move the task file** from `tasks/backlog/` to `tasks/active/` in the worktree and commit.
@@ -70,31 +70,24 @@ Execute the checklist from the task file. Follow these rules:
 
 1. **Work through checklist items sequentially**, checking each off in the task file as you complete it.
 
-2. **Use subagents liberally** for parallelizable work:
-   - Research subagents (Explore) for codebase questions
-   - Test engineer subagent for generating tests
-   - Specialist subagents for domain-specific guidance (Go, Cloudflare, UI, security)
-
-3. **Follow project conventions:**
+2. **Follow project conventions:**
    - Obey all rules in `.claude/rules/`
    - Respect build order: `shared` -> `providers` -> `cloud-init` -> `api` / `web`
-   - Update documentation in the same commit as code changes (rule 01)
-   - Write tests that prove the feature works (rule 02)
-   - No hardcoded values (rule 03 / constitution Principle XI)
+   - Update documentation in the same commit as code changes
+   - Write tests that prove the feature works
+   - No hardcoded values (constitution Principle XI)
 
-4. **Push frequently.** After every meaningful unit of work:
+3. **Push frequently.** After every meaningful unit of work:
    ```
    git add <specific-files>
    git commit -m "<type>: <description>"
    git push origin <branch-name>
    ```
-   Environments are ephemeral — unpushed work can be lost.
 
-5. **Run quality checks regularly** during implementation:
+4. **Run quality checks regularly** during implementation:
    - `pnpm typecheck` after type-related changes
    - `pnpm lint` after any code changes
    - `pnpm test` after adding/modifying tests
-   - Fix issues immediately — do not accumulate debt
 
 ---
 
@@ -114,48 +107,90 @@ Before creating the PR, ensure everything is solid:
 
 ---
 
-## Phase 5: Review Subagents
+## Phase 5: Review
 
-Dispatch a team of review subagents **in parallel** based on what the PR touches. Use the Task tool with specialized `subagent_type` values:
+Dispatch review based on what the PR touches:
 
-| PR touches | Subagent type | What it checks |
-|------------|---------------|----------------|
-| Go code (`packages/vm-agent/`) | `go-specialist` | Concurrency, resource leaks, Go idioms |
-| TypeScript API (`apps/api/`) | `cloudflare-specialist` | D1, KV, Workers patterns |
-| UI code (`apps/web/`, `packages/ui/`) | `ui-ux-specialist` | Accessibility, layout, interactions |
-| Auth, credentials, tokens | `security-auditor` | Credential safety, OWASP, JWT |
-| Environment variables | `env-validator` | GH_ vs GITHUB_, deployment mapping |
-| Documentation changes | `doc-sync-validator` | Docs match code reality |
-| Business logic, config | `constitution-validator` | No hardcoded values |
-| Tests added/changed | `test-engineer` | Coverage, realism, TDD compliance |
+| PR touches | Skill | What it checks |
+|------------|-------|----------------|
+| Go code (`packages/vm-agent/`) | `$go-specialist` | Concurrency, resource leaks, Go idioms |
+| TypeScript API (`apps/api/`) | `$cloudflare-specialist` | D1, KV, Workers patterns |
+| UI code (`apps/web/`, `packages/ui/`) | `$ui-ux-specialist` | Accessibility, layout, interactions |
+| Auth, credentials, tokens | `$security-auditor` | Credential safety, OWASP, JWT |
+| Environment variables | `$env-validator` | GH_ vs GITHUB_, deployment mapping |
+| Documentation changes | `$doc-sync-validator` | Docs match code reality |
+| Business logic, config | `$constitution-validator` | No hardcoded values |
+| Tests added/changed | `$test-engineer` | Coverage, realism, TDD compliance |
 
-**Process:**
-1. Launch all applicable reviewers in parallel
-2. Collect their findings
-3. Address every bug or correctness issue they raise
-4. Re-run reviewers if changes were substantial
-5. Repeat until all reviewers are satisfied (no outstanding bugs/correctness issues)
+Address every bug or correctness issue raised. Push fixes and re-run quality checks.
 
-Push all fixes and re-run quality checks after addressing feedback.
+**STOP: Wait for all review agents to complete before proceeding.** If you launched reviewers in background, you MUST wait for their results and address findings before moving to Phase 6. Do NOT use idle time to jump ahead to PR creation.
 
 ---
 
-## Phase 6: Pull Request
+## Phase 6: Staging Verification (BLOCKING — DO NOT SKIP)
+
+If this PR includes **any code changes** (not just docs/tasks), deploy to staging and verify before creating the PR.
+
+> **Skip this phase** only for documentation-only, config-only, or task-file-only changes.
+
+### 6a. Standard Verification (All Code Changes)
+
+1. **Deploy to staging:**
+   ```
+   pnpm deploy:setup --environment staging
+   ```
+   Or trigger the staging deployment via GitHub Actions.
+
+2. **Open the live app** using Playwright — navigate to `app.simple-agent-manager.org`.
+
+3. **Authenticate** using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`. If the file is missing, ask the human for credentials.
+
+4. **Verify the changed behavior works end-to-end:**
+   - **UI changes**: interact as a real user — click buttons, submit forms, navigate pages
+   - **API/backend changes**: verify affected endpoints respond correctly and downstream behavior works through the UI
+
+5. **Report findings** to the user with evidence (screenshots or Playwright observations).
+
+6. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT proceed to PR creation with known staging failures.
+
+### 6b. Infrastructure Verification (MANDATORY for Infrastructure Changes)
+
+If the PR touches **any** of: `packages/cloud-init/`, `packages/vm-agent/`, `scripts/deploy/` (VM provisioning infrastructure), DNS record logic, TLS certificates, or VM agent port/protocol — you MUST complete these additional steps. **This is not optional. This is the gate that prevents catastrophic production failures.**
+
+1. **Provision a real VM** — create a test workspace on staging that triggers full VM provisioning via cloud-init.
+2. **Wait for heartbeat** — verify that the VM agent starts and sends heartbeats to the control plane within 2 minutes. If heartbeats do not arrive, the change is broken.
+3. **Verify workspace access** — confirm the workspace is reachable via its `ws-*` subdomain and that terminal/agent sessions function.
+4. **If TLS-related** — verify HTTPS connections to the VM agent succeed with valid certificate negotiation.
+5. **Clean up** — delete the test workspace and node.
+6. **Record evidence** — report to the user: "VM provisioned, heartbeat received at [time], workspace accessible at [URL]" or "FAILED: [specific failure]".
+
+**If infrastructure verification fails, DO NOT create the PR. DO NOT merge. Fix the issue first.**
+
+> **Why this is mandatory**: The TLS YAML indentation bug (`docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md`) shipped to production because staging verification only checked UI rendering and API responses. Nobody provisioned a VM. The result: all workspace provisioning broke for ~2.5 hours in production.
+
+### No Self-Exemptions
+
+**Fixing a broken gate does not exempt you from the gate.** If staging is currently broken by the bug you are fixing, deploy your fix branch to staging and verify it *fixes* the broken state. "This is the fix for the thing the gate tests" is the **strongest** reason to run the gate, not a reason to skip it.
+
+### If You Already Created the PR Without Completing Phase 6
+
+You made a mistake. Close the PR, complete staging verification, then re-open. Do NOT merge a PR that skipped Phase 6 and "verify post-merge" — that is how bugs reach production.
+
+---
+
+## Phase 7: Pull Request
 
 1. **Create the PR** using `gh pr create`:
    - Title: short, under 70 characters
    - Body: use the PR template from `.github/pull_request_template.md`
-   - Fill in all sections including Agent Preflight, validation checkboxes, and any applicable sections (post-mortem for bug fixes, data flow trace for multi-component changes)
 
-2. **Push and wait for CI.** Check GitHub Actions for the PR:
+2. **Push and wait for CI.** Check GitHub Actions:
    ```
    gh pr checks <pr-number> --watch
    ```
 
-3. **If CI fails:**
-   - Inspect failing job logs: `gh run view <run-id> --log-failed`
-   - Fix the issues, commit, and push
-   - Repeat until all checks are green
+3. **If CI fails:** inspect logs, fix issues, commit, push, repeat.
 
 4. **Once CI is fully green**, merge the PR:
    ```
