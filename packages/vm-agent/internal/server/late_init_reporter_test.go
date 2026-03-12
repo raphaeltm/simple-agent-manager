@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/workspace/vm-agent/internal/acp"
@@ -67,42 +68,45 @@ func newServerWithoutReporter(t *testing.T) (*Server, string) {
 	return s, dbPath
 }
 
-func TestLateInitMessageReporter_CreatesReporter(t *testing.T) {
+func TestGetOrCreateReporter_CreatesReporter(t *testing.T) {
 	t.Parallel()
 	s, _ := newServerWithoutReporter(t)
 
 	if len(s.messageReporters) != 0 {
-		t.Fatal("expected no reporters before late init")
+		t.Fatal("expected no reporters before creation")
 	}
 
-	s.lateInitMessageReporter("ws-test-1", "proj-1", "sess-1")
+	r := s.getOrCreateReporter("ws-test-1", "proj-1", "sess-1")
 
+	if r == nil {
+		t.Fatal("expected reporter for ws-test-1 after getOrCreateReporter")
+	}
+
+	// Verify it's stored in the map
 	s.messageReportersMu.Lock()
-	r, ok := s.messageReporters["ws-test-1"]
+	stored, ok := s.messageReporters["ws-test-1"]
 	s.messageReportersMu.Unlock()
 
-	if !ok || r == nil {
-		t.Fatal("expected reporter for ws-test-1 after late init")
+	if !ok || stored != r {
+		t.Fatal("expected stored reporter to match returned reporter")
 	}
 
 	// Clean up the reporter's background goroutine
 	r.Shutdown()
 }
 
-func TestLateInitMessageReporter_SetsCallbackToken(t *testing.T) {
+func TestGetOrCreateReporter_SetsCallbackToken(t *testing.T) {
 	t.Parallel()
 	s, _ := newServerWithoutReporter(t)
 
-	// Set a callback token before late-init
+	// Set a callback token before creation
+	s.callbackTokenMu.Lock()
 	s.callbackToken = "test-token-123"
+	s.callbackTokenMu.Unlock()
 
-	s.lateInitMessageReporter("ws-test-2", "proj-2", "sess-2")
+	r := s.getOrCreateReporter("ws-test-2", "proj-2", "sess-2")
 
-	s.messageReportersMu.Lock()
-	r, ok := s.messageReporters["ws-test-2"]
-	s.messageReportersMu.Unlock()
-
-	if !ok || r == nil {
+	if r == nil {
 		t.Fatal("expected reporter for ws-test-2")
 	}
 
@@ -112,22 +116,19 @@ func TestLateInitMessageReporter_SetsCallbackToken(t *testing.T) {
 	r.Shutdown()
 }
 
-func TestLateInitMessageReporter_InvalidDBPath(t *testing.T) {
+func TestGetOrCreateReporter_InvalidDBPath(t *testing.T) {
 	t.Parallel()
 	s, _ := newServerWithoutReporter(t)
 
 	// Point to a non-writable path
 	s.config.PersistenceDBPath = "/nonexistent/path/test.db"
 
-	s.lateInitMessageReporter("ws-test-3", "proj-3", "sess-3")
+	r := s.getOrCreateReporter("ws-test-3", "proj-3", "sess-3")
 
-	// Should gracefully handle the error — reporter stays nil
-	s.messageReportersMu.Lock()
-	r := s.messageReporters["ws-test-3"]
-	s.messageReportersMu.Unlock()
+	// Should gracefully handle the error — returns nil
 	if r != nil {
-		t.Fatal("expected no reporter with invalid DB path")
 		r.Shutdown()
+		t.Fatal("expected no reporter with invalid DB path")
 	}
 }
 
@@ -218,4 +219,56 @@ func TestMessageReporterDBPath(t *testing.T) {
 			t.Errorf("messageReporterDBPath(%q, %q) = %q, want %q", tt.base, tt.wsID, got, tt.expected)
 		}
 	}
+}
+
+func TestMessageReporterDBPath_Adversarial(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		base     string
+		wsID     string
+		expected string
+	}{
+		{"/var/lib/vm-agent/data.db", "../evil", "/var/lib/vm-agent/messages-__evil.db"},
+		{"/var/lib/vm-agent/data.db", "ws/evil", "/var/lib/vm-agent/messages-ws_evil.db"},
+		{"/var/lib/vm-agent/data.db", "ws\x00id", "/var/lib/vm-agent/messages-ws_id.db"},
+		{"/var/lib/vm-agent/data.db", "../../etc/passwd", "/var/lib/vm-agent/messages-____etc_passwd.db"},
+	}
+
+	for _, tt := range tests {
+		got := messageReporterDBPath(tt.base, tt.wsID)
+		if got != tt.expected {
+			t.Errorf("messageReporterDBPath(%q, %q) = %q, want %q", tt.base, tt.wsID, got, tt.expected)
+		}
+	}
+}
+
+func TestGetOrCreateReporter_Concurrent(t *testing.T) {
+	t.Parallel()
+	s, _ := newServerWithoutReporter(t)
+
+	const workers = 20
+	results := make([]*messagereport.Reporter, workers)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			results[i] = s.getOrCreateReporter("ws-concurrent", "proj-1", "sess-1")
+		}()
+	}
+	wg.Wait()
+
+	// All goroutines must receive the same reporter instance.
+	first := results[0]
+	if first == nil {
+		t.Fatal("expected reporter to be created")
+	}
+	for i, r := range results {
+		if r != first {
+			t.Errorf("goroutine %d got different reporter instance", i)
+		}
+	}
+	s.shutdownAllReporters()
 }

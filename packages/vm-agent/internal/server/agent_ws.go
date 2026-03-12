@@ -203,6 +203,9 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	cfg.SessionID = sessionID
 
 	// Use per-workspace message reporter to prevent cross-workspace contamination.
+	// Lock ordering: sessionHostMu → messageReportersMu → Reporter.mu
+	// and: callbackTokenMu → messageReportersMu → Reporter.mu
+	// Never acquire sessionHostMu while holding messageReportersMu.
 	s.messageReportersMu.Lock()
 	if r, ok := s.messageReporters[workspaceID]; ok {
 		cfg.MessageReporter = &messageReporterAdapter{r: r}

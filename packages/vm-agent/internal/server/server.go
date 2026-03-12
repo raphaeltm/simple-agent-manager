@@ -55,7 +55,7 @@ type Server struct {
 	sessionMcpServers   map[string][]acp.McpServerEntry // hostKey → MCP servers for ACP injection
 	store               *persistence.Store
 	errorReporter       *errorreport.Reporter
-	messageReportersMu  sync.Mutex
+	messageReportersMu  sync.RWMutex
 	messageReporters    map[string]*messagereport.Reporter // keyed by workspaceID
 	worktreeCacheMu     sync.RWMutex
 	worktreeCache       map[string]cachedWorktreeList
@@ -595,14 +595,25 @@ func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 // if it doesn't exist yet. This handles both auto-provisioned nodes (reporter
 // created at boot) and manually provisioned nodes (late-initialized here).
 // Returns nil if creation fails (errors are logged, not propagated).
+//
+// Uses double-checked locking to avoid holding messageReportersMu during
+// disk I/O (SQLite open + migration).
 func (s *Server) getOrCreateReporter(workspaceID, projectID, chatSessionID string) *messagereport.Reporter {
-	s.messageReportersMu.Lock()
-	defer s.messageReportersMu.Unlock()
-
+	// Fast path: reporter already exists (read-only check).
+	s.messageReportersMu.RLock()
 	if r, ok := s.messageReporters[workspaceID]; ok {
+		s.messageReportersMu.RUnlock()
 		return r
 	}
+	s.messageReportersMu.RUnlock()
 
+	// Read callback token before any lock — avoids nested lock acquisition
+	// with callbackTokenMu (lock order: callbackTokenMu before messageReportersMu).
+	s.callbackTokenMu.RLock()
+	token := s.callbackToken
+	s.callbackTokenMu.RUnlock()
+
+	// Slow path: create reporter outside the lock (disk I/O).
 	cfg := messagereport.LoadConfigFromEnv()
 	cfg.ProjectID = projectID
 	cfg.SessionID = chatSessionID
@@ -622,13 +633,24 @@ func (s *Server) getOrCreateReporter(workspaceID, projectID, chatSessionID strin
 		msgDB.Close()
 		return nil
 	}
+	if reporter == nil {
+		// No project/session context — intentional no-op path.
+		msgDB.Close()
+		return nil
+	}
 
-	// Set the auth token so the reporter can authenticate with the control plane.
-	s.callbackTokenMu.RLock()
-	token := s.callbackToken
-	s.callbackTokenMu.RUnlock()
 	if token != "" {
 		reporter.SetToken(token)
+	}
+
+	// Re-acquire lock and check again — a concurrent call may have won the race.
+	s.messageReportersMu.Lock()
+	defer s.messageReportersMu.Unlock()
+
+	if existing, ok := s.messageReporters[workspaceID]; ok {
+		// Concurrent creation won — discard our duplicate.
+		reporter.Shutdown()
+		return existing
 	}
 
 	s.messageReporters[workspaceID] = reporter
@@ -674,26 +696,27 @@ func (s *Server) shutdownAllReporters() {
 
 // setTokenAllReporters propagates an auth token to all active reporters.
 func (s *Server) setTokenAllReporters(token string) {
-	s.messageReportersMu.Lock()
-	defer s.messageReportersMu.Unlock()
+	s.messageReportersMu.RLock()
+	snapshot := make([]*messagereport.Reporter, 0, len(s.messageReporters))
 	for _, r := range s.messageReporters {
+		snapshot = append(snapshot, r)
+	}
+	s.messageReportersMu.RUnlock()
+
+	for _, r := range snapshot {
 		r.SetToken(token)
 	}
 }
 
 // messageReporterDBPath returns the SQLite DB path for a workspace's message
 // reporter. Each workspace gets an isolated DB to prevent cross-workspace
-// contamination in the outbox.
+// contamination in the outbox. Workspace IDs are sanitized to prevent path
+// traversal.
 func messageReporterDBPath(basePath, workspaceID string) string {
+	// Sanitize: replace path-unsafe characters to prevent directory traversal.
+	safe := strings.NewReplacer("/", "_", "..", "_", "\x00", "_").Replace(workspaceID)
 	dir := filepath.Dir(basePath)
-	return filepath.Join(dir, "messages-"+workspaceID+".db")
-}
-
-// lateInitMessageReporter creates the message reporter at runtime when a
-// manually provisioned node receives its first agent session with project
-// context. Delegates to getOrCreateReporter.
-func (s *Server) lateInitMessageReporter(workspaceID, projectID, chatSessionID string) {
-	s.getOrCreateReporter(workspaceID, projectID, chatSessionID)
+	return filepath.Join(dir, "messages-"+safe+".db")
 }
 
 // messageReporterAdapter bridges acp.MessageReporter (which uses
