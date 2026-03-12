@@ -595,14 +595,25 @@ func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 // if it doesn't exist yet. This handles both auto-provisioned nodes (reporter
 // created at boot) and manually provisioned nodes (late-initialized here).
 // Returns nil if creation fails (errors are logged, not propagated).
+//
+// Uses double-checked locking to avoid holding messageReportersMu during
+// disk I/O (SQLite open + migration).
 func (s *Server) getOrCreateReporter(workspaceID, projectID, chatSessionID string) *messagereport.Reporter {
+	// Fast path: reporter already exists.
 	s.messageReportersMu.Lock()
-	defer s.messageReportersMu.Unlock()
-
 	if r, ok := s.messageReporters[workspaceID]; ok {
+		s.messageReportersMu.Unlock()
 		return r
 	}
+	s.messageReportersMu.Unlock()
 
+	// Read callback token before any lock — avoids nested lock acquisition
+	// with callbackTokenMu (lock order: callbackTokenMu before messageReportersMu).
+	s.callbackTokenMu.RLock()
+	token := s.callbackToken
+	s.callbackTokenMu.RUnlock()
+
+	// Slow path: create reporter outside the lock (disk I/O).
 	cfg := messagereport.LoadConfigFromEnv()
 	cfg.ProjectID = projectID
 	cfg.SessionID = chatSessionID
@@ -622,13 +633,24 @@ func (s *Server) getOrCreateReporter(workspaceID, projectID, chatSessionID strin
 		msgDB.Close()
 		return nil
 	}
+	if reporter == nil {
+		// No project/session context — intentional no-op path.
+		msgDB.Close()
+		return nil
+	}
 
-	// Set the auth token so the reporter can authenticate with the control plane.
-	s.callbackTokenMu.RLock()
-	token := s.callbackToken
-	s.callbackTokenMu.RUnlock()
 	if token != "" {
 		reporter.SetToken(token)
+	}
+
+	// Re-acquire lock and check again — a concurrent call may have won the race.
+	s.messageReportersMu.Lock()
+	defer s.messageReportersMu.Unlock()
+
+	if existing, ok := s.messageReporters[workspaceID]; ok {
+		// Concurrent creation won — discard our duplicate.
+		reporter.Shutdown()
+		return existing
 	}
 
 	s.messageReporters[workspaceID] = reporter
@@ -683,17 +705,13 @@ func (s *Server) setTokenAllReporters(token string) {
 
 // messageReporterDBPath returns the SQLite DB path for a workspace's message
 // reporter. Each workspace gets an isolated DB to prevent cross-workspace
-// contamination in the outbox.
+// contamination in the outbox. Workspace IDs are sanitized to prevent path
+// traversal.
 func messageReporterDBPath(basePath, workspaceID string) string {
+	// Sanitize: replace path-unsafe characters to prevent directory traversal.
+	safe := strings.NewReplacer("/", "_", "..", "_", "\x00", "").Replace(workspaceID)
 	dir := filepath.Dir(basePath)
-	return filepath.Join(dir, "messages-"+workspaceID+".db")
-}
-
-// lateInitMessageReporter creates the message reporter at runtime when a
-// manually provisioned node receives its first agent session with project
-// context. Delegates to getOrCreateReporter.
-func (s *Server) lateInitMessageReporter(workspaceID, projectID, chatSessionID string) {
-	s.getOrCreateReporter(workspaceID, projectID, chatSessionID)
+	return filepath.Join(dir, "messages-"+safe+".db")
 }
 
 // messageReporterAdapter bridges acp.MessageReporter (which uses

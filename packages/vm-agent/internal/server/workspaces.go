@@ -552,9 +552,15 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	// This handles both:
 	// - Auto-provisioned nodes: reporter may already exist from boot time
 	// - Manually provisioned nodes: reporter created here on first agent session
-	// - Warm node reuse: new reporter created for the new workspace/session
+	// - Warm node reuse: reporter already exists but session ID needs updating
 	if chatSID != "" && projectID != "" {
-		s.getOrCreateReporter(workspaceID, projectID, chatSID)
+		r := s.getOrCreateReporter(workspaceID, projectID, chatSID)
+		if r != nil {
+			// Always update session ID: handles warm-node reuse where the workspace
+			// is reused for a new task with a different chatSessionID. SetSessionID
+			// clears stale outbox messages from the previous session.
+			r.SetSessionID(chatSID)
+		}
 	}
 
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
