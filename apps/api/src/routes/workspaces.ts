@@ -112,7 +112,7 @@ function isActiveWorkspaceStatus(status: string): boolean {
 }
 
 /** Parse a JSON string into a plain object, returning null on failure or prototype pollution. */
-function safeParseJson(s: string): Record<string, unknown> | null {
+export function safeParseJson(s: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(s);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
