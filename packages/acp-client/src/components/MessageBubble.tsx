@@ -3,11 +3,14 @@ import type { Components } from 'react-markdown';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Highlight, themes } from 'prism-react-renderer';
+import { MessageActions } from './MessageActions';
 
 interface MessageBubbleProps {
   text: string;
   role: 'user' | 'agent';
   streaming?: boolean;
+  /** Unix-millisecond timestamp for metadata display (agent messages only). */
+  timestamp?: number;
 }
 
 // Stable remark plugins array — avoids creating a new array reference on every render
@@ -135,12 +138,14 @@ const AGENT_MARKDOWN_COMPONENTS: Components = {
  * Wrapped in React.memo to prevent re-renders when parent state changes
  * (e.g., scroll position, input value) don't affect this component's props.
  */
-export const MessageBubble = React.memo(function MessageBubble({ text, role, streaming }: MessageBubbleProps) {
+export const MessageBubble = React.memo(function MessageBubble({ text, role, streaming, timestamp }: MessageBubbleProps) {
   const isUser = role === 'user';
+  const isAgent = role === 'agent';
   const components = isUser ? USER_MARKDOWN_COMPONENTS : AGENT_MARKDOWN_COMPONENTS;
+  const showActions = isAgent && !streaming && timestamp != null && timestamp > 0;
 
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
+    <div className={`group/msg flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       <div
         className={`max-w-[80%] rounded-lg px-4 py-3 ${
           isUser
@@ -158,6 +163,11 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
         </div>
         {streaming && (
           <span className="inline-block mt-1 text-xs opacity-60 animate-pulse">...</span>
+        )}
+        {showActions && (
+          <div className="opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
+            <MessageActions text={text} timestamp={timestamp} />
+          </div>
         )}
       </div>
     </div>
