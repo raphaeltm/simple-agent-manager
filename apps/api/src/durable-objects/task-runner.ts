@@ -932,9 +932,13 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         workspaceId,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw new Error(
+      // Mark as permanent so the task runner fails immediately rather than
+      // burning all retry budget on a non-retryable D1 constraint violation.
+      const permanentError = new Error(
         `Failed to link chatSessionId to workspace ${workspaceId} in D1: ${err instanceof Error ? err.message : String(err)}`
       );
+      (permanentError as Error & { permanent: boolean }).permanent = true;
+      throw permanentError;
     }
 
     // Step 2: Update ProjectData DO session record (best-effort — enriches session data)
