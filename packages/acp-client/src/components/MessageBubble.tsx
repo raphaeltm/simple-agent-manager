@@ -142,7 +142,7 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
   const isUser = role === 'user';
   const isAgent = role === 'agent';
   const components = isUser ? USER_MARKDOWN_COMPONENTS : AGENT_MARKDOWN_COMPONENTS;
-  const showActions = isAgent && !streaming && timestamp != null;
+  const showActions = isAgent && !streaming && timestamp != null && timestamp > 0;
 
   return (
     <div className={`group/msg flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
@@ -165,7 +165,7 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
           <span className="inline-block mt-1 text-xs opacity-60 animate-pulse">...</span>
         )}
         {showActions && (
-          <div className="opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition-opacity">
+          <div className="opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
             <MessageActions text={text} timestamp={timestamp} />
           </div>
         )}

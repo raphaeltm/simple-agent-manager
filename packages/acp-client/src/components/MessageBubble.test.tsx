@@ -233,5 +233,10 @@ describe('MessageBubble', () => {
       render(<MessageBubble text="Hello" role="agent" />);
       expect(screen.queryByLabelText('Message info')).toBeNull();
     });
+
+    it('does not show action buttons when timestamp is 0 (epoch)', () => {
+      render(<MessageBubble text="Hello" role="agent" timestamp={0} />);
+      expect(screen.queryByLabelText('Message info')).toBeNull();
+    });
   });
 });

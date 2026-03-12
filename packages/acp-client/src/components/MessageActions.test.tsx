@@ -90,7 +90,7 @@ describe('MessageActions', () => {
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
-      expect(screen.getByRole('dialog')).toBeTruthy();
+      expect(screen.getByRole('tooltip')).toBeTruthy();
       expect(screen.getByText(/Time:/)).toBeTruthy();
       expect(screen.getByText(/Words:/)).toBeTruthy();
       expect(screen.getByText(/Characters:/)).toBeTruthy();
@@ -101,7 +101,7 @@ describe('MessageActions', () => {
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
-      const dialog = screen.getByRole('dialog');
+      const dialog = screen.getByRole('tooltip');
       expect(getMetadataValue(dialog, 'Words')).toBe('5');
     });
 
@@ -110,7 +110,7 @@ describe('MessageActions', () => {
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
-      const dialog = screen.getByRole('dialog');
+      const dialog = screen.getByRole('tooltip');
       expect(getMetadataValue(dialog, 'Characters')).toBe('5');
       expect(getMetadataValue(dialog, 'Words')).toBe('1');
     });
@@ -120,7 +120,7 @@ describe('MessageActions', () => {
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
-      const dialog = screen.getByRole('dialog');
+      const dialog = screen.getByRole('tooltip');
       expect(getMetadataValue(dialog, 'Words')).toBe('0');
       expect(getMetadataValue(dialog, 'Characters')).toBe('0');
     });
@@ -130,7 +130,7 @@ describe('MessageActions', () => {
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
-      const dialog = screen.getByRole('dialog');
+      const dialog = screen.getByRole('tooltip');
       // "Use the  function" stripped → "Use the function" = 3 words
       expect(getMetadataValue(dialog, 'Words')).toBe('3');
     });
@@ -141,7 +141,7 @@ describe('MessageActions', () => {
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
-      const dialog = screen.getByRole('dialog');
+      const dialog = screen.getByRole('tooltip');
       expect(getMetadataValue(dialog, 'Words')).toBe('2');
     });
 
@@ -150,7 +150,7 @@ describe('MessageActions', () => {
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
-      const dialog = screen.getByRole('dialog');
+      const dialog = screen.getByRole('tooltip');
       const timeValue = getMetadataValue(dialog, 'Time');
       // Should contain year 2024 from the timestamp
       expect(timeValue).toContain('2024');
@@ -161,10 +161,20 @@ describe('MessageActions', () => {
 
       const btn = screen.getByLabelText('Message info');
       fireEvent.click(btn);
-      expect(screen.getByRole('dialog')).toBeTruthy();
+      expect(screen.getByRole('tooltip')).toBeTruthy();
 
       fireEvent.click(btn);
-      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(screen.queryByRole('tooltip')).toBeNull();
+    });
+
+    it('closes metadata popover on Escape key', () => {
+      render(<MessageActions {...defaultProps} />);
+
+      fireEvent.click(screen.getByLabelText('Message info'));
+      expect(screen.getByRole('tooltip')).toBeTruthy();
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.queryByRole('tooltip')).toBeNull();
     });
 
     it('closes metadata popover on outside click', () => {
@@ -176,11 +186,11 @@ describe('MessageActions', () => {
       );
 
       fireEvent.click(screen.getByLabelText('Message info'));
-      expect(screen.getByRole('dialog')).toBeTruthy();
+      expect(screen.getByRole('tooltip')).toBeTruthy();
 
       // Click outside the component
       fireEvent.mouseDown(screen.getByTestId('outside'));
-      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(screen.queryByRole('tooltip')).toBeNull();
     });
 
     it('sets aria-expanded on info button', () => {
