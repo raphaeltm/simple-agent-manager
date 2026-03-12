@@ -1,8 +1,14 @@
 /**
- * Tests for cloud-init generation with projectId and chatSessionId variables.
+ * Tests for cloud-init generation.
+ *
+ * IMPORTANT: TLS certificate tests MUST parse the YAML output and verify
+ * the full PEM content survives intact. String `toContain()` checks are
+ * NOT sufficient — they hide YAML indentation bugs that truncate certs.
+ * See: docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md
  */
 import { describe, it, expect } from 'vitest';
-import { generateCloudInit, validateCloudInitSize } from '../src/generate';
+import YAML from 'yaml';
+import { generateCloudInit, validateCloudInitSize, indentForYamlBlock } from '../src/generate';
 import type { CloudInitVariables } from '../src/generate';
 
 function baseVariables(overrides?: Partial<CloudInitVariables>): CloudInitVariables {
@@ -15,6 +21,79 @@ function baseVariables(overrides?: Partial<CloudInitVariables>): CloudInitVariab
     ...overrides,
   };
 }
+
+/**
+ * Realistic multi-line PEM certificate (20 lines of base64, matching real Origin CA output).
+ * This catches YAML indentation bugs that single-line test data misses.
+ */
+const REALISTIC_CERT = [
+  '-----BEGIN CERTIFICATE-----',
+  'MIIEojCCA4qgAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4wDQYJKoZIhvcNAQEL',
+  'BQAwgYsxCzAJBgNVBAYTAlVTMRkwFwYDVQQKExBDbG91ZEZsYXJlLCBJbmMuMTQw',
+  'MgYDVQQLEytDbG91ZEZsYXJlIE9yaWdpbiBTU0wgQ2VydGlmaWNhdGUgQXV0aG9y',
+  'aXR5MRYwFAYDVQQHEw1TYW4gRnJhbmNpc2NvMRMwEQYDVQQIEwpDYWxpZm9ybmlh',
+  'MB4XDTI2MDMxMjAwMDAwMFoXDTQxMDMxMjAwMDAwMFowYjEZMBcGA1UEChMQQ2xv',
+  'dWRGbGFyZSwgSW5jLjEdMBsGA1UECxMUT3JpZ2luIFB1bGwgQ2VydGlmaWNhdGUx',
+  'JjAkBgNVBAMTHSouc2ltcGxlLWFnZW50LW1hbmFnZXIub3JnMIIBIjANBgkqhkiG',
+  '9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxvFqof1sMB1yt+eiTk7gSMkJaOWJFx7GCQID',
+  'fDs3FtQ2VLJmb0xGKHGFqRN6pbO7SMZP1FQ7kS8pT4oXjqypCkrN0VdFMYqBL7h',
+  'T0sBNq3GlC5MIE2AMDDX3BFHL9WYJ8B8U6OV3W5KF6gTQF1wMPn8k3hC+XnRN1a',
+  'sL7ceOW4FH7eMvhx8gvFr6RfIZ6XHQD8s0G1xFQS5gJOPUBE1TGZ7K/qf+B4rvy',
+  'Q7KR9fGYPIFDY+8uCMNPgSGJzB2mK7Zf3RkR7hZeG0yFQZ3HWOH1bRU8w0xnTPO',
+  'J3CKbU8XZjNqMOBz+yz8BDf7lTSGFsNQOgS/8dRFJ8TkM+SjwIDAQABo4IBIjCC',
+  'AR4wDgYDVR0PAQH/BAQDAgWgMB0GA1UdJQQWMBQGCCsGAQUFBwMCBggrBgEFBQcD',
+  'ATAMBgNVHRMBAf8EAjAAMB0GA1UdDgQWBBT+VRqXXauFSfaEJMOv7oBJl/qzYTAf',
+  'BgNVHSMEGDAWgBQk6FNXXXw0QIep65TbuuEWePwppDBABggrBgEFBQcBAQQ0MDIw',
+  'MAYIKwYBBQUHMAGGJGh0dHA6Ly9vY3NwLmNsb3VkZmxhcmUuY29tL29yaWdpbl9l',
+  'Y2MwJQYDVR0RBB4wHIIaKi5zaW1wbGUtYWdlbnQtbWFuYWdlci5vcmcwOgYDVR0f',
+  'BDMwMTAvoC2gK4YpaHR0cDovL2NybC5jbG91ZGZsYXJlLmNvbS9vcmlnaW5fZWNj',
+  '-----END CERTIFICATE-----',
+].join('\n');
+
+const REALISTIC_KEY = [
+  '-----BEGIN RSA PRIVATE KEY-----',
+  'MIIEpAIBAAKCAQEAxvFqof1sMB1yt+eiTk7gSMkJaOWJFx7GCQIDfDs3FtQ2VLJM',
+  'b0xGKHGFqRN6pbO7SMZP1FQ7kS8pT4oXjqypCkrN0VdFMYqBL7hT0sBNq3GlC5M',
+  'IE2AMDDX3BFHL9WYJ8B8U6OV3W5KF6gTQF1wMPn8k3hC+XnRN1asL7ceOW4FH7e',
+  'MvhxQgvFr6RfIZ6XHQD8s0G1xFQS5gJOPUBE1TGZ7K/qf+B4rvyQ7KR9fGYPIFD',
+  'Y+8uCMNPgSGJzB2mK7Zf3RkR7hZeG0yFQZ3HWOH1bRU8w0xnTPOJ3CKbU8XZjNq',
+  'MobyHyz8BDf7lTSGFsNQOgS/8dRFJ8TkM+SjwIDAQABAoIBAQCJr7bGFaFmsPlN',
+  'F0hIVBjW8dN3VbS4NlD5eHsOWLh7SJFG3FFtxD4ghVk9qZB0XH7H3d/rKL/xxaR',
+  'UQgz7DLZKi9q1J6wJpA8+oRNfBq0aGLXFM3KEe+GiPCGq7bDC4pEZ6k+F01MFYQ',
+  'Dqm/NBGZB+PsAeKbs+R7iL+qHFNYXHGFax7w7T6B/QfBM7a2Eq7Q1ZDON/Q6Tlx',
+  'JGRNfZm0SB0F8YP0cxQ7xVPYWB4j1R7A8OX8yYnP1oFcj5fB7VQTRGFx5WVF7zT',
+  '7GVFYJ3p8kqVjGRFqL/6AG8zNn8O0SBN5BLH0ZCMO2NZJ3ReC+O2DwLEiQpLPcj',
+  'hGVL7qhBAoGBAPWFx1OB3m2t6sMDOjQY2z4JyJAtp7E1r3hbQ0VEMIhj3pYBXwVG',
+  '-----END RSA PRIVATE KEY-----',
+].join('\n');
+
+describe('indentForYamlBlock', () => {
+  it('returns empty string unchanged', () => {
+    expect(indentForYamlBlock('', 6)).toBe('');
+  });
+
+  it('returns single-line string unchanged', () => {
+    expect(indentForYamlBlock('hello', 6)).toBe('hello');
+  });
+
+  it('indents all lines after the first', () => {
+    const input = 'line1\nline2\nline3';
+    const result = indentForYamlBlock(input, 4);
+    expect(result).toBe('line1\n    line2\n    line3');
+  });
+
+  it('preserves existing indentation on subsequent lines', () => {
+    const input = 'line1\n  line2';
+    const result = indentForYamlBlock(input, 4);
+    expect(result).toBe('line1\n      line2');
+  });
+
+  it('handles trailing newline', () => {
+    const input = 'line1\nline2\n';
+    const result = indentForYamlBlock(input, 6);
+    expect(result).toBe('line1\n      line2\n      ');
+  });
+});
 
 describe('generateCloudInit', () => {
   describe('existing variable substitution (regression)', () => {
@@ -83,7 +162,6 @@ describe('generateCloudInit', () => {
 
       expect(config).toContain('Environment=PROJECT_ID=');
       expect(config).toContain('Environment=CHAT_SESSION_ID=');
-      // Must NOT contain the literal string "undefined"
       expect(config).not.toContain('PROJECT_ID=undefined');
       expect(config).not.toContain('CHAT_SESSION_ID=undefined');
     });
@@ -114,7 +192,6 @@ describe('generateCloudInit', () => {
         chatSessionId: 'sess-456',
       }));
 
-      // Verify they're within the [Service] section (between Environment=CALLBACK_TOKEN and ExecStart)
       const serviceSection = config.split('[Service]')[1]?.split('[Install]')[0];
       expect(serviceSection).toBeDefined();
       expect(serviceSection).toContain('Environment=PROJECT_ID=proj-123');
@@ -123,25 +200,10 @@ describe('generateCloudInit', () => {
   });
 
   describe('TLS certificate injection', () => {
-    const fakeCert = '-----BEGIN CERTIFICATE-----\nMIIBxTCCAW...\n-----END CERTIFICATE-----';
-    const fakeKey = '-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAK...\n-----END RSA PRIVATE KEY-----';
-
-    it('writes cert and key files when originCaCert/Key provided', () => {
-      const config = generateCloudInit(baseVariables({
-        originCaCert: fakeCert,
-        originCaKey: fakeKey,
-      }));
-
-      expect(config).toContain('/etc/sam/tls/origin-ca.pem');
-      expect(config).toContain('/etc/sam/tls/origin-ca-key.pem');
-      expect(config).toContain('BEGIN CERTIFICATE');
-      expect(config).toContain('BEGIN RSA PRIVATE KEY');
-    });
-
     it('sets VM_AGENT_PORT=8443 and TLS paths when cert provided', () => {
       const config = generateCloudInit(baseVariables({
-        originCaCert: fakeCert,
-        originCaKey: fakeKey,
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
       }));
 
       expect(config).toContain('Environment=VM_AGENT_PORT=8443');
@@ -157,10 +219,80 @@ describe('generateCloudInit', () => {
       expect(config).toContain('Environment=TLS_KEY_PATH=');
     });
 
-    it('config with TLS cert stays within 32KB limit', () => {
+    it('key file has restricted permissions (0600)', () => {
       const config = generateCloudInit(baseVariables({
-        originCaCert: fakeCert,
-        originCaKey: fakeKey,
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+      }));
+
+      expect(config).toMatch(/origin-ca-key\.pem[\s\S]*?permissions:\s*'0600'/);
+    });
+
+    /**
+     * CRITICAL REGRESSION TEST: Parse the YAML output and verify full PEM content survives.
+     *
+     * This test would have caught the bug introduced in PR #320, where plain string
+     * replacement of multi-line PEM content broke YAML block scalar indentation,
+     * truncating certs to just the first line.
+     *
+     * See: docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md
+     */
+    it('full multi-line cert PEM survives YAML generation intact', () => {
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+      }));
+
+      // Parse the generated YAML — this is the critical test.
+      // If indentation is wrong, YAML.parse() will either throw or
+      // produce truncated content.
+      const parsed = YAML.parse(config);
+
+      const certEntry = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/tls/origin-ca.pem'
+      );
+      expect(certEntry).toBeDefined();
+
+      const parsedCert = certEntry.content.trim();
+      expect(parsedCert).toBe(REALISTIC_CERT);
+    });
+
+    it('full multi-line key PEM survives YAML generation intact', () => {
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+      }));
+
+      const parsed = YAML.parse(config);
+
+      const keyEntry = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/tls/origin-ca-key.pem'
+      );
+      expect(keyEntry).toBeDefined();
+
+      const parsedKey = keyEntry.content.trim();
+      expect(parsedKey).toBe(REALISTIC_KEY);
+    });
+
+    it('generated YAML is valid and parseable with realistic certs', () => {
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+        projectId: 'proj-123',
+        chatSessionId: 'sess-456',
+        taskId: 'task-789',
+      }));
+
+      const parsed = YAML.parse(config);
+      expect(parsed.hostname).toBe('sam-test-node');
+      expect(parsed.write_files).toBeDefined();
+      expect(parsed.write_files.length).toBeGreaterThanOrEqual(5);
+    });
+
+    it('config with realistic TLS certs stays within 32KB limit', () => {
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
         projectId: 'proj-123',
         chatSessionId: 'sess-456',
       }));
@@ -168,15 +300,15 @@ describe('generateCloudInit', () => {
       expect(validateCloudInitSize(config)).toBe(true);
     });
 
-    it('key file has restricted permissions (0600)', () => {
+    it('handles empty cert/key gracefully (no TLS mode)', () => {
       const config = generateCloudInit(baseVariables({
-        originCaCert: fakeCert,
-        originCaKey: fakeKey,
+        originCaCert: '',
+        originCaKey: '',
       }));
 
-      // Verify the key file write_files entry has 0600 permissions
-      // Match the YAML block: path line followed eventually by permissions line
-      expect(config).toMatch(/origin-ca-key\.pem[\s\S]*?permissions:\s*'0600'/);
+      const parsed = YAML.parse(config);
+      expect(parsed.write_files).toBeDefined();
+      expect(config).toContain('Environment=VM_AGENT_PORT=8080');
     });
   });
 
@@ -187,7 +319,6 @@ describe('generateCloudInit', () => {
         chatSessionId: 'sess-test',
       }));
 
-      // The only {{ }} pattern remaining should be the docker tag {{.Name}}
       const remaining = config.match(/\{\{[^.][^}]*\}\}/g);
       expect(remaining).toBeNull();
     });

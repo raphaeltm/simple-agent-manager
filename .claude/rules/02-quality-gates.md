@@ -143,6 +143,51 @@ Each reviewer should:
 - If a reviewer identifies a missing test category (e.g., "this needs an integration test, not just unit tests"), add it
 - Push fixes and re-run reviewers if changes are substantial
 
+## Infrastructure Change Verification (Required)
+
+Changes to **cloud-init templates, VM agent configuration, DNS records, or TLS certificates** affect whether VMs can boot and communicate with the control plane. These changes MUST be verified with actual VM provisioning — unit tests and staging UI checks are NOT sufficient.
+
+### When This Applies
+
+This gate applies when a PR modifies ANY of:
+- `packages/cloud-init/` — cloud-init templates or generation logic
+- `packages/vm-agent/` — VM agent startup, TLS, heartbeat, or configuration
+- DNS record creation/modification in `apps/api/src/services/dns.ts`
+- TLS certificate handling (Origin CA, cert paths, key paths)
+- VM agent port, protocol, or connectivity configuration
+- `scripts/deploy/` changes that affect VM provisioning infrastructure
+
+### Required Steps
+
+1. **Deploy to staging** and provision a real VM (create a workspace)
+2. **Verify the VM agent starts** — check that heartbeats arrive at the control plane within 2 minutes of provisioning
+3. **Verify workspace accessibility** — confirm the workspace is reachable via its `ws-*` subdomain
+4. **If TLS-related**: verify the full TLS handshake succeeds (agent serves valid cert, CF edge accepts it)
+5. **Clean up** — delete the test workspace and node after verification
+
+### Failures Block Merge
+
+If VM provisioning fails, heartbeats do not arrive, or the workspace is unreachable, the PR MUST NOT be merged. Fix the issue and re-verify.
+
+### Why This Gate Exists
+
+The TLS YAML indentation bug (see `docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md`) shipped to production because staging verification only checked UI rendering and API responses — nobody provisioned a VM to verify the cloud-init output actually worked. Unit tests used unrealistic 3-line PEM data that survived the broken indentation by coincidence.
+
+## Template Output Verification (Required)
+
+When modifying code that generates structured output (YAML, JSON, XML, TOML), tests MUST parse the output in the target format and verify content integrity — not just check string containment.
+
+### Rules
+
+1. **Parse, don't grep.** Tests for template/generation code MUST parse the output using a real parser (`yaml.parse()`, `JSON.parse()`, etc.) and assert on the parsed structure.
+2. **Use realistic test data.** If the template embeds multi-line content (PEM certs, SSH keys, config blocks), tests MUST use realistic multi-line data — not 1-3 line stubs that hide indentation/escaping bugs.
+3. **Assert round-trip integrity.** For embedded content, verify the full content survives generation intact: `expect(parsed.field).toBe(originalInput)`.
+4. **`toContain('BEGIN CERTIFICATE')` is NOT a valid cert test.** This passes even when the cert is truncated to just the header line.
+
+### Why This Rule Exists
+
+String containment tests on structured output create false confidence. The test passes, CI is green, but the output is malformed. This is the class of bug that caused the TLS YAML indentation incident.
+
 ## Pre-Merge Staging Verification (Required for All Code Changes)
 
 Any PR that includes code changes MUST be deployed and tested on the live staging environment before merging to main. Local tests and CI alone are NOT sufficient — the live environment has real OAuth, DNS, D1, KV, Durable Objects, and VM infrastructure that local tests cannot replicate.
