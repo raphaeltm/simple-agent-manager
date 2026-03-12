@@ -39,7 +39,7 @@ describe('node-agent readiness helpers', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit | undefined];
-    expect(url).toBe('https://vm-node_abc.example.com:8443/health');
+    expect(url).toBe('https://node_abc.vm.example.com:8443/health');
     expect(init?.method).toBe('GET');
     expect(init?.signal).toBeInstanceOf(AbortSignal);
   });
@@ -58,7 +58,7 @@ describe('node-agent readiness helpers', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url] = fetchMock.mock.calls[0] as [string];
-    expect(url).toBe('http://vm-node_http.example.com:8080/health');
+    expect(url).toBe('http://node_http.vm.example.com:8080/health');
   });
 
   it('throws after timeout when node agent health never becomes reachable', async () => {

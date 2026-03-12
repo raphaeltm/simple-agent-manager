@@ -6,7 +6,7 @@ describe('ws proxy source contract', () => {
   const file = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
 
   it('routes workspace traffic via node backend hostname', () => {
-    expect(file).toContain('vm-${routedNodeId}.${baseDomain}');
+    expect(file).toContain('${routedNodeId}.vm.${baseDomain}');
     expect(file).toContain('workspace.nodeId || workspaceId');
   });
 

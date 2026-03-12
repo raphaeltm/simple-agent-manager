@@ -131,7 +131,7 @@ describe('waitForNodeAgentReady', () => {
     const { waitForNodeAgentReady } = await import('../../src/services/node-agent');
     await expect(waitForNodeAgentReady('node-1', makeEnv())).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe('https://vm-node-1.test.example.com:8443/health');
+    expect(fetchMock.mock.calls[0][0]).toBe('https://node-1.vm.test.example.com:8443/health');
   });
 
   it('retries on non-ok response and succeeds', async () => {
@@ -192,7 +192,7 @@ describe('waitForNodeAgentReady', () => {
     await waitForNodeAgentReady('ABC-123', env);
 
     // Node ID should be lowercased in the URL
-    expect(fetchMock.mock.calls[0][0]).toBe('https://vm-abc-123.test.example.com:8443/health');
+    expect(fetchMock.mock.calls[0][0]).toBe('https://abc-123.vm.test.example.com:8443/health');
   });
 
   it('respects custom timeout from env var', async () => {

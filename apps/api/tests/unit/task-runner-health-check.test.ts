@@ -3,8 +3,9 @@
  *
  * The task runner checks VM agent readiness via D1 heartbeat records instead
  * of fetching the VM agent directly. This avoids Cloudflare same-zone
- * subrequest routing, which intercepts Worker fetch() calls to vm-* hostnames
- * and routes them back to the API Worker instead of the VM agent.
+ * subrequest routing, which intercepted Worker fetch() calls to single-level
+ * vm-* subdomains. Now mitigated by two-level subdomains ({nodeId}.vm.{domain})
+ * but D1 health checks remain as defense-in-depth.
  *
  * The VM agent sends POST /api/nodes/:id/ready on startup and
  * POST /api/nodes/:id/heartbeat periodically, both updating D1.
@@ -36,7 +37,7 @@ describe('verifyNodeAgentHealthy helper', () => {
   });
 
   it('does NOT fetch the VM agent directly (same-zone bypass)', () => {
-    // The old approach used fetch() to vm-{nodeId}.domain — this MUST NOT be present
+    // Health checks use D1 not fetch — defense-in-depth against same-zone routing
     expect(section).not.toContain('fetch(');
     expect(section).not.toContain('AbortController');
   });

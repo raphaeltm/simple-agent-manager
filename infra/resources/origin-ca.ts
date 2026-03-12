@@ -1,9 +1,17 @@
 /**
  * Cloudflare Origin CA Certificate
  *
- * Generates a wildcard Origin CA certificate for *.{BASE_DOMAIN} that the
- * VM agent uses to serve HTTPS. Cloudflare's edge validates this cert when
- * proxying requests to origin servers (vm-{id}.{domain}).
+ * Generates a wildcard Origin CA certificate for *.{BASE_DOMAIN} and
+ * *.vm.{BASE_DOMAIN} that the VM agent uses to serve HTTPS. Cloudflare's
+ * edge validates this cert when proxying requests to origin servers.
+ *
+ * Two wildcard SANs are needed:
+ *   - *.{domain} — covers ws-{id}.{domain} workspace proxying
+ *   - *.vm.{domain} — covers {nodeId}.vm.{domain} backend communication
+ *
+ * The two-level subdomain ({nodeId}.vm.{domain}) is used for Worker→VM
+ * communication to bypass Cloudflare same-zone routing. See
+ * docs/notes/2026-03-12-same-zone-routing-postmortem.md.
  *
  * - 15-year validity (maximum for Origin CA)
  * - RSA-2048 private key (matches JWT key pattern)
@@ -40,7 +48,7 @@ const originCaCsr = new tls.CertRequest("origin-ca-csr", {
     commonName: `*.${baseDomain}`,
     organization: "Simple Agent Manager",
   },
-  dnsNames: [`*.${baseDomain}`, baseDomain],
+  dnsNames: [`*.${baseDomain}`, `*.vm.${baseDomain}`, baseDomain],
 });
 
 /**
@@ -52,7 +60,7 @@ const originCaCert = new cloudflare.OriginCaCertificate(
   "origin-ca-cert",
   {
     csr: originCaCsr.certRequestPem,
-    hostnames: [`*.${baseDomain}`, baseDomain],
+    hostnames: [`*.${baseDomain}`, `*.vm.${baseDomain}`, baseDomain],
     requestType: "origin-rsa",
     requestedValidity: 5475, // 15 years
   },

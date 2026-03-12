@@ -11,7 +11,10 @@ const DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS = 5000;
 function getNodeBackendBaseUrl(nodeId: string, env: Env): string {
   const protocol = env.VM_AGENT_PROTOCOL || 'https';
   const port = env.VM_AGENT_PORT || '8443';
-  return `${protocol}://vm-${nodeId.toLowerCase()}.${env.BASE_DOMAIN}:${port}`;
+  // Two-level subdomain ({nodeId}.vm.{domain}) bypasses Cloudflare same-zone routing.
+  // The wildcard Worker route *.{domain}/* matches exactly one subdomain level,
+  // so {nodeId}.vm.{domain} is NOT intercepted — requests reach the VM directly.
+  return `${protocol}://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}`;
 }
 
 interface NodeAgentRequestOptions extends RequestInit {
@@ -161,7 +164,7 @@ async function nodeAgentRequest<T>(
     // which returns its own 404 format. Provide a clear error instead.
     if (response.status === 404 && body.includes('"Endpoint not found"')) {
       throw new Error(
-        `Node Agent unreachable: DNS record for vm-${nodeId.toLowerCase()} may be missing. ` +
+        `Node Agent unreachable: DNS record for ${nodeId.toLowerCase()}.vm may be missing. ` +
         `The request was routed back to the API Worker instead of the VM.`
       );
     }
