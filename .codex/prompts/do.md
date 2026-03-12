@@ -154,7 +154,7 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
 
 ### 6b. Infrastructure Verification (MANDATORY for Infrastructure Changes)
 
-If the PR touches **any** of: `packages/cloud-init/`, `packages/vm-agent/`, DNS record logic, TLS certificates, VM agent port/protocol, or provisioning infrastructure — you MUST complete these additional steps. **This is not optional. This is the gate that prevents catastrophic production failures.**
+If the PR touches **any** of: `packages/cloud-init/`, `packages/vm-agent/`, `scripts/deploy/` (VM provisioning infrastructure), DNS record logic, TLS certificates, or VM agent port/protocol — you MUST complete these additional steps. **This is not optional. This is the gate that prevents catastrophic production failures.**
 
 1. **Provision a real VM** — create a test workspace on staging that triggers full VM provisioning via cloud-init.
 2. **Wait for heartbeat** — verify that the VM agent starts and sends heartbeats to the control plane within 2 minutes. If heartbeats do not arrive, the change is broken.
