@@ -2,58 +2,75 @@
 
 **Status:** backlog
 **Priority:** high
-**Estimated Effort:** 1 week
 **Created:** 2026-03-03
+**Updated:** 2026-03-12
 
 ## Problem Statement
 
-The API layer (`apps/api/src/`) has grown organically and now contains several files that are too large, mix concerns, and duplicate logic. This makes debugging difficult and increases the risk of introducing bugs during changes.
+The API layer (`apps/api/src/`) has grown organically with several route files that are too large and mix concerns. This makes debugging difficult and increases the risk of introducing bugs.
 
 Key pain points:
-- `routes/workspaces.ts` is 1,625 lines — handles workspace CRUD, agent sessions, bootstrap tokens, boot logs, and provisioning callbacks
-- `routes/tasks.ts` is 1,036 lines — mixes task CRUD, status transitions, dependency graph, and event recording
-- Three route files mount at the same path (`/api/projects/:projectId/tasks`) creating hidden routing behavior
-- `services/node-agent.ts` exports 18 functions mixing workspace commands, session commands, and system queries
-- `services/observability.ts` is 641 lines mixing error persistence, querying, and Cloudflare API proxying
-- Validation helpers like `parsePositiveInt()` are duplicated across 3+ route files
-- Response mappers (`toTaskResponse`, `toWorkspaceResponse`) duplicated across every route file
-- Auth middleware patterns are inconsistent (blanket auth vs. conditional skip lists vs. per-route exceptions)
-
-## Acceptance Criteria
-
-- [ ] Split `routes/workspaces.ts` into focused sub-routers:
-  - `workspaces-crud.ts` — create, read, update, delete
-  - `workspaces-lifecycle.ts` — stop, restart, rebuild
-  - `agent-sessions.ts` — session management endpoints
-  - `workspace-provisioning.ts` — ready/failed callbacks, bootstrap tokens
-- [ ] Split `routes/tasks.ts` and merge the three task route files (`tasks.ts`, `task-runs.ts`, `task-submit.ts`) into a coherent structure — eliminate triple-mount at same path
-- [ ] Extract shared validation helpers to `services/validation.ts` — consolidate all `parsePositiveInt`, normalization, and parsing functions
-- [ ] Create `lib/mappers.ts` for schema-to-DTO converters — centralize `toTaskResponse`, `toWorkspaceResponse`, `toProjectResponse`, etc.
-- [ ] Refactor `services/node-agent.ts` into focused client classes:
-  - `NodeAgentWorkspaceClient` — create, stop, restart, delete, rebuild
-  - `NodeAgentSessionClient` — create, start, stop, suspend, resume, list
-  - `NodeAgentSystemClient` — info, logs, events
-- [ ] Split `services/observability.ts` into: error persistence, error querying, and CF API proxy
-- [ ] Centralize auth middleware pattern — use route metadata or a single auth registry instead of scattered skip lists
-- [ ] All existing tests pass after refactoring
-- [ ] No new functionality added — pure structural refactor
-
-## Key Files
-
-- `apps/api/src/routes/workspaces.ts` (1,625 lines)
-- `apps/api/src/routes/tasks.ts` (1,036 lines)
-- `apps/api/src/routes/task-runs.ts` (312 lines)
-- `apps/api/src/routes/task-submit.ts` (297 lines)
-- `apps/api/src/routes/projects.ts` (808 lines)
-- `apps/api/src/routes/nodes.ts` (681 lines)
-- `apps/api/src/services/node-agent.ts` (415 lines, 18 exports)
-- `apps/api/src/services/observability.ts` (641 lines, 16 exports)
-- `apps/api/src/index.ts` (route mounting — lines 430-434 triple-mount)
-- `apps/api/src/middleware/` (auth patterns)
+- `routes/workspaces.ts` is 1,813 lines — handles workspace CRUD, agent sessions, bootstrap tokens, boot logs, provisioning callbacks, runtime assets, and messages
+- `routes/projects.ts` is 1,118 lines — mixes project CRUD/runtime-config with ACP session lifecycle (270+ lines of ACP endpoints)
+- `routes/tasks.ts` (1,037 lines), `task-runs.ts` (315 lines), `task-submit.ts` (302 lines) — three files all mounted at `/api/projects/:projectId/tasks` creating hidden triple-mount behavior
+- `parsePositiveInt()` is duplicated across `projects.ts` and `tasks.ts`
+- Response mappers (`toTaskResponse`, `toWorkspaceResponse`, `toProjectResponse`) are defined inline in each route file
+- Auth middleware is inconsistent (blanket auth vs. conditional skip lists)
 
 ## Approach
 
-1. Start with validation and mapper extraction — low risk, high deduplication value
-2. Split route files next — maintains all endpoints, just reorganizes
-3. Refactor services last — requires updating route imports
-4. Run `pnpm typecheck && pnpm lint && pnpm test` after each major extraction
+Pure structural refactoring — no new functionality, no behavior changes. All existing tests must pass. Focus on the three largest route files.
+
+## Implementation Checklist
+
+### Phase 1: Extract shared utilities
+- [ ] Create `lib/route-helpers.ts` with `parsePositiveInt`, `requireRouteParam`, and other shared route utilities
+- [ ] Create `lib/mappers.ts` with `toWorkspaceResponse`, `toProjectResponse`, `toProjectSummaryResponse`, `toTaskResponse`, `toDependencyResponse`, `toAgentSessionResponse`
+- [ ] Update all route files to import from the new shared modules
+- [ ] Verify: `pnpm typecheck && pnpm lint && pnpm test`
+
+### Phase 2: Split workspaces.ts (1,813 → ~4 files)
+- [ ] `routes/workspaces/index.ts` — re-exports the combined router
+- [ ] `routes/workspaces/crud.ts` — workspace CRUD (create, list, get, update, delete)
+- [ ] `routes/workspaces/lifecycle.ts` — stop, restart, rebuild, provisioning callbacks (ready/failed)
+- [ ] `routes/workspaces/agent-sessions.ts` — agent session CRUD and lifecycle
+- [ ] `routes/workspaces/runtime.ts` — bootstrap tokens, boot logs, runtime assets, agent keys, messages, credential sync
+- [ ] Update `index.ts` route mounting to use the new combined router
+- [ ] Verify: `pnpm typecheck && pnpm lint && pnpm test`
+
+### Phase 3: Split projects.ts (1,118 → 2 files)
+- [ ] `routes/projects/index.ts` — re-exports the combined router
+- [ ] `routes/projects/crud.ts` — project CRUD, runtime config (env vars, files)
+- [ ] `routes/projects/acp-sessions.ts` — all ACP session endpoints (lines 850–1118)
+- [ ] Update `index.ts` route mounting
+- [ ] Verify: `pnpm typecheck && pnpm lint && pnpm test`
+
+### Phase 4: Consolidate task routes (3 files → 1 directory)
+- [ ] `routes/tasks/index.ts` — re-exports the combined router
+- [ ] `routes/tasks/crud.ts` — task CRUD, status transitions, dependencies, delegation, events
+- [ ] `routes/tasks/run.ts` — autonomous task execution (from `task-runs.ts`)
+- [ ] `routes/tasks/submit.ts` — chat-first task submission (from `task-submit.ts`)
+- [ ] Eliminate the triple-mount in `index.ts` — single `app.route('/api/projects/:projectId/tasks', tasksRoutes)`
+- [ ] Verify: `pnpm typecheck && pnpm lint && pnpm test`
+
+### Phase 5: Final validation
+- [ ] Full quality suite: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`
+- [ ] No new functionality added — pure structural refactor
+- [ ] All existing tests pass
+
+## Acceptance Criteria
+
+- [ ] No route file exceeds 500 lines
+- [ ] No duplicated utility functions across route files
+- [ ] Triple-mount eliminated — single mount point for task routes
+- [ ] All existing tests pass unchanged (tests prove behavior is preserved)
+- [ ] Response mappers centralized in `lib/mappers.ts`
+
+## Key Files
+
+- `apps/api/src/routes/workspaces.ts` (1,813 lines) → `routes/workspaces/` directory
+- `apps/api/src/routes/projects.ts` (1,118 lines) → `routes/projects/` directory
+- `apps/api/src/routes/tasks.ts` (1,037 lines) → `routes/tasks/` directory
+- `apps/api/src/routes/task-runs.ts` (315 lines) → merged into `routes/tasks/`
+- `apps/api/src/routes/task-submit.ts` (302 lines) → merged into `routes/tasks/`
+- `apps/api/src/index.ts` — route mounting (lines 463–468 triple-mount)
