@@ -41,28 +41,28 @@ When `{{ origin_ca_cert }}` is replaced with a multi-line PEM, only the first li
 ## Implementation Checklist
 
 ### Code Fix
-- [ ] Fix `generate.ts`: indent multi-line PEM content to match YAML block scalar (6 spaces)
-- [ ] Add helper function `indentForYamlBlock()` that pads each line of a multi-line string
-- [ ] Verify the fix handles edge cases: empty string, single-line, trailing newlines
+- [x] Fix `generate.ts`: indent multi-line PEM content to match YAML block scalar (6 spaces)
+- [x] Add helper function `indentForYamlBlock()` that pads each line of a multi-line string
+- [x] Verify the fix handles edge cases: empty string, single-line, trailing newlines
 
 ### Tests
-- [ ] Replace `fakeCert`/`fakeKey` with realistic multi-line PEM strings (20+ lines of base64)
-- [ ] Add test: parse generated YAML, extract cert content, verify full PEM survives intact
-- [ ] Add test: generated cert file content matches original PEM byte-for-byte (trimmed)
-- [ ] Add test: generated key file content matches original key byte-for-byte (trimmed)
-- [ ] Add regression test: if indent helper is removed/broken, YAML parse fails
-- [ ] Keep 32KB size limit test with realistic cert sizes
-- [ ] Run `pnpm --filter @simple-agent-manager/cloud-init test`
+- [x] Replace `fakeCert`/`fakeKey` with realistic multi-line PEM strings (20+ lines of base64)
+- [x] Add test: parse generated YAML, extract cert content, verify full PEM survives intact
+- [x] Add test: generated cert file content matches original PEM byte-for-byte (trimmed)
+- [x] Add test: generated key file content matches original key byte-for-byte (trimmed)
+- [x] Add regression test: if indent helper is removed/broken, YAML parse fails
+- [x] Keep 32KB size limit test with realistic cert sizes
+- [x] Run `pnpm --filter @workspace/cloud-init test`
 
 ### Post-Mortem
-- [ ] Write `docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md`
+- [x] Write `docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md`
 
 ### Process Fix
-- [ ] Add "Infrastructure Change Verification" gate to `.claude/rules/02-quality-gates.md`
-- [ ] Add "Template Output Verification" rule: cloud-init changes MUST include YAML parse test
-- [ ] Update `/do` skill (`.codex/prompts/do.md`) staging phase: make infrastructure verification explicit and blocking
-- [ ] Update `.agents/skills/do/SKILL.md` to match
-- [ ] Update PR template: add infrastructure verification checkbox
+- [x] Add "Infrastructure Change Verification" gate to `.claude/rules/02-quality-gates.md`
+- [x] Add "Template Output Verification" rule: cloud-init changes MUST include YAML parse test
+- [x] Update `/do` skill (`.codex/prompts/do.md`) staging phase: make infrastructure verification explicit and blocking
+- [x] Update `.agents/skills/do/SKILL.md` to match
+- [x] Update PR template: add infrastructure verification checkbox
 
 ### Quality
 - [ ] `pnpm lint` passes
