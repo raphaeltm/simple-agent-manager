@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { render } from '@testing-library/react';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { render, screen } from '@testing-library/react';
 import { MessageBubble } from './MessageBubble';
 
 // Verify React.memo is applied (component has $$typeof for memo)
@@ -188,6 +188,50 @@ describe('MessageBubble', () => {
 
       const table = container.querySelector('table');
       expect(table).not.toBeNull();
+    });
+  });
+
+  describe('message actions', () => {
+    beforeEach(() => {
+      // Provide minimal speechSynthesis mock so the speaker button renders
+      Object.defineProperty(window, 'speechSynthesis', {
+        value: {
+          speak: vi.fn(),
+          cancel: vi.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        },
+        writable: true,
+        configurable: true,
+      });
+      vi.stubGlobal('SpeechSynthesisUtterance', class {
+        text: string;
+        onend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        constructor(text: string) { this.text = text; }
+      });
+    });
+
+    it('shows action buttons for agent messages with timestamp', () => {
+      render(<MessageBubble text="Hello" role="agent" timestamp={1710288000000} />);
+      expect(screen.getByLabelText('Message info')).toBeTruthy();
+      expect(screen.getByLabelText('Read aloud')).toBeTruthy();
+    });
+
+    it('does not show action buttons for user messages', () => {
+      render(<MessageBubble text="Hello" role="user" timestamp={1710288000000} />);
+      expect(screen.queryByLabelText('Message info')).toBeNull();
+      expect(screen.queryByLabelText('Read aloud')).toBeNull();
+    });
+
+    it('does not show action buttons for streaming agent messages', () => {
+      render(<MessageBubble text="thinking..." role="agent" streaming={true} timestamp={1710288000000} />);
+      expect(screen.queryByLabelText('Message info')).toBeNull();
+    });
+
+    it('does not show action buttons when timestamp is not provided', () => {
+      render(<MessageBubble text="Hello" role="agent" />);
+      expect(screen.queryByLabelText('Message info')).toBeNull();
     });
   });
 });

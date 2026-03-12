@@ -19,6 +19,8 @@ export type { AgentPanelHandle } from './components/AgentPanel';
 export { SlashCommandPalette } from './components/SlashCommandPalette';
 export type { SlashCommandPaletteHandle, SlashCommandPaletteProps } from './components/SlashCommandPalette';
 export { MessageBubble } from './components/MessageBubble';
+export { MessageActions } from './components/MessageActions';
+export type { MessageActionsProps } from './components/MessageActions';
 export { ToolCallCard } from './components/ToolCallCard';
 export { PermissionDialog } from './components/PermissionDialog';
 export { ThinkingBlock } from './components/ThinkingBlock';

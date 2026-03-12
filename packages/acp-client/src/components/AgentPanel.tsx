@@ -473,7 +473,7 @@ const ConversationItemView = React.memo(function ConversationItemView({ item }: 
     case 'user_message':
       return <MessageBubble text={item.text} role="user" />;
     case 'agent_message':
-      return <MessageBubble text={item.text} role="agent" streaming={item.streaming} />;
+      return <MessageBubble text={item.text} role="agent" streaming={item.streaming} timestamp={item.timestamp} />;
     case 'thinking':
       return <ThinkingBlock text={item.text} active={item.active} />;
     case 'tool_call':

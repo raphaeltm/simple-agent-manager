@@ -85,7 +85,7 @@ function AcpConversationItemView({ item }: { item: ConversationItem }) {
     case 'user_message':
       return <AcpMessageBubble text={item.text} role="user" />;
     case 'agent_message':
-      return <AcpMessageBubble text={item.text} role="agent" streaming={item.streaming} />;
+      return <AcpMessageBubble text={item.text} role="agent" streaming={item.streaming} timestamp={item.timestamp} />;
     case 'thinking':
       return <AcpThinkingBlock text={item.text} active={item.active} />;
     case 'tool_call':
