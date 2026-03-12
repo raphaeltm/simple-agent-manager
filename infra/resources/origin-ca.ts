@@ -64,7 +64,8 @@ const originCaCert = new cloudflare.OriginCaCertificate(
     requestType: "origin-rsa",
     requestedValidity: 5475, // 15 years
   },
-  { protect: true }
+  // NOTE: protect temporarily removed to allow SAN update (adding *.vm.{domain}).
+  // Re-add { protect: true } after the replacement deploys successfully.
 );
 
 // Export as secret outputs

@@ -43,7 +43,7 @@ graph TB
     subgraph "Hetzner Cloud"
         Node1["Node VM"]
         subgraph "Node VM Internals"
-            VMAgent["VM Agent<br/>(Go Binary, :8080)"]
+            VMAgent["VM Agent<br/>(Go Binary, :8443)"]
             Docker["Docker Engine"]
             WS1["Workspace Container 1<br/>Devcontainer + Claude Code"]
             WS2["Workspace Container N<br/>Devcontainer + Claude Code"]
@@ -386,7 +386,7 @@ The VM Agent (`packages/vm-agent/`) is a Go binary that runs on each Hetzner nod
 
 ```mermaid
 graph TB
-    subgraph "VM Agent (Go Binary, :8080)"
+    subgraph "VM Agent (Go Binary, :8443)"
         Main["main.go<br/>Bootstrap → Server → Signal Handler"]
 
         subgraph "HTTP Server"

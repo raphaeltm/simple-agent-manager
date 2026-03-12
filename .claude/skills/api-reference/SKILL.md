@@ -13,7 +13,7 @@ user-invocable: false
 - `GET /api/nodes/:id` — Get node details
 - `POST /api/nodes/:id/stop` — Stop node
 - `DELETE /api/nodes/:id` — Delete node
-- `GET /api/nodes/:id/events` — List node events (proxied from VM Agent; vm-* DNS lacks SSL)
+- `GET /api/nodes/:id/events` — List node events (proxied from VM Agent via control plane)
 - `GET /api/nodes/:id/system-info` — Full system info (proxied from VM Agent)
 - `POST /api/nodes/:id/token` — Get node-scoped token for direct VM Agent access
 
