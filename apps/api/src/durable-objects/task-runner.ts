@@ -1116,10 +1116,12 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       });
     }
 
-    // Best-effort: inject error into chat session so user sees the failure
+    // Best-effort: inject error into chat session and stop the session so the UI
+    // shows the failure. Without stopSession, the session stays "active" in the
+    // sidebar even though the task has failed.
     if (state.stepResults.chatSessionId && state.projectId) {
       try {
-        const { persistMessage } = await import('../services/project-data');
+        const { persistMessage, stopSession } = await import('../services/project-data');
         await persistMessage(
           this.env as any,
           state.projectId,
@@ -1127,6 +1129,11 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
           'system',
           `Task failed at step "${state.currentStep}": ${errorMessage}`,
           null
+        );
+        await stopSession(
+          this.env as any,
+          state.projectId,
+          state.stepResults.chatSessionId
         );
       } catch (chatErr) {
         log.error('task_runner_do.chat_error_inject_failed', {

@@ -83,12 +83,12 @@ Console warns about deprecated `<meta name="apple-mobile-web-app-capable">` — 
 
 ## Acceptance Criteria
 
-- [ ] Follow-up messages sent from the chat UI are persisted server-side and forwarded to the agent
-- [ ] When a task fails, the session is stopped and the error message is displayed in the chat
-- [ ] The provisioning indicator properly dismisses when the task transitions to running
-- [ ] Task error messages are visible in the chat UI even if the session is still active
-- [ ] Admin Logs page loads without errors (or has graceful fallback)
-- [ ] Session message counts update in real-time
+- [x] Follow-up messages sent from the chat UI are persisted server-side and forwarded to the agent *(Fixed in prior work — webSocketMessage handles message.send)*
+- [x] When a task fails, the session is stopped and the error message is displayed in the chat *(Fixed: stopSession called in handlePermanentFailure)*
+- [x] The provisioning indicator properly dismisses when the task transitions to running *(Fixed in prior work — executionStep === 'running' condition)*
+- [x] Task error messages are visible in the chat UI even if the session is still active *(Fixed in prior work — errorMessage shown regardless of sessionState)*
+- [ ] Admin Logs page loads without errors (or has graceful fallback) *(Deferred — separate issue)*
+- [ ] Session message counts update in real-time *(Deferred — UX enhancement)*
 
 ## Investigation Evidence
 
