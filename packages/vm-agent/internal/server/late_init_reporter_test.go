@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/workspace/vm-agent/internal/acp"
@@ -218,4 +219,56 @@ func TestMessageReporterDBPath(t *testing.T) {
 			t.Errorf("messageReporterDBPath(%q, %q) = %q, want %q", tt.base, tt.wsID, got, tt.expected)
 		}
 	}
+}
+
+func TestMessageReporterDBPath_Adversarial(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		base     string
+		wsID     string
+		expected string
+	}{
+		{"/var/lib/vm-agent/data.db", "../evil", "/var/lib/vm-agent/messages-__evil.db"},
+		{"/var/lib/vm-agent/data.db", "ws/evil", "/var/lib/vm-agent/messages-ws_evil.db"},
+		{"/var/lib/vm-agent/data.db", "ws\x00id", "/var/lib/vm-agent/messages-ws_id.db"},
+		{"/var/lib/vm-agent/data.db", "../../etc/passwd", "/var/lib/vm-agent/messages-____etc_passwd.db"},
+	}
+
+	for _, tt := range tests {
+		got := messageReporterDBPath(tt.base, tt.wsID)
+		if got != tt.expected {
+			t.Errorf("messageReporterDBPath(%q, %q) = %q, want %q", tt.base, tt.wsID, got, tt.expected)
+		}
+	}
+}
+
+func TestGetOrCreateReporter_Concurrent(t *testing.T) {
+	t.Parallel()
+	s, _ := newServerWithoutReporter(t)
+
+	const workers = 20
+	results := make([]*messagereport.Reporter, workers)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			results[i] = s.getOrCreateReporter("ws-concurrent", "proj-1", "sess-1")
+		}()
+	}
+	wg.Wait()
+
+	// All goroutines must receive the same reporter instance.
+	first := results[0]
+	if first == nil {
+		t.Fatal("expected reporter to be created")
+	}
+	for i, r := range results {
+		if r != first {
+			t.Errorf("goroutine %d got different reporter instance", i)
+		}
+	}
+	s.shutdownAllReporters()
 }

@@ -55,7 +55,7 @@ type Server struct {
 	sessionMcpServers   map[string][]acp.McpServerEntry // hostKey → MCP servers for ACP injection
 	store               *persistence.Store
 	errorReporter       *errorreport.Reporter
-	messageReportersMu  sync.Mutex
+	messageReportersMu  sync.RWMutex
 	messageReporters    map[string]*messagereport.Reporter // keyed by workspaceID
 	worktreeCacheMu     sync.RWMutex
 	worktreeCache       map[string]cachedWorktreeList
@@ -599,13 +599,13 @@ func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 // Uses double-checked locking to avoid holding messageReportersMu during
 // disk I/O (SQLite open + migration).
 func (s *Server) getOrCreateReporter(workspaceID, projectID, chatSessionID string) *messagereport.Reporter {
-	// Fast path: reporter already exists.
-	s.messageReportersMu.Lock()
+	// Fast path: reporter already exists (read-only check).
+	s.messageReportersMu.RLock()
 	if r, ok := s.messageReporters[workspaceID]; ok {
-		s.messageReportersMu.Unlock()
+		s.messageReportersMu.RUnlock()
 		return r
 	}
-	s.messageReportersMu.Unlock()
+	s.messageReportersMu.RUnlock()
 
 	// Read callback token before any lock — avoids nested lock acquisition
 	// with callbackTokenMu (lock order: callbackTokenMu before messageReportersMu).
@@ -696,9 +696,14 @@ func (s *Server) shutdownAllReporters() {
 
 // setTokenAllReporters propagates an auth token to all active reporters.
 func (s *Server) setTokenAllReporters(token string) {
-	s.messageReportersMu.Lock()
-	defer s.messageReportersMu.Unlock()
+	s.messageReportersMu.RLock()
+	snapshot := make([]*messagereport.Reporter, 0, len(s.messageReporters))
 	for _, r := range s.messageReporters {
+		snapshot = append(snapshot, r)
+	}
+	s.messageReportersMu.RUnlock()
+
+	for _, r := range snapshot {
 		r.SetToken(token)
 	}
 }
@@ -709,7 +714,7 @@ func (s *Server) setTokenAllReporters(token string) {
 // traversal.
 func messageReporterDBPath(basePath, workspaceID string) string {
 	// Sanitize: replace path-unsafe characters to prevent directory traversal.
-	safe := strings.NewReplacer("/", "_", "..", "_", "\x00", "").Replace(workspaceID)
+	safe := strings.NewReplacer("/", "_", "..", "_", "\x00", "_").Replace(workspaceID)
 	dir := filepath.Dir(basePath)
 	return filepath.Join(dir, "messages-"+safe+".db")
 }
