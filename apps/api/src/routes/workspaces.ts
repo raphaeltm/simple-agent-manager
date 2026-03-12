@@ -41,6 +41,7 @@ import { appendBootLog, getBootLogs, writeBootLogs } from '../services/boot-log'
 import { requireOwnedProject } from '../middleware/project-auth';
 import { decrypt, encrypt } from '../services/encryption';
 import * as projectDataService from '../services/project-data';
+import { persistError } from '../services/observability';
 import { log } from '../lib/logger';
 
 const workspacesRoutes = new Hono<{ Bindings: Env }>();
@@ -115,7 +116,14 @@ function safeParseJson(s: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(s);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
-    if ('__proto__' in parsed || 'constructor' in parsed || 'prototype' in parsed) return null;
+    // Use Object.hasOwn to check only own properties, not the prototype chain.
+    // The `in` operator checks the prototype chain, so `'constructor' in {}` is always true.
+    if (
+      Object.hasOwn(parsed, '__proto__') ||
+      Object.hasOwn(parsed, 'constructor') ||
+      Object.hasOwn(parsed, 'prototype')
+    )
+      return null;
     return parsed as Record<string, unknown>;
   } catch {
     return null;
@@ -1709,13 +1717,21 @@ workspacesRoutes.post('/:id/messages', async (c) => {
   // If the workspace has a chatSessionId, messages MUST target that session.
   // Messages targeting a different session are rejected to prevent misrouting.
   if (workspace.chatSessionId && workspace.chatSessionId !== sessionId) {
-    console.error('Message routing mismatch: workspace linked to different session', {
+    const context = {
       workspaceId,
       projectId: workspace.projectId,
       expectedSessionId: workspace.chatSessionId,
       receivedSessionId: sessionId,
       messageCount: body.messages.length,
       action: 'rejected_batch',
+    };
+    console.error('Message routing mismatch: workspace linked to different session', context);
+    await persistError(c.env.OBSERVABILITY_DATABASE, {
+      source: 'api',
+      level: 'error',
+      message: `Message routing mismatch: workspace ${workspaceId} linked to session ${workspace.chatSessionId}, but messages target ${sessionId}`,
+      context,
+      workspaceId,
     });
     throw errors.badRequest(
       `Session mismatch: workspace is linked to session ${workspace.chatSessionId}, ` +
@@ -1723,15 +1739,28 @@ workspacesRoutes.post('/:id/messages', async (c) => {
     );
   }
 
-  // If workspace has no chatSessionId, log a warning — messages will be routed
-  // to whatever sessionId was provided, but this may indicate a setup issue.
+  // Reject messages when workspace has no linked chatSessionId.
+  // This prevents misrouting during the session linking window where
+  // chatSessionId is NULL between workspace creation and ensureSessionLinked().
   if (!workspace.chatSessionId) {
-    console.warn('Workspace has no linked chatSessionId, routing messages by provided sessionId', {
+    const context = {
       workspaceId,
       projectId: workspace.projectId,
       providedSessionId: sessionId,
       messageCount: body.messages.length,
+      action: 'rejected_no_session_link',
+    };
+    console.warn('Rejecting messages: workspace has no linked chatSessionId', context);
+    await persistError(c.env.OBSERVABILITY_DATABASE, {
+      source: 'api',
+      level: 'warn',
+      message: `Rejecting messages for workspace ${workspaceId}: no chatSessionId linked yet`,
+      context,
+      workspaceId,
     });
+    throw errors.badRequest(
+      'Workspace has no linked chat session yet — messages cannot be routed safely'
+    );
   }
 
   // Delegate to ProjectData DO

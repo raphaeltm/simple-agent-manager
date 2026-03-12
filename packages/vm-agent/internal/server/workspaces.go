@@ -252,12 +252,11 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	runtime.GitUserEmail = strings.TrimSpace(body.GitUserEmail)
 	runtime.GitHubID = strings.TrimSpace(body.GitHubID)
 
-	// Update the message reporter with the real workspace ID so message
-	// batches are POSTed to the correct URL. At VM boot time, only NODE_ID
-	// is known; the workspace ID becomes available here.
-	if s.messageReporter != nil {
-		s.messageReporter.SetWorkspaceID(body.WorkspaceID)
-	}
+	// Note: Per-workspace message reporter is created lazily in
+	// handleStartAgentSession when the chatSessionID becomes available.
+	// At workspace creation time, we only have workspaceID but not session context.
+	// For boot-time reporters (auto-provisioned task nodes), the reporter was
+	// already created with the correct workspaceID at server startup.
 
 	s.appendNodeEvent(body.WorkspaceID, "info", "workspace.provisioning", "Workspace provisioning started", map[string]interface{}{
 		"workspaceId": body.WorkspaceID,
@@ -318,6 +317,9 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 		_, _ = s.agentSessions.Stop(workspaceID, session.ID)
 		s.stopSessionHost(workspaceID, session.ID)
 	}
+
+	// Shut down per-workspace message reporter (final flush before cleanup).
+	s.shutdownReporter(workspaceID)
 
 	// Clear persisted tabs — workspace is stopped, no live sessions remain
 	if s.store != nil {
@@ -419,6 +421,9 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.stopSessionHostsForWorkspace(workspaceID)
+
+	// Shut down per-workspace message reporter (final flush before cleanup).
+	s.shutdownReporter(workspaceID)
 
 	// Remove the devcontainer and its Docker volume.
 	// The container must be removed before the volume (Docker won't remove a volume in use).
@@ -543,16 +548,13 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	chatSID := strings.TrimSpace(body.ChatSessionID)
 	projectID := strings.TrimSpace(body.ProjectID)
 
-	if chatSID != "" {
-		if s.messageReporter != nil {
-			// Reporter already exists (task runner path or warm node reuse) —
-			// update the session ID for subsequent messages.
-			s.messageReporter.SetSessionID(chatSID)
-		} else if projectID != "" {
-			// Reporter is nil because the node was manually provisioned without
-			// PROJECT_ID/CHAT_SESSION_ID in cloud-init. Late-initialize it now.
-			s.lateInitMessageReporter(workspaceID, projectID, chatSID)
-		}
+	// Ensure a per-workspace message reporter exists for this workspace.
+	// This handles both:
+	// - Auto-provisioned nodes: reporter may already exist from boot time
+	// - Manually provisioned nodes: reporter created here on first agent session
+	// - Warm node reuse: new reporter created for the new workspace/session
+	if chatSID != "" && projectID != "" {
+		s.getOrCreateReporter(workspaceID, projectID, chatSID)
 	}
 
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))

@@ -924,13 +924,17 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         workspaceId,
       });
     } catch (err) {
-      // D1 link failure is serious — log as error but don't block task execution.
+      // D1 link failure is blocking — without chatSessionId in D1, the message
+      // ingestion endpoint will reject all messages for this workspace.
       log.error('task_runner_do.session_d1_link_failed', {
         taskId: state.taskId,
         sessionId: state.stepResults.chatSessionId,
         workspaceId,
         error: err instanceof Error ? err.message : String(err),
       });
+      throw new Error(
+        `Failed to link chatSessionId to workspace ${workspaceId} in D1: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
 
     // Step 2: Update ProjectData DO session record (best-effort — enriches session data)

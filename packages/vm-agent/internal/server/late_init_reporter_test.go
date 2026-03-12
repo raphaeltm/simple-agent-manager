@@ -10,6 +10,7 @@ import (
 	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/messagereport"
 	"github.com/workspace/vm-agent/internal/pty"
 
 	_ "modernc.org/sqlite"
@@ -59,7 +60,7 @@ func newServerWithoutReporter(t *testing.T) (*Server, string) {
 		acpConfig:           acp.GatewayConfig{},
 		sessionHosts:        make(map[string]*acp.SessionHost),
 		bootLogBroadcasters: NewBootLogBroadcasterManager(),
-		messageReporter:     nil, // Simulates manually provisioned node
+		messageReporters:    make(map[string]*messagereport.Reporter),
 		done:                make(chan struct{}),
 	}
 
@@ -70,24 +71,22 @@ func TestLateInitMessageReporter_CreatesReporter(t *testing.T) {
 	t.Parallel()
 	s, _ := newServerWithoutReporter(t)
 
-	if s.messageReporter != nil {
-		t.Fatal("expected messageReporter to be nil before late init")
-	}
-	if s.acpConfig.MessageReporter != nil {
-		t.Fatal("expected acpConfig.MessageReporter to be nil before late init")
+	if len(s.messageReporters) != 0 {
+		t.Fatal("expected no reporters before late init")
 	}
 
 	s.lateInitMessageReporter("ws-test-1", "proj-1", "sess-1")
 
-	if s.messageReporter == nil {
-		t.Fatal("expected messageReporter to be non-nil after late init")
-	}
-	if s.acpConfig.MessageReporter == nil {
-		t.Fatal("expected acpConfig.MessageReporter to be non-nil after late init")
+	s.messageReportersMu.Lock()
+	r, ok := s.messageReporters["ws-test-1"]
+	s.messageReportersMu.Unlock()
+
+	if !ok || r == nil {
+		t.Fatal("expected reporter for ws-test-1 after late init")
 	}
 
 	// Clean up the reporter's background goroutine
-	s.messageReporter.Shutdown()
+	r.Shutdown()
 }
 
 func TestLateInitMessageReporter_SetsCallbackToken(t *testing.T) {
@@ -99,14 +98,18 @@ func TestLateInitMessageReporter_SetsCallbackToken(t *testing.T) {
 
 	s.lateInitMessageReporter("ws-test-2", "proj-2", "sess-2")
 
-	if s.messageReporter == nil {
-		t.Fatal("expected messageReporter to be non-nil")
+	s.messageReportersMu.Lock()
+	r, ok := s.messageReporters["ws-test-2"]
+	s.messageReportersMu.Unlock()
+
+	if !ok || r == nil {
+		t.Fatal("expected reporter for ws-test-2")
 	}
 
 	// The reporter should have the token set. We can't directly inspect it,
 	// but we verify the method was called without error by checking reporter
 	// is functional.
-	s.messageReporter.Shutdown()
+	r.Shutdown()
 }
 
 func TestLateInitMessageReporter_InvalidDBPath(t *testing.T) {
@@ -119,8 +122,100 @@ func TestLateInitMessageReporter_InvalidDBPath(t *testing.T) {
 	s.lateInitMessageReporter("ws-test-3", "proj-3", "sess-3")
 
 	// Should gracefully handle the error — reporter stays nil
-	if s.messageReporter != nil {
-		t.Fatal("expected messageReporter to remain nil with invalid DB path")
-		s.messageReporter.Shutdown()
+	s.messageReportersMu.Lock()
+	r := s.messageReporters["ws-test-3"]
+	s.messageReportersMu.Unlock()
+	if r != nil {
+		t.Fatal("expected no reporter with invalid DB path")
+		r.Shutdown()
+	}
+}
+
+func TestPerWorkspaceReporterIsolation(t *testing.T) {
+	t.Parallel()
+	s, _ := newServerWithoutReporter(t)
+
+	// Create reporters for two workspaces
+	r1 := s.getOrCreateReporter("ws-a", "proj-1", "sess-a")
+	r2 := s.getOrCreateReporter("ws-b", "proj-1", "sess-b")
+
+	if r1 == nil || r2 == nil {
+		t.Fatal("expected both reporters to be created")
+	}
+	if r1 == r2 {
+		t.Fatal("expected different reporter instances for different workspaces")
+	}
+
+	// Verify idempotent creation — same workspace returns same reporter
+	r1again := s.getOrCreateReporter("ws-a", "proj-1", "sess-a")
+	if r1again != r1 {
+		t.Fatal("expected same reporter instance for same workspace")
+	}
+
+	// Shut down one — the other should still exist
+	s.shutdownReporter("ws-a")
+	s.messageReportersMu.Lock()
+	_, aExists := s.messageReporters["ws-a"]
+	_, bExists := s.messageReporters["ws-b"]
+	s.messageReportersMu.Unlock()
+
+	if aExists {
+		t.Fatal("expected reporter for ws-a to be removed after shutdown")
+	}
+	if !bExists {
+		t.Fatal("expected reporter for ws-b to still exist")
+	}
+
+	r2.Shutdown()
+}
+
+func TestShutdownAllReporters(t *testing.T) {
+	t.Parallel()
+	s, _ := newServerWithoutReporter(t)
+
+	s.getOrCreateReporter("ws-1", "proj-1", "sess-1")
+	s.getOrCreateReporter("ws-2", "proj-1", "sess-2")
+
+	s.shutdownAllReporters()
+
+	s.messageReportersMu.Lock()
+	count := len(s.messageReporters)
+	s.messageReportersMu.Unlock()
+
+	if count != 0 {
+		t.Fatalf("expected all reporters removed, got %d", count)
+	}
+}
+
+func TestSetTokenAllReporters(t *testing.T) {
+	t.Parallel()
+	s, _ := newServerWithoutReporter(t)
+
+	s.getOrCreateReporter("ws-1", "proj-1", "sess-1")
+	s.getOrCreateReporter("ws-2", "proj-1", "sess-2")
+
+	// Should not panic — verifies token propagation works
+	s.setTokenAllReporters("new-token")
+
+	s.shutdownAllReporters()
+}
+
+func TestMessageReporterDBPath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		base     string
+		wsID     string
+		expected string
+	}{
+		{"/var/lib/vm-agent/data.db", "ws-abc", "/var/lib/vm-agent/messages-ws-abc.db"},
+		{"/tmp/test.db", "workspace-1", "/tmp/messages-workspace-1.db"},
+	}
+
+	for _, tt := range tests {
+		got := messageReporterDBPath(tt.base, tt.wsID)
+		if got != tt.expected {
+			t.Errorf("messageReporterDBPath(%q, %q) = %q, want %q", tt.base, tt.wsID, got, tt.expected)
+		}
 	}
 }

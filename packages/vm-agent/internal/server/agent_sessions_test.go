@@ -27,8 +27,8 @@ func TestAgentSessionsSourceContract(t *testing.T) {
 		"ViewerCount",
 		"host.Status()",
 		"host.ViewerCount()",
-		// Late-init message reporter for manually provisioned nodes
-		"lateInitMessageReporter",
+		// Per-workspace message reporter creation
+		"getOrCreateReporter",
 		`"projectId"`,
 	} {
 		if !strings.Contains(content, needle) {

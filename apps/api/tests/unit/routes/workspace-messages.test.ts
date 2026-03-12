@@ -68,8 +68,9 @@ describe('workspace messages batch endpoint source contract', () => {
     expect(file).toContain('Message routing mismatch');
   });
 
-  it('logs warning when workspace has no linked chatSessionId', () => {
-    expect(file).toContain('Workspace has no linked chatSessionId');
+  it('rejects messages when workspace has no linked chatSessionId', () => {
+    expect(file).toContain('Workspace has no linked chat session yet');
+    expect(file).toContain('rejected_no_session_link');
   });
 
   it('delegates to persistMessageBatch on ProjectData DO', () => {
