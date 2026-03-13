@@ -301,7 +301,15 @@ export const DEFAULT_CONTEXT_SUMMARY_RECENT_MESSAGES = 20;
  * Override via CONTEXT_SUMMARY_SHORT_THRESHOLD env var. */
 export const DEFAULT_CONTEXT_SUMMARY_SHORT_THRESHOLD = 5;
 
-/** Maximum size of contextSummary in bytes (64KB). */
+/** Default number of leading messages always included in summarization chunking.
+ * Override via CONTEXT_SUMMARY_HEAD_MESSAGES env var. */
+export const DEFAULT_CONTEXT_SUMMARY_HEAD_MESSAGES = 5;
+
+/** Default number of recent messages included in heuristic fallback summary.
+ * Override via CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES env var. */
+export const DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES = 10;
+
+/** Maximum size of contextSummary in bytes (64KB — schema constraint). */
 export const MAX_CONTEXT_SUMMARY_BYTES = 65536;
 
 // =============================================================================

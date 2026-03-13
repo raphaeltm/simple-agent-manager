@@ -27,6 +27,8 @@ import {
   DEFAULT_CONTEXT_SUMMARY_MAX_MESSAGES,
   DEFAULT_CONTEXT_SUMMARY_RECENT_MESSAGES,
   DEFAULT_CONTEXT_SUMMARY_SHORT_THRESHOLD,
+  DEFAULT_CONTEXT_SUMMARY_HEAD_MESSAGES,
+  DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES,
 } from '@simple-agent-manager/shared';
 import { log } from '../lib/logger';
 import { classifyError } from './task-title';
@@ -45,6 +47,8 @@ export interface SummarizeConfig {
   maxMessages?: number;
   recentMessages?: number;
   shortThreshold?: number;
+  headMessages?: number;
+  heuristicRecentMessages?: number;
 }
 
 export interface SummarizeResult {
@@ -71,6 +75,8 @@ export interface SummarizeEnvVars {
   CONTEXT_SUMMARY_MAX_MESSAGES?: string;
   CONTEXT_SUMMARY_RECENT_MESSAGES?: string;
   CONTEXT_SUMMARY_SHORT_THRESHOLD?: string;
+  CONTEXT_SUMMARY_HEAD_MESSAGES?: string;
+  CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES?: string;
 }
 
 /** Read summarization config from environment variables. */
@@ -86,6 +92,14 @@ export function getSummarizeConfig(env: SummarizeEnvVars): SummarizeConfig {
     ),
     shortThreshold: parseInt(
       env.CONTEXT_SUMMARY_SHORT_THRESHOLD || String(DEFAULT_CONTEXT_SUMMARY_SHORT_THRESHOLD),
+      10,
+    ),
+    headMessages: parseInt(
+      env.CONTEXT_SUMMARY_HEAD_MESSAGES || String(DEFAULT_CONTEXT_SUMMARY_HEAD_MESSAGES),
+      10,
+    ),
+    heuristicRecentMessages: parseInt(
+      env.CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES || String(DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES),
       10,
     ),
   };
@@ -112,12 +126,13 @@ export function chunkMessages(
   messages: SummarizeMessage[],
   maxMessages: number,
   recentMessages: number,
+  headMessages: number = DEFAULT_CONTEXT_SUMMARY_HEAD_MESSAGES,
 ): SummarizeMessage[] {
   if (messages.length <= maxMessages) {
     return messages;
   }
 
-  const headCount = 5;
+  const headCount = headMessages;
   const tailCount = Math.min(recentMessages, messages.length - headCount);
   const head = messages.slice(0, headCount);
   const tail = messages.slice(-tailCount);
@@ -184,6 +199,7 @@ Rules:
 export function buildHeuristicSummary(
   messages: SummarizeMessage[],
   taskContext?: TaskContext,
+  recentCount: number = DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES,
 ): string {
   const parts: string[] = [];
 
@@ -205,8 +221,7 @@ export function buildHeuristicSummary(
   if (messages.length > 0) {
     parts.push('## Recent Conversation');
     parts.push('');
-    // Take last 10 messages
-    const recent = messages.slice(-10);
+    const recent = messages.slice(-recentCount);
     for (const m of recent) {
       const role = m.role === 'user' ? 'User' : 'Agent';
       const content = truncateMessageContent(m.content, 500);
@@ -237,6 +252,8 @@ export async function summarizeSession(
   const maxMessages = config.maxMessages ?? DEFAULT_CONTEXT_SUMMARY_MAX_MESSAGES;
   const recentMessages = config.recentMessages ?? DEFAULT_CONTEXT_SUMMARY_RECENT_MESSAGES;
   const shortThreshold = config.shortThreshold ?? DEFAULT_CONTEXT_SUMMARY_SHORT_THRESHOLD;
+  const headMessages = config.headMessages ?? DEFAULT_CONTEXT_SUMMARY_HEAD_MESSAGES;
+  const heuristicRecentMessages = config.heuristicRecentMessages ?? DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES;
 
   const messageCount = allMessages.length;
   const filtered = filterMessages(allMessages);
@@ -244,12 +261,12 @@ export async function summarizeSession(
 
   // Very short sessions: include verbatim
   if (filteredCount <= shortThreshold) {
-    const verbatim = buildHeuristicSummary(filtered, taskContext);
+    const verbatim = buildHeuristicSummary(filtered, taskContext, heuristicRecentMessages);
     return { summary: verbatim, messageCount, filteredCount, method: 'verbatim' };
   }
 
   // Chunk messages for AI input
-  const chunked = chunkMessages(filtered, maxMessages, recentMessages);
+  const chunked = chunkMessages(filtered, maxMessages, recentMessages, headMessages);
   const messagesText = formatMessagesForPrompt(chunked, filteredCount);
 
   // Build AI prompt with task context
@@ -284,7 +301,7 @@ export async function summarizeSession(
     if (!summary) {
       log.warn('session_summarize.empty_response', { modelId, messageCount, filteredCount });
       return {
-        summary: buildHeuristicSummary(filtered, taskContext),
+        summary: buildHeuristicSummary(filtered, taskContext, heuristicRecentMessages),
         messageCount,
         filteredCount,
         method: 'heuristic',
@@ -307,7 +324,7 @@ export async function summarizeSession(
 
     // Fall back to heuristic summary
     return {
-      summary: buildHeuristicSummary(filtered, taskContext),
+      summary: buildHeuristicSummary(filtered, taskContext, heuristicRecentMessages),
       messageCount,
       filteredCount,
       method: 'heuristic',
