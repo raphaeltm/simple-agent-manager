@@ -25,6 +25,14 @@ func (s *Server) stopSessionHost(workspaceID, sessionID string) {
 	}
 	delete(s.sessionMcpServers, hostKey)
 	s.sessionHostMu.Unlock()
+
+	// Clean up persisted MCP servers (best-effort).
+	if s.store != nil {
+		if err := s.store.DeleteSessionMcpServers(workspaceID, sessionID); err != nil {
+			slog.Warn("Failed to delete MCP servers from SQLite",
+				"workspace", workspaceID, "session", sessionID, "error", err)
+		}
+	}
 }
 
 // removeWorkspaceContainer stops and removes the Docker container associated with
@@ -66,8 +74,6 @@ func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
 	prefix := workspaceID + ":"
 
 	s.sessionHostMu.Lock()
-	defer s.sessionHostMu.Unlock()
-
 	for key, host := range s.sessionHosts {
 		if !strings.HasPrefix(key, prefix) {
 			continue
@@ -75,6 +81,15 @@ func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
 		host.Stop()
 		delete(s.sessionHosts, key)
 		delete(s.sessionMcpServers, key)
+	}
+	s.sessionHostMu.Unlock()
+
+	// Clean up all persisted MCP servers for this workspace (best-effort).
+	if s.store != nil {
+		if err := s.store.DeleteWorkspaceMcpServers(workspaceID); err != nil {
+			slog.Warn("Failed to delete workspace MCP servers from SQLite",
+				"workspace", workspaceID, "error", err)
+		}
 	}
 }
 
@@ -434,10 +449,13 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	s.removeWorkspaceRuntime(workspaceID)
 
-	// Remove all persisted tabs for this workspace
+	// Remove all persisted tabs and MCP server configs for this workspace
 	if s.store != nil {
 		if err := s.store.DeleteWorkspaceTabs(workspaceID); err != nil {
 			slog.Warn("Failed to delete persisted tabs for workspace", "workspace", workspaceID, "error", err)
+		}
+		if err := s.store.DeleteWorkspaceMcpServers(workspaceID); err != nil {
+			slog.Warn("Failed to delete persisted MCP servers for workspace", "workspace", workspaceID, "error", err)
 		}
 	}
 
@@ -664,6 +682,20 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		s.sessionHostMu.Lock()
 		s.sessionMcpServers[hostKey] = body.McpServers
 		s.sessionHostMu.Unlock()
+
+		// Persist to SQLite so MCP servers survive VM agent restarts and
+		// are available even if a WebSocket creates the SessionHost first.
+		if s.store != nil {
+			persistEntries := make([]persistence.McpServer, len(body.McpServers))
+			for i, srv := range body.McpServers {
+				persistEntries[i] = persistence.McpServer{URL: srv.URL, Token: srv.Token}
+			}
+			if err := s.store.UpsertSessionMcpServers(workspaceID, sessionID, persistEntries); err != nil {
+				slog.Warn("Failed to persist MCP servers to SQLite",
+					"workspace", workspaceID, "session", sessionID, "error", err)
+			}
+		}
+
 		slog.Info("MCP servers registered for agent session",
 			"workspace", workspaceID, "session", sessionID, "count", len(body.McpServers))
 	}
@@ -866,7 +898,9 @@ func (s *Server) suspendSessionHost(workspaceID, sessionID string) (acpSessionID
 // auto-suspend fires. It removes the SessionHost from the map (the host has
 // already stopped itself) and transitions the session to suspended status.
 func (s *Server) handleAutoSuspend(workspaceID, sessionID string) {
-	// Remove the SessionHost and its MCP config from the map (the host has already stopped).
+	// Remove the SessionHost and its in-memory MCP config from the map (the host
+	// has already stopped). MCP servers are intentionally NOT deleted from SQLite
+	// so they can be recovered when the session resumes via getOrCreateSessionHost.
 	hostKey := workspaceID + ":" + sessionID
 	s.sessionHostMu.Lock()
 	delete(s.sessionHosts, hostKey)

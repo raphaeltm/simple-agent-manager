@@ -591,6 +591,177 @@ func TestWorkspaceMetadataPersistedAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestUpsertAndGetSessionMcpServers(t *testing.T) {
+	store, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	// Initially no servers — returns empty (non-nil) slice
+	servers, err := store.GetSessionMcpServers("ws-1", "sess-1")
+	if err != nil {
+		t.Fatalf("GetSessionMcpServers: %v", err)
+	}
+	if len(servers) != 0 {
+		t.Fatalf("expected 0 servers for non-existent session, got %d", len(servers))
+	}
+
+	// Upsert
+	err = store.UpsertSessionMcpServers("ws-1", "sess-1", []McpServer{
+		{URL: "https://api.example.com/mcp", Token: "tok-123"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertSessionMcpServers: %v", err)
+	}
+
+	// Read back
+	servers, err = store.GetSessionMcpServers("ws-1", "sess-1")
+	if err != nil {
+		t.Fatalf("GetSessionMcpServers: %v", err)
+	}
+	if len(servers) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(servers))
+	}
+	if servers[0].URL != "https://api.example.com/mcp" {
+		t.Errorf("expected URL 'https://api.example.com/mcp', got %q", servers[0].URL)
+	}
+	if servers[0].Token != "tok-123" {
+		t.Errorf("expected Token 'tok-123', got %q", servers[0].Token)
+	}
+
+	// Upsert again (overwrite)
+	err = store.UpsertSessionMcpServers("ws-1", "sess-1", []McpServer{
+		{URL: "https://api.example.com/mcp", Token: "tok-456"},
+		{URL: "https://api2.example.com/mcp", Token: "tok-789"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertSessionMcpServers overwrite: %v", err)
+	}
+
+	servers, err = store.GetSessionMcpServers("ws-1", "sess-1")
+	if err != nil {
+		t.Fatalf("GetSessionMcpServers after overwrite: %v", err)
+	}
+	if len(servers) != 2 {
+		t.Fatalf("expected 2 servers after overwrite, got %d", len(servers))
+	}
+	if servers[0].Token != "tok-456" {
+		t.Errorf("expected first token 'tok-456', got %q", servers[0].Token)
+	}
+
+	// Different session should be isolated
+	servers2, err := store.GetSessionMcpServers("ws-1", "sess-2")
+	if err != nil {
+		t.Fatalf("GetSessionMcpServers different session: %v", err)
+	}
+	if len(servers2) != 0 {
+		t.Fatalf("expected 0 servers for different session, got %d", len(servers2))
+	}
+}
+
+func TestDeleteSessionMcpServers(t *testing.T) {
+	store, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	_ = store.UpsertSessionMcpServers("ws-1", "sess-1", []McpServer{
+		{URL: "https://api.example.com/mcp", Token: "tok"},
+	})
+	_ = store.UpsertSessionMcpServers("ws-1", "sess-2", []McpServer{
+		{URL: "https://api2.example.com/mcp", Token: "tok2"},
+	})
+
+	// Delete one session
+	if err := store.DeleteSessionMcpServers("ws-1", "sess-1"); err != nil {
+		t.Fatalf("DeleteSessionMcpServers: %v", err)
+	}
+
+	servers, _ := store.GetSessionMcpServers("ws-1", "sess-1")
+	if len(servers) != 0 {
+		t.Fatalf("expected 0 servers after delete, got %d", len(servers))
+	}
+
+	// Other session should survive
+	servers2, _ := store.GetSessionMcpServers("ws-1", "sess-2")
+	if len(servers2) != 1 {
+		t.Fatalf("expected 1 server for sess-2, got %d", len(servers2))
+	}
+
+	// Deleting non-existent should not error
+	if err := store.DeleteSessionMcpServers("ws-1", "nonexistent"); err != nil {
+		t.Fatalf("DeleteSessionMcpServers non-existent: %v", err)
+	}
+}
+
+func TestDeleteWorkspaceMcpServers(t *testing.T) {
+	store, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	_ = store.UpsertSessionMcpServers("ws-1", "sess-1", []McpServer{
+		{URL: "https://api.example.com/mcp", Token: "tok1"},
+	})
+	_ = store.UpsertSessionMcpServers("ws-1", "sess-2", []McpServer{
+		{URL: "https://api.example.com/mcp", Token: "tok2"},
+	})
+	_ = store.UpsertSessionMcpServers("ws-2", "sess-3", []McpServer{
+		{URL: "https://api.example.com/mcp", Token: "tok3"},
+	})
+
+	// Delete all for ws-1
+	if err := store.DeleteWorkspaceMcpServers("ws-1"); err != nil {
+		t.Fatalf("DeleteWorkspaceMcpServers: %v", err)
+	}
+
+	s1, _ := store.GetSessionMcpServers("ws-1", "sess-1")
+	s2, _ := store.GetSessionMcpServers("ws-1", "sess-2")
+	if len(s1) != 0 || len(s2) != 0 {
+		t.Fatalf("expected 0 servers for all ws-1 sessions after workspace delete, got %d and %d", len(s1), len(s2))
+	}
+
+	// ws-2 should survive
+	s3, _ := store.GetSessionMcpServers("ws-2", "sess-3")
+	if len(s3) != 1 {
+		t.Fatalf("expected 1 server for ws-2, got %d", len(s3))
+	}
+}
+
+func TestSessionMcpServersPersistedAcrossReopen(t *testing.T) {
+	dbPath := tempDBPath(t)
+
+	store1, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open 1: %v", err)
+	}
+
+	_ = store1.UpsertSessionMcpServers("ws-1", "sess-1", []McpServer{
+		{URL: "https://api.example.com/mcp", Token: "persist-tok"},
+	})
+	store1.Close()
+
+	store2, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open 2: %v", err)
+	}
+	defer store2.Close()
+
+	servers, err := store2.GetSessionMcpServers("ws-1", "sess-1")
+	if err != nil {
+		t.Fatalf("GetSessionMcpServers after reopen: %v", err)
+	}
+	if len(servers) != 1 {
+		t.Fatalf("expected 1 server after reopen, got %d", len(servers))
+	}
+	if servers[0].Token != "persist-tok" {
+		t.Errorf("expected token 'persist-tok' after reopen, got %q", servers[0].Token)
+	}
+}
+
 func TestMigrationV3AddsLastPromptColumn(t *testing.T) {
 	dbPath := tempDBPath(t)
 
