@@ -449,10 +449,13 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	s.removeWorkspaceRuntime(workspaceID)
 
-	// Remove all persisted tabs for this workspace
+	// Remove all persisted tabs and MCP server configs for this workspace
 	if s.store != nil {
 		if err := s.store.DeleteWorkspaceTabs(workspaceID); err != nil {
 			slog.Warn("Failed to delete persisted tabs for workspace", "workspace", workspaceID, "error", err)
+		}
+		if err := s.store.DeleteWorkspaceMcpServers(workspaceID); err != nil {
+			slog.Warn("Failed to delete persisted MCP servers for workspace", "workspace", workspaceID, "error", err)
 		}
 	}
 
@@ -683,9 +686,9 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		// Persist to SQLite so MCP servers survive VM agent restarts and
 		// are available even if a WebSocket creates the SessionHost first.
 		if s.store != nil {
-			persistEntries := make([]persistence.McpServerEntry, len(body.McpServers))
+			persistEntries := make([]persistence.McpServer, len(body.McpServers))
 			for i, srv := range body.McpServers {
-				persistEntries[i] = persistence.McpServerEntry{URL: srv.URL, Token: srv.Token}
+				persistEntries[i] = persistence.McpServer{URL: srv.URL, Token: srv.Token}
 			}
 			if err := s.store.UpsertSessionMcpServers(workspaceID, sessionID, persistEntries); err != nil {
 				slog.Warn("Failed to persist MCP servers to SQLite",

@@ -598,17 +598,17 @@ func TestUpsertAndGetSessionMcpServers(t *testing.T) {
 	}
 	defer store.Close()
 
-	// Initially no servers
+	// Initially no servers — returns empty (non-nil) slice
 	servers, err := store.GetSessionMcpServers("ws-1", "sess-1")
 	if err != nil {
 		t.Fatalf("GetSessionMcpServers: %v", err)
 	}
-	if servers != nil {
-		t.Fatal("expected nil for non-existent session MCP servers")
+	if len(servers) != 0 {
+		t.Fatalf("expected 0 servers for non-existent session, got %d", len(servers))
 	}
 
 	// Upsert
-	err = store.UpsertSessionMcpServers("ws-1", "sess-1", []McpServerEntry{
+	err = store.UpsertSessionMcpServers("ws-1", "sess-1", []McpServer{
 		{URL: "https://api.example.com/mcp", Token: "tok-123"},
 	})
 	if err != nil {
@@ -631,7 +631,7 @@ func TestUpsertAndGetSessionMcpServers(t *testing.T) {
 	}
 
 	// Upsert again (overwrite)
-	err = store.UpsertSessionMcpServers("ws-1", "sess-1", []McpServerEntry{
+	err = store.UpsertSessionMcpServers("ws-1", "sess-1", []McpServer{
 		{URL: "https://api.example.com/mcp", Token: "tok-456"},
 		{URL: "https://api2.example.com/mcp", Token: "tok-789"},
 	})
@@ -655,8 +655,8 @@ func TestUpsertAndGetSessionMcpServers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSessionMcpServers different session: %v", err)
 	}
-	if servers2 != nil {
-		t.Fatal("expected nil for different session")
+	if len(servers2) != 0 {
+		t.Fatalf("expected 0 servers for different session, got %d", len(servers2))
 	}
 }
 
@@ -667,10 +667,10 @@ func TestDeleteSessionMcpServers(t *testing.T) {
 	}
 	defer store.Close()
 
-	_ = store.UpsertSessionMcpServers("ws-1", "sess-1", []McpServerEntry{
+	_ = store.UpsertSessionMcpServers("ws-1", "sess-1", []McpServer{
 		{URL: "https://api.example.com/mcp", Token: "tok"},
 	})
-	_ = store.UpsertSessionMcpServers("ws-1", "sess-2", []McpServerEntry{
+	_ = store.UpsertSessionMcpServers("ws-1", "sess-2", []McpServer{
 		{URL: "https://api2.example.com/mcp", Token: "tok2"},
 	})
 
@@ -680,8 +680,8 @@ func TestDeleteSessionMcpServers(t *testing.T) {
 	}
 
 	servers, _ := store.GetSessionMcpServers("ws-1", "sess-1")
-	if servers != nil {
-		t.Fatal("expected nil after delete")
+	if len(servers) != 0 {
+		t.Fatalf("expected 0 servers after delete, got %d", len(servers))
 	}
 
 	// Other session should survive
@@ -703,13 +703,13 @@ func TestDeleteWorkspaceMcpServers(t *testing.T) {
 	}
 	defer store.Close()
 
-	_ = store.UpsertSessionMcpServers("ws-1", "sess-1", []McpServerEntry{
+	_ = store.UpsertSessionMcpServers("ws-1", "sess-1", []McpServer{
 		{URL: "https://api.example.com/mcp", Token: "tok1"},
 	})
-	_ = store.UpsertSessionMcpServers("ws-1", "sess-2", []McpServerEntry{
+	_ = store.UpsertSessionMcpServers("ws-1", "sess-2", []McpServer{
 		{URL: "https://api.example.com/mcp", Token: "tok2"},
 	})
-	_ = store.UpsertSessionMcpServers("ws-2", "sess-3", []McpServerEntry{
+	_ = store.UpsertSessionMcpServers("ws-2", "sess-3", []McpServer{
 		{URL: "https://api.example.com/mcp", Token: "tok3"},
 	})
 
@@ -720,8 +720,8 @@ func TestDeleteWorkspaceMcpServers(t *testing.T) {
 
 	s1, _ := store.GetSessionMcpServers("ws-1", "sess-1")
 	s2, _ := store.GetSessionMcpServers("ws-1", "sess-2")
-	if s1 != nil || s2 != nil {
-		t.Fatal("expected nil for all ws-1 sessions after workspace delete")
+	if len(s1) != 0 || len(s2) != 0 {
+		t.Fatalf("expected 0 servers for all ws-1 sessions after workspace delete, got %d and %d", len(s1), len(s2))
 	}
 
 	// ws-2 should survive
@@ -739,7 +739,7 @@ func TestSessionMcpServersPersistedAcrossReopen(t *testing.T) {
 		t.Fatalf("Open 1: %v", err)
 	}
 
-	_ = store1.UpsertSessionMcpServers("ws-1", "sess-1", []McpServerEntry{
+	_ = store1.UpsertSessionMcpServers("ws-1", "sess-1", []McpServer{
 		{URL: "https://api.example.com/mcp", Token: "persist-tok"},
 	})
 	store1.Close()

@@ -191,9 +191,33 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 
 // getOrCreateSessionHost returns an existing SessionHost or creates a new one.
 func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, session agentsessions.Session, runtime *WorkspaceRuntime, requestedWorktree string) *acp.SessionHost {
+	// Fast path: check if host already exists.
+	s.sessionHostMu.Lock()
+	if host, ok := s.sessionHosts[hostKey]; ok {
+		s.sessionHostMu.Unlock()
+		return host
+	}
+	s.sessionHostMu.Unlock()
+
+	// Pre-fetch MCP servers from SQLite outside the lock to avoid holding
+	// sessionHostMu during I/O (Go specialist review finding).
+	var prefetchedMcpServers []acp.McpServerEntry
+	if s.store != nil {
+		if persisted, err := s.store.GetSessionMcpServers(workspaceID, sessionID); err == nil && len(persisted) > 0 {
+			prefetchedMcpServers = make([]acp.McpServerEntry, len(persisted))
+			for i, p := range persisted {
+				prefetchedMcpServers[i] = acp.McpServerEntry{URL: p.URL, Token: p.Token}
+			}
+		} else if err != nil {
+			slog.Warn("Failed to read MCP servers from SQLite",
+				"workspace", workspaceID, "sessionId", sessionID, "error", err)
+		}
+	}
+
 	s.sessionHostMu.Lock()
 	defer s.sessionHostMu.Unlock()
 
+	// Re-check after re-acquiring lock (double-checked locking).
 	if host, ok := s.sessionHosts[hostKey]; ok {
 		return host
 	}
@@ -260,24 +284,15 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	}
 
 	// Inject per-session MCP servers. Check in-memory map first (fast path),
-	// then fall back to SQLite (survives VM agent restart / race conditions).
+	// then use pre-fetched SQLite data (survives VM agent restart / race conditions).
 	if mcpServers, ok := s.sessionMcpServers[hostKey]; ok && len(mcpServers) > 0 {
 		cfg.McpServers = mcpServers
-	} else if s.store != nil {
-		if persisted, err := s.store.GetSessionMcpServers(workspaceID, sessionID); err == nil && len(persisted) > 0 {
-			acpEntries := make([]acp.McpServerEntry, len(persisted))
-			for i, p := range persisted {
-				acpEntries[i] = acp.McpServerEntry{URL: p.URL, Token: p.Token}
-			}
-			cfg.McpServers = acpEntries
-			// Backfill in-memory map so subsequent lookups are fast
-			s.sessionMcpServers[hostKey] = acpEntries
-			slog.Info("MCP servers recovered from SQLite",
-				"workspace", workspaceID, "sessionId", sessionID, "count", len(acpEntries))
-		} else if err != nil {
-			slog.Warn("Failed to read MCP servers from SQLite",
-				"workspace", workspaceID, "sessionId", sessionID, "error", err)
-		}
+	} else if len(prefetchedMcpServers) > 0 {
+		cfg.McpServers = prefetchedMcpServers
+		// Backfill in-memory map so subsequent lookups are fast
+		s.sessionMcpServers[hostKey] = prefetchedMcpServers
+		slog.Info("MCP servers recovered from SQLite",
+			"workspace", workspaceID, "sessionId", sessionID, "count", len(prefetchedMcpServers))
 	}
 
 	hostCfg := acp.SessionHostConfig{

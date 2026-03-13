@@ -4,7 +4,6 @@ package persistence
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -13,11 +12,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// McpServerEntry represents an MCP server config persisted to SQLite.
-// This is a persistence-layer type (no dependency on the acp package)
-// to avoid import cycles. The server package converts between this and
-// acp.McpServerEntry.
-type McpServerEntry struct {
+// McpServer represents a persisted MCP server config for an ACP session.
+// It mirrors acp.McpServerEntry and is stored independently to avoid an
+// import cycle between the persistence and acp packages.
+type McpServer struct {
 	URL   string `json:"url"`
 	Token string `json:"token"`
 }
@@ -371,72 +369,89 @@ func (s *Store) TabCount(workspaceID string) (int, error) {
 }
 
 // migrateV5 creates the session_mcp_servers table for persisting MCP server
-// configs across VM agent restarts. Previously these were only held in an
-// in-memory map, causing silent MCP tool loss on restart or race conditions.
+// configs registered per ACP session so they survive VM agent restarts.
 func migrateV5(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS session_mcp_servers (
 			workspace_id TEXT NOT NULL,
-			session_id TEXT NOT NULL,
-			servers_json TEXT NOT NULL DEFAULT '[]',
-			updated_at TEXT NOT NULL,
-			PRIMARY KEY (workspace_id, session_id)
-		)
+			session_id   TEXT NOT NULL,
+			sort_order   INTEGER NOT NULL DEFAULT 0,
+			url          TEXT NOT NULL,
+			token        TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (workspace_id, session_id, sort_order)
+		);
+		CREATE INDEX IF NOT EXISTS idx_session_mcp_workspace ON session_mcp_servers(workspace_id);
 	`)
 	return err
 }
 
-// UpsertSessionMcpServers persists MCP server configs for a session.
-// Called by handleStartAgentSession when the control plane sends MCP
-// server configs alongside an agent session start request.
-func (s *Store) UpsertSessionMcpServers(workspaceID, sessionID string, servers []McpServerEntry) error {
+// UpsertSessionMcpServers replaces all MCP server entries for a session.
+// Passing an empty slice removes all servers for the session without error.
+// This is intentionally a full replace (delete + insert) so that the
+// persisted list always exactly mirrors the in-memory sessionMcpServers map.
+func (s *Store) UpsertSessionMcpServers(workspaceID, sessionID string, servers []McpServer) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data, err := json.Marshal(servers)
+	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("marshal mcp servers: %w", err)
+		return fmt.Errorf("upsert session mcp servers: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.Exec(
+		"DELETE FROM session_mcp_servers WHERE workspace_id = ? AND session_id = ?",
+		workspaceID, sessionID,
+	); err != nil {
+		return fmt.Errorf("upsert session mcp servers: delete old rows: %w", err)
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = s.db.Exec(
-		`INSERT OR REPLACE INTO session_mcp_servers (workspace_id, session_id, servers_json, updated_at)
-		 VALUES (?, ?, ?, ?)`,
-		workspaceID, sessionID, string(data), now,
-	)
-	if err != nil {
-		return fmt.Errorf("upsert session mcp servers: %w", err)
+	for i, srv := range servers {
+		if _, err := tx.Exec(
+			"INSERT INTO session_mcp_servers (workspace_id, session_id, sort_order, url, token) VALUES (?, ?, ?, ?, ?)",
+			workspaceID, sessionID, i, srv.URL, srv.Token,
+		); err != nil {
+			return fmt.Errorf("upsert session mcp servers: insert row %d: %w", i, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("upsert session mcp servers: commit: %w", err)
 	}
 	return nil
 }
 
-// GetSessionMcpServers retrieves persisted MCP server configs for a session.
-// Returns nil, nil if no config exists for the given workspace+session pair.
-func (s *Store) GetSessionMcpServers(workspaceID, sessionID string) ([]McpServerEntry, error) {
+// GetSessionMcpServers returns the persisted MCP servers for a session,
+// ordered by sort_order. Returns an empty (non-nil) slice when none exist.
+func (s *Store) GetSessionMcpServers(workspaceID, sessionID string) ([]McpServer, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var serversJSON string
-	err := s.db.QueryRow(
-		`SELECT servers_json FROM session_mcp_servers WHERE workspace_id = ? AND session_id = ?`,
+	rows, err := s.db.Query(
+		"SELECT url, token FROM session_mcp_servers WHERE workspace_id = ? AND session_id = ? ORDER BY sort_order ASC",
 		workspaceID, sessionID,
-	).Scan(&serversJSON)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
+	)
 	if err != nil {
 		return nil, fmt.Errorf("get session mcp servers: %w", err)
 	}
+	defer rows.Close()
 
-	var servers []McpServerEntry
-	if err := json.Unmarshal([]byte(serversJSON), &servers); err != nil {
-		return nil, fmt.Errorf("unmarshal session mcp servers: %w", err)
+	servers := []McpServer{}
+	for rows.Next() {
+		var srv McpServer
+		if err := rows.Scan(&srv.URL, &srv.Token); err != nil {
+			return nil, fmt.Errorf("get session mcp servers: scan: %w", err)
+		}
+		servers = append(servers, srv)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get session mcp servers: iterate: %w", err)
 	}
 	return servers, nil
 }
 
-// DeleteSessionMcpServers removes persisted MCP server configs for a session.
-// Called when a session is stopped, deleted, or suspended.
+// DeleteSessionMcpServers removes all MCP server entries for a specific
+// session. It is a no-op when no entries exist.
 func (s *Store) DeleteSessionMcpServers(workspaceID, sessionID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -451,13 +466,16 @@ func (s *Store) DeleteSessionMcpServers(workspaceID, sessionID string) error {
 	return nil
 }
 
-// DeleteWorkspaceMcpServers removes all persisted MCP server configs for a workspace.
-// Called when a workspace is deleted.
+// DeleteWorkspaceMcpServers removes all MCP server entries for every session
+// belonging to the given workspace. Called during workspace cleanup.
 func (s *Store) DeleteWorkspaceMcpServers(workspaceID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, err := s.db.Exec("DELETE FROM session_mcp_servers WHERE workspace_id = ?", workspaceID)
+	_, err := s.db.Exec(
+		"DELETE FROM session_mcp_servers WHERE workspace_id = ?",
+		workspaceID,
+	)
 	if err != nil {
 		return fmt.Errorf("delete workspace mcp servers: %w", err)
 	}
