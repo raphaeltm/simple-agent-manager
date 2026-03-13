@@ -535,6 +535,7 @@ export interface DelegateTaskRequest {
 export interface RunTaskRequest {
   vmSize?: VMSize;
   vmLocation?: VMLocation;
+  workspaceProfile?: WorkspaceProfile;
   nodeId?: string;
   branch?: string;
 }

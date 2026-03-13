@@ -237,6 +237,7 @@ submitRoutes.post('/submit', async (c) => {
     branchName,
     vmSize,
     vmLocation,
+    workspaceProfile,
   });
 
   // Look up user's githubId for noreply email fallback

@@ -14,7 +14,7 @@ import { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { RunTaskRequest, RunTaskResponse, TaskStatus, VMSize, VMLocation, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES } from '@simple-agent-manager/shared';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
 import { ulid } from '../../lib/ulid';
@@ -130,6 +130,11 @@ runRoutes.post('/:taskId/run', async (c) => {
     throw errors.badRequest('vmLocation must be nbg1, fsn1, or hel1');
   }
 
+  // Validate workspaceProfile if provided
+  if (body.workspaceProfile && !VALID_WORKSPACE_PROFILES.includes(body.workspaceProfile)) {
+    throw errors.badRequest('workspaceProfile must be full or lightweight');
+  }
+
   // Load project for repository/installationId
   const [project] = await db
     .select()
@@ -151,7 +156,7 @@ runRoutes.post('/:taskId/run', async (c) => {
     ?? (project.defaultVmSize as VMSize | null)
     ?? DEFAULT_VM_SIZE;
   const vmLocation: VMLocation = (body.vmLocation as VMLocation) ?? 'nbg1';
-  const workspaceProfile: WorkspaceProfile = (body as { workspaceProfile?: WorkspaceProfile }).workspaceProfile
+  const workspaceProfile: WorkspaceProfile = body.workspaceProfile
     ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
     ?? DEFAULT_WORKSPACE_PROFILE;
   const branch = body.branch ?? project.defaultBranch;
