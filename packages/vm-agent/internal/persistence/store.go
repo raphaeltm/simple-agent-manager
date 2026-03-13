@@ -4,6 +4,7 @@ package persistence
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -11,6 +12,15 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+// McpServerEntry represents an MCP server config persisted to SQLite.
+// This is a persistence-layer type (no dependency on the acp package)
+// to avoid import cycles. The server package converts between this and
+// acp.McpServerEntry.
+type McpServerEntry struct {
+	URL   string `json:"url"`
+	Token string `json:"token"`
+}
 
 // WorkspaceMetadata represents persisted workspace metadata that survives
 // agent restarts. This ensures the correct container working directory,
@@ -100,6 +110,7 @@ func (s *Store) migrate() error {
 		migrateV2,
 		migrateV3,
 		migrateV4,
+		migrateV5,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -357,4 +368,98 @@ func (s *Store) TabCount(workspaceID string) (int, error) {
 		return 0, fmt.Errorf("count tabs: %w", err)
 	}
 	return count, nil
+}
+
+// migrateV5 creates the session_mcp_servers table for persisting MCP server
+// configs across VM agent restarts. Previously these were only held in an
+// in-memory map, causing silent MCP tool loss on restart or race conditions.
+func migrateV5(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS session_mcp_servers (
+			workspace_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			servers_json TEXT NOT NULL DEFAULT '[]',
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (workspace_id, session_id)
+		)
+	`)
+	return err
+}
+
+// UpsertSessionMcpServers persists MCP server configs for a session.
+// Called by handleStartAgentSession when the control plane sends MCP
+// server configs alongside an agent session start request.
+func (s *Store) UpsertSessionMcpServers(workspaceID, sessionID string, servers []McpServerEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := json.Marshal(servers)
+	if err != nil {
+		return fmt.Errorf("marshal mcp servers: %w", err)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err = s.db.Exec(
+		`INSERT OR REPLACE INTO session_mcp_servers (workspace_id, session_id, servers_json, updated_at)
+		 VALUES (?, ?, ?, ?)`,
+		workspaceID, sessionID, string(data), now,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert session mcp servers: %w", err)
+	}
+	return nil
+}
+
+// GetSessionMcpServers retrieves persisted MCP server configs for a session.
+// Returns nil, nil if no config exists for the given workspace+session pair.
+func (s *Store) GetSessionMcpServers(workspaceID, sessionID string) ([]McpServerEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var serversJSON string
+	err := s.db.QueryRow(
+		`SELECT servers_json FROM session_mcp_servers WHERE workspace_id = ? AND session_id = ?`,
+		workspaceID, sessionID,
+	).Scan(&serversJSON)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get session mcp servers: %w", err)
+	}
+
+	var servers []McpServerEntry
+	if err := json.Unmarshal([]byte(serversJSON), &servers); err != nil {
+		return nil, fmt.Errorf("unmarshal session mcp servers: %w", err)
+	}
+	return servers, nil
+}
+
+// DeleteSessionMcpServers removes persisted MCP server configs for a session.
+// Called when a session is stopped, deleted, or suspended.
+func (s *Store) DeleteSessionMcpServers(workspaceID, sessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(
+		"DELETE FROM session_mcp_servers WHERE workspace_id = ? AND session_id = ?",
+		workspaceID, sessionID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete session mcp servers: %w", err)
+	}
+	return nil
+}
+
+// DeleteWorkspaceMcpServers removes all persisted MCP server configs for a workspace.
+// Called when a workspace is deleted.
+func (s *Store) DeleteWorkspaceMcpServers(workspaceID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec("DELETE FROM session_mcp_servers WHERE workspace_id = ?", workspaceID)
+	if err != nil {
+		return fmt.Errorf("delete workspace mcp servers: %w", err)
+	}
+	return nil
 }

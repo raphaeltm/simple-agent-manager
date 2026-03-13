@@ -259,9 +259,25 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 		}
 	}
 
-	// Inject per-session MCP servers if registered (e.g., by handleStartAgentSession).
+	// Inject per-session MCP servers. Check in-memory map first (fast path),
+	// then fall back to SQLite (survives VM agent restart / race conditions).
 	if mcpServers, ok := s.sessionMcpServers[hostKey]; ok && len(mcpServers) > 0 {
 		cfg.McpServers = mcpServers
+	} else if s.store != nil {
+		if persisted, err := s.store.GetSessionMcpServers(workspaceID, sessionID); err == nil && len(persisted) > 0 {
+			acpEntries := make([]acp.McpServerEntry, len(persisted))
+			for i, p := range persisted {
+				acpEntries[i] = acp.McpServerEntry{URL: p.URL, Token: p.Token}
+			}
+			cfg.McpServers = acpEntries
+			// Backfill in-memory map so subsequent lookups are fast
+			s.sessionMcpServers[hostKey] = acpEntries
+			slog.Info("MCP servers recovered from SQLite",
+				"workspace", workspaceID, "sessionId", sessionID, "count", len(acpEntries))
+		} else if err != nil {
+			slog.Warn("Failed to read MCP servers from SQLite",
+				"workspace", workspaceID, "sessionId", sessionID, "error", err)
+		}
 	}
 
 	hostCfg := acp.SessionHostConfig{
