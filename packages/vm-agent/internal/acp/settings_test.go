@@ -13,6 +13,7 @@ func TestGetModelEnvVar(t *testing.T) {
 		{"claude-code", "ANTHROPIC_MODEL"},
 		{"openai-codex", "OPENAI_MODEL"},
 		{"google-gemini", "GEMINI_MODEL"},
+		{"mistral-vibe", "VIBE_ACTIVE_MODEL"},
 		{"unknown-agent", ""},
 		{"", ""},
 	}
@@ -66,6 +67,12 @@ func TestAgentSettingsEnvVarInjection(t *testing.T) {
 			agentType: "google-gemini",
 			settings:  &agentSettingsPayload{Model: "gemini-2.5-pro"},
 			wantEnv:   "GEMINI_MODEL=gemini-2.5-pro",
+		},
+		{
+			name:      "Mistral Vibe with model override",
+			agentType: "mistral-vibe",
+			settings:  &agentSettingsPayload{Model: "devstral-2"},
+			wantEnv:   "VIBE_ACTIVE_MODEL=devstral-2",
 		},
 		{
 			name:      "Empty model should not produce env var",

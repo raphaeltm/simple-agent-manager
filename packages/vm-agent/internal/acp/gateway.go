@@ -631,6 +631,8 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		return agentCommandInfo{"codex-acp", nil, "OPENAI_API_KEY", "npm install -g @zed-industries/codex-acp", "", ""}
 	case "google-gemini":
 		return agentCommandInfo{"gemini", []string{"--experimental-acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli", "", ""}
+	case "mistral-vibe":
+		return agentCommandInfo{"vibe-acp", nil, "MISTRAL_API_KEY", `ARCH=$(uname -m) && curl -fLo /usr/local/bin/vibe-acp "https://github.com/mistralai/mistral-vibe/releases/latest/download/vibe-acp-linux-${ARCH}" && chmod +x /usr/local/bin/vibe-acp`, "", ""}
 	default:
 		return agentCommandInfo{agentType, nil, "API_KEY", "", "", ""}
 	}
@@ -646,6 +648,8 @@ func getModelEnvVar(agentType string) string {
 		return "OPENAI_MODEL"
 	case "google-gemini":
 		return "GEMINI_MODEL"
+	case "mistral-vibe":
+		return "VIBE_ACTIVE_MODEL"
 	default:
 		return ""
 	}
