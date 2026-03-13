@@ -113,29 +113,26 @@ describe('Shannon Security Fixes', () => {
         body: JSON.stringify({ path, content: 'test content', isSecret: false }),
       }, mockEnv);
 
-    it('allows /etc/cron.d/ paths (devcontainer sandbox)', async () => {
-      orderByResponses.push([], []);
+    it('rejects /etc/cron.d/ paths (cron injection)', async () => {
       const res = await postFile('/etc/cron.d/backdoor');
-      // Absolute paths are now allowed since files are injected into sandboxed devcontainers
-      expect(res.status).not.toBe(400);
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.message).toContain('Absolute paths are only allowed under');
     });
 
-    it('allows /etc/profile.d/ paths (devcontainer sandbox)', async () => {
-      orderByResponses.push([], []);
+    it('rejects /etc/profile.d/ paths (shell injection)', async () => {
       const res = await postFile('/etc/profile.d/backdoor.sh');
-      expect(res.status).not.toBe(400);
+      expect(res.status).toBe(400);
     });
 
-    it('allows /usr/ paths (devcontainer sandbox)', async () => {
-      orderByResponses.push([], []);
+    it('rejects /usr/ paths', async () => {
       const res = await postFile('/usr/local/bin/evil');
-      expect(res.status).not.toBe(400);
+      expect(res.status).toBe(400);
     });
 
-    it('allows /var/ paths (devcontainer sandbox)', async () => {
-      orderByResponses.push([], []);
+    it('rejects /var/ paths', async () => {
       const res = await postFile('/var/spool/cron/root');
-      expect(res.status).not.toBe(400);
+      expect(res.status).toBe(400);
     });
 
     it('rejects ~/.ssh/authorized_keys (SSH key injection)', async () => {
