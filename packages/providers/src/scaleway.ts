@@ -1,6 +1,6 @@
 import type { VMSize } from '@simple-agent-manager/shared';
 import { DEFAULT_SCALEWAY_ZONE, DEFAULT_SCALEWAY_IMAGE_NAME } from '@simple-agent-manager/shared';
-import type { Provider, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
+import type { LocationMeta, Provider, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
 import { ProviderError } from './types';
 import { providerFetch } from './provider-fetch';
 
@@ -11,6 +11,17 @@ export const SCALEWAY_LOCATIONS = [
   'nl-ams-1', 'nl-ams-2', 'nl-ams-3',
   'pl-waw-1', 'pl-waw-2',
 ] as const;
+
+const SCALEWAY_LOCATION_META: Record<string, LocationMeta> = {
+  'fr-par-1': { name: 'Paris 1', country: 'FR' },
+  'fr-par-2': { name: 'Paris 2', country: 'FR' },
+  'fr-par-3': { name: 'Paris 3', country: 'FR' },
+  'nl-ams-1': { name: 'Amsterdam 1', country: 'NL' },
+  'nl-ams-2': { name: 'Amsterdam 2', country: 'NL' },
+  'nl-ams-3': { name: 'Amsterdam 3', country: 'NL' },
+  'pl-waw-1': { name: 'Warsaw 1', country: 'PL' },
+  'pl-waw-2': { name: 'Warsaw 2', country: 'PL' },
+};
 
 const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
   small: {
@@ -61,7 +72,9 @@ interface ScalewayImageResponse {
 export class ScalewayProvider implements Provider {
   readonly name = 'scaleway';
   readonly locations: readonly string[] = SCALEWAY_LOCATIONS;
+  readonly locationMetadata: Readonly<Record<string, LocationMeta>> = SCALEWAY_LOCATION_META;
   readonly sizes: Readonly<Record<VMSize, SizeConfig>> = SIZE_CONFIGS;
+  readonly defaultLocation: string;
 
   private readonly secretKey: string;
   private readonly projectId: string;
@@ -77,6 +90,7 @@ export class ScalewayProvider implements Provider {
     this.secretKey = secretKey;
     this.projectId = projectId;
     this.zone = zone || DEFAULT_SCALEWAY_ZONE;
+    this.defaultLocation = this.zone;
     this.imageName = imageName || DEFAULT_SCALEWAY_IMAGE_NAME;
   }
 

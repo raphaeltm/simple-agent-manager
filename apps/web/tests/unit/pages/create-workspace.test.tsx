@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   listNodes: vi.fn(),
   listRepositories: vi.fn(),
   listBranches: vi.fn(),
+  getProviderCatalog: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
@@ -18,6 +19,7 @@ vi.mock('../../../src/lib/api', () => ({
   listNodes: mocks.listNodes,
   listRepositories: mocks.listRepositories,
   listBranches: mocks.listBranches,
+  getProviderCatalog: mocks.getProviderCatalog,
 }));
 
 vi.mock('../../../src/components/UserMenu', () => ({
@@ -75,6 +77,7 @@ describe('CreateWorkspace', () => {
       { name: 'develop' },
       { name: 'feature/cool-thing' },
     ]);
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
   });
 
   it('renders the create workspace form when prerequisites are met', async () => {
@@ -171,7 +174,7 @@ describe('CreateWorkspace', () => {
     renderCreateWorkspace();
 
     expect(await screen.findByText('Checking prerequisites...')).toBeInTheDocument();
-    expect(screen.getByText('Hetzner Cloud Token')).toBeInTheDocument();
+    expect(screen.getByText('Cloud Provider')).toBeInTheDocument();
     expect(screen.getByText('GitHub App Installation')).toBeInTheDocument();
     expect(screen.getByText('Nodes')).toBeInTheDocument();
   });

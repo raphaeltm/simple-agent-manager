@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ProjectRuntimeConfigResponse, VMSize } from '@simple-agent-manager/shared';
+import type { ProjectRuntimeConfigResponse, ProviderCatalog, VMSize } from '@simple-agent-manager/shared';
 import { AGENT_CATALOG } from '@simple-agent-manager/shared';
-import { Button, Spinner } from '@simple-agent-manager/ui';
+import { Button, Spinner, Skeleton } from '@simple-agent-manager/ui';
 import {
   getProjectRuntimeConfig,
+  getProviderCatalog,
   updateProject,
   upsertProjectRuntimeEnvVar,
   deleteProjectRuntimeEnvVar,
@@ -13,10 +14,10 @@ import {
 import { useToast } from '../hooks/useToast';
 import { useProjectContext } from './ProjectContext';
 
-const VM_SIZES: { value: VMSize; label: string; description: string }[] = [
-  { value: 'small', label: 'Small', description: '2 vCPUs, 4 GB RAM' },
-  { value: 'medium', label: 'Medium', description: '4 vCPUs, 8 GB RAM' },
-  { value: 'large', label: 'Large', description: '8 vCPUs, 16 GB RAM' },
+const FALLBACK_VM_SIZES: { value: VMSize; label: string; description: string }[] = [
+  { value: 'small', label: 'Small', description: '2-3 vCPUs, 4 GB RAM' },
+  { value: 'medium', label: 'Medium', description: '4 vCPUs, 8-12 GB RAM' },
+  { value: 'large', label: 'Large', description: '8 vCPUs, 16-32 GB RAM' },
 ];
 
 export function ProjectSettings() {
@@ -27,6 +28,38 @@ export function ProjectSettings() {
   const [savingVmSize, setSavingVmSize] = useState(false);
   const [defaultAgentType, setDefaultAgentType] = useState<string | null>(project?.defaultAgentType ?? null);
   const [savingAgentType, setSavingAgentType] = useState(false);
+
+  // Provider catalog for accurate VM size descriptions
+  const [catalog, setCatalog] = useState<ProviderCatalog | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+
+  useEffect(() => {
+    setCatalogLoading(true);
+    getProviderCatalog()
+      .then((resp) => {
+        setCatalog(resp.catalogs[0] ?? null);
+      })
+      .catch(() => {
+        // Catalog unavailable — use fallback descriptions
+      })
+      .finally(() => {
+        setCatalogLoading(false);
+      });
+  }, []);
+
+  // Build VM size options from catalog or fallback
+  const vmSizes = catalog
+    ? (['small', 'medium', 'large'] as VMSize[]).map((size) => {
+        const info = catalog.sizes[size];
+        return {
+          value: size,
+          label: size.charAt(0).toUpperCase() + size.slice(1),
+          description: info
+            ? `${info.vcpu} vCPUs, ${info.ramGb} GB RAM \u2014 ${info.price}`
+            : size,
+        };
+      })
+    : FALLBACK_VM_SIZES;
 
   // Sync from project when it reloads
   useEffect(() => {
@@ -182,24 +215,28 @@ export function ProjectSettings() {
           </p>
         </div>
         <div className="grid grid-cols-3 gap-3">
-          {VM_SIZES.map((size) => {
+          {vmSizes.map((size) => {
             const isSelected = defaultVmSize === size.value;
             return (
               <button
                 key={size.value}
                 type="button"
                 aria-pressed={isSelected}
-                disabled={savingVmSize}
+                disabled={savingVmSize || catalogLoading}
                 onClick={() => void handleSaveVmSize(size.value)}
                 className={`p-3 rounded-md text-left text-fg-primary transition-all ${
                   isSelected
                     ? 'border-2 border-accent bg-accent-tint'
                     : 'border border-border-default bg-inset'
-                } ${savingVmSize ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
+                } ${savingVmSize || catalogLoading ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
               >
                 <div className="font-medium">{size.label}</div>
                 <div className="text-xs text-fg-muted mt-0.5">
-                  {size.description}
+                  {catalogLoading ? (
+                    <Skeleton width="80%" height="10px" />
+                  ) : (
+                    size.description
+                  )}
                 </div>
               </button>
             );
@@ -330,7 +367,7 @@ export function ProjectSettings() {
                   >
                     <code className="font-semibold text-fg-primary text-[0.8125rem]">{item.key}</code>
                     <span className="text-fg-muted flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-                      = {item.isSecret ? '••••••' : item.value}
+                      = {item.isSecret ? '\u2022\u2022\u2022\u2022\u2022\u2022' : item.value}
                     </span>
                     {item.isSecret && (
                       <span className="text-[0.6875rem] text-fg-muted bg-inset px-1.5 py-px rounded-sm shrink-0">secret</span>

@@ -122,10 +122,10 @@ export function ProjectChat() {
   // Effects (all preserved from original)
   // ---------------------------------------------------------------------------
 
-  // Check for Hetzner credentials
+  // Check for cloud provider credentials
   useEffect(() => {
     void listCredentials()
-      .then((creds) => setHasCloudCredentials(creds.some((c) => c.provider === 'hetzner')))
+      .then((creds) => setHasCloudCredentials(creds.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway')))
       .catch(() => setHasCloudCredentials(false));
   }, []);
 

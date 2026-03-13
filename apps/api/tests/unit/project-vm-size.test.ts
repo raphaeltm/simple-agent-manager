@@ -83,7 +83,7 @@ describe('Project default VM size — settings UI', () => {
   });
 
   it('shows size descriptions', () => {
-    expect(settingsSource).toContain('2 vCPUs');
+    expect(settingsSource).toContain('2-3 vCPUs');
     expect(settingsSource).toContain('4 vCPUs');
     expect(settingsSource).toContain('8 vCPUs');
   });

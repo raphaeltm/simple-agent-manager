@@ -1,8 +1,21 @@
-import type { VMSize, VMLocation, WorkspaceProfile } from './types';
+import type { VMSize, WorkspaceProfile } from './types';
 
 // =============================================================================
-// VM Size Configuration
+// VM Size Display (provider-agnostic)
 // =============================================================================
+
+/** Generic VM size display info. For provider-specific details (exact specs, price),
+ *  use the provider catalog API (GET /api/providers/catalog). */
+export const VM_SIZE_LABELS: Record<VMSize, { label: string; shortDescription: string }> = {
+  small: { label: 'Small', shortDescription: '2-3 vCPUs, 4 GB RAM' },
+  medium: { label: 'Medium', shortDescription: '4 vCPUs, 8-12 GB RAM' },
+  large: { label: 'Large', shortDescription: '8 vCPUs, 16-32 GB RAM' },
+};
+
+/**
+ * @deprecated Use VM_SIZE_LABELS for display and provider catalog for specs.
+ * Kept for backward compatibility with existing node display components.
+ */
 export const VM_SIZE_CONFIG: Record<VMSize, { hetznerType: string; cpus: number; ram: string }> = {
   small: { hetznerType: 'cx23', cpus: 2, ram: '4GB' },
   medium: { hetznerType: 'cx33', cpus: 4, ram: '8GB' },
@@ -10,12 +23,34 @@ export const VM_SIZE_CONFIG: Record<VMSize, { hetznerType: string; cpus: number;
 };
 
 // =============================================================================
-// VM Location Configuration
+// Provider Display Labels
 // =============================================================================
-export const VM_LOCATIONS: Record<VMLocation, { name: string; country: string }> = {
+
+/** Human-readable display labels for credential providers. */
+export const PROVIDER_LABELS: Record<string, string> = {
+  hetzner: 'Hetzner',
+  scaleway: 'Scaleway',
+};
+
+// =============================================================================
+// VM Location Display Names (all providers)
+// =============================================================================
+export const VM_LOCATIONS: Record<string, { name: string; country: string }> = {
+  // Hetzner
   nbg1: { name: 'Nuremberg', country: 'DE' },
   fsn1: { name: 'Falkenstein', country: 'DE' },
   hel1: { name: 'Helsinki', country: 'FI' },
+  ash: { name: 'Ashburn', country: 'US' },
+  hil: { name: 'Hillsboro', country: 'US' },
+  // Scaleway
+  'fr-par-1': { name: 'Paris 1', country: 'FR' },
+  'fr-par-2': { name: 'Paris 2', country: 'FR' },
+  'fr-par-3': { name: 'Paris 3', country: 'FR' },
+  'nl-ams-1': { name: 'Amsterdam 1', country: 'NL' },
+  'nl-ams-2': { name: 'Amsterdam 2', country: 'NL' },
+  'nl-ams-3': { name: 'Amsterdam 3', country: 'NL' },
+  'pl-waw-1': { name: 'Warsaw 1', country: 'PL' },
+  'pl-waw-2': { name: 'Warsaw 2', country: 'PL' },
 };
 
 // =============================================================================
@@ -43,7 +78,8 @@ export const STATUS_COLORS: Record<string, string> = {
 // Defaults
 // =============================================================================
 export const DEFAULT_VM_SIZE: VMSize = 'medium';
-export const DEFAULT_VM_LOCATION: VMLocation = 'nbg1';
+/** Default VM location (Hetzner). Provider-specific defaults come from the provider catalog. */
+export const DEFAULT_VM_LOCATION = 'nbg1';
 export const DEFAULT_BRANCH = 'main';
 export const DEFAULT_WORKSPACE_PROFILE: WorkspaceProfile = 'full';
 export const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['full', 'lightweight'];
@@ -196,6 +232,9 @@ export const DEFAULT_DASHBOARD_INACTIVE_THRESHOLD_MS = 15 * 60 * 1000; // 15 min
 
 /** Default dashboard poll interval (ms) for active tasks. */
 export const DEFAULT_DASHBOARD_POLL_INTERVAL_MS = 15_000; // 15 seconds
+
+/** Default Hetzner datacenter. Override via HETZNER_DATACENTER env var. */
+export const DEFAULT_HETZNER_DATACENTER = 'fsn1';
 
 /** Default Hetzner image. Override via HETZNER_IMAGE env var. */
 export const DEFAULT_HETZNER_IMAGE = 'ubuntu-24.04';

@@ -10,6 +10,7 @@ export type {
   HetznerProviderConfig,
   UpCloudProviderConfig,
   ScalewayProviderConfig,
+  LocationMeta,
   SizeConfig,
   VMConfig,
   VMInstance,

@@ -1,7 +1,7 @@
 import type { FC } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { VM_SIZE_CONFIG, VM_LOCATIONS } from '@simple-agent-manager/shared';
+import { VM_SIZE_LABELS, VM_LOCATIONS } from '@simple-agent-manager/shared';
 import { Card, Button, StatusBadge, DropdownMenu, type DropdownMenuItem } from '@simple-agent-manager/ui';
 import { Server, Plus } from 'lucide-react';
 import { MiniMetricBadge } from './MiniMetricBadge';
@@ -53,7 +53,7 @@ export const NodeCard: FC<NodeCardProps> = ({
 }) => {
   const navigate = useNavigate();
   const overflowItems = getNodeActions(node, { onStop, onDelete });
-  const sizeConfig = VM_SIZE_CONFIG[node.vmSize];
+  const sizeLabels = VM_SIZE_LABELS[node.vmSize];
   const locationConfig = VM_LOCATIONS[node.vmLocation];
   const metrics = node.lastMetrics;
   const hasMetrics = metrics && (metrics.cpuLoadAvg1 != null || metrics.memoryPercent != null || metrics.diskPercent != null);
@@ -113,7 +113,7 @@ export const NodeCard: FC<NodeCardProps> = ({
 
         {/* VM info */}
         <div className="sam-type-caption text-fg-muted">
-          {node.vmSize} ({sizeConfig.cpus} CPU, {sizeConfig.ram}) &middot; {locationConfig.name}, {locationConfig.country}
+          {sizeLabels ? `${sizeLabels.label} \u2014 ${sizeLabels.shortDescription}` : node.vmSize} &middot; {locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}
         </div>
 
         {/* Resource metrics */}

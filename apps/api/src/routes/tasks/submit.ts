@@ -34,7 +34,6 @@ import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title
 
 const MAX_MESSAGE_LENGTH = 2000;
 const VALID_VM_SIZES: VMSize[] = ['small', 'medium', 'large'];
-const VALID_VM_LOCATIONS: VMLocation[] = ['nbg1', 'fsn1', 'hel1'];
 
 const submitRoutes = new Hono<{ Bindings: Env }>();
 
@@ -71,8 +70,10 @@ submitRoutes.post('/submit', async (c) => {
   if (body.vmSize && !VALID_VM_SIZES.includes(body.vmSize)) {
     throw errors.badRequest('vmSize must be small, medium, or large');
   }
-  if (body.vmLocation && !VALID_VM_LOCATIONS.includes(body.vmLocation as VMLocation)) {
-    throw errors.badRequest('vmLocation must be nbg1, fsn1, or hel1');
+  if (body.vmLocation !== undefined) {
+    if (typeof body.vmLocation !== 'string' || body.vmLocation.trim() === '') {
+      throw errors.badRequest('vmLocation must be a non-empty string');
+    }
   }
   if (body.workspaceProfile && !VALID_WORKSPACE_PROFILES.includes(body.workspaceProfile)) {
     throw errors.badRequest('workspaceProfile must be full or lightweight');

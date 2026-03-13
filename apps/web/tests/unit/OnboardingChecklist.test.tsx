@@ -46,7 +46,7 @@ describe('OnboardingChecklist', () => {
       expect(screen.getByText('Get Started')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('Add your Hetzner Cloud API token')).toBeInTheDocument();
+    expect(screen.getByText('Add a cloud provider API token')).toBeInTheDocument();
     expect(screen.getByText('Install the GitHub App')).toBeInTheDocument();
     expect(screen.getByText('Create your first workspace')).toBeInTheDocument();
     expect(screen.getByText('0 of 3 steps completed')).toBeInTheDocument();

@@ -14,7 +14,7 @@ import { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { RunTaskRequest, RunTaskResponse, TaskStatus, VMSize, VMLocation, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES } from '@simple-agent-manager/shared';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
 import { ulid } from '../../lib/ulid';
@@ -39,7 +39,7 @@ runRoutes.use('/*', requireAuth(), requireApproved());
  *
  * Request body (all optional):
  *   vmSize: 'small' | 'medium' | 'large' — VM size for workspace (default: medium)
- *   vmLocation: 'nbg1' | 'fsn1' | 'hel1' — VM location (default: nbg1)
+ *   vmLocation: string — VM location (provider-specific, default: nbg1)
  *   nodeId: string — force a specific node (must be running and owned by user)
  *   branch: string — override project default branch
  *
@@ -126,8 +126,10 @@ runRoutes.post('/:taskId/run', async (c) => {
   }
 
   // Validate vmLocation if provided
-  if (body.vmLocation && !['nbg1', 'fsn1', 'hel1'].includes(body.vmLocation)) {
-    throw errors.badRequest('vmLocation must be nbg1, fsn1, or hel1');
+  if (body.vmLocation !== undefined) {
+    if (typeof body.vmLocation !== 'string' || body.vmLocation.trim() === '') {
+      throw errors.badRequest('vmLocation must be a non-empty string');
+    }
   }
 
   // Validate workspaceProfile if provided
@@ -155,7 +157,7 @@ runRoutes.post('/:taskId/run', async (c) => {
   const vmSize: VMSize = body.vmSize
     ?? (project.defaultVmSize as VMSize | null)
     ?? DEFAULT_VM_SIZE;
-  const vmLocation: VMLocation = (body.vmLocation as VMLocation) ?? 'nbg1';
+  const vmLocation: VMLocation = (body.vmLocation as VMLocation) ?? DEFAULT_VM_LOCATION;
   const workspaceProfile: WorkspaceProfile = body.workspaceProfile
     ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
     ?? DEFAULT_WORKSPACE_PROFILE;
