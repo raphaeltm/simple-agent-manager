@@ -498,6 +498,8 @@ export interface ChatSessionResponse {
   workspaceUrl?: string | null;
   /** Scheduled cleanup timestamp for idle sessions (from idle_cleanup_schedule). */
   cleanupAt?: number | null;
+  /** Active agent session ID (ULID) from D1, used for ACP WebSocket routing. */
+  agentSessionId?: string | null;
   /** Embedded task summary (populated in session detail response). */
   task?: {
     id: string;

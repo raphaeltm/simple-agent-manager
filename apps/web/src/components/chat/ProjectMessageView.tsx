@@ -362,9 +362,12 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
   // ACP agent session — direct WebSocket to VM agent for prompts and cancel.
   // Active when workspace is available and session is interactive.
+  // Use the agent session ID (ULID from D1) when available so the ACP WebSocket
+  // connects to the session created by TaskRunner, not a duplicate.
+  const agentSessionId = session?.agentSessionId ?? sessionId;
   const agentSession = useProjectAgentSession({
     workspaceId: session?.workspaceId ?? null,
-    sessionId,
+    sessionId: agentSessionId,
     enabled: sessionState === 'active' || sessionState === 'idle',
     preferredAgentType: 'claude-code',
   });
