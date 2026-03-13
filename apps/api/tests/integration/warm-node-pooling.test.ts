@@ -77,7 +77,7 @@ describe('warm node pooling lifecycle integration', () => {
     });
 
     it('cron sweep finds stale warm nodes and calls deleteNodeResources', () => {
-      expect(cleanupFile).toContain('deleteNodeResources(node.id, node.userId, env)');
+      expect(cleanupFile).toContain('deleteNodeResources(node.id, node.user_id, env)');
     });
 
     it('cron sweep also enforces max auto-provisioned node lifetime', () => {
