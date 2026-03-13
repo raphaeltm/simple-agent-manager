@@ -76,12 +76,13 @@ export function ScalewayCredentialForm({ credential, onUpdate }: ScalewayCredent
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setShowForm(true)} className="py-1 px-3 text-sm bg-transparent border-none cursor-pointer text-accent">
+            <button onClick={() => setShowForm(true)} aria-label="Update Scaleway credentials" className="py-1 px-3 text-sm bg-transparent border-none cursor-pointer text-accent">
               Update
             </button>
             <button
               onClick={handleDelete}
               disabled={loading}
+              aria-label="Disconnect Scaleway account"
               className={`py-1 px-3 text-sm bg-transparent border-none cursor-pointer text-danger ${loading ? 'opacity-50' : 'opacity-100'}`}
             >
               {loading ? 'Removing...' : 'Disconnect'}
@@ -121,20 +122,19 @@ export function ScalewayCredentialForm({ credential, onUpdate }: ScalewayCredent
           placeholder="Enter your Scaleway project ID"
           required
         />
+        <p className="mt-1 text-xs text-fg-muted">
+          Find your credentials in the{' '}
+          <a
+            href="https://console.scaleway.com/project/credentials"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent"
+          >
+            Scaleway Console
+          </a>
+          {' '}&gt; Project &gt; Credentials
+        </p>
       </div>
-
-      <p className="text-xs text-fg-muted">
-        Find your credentials in the{' '}
-        <a
-          href="https://console.scaleway.com/project/credentials"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-accent"
-        >
-          Scaleway Console
-        </a>
-        {' '}&gt; Project &gt; Credentials
-      </p>
 
       {error && <Alert variant="error">{error}</Alert>}
 

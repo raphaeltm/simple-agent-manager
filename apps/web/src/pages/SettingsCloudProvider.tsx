@@ -21,12 +21,12 @@ export function SettingsCloudProvider() {
   return (
     <div className="flex flex-col gap-8">
       <section>
-        <h3 className="text-base font-medium text-fg-primary mb-3">Hetzner</h3>
+        <h3 className="text-base font-semibold text-fg-primary mb-3">Hetzner</h3>
         <HetznerTokenForm credential={hetznerCredential} onUpdate={reload} />
       </section>
 
       <section>
-        <h3 className="text-base font-medium text-fg-primary mb-3">Scaleway</h3>
+        <h3 className="text-base font-semibold text-fg-primary mb-3">Scaleway</h3>
         <ScalewayCredentialForm credential={scalewayCredential} onUpdate={reload} />
       </section>
     </div>

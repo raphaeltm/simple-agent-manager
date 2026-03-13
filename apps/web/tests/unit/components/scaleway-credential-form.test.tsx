@@ -93,14 +93,14 @@ describe('ScalewayCredentialForm', () => {
     render(<ScalewayCredentialForm credential={credential} onUpdate={onUpdate} />);
 
     expect(screen.getByText('Connected')).toBeInTheDocument();
-    expect(screen.getByText('Update')).toBeInTheDocument();
-    expect(screen.getByText('Disconnect')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Update Scaleway credentials' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Disconnect Scaleway account' })).toBeInTheDocument();
   });
 
   it('switches to form on Update click', () => {
     render(<ScalewayCredentialForm credential={credential} onUpdate={onUpdate} />);
 
-    fireEvent.click(screen.getByText('Update'));
+    fireEvent.click(screen.getByRole('button', { name: 'Update Scaleway credentials' }));
 
     expect(screen.getByLabelText('API Secret Key')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Update Credentials' })).toBeInTheDocument();
@@ -110,7 +110,7 @@ describe('ScalewayCredentialForm', () => {
   it('Cancel returns to connected panel without API call', () => {
     render(<ScalewayCredentialForm credential={credential} onUpdate={onUpdate} />);
 
-    fireEvent.click(screen.getByText('Update'));
+    fireEvent.click(screen.getByRole('button', { name: 'Update Scaleway credentials' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(screen.getByText('Connected')).toBeInTheDocument();
@@ -122,7 +122,7 @@ describe('ScalewayCredentialForm', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<ScalewayCredentialForm credential={credential} onUpdate={onUpdate} />);
 
-    fireEvent.click(screen.getByText('Disconnect'));
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect Scaleway account' }));
 
     await waitFor(() => {
       expect(mocks.deleteCredential).toHaveBeenCalledWith('scaleway');
@@ -134,7 +134,7 @@ describe('ScalewayCredentialForm', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false);
     render(<ScalewayCredentialForm credential={credential} onUpdate={onUpdate} />);
 
-    fireEvent.click(screen.getByText('Disconnect'));
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect Scaleway account' }));
 
     expect(mocks.deleteCredential).not.toHaveBeenCalled();
   });
@@ -144,7 +144,7 @@ describe('ScalewayCredentialForm', () => {
     mocks.deleteCredential.mockRejectedValue(new Error('Delete failed'));
     render(<ScalewayCredentialForm credential={credential} onUpdate={onUpdate} />);
 
-    fireEvent.click(screen.getByText('Disconnect'));
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect Scaleway account' }));
 
     await waitFor(() => {
       expect(screen.getByText('Delete failed')).toBeInTheDocument();
