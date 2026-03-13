@@ -1,35 +1,48 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { HetznerProvider } from '../../src/hetzner';
+import { ProviderError } from '../../src/types';
 import type { VMConfig } from '../../src/types';
+import { createMockServer } from '../fixtures/hetzner-mocks';
 
 describe('HetznerProvider', () => {
-  const mockConfig = {
-    apiToken: 'test-token',
-    datacenter: 'fsn1',
-  };
-
   let provider: HetznerProvider;
+  const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
-    provider = new HetznerProvider(mockConfig);
+    provider = new HetznerProvider('test-token', 'fsn1');
     vi.resetAllMocks();
   });
 
-  describe('constructor', () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  describe('constructor and properties', () => {
     it('should set provider name to hetzner', () => {
       expect(provider.name).toBe('hetzner');
     });
 
+    it('should expose locations', () => {
+      expect(provider.locations).toContain('fsn1');
+      expect(provider.locations).toContain('nbg1');
+      expect(provider.locations.length).toBeGreaterThan(0);
+    });
+
+    it('should expose sizes for all tiers', () => {
+      expect(provider.sizes.small).toBeDefined();
+      expect(provider.sizes.medium).toBeDefined();
+      expect(provider.sizes.large).toBeDefined();
+    });
+
     it('should use default datacenter if not provided', () => {
-      const providerWithDefaults = new HetznerProvider({ apiToken: 'test' });
-      expect(providerWithDefaults.name).toBe('hetzner');
+      const p = new HetznerProvider('test');
+      expect(p.name).toBe('hetzner');
     });
   });
 
-  describe('getSizeConfig', () => {
-    it('should return small size config', () => {
-      const config = provider.getSizeConfig('small');
-      expect(config).toEqual({
+  describe('sizes', () => {
+    it('should return correct small size config', () => {
+      expect(provider.sizes.small).toEqual({
         type: 'cx23',
         price: '€3.99/mo',
         vcpu: 2,
@@ -38,9 +51,8 @@ describe('HetznerProvider', () => {
       });
     });
 
-    it('should return medium size config', () => {
-      const config = provider.getSizeConfig('medium');
-      expect(config).toEqual({
+    it('should return correct medium size config', () => {
+      expect(provider.sizes.medium).toEqual({
         type: 'cx33',
         price: '€7.49/mo',
         vcpu: 4,
@@ -49,9 +61,8 @@ describe('HetznerProvider', () => {
       });
     });
 
-    it('should return large size config', () => {
-      const config = provider.getSizeConfig('large');
-      expect(config).toEqual({
+    it('should return correct large size config', () => {
+      expect(provider.sizes.large).toEqual({
         type: 'cx43',
         price: '€14.49/mo',
         vcpu: 8,
@@ -61,130 +72,49 @@ describe('HetznerProvider', () => {
     });
   });
 
-  describe('generateCloudInit', () => {
-    const vmConfig: VMConfig = {
-      workspaceId: 'ws-abc123',
-      name: 'test-project',
-      repoUrl: 'https://github.com/user/repo',
-      size: 'medium',
-      authPassword: 'generated-password',
-      apiToken: 'api-token',
-      baseDomain: 'example.com',
-      apiUrl: 'https://api.example.com',
-    };
-
-    it('should generate valid cloud-init with #cloud-config header', () => {
-      const cloudInit = provider.generateCloudInit(vmConfig);
-      expect(cloudInit).toContain('#cloud-config');
-    });
-
-    it('should include workspace configuration', () => {
-      const cloudInit = provider.generateCloudInit(vmConfig);
-      expect(cloudInit).toContain(`WORKSPACE_ID=${vmConfig.workspaceId}`);
-      expect(cloudInit).toContain(`REPO_URL=${vmConfig.repoUrl}`);
-      expect(cloudInit).toContain(`BASE_DOMAIN=${vmConfig.baseDomain}`);
-    });
-
-    it('should include idle check script', () => {
-      const cloudInit = provider.generateCloudInit(vmConfig);
-      expect(cloudInit).toContain('/usr/local/bin/idle-check.sh');
-      expect(cloudInit).toContain('IDLE_THRESHOLD=30');
-    });
-
-    it('should include docker installation', () => {
-      const cloudInit = provider.generateCloudInit(vmConfig);
-      expect(cloudInit).toContain('docker.io');
-      expect(cloudInit).toContain('systemctl enable docker');
-    });
-
-    it('should include devcontainer CLI installation', () => {
-      const cloudInit = provider.generateCloudInit(vmConfig);
-      expect(cloudInit).toContain('@devcontainers/cli');
-    });
-
-    it('should inject ACP adapters via --additional-features', () => {
-      const cloudInit = provider.generateCloudInit(vmConfig);
-      expect(cloudInit).toContain('--additional-features');
-      expect(cloudInit).toContain('@zed-industries/claude-agent-acp');
-      expect(cloudInit).toContain('npm-features/npm-package');
-    });
-
-    it('should NOT include CloudCLI (removed)', () => {
-      const cloudInit = provider.generateCloudInit(vmConfig);
-      expect(cloudInit).not.toContain('@siteboon/claude-code-ui');
-      expect(cloudInit).not.toContain('claude-code-ui');
-      expect(cloudInit).not.toContain('cloudcli');
-      expect(cloudInit).not.toContain('reverse_proxy localhost:3001');
-    });
-
-    it('should check devcontainer processes for idle detection', () => {
-      const cloudInit = provider.generateCloudInit(vmConfig);
-      expect(cloudInit).toContain('docker exec');
-      expect(cloudInit).toContain('devcontainer.local_folder');
-    });
-
-    it('should setup cron for idle check', () => {
-      const cloudInit = provider.generateCloudInit(vmConfig);
-      expect(cloudInit).toContain('*/5 * * * * root /usr/local/bin/idle-check.sh');
-    });
-
-    it('should NOT include ANTHROPIC_API_KEY (users use claude login)', () => {
-      const cloudInit = provider.generateCloudInit(vmConfig);
-      expect(cloudInit).not.toMatch(/ANTHROPIC_API_KEY=sk-/);
-      expect(cloudInit).toContain("users authenticate via 'claude login'");
-    });
-
-    it('should include GitHub token when provided', () => {
-      const configWithGithub: VMConfig = {
-        ...vmConfig,
-        githubToken: 'ghs_testaccesstoken123',
+  describe('VMConfig has no secrets', () => {
+    it('should not accept secret fields in VMConfig type', () => {
+      // This is a compile-time check. If VMConfig had authPassword, apiToken, etc.,
+      // this config would fail typechecking because those fields don't exist.
+      const config: VMConfig = {
+        name: 'test-server',
+        size: 'medium',
+        location: 'fsn1',
+        userData: '#cloud-config\npackages:\n  - docker.io',
       };
-      const cloudInit = provider.generateCloudInit(configWithGithub);
-      expect(cloudInit).toContain('GITHUB_TOKEN=ghs_testaccesstoken123');
-      expect(cloudInit).toContain('git config --global credential.helper store');
+      expect(config).not.toHaveProperty('authPassword');
+      expect(config).not.toHaveProperty('apiToken');
+      expect(config).not.toHaveProperty('baseDomain');
+      expect(config).not.toHaveProperty('apiUrl');
+      expect(config).not.toHaveProperty('githubToken');
+      expect(config).not.toHaveProperty('workspaceId');
+      expect(config).not.toHaveProperty('repoUrl');
     });
+  });
 
-    it('should not include GitHub token when not provided', () => {
-      const cloudInit = provider.generateCloudInit(vmConfig);
-      expect(cloudInit).toContain('# No GitHub token (public repo)');
-      expect(cloudInit).not.toContain('ghs_');
-    });
-
-    it('should include instructions for claude login', () => {
-      const cloudInit = provider.generateCloudInit(vmConfig);
-      expect(cloudInit).toContain('Run claude login to authenticate');
+  describe('no generateCloudInit method', () => {
+    it('should not have generateCloudInit method', () => {
+      expect((provider as Record<string, unknown>)['generateCloudInit']).toBeUndefined();
     });
   });
 
   describe('createVM', () => {
     const vmConfig: VMConfig = {
-      workspaceId: 'ws-abc123',
-      name: 'test-project',
-      repoUrl: 'https://github.com/user/repo',
+      name: 'test-server',
       size: 'medium',
-      authPassword: 'generated-password',
-      apiToken: 'api-token',
-      baseDomain: 'example.com',
-      apiUrl: 'https://api.example.com',
+      location: 'fsn1',
+      userData: '#cloud-config\npackages:\n  - docker.io',
+      labels: { node: 'node-123', managed: 'simple-agent-manager' },
     };
 
     it('should call Hetzner API with correct parameters', async () => {
       const mockResponse = {
-        server: {
-          id: 12345,
-          name: 'test-project-ws-abc123',
-          status: 'initializing',
-          public_net: { ipv4: { ip: '1.2.3.4' } },
-          server_type: { name: 'cx22' },
-          created: '2024-01-24T12:00:00Z',
-          labels: { 'workspace-id': 'ws-abc123' },
-        },
+        server: createMockServer({ status: 'initializing', labels: { node: 'node-123' } }),
       };
 
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
-      });
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(mockResponse), { status: 200 }),
+      );
 
       const result = await provider.createVM(vmConfig);
 
@@ -195,142 +125,199 @@ describe('HetznerProvider', () => {
           headers: expect.objectContaining({
             Authorization: 'Bearer test-token',
           }),
-        })
+        }),
       );
+
+      // Verify the body contains the correct fields
+      const callArgs = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+      const body = JSON.parse((callArgs[1] as RequestInit).body as string);
+      expect(body.name).toBe('test-server');
+      expect(body.server_type).toBe('cx33');
+      expect(body.user_data).toBe(vmConfig.userData);
+      expect(body.labels).toEqual(vmConfig.labels);
+      expect(body.start_after_create).toBe(true);
 
       expect(result).toEqual({
         id: '12345',
-        name: 'test-project-ws-abc123',
+        name: 'test-server',
         ip: '1.2.3.4',
         status: 'initializing',
-        serverType: 'cx22',
+        serverType: 'cx33',
         createdAt: '2024-01-24T12:00:00Z',
-        labels: { 'workspace-id': 'ws-abc123' },
+        labels: { node: 'node-123' },
       });
     });
 
-    it('should throw error on API failure', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        text: () => Promise.resolve('API Error'),
-      });
+    it('should throw ProviderError on API failure', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'Quota exceeded' } }), { status: 403 }),
+      );
 
-      await expect(provider.createVM(vmConfig)).rejects.toThrow('Failed to create VM: API Error');
+      await expect(provider.createVM(vmConfig)).rejects.toThrow(ProviderError);
+    });
+
+    it('should use default image when not specified', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          server: createMockServer({ id: 1, name: 'test', status: 'initializing' }),
+        }), { status: 200 }),
+      );
+
+      await provider.createVM(vmConfig);
+
+      const body = JSON.parse(((fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit).body as string);
+      expect(body.image).toBe('ubuntu-24.04');
     });
   });
 
   describe('deleteVM', () => {
     it('should call Hetzner API to delete server', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-      });
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
 
       await provider.deleteVM('12345');
 
-      expect(fetch).toHaveBeenCalledWith('https://api.hetzner.cloud/v1/servers/12345', {
-        method: 'DELETE',
-        headers: { Authorization: 'Bearer test-token' },
-      });
+      expect(fetch).toHaveBeenCalledWith(
+        'https://api.hetzner.cloud/v1/servers/12345',
+        expect.objectContaining({
+          method: 'DELETE',
+          headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
+        }),
+      );
     });
 
-    it('should not throw on 404 (already deleted)', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 404,
-      });
+    it('should not throw on 404 (idempotent)', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 }),
+      );
 
       await expect(provider.deleteVM('12345')).resolves.not.toThrow();
     });
 
-    it('should throw on other errors', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 500,
-        text: () => Promise.resolve('Server Error'),
-      });
-
-      await expect(provider.deleteVM('12345')).rejects.toThrow('Failed to delete VM');
-    });
-  });
-
-  describe('listVMs', () => {
-    it('should return list of managed VMs', async () => {
-      const mockResponse = {
-        servers: [
-          {
-            id: 12345,
-            name: 'test-ws-abc123',
-            status: 'running',
-            public_net: { ipv4: { ip: '1.2.3.4' } },
-            server_type: { name: 'cx22' },
-            created: '2024-01-24T12:00:00Z',
-            labels: { 'workspace-id': 'ws-abc123' },
-          },
-          {
-            id: 12346,
-            name: 'test-ws-def456',
-            status: 'running',
-            public_net: { ipv4: { ip: '5.6.7.8' } },
-            server_type: { name: 'cx11' },
-            created: '2024-01-24T13:00:00Z',
-            labels: { 'workspace-id': 'ws-def456' },
-          },
-        ],
-      };
-
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
-      });
-
-      const result = await provider.listVMs();
-
-      expect(fetch).toHaveBeenCalledWith(
-        expect.stringContaining('label_selector=managed-by=simple-agent-manager'),
-        expect.any(Object)
+    it('should throw ProviderError on other errors', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response('Server Error', { status: 500 }),
       );
 
-      expect(result).toHaveLength(2);
-      expect(result[0]!.id).toBe('12345');
-      expect(result[1]!.id).toBe('12346');
+      await expect(provider.deleteVM('12345')).rejects.toThrow(ProviderError);
     });
   });
 
   describe('getVM', () => {
     it('should return VM instance if found', async () => {
-      const mockResponse = {
-        server: {
-          id: 12345,
-          name: 'test-ws-abc123',
-          status: 'running',
-          public_net: { ipv4: { ip: '1.2.3.4' } },
-          server_type: { name: 'cx22' },
-          created: '2024-01-24T12:00:00Z',
-          labels: { 'workspace-id': 'ws-abc123' },
-        },
-      };
-
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
-      });
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          server: createMockServer({ name: 'test', server_type: { name: 'cx22' }, labels: { node: 'n1' } }),
+        }), { status: 200 }),
+      );
 
       const result = await provider.getVM('12345');
-
       expect(result).not.toBeNull();
       expect(result!.id).toBe('12345');
       expect(result!.status).toBe('running');
     });
 
-    it('should return null if VM not found', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 404,
-      });
+    it('should return null if VM not found (404)', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 }),
+      );
 
       const result = await provider.getVM('99999');
-
       expect(result).toBeNull();
+    });
+  });
+
+  describe('listVMs', () => {
+    const mockServers = {
+      servers: [
+        createMockServer({ id: 1, name: 's1', public_net: { ipv4: { ip: '1.1.1.1' } }, server_type: { name: 'cx23' }, created: '2024-01-01T00:00:00Z', labels: { managed: 'sam' } }),
+        createMockServer({ id: 2, name: 's2', status: 'off', public_net: { ipv4: { ip: '2.2.2.2' } }, server_type: { name: 'cx33' }, created: '2024-01-02T00:00:00Z', labels: { managed: 'sam' } }),
+      ],
+    };
+
+    it('should return list of VMs without labels', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(mockServers), { status: 200 }),
+      );
+
+      const result = await provider.listVMs();
+      expect(result).toHaveLength(2);
+      expect(result[0]!.id).toBe('1');
+      expect(result[1]!.id).toBe('2');
+    });
+
+    it('should pass label filters as label_selector', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ servers: [] }), { status: 200 }),
+      );
+
+      await provider.listVMs({ 'managed-by': 'simple-agent-manager', node: 'n1' });
+
+      const url = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]![0] as string;
+      expect(url).toContain('label_selector=');
+      expect(decodeURIComponent(url)).toContain('managed-by=simple-agent-manager');
+      expect(decodeURIComponent(url)).toContain('node=n1');
+    });
+
+    it('should return empty array when no VMs match', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ servers: [] }), { status: 200 }),
+      );
+
+      const result = await provider.listVMs({ nonexistent: 'label' });
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('powerOff', () => {
+    it('should call poweroff action endpoint', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+
+      await provider.powerOff('12345');
+
+      expect(fetch).toHaveBeenCalledWith(
+        'https://api.hetzner.cloud/v1/servers/12345/actions/poweroff',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    it('should throw ProviderError on failure', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response('Error', { status: 500 }),
+      );
+
+      await expect(provider.powerOff('12345')).rejects.toThrow(ProviderError);
+    });
+  });
+
+  describe('powerOn', () => {
+    it('should call poweron action endpoint', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+
+      await provider.powerOn('12345');
+
+      expect(fetch).toHaveBeenCalledWith(
+        'https://api.hetzner.cloud/v1/servers/12345/actions/poweron',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+  });
+
+  describe('validateToken', () => {
+    it('should return true for valid token', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ datacenters: [] }), { status: 200 }),
+      );
+
+      const result = await provider.validateToken();
+      expect(result).toBe(true);
+    });
+
+    it('should throw ProviderError for invalid token', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'Unauthorized' } }), { status: 401 }),
+      );
+
+      await expect(provider.validateToken()).rejects.toThrow(ProviderError);
     });
   });
 });

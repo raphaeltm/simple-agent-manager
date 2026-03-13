@@ -18,15 +18,15 @@ describe('stopNodeResources source contract', () => {
     file.indexOf('export async function deleteNodeResources')
   );
 
-  it('calls deleteServer instead of powerOffServer', () => {
-    expect(section).toContain('deleteServer(');
+  it('calls provider.deleteVM instead of powerOffServer', () => {
+    expect(section).toContain('provider.deleteVM(');
     expect(section).not.toContain('powerOffServer(');
   });
 
-  it('does not import powerOffServer', () => {
+  it('uses createProvider from providers package', () => {
     const importLine = file.slice(0, file.indexOf('\n\n'));
     expect(importLine).not.toContain('powerOffServer');
-    expect(importLine).toContain('deleteServer');
+    expect(importLine).toContain('createProvider');
   });
 
   it('deletes DNS record', () => {

@@ -9,9 +9,22 @@
 - [ ] `pnpm typecheck`
 - [ ] `pnpm test`
 - [ ] Additional validation run (if applicable)
-- [ ] Staging verification completed (required for all code changes; write `N/A: docs-only` if no code changed)
-- [ ] Infrastructure verification completed — VM provisioned and heartbeat confirmed (required for changes to cloud-init, VM agent, DNS, TLS, scripts/deploy). If this PR touches infrastructure, this checkbox MUST be checked — not N/A'd. Write `N/A: no infra changes` ONLY if the PR does not touch any infrastructure paths.
+
+## Staging Verification (REQUIRED for all code changes — merge-blocking)
+
+All checkboxes below are mandatory for any PR that changes runtime code (`.ts`, `.tsx`, `.go`, etc.). Write `N/A: docs-only` ONLY if the PR contains zero runtime code changes. See `.claude/rules/13-staging-verification.md`.
+
+- [ ] **Staging deployment green** — `Deploy Staging` workflow passed on this PR
+- [ ] **Live app verified via Playwright** — logged into `app.simple-agent-manager.org` using test credentials and actively tested the application
+- [ ] **Existing workflows confirmed working** — navigated dashboard, projects, and settings; confirmed no regressions in core flows (pages load, data displays, navigation works, no new console errors)
+- [ ] **New feature/fix verified on staging** — the specific changes in this PR work correctly on the live staging environment (describe what was tested below)
+- [ ] Infrastructure verification completed — VM provisioned and heartbeat confirmed (required for changes to cloud-init, VM agent, DNS, TLS, scripts/deploy). Write `N/A: no infra changes` ONLY if the PR does not touch any infrastructure paths.
 - [ ] Mobile and desktop verification notes added for UI changes
+
+### Staging Verification Evidence
+
+<!-- Describe what you tested on staging and what you observed. Include screenshots, API responses, or Playwright observations. -->
+<!-- If N/A: docs-only, explain why no code was changed. -->
 
 ## UI Compliance Checklist (Required for UI changes)
 

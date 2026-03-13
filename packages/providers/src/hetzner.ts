@@ -1,7 +1,11 @@
 import type { VMSize } from '@simple-agent-manager/shared';
-import type { Provider, ProviderConfig, SizeConfig, VMConfig, VMInstance } from './types';
+import type { Provider, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
+import { ProviderError } from './types';
+import { providerFetch } from './provider-fetch';
 
 const HETZNER_API_URL = 'https://api.hetzner.cloud/v1';
+
+const HETZNER_LOCATIONS = ['fsn1', 'nbg1', 'hel1', 'ash', 'hil'] as const;
 
 const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
   small: {
@@ -27,8 +31,6 @@ const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
   },
 };
 
-const MANAGED_BY_LABEL = 'simple-agent-manager';
-
 interface HetznerServerResponse {
   server: {
     id: number;
@@ -53,227 +55,122 @@ interface HetznerServersResponse {
 
 export class HetznerProvider implements Provider {
   readonly name = 'hetzner';
+  readonly locations: readonly string[] = HETZNER_LOCATIONS;
+  readonly sizes: Readonly<Record<VMSize, SizeConfig>> = SIZE_CONFIGS;
+
   private readonly apiToken: string;
   private readonly datacenter: string;
 
-  constructor(config: ProviderConfig) {
-    this.apiToken = config.apiToken;
-    this.datacenter = config.datacenter || 'fsn1'; // Falkenstein, Germany
+  constructor(apiToken: string, datacenter?: string) {
+    this.apiToken = apiToken;
+    this.datacenter = datacenter || 'fsn1';
   }
 
   async createVM(config: VMConfig): Promise<VMInstance> {
-    const sizeConfig = this.getSizeConfig(config.size);
-    const cloudInit = this.generateCloudInit(config);
+    const sizeConfig = this.sizes[config.size];
 
-    const response = await fetch(`${HETZNER_API_URL}/servers`, {
+    const response = await providerFetch(this.name, `${HETZNER_API_URL}/servers`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        name: `${config.name}-${config.workspaceId}`,
+        name: config.name,
         server_type: sizeConfig.type,
-        image: 'ubuntu-24.04',
-        datacenter: this.datacenter,
-        user_data: cloudInit,
-        labels: {
-          'managed-by': MANAGED_BY_LABEL,
-          'workspace-id': config.workspaceId,
-          'repo-url': encodeURIComponent(config.repoUrl).slice(0, 63), // Hetzner label limit
-          size: config.size,
-          'created-at': new Date().toISOString(),
-        },
+        image: config.image || 'ubuntu-24.04',
+        location: config.location || this.datacenter,
+        user_data: config.userData,
+        labels: config.labels || {},
         start_after_create: true,
       }),
     });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Failed to create VM: ${error}`);
-    }
 
     const data = (await response.json()) as HetznerServerResponse;
     return this.mapServerToVMInstance(data.server);
   }
 
   async deleteVM(id: string): Promise<void> {
-    const response = await fetch(`${HETZNER_API_URL}/servers/${id}`, {
-      method: 'DELETE',
+    try {
+      await providerFetch(this.name, `${HETZNER_API_URL}/servers/${id}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+        },
+      });
+    } catch (err) {
+      if (err instanceof ProviderError && err.statusCode === 404) {
+        return; // Idempotent: already deleted
+      }
+      throw err;
+    }
+  }
+
+  async getVM(id: string): Promise<VMInstance | null> {
+    try {
+      const response = await providerFetch(this.name, `${HETZNER_API_URL}/servers/${id}`, {
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+        },
+      });
+
+      const data = (await response.json()) as HetznerServerResponse;
+      return this.mapServerToVMInstance(data.server);
+    } catch (err) {
+      if (err instanceof ProviderError && err.statusCode === 404) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  async listVMs(labels?: Record<string, string>): Promise<VMInstance[]> {
+    const labelParts: string[] = [];
+    if (labels) {
+      for (const [key, value] of Object.entries(labels)) {
+        labelParts.push(`${key}=${value}`);
+      }
+    }
+
+    const url = labelParts.length > 0
+      ? `${HETZNER_API_URL}/servers?label_selector=${encodeURIComponent(labelParts.join(','))}`
+      : `${HETZNER_API_URL}/servers`;
+
+    const response = await providerFetch(this.name, url, {
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
       },
     });
-
-    if (!response.ok && response.status !== 404) {
-      const error = await response.text();
-      throw new Error(`Failed to delete VM: ${error}`);
-    }
-  }
-
-  async listVMs(): Promise<VMInstance[]> {
-    const response = await fetch(
-      `${HETZNER_API_URL}/servers?label_selector=managed-by=${MANAGED_BY_LABEL}`,
-      {
-        headers: {
-          Authorization: `Bearer ${this.apiToken}`,
-        },
-      }
-    );
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Failed to list VMs: ${error}`);
-    }
 
     const data = (await response.json()) as HetznerServersResponse;
     return data.servers.map((server) => this.mapServerToVMInstance(server));
   }
 
-  async getVM(id: string): Promise<VMInstance | null> {
-    const response = await fetch(`${HETZNER_API_URL}/servers/${id}`, {
+  async powerOff(id: string): Promise<void> {
+    await providerFetch(this.name, `${HETZNER_API_URL}/servers/${id}/actions/poweroff`, {
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
       },
     });
-
-    if (response.status === 404) {
-      return null;
-    }
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Failed to get VM: ${error}`);
-    }
-
-    const data = (await response.json()) as HetznerServerResponse;
-    return this.mapServerToVMInstance(data.server);
   }
 
-  getSizeConfig(size: VMSize): SizeConfig {
-    return SIZE_CONFIGS[size];
+  async powerOn(id: string): Promise<void> {
+    await providerFetch(this.name, `${HETZNER_API_URL}/servers/${id}/actions/poweron`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.apiToken}`,
+      },
+    });
   }
 
-  generateCloudInit(config: VMConfig): string {
-    return `#cloud-config
-package_update: true
-packages:
-  - docker.io
-  - docker-compose
-  - jq
-  - curl
-  - git
-
-write_files:
-  - path: /etc/workspace/config
-    permissions: '0600'
-    content: |
-      WORKSPACE_ID=${config.workspaceId}
-      REPO_URL=${config.repoUrl}
-      BASE_DOMAIN=${config.baseDomain}
-      API_URL=${config.apiUrl}
-      API_TOKEN=${config.apiToken}
-      # Note: ANTHROPIC_API_KEY is NOT set - users authenticate via 'claude login'
-      ${config.githubToken ? `GITHUB_TOKEN=${config.githubToken}` : '# No GitHub token (public repo)'}
-
-  - path: /usr/local/bin/idle-check.sh
-    permissions: '0755'
-    content: |
-      #!/bin/bash
-      IDLE_FILE="/var/run/idle-check.state"
-      IDLE_THRESHOLD=30
-      CHECK_INTERVAL=5
-
-      source /etc/workspace/config
-
-      is_active() {
-        [ -n "$(find /workspace -type f -mmin -$CHECK_INTERVAL 2>/dev/null | head -1)" ] && return 0
-        docker exec $(docker ps -q --filter "label=devcontainer.local_folder=/workspace" | head -1) pgrep -f "claude|node" >/dev/null 2>&1 && return 0
-        [ "$(ss -tnp 2>/dev/null | grep -c ':8080.*ESTAB')" -gt 0 ] && return 0
-        [ "$(who | wc -l)" -gt 0 ] && return 0
-        return 1
-      }
-
-      if is_active; then
-        echo "0" > "$IDLE_FILE"
-      else
-        IDLE_COUNT=$(cat "$IDLE_FILE" 2>/dev/null || echo "0")
-        IDLE_COUNT=$((IDLE_COUNT + CHECK_INTERVAL))
-        echo "$IDLE_COUNT" > "$IDLE_FILE"
-
-        if [ "$IDLE_COUNT" -ge "$IDLE_THRESHOLD" ]; then
-          curl -sX POST "$API_URL/vms/$WORKSPACE_ID/cleanup" \\
-            -H "Authorization: Bearer $API_TOKEN" \\
-            -H "Content-Type: application/json" \\
-            -d '{"reason": "idle_timeout"}'
-
-          SERVER_ID=$(curl -s http://169.254.169.254/hetzner/v1/metadata/instance-id)
-          curl -X DELETE "https://api.hetzner.cloud/v1/servers/$SERVER_ID" \\
-            -H "Authorization: Bearer $HETZNER_TOKEN"
-        fi
-      fi
-
-runcmd:
-  # Enable Docker
-  - systemctl enable docker
-  - systemctl start docker
-
-  # Add user to docker group
-  - usermod -aG docker ubuntu
-
-  # Install Node.js 22
-  - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-  - apt-get install -y nodejs
-
-  # Install devcontainer CLI
-  - npm install -g @devcontainers/cli
-
-  # Configure git credentials if GitHub token provided (for private repos)
-  - |
-    source /etc/workspace/config
-    if [ -n "$GITHUB_TOKEN" ]; then
-      git config --global credential.helper store
-      echo "https://x-access-token:$GITHUB_TOKEN@github.com" > ~/.git-credentials
-      chmod 600 ~/.git-credentials
-    fi
-
-  # Clone repository (uses git credentials if GITHUB_TOKEN is set)
-  - |
-    source /etc/workspace/config
-    if [ -n "$GITHUB_TOKEN" ]; then
-      REPO_URL_WITH_TOKEN=$(echo "${config.repoUrl}" | sed "s|https://github.com|https://x-access-token:$GITHUB_TOKEN@github.com|")
-      git clone "$REPO_URL_WITH_TOKEN" /workspace || mkdir -p /workspace
-    else
-      git clone ${config.repoUrl} /workspace || mkdir -p /workspace
-    fi
-
-  # Setup devcontainer if exists, otherwise use default
-  - |
-    if [ ! -f /workspace/.devcontainer/devcontainer.json ]; then
-      mkdir -p /workspace/.devcontainer
-      cat > /workspace/.devcontainer/devcontainer.json << 'DEVEOF'
-      {
-        "name": "Claude Code Workspace",
-        "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
-        "features": {
-          "ghcr.io/devcontainers/features/git:1": {},
-          "ghcr.io/devcontainers/features/github-cli:1": {},
-          "ghcr.io/devcontainers/features/node:1": { "version": "22" },
-          "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
-        },
-        "postCreateCommand": "echo 'Run claude login to authenticate with Claude Max'",
-        "remoteUser": "vscode"
-      }
-      DEVEOF
-    fi
-
-  # Start devcontainer with ACP agent adapters injected as additional features.
-  # Node.js feature ensures npm is available; npm-package feature installs claude-agent-acp globally.
-  - cd /workspace && devcontainer up --workspace-folder . --additional-features '{"ghcr.io/devcontainers/features/node:1":{"version":"22"},"ghcr.io/devcontainers-community/npm-features/npm-package:1":{"package":"@zed-industries/claude-agent-acp"}}'
-
-  # Setup idle check cron
-  - echo "*/5 * * * * root /usr/local/bin/idle-check.sh" > /etc/cron.d/idle-check
-`;
+  async validateToken(): Promise<boolean> {
+    await providerFetch(this.name, `${HETZNER_API_URL}/datacenters`, {
+      headers: {
+        Authorization: `Bearer ${this.apiToken}`,
+      },
+    });
+    return true;
   }
 
   private mapServerToVMInstance(server: HetznerServerResponse['server']): VMInstance {
@@ -288,20 +185,14 @@ runcmd:
     };
   }
 
-  private mapStatus(
-    hetznerStatus: string
-  ): 'initializing' | 'running' | 'off' | 'starting' | 'stopping' {
+  private mapStatus(hetznerStatus: string): VMStatus {
     switch (hetznerStatus) {
       case 'initializing':
-        return 'initializing';
       case 'running':
-        return 'running';
       case 'off':
-        return 'off';
       case 'starting':
-        return 'starting';
       case 'stopping':
-        return 'stopping';
+        return hetznerStatus;
       default:
         return 'initializing';
     }

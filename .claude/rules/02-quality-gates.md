@@ -29,6 +29,7 @@ Before marking feature work complete:
 - [ ] E2E coverage added or explicitly justified as not applicable
 - [ ] Local test run passes for impacted packages
 - [ ] CI test checks are expected to pass with the changes
+- [ ] Staging deployment succeeded and live app verified via Playwright (see `13-staging-verification.md`)
 
 ### Test Locations
 
@@ -192,66 +193,34 @@ When modifying code that generates structured output (YAML, JSON, XML, TOML), te
 
 String containment tests on structured output create false confidence. The test passes, CI is green, but the output is malformed. This is the class of bug that caused the TLS YAML indentation incident.
 
-## Pre-Merge Staging Verification (Required for All Code Changes)
+## Staging Deployment and Live Verification (Hard Merge Gate)
 
-Any PR that includes code changes MUST be deployed and tested on the live staging environment before merging to main. Local tests and CI alone are NOT sufficient — the live environment has real OAuth, DNS, D1, KV, Durable Objects, and VM infrastructure that local tests cannot replicate.
+**Full details in `.claude/rules/13-staging-verification.md`.** Summary of the hard requirements:
 
-### When This Applies
+1. **Staging deployment MUST be green.** The `Deploy Staging` workflow runs on every PR. A failed staging deployment is the same severity as a failed test — it blocks merge. Do NOT treat staging deploy failures as "expected on PRs."
+2. **Live app MUST be verified via Playwright.** After staging deploys, log into `app.simple-agent-manager.org` using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`, and actively test the application.
+3. **Existing workflows MUST be confirmed working.** Navigate the dashboard, projects, settings. Verify no regressions — pages load, data displays, navigation works, no new console errors.
+4. **New feature/fix MUST be verified on staging.** The specific changes in the PR must work correctly on the live staging environment.
+5. **Evidence MUST be reported.** Include screenshots, API responses, or Playwright observations in the PR.
 
-This gate applies to **every PR that changes code** — API routes, business logic, UI components, infrastructure, agent code, shared packages, or any other runtime code.
+### No Exceptions
 
-### When This Does NOT Apply
-
-- Documentation-only changes (`.md` files, comments)
-- Configuration-only changes that don't affect runtime (`.gitignore`, editor configs)
-- Task file management (`tasks/` directory only)
-
-### Required Steps
-
-1. **Push your branch** and wait for CI to pass
-2. **Deploy to staging** via GitHub Actions or `pnpm deploy:setup --environment staging`
-3. **Open the live app** using Playwright (navigate to `app.simple-agent-manager.org`)
-4. **Authenticate** using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`. If the file is missing, ask the human for credentials.
-5. **Exercise the changed flows** — for UI changes, interact as a real user would; for API/backend changes, verify affected endpoints return correct responses and downstream behavior works
-6. **Verify the change works end-to-end** — not just that the page renders or endpoint responds, but that the full interaction produces the expected outcome
-7. **Report findings** to the user with evidence (screenshots, Playwright observations, or API response verification)
-
-### What to Check
-
-**For UI changes:**
-- Pages load without errors (check browser console)
-- Interactive elements respond correctly (buttons, links, forms)
-- Data displays accurately (lists, details, status indicators)
-- Navigation flows work (redirects, back button, deep links)
-- Error states render properly (not blank pages or raw error text)
-- Mobile/responsive layout is acceptable if applicable
-
-**For API/backend changes:**
-- Affected API endpoints respond correctly (use Playwright or curl)
-- Data persists and loads correctly through the UI
-- Background processes (DOs, cron jobs) function as expected
-- Error handling returns appropriate responses
-
-**For infrastructure/agent changes:**
-- Workspace creation and lifecycle operations work
-- Agent sessions start and communicate correctly
-- WebSocket connections establish and maintain
-
-### Failures Block Merge
-
-If staging verification reveals issues, fix them before merging. Do NOT merge with known regressions and track them as follow-up tasks — fix them in the same branch.
+- A "small refactor" still deploys and verifies — prove no behavior changed
+- A "fix for broken staging" is the STRONGEST reason to verify — confirm the fix works
+- "Tests pass" is not sufficient — tests passed for bugs that only manifested in the real environment
+- If you cannot authenticate, ask the human — do NOT skip verification
 
 ## Post-Push CI Procedure (Required)
 
-After every push, check GitHub Actions runs for the pushed commit/branch. If any workflow fails, inspect the failing job logs immediately and implement fixes. Push follow-up commits and repeat until all required workflows are green.
+After every push, check GitHub Actions runs for the pushed commit/branch. If ANY workflow fails — including the staging deployment — inspect the failing job logs immediately and implement fixes. Push follow-up commits and repeat until all required workflows are green.
 
-For pull requests, keep the PR template filled (including Agent Preflight block) so quality gates can pass.
+For pull requests, keep the PR template filled (including Agent Preflight block and Staging Verification section) so quality gates can pass.
 
-## Post-Deployment Playwright Testing (Required)
+## Post-Merge Production Verification (Required)
 
-After ANY deployment to production (push to main or merged PR), you MUST verify the deployed feature works using Playwright against the live app.
+After ANY merge to main, the production deployment triggers automatically. You MUST verify the deployed feature works using Playwright against the live app.
 
-1. Wait for the Deploy workflow to complete successfully in GitHub Actions.
+1. Wait for the Deploy Production workflow to complete successfully in GitHub Actions.
 2. Use Playwright to navigate to `app.simple-agent-manager.org` and test the deployed feature end-to-end.
 3. Use the test credentials stored at `/workspaces/.tmp/secure/demo-credentials.md` to authenticate. If the file is missing, ask the human for credentials.
 4. If the feature cannot be tested via Playwright, document why and what was verified manually.

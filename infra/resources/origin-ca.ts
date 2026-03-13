@@ -15,7 +15,9 @@
  *
  * - 15-year validity (maximum for Origin CA)
  * - RSA-2048 private key (matches JWT key pattern)
- * - Protected from accidental deletion
+ * - Private key protected from accidental deletion (cert is NOT protected
+ *   because it's an immutable resource — Pulumi must delete+recreate when
+ *   inputs change, and protect blocks that)
  * - Cert/key persisted in Pulumi state (encrypted in R2)
  */
 
@@ -64,7 +66,13 @@ const originCaCert = new cloudflare.OriginCaCertificate(
     requestType: "origin-rsa",
     requestedValidity: 5475, // 15 years
   },
-  { protect: true }
+  {
+    // NOT protected: OriginCaCertificate is immutable — Pulumi must
+    // delete+recreate when inputs (CSR) change. protect: true blocks
+    // deletion, causing all staging deployments to fail. The private key
+    // IS protected; the cert is just a signed derivation that can be
+    // safely re-issued.
+  }
 );
 
 // Export as secret outputs
