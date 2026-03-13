@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -14,6 +15,10 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+// defaultMistralVibeReleaseURL is the base URL for downloading the vibe-acp binary.
+// Override via MISTRAL_VIBE_RELEASE_URL env var to pin a version or use a mirror.
+const defaultMistralVibeReleaseURL = "https://github.com/mistralai/mistral-vibe/releases/latest/download"
 
 // BootLogReporter sends structured log entries to the control plane.
 // It must be non-nil and have a valid token for logging to work.
@@ -645,11 +650,18 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 	case "google-gemini":
 		return agentCommandInfo{"gemini", []string{"--experimental-acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli", "", ""}
 	case "mistral-vibe":
+		releaseURL := os.Getenv("MISTRAL_VIBE_RELEASE_URL")
+		if releaseURL == "" {
+			releaseURL = defaultMistralVibeReleaseURL
+		}
 		return agentCommandInfo{
 			command:    "vibe-acp",
 			args:       nil,
 			envVarName: "MISTRAL_API_KEY",
-			installCmd: `ARCH=$(uname -m) && curl -fLo /usr/local/bin/vibe-acp "https://github.com/mistralai/mistral-vibe/releases/latest/download/vibe-acp-linux-${ARCH}" && chmod +x /usr/local/bin/vibe-acp`,
+			installCmd: fmt.Sprintf(
+				`ARCH=$(uname -m) && curl -fLo /usr/local/bin/vibe-acp "%s/vibe-acp-linux-${ARCH}" && chmod +x /usr/local/bin/vibe-acp`,
+				releaseURL,
+			),
 		}
 	default:
 		return agentCommandInfo{agentType, nil, "API_KEY", "", "", ""}

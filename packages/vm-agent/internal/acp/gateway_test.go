@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -290,6 +291,21 @@ func TestGetAgentCommandInfoMistralVibe(t *testing.T) {
 	}
 	if !strings.Contains(info.installCmd, "vibe-acp") {
 		t.Fatalf("installCmd should reference vibe-acp binary, got %q", info.installCmd)
+	}
+}
+
+func TestGetAgentCommandInfoMistralVibeCustomURL(t *testing.T) {
+	// Verify MISTRAL_VIBE_RELEASE_URL env var overrides the default release URL
+	customURL := "https://mirror.example.com/vibe-releases"
+	os.Setenv("MISTRAL_VIBE_RELEASE_URL", customURL)
+	defer os.Unsetenv("MISTRAL_VIBE_RELEASE_URL")
+
+	info := getAgentCommandInfo("mistral-vibe", "api-key")
+	if !strings.Contains(info.installCmd, customURL) {
+		t.Fatalf("installCmd should use custom URL %q, got %q", customURL, info.installCmd)
+	}
+	if strings.Contains(info.installCmd, "github.com") {
+		t.Fatalf("installCmd should NOT contain default github.com URL when override is set, got %q", info.installCmd)
 	}
 }
 

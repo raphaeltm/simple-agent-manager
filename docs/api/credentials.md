@@ -116,5 +116,6 @@ Removes all credentials for an agent.
 - OAuth tokens are treated as opaque values; API-side checks only reject obvious type mismatches
 
 ### Other Agents
-- OpenAI Codex and Google Gemini currently only support API keys
-- OAuth support planned for future releases
+- OpenAI Codex, Google Gemini, and Mistral Vibe currently only support API keys
+- Mistral Vibe uses `MISTRAL_API_KEY` for authentication
+- OAuth support planned for future releases for Codex and Gemini
