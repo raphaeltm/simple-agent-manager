@@ -113,7 +113,7 @@ export const NodeCard: FC<NodeCardProps> = ({
 
         {/* VM info */}
         <div className="sam-type-caption text-fg-muted">
-          {node.vmSize} ({sizeConfig.cpus} CPU, {sizeConfig.ram}) &middot; {locationConfig.name}, {locationConfig.country}
+          {node.vmSize} ({sizeConfig.cpus} CPU, {sizeConfig.ram}) &middot; {locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}
         </div>
 
         {/* Resource metrics */}
