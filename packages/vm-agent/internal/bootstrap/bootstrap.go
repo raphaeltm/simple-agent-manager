@@ -1591,6 +1591,17 @@ func renderGitCredentialHelperScript(cfg *config.Config) (string, error) {
 		query = "?workspaceId=" + url.QueryEscape(workspaceID)
 	}
 
+	// When TLS is enabled on the VM agent, the credential helper must use https://
+	// with -k (skip cert verification) because the TLS cert is issued for the
+	// external domain (e.g. ws-*.example.com), not for internal Docker addresses
+	// like host.docker.internal or 172.17.0.1.
+	scheme := "http"
+	curlTLSFlag := ""
+	if cfg.TLSEnabled {
+		scheme = "https"
+		curlTLSFlag = " -k"
+	}
+
 	return fmt.Sprintf(`#!/bin/sh
 set -eu
 
@@ -1617,9 +1628,9 @@ resolve_gateway() {
 
 request_credentials() {
   target="$1"
-  curl -fsS --max-time 5 \
+  curl -fsS --max-time 5%s \
     -H "Authorization: Bearer %s" \
-    "http://${target}:%d/git-credential%s"
+    "%s://${target}:%d/git-credential%s"
 }
 
 gateway="$(resolve_gateway || true)"
@@ -1631,7 +1642,7 @@ for target in host.docker.internal "$gateway" 172.17.0.1; do
 done
 
 exit 0
-`, cfg.CallbackToken, cfg.Port, query), nil
+`, curlTLSFlag, cfg.CallbackToken, scheme, cfg.Port, query), nil
 }
 
 func findDevcontainerID(ctx context.Context, cfg *config.Config) (string, error) {
