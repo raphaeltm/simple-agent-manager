@@ -121,6 +121,48 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 			t.Fatalf("expected script to contain %q", fragment)
 		}
 	}
+
+	// Plain HTTP mode must NOT use -k or https
+	if strings.Contains(script, "https://") {
+		t.Fatal("plain HTTP mode should not contain https://")
+	}
+	if strings.Contains(script, " -k") {
+		t.Fatal("plain HTTP mode should not contain -k flag")
+	}
+}
+
+func TestRenderGitCredentialHelperScriptTLS(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Port:          8443,
+		CallbackToken: "callback-token-tls",
+		TLSEnabled:    true,
+	}
+
+	script, err := renderGitCredentialHelperScript(cfg)
+	if err != nil {
+		t.Fatalf("renderGitCredentialHelperScript returned error: %v", err)
+	}
+
+	required := []string{
+		`Authorization: Bearer callback-token-tls`,
+		`https://${target}:8443/git-credential`,
+		" -k",
+		"host.docker.internal",
+		"172.17.0.1",
+	}
+
+	for _, fragment := range required {
+		if !strings.Contains(script, fragment) {
+			t.Fatalf("expected TLS script to contain %q", fragment)
+		}
+	}
+
+	// TLS mode must NOT use http:// (without the s)
+	if strings.Contains(script, "http://") {
+		t.Fatal("TLS mode should not contain plain http:// URL")
+	}
 }
 
 func TestRenderGitCredentialHelperScriptValidation(t *testing.T) {
