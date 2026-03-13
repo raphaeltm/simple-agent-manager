@@ -74,20 +74,20 @@ submitRoutes.post('/submit', async (c) => {
     throw errors.badRequest('vmLocation must be nbg1, fsn1, or hel1');
   }
 
-  // Check Hetzner credentials
+  // Check cloud provider credentials
   const [credential] = await db
     .select({ id: schema.credentials.id })
     .from(schema.credentials)
     .where(
       and(
         eq(schema.credentials.userId, userId),
-        eq(schema.credentials.provider, 'hetzner')
+        eq(schema.credentials.credentialType, 'cloud-provider')
       )
     )
     .limit(1);
 
   if (!credential) {
-    throw errors.forbidden('Hetzner credentials required. Connect your account in Settings.');
+    throw errors.forbidden('Cloud provider credentials required. Connect your account in Settings.');
   }
 
   // Validate nodeId if provided

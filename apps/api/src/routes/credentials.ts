@@ -9,8 +9,9 @@ import { encrypt, decrypt } from '../services/encryption';
 import { createProvider } from '@simple-agent-manager/providers';
 import { CredentialValidator } from '../services/validation';
 import * as schema from '../db/schema';
-import type { CredentialResponse, AgentCredentialInfo, SaveAgentCredentialRequest, CredentialKind, AgentType } from '@simple-agent-manager/shared';
+import type { CredentialResponse, AgentCredentialInfo, SaveAgentCredentialRequest, CredentialKind, AgentType, CredentialProvider, CreateCredentialRequest } from '@simple-agent-manager/shared';
 import { isValidAgentType, getAgentDefinition } from '@simple-agent-manager/shared';
+import { serializeCredentialToken, buildProviderConfig } from '../services/provider-credentials';
 
 const credentialsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -40,7 +41,7 @@ credentialsRoutes.get('/', async (c) => {
 
   const response: CredentialResponse[] = creds.map((cred) => ({
     id: cred.id,
-    provider: cred.provider as 'hetzner',
+    provider: cred.provider as CredentialProvider,
     connected: true,
     createdAt: cred.createdAt,
   }));
@@ -55,38 +56,60 @@ credentialsRoutes.post('/', async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const body = await c.req.json<{ provider: string; token: string }>();
+  const body = await c.req.json<CreateCredentialRequest>();
+  const providerName = body.provider;
 
-  if (!body.provider || !body.token) {
-    throw errors.badRequest('Provider and token are required');
+  // Validate required fields per provider
+  if (!providerName) {
+    throw errors.badRequest('Provider is required');
   }
 
-  if (body.provider !== 'hetzner') {
-    throw errors.badRequest('Only hetzner provider is supported');
+  const SUPPORTED_PROVIDERS: CredentialProvider[] = ['hetzner', 'scaleway'];
+  if (!SUPPORTED_PROVIDERS.includes(providerName)) {
+    throw errors.badRequest(`Unsupported provider: ${providerName}. Supported: ${SUPPORTED_PROVIDERS.join(', ')}`);
   }
 
-  // Validate the token
-  // Note: We sanitize error messages to avoid leaking details about the Hetzner API
+  // Extract and serialize the credential token based on provider type
+  let credentialFields: Record<string, string>;
+  if (providerName === 'hetzner') {
+    const hetznerBody = body as { provider: 'hetzner'; token: string };
+    if (!hetznerBody.token) {
+      throw errors.badRequest('Token is required for Hetzner');
+    }
+    credentialFields = { token: hetznerBody.token };
+  } else if (providerName === 'scaleway') {
+    const scalewayBody = body as { provider: 'scaleway'; secretKey: string; projectId: string };
+    if (!scalewayBody.secretKey || !scalewayBody.projectId) {
+      throw errors.badRequest('secretKey and projectId are required for Scaleway');
+    }
+    credentialFields = { secretKey: scalewayBody.secretKey, projectId: scalewayBody.projectId };
+  } else {
+    throw errors.badRequest(`Unsupported provider: ${providerName}`);
+  }
+
+  const tokenToEncrypt = serializeCredentialToken(providerName, credentialFields);
+
+  // Validate the credentials by building a ProviderConfig and calling validateToken()
   try {
-    const provider = createProvider({ provider: body.provider, apiToken: body.token });
+    const providerConfig = buildProviderConfig(providerName, tokenToEncrypt);
+    const provider = createProvider(providerConfig);
     await provider.validateToken();
   } catch (err) {
-    // Log the actual error for debugging, but return a generic message to the user
-    console.error('Hetzner token validation failed:', err instanceof Error ? err.message : err);
-    throw errors.badRequest('Invalid or unauthorized Hetzner API token');
+    console.error(`${providerName} credential validation failed:`, err instanceof Error ? err.message : err);
+    throw errors.badRequest(`Invalid or unauthorized ${providerName} credentials`);
   }
 
-  // Encrypt the token
-  const { ciphertext, iv } = await encrypt(body.token, c.env.ENCRYPTION_KEY);
+  // Encrypt the serialized credential token
+  const { ciphertext, iv } = await encrypt(tokenToEncrypt, c.env.ENCRYPTION_KEY);
 
-  // Check if credential already exists
+  // Check if credential already exists for this provider
   const existing = await db
     .select()
     .from(schema.credentials)
     .where(
       and(
         eq(schema.credentials.userId, userId),
-        eq(schema.credentials.provider, body.provider)
+        eq(schema.credentials.provider, providerName)
       )
     )
     .limit(1);
@@ -95,7 +118,6 @@ credentialsRoutes.post('/', async (c) => {
 
   const existingCred = existing[0];
   if (existingCred) {
-    // Update existing credential
     await db
       .update(schema.credentials)
       .set({
@@ -107,7 +129,7 @@ credentialsRoutes.post('/', async (c) => {
 
     const response: CredentialResponse = {
       id: existingCred.id,
-      provider: body.provider as 'hetzner',
+      provider: providerName,
       connected: true,
       createdAt: existingCred.createdAt,
     };
@@ -120,7 +142,7 @@ credentialsRoutes.post('/', async (c) => {
   await db.insert(schema.credentials).values({
     id,
     userId,
-    provider: body.provider,
+    provider: providerName,
     encryptedToken: ciphertext,
     iv,
     createdAt: now,
@@ -129,7 +151,7 @@ credentialsRoutes.post('/', async (c) => {
 
   const response: CredentialResponse = {
     id,
-    provider: body.provider as 'hetzner',
+    provider: providerName,
     connected: true,
     createdAt: now,
   };

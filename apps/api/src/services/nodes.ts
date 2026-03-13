@@ -1,14 +1,13 @@
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { generateCloudInit, validateCloudInitSize } from '@workspace/cloud-init';
-import { HETZNER_IMAGE } from '@simple-agent-manager/shared';
 import { ulid } from '../lib/ulid';
 import * as schema from '../db/schema';
 import type { Env } from '../index';
-import { decrypt } from './encryption';
 import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
 import { createProvider } from '@simple-agent-manager/providers';
 import { signCallbackToken } from './jwt';
+import { getUserCloudProviderConfig } from './provider-credentials';
 
 export interface CreateNodeInput {
   userId: string;
@@ -95,23 +94,11 @@ export async function provisionNode(
   }
 
   try {
-    const credentials = await db
-      .select()
-      .from(schema.credentials)
-      .where(
-        and(
-          eq(schema.credentials.userId, node.userId),
-          eq(schema.credentials.provider, 'hetzner')
-        )
-      )
-      .limit(1);
-
-    const credential = credentials[0];
-    if (!credential) {
-      throw new Error('Hetzner account not connected');
+    const credResult = await getUserCloudProviderConfig(db, node.userId, env.ENCRYPTION_KEY);
+    if (!credResult) {
+      throw new Error('Cloud provider account not connected');
     }
 
-    const hetznerToken = await decrypt(credential.encryptedToken, credential.iv, env.ENCRYPTION_KEY);
     const callbackToken = await signCallbackToken(node.id, env);
 
     const cloudInit = generateCloudInit({
@@ -136,17 +123,13 @@ export async function provisionNode(
       throw new Error('Cloud-init config exceeds size limit');
     }
 
-    const provider = createProvider({
-      provider: 'hetzner',
-      apiToken: hetznerToken,
-    });
+    const provider = createProvider(credResult.config);
 
     const vm = await provider.createVM({
       name: `node-${node.id.toLowerCase()}`,
       size: node.vmSize as 'small' | 'medium' | 'large',
       location: node.vmLocation,
       userData: cloudInit,
-      image: HETZNER_IMAGE,
       labels: {
         node: node.id,
         managed: 'simple-agent-manager',
@@ -204,27 +187,16 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
     return;
   }
 
-  const credentials = await db
-    .select()
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.provider, 'hetzner')
-      )
-    )
-    .limit(1);
-
-  const credential = credentials[0];
-
-  // Delete the Hetzner server (not just power off) since stopped nodes cannot be restarted
-  if (node.providerInstanceId && credential) {
-    const hetznerToken = await decrypt(credential.encryptedToken, credential.iv, env.ENCRYPTION_KEY);
-    try {
-      const provider = createProvider({ provider: 'hetzner', apiToken: hetznerToken });
-      await provider.deleteVM(node.providerInstanceId);
-    } catch (err) {
-      console.error('Failed to delete node server:', err);
+  // Delete the cloud provider server since stopped nodes cannot be restarted
+  if (node.providerInstanceId) {
+    const credResult = await getUserCloudProviderConfig(db, userId, env.ENCRYPTION_KEY);
+    if (credResult) {
+      try {
+        const provider = createProvider(credResult.config);
+        await provider.deleteVM(node.providerInstanceId);
+      } catch (err) {
+        console.error('Failed to delete node server:', err);
+      }
     }
   }
 
@@ -285,25 +257,15 @@ export async function deleteNodeResources(nodeId: string, userId: string, env: E
     return;
   }
 
-  const credentials = await db
-    .select()
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.provider, 'hetzner')
-      )
-    )
-    .limit(1);
-
-  const credential = credentials[0];
-  if (credential && node.providerInstanceId) {
-    const hetznerToken = await decrypt(credential.encryptedToken, credential.iv, env.ENCRYPTION_KEY);
-    try {
-      const provider = createProvider({ provider: 'hetzner', apiToken: hetznerToken });
-      await provider.deleteVM(node.providerInstanceId);
-    } catch (err) {
-      console.error('Failed to delete node server:', err);
+  if (node.providerInstanceId) {
+    const credResult = await getUserCloudProviderConfig(db, userId, env.ENCRYPTION_KEY);
+    if (credResult) {
+      try {
+        const provider = createProvider(credResult.config);
+        await provider.deleteVM(node.providerInstanceId);
+      } catch (err) {
+        console.error('Failed to delete node server:', err);
+      }
     }
   }
 
