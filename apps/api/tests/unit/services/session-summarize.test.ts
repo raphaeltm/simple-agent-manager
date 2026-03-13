@@ -110,6 +110,15 @@ describe('chunkMessages', () => {
     const result = chunkMessages(messages, 50, 20);
     expect(result).toHaveLength(50);
   });
+
+  it('does not produce duplicate messages when head and tail are adjacent', () => {
+    const messages = Array.from({ length: 7 }, (_, i) => makeMsg('user', `msg ${i}`));
+    // maxMessages = 5, headMessages = 5, recentMessages = 5 → tail = min(5, 7-5) = 2
+    const result = chunkMessages(messages, 5, 5, 5);
+    expect(result).toHaveLength(7); // head 5 + tail 2 = 7 (all, no duplicates)
+    const contents = result.map((m) => m.content);
+    expect(new Set(contents).size).toBe(contents.length); // all unique
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -132,6 +141,14 @@ describe('formatMessagesForPrompt', () => {
     const messages = [makeMsg('user', longContent)];
     const result = formatMessagesForPrompt(messages, 55); // >50 filtered → 300 char limit
     expect(result.length).toBeLessThan(310); // "User: " prefix + 300 chars max
+    expect(result).toContain('...');
+  });
+
+  it('truncates at 500 chars for medium conversations (21-50 filtered)', () => {
+    const longContent = 'y'.repeat(700);
+    const messages = [makeMsg('user', longContent)];
+    const result = formatMessagesForPrompt(messages, 30); // 20 < 30 ≤ 50 → 500 char limit
+    expect(result.length).toBeLessThan(510);
     expect(result).toContain('...');
   });
 
@@ -265,6 +282,28 @@ describe('summarizeSession', () => {
     const result = await summarizeSession(mockAi, messages, { shortThreshold: 5 });
     expect(result.method).toBe('heuristic');
     expect(result.summary).toContain('## Previous Session Context');
+  });
+
+  it('falls back to heuristic on whitespace-only AI response', async () => {
+    mockGenerate.mockResolvedValueOnce({ text: '   \n  ' });
+
+    const messages = Array.from({ length: 10 }, (_, i) =>
+      makeMsg(i % 2 === 0 ? 'user' : 'assistant', `message ${i}`)
+    );
+
+    const result = await summarizeSession(mockAi, messages, { shortThreshold: 5 });
+    expect(result.method).toBe('heuristic');
+  });
+
+  it('falls back to heuristic on null AI text', async () => {
+    mockGenerate.mockResolvedValueOnce({ text: null });
+
+    const messages = Array.from({ length: 10 }, (_, i) =>
+      makeMsg(i % 2 === 0 ? 'user' : 'assistant', `message ${i}`)
+    );
+
+    const result = await summarizeSession(mockAi, messages, { shortThreshold: 5 });
+    expect(result.method).toBe('heuristic');
   });
 
   it('falls back to heuristic on empty AI response', async () => {
