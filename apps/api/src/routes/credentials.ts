@@ -10,7 +10,7 @@ import { createProvider } from '@simple-agent-manager/providers';
 import { CredentialValidator } from '../services/validation';
 import * as schema from '../db/schema';
 import type { CredentialResponse, AgentCredentialInfo, SaveAgentCredentialRequest, CredentialKind, AgentType, CredentialProvider, CreateCredentialRequest } from '@simple-agent-manager/shared';
-import { isValidAgentType, getAgentDefinition } from '@simple-agent-manager/shared';
+import { isValidAgentType, getAgentDefinition, CREDENTIAL_PROVIDERS } from '@simple-agent-manager/shared';
 import { serializeCredentialToken, buildProviderConfig } from '../services/provider-credentials';
 
 const credentialsRoutes = new Hono<{ Bindings: Env }>();
@@ -64,9 +64,8 @@ credentialsRoutes.post('/', async (c) => {
     throw errors.badRequest('Provider is required');
   }
 
-  const SUPPORTED_PROVIDERS: CredentialProvider[] = ['hetzner', 'scaleway'];
-  if (!SUPPORTED_PROVIDERS.includes(providerName)) {
-    throw errors.badRequest(`Unsupported provider: ${providerName}. Supported: ${SUPPORTED_PROVIDERS.join(', ')}`);
+  if (!(CREDENTIAL_PROVIDERS as readonly string[]).includes(providerName)) {
+    throw errors.badRequest(`Unsupported provider: ${providerName}. Supported: ${CREDENTIAL_PROVIDERS.join(', ')}`);
   }
 
   // Extract and serialize the credential token based on provider type

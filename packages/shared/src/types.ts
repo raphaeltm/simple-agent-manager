@@ -44,7 +44,8 @@ export interface AdminUserRoleRequest {
 // =============================================================================
 // Credential
 // =============================================================================
-export type CredentialProvider = 'hetzner' | 'scaleway';
+export const CREDENTIAL_PROVIDERS = ['hetzner', 'scaleway'] as const;
+export type CredentialProvider = (typeof CREDENTIAL_PROVIDERS)[number];
 
 export interface Credential {
   id: string;
