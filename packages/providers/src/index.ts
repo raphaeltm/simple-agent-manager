@@ -1,6 +1,7 @@
 import type { Provider, ProviderConfig } from './types';
 import { ProviderError } from './types';
 import { HetznerProvider } from './hetzner';
+import { ScalewayProvider } from './scaleway';
 
 // Re-export types
 export type {
@@ -21,6 +22,7 @@ export { providerFetch, getTimeoutMs } from './provider-fetch';
 
 // Re-export providers
 export { HetznerProvider, DEFAULT_PLACEMENT_RETRY_DELAY_MS } from './hetzner';
+export { ScalewayProvider, SCALEWAY_LOCATIONS } from './scaleway';
 
 /**
  * Create a provider instance from explicit configuration.
@@ -36,10 +38,10 @@ export function createProvider(config: ProviderConfig): Provider {
         config.placementFallbackEnabled,
       );
     case 'scaleway':
-      throw new ProviderError(
-        'scaleway',
-        undefined,
-        'Scaleway provider is not yet implemented. See tasks/backlog/2026-02-16-provider-scaleway.md',
+      return new ScalewayProvider(
+        config.secretKey,
+        config.projectId,
+        config.zone,
       );
     default:
       throw new ProviderError(
