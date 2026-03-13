@@ -210,18 +210,26 @@ describe('MessageBubble', () => {
         onerror: (() => void) | null = null;
         constructor(text: string) { this.text = text; }
       });
+      // Provide minimal clipboard mock so the copy button renders
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: vi.fn().mockResolvedValue(undefined) },
+        writable: true,
+        configurable: true,
+      });
     });
 
     it('shows action buttons for agent messages with timestamp', () => {
       render(<MessageBubble text="Hello" role="agent" timestamp={1710288000000} />);
       expect(screen.getByLabelText('Message info')).toBeTruthy();
       expect(screen.getByLabelText('Read aloud')).toBeTruthy();
+      expect(screen.getByLabelText('Copy message')).toBeTruthy();
     });
 
     it('does not show action buttons for user messages', () => {
       render(<MessageBubble text="Hello" role="user" timestamp={1710288000000} />);
       expect(screen.queryByLabelText('Message info')).toBeNull();
       expect(screen.queryByLabelText('Read aloud')).toBeNull();
+      expect(screen.queryByLabelText('Copy message')).toBeNull();
     });
 
     it('does not show action buttons for streaming agent messages', () => {
