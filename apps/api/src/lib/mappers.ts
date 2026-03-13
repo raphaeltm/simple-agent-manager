@@ -70,6 +70,7 @@ export function toProjectResponse(project: schema.Project): Project {
     defaultBranch: project.defaultBranch,
     defaultVmSize: (project.defaultVmSize as Project['defaultVmSize']) ?? null,
     defaultAgentType: project.defaultAgentType ?? null,
+    defaultWorkspaceProfile: (project.defaultWorkspaceProfile as Project['defaultWorkspaceProfile']) ?? null,
     status: (project.status as 'active' | 'detached') || 'active',
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,

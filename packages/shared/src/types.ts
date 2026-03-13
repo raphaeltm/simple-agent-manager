@@ -151,6 +151,7 @@ export interface Project {
   defaultBranch: string;
   defaultVmSize?: VMSize | null;
   defaultAgentType?: string | null;
+  defaultWorkspaceProfile?: WorkspaceProfile | null;
   status?: ProjectStatus;
   createdAt: string;
   updatedAt: string;
@@ -333,6 +334,7 @@ export interface UpdateProjectRequest {
   defaultBranch?: string;
   defaultVmSize?: VMSize | null;
   defaultAgentType?: string | null;
+  defaultWorkspaceProfile?: WorkspaceProfile | null;
 }
 
 export interface ProjectRuntimeEnvVarResponse {
@@ -511,6 +513,8 @@ export interface SubmitTaskRequest {
   nodeId?: string;
   /** Agent type to use for the task (e.g., 'claude-code', 'openai-codex') */
   agentType?: string;
+  /** Workspace provisioning profile. 'lightweight' skips devcontainer build for faster startup. */
+  workspaceProfile?: WorkspaceProfile;
 }
 
 export interface SubmitTaskResponse {
@@ -601,6 +605,14 @@ export type WorkspaceStatus =
 export type VMSize = 'small' | 'medium' | 'large';
 
 export type VMLocation = 'nbg1' | 'fsn1' | 'hel1';
+
+/**
+ * Workspace provisioning profile.
+ * - 'full': Standard devcontainer build (project's .devcontainer config)
+ * - 'lightweight': Skip devcontainer build, use minimal base image with git clone.
+ *   Much faster startup (~20s vs ~2min) but no project-specific tooling.
+ */
+export type WorkspaceProfile = 'full' | 'lightweight';
 
 export interface Node {
   id: string;

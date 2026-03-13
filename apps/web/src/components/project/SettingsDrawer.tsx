@@ -9,7 +9,7 @@
  */
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { ProjectRuntimeConfigResponse, VMSize } from '@simple-agent-manager/shared';
+import type { ProjectRuntimeConfigResponse, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import {
   getProjectRuntimeConfig,
@@ -26,6 +26,11 @@ const VM_SIZES: { value: VMSize; label: string; description: string }[] = [
   { value: 'small', label: 'Small', description: '2 vCPUs, 4 GB RAM' },
   { value: 'medium', label: 'Medium', description: '4 vCPUs, 8 GB RAM' },
   { value: 'large', label: 'Large', description: '8 vCPUs, 16 GB RAM' },
+];
+
+const WORKSPACE_PROFILES: { value: WorkspaceProfile; label: string; description: string }[] = [
+  { value: 'full', label: 'Full', description: 'Build project devcontainer' },
+  { value: 'lightweight', label: 'Lightweight', description: 'Skip build, ~20s startup' },
 ];
 
 interface SettingsDrawerProps {
@@ -46,6 +51,12 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
   const [defaultVmSize, setDefaultVmSize] = useState<VMSize | null>(project?.defaultVmSize ?? null);
   const [savingVmSize, setSavingVmSize] = useState(false);
 
+  // Workspace profile
+  const [defaultWorkspaceProfile, setDefaultWorkspaceProfile] = useState<WorkspaceProfile | null>(
+    (project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? null
+  );
+  const [savingWorkspaceProfile, setSavingWorkspaceProfile] = useState(false);
+
   // Runtime config
   const [runtimeConfig, setRuntimeConfig] = useState<ProjectRuntimeConfigResponse>({ envVars: [], files: [] });
   const [runtimeConfigLoading, setRuntimeConfigLoading] = useState(true);
@@ -61,10 +72,11 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
   const [fileContentInput, setFileContentInput] = useState('');
   const [fileSecretInput, setFileSecretInput] = useState(false);
 
-  // Sync VM size from project
+  // Sync VM size and workspace profile from project
   useEffect(() => {
     if (project) {
       setDefaultVmSize(project.defaultVmSize ?? null);
+      setDefaultWorkspaceProfile((project.defaultWorkspaceProfile as WorkspaceProfile | null) ?? null);
     }
   }, [project]);
 
@@ -158,6 +170,23 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
       toast.error(err instanceof Error ? err.message : 'Failed to update VM size');
     } finally {
       setSavingVmSize(false);
+    }
+  };
+
+  // Workspace profile handlers
+  const handleSaveWorkspaceProfile = async (profile: WorkspaceProfile) => {
+    const newProfile = profile === defaultWorkspaceProfile ? null : profile;
+    setSavingWorkspaceProfile(true);
+    setDefaultWorkspaceProfile(newProfile);
+    try {
+      await updateProject(projectId, { defaultWorkspaceProfile: newProfile });
+      await reload();
+      toast.success(newProfile ? `Default workspace profile set to ${newProfile}` : 'Default workspace profile cleared');
+    } catch (err) {
+      setDefaultWorkspaceProfile((project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? null);
+      toast.error(err instanceof Error ? err.message : 'Failed to update workspace profile');
+    } finally {
+      setSavingWorkspaceProfile(false);
     }
   };
 
@@ -316,6 +345,47 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
               {!defaultVmSize && (
                 <div className="text-xs text-fg-muted">
                   No default set — uses platform default (Medium).
+                </div>
+              )}
+            </section>
+
+            {/* Default Workspace Profile */}
+            <section className="grid gap-3">
+              <div>
+                <h3 className="sam-type-card-title m-0 text-fg-primary">
+                  Workspace Profile
+                </h3>
+                <p className="m-0 mt-1 text-xs text-fg-muted">
+                  Full builds the project devcontainer. Lightweight skips the build for faster startup (~20s). Click again to clear.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {WORKSPACE_PROFILES.map((profile) => {
+                  const isSelected = defaultWorkspaceProfile === profile.value;
+                  return (
+                    <button
+                      key={profile.value}
+                      type="button"
+                      aria-pressed={isSelected}
+                      disabled={savingWorkspaceProfile}
+                      onClick={() => void handleSaveWorkspaceProfile(profile.value)}
+                      className={`p-2 rounded-md text-left text-fg-primary ${
+                        isSelected
+                          ? 'border-2 border-accent bg-accent-tint'
+                          : 'border border-border-default bg-inset'
+                      } ${savingWorkspaceProfile ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
+                    >
+                      <div className="font-medium text-[0.8125rem]">{profile.label}</div>
+                      <div className="text-xs text-fg-muted mt-0.5">
+                        {profile.description}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              {!defaultWorkspaceProfile && (
+                <div className="text-xs text-fg-muted">
+                  No default set — uses platform default (Full).
                 </div>
               )}
             </section>

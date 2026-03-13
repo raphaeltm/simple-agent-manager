@@ -241,6 +241,7 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		GitUserName   string `json:"gitUserName,omitempty"`
 		GitUserEmail  string `json:"gitUserEmail,omitempty"`
 		GitHubID      string `json:"githubId,omitempty"`
+		Lightweight   bool   `json:"lightweight,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -266,6 +267,7 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	runtime.GitUserName = strings.TrimSpace(body.GitUserName)
 	runtime.GitUserEmail = strings.TrimSpace(body.GitUserEmail)
 	runtime.GitHubID = strings.TrimSpace(body.GitHubID)
+	runtime.Lightweight = body.Lightweight
 
 	// Note: Per-workspace message reporter is created lazily in
 	// handleStartAgentSession when the chatSessionID becomes available.

@@ -191,6 +191,7 @@ export async function createWorkspaceOnNode(
     gitUserName?: string | null;
     gitUserEmail?: string | null;
     githubId?: string | null;
+    lightweight?: boolean;
   }
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, '/workspaces', {

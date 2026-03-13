@@ -5,7 +5,7 @@
  * This is the bridge between HTTP routes and the DO. Routes should call
  * these functions instead of accessing the DO binding directly.
  */
-import type { VMSize, VMLocation } from '@simple-agent-manager/shared';
+import type { VMSize, VMLocation, WorkspaceProfile } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import type { StartTaskInput, TaskRunner } from '../durable-objects/task-runner';
 import { log } from '../lib/logger';
@@ -46,6 +46,8 @@ export async function startTaskRunnerDO(
     chatSessionId?: string | null;
     /** Agent type to use (e.g., 'claude-code', 'openai-codex') */
     agentType?: string | null;
+    /** Workspace provisioning profile. 'lightweight' skips devcontainer build. */
+    workspaceProfile?: WorkspaceProfile | null;
   },
 ): Promise<void> {
   const stub = getStub(env, input.taskId);
@@ -70,6 +72,7 @@ export async function startTaskRunnerDO(
       projectDefaultVmSize: input.projectDefaultVmSize ?? null,
       chatSessionId: input.chatSessionId ?? null,
       agentType: input.agentType ?? null,
+      workspaceProfile: input.workspaceProfile ?? null,
     },
   };
 

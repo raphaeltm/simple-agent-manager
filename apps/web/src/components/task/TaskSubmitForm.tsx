@@ -1,5 +1,5 @@
 import { type FC, useState } from 'react';
-import type { VMSize } from '@simple-agent-manager/shared';
+import type { VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { SplitButton } from '../ui/SplitButton';
 
 export interface TaskSubmitFormProps {
@@ -14,6 +14,7 @@ export interface TaskSubmitOptions {
   priority?: number;
   agentProfileHint?: string;
   vmSize?: VMSize;
+  workspaceProfile?: WorkspaceProfile;
 }
 
 export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
@@ -27,6 +28,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   const [priority, setPriority] = useState(0);
   const [agentProfileHint, setAgentProfileHint] = useState('');
   const [vmSize, setVmSize] = useState<VMSize | ''>('');
+  const [workspaceProfile, setWorkspaceProfile] = useState<WorkspaceProfile | ''>('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,6 +37,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
     priority: priority || undefined,
     agentProfileHint: agentProfileHint.trim() || undefined,
     vmSize: vmSize || undefined,
+    workspaceProfile: workspaceProfile || undefined,
   };
 
   const handleRunNow = async () => {
@@ -56,6 +59,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
       setPriority(0);
       setAgentProfileHint('');
       setVmSize('');
+      setWorkspaceProfile('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run task');
     } finally {
@@ -78,6 +82,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
       setPriority(0);
       setAgentProfileHint('');
       setVmSize('');
+      setWorkspaceProfile('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save task');
     } finally {
@@ -177,6 +182,21 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
                 <option value="small">Small</option>
                 <option value="medium">Medium</option>
                 <option value="large">Large</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs text-fg-muted block mb-1">
+                Workspace
+              </label>
+              <select
+                value={workspaceProfile}
+                onChange={(e) => setWorkspaceProfile(e.target.value as WorkspaceProfile | '')}
+                className="py-1 px-2 bg-surface border border-border-default rounded-sm text-fg-primary text-sm"
+              >
+                <option value="">Default</option>
+                <option value="full">Full</option>
+                <option value="lightweight">Lightweight</option>
               </select>
             </div>
 

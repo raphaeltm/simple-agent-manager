@@ -106,6 +106,7 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 		GitHubID:       runtime.GitHubID,
 		ProjectEnvVars: runtimeAssets.EnvVars,
 		ProjectFiles:   runtimeAssets.Files,
+		Lightweight:    runtime.Lightweight,
 	}, reporter)
 	if err != nil {
 		return false, err

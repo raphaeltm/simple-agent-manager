@@ -87,6 +87,7 @@ type WorkspaceRuntime struct {
 	GitUserName         string
 	GitUserEmail        string
 	GitHubID            string
+	Lightweight         bool // Skip devcontainer build, use fallback image for faster startup
 	PTY                 *pty.Manager
 }
 
