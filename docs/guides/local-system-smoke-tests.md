@@ -68,7 +68,7 @@ E2E_CONTROL_PLANE=worker pnpm test:e2e:vm-agent-smoke
 - `scripts/e2e/control-plane-worker.mjs` - Wrangler control-plane fixture for `worker` mode
 - `scripts/e2e/docker-compose.vm-agent.yml` - workspace container dependency
 - `scripts/e2e/workspace-mock/Dockerfile` - mock workspace image
-- `scripts/e2e/workspace-mock/mock-acp-agent.sh` - mock ACP binary (`claude-code-acp`, `codex-acp`, `gemini`)
+- `scripts/e2e/workspace-mock/mock-acp-agent.sh` - mock ACP binary (`claude-code-acp`, `codex-acp`, `gemini`, `vibe-acp`)
 
 ## CI
 
@@ -82,6 +82,6 @@ GitHub Actions runs both smoke profiles on pull requests to `main` via `.github/
 - Real Cloudflare Workers/D1/KV/R2 behavior
 - Real Cloudflare DNS routing and wildcard hostnames
 - Real Hetzner provisioning/deletion lifecycle
-- Real Claude/Codex/Gemini network calls and provider auth
+- Real Claude/Codex/Gemini/Mistral Vibe network calls and provider auth
 
 Use staging deployment for those validation points.
