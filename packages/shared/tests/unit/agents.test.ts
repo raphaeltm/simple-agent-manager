@@ -10,6 +10,7 @@ describe('Agent Catalog', () => {
     expect(vibe!.envVarName).toBe('MISTRAL_API_KEY');
     expect(vibe!.acpCommand).toBe('vibe-acp');
     expect(vibe!.supportsAcp).toBe(true);
+    expect(vibe!.acpArgs).toEqual([]);
   });
 
   it('should not have oauthSupport for mistral-vibe', () => {
@@ -24,14 +25,24 @@ describe('Agent Catalog', () => {
     expect(vibe!.installCommand).not.toContain('npm');
   });
 
-  it('should have four agents in the catalog', () => {
-    expect(AGENT_CATALOG).toHaveLength(4);
+  it('should contain all expected agents by ID', () => {
+    const ids = AGENT_CATALOG.map((a) => a.id);
+    expect(ids).toContain('claude-code');
+    expect(ids).toContain('openai-codex');
+    expect(ids).toContain('google-gemini');
+    expect(ids).toContain('mistral-vibe');
   });
 
   it('should return mistral-vibe from getAgentDefinition', () => {
     const def = getAgentDefinition('mistral-vibe');
     expect(def).toBeDefined();
     expect(def!.id).toBe('mistral-vibe');
+  });
+
+  it('should return undefined for unknown agent type', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const def = getAgentDefinition('not-an-agent' as any);
+    expect(def).toBeUndefined();
   });
 
   it('should validate mistral-vibe as a valid agent type', () => {
@@ -53,6 +64,7 @@ describe('Agent Catalog', () => {
       expect(agent.installCommand).toBeTruthy();
       expect(agent.credentialHelpUrl).toBeTruthy();
       expect(typeof agent.supportsAcp).toBe('boolean');
+      expect(Array.isArray(agent.acpArgs)).toBe(true);
     }
   });
 });
