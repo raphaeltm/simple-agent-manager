@@ -13,6 +13,7 @@ import * as schema from './db/schema';
 import { AppError } from './middleware/error';
 import { authRoutes } from './routes/auth';
 import { credentialsRoutes } from './routes/credentials';
+import { providersRoutes } from './routes/providers';
 import { githubRoutes } from './routes/github';
 import { workspacesRoutes } from './routes/workspaces';
 import { nodesRoutes } from './routes/nodes';
@@ -457,6 +458,7 @@ app.get('/.well-known/jwks.json', async (c) => {
 // API routes
 app.route('/api/auth', authRoutes);
 app.route('/api/credentials', credentialsRoutes);
+app.route('/api/providers', providersRoutes);
 app.route('/api/github', githubRoutes);
 app.route('/api/nodes', nodesRoutes);
 app.route('/api/workspaces', workspacesRoutes);

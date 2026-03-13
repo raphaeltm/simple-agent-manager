@@ -77,6 +77,12 @@ export interface SizeConfig {
   storageGb: number;
 }
 
+/** Location metadata for display purposes */
+export interface LocationMeta {
+  name: string;
+  country: string;
+}
+
 /**
  * Cloud provider interface.
  * Implementations handle VM lifecycle through their respective cloud APIs.
@@ -88,8 +94,14 @@ export interface Provider {
   /** Available datacenter/region identifiers */
   readonly locations: readonly string[];
 
+  /** Human-readable metadata for each location */
+  readonly locationMetadata: Readonly<Record<string, LocationMeta>>;
+
   /** Available VM size configurations */
   readonly sizes: Readonly<Record<VMSize, SizeConfig>>;
+
+  /** Default location for this provider */
+  readonly defaultLocation: string;
 
   /** Provision a new VM */
   createVM(config: VMConfig): Promise<VMInstance>;

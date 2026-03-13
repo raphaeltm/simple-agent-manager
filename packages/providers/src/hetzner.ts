@@ -1,11 +1,19 @@
 import type { VMSize } from '@simple-agent-manager/shared';
-import type { Provider, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
+import type { LocationMeta, Provider, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
 import { ProviderError } from './types';
 import { providerFetch } from './provider-fetch';
 
 const HETZNER_API_URL = 'https://api.hetzner.cloud/v1';
 
 const HETZNER_LOCATIONS = ['fsn1', 'nbg1', 'hel1', 'ash', 'hil'] as const;
+
+const HETZNER_LOCATION_META: Record<string, LocationMeta> = {
+  fsn1: { name: 'Falkenstein', country: 'DE' },
+  nbg1: { name: 'Nuremberg', country: 'DE' },
+  hel1: { name: 'Helsinki', country: 'FI' },
+  ash: { name: 'Ashburn', country: 'US' },
+  hil: { name: 'Hillsboro', country: 'US' },
+};
 
 export const DEFAULT_PLACEMENT_RETRY_DELAY_MS = 3_000;
 
@@ -58,7 +66,9 @@ interface HetznerServersResponse {
 export class HetznerProvider implements Provider {
   readonly name = 'hetzner';
   readonly locations: readonly string[] = HETZNER_LOCATIONS;
+  readonly locationMetadata: Readonly<Record<string, LocationMeta>> = HETZNER_LOCATION_META;
   readonly sizes: Readonly<Record<VMSize, SizeConfig>> = SIZE_CONFIGS;
+  readonly defaultLocation: string;
 
   private readonly apiToken: string;
   private readonly datacenter: string;
@@ -73,6 +83,7 @@ export class HetznerProvider implements Provider {
   ) {
     this.apiToken = apiToken;
     this.datacenter = datacenter || 'fsn1';
+    this.defaultLocation = this.datacenter;
     this.placementRetryDelayMs = placementRetryDelayMs ?? DEFAULT_PLACEMENT_RETRY_DELAY_MS;
     this.placementFallbackEnabled = placementFallbackEnabled ?? true;
   }

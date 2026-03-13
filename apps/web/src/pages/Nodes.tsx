@@ -1,22 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { NodeResponse, WorkspaceResponse, VMSize, VMLocation } from '@simple-agent-manager/shared';
+import type { NodeResponse, WorkspaceResponse, ProviderCatalog, VMSize } from '@simple-agent-manager/shared';
+import { PROVIDER_LABELS, DEFAULT_VM_LOCATION } from '@simple-agent-manager/shared';
 import { Alert, Button, PageLayout, Select, SkeletonCard, EmptyState, Spinner } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { NodeCard } from '../components/node/NodeCard';
-import { createNode, listNodes, listWorkspaces, deleteNode, stopNode } from '../lib/api';
+import { createNode, getProviderCatalog, listNodes, listWorkspaces, deleteNode, stopNode } from '../lib/api';
 import { Server } from 'lucide-react';
 
-const VM_SIZES: { value: VMSize; label: string; description: string }[] = [
-  { value: 'small', label: 'Small', description: '2 vCPUs, 4 GB RAM' },
-  { value: 'medium', label: 'Medium', description: '4 vCPUs, 8 GB RAM' },
-  { value: 'large', label: 'Large', description: '8 vCPUs, 16 GB RAM' },
-];
-
-const VM_LOCATIONS: { value: VMLocation; label: string }[] = [
-  { value: 'nbg1', label: 'Nuremberg, DE' },
-  { value: 'fsn1', label: 'Falkenstein, DE' },
-  { value: 'hel1', label: 'Helsinki, FI' },
+const FALLBACK_VM_SIZES: { value: VMSize; label: string; description: string }[] = [
+  { value: 'small', label: 'Small', description: '2-3 vCPUs, 4 GB RAM' },
+  { value: 'medium', label: 'Medium', description: '4 vCPUs, 8-12 GB RAM' },
+  { value: 'large', label: 'Large', description: '8 vCPUs, 16-32 GB RAM' },
 ];
 
 export function Nodes() {
@@ -28,9 +23,13 @@ export function Nodes() {
   const [creating, setCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newNodeSize, setNewNodeSize] = useState<VMSize>('medium');
-  const [newNodeLocation, setNewNodeLocation] = useState<VMLocation>('nbg1');
+  const [newNodeLocation, setNewNodeLocation] = useState(DEFAULT_VM_LOCATION);
+  const [catalogs, setCatalogs] = useState<ProviderCatalog[]>([]);
+  const [selectedProvider, setSelectedProvider] = useState('');
   const [error, setError] = useState<string | null>(null);
   const hasLoadedRef = useRef(false);
+
+  const activeCatalog = catalogs.find((c) => c.provider === selectedProvider);
 
   const loadData = useCallback(async () => {
     if (hasLoadedRef.current) {
@@ -58,6 +57,19 @@ export function Nodes() {
     const interval = window.setInterval(() => {
       void loadData();
     }, 10000);
+
+    // Load provider catalog for location/size data
+    getProviderCatalog()
+      .then((resp) => {
+        setCatalogs(resp.catalogs);
+        const first = resp.catalogs[0];
+        if (first) {
+          setSelectedProvider(first.provider);
+          setNewNodeLocation(first.defaultLocation);
+        }
+      })
+      .catch(() => { /* catalog unavailable, use fallbacks */ });
+
     return () => window.clearInterval(interval);
   }, [loadData]);
 
@@ -135,10 +147,37 @@ export function Nodes() {
 
       {showCreateForm && (
         <div className="mb-4 border border-border-default rounded-md bg-surface p-4 grid gap-4">
+          {catalogs.length > 1 && (
+            <div>
+              <label htmlFor="node-provider" className="block text-fg-muted font-medium mb-1" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Cloud Provider</label>
+              <Select id="node-provider" value={selectedProvider} onChange={(e) => {
+                const p = e.target.value;
+                setSelectedProvider(p);
+                const cat = catalogs.find((c) => c.provider === p);
+                if (cat) setNewNodeLocation(cat.defaultLocation);
+              }}>
+                {catalogs.map((cat) => (
+                  <option key={cat.provider} value={cat.provider}>
+                    {PROVIDER_LABELS[cat.provider] ?? cat.provider}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
           <div>
             <label className="block text-fg-muted font-medium mb-2" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Node Size</label>
             <div className="grid grid-cols-3 gap-3">
-              {VM_SIZES.map((size) => (
+              {(activeCatalog
+                ? (['small', 'medium', 'large'] as VMSize[]).map((size) => {
+                    const info = activeCatalog.sizes[size];
+                    return {
+                      value: size,
+                      label: size.charAt(0).toUpperCase() + size.slice(1),
+                      description: info ? `${info.vcpu} vCPUs, ${info.ramGb} GB RAM \u2014 ${info.price}` : size,
+                    };
+                  })
+                : FALLBACK_VM_SIZES
+              ).map((size) => (
                 <button
                   key={size.value}
                   type="button"
@@ -158,14 +197,16 @@ export function Nodes() {
               ))}
             </div>
           </div>
-          <div>
-            <label htmlFor="node-location" className="block text-fg-muted font-medium mb-1" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Location</label>
-            <Select id="node-location" value={newNodeLocation} onChange={(e) => setNewNodeLocation(e.target.value as VMLocation)}>
-              {VM_LOCATIONS.map((loc) => (
-                <option key={loc.value} value={loc.value}>{loc.label}</option>
-              ))}
-            </Select>
-          </div>
+          {activeCatalog && (
+            <div>
+              <label htmlFor="node-location" className="block text-fg-muted font-medium mb-1" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Location</label>
+              <Select id="node-location" value={newNodeLocation} onChange={(e) => setNewNodeLocation(e.target.value)}>
+                {activeCatalog.locations.map((loc) => (
+                  <option key={loc.id} value={loc.id}>{loc.name}, {loc.country}</option>
+                ))}
+              </Select>
+            </div>
+          )}
           <div className="flex justify-end">
             <Button onClick={handleCreateNode} disabled={creating} loading={creating}>
               Create Node

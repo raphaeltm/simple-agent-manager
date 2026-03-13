@@ -58,6 +58,7 @@ import type {
   HealthSummary,
   ErrorTrendResponse,
   LogQueryResponse,
+  ProviderCatalogResponse,
 } from '@simple-agent-manager/shared';
 
 // In production, VITE_API_URL must be explicitly set
@@ -138,6 +139,14 @@ export async function deleteCredential(provider: string): Promise<void> {
   return request<void>(`/api/credentials/${provider}`, {
     method: 'DELETE',
   });
+}
+
+// =============================================================================
+// Providers
+// =============================================================================
+
+export async function getProviderCatalog(): Promise<ProviderCatalogResponse> {
+  return request<ProviderCatalogResponse>('/api/providers/catalog');
 }
 
 // =============================================================================

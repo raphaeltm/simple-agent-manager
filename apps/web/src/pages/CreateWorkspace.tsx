@@ -6,12 +6,14 @@ import { BranchSelector } from '../components/BranchSelector';
 import {
   createWorkspace,
   getProject,
+  getProviderCatalog,
   listBranches,
   listCredentials,
   listGitHubInstallations,
   listNodes,
 } from '../lib/api';
-import type { GitHubInstallation, NodeResponse, ProjectDetailResponse, VMSize, VMLocation } from '@simple-agent-manager/shared';
+import type { GitHubInstallation, NodeResponse, ProjectDetailResponse, ProviderCatalog, VMSize } from '@simple-agent-manager/shared';
+import { PROVIDER_LABELS } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, Input, PageLayout, Select, Spinner } from '@simple-agent-manager/ui';
 
 type PrereqStatus = 'loading' | 'ready' | 'missing' | 'error';
@@ -68,18 +70,6 @@ function PrereqItem({ label, status, detail, actionLabel, onAction }: PrereqItem
   );
 }
 
-const VM_SIZES = [
-  { value: 'small', label: 'Small', description: '2 vCPUs, 4GB RAM' },
-  { value: 'medium', label: 'Medium', description: '4 vCPUs, 8GB RAM' },
-  { value: 'large', label: 'Large', description: '8 vCPUs, 16GB RAM' },
-];
-
-const VM_LOCATIONS = [
-  { value: 'nbg1', label: 'Nuremberg, DE' },
-  { value: 'fsn1', label: 'Falkenstein, DE' },
-  { value: 'hel1', label: 'Helsinki, FI' },
-];
-
 type LocationState = {
   nodeId?: string;
   projectId?: string;
@@ -92,13 +82,18 @@ export function CreateWorkspace() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hetznerStatus, setHetznerStatus] = useState<PrereqStatus>('loading');
+  const [cloudStatus, setCloudStatus] = useState<PrereqStatus>('loading');
   const [githubStatus, setGithubStatus] = useState<PrereqStatus>('loading');
   const [nodesStatus, setNodesStatus] = useState<PrereqStatus>('loading');
-  const [hasHetzner, setHasHetzner] = useState(false);
+  const [hasCloudProvider, setHasCloudProvider] = useState(false);
   const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
   const [nodes, setNodes] = useState<NodeResponse[]>([]);
   const [linkedProject, setLinkedProject] = useState<ProjectDetailResponse | null>(null);
+
+  // Provider catalog state
+  const [catalogs, setCatalogs] = useState<ProviderCatalog[]>([]);
+  const [selectedProvider, setSelectedProvider] = useState<string>('');
+  const [catalogLoading, setCatalogLoading] = useState(false);
 
   const [name, setName] = useState('');
   const [repository, setRepository] = useState('');
@@ -109,20 +104,43 @@ export function CreateWorkspace() {
   const [branchesError, setBranchesError] = useState<string | null>(null);
   const [repoDefaultBranch, setRepoDefaultBranch] = useState<string | undefined>(undefined);
   const [installationId, setInstallationId] = useState('');
-  const [vmSize, setVmSize] = useState('medium');
-  const [vmLocation, setVmLocation] = useState('nbg1');
+  const [vmSize, setVmSize] = useState<VMSize>('medium');
+  const [vmLocation, setVmLocation] = useState('');
   const [selectedNodeId, setSelectedNodeId] = useState<string>(locationState?.nodeId ?? '');
+
+  // Get the active catalog based on selected provider
+  const activeCatalog = catalogs.find((c) => c.provider === selectedProvider);
 
   // Check each prerequisite independently so status appears incrementally
   useEffect(() => {
-    // Hetzner credentials
+    // Cloud provider credentials + catalog
     listCredentials()
       .then((creds) => {
-        const found = creds.some((c) => c.provider === 'hetzner');
-        setHasHetzner(found);
-        setHetznerStatus(found ? 'ready' : 'missing');
+        const hasCloud = creds.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway');
+        setHasCloudProvider(hasCloud);
+        setCloudStatus(hasCloud ? 'ready' : 'missing');
+
+        if (hasCloud) {
+          // Fetch provider catalog for location/size data
+          setCatalogLoading(true);
+          getProviderCatalog()
+            .then((resp) => {
+              setCatalogs(resp.catalogs);
+              const first = resp.catalogs[0];
+              if (first) {
+                setSelectedProvider(first.provider);
+                setVmLocation(first.defaultLocation);
+              }
+            })
+            .catch(() => {
+              // Catalog fetch failed — UI will use generic fallback
+            })
+            .finally(() => {
+              setCatalogLoading(false);
+            });
+        }
       })
-      .catch(() => setHetznerStatus('error'));
+      .catch(() => setCloudStatus('error'));
 
     // GitHub App installations
     listGitHubInstallations()
@@ -162,7 +180,7 @@ export function CreateWorkspace() {
         setRepoDefaultBranch(defBranch);
         setInstallationId(proj.installationId);
         if (proj.defaultVmSize) {
-          setVmSize(proj.defaultVmSize);
+          setVmSize(proj.defaultVmSize as VMSize);
         }
         // Fetch branches even when project-linked so the selector has data
         void fetchBranches(proj.repository, proj.installationId, defBranch);
@@ -172,7 +190,7 @@ export function CreateWorkspace() {
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const checkingPrereqs = hetznerStatus === 'loading' || githubStatus === 'loading';
+  const checkingPrereqs = cloudStatus === 'loading' || githubStatus === 'loading';
 
   const fetchBranches = useCallback(async (fullName: string, instId: string, defBranch?: string) => {
     setBranchesLoading(true);
@@ -225,6 +243,18 @@ export function CreateWorkspace() {
     [isProjectLinked]
   );
 
+  const handleProviderChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const provider = e.target.value;
+      setSelectedProvider(provider);
+      const catalog = catalogs.find((c) => c.provider === provider);
+      if (catalog) {
+        setVmLocation(catalog.defaultLocation);
+      }
+    },
+    [catalogs]
+  );
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setLoading(true);
@@ -243,8 +273,8 @@ export function CreateWorkspace() {
         repository: repo,
         branch,
         installationId,
-        vmSize: vmSize as VMSize,
-        vmLocation: vmLocation as VMLocation,
+        vmSize,
+        vmLocation,
       });
 
       navigate(`/workspaces/${workspace.id}`);
@@ -255,9 +285,9 @@ export function CreateWorkspace() {
     }
   };
 
-  const canCreate = hasHetzner && installations.length > 0;
-  const anyMissing = hetznerStatus === 'missing' || githubStatus === 'missing'
-    || hetznerStatus === 'error' || githubStatus === 'error';
+  const canCreate = hasCloudProvider && installations.length > 0;
+  const anyMissing = cloudStatus === 'missing' || githubStatus === 'missing'
+    || cloudStatus === 'error' || githubStatus === 'error';
   const showPrereqs = checkingPrereqs || anyMissing;
 
   const labelStyle = {
@@ -268,9 +298,35 @@ export function CreateWorkspace() {
     marginBottom: '0.25rem',
   } as const;
 
+  // Build VM size options from catalog or use generic fallback
+  const vmSizeOptions = activeCatalog
+    ? (['small', 'medium', 'large'] as VMSize[]).map((size) => {
+        const sizeInfo = activeCatalog.sizes[size];
+        return {
+          value: size,
+          label: size.charAt(0).toUpperCase() + size.slice(1),
+          description: sizeInfo
+            ? `${sizeInfo.vcpu} vCPUs, ${sizeInfo.ramGb}GB RAM \u2014 ${sizeInfo.price}`
+            : size,
+        };
+      })
+    : [
+        { value: 'small' as VMSize, label: 'Small', description: '2-3 vCPUs, 4GB RAM' },
+        { value: 'medium' as VMSize, label: 'Medium', description: '4 vCPUs, 8-12GB RAM' },
+        { value: 'large' as VMSize, label: 'Large', description: '8 vCPUs, 16-32GB RAM' },
+      ];
+
+  // Build location options from catalog
+  const locationOptions = activeCatalog
+    ? activeCatalog.locations.map((loc) => ({
+        value: loc.id,
+        label: `${loc.name}, ${loc.country}`,
+      }))
+    : [];
+
   return (
     <PageLayout
-      title={isProjectLinked ? `New Workspace — ${linkedProject?.name}` : 'Create Workspace'}
+      title={isProjectLinked ? `New Workspace \u2014 ${linkedProject?.name}` : 'Create Workspace'}
       onBack={() => isProjectLinked ? navigate(`/projects/${linkedProject?.id}`) : navigate('/dashboard')}
       maxWidth="md"
       headerRight={<UserMenu />}
@@ -288,15 +344,15 @@ export function CreateWorkspace() {
             )}
           </div>
           <PrereqItem
-            label="Hetzner Cloud Token"
-            status={hetznerStatus}
+            label="Cloud Provider"
+            status={cloudStatus}
             detail={
-              hetznerStatus === 'ready' ? 'Connected' :
-              hetznerStatus === 'missing' ? 'Required to provision VMs' :
-              hetznerStatus === 'error' ? 'Failed to check credentials' : undefined
+              cloudStatus === 'ready' ? 'Connected' :
+              cloudStatus === 'missing' ? 'Required to provision VMs (Hetzner or Scaleway)' :
+              cloudStatus === 'error' ? 'Failed to check credentials' : undefined
             }
-            actionLabel={hetznerStatus === 'missing' || hetznerStatus === 'error' ? 'Settings' : undefined}
-            onAction={hetznerStatus === 'missing' || hetznerStatus === 'error' ? () => navigate('/settings') : undefined}
+            actionLabel={cloudStatus === 'missing' || cloudStatus === 'error' ? 'Settings' : undefined}
+            onAction={cloudStatus === 'missing' || cloudStatus === 'error' ? () => navigate('/settings') : undefined}
           />
           <PrereqItem
             label="GitHub App Installation"
@@ -435,11 +491,39 @@ export function CreateWorkspace() {
             </div>
           )}
 
+          {!selectedNodeId && catalogs.length > 1 && (
+            <div>
+              <label htmlFor="provider" style={labelStyle}>
+                Cloud Provider
+              </label>
+              <Select id="provider" value={selectedProvider} onChange={handleProviderChange}>
+                {catalogs.map((catalog) => (
+                  <option key={catalog.provider} value={catalog.provider}>
+                    {PROVIDER_LABELS[catalog.provider] ?? catalog.provider}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
+
           {!selectedNodeId && (
             <div>
-              <label style={{ ...labelStyle, marginBottom: '0.5rem' }}>VM Size</label>
-              <div className="grid grid-cols-3 gap-3">
-                {VM_SIZES.map((size) => (
+              <label style={{ ...labelStyle, marginBottom: '0.5rem' }}>
+                VM Size
+                {activeCatalog && catalogs.length === 1 && (
+                  <span className="text-fg-muted font-normal ml-1">
+                    ({PROVIDER_LABELS[activeCatalog.provider] ?? activeCatalog.provider})
+                  </span>
+                )}
+                {catalogLoading && (
+                  <span className="text-fg-muted font-normal ml-2" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
+                    <Spinner size="sm" className="inline-block align-middle" />
+                    <span className="ml-1 align-middle">Loading pricing...</span>
+                  </span>
+                )}
+              </label>
+              <div className={`grid grid-cols-3 gap-3${catalogLoading ? ' opacity-60 pointer-events-none' : ''}`}>
+                {vmSizeOptions.map((size) => (
                   <button
                     key={size.value}
                     type="button"
@@ -461,15 +545,15 @@ export function CreateWorkspace() {
             </div>
           )}
 
-          {!selectedNodeId && (
+          {!selectedNodeId && locationOptions.length > 0 && (
             <div>
               <label htmlFor="location" style={labelStyle}>
                 Node Location
               </label>
               <Select id="location" value={vmLocation} onChange={(e) => setVmLocation(e.target.value)}>
-                {VM_LOCATIONS.map((locationOption) => (
-                  <option key={locationOption.value} value={locationOption.value}>
-                    {locationOption.label}
+                {locationOptions.map((loc) => (
+                  <option key={loc.value} value={loc.value}>
+                    {loc.label}
                   </option>
                 ))}
               </Select>

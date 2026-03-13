@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   deleteProject: vi.fn(),
   listActivityEvents: vi.fn(),
   listChatSessions: vi.fn(),
+  getProviderCatalog: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
@@ -53,6 +54,7 @@ vi.mock('../../../src/lib/api', () => ({
   deleteProject: mocks.deleteProject,
   listActivityEvents: mocks.listActivityEvents,
   listChatSessions: mocks.listChatSessions,
+  getProviderCatalog: mocks.getProviderCatalog,
 }));
 
 vi.mock('../../../src/components/UserMenu', () => ({
@@ -159,6 +161,7 @@ describe('Project page', () => {
     mocks.deleteProject.mockResolvedValue({ success: true });
     mocks.listActivityEvents.mockResolvedValue({ events: [], hasMore: false });
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
   });
 
   it('loads project details and renders task backlog on tasks tab', async () => {

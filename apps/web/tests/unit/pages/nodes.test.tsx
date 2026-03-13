@@ -6,12 +6,14 @@ const mocks = vi.hoisted(() => ({
   listNodes: vi.fn(),
   listWorkspaces: vi.fn(),
   createNode: vi.fn(),
+  getProviderCatalog: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
   listNodes: mocks.listNodes,
   listWorkspaces: mocks.listWorkspaces,
   createNode: mocks.createNode,
+  getProviderCatalog: mocks.getProviderCatalog,
 }));
 
 vi.mock('../../../src/components/UserMenu', () => ({
@@ -54,6 +56,7 @@ describe('Nodes page', () => {
       createdAt: '2026-01-02T00:00:00.000Z',
       updatedAt: '2026-01-02T00:00:00.000Z',
     });
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
   });
 
   it('renders node list', async () => {
