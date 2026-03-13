@@ -72,9 +72,9 @@ runtimeRoutes.post('/:id/agent-credential-sync', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
-  // Payload size check (64KB — auth.json files are typically a few KB).
+  // Payload size check (64KB default — auth.json files are typically a few KB).
   const contentLength = parseInt(c.req.header('content-length') || '0', 10);
-  const maxPayloadBytes = 64 * 1024;
+  const maxPayloadBytes = parsePositiveInt(c.env.MAX_AGENT_CREDENTIAL_SYNC_BYTES as string, 64 * 1024);
   if (contentLength > maxPayloadBytes) {
     throw errors.badRequest(`Payload exceeds ${maxPayloadBytes} byte limit`);
   }
