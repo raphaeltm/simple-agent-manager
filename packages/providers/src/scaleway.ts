@@ -225,9 +225,17 @@ export class ScalewayProvider implements Provider {
   }
 
   async validateToken(): Promise<boolean> {
-    await providerFetch(this.name, `${SCALEWAY_ACCOUNT_API_URL}/projects`, {
-      headers: { 'X-Auth-Token': this.secretKey },
-    });
+    // Validate by listing servers scoped to the user's project.
+    // The Account API v3 requires organization_id which we don't collect,
+    // so we use the Instance API instead — this also validates that the
+    // credentials work for the API we actually need.
+    await providerFetch(
+      this.name,
+      `${SCALEWAY_INSTANCE_API_URL}/${this.zone}/servers?per_page=1&project=${this.projectId}`,
+      {
+        headers: { 'X-Auth-Token': this.secretKey },
+      },
+    );
     return true;
   }
 
