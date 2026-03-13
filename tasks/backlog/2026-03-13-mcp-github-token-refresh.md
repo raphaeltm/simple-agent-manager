@@ -8,22 +8,50 @@
 
 Long-running ACP sessions (Claude Code agent) fail to push code or interact with GitHub after ~1 hour because the `GH_TOKEN` environment variable injected at session start contains a GitHub App installation token that expires after 1 hour.
 
+### Live environment observation (2026-03-13)
+
+Tested from inside a running ACP session. The current state:
+
+1. **`GH_TOKEN` env var** — set at session start (40 chars), static, will expire after ~1 hour
+2. **`gh` CLI wrapper** (`/usr/bin/gh`) — IS installed and working. Calls `git credential fill` before every `gh` invocation. `gh` commands survive token expiration.
+3. **Git credential helper** (`/usr/local/bin/git-credential-sam`) — IS configured. `git push`/`git fetch` get fresh tokens on demand.
+4. **`gh auth setup-git`** — was NOT run automatically. Initial `git push` via HTTPS failed until this was run manually, which sets up the gh credential helper for git operations.
+
 ### Why existing refresh mechanisms don't fully solve this
 
-The codebase already has two token refresh mechanisms, but neither covers all agent usage patterns:
+The codebase has two token refresh mechanisms that cover most cases, but gaps remain:
 
-1. **gh wrapper** (`bootstrap.go:1527-1576`): Wraps the `gh` CLI binary to call `git credential fill` before every `gh` invocation. Works for `gh pr create`, `gh pr view`, etc. — but only when the agent uses the `gh` CLI directly.
+1. **gh wrapper** (`bootstrap.go:1527-1576`): Wraps `gh` CLI to call `git credential fill` before every invocation. Works for `gh pr create`, `gh pr view`, etc.
 
-2. **git credential helper** (`bootstrap.go:1578+`): Configured in the container to call the VM agent's `/git-credential` endpoint for every `git push`/`git fetch`. Works for git operations — but only for `git` CLI commands.
+2. **git credential helper** (`bootstrap.go:1578+`): Configured in container for `git push`/`git fetch`. Calls VM agent → control plane for fresh tokens.
 
-**Gap**: The `GH_TOKEN` environment variable itself is never refreshed. If the agent (or any tool it uses) reads `GH_TOKEN` directly — e.g., for GitHub API calls, or if a tool caches the token from the env var at startup — it will use the expired 1-hour token. Additionally, some agent workflows may encounter confusing auth errors and not know how to recover.
+**Remaining gaps:**
+
+- **`gh auth setup-git` not automatic**: The git credential helper for HTTPS remotes requires `gh auth setup-git` to be run, which doesn't happen during bootstrap. First `git push` fails until the agent figures this out. (This may be the primary failure mode the user is seeing.)
+- **Raw `GH_TOKEN` reads**: Any tool/script that reads `$GH_TOKEN` directly (not through `gh` or `git`) uses the expired static token.
+- **Token caching**: If Claude Code or any tool caches the token value at startup, it won't pick up the credential helper refresh.
+- **Error recovery UX**: When auth fails, the agent has no structured way to get a fresh token — it has to guess at running `git credential fill` or similar.
+
+### Diagnosis needed
+
+Before implementing, we should confirm which specific failure mode is hitting in practice:
+
+1. **Is `gh auth setup-git` the missing piece?** If so, adding it to bootstrap may be the simpler fix.
+2. **Is something reading `GH_TOKEN` directly?** If so, the MCP tool approach is the right fix.
+3. **Is the credential helper chain broken?** E.g., callback token expired, VM agent endpoint unreachable.
 
 ### Related work
 
 - `tasks/active/2026-02-23-gh-token-empty-in-workspaces.md` — addresses GH_TOKEN being empty at provisioning time (different issue: token absent vs. token expired)
 - `docs/notes/2026-03-08-mcp-token-revocation-postmortem.md` — credential lifecycle mismatch lesson (token lifetime must match session lifetime)
 
-## Proposed Solution: `refresh_github_token` SAM MCP Tool
+## Two-Part Solution
+
+### Part 1 (Quick fix): Run `gh auth setup-git` during bootstrap
+
+The gh wrapper is installed but `gh auth setup-git` is never called. This means the git credential helper isn't registered for HTTPS remotes — `git push` fails on the first attempt. Adding this single command to the bootstrap sequence (`bootstrap.go`, after `installGhWrapper()`) would likely fix the most common failure mode.
+
+### Part 2 (Robust fix): `refresh_github_token` SAM MCP Tool
 
 Add a new tool to the SAM MCP server that agents can call to obtain a fresh GitHub token. This follows the existing pattern of SAM MCP tools (`get_instructions`, `update_task_status`, `complete_task`) and leverages the existing infrastructure for GitHub App installation token generation.
 
@@ -57,6 +85,15 @@ A background process on the VM agent could periodically refresh `GH_TOKEN` in `/
 - The agent is best positioned to know when it needs a fresh token
 
 ## Detailed Tasklist
+
+### Bootstrap fix (packages/vm-agent/)
+
+- [ ] Add `gh auth setup-git` call in `bootstrap.go` after `installGhWrapper()` returns
+  - Run inside the container: `docker exec <containerID> gh auth setup-git`
+  - Non-fatal: log warning on failure (same pattern as gh wrapper install)
+  - This registers the gh credential helper for HTTPS git operations
+- [ ] Verify the git credential helper is properly configured after bootstrap
+- [ ] Test: `git push` works without manual `gh auth setup-git` in a fresh workspace
 
 ### API changes (apps/api/)
 
