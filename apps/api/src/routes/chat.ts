@@ -185,8 +185,9 @@ chatRoutes.get('/:sessionId', async (c) => {
       if (agentRow) {
         agentSessionId = agentRow.id;
       }
-    } catch {
+    } catch (err) {
       // D1 lookup failure is non-fatal — UI falls back to chat session ID
+      console.warn('Failed to fetch agentSessionId for workspace', workspaceId, err);
     }
   }
 
