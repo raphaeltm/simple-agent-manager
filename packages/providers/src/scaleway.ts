@@ -5,7 +5,6 @@ import { ProviderError } from './types';
 import { providerFetch } from './provider-fetch';
 
 const SCALEWAY_INSTANCE_API_URL = 'https://api.scaleway.com/instance/v1/zones';
-const SCALEWAY_ACCOUNT_API_URL = 'https://api.scaleway.com/account/v3';
 
 export const SCALEWAY_LOCATIONS = [
   'fr-par-1', 'fr-par-2', 'fr-par-3',
