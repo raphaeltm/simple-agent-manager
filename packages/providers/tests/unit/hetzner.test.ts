@@ -41,6 +41,50 @@ describe('HetznerProvider', () => {
     });
   });
 
+  describe('locationMetadata', () => {
+    it('should have metadata for all 5 locations', () => {
+      expect(Object.keys(provider.locationMetadata)).toHaveLength(5);
+    });
+
+    it('should have correct metadata for fsn1', () => {
+      expect(provider.locationMetadata['fsn1']).toEqual({ name: 'Falkenstein', country: 'DE' });
+    });
+
+    it('should have correct metadata for nbg1', () => {
+      expect(provider.locationMetadata['nbg1']).toEqual({ name: 'Nuremberg', country: 'DE' });
+    });
+
+    it('should have correct metadata for hel1', () => {
+      expect(provider.locationMetadata['hel1']).toEqual({ name: 'Helsinki', country: 'FI' });
+    });
+
+    it('should have correct metadata for ash', () => {
+      expect(provider.locationMetadata['ash']).toEqual({ name: 'Ashburn', country: 'US' });
+    });
+
+    it('should have correct metadata for hil', () => {
+      expect(provider.locationMetadata['hil']).toEqual({ name: 'Hillsboro', country: 'US' });
+    });
+
+    it('should have metadata entries matching the locations array', () => {
+      for (const loc of provider.locations) {
+        expect(provider.locationMetadata[loc]).toBeDefined();
+      }
+    });
+  });
+
+  describe('defaultLocation', () => {
+    it('should default to constructor datacenter parameter', () => {
+      const p = new HetznerProvider('test-token', 'hel1');
+      expect(p.defaultLocation).toBe('hel1');
+    });
+
+    it('should default to fsn1 when no datacenter is provided', () => {
+      const p = new HetznerProvider('test-token');
+      expect(p.defaultLocation).toBe('fsn1');
+    });
+  });
+
   describe('sizes', () => {
     it('should return correct small size config', () => {
       expect(provider.sizes.small).toEqual({

@@ -41,6 +41,62 @@ describe('ScalewayProvider', () => {
     });
   });
 
+  describe('locationMetadata', () => {
+    it('should have metadata for all 8 zones', () => {
+      expect(Object.keys(provider.locationMetadata)).toHaveLength(8);
+    });
+
+    it('should have correct metadata for fr-par-1', () => {
+      expect(provider.locationMetadata['fr-par-1']).toEqual({ name: 'Paris 1', country: 'FR' });
+    });
+
+    it('should have correct metadata for fr-par-2', () => {
+      expect(provider.locationMetadata['fr-par-2']).toEqual({ name: 'Paris 2', country: 'FR' });
+    });
+
+    it('should have correct metadata for fr-par-3', () => {
+      expect(provider.locationMetadata['fr-par-3']).toEqual({ name: 'Paris 3', country: 'FR' });
+    });
+
+    it('should have correct metadata for nl-ams-1', () => {
+      expect(provider.locationMetadata['nl-ams-1']).toEqual({ name: 'Amsterdam 1', country: 'NL' });
+    });
+
+    it('should have correct metadata for nl-ams-2', () => {
+      expect(provider.locationMetadata['nl-ams-2']).toEqual({ name: 'Amsterdam 2', country: 'NL' });
+    });
+
+    it('should have correct metadata for nl-ams-3', () => {
+      expect(provider.locationMetadata['nl-ams-3']).toEqual({ name: 'Amsterdam 3', country: 'NL' });
+    });
+
+    it('should have correct metadata for pl-waw-1', () => {
+      expect(provider.locationMetadata['pl-waw-1']).toEqual({ name: 'Warsaw 1', country: 'PL' });
+    });
+
+    it('should have correct metadata for pl-waw-2', () => {
+      expect(provider.locationMetadata['pl-waw-2']).toEqual({ name: 'Warsaw 2', country: 'PL' });
+    });
+
+    it('should have metadata entries matching the locations array', () => {
+      for (const loc of provider.locations) {
+        expect(provider.locationMetadata[loc]).toBeDefined();
+      }
+    });
+  });
+
+  describe('defaultLocation', () => {
+    it('should default to constructor zone parameter', () => {
+      const p = new ScalewayProvider('key', 'proj', 'nl-ams-1');
+      expect(p.defaultLocation).toBe('nl-ams-1');
+    });
+
+    it('should default to DEFAULT_SCALEWAY_ZONE when no zone is provided', () => {
+      const p = new ScalewayProvider('key', 'proj');
+      expect(p.defaultLocation).toBe('fr-par-1');
+    });
+  });
+
   describe('sizes', () => {
     it('should return correct small size config', () => {
       expect(provider.sizes.small).toEqual({
