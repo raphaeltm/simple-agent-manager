@@ -7,7 +7,7 @@ const HETZNER_API_URL = 'https://api.hetzner.cloud/v1';
 
 const HETZNER_LOCATIONS = ['fsn1', 'nbg1', 'hel1', 'ash', 'hil'] as const;
 
-const PLACEMENT_RETRY_DELAY_MS = 3_000;
+export const DEFAULT_PLACEMENT_RETRY_DELAY_MS = 3_000;
 
 const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
   small: {
@@ -62,10 +62,19 @@ export class HetznerProvider implements Provider {
 
   private readonly apiToken: string;
   private readonly datacenter: string;
+  private readonly placementRetryDelayMs: number;
+  private readonly placementFallbackEnabled: boolean;
 
-  constructor(apiToken: string, datacenter?: string) {
+  constructor(
+    apiToken: string,
+    datacenter?: string,
+    placementRetryDelayMs?: number,
+    placementFallbackEnabled?: boolean,
+  ) {
     this.apiToken = apiToken;
     this.datacenter = datacenter || 'fsn1';
+    this.placementRetryDelayMs = placementRetryDelayMs ?? DEFAULT_PLACEMENT_RETRY_DELAY_MS;
+    this.placementFallbackEnabled = placementFallbackEnabled ?? true;
   }
 
   async createVM(config: VMConfig): Promise<VMInstance> {
@@ -73,12 +82,14 @@ export class HetznerProvider implements Provider {
     const primaryLocation = config.location || this.datacenter;
 
     // Build attempt order: primary twice (with a delay between), then remaining locations shuffled
-    const fallbackLocations = HETZNER_LOCATIONS
-      .filter((loc) => loc !== primaryLocation)
-      .sort(() => Math.random() - 0.5);
+    const fallbackLocations = this.placementFallbackEnabled
+      ? HETZNER_LOCATIONS
+          .filter((loc) => loc !== primaryLocation)
+          .sort(() => Math.random() - 0.5)
+      : [];
     const attemptsToTry: Array<{ location: string; delayMs: number }> = [
       { location: primaryLocation, delayMs: 0 },
-      { location: primaryLocation, delayMs: PLACEMENT_RETRY_DELAY_MS },
+      { location: primaryLocation, delayMs: this.placementRetryDelayMs },
       ...fallbackLocations.map((loc) => ({ location: loc, delayMs: 0 })),
     ];
 

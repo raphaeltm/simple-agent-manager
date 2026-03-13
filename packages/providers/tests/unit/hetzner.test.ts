@@ -14,6 +14,7 @@ describe('HetznerProvider', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     globalThis.fetch = originalFetch;
   });
 
@@ -188,8 +189,7 @@ describe('HetznerProvider', () => {
       globalThis.fetch = mockFetch;
 
       const promise = provider.createVM(vmConfig);
-      // Advance past the 3s retry delay
-      await vi.advanceTimersByTimeAsync(3_000);
+      await vi.runAllTimersAsync();
       const result = await promise;
 
       expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -200,8 +200,40 @@ describe('HetznerProvider', () => {
       const secondBody = JSON.parse((mockFetch.mock.calls[1]![1] as RequestInit).body as string);
       expect(firstBody.location).toBe('fsn1');
       expect(secondBody.location).toBe('fsn1');
+    });
 
-      vi.useRealTimers();
+    it('should wait the full delay before retrying the primary location', async () => {
+      vi.useFakeTimers();
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ error: { message: 'error during placement' } }),
+            { status: 412 },
+          ),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ server: createMockServer({ status: 'initializing' }) }),
+            { status: 200 },
+          ),
+        );
+
+      globalThis.fetch = mockFetch;
+
+      const promise = provider.createVM(vmConfig);
+
+      // Drain microtasks so first fetch completes, but don't advance time
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      // Advance just under the delay — second call must NOT have happened
+      await vi.advanceTimersByTimeAsync(2_999);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      // Cross the threshold
+      await vi.advanceTimersByTimeAsync(1);
+      await promise;
+      expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
     it('should fall back to other locations after primary retry fails', async () => {
@@ -229,17 +261,19 @@ describe('HetznerProvider', () => {
       globalThis.fetch = mockFetch;
 
       const promise = provider.createVM(vmConfig);
-      await vi.advanceTimersByTimeAsync(3_000);
+      await vi.runAllTimersAsync();
       const result = await promise;
 
       expect(mockFetch).toHaveBeenCalledTimes(3);
       expect(result.id).toBe('12345');
 
-      // Third call should be a different location
+      // First two calls should be primary, third should be different
+      const firstBody = JSON.parse((mockFetch.mock.calls[0]![1] as RequestInit).body as string);
+      const secondBody = JSON.parse((mockFetch.mock.calls[1]![1] as RequestInit).body as string);
       const thirdBody = JSON.parse((mockFetch.mock.calls[2]![1] as RequestInit).body as string);
+      expect(firstBody.location).toBe('fsn1');
+      expect(secondBody.location).toBe('fsn1');
       expect(thirdBody.location).not.toBe('fsn1');
-
-      vi.useRealTimers();
     });
 
     it('should throw after all locations exhausted on 412', async () => {
@@ -252,13 +286,32 @@ describe('HetznerProvider', () => {
       );
 
       const promise = provider.createVM(vmConfig).catch((err) => err);
-      await vi.advanceTimersByTimeAsync(3_000);
+      await vi.runAllTimersAsync();
       const result = await promise;
       expect(result).toBeInstanceOf(ProviderError);
       // primary (1) + primary retry (2) + 4 fallback locations = 6
       expect(fetch).toHaveBeenCalledTimes(6);
+    });
 
-      vi.useRealTimers();
+    it('should never retry the primary location in the fallback phase', async () => {
+      vi.useFakeTimers();
+      const mockFetch = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { message: 'error during placement' } }),
+          { status: 412 },
+        ),
+      );
+      globalThis.fetch = mockFetch;
+
+      const promise = provider.createVM(vmConfig).catch(() => {});
+      await vi.runAllTimersAsync();
+      await promise;
+
+      // Calls after the first two (primary + primary retry) should not include fsn1
+      const fallbackLocations = mockFetch.mock.calls.slice(2).map(
+        (call) => JSON.parse((call[1] as RequestInit).body as string).location as string,
+      );
+      expect(fallbackLocations).not.toContain('fsn1');
     });
 
     it('should not retry on non-412 errors', async () => {
@@ -268,6 +321,13 @@ describe('HetznerProvider', () => {
           { status: 403 },
         ),
       );
+
+      await expect(provider.createVM(vmConfig)).rejects.toThrow(ProviderError);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not retry on network-level errors', async () => {
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error('Network failure'));
 
       await expect(provider.createVM(vmConfig)).rejects.toThrow(ProviderError);
       expect(fetch).toHaveBeenCalledTimes(1);
@@ -286,6 +346,39 @@ describe('HetznerProvider', () => {
       const body = JSON.parse(((fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit).body as string);
       expect(body.location).toBe('fsn1');
       expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('should use constructor datacenter when config.location is not set', async () => {
+      const providerWithDc = new HetznerProvider('test-token', 'hel1');
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ server: createMockServer({ status: 'initializing' }) }),
+          { status: 200 },
+        ),
+      );
+
+      await providerWithDc.createVM({ name: 'test', size: 'small', userData: '' });
+
+      const body = JSON.parse(((fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit).body as string);
+      expect(body.location).toBe('hel1');
+    });
+
+    it('should only retry primary when fallback is disabled', async () => {
+      vi.useFakeTimers();
+      const noFallbackProvider = new HetznerProvider('test-token', 'fsn1', undefined, false);
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { message: 'error during placement' } }),
+          { status: 412 },
+        ),
+      );
+
+      const promise = noFallbackProvider.createVM(vmConfig).catch((err) => err);
+      await vi.runAllTimersAsync();
+      const result = await promise;
+      expect(result).toBeInstanceOf(ProviderError);
+      // primary (1) + primary retry (2), no fallback locations
+      expect(fetch).toHaveBeenCalledTimes(2);
     });
   });
 
