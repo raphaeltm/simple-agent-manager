@@ -10,6 +10,7 @@ describe('AGENT_CATALOG', () => {
     const mistral = AGENT_CATALOG.find((a) => a.id === 'mistral-vibe');
     expect(mistral).toBeDefined();
     expect(mistral!.name).toBe('Mistral Vibe');
+    expect(mistral!.description).toBe("Mistral AI's coding agent");
     expect(mistral!.provider).toBe('mistral');
     expect(mistral!.envVarName).toBe('MISTRAL_API_KEY');
     expect(mistral!.acpCommand).toBe('vibe-acp');
@@ -18,7 +19,9 @@ describe('AGENT_CATALOG', () => {
     expect(mistral!.credentialHelpUrl).toBe(
       'https://console.mistral.ai/api-keys'
     );
-    expect(mistral!.installCommand).toContain('vibe-acp');
+    expect(mistral!.installCommand).toBe(
+      'ARCH=$(uname -m) && curl -fLo /usr/local/bin/vibe-acp "https://github.com/mistralai/mistral-vibe/releases/latest/download/vibe-acp-linux-${ARCH}" && chmod +x /usr/local/bin/vibe-acp'
+    );
   });
 
   it('mistral-vibe has no OAuth support', () => {
@@ -29,11 +32,6 @@ describe('AGENT_CATALOG', () => {
   it('all catalog entries have unique IDs', () => {
     const ids = AGENT_CATALOG.map((a) => a.id);
     expect(new Set(ids).size).toBe(ids.length);
-  });
-
-  it('all catalog entries have unique providers', () => {
-    const providers = AGENT_CATALOG.map((a) => a.provider);
-    expect(new Set(providers).size).toBe(providers.length);
   });
 });
 

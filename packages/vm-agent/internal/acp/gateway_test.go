@@ -408,6 +408,15 @@ func TestProcessConfig_EnvVarInjection(t *testing.T) {
 			},
 			wantEnvVar: "OPENAI_API_KEY=sk-openai-key",
 		},
+		{
+			name:      "Mistral Vibe API key uses env var",
+			agentType: "mistral-vibe",
+			credential: &agentCredential{
+				credential:     "mistral-api-key-123",
+				credentialKind: "api-key",
+			},
+			wantEnvVar: "MISTRAL_API_KEY=mistral-api-key-123",
+		},
 	}
 
 	for _, tt := range tests {
