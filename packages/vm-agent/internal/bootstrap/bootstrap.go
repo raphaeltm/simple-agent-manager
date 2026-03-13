@@ -1594,7 +1594,9 @@ func renderGitCredentialHelperScript(cfg *config.Config) (string, error) {
 	// When TLS is enabled on the VM agent, the credential helper must use https://
 	// with -k (skip cert verification) because the TLS cert is issued for the
 	// external domain (e.g. ws-*.example.com), not for internal Docker addresses
-	// like host.docker.internal or 172.17.0.1.
+	// like host.docker.internal or 172.17.0.1. This is acceptable because the
+	// credential endpoint is only bound to the VM host, and each request is
+	// authenticated via the callback token.
 	scheme := "http"
 	curlTLSFlag := ""
 	if cfg.TLSEnabled {

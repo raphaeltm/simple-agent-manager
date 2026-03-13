@@ -160,7 +160,7 @@ func TestRenderGitCredentialHelperScriptTLS(t *testing.T) {
 	}
 
 	// TLS mode must NOT use http:// (without the s)
-	if strings.Contains(script, `"http://`) {
+	if strings.Contains(script, "http://") {
 		t.Fatal("TLS mode should not contain plain http:// URL")
 	}
 }
