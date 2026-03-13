@@ -10,6 +10,7 @@ import type {
   CreateWorkspaceRequest,
   UpdateWorkspaceRequest,
 } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION } from '@simple-agent-manager/shared';
 import { getRuntimeLimits } from '../../services/limits';
 import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
 import { createNodeRecord, provisionNode } from '../../services/nodes';
@@ -157,8 +158,8 @@ crudRoutes.post('/', requireAuth(), requireApproved(), async (c) => {
     throw errors.badRequest('GitHub installation not found');
   }
 
-  const vmSize = body.vmSize ?? 'medium';
-  const vmLocation = body.vmLocation ?? 'nbg1';
+  const vmSize = body.vmSize ?? DEFAULT_VM_SIZE;
+  const vmLocation = body.vmLocation ?? DEFAULT_VM_LOCATION;
 
   // Validate branch name — reject shell metacharacters to prevent command injection.
   // Git branch names allow: alphanumeric, hyphens, underscores, slashes, dots.

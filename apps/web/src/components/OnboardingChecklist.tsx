@@ -38,15 +38,15 @@ export function OnboardingChecklist() {
         listWorkspaces(),
       ]);
 
-      const hasHetznerToken = credentials.some((c) => c.provider === 'hetzner');
+      const hasCloudProvider = credentials.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway');
       const hasGitHubApp = installations.length > 0;
       const hasWorkspace = workspaces.length > 0;
 
       setSteps([
         {
-          id: 'hetzner',
-          label: 'Add your Hetzner Cloud API token',
-          complete: hasHetznerToken,
+          id: 'cloud-provider',
+          label: 'Add a cloud provider API token',
+          complete: hasCloudProvider,
           path: '/settings/cloud-provider',
         },
         {
