@@ -33,6 +33,20 @@ describe('createProvider', () => {
     }
   });
 
+  it('should throw ProviderError for scaleway (not yet implemented)', () => {
+    expect(() =>
+      createProvider({ provider: 'scaleway', secretKey: 'key', projectId: 'proj' }),
+    ).toThrow(ProviderError);
+
+    try {
+      createProvider({ provider: 'scaleway', secretKey: 'key', projectId: 'proj' });
+    } catch (err) {
+      expect(err).toBeInstanceOf(ProviderError);
+      expect((err as ProviderError).message).toContain('not yet implemented');
+      expect((err as ProviderError).providerName).toBe('scaleway');
+    }
+  });
+
   it('should not access process.env', () => {
     // The factory function signature requires explicit config — there's no fallback to env vars.
     // This test verifies the function works without any environment setup.
