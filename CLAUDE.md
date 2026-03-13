@@ -132,7 +132,14 @@ Environment-specific `[env.*]` sections are NOT checked into the repository. The
 
 ## Agent Authentication
 
-Claude Code supports dual authentication: **API keys** (pay-per-use from Anthropic Console) and **OAuth tokens** (from Claude Max/Pro subscriptions via `claude setup-token`). Users toggle between them in Settings. The system injects `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` based on active credential type.
+The platform supports four ACP-compatible agents: **Claude Code**, **OpenAI Codex**, **Gemini CLI**, and **Mistral Vibe**. Each agent authenticates via API key; Claude Code and OpenAI Codex also support OAuth tokens. The agent catalog is defined in `packages/shared/src/agents.ts` and mirrored in the VM agent's `getAgentCommandInfo()` in `packages/vm-agent/internal/acp/gateway.go`.
+
+| Agent | API Key Env Var | OAuth Support | Install Method |
+|-------|----------------|---------------|----------------|
+| Claude Code | `ANTHROPIC_API_KEY` | Yes (`CLAUDE_CODE_OAUTH_TOKEN`) | npm |
+| OpenAI Codex | `OPENAI_API_KEY` | Yes (auth-file injection) | npm |
+| Gemini CLI | `GEMINI_API_KEY` | No | npm |
+| Mistral Vibe | `MISTRAL_API_KEY` | No | curl binary download |
 
 ## Testing
 

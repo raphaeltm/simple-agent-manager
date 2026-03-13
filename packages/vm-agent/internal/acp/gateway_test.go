@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -65,6 +66,22 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			wantCommand:    "gemini",
 			wantEnvVar:     "GEMINI_API_KEY",
 			wantInstallCmd: "npm install -g @google/gemini-cli",
+		},
+		{
+			name:           "Mistral Vibe uses env var injection",
+			agentType:      "mistral-vibe",
+			credentialKind: "api-key",
+			wantCommand:    "vibe-acp",
+			wantEnvVar:     "MISTRAL_API_KEY",
+			wantInstallCmd: `ARCH=$(uname -m) && curl -fLo /usr/local/bin/vibe-acp "https://github.com/mistralai/mistral-vibe/releases/latest/download/vibe-acp-linux-${ARCH}" && chmod +x /usr/local/bin/vibe-acp`,
+		},
+		{
+			name:           "Mistral Vibe ignores OAuth (no OAuth support)",
+			agentType:      "mistral-vibe",
+			credentialKind: "oauth-token",
+			wantCommand:    "vibe-acp",
+			wantEnvVar:     "MISTRAL_API_KEY",
+			wantInstallCmd: `ARCH=$(uname -m) && curl -fLo /usr/local/bin/vibe-acp "https://github.com/mistralai/mistral-vibe/releases/latest/download/vibe-acp-linux-${ARCH}" && chmod +x /usr/local/bin/vibe-acp`,
 		},
 	}
 
@@ -245,6 +262,34 @@ func TestGetAgentCommandInfoGoogleGemini(t *testing.T) {
 	}
 	if len(info.args) != 1 || info.args[0] != "--experimental-acp" {
 		t.Fatalf("args=%v, want [--experimental-acp]", info.args)
+	}
+}
+
+func TestGetAgentCommandInfoMistralVibe(t *testing.T) {
+	t.Parallel()
+
+	info := getAgentCommandInfo("mistral-vibe", "api-key")
+	if info.command != "vibe-acp" {
+		t.Fatalf("command=%q, want %q", info.command, "vibe-acp")
+	}
+	if info.envVarName != "MISTRAL_API_KEY" {
+		t.Fatalf("envVarName=%q, want %q", info.envVarName, "MISTRAL_API_KEY")
+	}
+	if info.args != nil {
+		t.Fatalf("args=%v, want nil", info.args)
+	}
+	if info.injectionMode != "" {
+		t.Fatalf("injectionMode=%q, want empty", info.injectionMode)
+	}
+	// Install command should use curl, not npm
+	if info.installCmd == "" {
+		t.Fatal("installCmd should not be empty for mistral-vibe")
+	}
+	if !strings.Contains(info.installCmd, "curl") {
+		t.Fatalf("installCmd should use curl for binary download, got %q", info.installCmd)
+	}
+	if !strings.Contains(info.installCmd, "vibe-acp") {
+		t.Fatalf("installCmd should reference vibe-acp binary, got %q", info.installCmd)
 	}
 }
 

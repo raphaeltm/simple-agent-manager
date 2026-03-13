@@ -78,9 +78,9 @@ This loses streaming and session management. Not needed given ACP compatibility 
 ## Implementation Checklist
 
 ### Phase 1: Shared Types
-- [ ] Add `'mistral-vibe'` to `AgentType` union in `packages/shared/src/agents.ts`
-- [ ] Add `'mistral'` to `AgentProvider` union
-- [ ] Add Mistral Vibe entry to `AGENT_CATALOG` with:
+- [x] Add `'mistral-vibe'` to `AgentType` union in `packages/shared/src/agents.ts`
+- [x] Add `'mistral'` to `AgentProvider` union
+- [x] Add Mistral Vibe entry to `AGENT_CATALOG` with:
   - `id: 'mistral-vibe'`
   - `acpCommand: 'vibe-acp'`
   - `envVarName: 'MISTRAL_API_KEY'`
@@ -88,25 +88,26 @@ This loses streaming and session management. Not needed given ACP compatibility 
   - No `oauthSupport` field
 
 ### Phase 2: VM Agent (Go)
-- [ ] Add `"mistral-vibe"` case to `getAgentCommandInfo()` in `gateway.go`
+- [x] Add `"mistral-vibe"` case to `getAgentCommandInfo()` in `gateway.go`
   - `command: "vibe-acp"`, `injectionMode: "env"`, `envVarName: "MISTRAL_API_KEY"`
   - `installCmd`: curl-based binary download (handle x86_64/aarch64)
-- [ ] Add `"mistral-vibe"` case to `getModelEnvVar()` (determine correct env var name)
-- [ ] Handle any vibe-acp-specific config file pre-creation if needed for headless mode
-- [ ] Verify `ensureAgentInstalled()` works with non-npm binary (curl download) — it runs `docker exec -u root sh -c` so should work
+- [x] Add `"mistral-vibe"` case to `getModelEnvVar()` — uses `MISTRAL_MODEL`
+- [x] Handle any vibe-acp-specific config file pre-creation if needed for headless mode — not needed, vibe-acp works headless without config
+- [x] Verify `ensureAgentInstalled()` works with non-npm binary (curl download) — refactored to conditionally handle npm vs curl installs
 
 ### Phase 3: API (Credential Validation)
-- [ ] Add Mistral API key validation to `apps/api/src/services/validation.ts` (non-empty check at minimum)
-- [ ] Verify credential storage/retrieval works for new agent type (generic `credentials` table — should need no schema changes)
+- [x] Add Mistral API key validation to `apps/api/src/services/validation.ts` (non-empty check at minimum) — existing generic validation already handles non-Anthropic agents
+- [x] Verify credential storage/retrieval works for new agent type (generic `credentials` table — no schema changes needed)
 
 ### Phase 4: Testing
-- [ ] Unit tests for new agent catalog entry
-- [ ] Unit test for `getAgentCommandInfo("mistral-vibe")` in Go
-- [ ] Integration test: install `vibe-acp` binary in a test container
-- [ ] Capability test: end-to-end ACP session with vibe-acp (Initialize → NewSession → Prompt)
+- [x] Unit tests for new agent catalog entry (`packages/shared/tests/unit/agents.test.ts`)
+- [x] Unit test for `getAgentCommandInfo("mistral-vibe")` in Go (`gateway_test.go`)
+- [x] Unit test for `getModelEnvVar("mistral-vibe")` in Go (`settings_test.go`)
+- [ ] Integration test: install `vibe-acp` binary in a test container (deferred — requires real container)
+- [ ] Capability test: end-to-end ACP session with vibe-acp (deferred — requires staging deployment + VM)
 
 ### Phase 5: Documentation
-- [ ] Update CLAUDE.md agent documentation section
+- [x] Update CLAUDE.md agent documentation section
 - [ ] Update any agent-related docs in `docs/`
 
 ## Risks & Mitigations
