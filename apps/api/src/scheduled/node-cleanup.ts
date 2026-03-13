@@ -80,7 +80,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
      WHERE n.warm_since IS NOT NULL
        AND n.warm_since < ?
        AND n.status = 'running'
-     GROUP BY n.id`
+     GROUP BY n.id, n.user_id, n.warm_since`
   ).bind(staleThreshold).all<{
     id: string;
     user_id: string;
@@ -153,20 +153,19 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
   const lifetimeThreshold = new Date(now.getTime() - maxLifetimeMs).toISOString();
   const absoluteLifetimeThreshold = new Date(now.getTime() - absoluteMaxLifetimeMs).toISOString();
 
-  // Auto-provisioned nodes with active workspace counts in a single query
+  // Auto-provisioned nodes with active workspace counts in a single query.
+  // Drive from nodes table and join tasks to identify auto-provisioned ones.
   const autoProvisionedNodesWithCounts = await env.DATABASE.prepare(
-    `SELECT DISTINCT t.auto_provisioned_node_id as node_id,
-            n.id, n.user_id, n.status, n.created_at,
+    `SELECT n.id, n.user_id, n.status, n.created_at,
             COUNT(CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN 1 END) as active_ws_count
-     FROM tasks t
-     INNER JOIN nodes n ON n.id = t.auto_provisioned_node_id
+     FROM nodes n
+     INNER JOIN tasks t ON t.auto_provisioned_node_id = n.id
      LEFT JOIN workspaces w ON w.node_id = n.id
      WHERE t.auto_provisioned_node_id IS NOT NULL
        AND n.status NOT IN ('stopped', 'deleted')
        AND n.created_at < ?
-     GROUP BY t.auto_provisioned_node_id`
+     GROUP BY n.id, n.user_id, n.status, n.created_at`
   ).bind(lifetimeThreshold).all<{
-    node_id: string;
     id: string;
     user_id: string;
     status: string;

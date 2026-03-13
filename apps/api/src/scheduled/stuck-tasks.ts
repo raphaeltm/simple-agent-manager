@@ -245,7 +245,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           // A recent heartbeat means the agent is actively working — don't kill it.
           const nodeIdToCheck = await getTaskNodeId(env, task);
           if (nodeIdToCheck) {
-            const staleSeconds = parseMs(env.NODE_HEARTBEAT_STALE_SECONDS, DEFAULT_NODE_HEARTBEAT_STALE_SECONDS);
+            const staleSeconds = parseInt(env.NODE_HEARTBEAT_STALE_SECONDS || '', 10) || DEFAULT_NODE_HEARTBEAT_STALE_SECONDS;
             const heartbeatRecent = await isNodeHeartbeatRecent(env, nodeIdToCheck, staleSeconds);
             if (heartbeatRecent) {
               log.info('stuck_task.skipped_active_heartbeat', {
