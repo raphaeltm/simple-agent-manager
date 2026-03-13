@@ -19,7 +19,7 @@ export { ProviderError } from './types';
 export { providerFetch, getTimeoutMs } from './provider-fetch';
 
 // Re-export providers
-export { HetznerProvider } from './hetzner';
+export { HetznerProvider, DEFAULT_PLACEMENT_RETRY_DELAY_MS } from './hetzner';
 
 /**
  * Create a provider instance from explicit configuration.
@@ -28,7 +28,12 @@ export { HetznerProvider } from './hetzner';
 export function createProvider(config: ProviderConfig): Provider {
   switch (config.provider) {
     case 'hetzner':
-      return new HetznerProvider(config.apiToken, config.datacenter);
+      return new HetznerProvider(
+        config.apiToken,
+        config.datacenter,
+        config.placementRetryDelayMs,
+        config.placementFallbackEnabled,
+      );
     default:
       throw new ProviderError(
         'factory',

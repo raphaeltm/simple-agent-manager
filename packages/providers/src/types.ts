@@ -123,6 +123,10 @@ export interface HetznerProviderConfig {
   provider: 'hetzner';
   apiToken: string;
   datacenter?: string;
+  /** Delay in ms before retrying same location on 412 (default: 3000) */
+  placementRetryDelayMs?: number;
+  /** Whether to try other locations after primary fails (default: true) */
+  placementFallbackEnabled?: boolean;
 }
 
 export interface UpCloudProviderConfig {
