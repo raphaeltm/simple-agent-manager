@@ -15,6 +15,12 @@ Local tests run against Miniflare mocks. CI runs unit tests in isolation. Neithe
 
 ## Step-by-Step Procedure
 
+### External Checks That Can Be Ignored
+
+- **SonarCloud Code Analysis** — external third-party service; not a SAM-owned check. Failures here do NOT block merge.
+
+All other checks (CI, Deploy Staging, VM Agent Smoke, Preflight Evidence, etc.) are SAM-owned and MUST pass.
+
 ### 1. Staging Deployment Must Be Green
 
 The `deploy-staging.yml` workflow runs automatically on every PR. Check its status:
