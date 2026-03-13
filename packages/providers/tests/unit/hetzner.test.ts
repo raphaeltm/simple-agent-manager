@@ -168,6 +168,125 @@ describe('HetznerProvider', () => {
       const body = JSON.parse(((fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit).body as string);
       expect(body.image).toBe('ubuntu-24.04');
     });
+
+    it('should retry same location after delay on 412 before trying other locations', async () => {
+      vi.useFakeTimers();
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ error: { message: 'error during placement' } }),
+            { status: 412 },
+          ),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ server: createMockServer({ status: 'initializing' }) }),
+            { status: 200 },
+          ),
+        );
+
+      globalThis.fetch = mockFetch;
+
+      const promise = provider.createVM(vmConfig);
+      // Advance past the 3s retry delay
+      await vi.advanceTimersByTimeAsync(3_000);
+      const result = await promise;
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(result.id).toBe('12345');
+
+      // Both calls should use the same primary location (fsn1)
+      const firstBody = JSON.parse((mockFetch.mock.calls[0]![1] as RequestInit).body as string);
+      const secondBody = JSON.parse((mockFetch.mock.calls[1]![1] as RequestInit).body as string);
+      expect(firstBody.location).toBe('fsn1');
+      expect(secondBody.location).toBe('fsn1');
+
+      vi.useRealTimers();
+    });
+
+    it('should fall back to other locations after primary retry fails', async () => {
+      vi.useFakeTimers();
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ error: { message: 'error during placement' } }),
+            { status: 412 },
+          ),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ error: { message: 'error during placement' } }),
+            { status: 412 },
+          ),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ server: createMockServer({ status: 'initializing' }) }),
+            { status: 200 },
+          ),
+        );
+
+      globalThis.fetch = mockFetch;
+
+      const promise = provider.createVM(vmConfig);
+      await vi.advanceTimersByTimeAsync(3_000);
+      const result = await promise;
+
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(result.id).toBe('12345');
+
+      // Third call should be a different location
+      const thirdBody = JSON.parse((mockFetch.mock.calls[2]![1] as RequestInit).body as string);
+      expect(thirdBody.location).not.toBe('fsn1');
+
+      vi.useRealTimers();
+    });
+
+    it('should throw after all locations exhausted on 412', async () => {
+      vi.useFakeTimers();
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { message: 'error during placement' } }),
+          { status: 412 },
+        ),
+      );
+
+      const promise = provider.createVM(vmConfig).catch((err) => err);
+      await vi.advanceTimersByTimeAsync(3_000);
+      const result = await promise;
+      expect(result).toBeInstanceOf(ProviderError);
+      // primary (1) + primary retry (2) + 4 fallback locations = 6
+      expect(fetch).toHaveBeenCalledTimes(6);
+
+      vi.useRealTimers();
+    });
+
+    it('should not retry on non-412 errors', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { message: 'Quota exceeded' } }),
+          { status: 403 },
+        ),
+      );
+
+      await expect(provider.createVM(vmConfig)).rejects.toThrow(ProviderError);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('should try primary location first', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ server: createMockServer({ status: 'initializing' }) }),
+          { status: 200 },
+        ),
+      );
+
+      await provider.createVM(vmConfig);
+
+      const body = JSON.parse(((fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit).body as string);
+      expect(body.location).toBe('fsn1');
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('deleteVM', () => {
