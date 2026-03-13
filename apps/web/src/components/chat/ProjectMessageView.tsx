@@ -362,9 +362,12 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
   // ACP agent session — direct WebSocket to VM agent for prompts and cancel.
   // Active when workspace is available and session is interactive.
+  // Use the agent session ID (ULID from D1) when available so the ACP WebSocket
+  // connects to the session created by TaskRunner, not a duplicate.
+  const agentSessionId = session?.agentSessionId ?? sessionId;
   const agentSession = useProjectAgentSession({
     workspaceId: session?.workspaceId ?? null,
-    sessionId,
+    sessionId: agentSessionId,
     enabled: sessionState === 'active' || sessionState === 'idle',
     preferredAgentType: 'claude-code',
   });
@@ -475,7 +478,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         if (data.session.id !== sessionId) return;
         const newLastId = data.messages[data.messages.length - 1]?.id ?? '';
         const taskStatus = data.session.task?.status ?? '';
-        const fingerprint = `${data.messages.length}:${newLastId}:${data.session.status}:${data.hasMore}:${taskStatus}`;
+        const agentSessId = data.session.agentSessionId ?? '';
+        const fingerprint = `${data.messages.length}:${newLastId}:${data.session.status}:${data.hasMore}:${taskStatus}:${agentSessId}`;
         if (fingerprint !== lastPollFingerprint) {
           lastPollFingerprint = fingerprint;
           setSession(data.session);

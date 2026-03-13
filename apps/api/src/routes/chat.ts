@@ -166,8 +166,33 @@ chatRoutes.get('/:sessionId', async (c) => {
     }
   }
 
+  // Look up active agent session ID (ULID) from D1 so the UI can route
+  // ACP WebSocket to the correct VM agent session instead of creating a duplicate.
+  let agentSessionId: string | null = null;
+  const workspaceId = (session as Record<string, unknown>).workspaceId as string | null;
+  if (workspaceId) {
+    try {
+      const [agentRow] = await db
+        .select({ id: schema.agentSessions.id })
+        .from(schema.agentSessions)
+        .where(
+          and(
+            eq(schema.agentSessions.workspaceId, workspaceId),
+            eq(schema.agentSessions.status, 'running')
+          )
+        )
+        .limit(1);
+      if (agentRow) {
+        agentSessionId = agentRow.id;
+      }
+    } catch (err) {
+      // D1 lookup failure is non-fatal — UI falls back to chat session ID
+      console.warn('Failed to fetch agentSessionId for workspace', workspaceId, err);
+    }
+  }
+
   return c.json({
-    session: { ...session, task },
+    session: { ...session, agentSessionId, task },
     messages: messagesResult.messages,
     hasMore: messagesResult.hasMore,
   });
