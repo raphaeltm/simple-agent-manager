@@ -99,6 +99,8 @@ export const MessageActions = React.memo(function MessageActions({ text, timesta
       setCopied(true);
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
       copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
+    }, () => {
+      // Clipboard write failed (e.g., permission denied) — silently ignore
     });
   }, [text]);
 

@@ -340,6 +340,20 @@ describe('MessageActions', () => {
       expect(screen.queryByLabelText('Copy message')).toBeNull();
     });
 
+    it('does not show "Copied" when clipboard write fails', async () => {
+      mockWriteText.mockRejectedValue(new DOMException('Permission denied', 'NotAllowedError'));
+
+      render(<MessageActions {...defaultProps} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText('Copy message'));
+      });
+
+      // Should remain as "Copy message", not switch to "Copied"
+      expect(screen.getByLabelText('Copy message')).toBeTruthy();
+      expect(screen.queryByLabelText('Copied')).toBeNull();
+    });
+
     it('copies the raw text including markdown', async () => {
       const mdText = '# Hello\n\nThis is **bold** and `code`.';
       render(<MessageActions text={mdText} timestamp={defaultProps.timestamp} />);
