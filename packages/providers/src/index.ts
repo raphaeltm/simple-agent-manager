@@ -8,6 +8,7 @@ export type {
   ProviderConfig,
   HetznerProviderConfig,
   UpCloudProviderConfig,
+  ScalewayProviderConfig,
   SizeConfig,
   VMConfig,
   VMInstance,
@@ -33,6 +34,12 @@ export function createProvider(config: ProviderConfig): Provider {
         config.datacenter,
         config.placementRetryDelayMs,
         config.placementFallbackEnabled,
+      );
+    case 'scaleway':
+      throw new ProviderError(
+        'scaleway',
+        undefined,
+        'Scaleway provider is not yet implemented. See tasks/backlog/2026-02-16-provider-scaleway.md',
       );
     default:
       throw new ProviderError(

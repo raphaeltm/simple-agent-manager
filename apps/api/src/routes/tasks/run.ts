@@ -101,20 +101,20 @@ runRoutes.post('/:taskId/run', async (c) => {
     }
   }
 
-  // Check the user has Hetzner credentials (required for node provisioning)
+  // Check the user has cloud provider credentials (required for node provisioning)
   const [credential] = await db
     .select({ id: schema.credentials.id })
     .from(schema.credentials)
     .where(
       and(
         eq(schema.credentials.userId, userId),
-        eq(schema.credentials.provider, 'hetzner')
+        eq(schema.credentials.credentialType, 'cloud-provider')
       )
     )
     .limit(1);
 
   if (!credential) {
-    throw errors.badRequest('Hetzner credentials required. Connect your account in Settings.');
+    throw errors.badRequest('Cloud provider credentials required. Connect your account in Settings.');
   }
 
   // Parse request body

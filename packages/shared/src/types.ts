@@ -44,7 +44,8 @@ export interface AdminUserRoleRequest {
 // =============================================================================
 // Credential
 // =============================================================================
-export type CredentialProvider = 'hetzner';
+export const CREDENTIAL_PROVIDERS = ['hetzner', 'scaleway'] as const;
+export type CredentialProvider = (typeof CREDENTIAL_PROVIDERS)[number];
 
 export interface Credential {
   id: string;
@@ -64,10 +65,13 @@ export interface CredentialResponse {
   createdAt: string;
 }
 
-export interface CreateCredentialRequest {
-  provider: CredentialProvider;
-  token: string;
-}
+/**
+ * Create credential request — discriminated by provider.
+ * Hetzner uses a single API token; Scaleway requires secretKey + projectId.
+ */
+export type CreateCredentialRequest =
+  | { provider: 'hetzner'; token: string }
+  | { provider: 'scaleway'; secretKey: string; projectId: string };
 
 // =============================================================================
 // GitHub Installation

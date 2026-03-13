@@ -117,7 +117,7 @@ export interface Provider {
  * Provider configuration — discriminated union per provider type.
  * Accepts explicit credentials; MUST NOT access process.env.
  */
-export type ProviderConfig = HetznerProviderConfig | UpCloudProviderConfig;
+export type ProviderConfig = HetznerProviderConfig | UpCloudProviderConfig | ScalewayProviderConfig;
 
 export interface HetznerProviderConfig {
   provider: 'hetzner';
@@ -133,6 +133,13 @@ export interface UpCloudProviderConfig {
   provider: 'upcloud';
   username: string;
   password: string;
+}
+
+export interface ScalewayProviderConfig {
+  provider: 'scaleway';
+  secretKey: string;
+  projectId: string;
+  zone?: string;
 }
 
 /**
