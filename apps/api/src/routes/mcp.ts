@@ -19,6 +19,7 @@ import type { Env } from '../index';
 import * as schema from '../db/schema';
 import { validateMcpToken, type McpTokenData } from '../services/mcp-token';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 
 export const mcpRoutes = new Hono<{ Bindings: Env }>();
 
@@ -67,9 +68,9 @@ const DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH = 2000;
 
 function getMcpLimits(env: Env) {
   return {
-    activityMessageMaxLength: parseInt(env.MAX_ACTIVITY_MESSAGE_LENGTH as string || '', 10) || DEFAULT_ACTIVITY_MESSAGE_MAX_LENGTH,
-    logMessageMaxLength: parseInt(env.MAX_LOG_MESSAGE_LENGTH as string || '', 10) || DEFAULT_LOG_MESSAGE_MAX_LENGTH,
-    outputSummaryMaxLength: parseInt(env.MAX_OUTPUT_SUMMARY_LENGTH as string || '', 10) || DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH,
+    activityMessageMaxLength: parsePositiveInt(env.MAX_ACTIVITY_MESSAGE_LENGTH as string, DEFAULT_ACTIVITY_MESSAGE_MAX_LENGTH),
+    logMessageMaxLength: parsePositiveInt(env.MAX_LOG_MESSAGE_LENGTH as string, DEFAULT_LOG_MESSAGE_MAX_LENGTH),
+    outputSummaryMaxLength: parsePositiveInt(env.MAX_OUTPUT_SUMMARY_LENGTH as string, DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH),
   };
 }
 

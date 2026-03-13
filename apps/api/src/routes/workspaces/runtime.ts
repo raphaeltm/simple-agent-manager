@@ -18,6 +18,7 @@ import {
   getWorkspaceRuntimeAssets,
   safeParseJson,
 } from './_helpers';
+import { parsePositiveInt } from '../../lib/route-helpers';
 
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
 
@@ -328,7 +329,7 @@ runtimeRoutes.post('/:id/messages', async (c) => {
 
   // Payload size check (256KB default, configurable via MAX_MESSAGES_PAYLOAD_BYTES)
   const contentLength = parseInt(c.req.header('content-length') || '0', 10);
-  const maxPayloadBytes = parseInt(c.env.MAX_MESSAGES_PAYLOAD_BYTES as string || '', 10) || 256 * 1024;
+  const maxPayloadBytes = parsePositiveInt(c.env.MAX_MESSAGES_PAYLOAD_BYTES as string, 256 * 1024);
   if (contentLength > maxPayloadBytes) {
     throw errors.badRequest(`Payload exceeds ${maxPayloadBytes} byte limit`);
   }
@@ -351,7 +352,7 @@ runtimeRoutes.post('/:id/messages', async (c) => {
   if (body.messages.length === 0) {
     throw errors.badRequest('messages array must not be empty');
   }
-  const maxMessagesPerBatch = parseInt(c.env.MAX_MESSAGES_PER_BATCH as string || '', 10) || 100;
+  const maxMessagesPerBatch = parsePositiveInt(c.env.MAX_MESSAGES_PER_BATCH as string, 100);
   if (body.messages.length > maxMessagesPerBatch) {
     throw errors.badRequest(`Maximum ${maxMessagesPerBatch} messages per batch`);
   }

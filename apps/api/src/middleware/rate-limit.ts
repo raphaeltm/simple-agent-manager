@@ -52,7 +52,9 @@ interface RateLimitEntry {
 export function getRateLimit(env: Env, key: keyof typeof DEFAULT_RATE_LIMITS): number {
   const envKey = `RATE_LIMIT_${key}` as keyof Env;
   const envValue = env[envKey] as string | undefined;
-  return envValue ? parseInt(envValue, 10) : DEFAULT_RATE_LIMITS[key];
+  if (!envValue) return DEFAULT_RATE_LIMITS[key];
+  const parsed = Number.parseInt(envValue, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_RATE_LIMITS[key];
 }
 
 /**
@@ -178,7 +180,7 @@ export function rateLimit(config: RateLimitConfig): MiddlewareHandler<{ Bindings
 
 /**
  * Rate limit middleware for workspace creation.
- * Default: 10 requests per hour per user.
+ * Default: 30 requests per hour per user.
  */
 export function rateLimitWorkspaceCreate(env: Env): MiddlewareHandler<{ Bindings: Env }> {
   return rateLimit({
@@ -200,7 +202,7 @@ export function rateLimitTerminalToken(env: Env): MiddlewareHandler<{ Bindings: 
 
 /**
  * Rate limit middleware for credential updates.
- * Default: 5 requests per hour per user.
+ * Default: 30 requests per hour per user.
  */
 export function rateLimitCredentialUpdate(env: Env): MiddlewareHandler<{ Bindings: Env }> {
   return rateLimit({

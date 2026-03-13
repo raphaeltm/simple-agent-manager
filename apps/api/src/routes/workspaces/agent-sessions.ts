@@ -20,6 +20,7 @@ import {
 import { log } from '../../lib/logger';
 import { toAgentSessionResponse } from '../../lib/mappers';
 import { getOwnedWorkspace, getOwnedNode, assertNodeOperational } from './_helpers';
+import { parsePositiveInt } from '../../lib/route-helpers';
 
 const agentSessionRoutes = new Hono<{ Bindings: Env }>();
 
@@ -143,7 +144,7 @@ agentSessionRoutes.patch('/:id/agent-sessions/:sessionId', requireAuth(), requir
   }
 
   const body = await c.req.json<{ label?: string }>();
-  const maxLabelLength = parseInt(c.env.MAX_AGENT_SESSION_LABEL_LENGTH as string || '', 10) || 50;
+  const maxLabelLength = parsePositiveInt(c.env.MAX_AGENT_SESSION_LABEL_LENGTH as string, 50);
   const label = body.label?.trim()?.slice(0, maxLabelLength);
   if (!label) {
     throw errors.badRequest('Label is required and must be non-empty');

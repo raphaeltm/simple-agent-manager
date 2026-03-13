@@ -31,6 +31,7 @@ import { generateBranchName } from '../../services/branch-name';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import * as projectDataService from '../../services/project-data';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
+import { parsePositiveInt } from '../../lib/route-helpers';
 
 /** Default max task message length. Override via MAX_TASK_MESSAGE_LENGTH env var. */
 const DEFAULT_MAX_MESSAGE_LENGTH = 16_000;
@@ -65,7 +66,7 @@ submitRoutes.post('/submit', async (c) => {
   if (!body.message || typeof body.message !== 'string' || body.message.trim().length === 0) {
     throw errors.badRequest('Message is required');
   }
-  const maxMessageLength = parseInt(c.env.MAX_TASK_MESSAGE_LENGTH || '', 10) || DEFAULT_MAX_MESSAGE_LENGTH;
+  const maxMessageLength = parsePositiveInt(c.env.MAX_TASK_MESSAGE_LENGTH, DEFAULT_MAX_MESSAGE_LENGTH);
   if (body.message.length > maxMessageLength) {
     throw errors.badRequest(`Message must be ${maxMessageLength} characters or less`);
   }

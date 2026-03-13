@@ -36,7 +36,7 @@ acpSessionRoutes.post('/:id/acp-sessions', async (c) => {
   }
 
   // Validate initialPrompt length (256 KB default, configurable via MAX_ACP_PROMPT_BYTES)
-  const maxPromptBytes = parseInt(c.env.MAX_ACP_PROMPT_BYTES as string || '', 10) || 262144;
+  const maxPromptBytes = parsePositiveInt(c.env.MAX_ACP_PROMPT_BYTES as string, 262144);
   if (body.initialPrompt && new TextEncoder().encode(body.initialPrompt).length > maxPromptBytes) {
     throw errors.badRequest(`initialPrompt exceeds maximum size of ${maxPromptBytes} bytes`);
   }
@@ -248,7 +248,7 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/fork', async (c) => {
   }
 
   // Validate contextSummary length (256 KB default, configurable via MAX_ACP_CONTEXT_BYTES)
-  const maxContextBytes = parseInt(c.env.MAX_ACP_CONTEXT_BYTES as string || '', 10) || 262144;
+  const maxContextBytes = parsePositiveInt(c.env.MAX_ACP_CONTEXT_BYTES as string, 262144);
   if (new TextEncoder().encode(body.contextSummary).length > maxContextBytes) {
     throw errors.badRequest(`contextSummary exceeds maximum size of ${maxContextBytes} bytes`);
   }
