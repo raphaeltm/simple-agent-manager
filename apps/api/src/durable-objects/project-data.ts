@@ -475,7 +475,8 @@ export class ProjectData extends DurableObject<Env> {
   async getMessages(
     sessionId: string,
     limit: number = 1000,
-    before: number | null = null
+    before: number | null = null,
+    roles?: string[]
   ): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
     let query =
       'SELECT id, session_id, role, content, tool_metadata, created_at, sequence FROM chat_messages WHERE session_id = ?';
@@ -484,6 +485,12 @@ export class ProjectData extends DurableObject<Env> {
     if (before !== null) {
       query += ' AND created_at < ?';
       params.push(before);
+    }
+
+    if (roles && roles.length > 0) {
+      const placeholders = roles.map(() => '?').join(', ');
+      query += ` AND role IN (${placeholders})`;
+      params.push(...roles);
     }
 
     // Order by created_at with sequence as tiebreaker for messages
@@ -507,6 +514,23 @@ export class ProjectData extends DurableObject<Env> {
       })),
       hasMore,
     };
+  }
+
+  /**
+   * Get total message count for a session, optionally filtered by roles.
+   */
+  getMessageCount(sessionId: string, roles?: string[]): number {
+    let query = 'SELECT COUNT(*) as count FROM chat_messages WHERE session_id = ?';
+    const params: (string | number)[] = [sessionId];
+
+    if (roles && roles.length > 0) {
+      const placeholders = roles.map(() => '?').join(', ');
+      query += ` AND role IN (${placeholders})`;
+      params.push(...roles);
+    }
+
+    const rows = this.sql.exec(query, ...params).toArray();
+    return (rows[0]?.count as number) ?? 0;
   }
 
   // =========================================================================
