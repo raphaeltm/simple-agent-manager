@@ -55,8 +55,13 @@ pnpm --filter @simple-agent-manager/api build
 Merge to `main` automatically deploys to production via GitHub Actions.
 
 - **CI** (`ci.yml`): lint, typecheck, test, build on all pushes/PRs
-- **Deploy** (`deploy.yml`): full Pulumi + Wrangler deployment on push to main
+- **Deploy Staging** (`deploy-staging.yml`): deploys to staging on every PR — **this MUST pass before merge**
+- **Deploy Production** (`deploy.yml`): full Pulumi + Wrangler deployment on push to main
 - **Teardown** (`teardown.yml`): manual only — destroys all resources
+
+### Staging Deployment is a Merge Gate
+
+Every PR that changes code triggers a staging deployment. This is NOT optional — a failed staging deploy blocks merge just like a failed test. After staging deploys successfully, you MUST verify the live app works using Playwright and test credentials (see `.claude/rules/13-staging-verification.md`).
 
 ## Key Concepts
 
@@ -133,6 +138,7 @@ Claude Code supports dual authentication: **API keys** (pay-per-use from Anthrop
 
 - **Test credentials** for the live app are at `/workspaces/.tmp/secure/demo-credentials.md` (outside repo)
 - **Live test cleanup required**: delete test workspaces/nodes after verification
+- **Staging verification required for every code PR** — see `.claude/rules/13-staging-verification.md`
 - See `.claude/rules/02-quality-gates.md` for full testing requirements
 
 ## Bug Discovery During Testing
