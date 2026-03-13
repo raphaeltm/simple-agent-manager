@@ -70,8 +70,10 @@ submitRoutes.post('/submit', async (c) => {
   if (body.vmSize && !VALID_VM_SIZES.includes(body.vmSize)) {
     throw errors.badRequest('vmSize must be small, medium, or large');
   }
-  if (body.vmLocation && typeof body.vmLocation !== 'string') {
-    throw errors.badRequest('vmLocation must be a string');
+  if (body.vmLocation !== undefined) {
+    if (typeof body.vmLocation !== 'string' || body.vmLocation.trim() === '') {
+      throw errors.badRequest('vmLocation must be a non-empty string');
+    }
   }
   if (body.workspaceProfile && !VALID_WORKSPACE_PROFILES.includes(body.workspaceProfile)) {
     throw errors.badRequest('workspaceProfile must be full or lightweight');

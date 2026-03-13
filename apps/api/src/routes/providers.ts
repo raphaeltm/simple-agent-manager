@@ -8,6 +8,7 @@ import { requireAuth, requireApproved, getUserId } from '../middleware/auth';
 import * as schema from '../db/schema';
 import { decrypt } from '../services/encryption';
 import { buildProviderConfig } from '../services/provider-credentials';
+import { log } from '../lib/logger';
 
 const providersRoutes = new Hono<{ Bindings: Env }>();
 
@@ -73,7 +74,7 @@ providersRoutes.get('/catalog', async (c) => {
     } else {
       // Skip providers with invalid/expired credentials — log only message, not raw error
       const errMsg = result.reason instanceof Error ? result.reason.message : 'unknown';
-      console.warn('catalog.build_failed', { error: errMsg });
+      log.warn('catalog.build_failed', { error: errMsg });
     }
   }
 

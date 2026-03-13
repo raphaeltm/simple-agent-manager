@@ -126,8 +126,10 @@ runRoutes.post('/:taskId/run', async (c) => {
   }
 
   // Validate vmLocation if provided
-  if (body.vmLocation && typeof body.vmLocation !== 'string') {
-    throw errors.badRequest('vmLocation must be a string');
+  if (body.vmLocation !== undefined) {
+    if (typeof body.vmLocation !== 'string' || body.vmLocation.trim() === '') {
+      throw errors.badRequest('vmLocation must be a non-empty string');
+    }
   }
 
   // Validate workspaceProfile if provided
