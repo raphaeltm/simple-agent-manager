@@ -96,10 +96,6 @@ credentialsRoutes.post('/', async (c) => {
     const provider = createProvider(providerConfig);
     await provider.validateToken();
   } catch (err) {
-    // Distinguish "not yet implemented" from invalid credentials
-    if (err instanceof Error && err.message.includes('not yet implemented')) {
-      throw errors.badRequest(`${providerName} provider is not yet available`);
-    }
     console.error(`${providerName} credential validation failed:`, err instanceof Error ? err.message : err);
     throw errors.badRequest(`Invalid or unauthorized ${providerName} credentials`);
   }

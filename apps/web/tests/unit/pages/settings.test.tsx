@@ -16,6 +16,12 @@ vi.mock('../../../src/components/HetznerTokenForm', () => ({
   ),
 }));
 
+vi.mock('../../../src/components/ScalewayCredentialForm', () => ({
+  ScalewayCredentialForm: ({ credential }: { credential: unknown }) => (
+    <div data-testid="scaleway-credential-form">{credential ? 'connected' : 'not-connected'}</div>
+  ),
+}));
+
 vi.mock('../../../src/components/GitHubAppSection', () => ({
   GitHubAppSection: () => <div data-testid="github-app-section">github-app</div>,
 }));
@@ -129,12 +135,52 @@ describe('Settings shell', () => {
     expect(screen.getByTestId('agent-settings-section')).toBeInTheDocument();
   });
 
-  it('shows hetzner as not connected when no credential', async () => {
+  it('renders cloud-provider sub-route with scaleway form', async () => {
+    mocks.listCredentials.mockResolvedValue([
+      {
+        id: 'cred_02',
+        provider: 'scaleway',
+        connected: true,
+        createdAt: '2026-03-13T00:00:00.000Z',
+      },
+    ]);
+    renderSettings('/settings/cloud-provider');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('scaleway-credential-form')).toHaveTextContent('connected');
+    });
+  });
+
+  it('renders both provider forms on cloud-provider page', async () => {
+    mocks.listCredentials.mockResolvedValue([
+      {
+        id: 'cred_01',
+        provider: 'hetzner',
+        connected: true,
+        createdAt: '2026-02-07T00:00:00.000Z',
+      },
+      {
+        id: 'cred_02',
+        provider: 'scaleway',
+        connected: true,
+        createdAt: '2026-03-13T00:00:00.000Z',
+      },
+    ]);
+    renderSettings('/settings/cloud-provider');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('hetzner-token-form')).toHaveTextContent('connected');
+      expect(screen.getByTestId('scaleway-credential-form')).toHaveTextContent('connected');
+    });
+  });
+
+  it('shows both providers as not connected when no credentials', async () => {
     mocks.listCredentials.mockResolvedValue([]);
     renderSettings('/settings/cloud-provider');
 
     await waitFor(() => {
       expect(screen.getByTestId('hetzner-token-form')).toHaveTextContent('not-connected');
+      expect(screen.getByTestId('scaleway-credential-form')).toHaveTextContent('not-connected');
     });
   });
 
