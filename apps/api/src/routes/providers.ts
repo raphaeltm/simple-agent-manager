@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { createProvider } from '@simple-agent-manager/providers';
-import type { CredentialProvider, ProviderCatalog, ProviderCatalogResponse } from '@simple-agent-manager/shared';
+import type { CredentialProvider, ProviderCatalog, ProviderCatalogResponse, SizeInfo, VMSize } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import { requireAuth, requireApproved, getUserId } from '../middleware/auth';
 import * as schema from '../db/schema';
@@ -55,7 +55,12 @@ providersRoutes.get('/catalog', async (c) => {
             country: meta?.country ?? '',
           };
         }),
-        sizes: { ...provider.sizes },
+        sizes: Object.fromEntries(
+          Object.entries(provider.sizes).map(([k, v]) => [
+            k,
+            { type: v.type, price: v.price, vcpu: v.vcpu, ramGb: v.ramGb, storageGb: v.storageGb },
+          ]),
+        ) as Record<VMSize, SizeInfo>,
         defaultLocation: provider.defaultLocation,
       } satisfies ProviderCatalog;
     }),
@@ -66,8 +71,9 @@ providersRoutes.get('/catalog', async (c) => {
     if (result.status === 'fulfilled') {
       catalogs.push(result.value);
     } else {
-      // Skip providers with invalid/expired credentials
-      console.warn('Failed to build provider catalog entry:', result.reason);
+      // Skip providers with invalid/expired credentials — log only message, not raw error
+      const errMsg = result.reason instanceof Error ? result.reason.message : 'unknown';
+      console.warn('catalog.build_failed', { error: errMsg });
     }
   }
 
