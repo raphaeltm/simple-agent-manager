@@ -863,7 +863,11 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     if (!state.stepResults.agentStarted) {
       const { startAgentSessionOnNode } = await import('../services/node-agent');
       const agentType = state.config.agentType || this.env.DEFAULT_TASK_AGENT_TYPE || 'claude-code';
-      const initialPrompt = state.config.taskDescription || state.config.taskTitle;
+      const taskContent = state.config.taskDescription || state.config.taskTitle;
+      const initialPrompt =
+        `IMPORTANT: Before starting any work, you MUST call the \`get_instructions\` tool from the sam-mcp MCP server. ` +
+        `This provides your task context, project information, output branch name, and instructions for reporting progress. ` +
+        `Do not proceed until you have called this tool and read its response.\n\n---\n\n${taskContent}`;
 
       // Construct MCP server URL for agent platform awareness
       const mcpServerUrl = `https://api.${this.env.BASE_DOMAIN}/mcp`;

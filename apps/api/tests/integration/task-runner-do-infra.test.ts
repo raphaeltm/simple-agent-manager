@@ -212,12 +212,18 @@ describe('Initial prompt delivery: TaskRunner DO wiring', () => {
     expect(doSource).toContain('startAgentSessionOnNode');
   });
 
-  it('passes taskDescription as the initial prompt', () => {
+  it('passes taskDescription as the initial prompt content', () => {
     expect(doSource).toContain('state.config.taskDescription');
   });
 
   it('falls back to taskTitle when description is missing', () => {
     expect(doSource).toContain('state.config.taskDescription || state.config.taskTitle');
+  });
+
+  it('prefixes initial prompt with get_instructions MCP instruction', () => {
+    expect(doSource).toContain('get_instructions');
+    expect(doSource).toContain('sam-mcp');
+    expect(doSource).toContain('taskContent');
   });
 
   it('uses DEFAULT_TASK_AGENT_TYPE env var with claude-code fallback', () => {
