@@ -1,4 +1,4 @@
-import type { VMSize, VMLocation } from './types';
+import type { VMSize, VMLocation, WorkspaceProfile } from './types';
 
 // =============================================================================
 // VM Size Configuration
@@ -45,6 +45,8 @@ export const STATUS_COLORS: Record<string, string> = {
 export const DEFAULT_VM_SIZE: VMSize = 'medium';
 export const DEFAULT_VM_LOCATION: VMLocation = 'nbg1';
 export const DEFAULT_BRANCH = 'main';
+export const DEFAULT_WORKSPACE_PROFILE: WorkspaceProfile = 'full';
+export const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['full', 'lightweight'];
 
 // =============================================================================
 // Default Limits (configurable via environment variables)

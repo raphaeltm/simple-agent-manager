@@ -24,7 +24,7 @@
  * See: specs/tdf-2-orchestration-engine/ for full design.
  */
 import { DurableObject } from 'cloudflare:workers';
-import type { TaskExecutionStep, VMSize, VMLocation } from '@simple-agent-manager/shared';
+import type { TaskExecutionStep, VMSize, VMLocation, WorkspaceProfile } from '@simple-agent-manager/shared';
 import type { NodeLifecycle } from './node-lifecycle';
 import {
   DEFAULT_TASK_RUNNER_STEP_MAX_RETRIES,
@@ -108,6 +108,8 @@ interface TaskRunConfig {
   chatSessionId: string | null;
   /** Agent type to use (e.g., 'claude-code', 'openai-codex'). Falls back to DEFAULT_TASK_AGENT_TYPE env var. */
   agentType: string | null;
+  /** Workspace provisioning profile. 'lightweight' skips devcontainer build for faster startup. */
+  workspaceProfile: WorkspaceProfile | null;
 }
 
 export interface TaskRunnerState {
@@ -661,6 +663,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         gitUserName: state.config.userName,
         gitUserEmail: state.config.userEmail,
         githubId: state.config.githubId,
+        lightweight: state.config.workspaceProfile === 'lightweight',
       });
 
       await this.ctx.storage.put('state', state);

@@ -32,6 +32,7 @@ type WorkspaceMetadata struct {
 	ContainerUser     string `json:"containerUser"`
 	ContainerLabelVal string `json:"containerLabelValue"`
 	WorkspaceDir      string `json:"workspaceDir"`
+	Lightweight       bool   `json:"lightweight"`
 	UpdatedAt         string `json:"updatedAt"`
 }
 
@@ -109,6 +110,7 @@ func (s *Store) migrate() error {
 		migrateV3,
 		migrateV4,
 		migrateV5,
+		migrateV6,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -184,10 +186,10 @@ func (s *Store) UpsertWorkspaceMetadata(meta WorkspaceMetadata) error {
 
 	_, err := s.db.Exec(
 		`INSERT OR REPLACE INTO workspace_metadata
-			(workspace_id, repository, branch, container_work_dir, container_user, container_label_value, workspace_dir, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			(workspace_id, repository, branch, container_work_dir, container_user, container_label_value, workspace_dir, lightweight, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		meta.WorkspaceID, meta.Repository, meta.Branch, meta.ContainerWorkDir,
-		meta.ContainerUser, meta.ContainerLabelVal, meta.WorkspaceDir, meta.UpdatedAt,
+		meta.ContainerUser, meta.ContainerLabelVal, meta.WorkspaceDir, meta.Lightweight, meta.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert workspace metadata: %w", err)
@@ -203,11 +205,11 @@ func (s *Store) GetWorkspaceMetadata(workspaceID string) (*WorkspaceMetadata, er
 
 	var m WorkspaceMetadata
 	err := s.db.QueryRow(
-		`SELECT workspace_id, repository, branch, container_work_dir, container_user, container_label_value, workspace_dir, updated_at
+		`SELECT workspace_id, repository, branch, container_work_dir, container_user, container_label_value, workspace_dir, lightweight, updated_at
 		FROM workspace_metadata WHERE workspace_id = ?`,
 		workspaceID,
 	).Scan(&m.WorkspaceID, &m.Repository, &m.Branch, &m.ContainerWorkDir,
-		&m.ContainerUser, &m.ContainerLabelVal, &m.WorkspaceDir, &m.UpdatedAt)
+		&m.ContainerUser, &m.ContainerLabelVal, &m.WorkspaceDir, &m.Lightweight, &m.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -382,6 +384,13 @@ func migrateV5(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_session_mcp_workspace ON session_mcp_servers(workspace_id);
 	`)
+	return err
+}
+
+// migrateV6 adds lightweight column to workspace_metadata for persisting
+// the workspace profile (lightweight vs full) across agent restarts.
+func migrateV6(db *sql.DB) error {
+	_, err := db.Exec(`ALTER TABLE workspace_metadata ADD COLUMN lightweight INTEGER NOT NULL DEFAULT 0`)
 	return err
 }
 

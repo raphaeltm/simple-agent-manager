@@ -81,6 +81,7 @@ type ProvisionState struct {
 	GitHubID       string
 	ProjectEnvVars []ProjectRuntimeEnvVar
 	ProjectFiles   []ProjectRuntimeFile
+	Lightweight    bool // Skip devcontainer build, use fallback image for faster startup
 }
 
 // Run redeems bootstrap credentials (if configured), prepares the workspace, and signals ready.
@@ -250,23 +251,40 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	}
 	reporter.Log("git_clone", "completed", "Repository cloned")
 
-	reporter.Log("devcontainer_up", "started", "Building devcontainer")
-	usedFallback, err := ensureDevcontainerReady(ctx, cfg, volumeName)
-	if err != nil {
-		reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", err.Error())
-		return false, err
-	}
-	if usedFallback {
-		reporter.Log("devcontainer_up", "completed", "Devcontainer ready (fallback to default image)")
+	var usedFallback bool
+	var recoveryMode bool
+	if state.Lightweight {
+		// Lightweight profile: skip devcontainer build entirely, use fallback image.
+		// This saves 30-120 seconds by avoiding the project's .devcontainer build.
+		reporter.Log("devcontainer_up", "started", "Starting lightweight container (skipping devcontainer build)")
+		slog.Info("Lightweight mode: forcing fallback image, skipping devcontainer build", "workspaceID", cfg.WorkspaceID)
+		var fallbackErr error
+		usedFallback, fallbackErr = ensureDevcontainerFallback(ctx, cfg, volumeName)
+		if fallbackErr != nil {
+			reporter.Log("devcontainer_up", "failed", "Lightweight container startup failed", fallbackErr.Error())
+			return false, fallbackErr
+		}
+		reporter.Log("devcontainer_up", "completed", "Lightweight container ready")
 	} else {
-		reporter.Log("devcontainer_up", "completed", "Devcontainer ready")
-	}
+		reporter.Log("devcontainer_up", "started", "Building devcontainer")
+		var devErr error
+		usedFallback, devErr = ensureDevcontainerReady(ctx, cfg, volumeName)
+		if devErr != nil {
+			reporter.Log("devcontainer_up", "failed", "Devcontainer build failed", devErr.Error())
+			return false, devErr
+		}
+		if usedFallback {
+			reporter.Log("devcontainer_up", "completed", "Devcontainer ready (fallback to default image)")
+		} else {
+			reporter.Log("devcontainer_up", "completed", "Devcontainer ready")
+		}
 
-	recoveryMode := usedFallback
-	if markerFound, markerErr := hasBuildErrorMarker(cfg); markerErr != nil {
-		slog.Warn("Failed to inspect build error marker", "workspaceID", cfg.WorkspaceID, "error", markerErr)
-	} else if markerFound {
-		recoveryMode = true
+		recoveryMode = usedFallback
+		if markerFound, markerErr := hasBuildErrorMarker(cfg); markerErr != nil {
+			slog.Warn("Failed to inspect build error marker", "workspaceID", cfg.WorkspaceID, "error", markerErr)
+		} else if markerFound {
+			recoveryMode = true
+		}
 	}
 
 	// Ensure gh CLI is available (install if missing from custom devcontainers).
@@ -652,6 +670,36 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 	}
 
 	return nil
+}
+
+// ensureDevcontainerFallback starts a container using the default devcontainer image,
+// deliberately skipping the project's .devcontainer config. Used by lightweight mode
+// to avoid the expensive devcontainer build while still providing a working container
+// with git clone, git credentials, and agent support.
+func ensureDevcontainerFallback(ctx context.Context, cfg *config.Config, volumeName string) (bool, error) {
+	if _, err := findDevcontainerID(ctx, cfg); err == nil {
+		slog.Info("Container already running (lightweight)", "labelKey", cfg.ContainerLabelKey, "labelValue", cfg.ContainerLabelValue)
+		ensureContainerUserResolved(ctx, cfg)
+		if err := ensureWorkspaceOwnership(ctx, cfg); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+
+	if err := waitForCommand(ctx, "devcontainer"); err != nil {
+		return false, fmt.Errorf("devcontainer CLI never became available: %w", err)
+	}
+
+	slog.Info("Starting lightweight container (default image)", "workspaceDir", cfg.WorkspaceDir)
+	if _, err := runDevcontainerWithDefault(ctx, cfg, volumeName); err != nil {
+		return false, err
+	}
+
+	ensureContainerUserResolved(ctx, cfg)
+	if err := ensureWorkspaceOwnership(ctx, cfg); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 // ensureDevcontainerReady builds and starts the devcontainer for the workspace.

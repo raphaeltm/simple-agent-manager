@@ -106,6 +106,7 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 		GitHubID:       runtime.GitHubID,
 		ProjectEnvVars: runtimeAssets.EnvVars,
 		ProjectFiles:   runtimeAssets.Files,
+		Lightweight:    runtime.Lightweight,
 	}, reporter)
 	if err != nil {
 		return false, err
@@ -170,6 +171,7 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 	}
 	state.ProjectEnvVars = runtimeAssets.EnvVars
 	state.ProjectFiles = runtimeAssets.Files
+	state.Lightweight = runtime.Lightweight
 
 	_, err := prepareWorkspaceForRuntime(recoveryCtx, &cfg, state, nil)
 	if err != nil {

@@ -13,6 +13,26 @@ You are an autonomous task executor. The user has described a task above. Your j
 
 ---
 
+## Phase 0: Initialize Workflow Tracker (MANDATORY FIRST STEP)
+
+**Before doing ANYTHING else**, create a TodoWrite with all phases of this workflow. This todo list survives context compaction and ensures no phase is skipped even if the conversation is continued in a new session.
+
+```
+TodoWrite([
+  { content: "Phase 1: Research & task creation", status: "pending", activeForm: "Researching codebase and creating task file" },
+  { content: "Phase 2: Worktree setup", status: "pending", activeForm: "Setting up worktree and feature branch" },
+  { content: "Phase 3: Implementation", status: "pending", activeForm: "Implementing changes" },
+  { content: "Phase 4: Pre-PR validation (lint, typecheck, test, build)", status: "pending", activeForm: "Running full quality suite" },
+  { content: "Phase 5: Review (dispatch specialist agents)", status: "pending", activeForm: "Running review agents" },
+  { content: "Phase 6: Staging verification (deploy + Playwright)", status: "pending", activeForm: "Verifying on staging" },
+  { content: "Phase 7: Create PR, wait for CI, merge", status: "pending", activeForm: "Creating and merging PR" },
+])
+```
+
+You may add sub-tasks for implementation details, but these 7 phase-level items MUST remain in the todo list at all times. Mark each phase as `completed` only when ALL of its steps are done. If the conversation is resumed after compaction, check the todo list to determine which phase you are in and continue from there — do NOT re-read only the code summary.
+
+---
+
 ## Phase 1: Research & Task Creation
 
 1. **Understand the request.** Parse the user input to identify:

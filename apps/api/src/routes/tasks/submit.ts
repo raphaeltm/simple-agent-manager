@@ -17,8 +17,9 @@ import type {
   SubmitTaskResponse,
   VMSize,
   VMLocation,
+  WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES } from '@simple-agent-manager/shared';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
 import { ulid } from '../../lib/ulid';
@@ -72,6 +73,9 @@ submitRoutes.post('/submit', async (c) => {
   }
   if (body.vmLocation && !VALID_VM_LOCATIONS.includes(body.vmLocation as VMLocation)) {
     throw errors.badRequest('vmLocation must be nbg1, fsn1, or hel1');
+  }
+  if (body.workspaceProfile && !VALID_WORKSPACE_PROFILES.includes(body.workspaceProfile)) {
+    throw errors.badRequest('workspaceProfile must be full or lightweight');
   }
 
   // Check cloud provider credentials
@@ -128,6 +132,9 @@ submitRoutes.post('/submit', async (c) => {
     ?? (project.defaultVmSize as VMSize | null)
     ?? DEFAULT_VM_SIZE;
   const vmLocation: VMLocation = (body.vmLocation as VMLocation) ?? DEFAULT_VM_LOCATION;
+  const workspaceProfile: WorkspaceProfile = body.workspaceProfile
+    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
+    ?? DEFAULT_WORKSPACE_PROFILE;
   const branch = project.defaultBranch;
 
   // Generate concise task title via AI (falls back to truncation on failure)
@@ -230,6 +237,7 @@ submitRoutes.post('/submit', async (c) => {
     branchName,
     vmSize,
     vmLocation,
+    workspaceProfile,
   });
 
   // Look up user's githubId for noreply email fallback
@@ -263,6 +271,7 @@ submitRoutes.post('/submit', async (c) => {
       projectDefaultVmSize: project.defaultVmSize as VMSize | null,
       chatSessionId: sessionId,
       agentType: body.agentType ?? project.defaultAgentType ?? null,
+      workspaceProfile,
     });
   } catch (err) {
     // TaskRunner DO startup failed — mark task as failed.
