@@ -2,6 +2,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import { MessageActions } from './MessageActions';
 
+// Mock clipboard API
+const mockWriteText = vi.fn<(text: string) => Promise<void>>();
+
+function installClipboardMock() {
+  mockWriteText.mockReset();
+  mockWriteText.mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', {
+    value: { writeText: mockWriteText },
+    writable: true,
+    configurable: true,
+  });
+}
+
 // Mock speechSynthesis API
 const mockSpeak = vi.fn();
 const mockCancel = vi.fn();
@@ -42,6 +55,7 @@ function installSpeechMocks() {
 
 beforeEach(() => {
   installSpeechMocks();
+  installClipboardMock();
 });
 
 afterEach(() => {
@@ -62,11 +76,12 @@ describe('MessageActions', () => {
   };
 
   describe('rendering', () => {
-    it('renders info and speaker buttons', () => {
+    it('renders info, speaker, and copy buttons', () => {
       render(<MessageActions {...defaultProps} />);
 
       expect(screen.getByLabelText('Message info')).toBeTruthy();
       expect(screen.getByLabelText('Read aloud')).toBeTruthy();
+      expect(screen.getByLabelText('Copy message')).toBeTruthy();
     });
 
     it('does not render speaker button when speechSynthesis is absent', () => {
@@ -269,6 +284,85 @@ describe('MessageActions', () => {
       unmount();
 
       expect(mockCancel).toHaveBeenCalled();
+    });
+  });
+
+  describe('copy to clipboard', () => {
+    it('copies message text when copy button is clicked', async () => {
+      render(<MessageActions {...defaultProps} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText('Copy message'));
+      });
+
+      expect(mockWriteText).toHaveBeenCalledWith(defaultProps.text);
+    });
+
+    it('shows "Copied" label after successful copy', async () => {
+      render(<MessageActions {...defaultProps} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText('Copy message'));
+      });
+
+      expect(screen.getByLabelText('Copied')).toBeTruthy();
+    });
+
+    it('resets to "Copy message" label after timeout', async () => {
+      vi.useFakeTimers();
+
+      render(<MessageActions {...defaultProps} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText('Copy message'));
+      });
+
+      expect(screen.getByLabelText('Copied')).toBeTruthy();
+
+      act(() => {
+        vi.advanceTimersByTime(1500);
+      });
+
+      expect(screen.getByLabelText('Copy message')).toBeTruthy();
+
+      vi.useRealTimers();
+    });
+
+    it('does not render copy button when clipboard API is absent', () => {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: undefined,
+        writable: true,
+        configurable: true,
+      });
+
+      render(<MessageActions {...defaultProps} />);
+
+      expect(screen.queryByLabelText('Copy message')).toBeNull();
+    });
+
+    it('does not show "Copied" when clipboard write fails', async () => {
+      mockWriteText.mockRejectedValue(new DOMException('Permission denied', 'NotAllowedError'));
+
+      render(<MessageActions {...defaultProps} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText('Copy message'));
+      });
+
+      // Should remain as "Copy message", not switch to "Copied"
+      expect(screen.getByLabelText('Copy message')).toBeTruthy();
+      expect(screen.queryByLabelText('Copied')).toBeNull();
+    });
+
+    it('copies the raw text including markdown', async () => {
+      const mdText = '# Hello\n\nThis is **bold** and `code`.';
+      render(<MessageActions text={mdText} timestamp={defaultProps.timestamp} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText('Copy message'));
+      });
+
+      expect(mockWriteText).toHaveBeenCalledWith(mdText);
     });
   });
 });

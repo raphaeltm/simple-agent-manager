@@ -35,10 +35,13 @@ function formatTimestamp(ts: number): string {
  * Action buttons displayed below agent messages.
  * - Info icon: shows metadata popover (timestamp, word count, char count)
  * - Speaker icon: reads the message aloud via Web Speech API
+ * - Copy icon: copies message text to clipboard
  */
 export const MessageActions = React.memo(function MessageActions({ text, timestamp }: MessageActionsProps) {
   const [showMeta, setShowMeta] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const metaRef = useRef<HTMLDivElement>(null);
   const popoverId = React.useId();
 
@@ -90,12 +93,24 @@ export const MessageActions = React.memo(function MessageActions({ text, timesta
     setIsSpeaking(true);
   }, [isSpeaking, plain]);
 
+  const handleCopy = useCallback(() => {
+    if (!navigator.clipboard) return;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
+    }, () => {
+      // Clipboard write failed (e.g., permission denied) — silently ignore
+    });
+  }, [text]);
+
   // Clean up speech on unmount
   useEffect(() => {
     return () => {
       if (window.speechSynthesis && isSpeaking) {
         window.speechSynthesis.cancel();
       }
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
     };
   }, [isSpeaking]);
 
@@ -173,6 +188,53 @@ export const MessageActions = React.memo(function MessageActions({ text, timesta
               <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
               <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
               <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+            </svg>
+          )}
+        </button>
+      )}
+
+      {/* Copy button */}
+      {navigator.clipboard && (
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded transition-colors"
+          style={{
+            color: copied ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
+          }}
+          aria-label={copied ? 'Copied' : 'Copy message'}
+          title={copied ? 'Copied' : 'Copy message'}
+        >
+          {copied ? (
+            // Check icon
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          ) : (
+            // Clipboard/copy icon
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
             </svg>
           )}
         </button>
