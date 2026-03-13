@@ -304,6 +304,9 @@ export interface SubmitTaskRequest {
   vmSize?: string;
   vmLocation?: string;
   nodeId?: string;
+  agentType?: string;
+  parentTaskId?: string;
+  contextSummary?: string;
 }
 
 export interface SubmitTaskResponse {
@@ -578,6 +581,24 @@ export async function stopChatSession(
   return request<{ status: string }>(`/api/projects/${projectId}/sessions/${sessionId}/stop`, {
     method: 'POST',
   });
+}
+
+// Context summarization (conversation forking)
+export interface SessionSummaryResponse {
+  summary: string;
+  messageCount: number;
+  filteredCount: number;
+  method: 'ai' | 'heuristic' | 'verbatim';
+}
+
+export async function summarizeSession(
+  projectId: string,
+  sessionId: string
+): Promise<SessionSummaryResponse> {
+  return request<SessionSummaryResponse>(
+    `/api/projects/${projectId}/sessions/${sessionId}/summarize`,
+    { method: 'POST' }
+  );
 }
 
 export async function resetIdleTimer(

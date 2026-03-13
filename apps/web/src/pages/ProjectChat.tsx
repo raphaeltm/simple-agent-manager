@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { List, Settings, LayoutGrid } from 'lucide-react';
+import { List, Settings, LayoutGrid, GitFork } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
 import { VoiceButton } from '@simple-agent-manager/acp-client';
 import type { AgentInfo } from '@simple-agent-manager/shared';
@@ -23,6 +23,7 @@ import {
 import type { ChatSessionResponse } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 import { stripMarkdown } from '../lib/text-utils';
+import { ForkDialog } from '../components/project/ForkDialog';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -115,6 +116,9 @@ export function ProjectChat() {
   // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
   const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Fork dialog state
+  const [forkSession, setForkSession] = useState<ChatSessionResponse | null>(null);
 
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
@@ -297,6 +301,35 @@ export function ProjectChat() {
     navigate(`/projects/${projectId}/chat/${id}`);
   };
 
+  const handleFork = async (forkMessage: string, contextSummary: string, parentTaskId: string) => {
+    setSubmitError(null);
+    setSubmitting(true);
+    try {
+      const result = await submitTask(projectId, {
+        message: forkMessage,
+        parentTaskId,
+        contextSummary,
+        ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
+      });
+      setProvisioning({
+        taskId: result.taskId,
+        sessionId: result.sessionId,
+        branchName: result.branchName,
+        status: 'queued',
+        executionStep: null,
+        errorMessage: null,
+        startedAt: Date.now(),
+      });
+      navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
+      void loadSessions();
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Failed to fork session');
+      throw err; // Re-throw so ForkDialog knows it failed
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   // ---------------------------------------------------------------------------
   // Derived state
   // ---------------------------------------------------------------------------
@@ -372,6 +405,7 @@ export function ProjectChat() {
                   session={session}
                   isSelected={session.id === sessionId}
                   onSelect={handleSelect}
+                  onFork={setForkSession}
                 />
               ))}
             </nav>
@@ -468,10 +502,20 @@ export function ProjectChat() {
           sessions={sessions}
           selectedSessionId={sessionId ?? null}
           onSelect={handleSelect}
+          onFork={(session) => { setSidebarOpen(false); setForkSession(session); }}
           onNewChat={() => { setSidebarOpen(false); handleNewChat(); }}
           onClose={() => setSidebarOpen(false)}
         />
       )}
+
+      {/* Fork dialog */}
+      <ForkDialog
+        open={!!forkSession}
+        session={forkSession}
+        projectId={projectId}
+        onClose={() => setForkSession(null)}
+        onFork={handleFork}
+      />
     </div>
   );
 }
@@ -484,42 +528,60 @@ function SessionItem({
   session,
   isSelected,
   onSelect,
+  onFork,
 }: {
   session: ChatSessionResponse;
   isSelected: boolean;
   onSelect: (id: string) => void;
+  onFork?: (session: ChatSessionResponse) => void;
 }) {
   const state = getSessionState(session);
   const dotColor = STATE_COLORS[state];
+  const canFork = state === 'terminated' && !!session.task?.id;
 
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(session.id)}
-      className={`block w-full text-left px-3 py-2.5 border-none border-b border-border-default cursor-pointer transition-colors duration-100 ${isSelected ? 'bg-inset' : 'hover:bg-surface-hover'}`}
+    <div
+      className={`block w-full text-left px-3 py-2.5 border-b border-border-default transition-colors duration-100 ${isSelected ? 'bg-inset' : 'hover:bg-surface-hover'}`}
       style={{
         borderLeft: isSelected
           ? '3px solid var(--sam-color-accent-primary)'
           : '3px solid transparent',
       }}
     >
-      <div className="flex items-center gap-2 mb-0.5">
-        <span
-          className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
-          style={{ backgroundColor: dotColor }}
-        />
-        <span className={`text-sm overflow-hidden text-ellipsis whitespace-nowrap flex-1 ${isSelected ? 'font-semibold text-fg-primary' : 'font-medium text-fg-primary'}`}>
-          {session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`}
-        </span>
-      </div>
-      <div className="flex items-center gap-2 text-xs text-fg-muted pl-[calc(6px+8px)]">
-        <span style={{ color: dotColor }} className="font-medium">
-          {STATE_LABELS[state]}
-        </span>
-        <span>{session.messageCount} msg{session.messageCount !== 1 ? 's' : ''}</span>
-        <span className="ml-auto">{formatRelativeTime(session.startedAt)}</span>
-      </div>
-    </button>
+      <button
+        type="button"
+        onClick={() => onSelect(session.id)}
+        className="block w-full text-left bg-transparent border-none cursor-pointer p-0"
+      >
+        <div className="flex items-center gap-2 mb-0.5">
+          <span
+            className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
+            style={{ backgroundColor: dotColor }}
+          />
+          <span className={`text-sm overflow-hidden text-ellipsis whitespace-nowrap flex-1 ${isSelected ? 'font-semibold text-fg-primary' : 'font-medium text-fg-primary'}`}>
+            {session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-fg-muted pl-[calc(6px+8px)]">
+          <span style={{ color: dotColor }} className="font-medium">
+            {STATE_LABELS[state]}
+          </span>
+          <span>{session.messageCount} msg{session.messageCount !== 1 ? 's' : ''}</span>
+          <span className="ml-auto">{formatRelativeTime(session.startedAt)}</span>
+        </div>
+      </button>
+      {canFork && onFork && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onFork(session); }}
+          className="mt-1.5 ml-[calc(6px+8px)] flex items-center gap-1 text-xs text-accent-primary bg-transparent border-none cursor-pointer p-0 hover:underline"
+          title="Continue from this session"
+        >
+          <GitFork size={12} />
+          Continue
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -531,12 +593,14 @@ function MobileSessionDrawer({
   sessions,
   selectedSessionId,
   onSelect,
+  onFork,
   onNewChat,
   onClose,
 }: {
   sessions: ChatSessionResponse[];
   selectedSessionId: string | null;
   onSelect: (id: string) => void;
+  onFork: (session: ChatSessionResponse) => void;
   onNewChat: () => void;
   onClose: () => void;
 }) {
@@ -595,6 +659,7 @@ function MobileSessionDrawer({
               session={session}
               isSelected={session.id === selectedSessionId}
               onSelect={onSelect}
+              onFork={onFork}
             />
           ))}
         </nav>
