@@ -228,6 +228,9 @@ export const DEFAULT_DASHBOARD_INACTIVE_THRESHOLD_MS = 15 * 60 * 1000; // 15 min
 /** Default dashboard poll interval (ms) for active tasks. */
 export const DEFAULT_DASHBOARD_POLL_INTERVAL_MS = 15_000; // 15 seconds
 
+/** Default Hetzner datacenter. Override via HETZNER_DATACENTER env var. */
+export const DEFAULT_HETZNER_DATACENTER = 'fsn1';
+
 /** Default Hetzner image. Override via HETZNER_IMAGE env var. */
 export const DEFAULT_HETZNER_IMAGE = 'ubuntu-24.04';
 

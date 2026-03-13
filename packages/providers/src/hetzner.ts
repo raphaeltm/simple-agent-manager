@@ -1,4 +1,5 @@
 import type { VMSize } from '@simple-agent-manager/shared';
+import { DEFAULT_HETZNER_DATACENTER, DEFAULT_HETZNER_IMAGE } from '@simple-agent-manager/shared';
 import type { LocationMeta, Provider, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
 import { ProviderError } from './types';
 import { providerFetch } from './provider-fetch';
@@ -82,7 +83,7 @@ export class HetznerProvider implements Provider {
     placementFallbackEnabled?: boolean,
   ) {
     this.apiToken = apiToken;
-    this.datacenter = datacenter || 'fsn1';
+    this.datacenter = datacenter || DEFAULT_HETZNER_DATACENTER;
     this.defaultLocation = this.datacenter;
     this.placementRetryDelayMs = placementRetryDelayMs ?? DEFAULT_PLACEMENT_RETRY_DELAY_MS;
     this.placementFallbackEnabled = placementFallbackEnabled ?? true;
@@ -123,7 +124,7 @@ export class HetznerProvider implements Provider {
           body: JSON.stringify({
             name: config.name,
             server_type: sizeConfig.type,
-            image: config.image || 'ubuntu-24.04',
+            image: config.image || DEFAULT_HETZNER_IMAGE,
             location: attempt.location,
             user_data: config.userData,
             labels: config.labels || {},
