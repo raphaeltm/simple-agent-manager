@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { HetznerProvider } from '../../src/hetzner';
 import { ProviderError } from '../../src/types';
 import type { VMConfig } from '../../src/types';
+import { createMockServer } from '../fixtures/hetzner-mocks';
 
 describe('HetznerProvider', () => {
   let provider: HetznerProvider;
@@ -108,15 +109,7 @@ describe('HetznerProvider', () => {
 
     it('should call Hetzner API with correct parameters', async () => {
       const mockResponse = {
-        server: {
-          id: 12345,
-          name: 'test-server',
-          status: 'initializing',
-          public_net: { ipv4: { ip: '1.2.3.4' } },
-          server_type: { name: 'cx33' },
-          created: '2024-01-24T12:00:00Z',
-          labels: { node: 'node-123' },
-        },
+        server: createMockServer({ status: 'initializing', labels: { node: 'node-123' } }),
       };
 
       globalThis.fetch = vi.fn().mockResolvedValue(
@@ -166,11 +159,7 @@ describe('HetznerProvider', () => {
     it('should use default image when not specified', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
         new Response(JSON.stringify({
-          server: {
-            id: 1, name: 'test', status: 'initializing',
-            public_net: { ipv4: { ip: '1.2.3.4' } },
-            server_type: { name: 'cx33' }, created: '2024-01-01T00:00:00Z', labels: {},
-          },
+          server: createMockServer({ id: 1, name: 'test', status: 'initializing' }),
         }), { status: 200 }),
       );
 
@@ -217,12 +206,7 @@ describe('HetznerProvider', () => {
     it('should return VM instance if found', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
         new Response(JSON.stringify({
-          server: {
-            id: 12345, name: 'test', status: 'running',
-            public_net: { ipv4: { ip: '1.2.3.4' } },
-            server_type: { name: 'cx22' }, created: '2024-01-24T12:00:00Z',
-            labels: { node: 'n1' },
-          },
+          server: createMockServer({ name: 'test', server_type: { name: 'cx22' }, labels: { node: 'n1' } }),
         }), { status: 200 }),
       );
 
@@ -245,18 +229,8 @@ describe('HetznerProvider', () => {
   describe('listVMs', () => {
     const mockServers = {
       servers: [
-        {
-          id: 1, name: 's1', status: 'running',
-          public_net: { ipv4: { ip: '1.1.1.1' } },
-          server_type: { name: 'cx23' }, created: '2024-01-01T00:00:00Z',
-          labels: { managed: 'sam' },
-        },
-        {
-          id: 2, name: 's2', status: 'off',
-          public_net: { ipv4: { ip: '2.2.2.2' } },
-          server_type: { name: 'cx33' }, created: '2024-01-02T00:00:00Z',
-          labels: { managed: 'sam' },
-        },
+        createMockServer({ id: 1, name: 's1', public_net: { ipv4: { ip: '1.1.1.1' } }, server_type: { name: 'cx23' }, created: '2024-01-01T00:00:00Z', labels: { managed: 'sam' } }),
+        createMockServer({ id: 2, name: 's2', status: 'off', public_net: { ipv4: { ip: '2.2.2.2' } }, server_type: { name: 'cx33' }, created: '2024-01-02T00:00:00Z', labels: { managed: 'sam' } }),
       ],
     };
 
