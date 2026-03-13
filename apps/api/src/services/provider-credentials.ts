@@ -18,8 +18,10 @@ export function serializeCredentialToken(
       return fields.token ?? fields.apiToken ?? '';
     case 'scaleway':
       return JSON.stringify({ secretKey: fields.secretKey, projectId: fields.projectId });
-    default:
-      return fields.token ?? '';
+    default: {
+      const _exhaustive: never = provider;
+      throw new Error(`Unsupported provider: ${_exhaustive}`);
+    }
   }
 }
 

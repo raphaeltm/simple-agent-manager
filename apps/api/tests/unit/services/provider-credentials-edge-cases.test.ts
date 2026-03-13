@@ -64,20 +64,13 @@ describe('serializeCredentialToken — edge cases', () => {
     expect(parsed).toEqual({});
   });
 
-  it('default branch returns token field value for unknown providers', () => {
-    // The default branch in serializeCredentialToken returns fields.token ?? ''.
-    // This is a silent fallthrough that callers of unknown providers will hit.
-    // This test documents the behavior so it cannot silently change.
-    const result = serializeCredentialToken(
+  it('default branch throws for unknown providers', () => {
+    // The default branch uses exhaustive type checking and throws.
+    // This prevents silent data loss for unsupported providers.
+    expect(() => serializeCredentialToken(
       'upcloud' as any,
       { token: 'upcloud-token' },
-    );
-    expect(result).toBe('upcloud-token');
-  });
-
-  it('default branch returns empty string when token field is missing for unknown providers', () => {
-    const result = serializeCredentialToken('upcloud' as any, { username: 'user' });
-    expect(result).toBe('');
+    )).toThrow('Unsupported provider');
   });
 });
 

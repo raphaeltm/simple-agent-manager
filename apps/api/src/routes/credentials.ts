@@ -88,12 +88,18 @@ credentialsRoutes.post('/', async (c) => {
 
   const tokenToEncrypt = serializeCredentialToken(providerName, credentialFields);
 
-  // Validate the credentials by building a ProviderConfig and calling validateToken()
+  // Validate the credentials by building a ProviderConfig and calling validateToken().
+  // Note: buildProviderConfig accepts the pre-encryption serialized token here — this is
+  // safe because serialize → build is a documented round-trip (see provider-credentials tests).
   try {
     const providerConfig = buildProviderConfig(providerName, tokenToEncrypt);
     const provider = createProvider(providerConfig);
     await provider.validateToken();
   } catch (err) {
+    // Distinguish "not yet implemented" from invalid credentials
+    if (err instanceof Error && err.message.includes('not yet implemented')) {
+      throw errors.badRequest(`${providerName} provider is not yet available`);
+    }
     console.error(`${providerName} credential validation failed:`, err instanceof Error ? err.message : err);
     throw errors.badRequest(`Invalid or unauthorized ${providerName} credentials`);
   }
@@ -108,7 +114,8 @@ credentialsRoutes.post('/', async (c) => {
     .where(
       and(
         eq(schema.credentials.userId, userId),
-        eq(schema.credentials.provider, providerName)
+        eq(schema.credentials.provider, providerName),
+        eq(schema.credentials.credentialType, 'cloud-provider')
       )
     )
     .limit(1);
@@ -142,6 +149,7 @@ credentialsRoutes.post('/', async (c) => {
     id,
     userId,
     provider: providerName,
+    credentialType: 'cloud-provider',
     encryptedToken: ciphertext,
     iv,
     createdAt: now,
@@ -171,7 +179,8 @@ credentialsRoutes.delete('/:provider', async (c) => {
     .where(
       and(
         eq(schema.credentials.userId, userId),
-        eq(schema.credentials.provider, provider)
+        eq(schema.credentials.provider, provider),
+        eq(schema.credentials.credentialType, 'cloud-provider')
       )
     )
     .returning();
@@ -568,7 +577,8 @@ export async function getDecryptedCredential(
     .where(
       and(
         eq(schema.credentials.userId, userId),
-        eq(schema.credentials.provider, provider)
+        eq(schema.credentials.provider, provider),
+        eq(schema.credentials.credentialType, 'cloud-provider')
       )
     )
     .limit(1);
