@@ -171,6 +171,7 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 	}
 	state.ProjectEnvVars = runtimeAssets.EnvVars
 	state.ProjectFiles = runtimeAssets.Files
+	state.Lightweight = runtime.Lightweight
 
 	_, err := prepareWorkspaceForRuntime(recoveryCtx, &cfg, state, nil)
 	if err != nil {

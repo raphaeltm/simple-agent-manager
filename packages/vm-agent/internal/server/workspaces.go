@@ -263,11 +263,12 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		branch = "main"
 	}
 
-	runtime := s.upsertWorkspaceRuntime(body.WorkspaceID, strings.TrimSpace(body.Repository), branch, "creating", strings.TrimSpace(body.CallbackToken))
-	runtime.GitUserName = strings.TrimSpace(body.GitUserName)
-	runtime.GitUserEmail = strings.TrimSpace(body.GitUserEmail)
-	runtime.GitHubID = strings.TrimSpace(body.GitHubID)
-	runtime.Lightweight = body.Lightweight
+	runtime := s.upsertWorkspaceRuntime(body.WorkspaceID, strings.TrimSpace(body.Repository), branch, "creating", strings.TrimSpace(body.CallbackToken), workspaceRuntimeOpts{
+		GitUserName:  strings.TrimSpace(body.GitUserName),
+		GitUserEmail: strings.TrimSpace(body.GitUserEmail),
+		GitHubID:     strings.TrimSpace(body.GitHubID),
+		Lightweight:  body.Lightweight,
+	})
 
 	// Note: Per-workspace message reporter is created lazily in
 	// handleStartAgentSession when the chatSessionID becomes available.
