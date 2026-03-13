@@ -123,11 +123,11 @@ describe('AgentSettingsSection', () => {
   it('shows warning when bypassPermissions is selected', async () => {
     render(<AgentSettingsSection />);
 
-    // Wait for settings to fully load — the save button is disabled when no changes exist,
-    // which proves the useEffect that syncs props→state has completed.
+    // Wait for settings to fully load — the default radio must be checked,
+    // proving the useEffect that syncs props→state has completed.
     await waitFor(() => {
-      const saveBtn = screen.getByTestId('save-settings-claude-code');
-      expect(saveBtn).toBeDisabled();
+      const defaultRadio = screen.getByTestId('permission-mode-claude-code-default') as HTMLInputElement;
+      expect(defaultRadio.checked).toBe(true);
     });
 
     const bypassRadio = screen.getByTestId('permission-mode-claude-code-bypassPermissions');
@@ -152,8 +152,10 @@ describe('AgentSettingsSection', () => {
 
     render(<AgentSettingsSection />);
 
+    // Wait for settings to fully load before interacting
     await waitFor(() => {
-      expect(screen.getByTestId('model-input-claude-code')).toBeInTheDocument();
+      const defaultRadio = screen.getByTestId('permission-mode-claude-code-default') as HTMLInputElement;
+      expect(defaultRadio.checked).toBe(true);
     });
 
     const modelInput = screen.getByTestId('model-input-claude-code');
