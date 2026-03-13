@@ -19,6 +19,7 @@ import type { Env } from '../index';
 import * as schema from '../db/schema';
 import { validateMcpToken, type McpTokenData } from '../services/mcp-token';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 
 export const mcpRoutes = new Hono<{ Bindings: Env }>();
 
@@ -58,12 +59,20 @@ const INTERNAL_ERROR = -32603;
 
 // ─── Configurable limits ─────────────────────────────────────────────────────
 
-/** Max length for progress/summary messages stored in activity events */
-const ACTIVITY_MESSAGE_MAX_LENGTH = 500;
-/** Max length for log messages */
-const LOG_MESSAGE_MAX_LENGTH = 200;
-/** Max length for task output summary stored in D1 */
-const OUTPUT_SUMMARY_MAX_LENGTH = 2000;
+/** Default max length for progress/summary messages. Override via MAX_ACTIVITY_MESSAGE_LENGTH env var. */
+const DEFAULT_ACTIVITY_MESSAGE_MAX_LENGTH = 2000;
+/** Default max length for log messages. Override via MAX_LOG_MESSAGE_LENGTH env var. */
+const DEFAULT_LOG_MESSAGE_MAX_LENGTH = 1000;
+/** Default max length for task output summary stored in D1. Override via MAX_OUTPUT_SUMMARY_LENGTH env var. */
+const DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH = 2000;
+
+function getMcpLimits(env: Env) {
+  return {
+    activityMessageMaxLength: parsePositiveInt(env.MAX_ACTIVITY_MESSAGE_LENGTH as string, DEFAULT_ACTIVITY_MESSAGE_MAX_LENGTH),
+    logMessageMaxLength: parsePositiveInt(env.MAX_LOG_MESSAGE_LENGTH as string, DEFAULT_LOG_MESSAGE_MAX_LENGTH),
+    outputSummaryMaxLength: parsePositiveInt(env.MAX_OUTPUT_SUMMARY_LENGTH as string, DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH),
+  };
+}
 
 // MCP protocol constants
 const MCP_PROTOCOL_VERSION = '2025-03-26';
@@ -255,7 +264,7 @@ async function handleUpdateTaskStatus(
         actorId: tokenData.workspaceId,
         metadata: {
           taskId: tokenData.taskId,
-          message: message.trim().slice(0, ACTIVITY_MESSAGE_MAX_LENGTH),
+          message: message.trim().slice(0, getMcpLimits(env).activityMessageMaxLength),
         },
       }),
     }));
@@ -269,7 +278,7 @@ async function handleUpdateTaskStatus(
   log.info('mcp.update_task_status', {
     taskId: tokenData.taskId,
     projectId: tokenData.projectId,
-    message: message.trim().slice(0, LOG_MESSAGE_MAX_LENGTH),
+    message: message.trim().slice(0, getMcpLimits(env).logMessageMaxLength),
   });
 
   return jsonRpcSuccess(requestId, {
@@ -294,7 +303,7 @@ async function handleCompleteTask(
      WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`,
   ).bind(
     now,
-    summary ? summary.slice(0, OUTPUT_SUMMARY_MAX_LENGTH) : null,
+    summary ? summary.slice(0, getMcpLimits(env).outputSummaryMaxLength) : null,
     now,
     tokenData.taskId,
     tokenData.projectId,
@@ -322,7 +331,7 @@ async function handleCompleteTask(
         actorId: tokenData.workspaceId,
         metadata: {
           taskId: tokenData.taskId,
-          summary: summary?.slice(0, ACTIVITY_MESSAGE_MAX_LENGTH) ?? null,
+          summary: summary?.slice(0, getMcpLimits(env).activityMessageMaxLength) ?? null,
         },
       }),
     }));
@@ -343,7 +352,7 @@ async function handleCompleteTask(
   log.info('mcp.complete_task', {
     taskId: tokenData.taskId,
     projectId: tokenData.projectId,
-    summary: summary?.slice(0, LOG_MESSAGE_MAX_LENGTH) ?? null,
+    summary: summary?.slice(0, getMcpLimits(env).logMessageMaxLength) ?? null,
   });
 
   return jsonRpcSuccess(requestId, {

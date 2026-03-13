@@ -18,6 +18,7 @@ import {
   getWorkspaceRuntimeAssets,
   safeParseJson,
 } from './_helpers';
+import { parsePositiveInt } from '../../lib/route-helpers';
 
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
 
@@ -326,9 +327,9 @@ runtimeRoutes.post('/:id/messages', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
-  // Payload size check (256KB limit)
+  // Payload size check (256KB default, configurable via MAX_MESSAGES_PAYLOAD_BYTES)
   const contentLength = parseInt(c.req.header('content-length') || '0', 10);
-  const maxPayloadBytes = 256 * 1024;
+  const maxPayloadBytes = parsePositiveInt(c.env.MAX_MESSAGES_PAYLOAD_BYTES as string, 256 * 1024);
   if (contentLength > maxPayloadBytes) {
     throw errors.badRequest(`Payload exceeds ${maxPayloadBytes} byte limit`);
   }
@@ -351,8 +352,9 @@ runtimeRoutes.post('/:id/messages', async (c) => {
   if (body.messages.length === 0) {
     throw errors.badRequest('messages array must not be empty');
   }
-  if (body.messages.length > 100) {
-    throw errors.badRequest('Maximum 100 messages per batch');
+  const maxMessagesPerBatch = parsePositiveInt(c.env.MAX_MESSAGES_PER_BATCH as string, 100);
+  if (body.messages.length > maxMessagesPerBatch) {
+    throw errors.badRequest(`Maximum ${maxMessagesPerBatch} messages per batch`);
   }
 
   const validRoles = new Set(['user', 'assistant', 'system', 'tool', 'thinking', 'plan']);

@@ -211,8 +211,8 @@ crudRoutes.post('/', requireAuth(), requireApproved(), async (c) => {
     throw errors.internal('Failed to determine target node');
   }
 
-  // Use COUNT instead of fetching all workspace IDs per node (P1 fix).
-  // Exclude deleted/stopped workspaces — only active ones count toward the limit.
+  // Count active workspaces on this node (for telemetry — no hard count limit,
+  // resource thresholds handle capacity in the task runner path).
   const [nodeWorkspaceCount] = await db
     .select({ count: count() })
     .from(schema.workspaces)
@@ -222,10 +222,6 @@ crudRoutes.post('/', requireAuth(), requireApproved(), async (c) => {
       inArray(schema.workspaces.status, ['running', 'creating', 'recovery'])
     ));
   const nodeWorkspaceCountVal = nodeWorkspaceCount?.count ?? 0;
-
-  if (nodeWorkspaceCountVal >= limits.maxWorkspacesPerNode) {
-    throw errors.badRequest(`Maximum ${limits.maxWorkspacesPerNode} workspaces allowed per node`);
-  }
 
   const uniqueName = await resolveUniqueWorkspaceDisplayName(db, targetNodeId, workspaceName);
 

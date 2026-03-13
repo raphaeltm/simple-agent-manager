@@ -12,7 +12,7 @@ The reference covers:
 - GH_ to GITHUB_ mapping (done by `configure-secrets.sh`)
 - API Worker Runtime Environment Variables:
   - Core settings
-  - Resource limits (MAX_NODES_PER_USER, MAX_WORKSPACES_PER_NODE, etc.)
+  - Resource limits (MAX_NODES_PER_USER, MAX_AGENT_SESSIONS_PER_WORKSPACE, etc.)
   - Pagination settings
   - Timeouts (heartbeat, Hetzner API, Cloudflare API, Node Agent)
   - Audio/Transcription settings

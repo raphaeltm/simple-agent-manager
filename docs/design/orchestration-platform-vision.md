@@ -881,9 +881,9 @@ When a task is delegated, SAM needs to decide **where** to run it:
 ```
 Scheduling Algorithm:
 1. Get all running Nodes for this org
-2. Filter by capacity (current workspaces < MAX_WORKSPACES_PER_NODE)
+2. Filter by capacity (CPU < threshold AND memory < threshold)
 3. Filter by VM size compatibility (task may require minimum resources)
-4. Sort by: running workspaces ASC (prefer emptier nodes for load balancing)
+4. Sort by: resource load score ASC (prefer least loaded nodes)
 5. If no suitable Node exists → provision a new one using org credentials
 6. Create Workspace on selected Node
 ```

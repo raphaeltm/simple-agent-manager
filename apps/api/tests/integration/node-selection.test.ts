@@ -272,14 +272,6 @@ describe('capacity scoring consistency', () => {
     expect(trSort).toContain('aSize');
   });
 
-  it('both check workspace count against max per node', () => {
-    expect(selectorSource).toContain('maxWorkspacesPerNode');
-    const trSection = taskRunnerSource.slice(
-      taskRunnerSource.indexOf('private async findNodeWithCapacity(')
-    );
-    expect(trSection).toContain('maxWsPerNode');
-  });
-
   it('both skip unhealthy nodes', () => {
     expect(selectorSource).toContain("node.healthStatus === 'unhealthy'");
     const trSection = taskRunnerSource.slice(

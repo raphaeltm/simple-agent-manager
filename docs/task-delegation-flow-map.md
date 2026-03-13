@@ -569,7 +569,6 @@ The idle cleanup flow (`awaiting_followup` -> `scheduleIdleCleanup`) looks up th
 |----------|---------|---------|
 | `TASK_RUN_NODE_CPU_THRESHOLD_PERCENT` | 80 | Max CPU for capacity check |
 | `TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT` | 85 | Max memory for capacity check |
-| `MAX_WORKSPACES_PER_NODE` | 10 | Max concurrent workspaces per node |
 | `MAX_NODES_PER_USER` | (from limits) | User node limit |
 
 ### Chat & Sessions

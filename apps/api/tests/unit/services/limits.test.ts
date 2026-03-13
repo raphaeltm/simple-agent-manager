@@ -4,9 +4,9 @@ import { getRuntimeLimits } from '../../../src/services/limits';
 describe('getRuntimeLimits', () => {
   it('parses project and task limits with defaults', () => {
     const defaults = getRuntimeLimits({});
-    expect(defaults.maxProjectsPerUser).toBe(25);
+    expect(defaults.maxProjectsPerUser).toBe(100);
     expect(defaults.maxTasksPerProject).toBe(500);
-    expect(defaults.maxTaskDependenciesPerTask).toBe(25);
+    expect(defaults.maxTaskDependenciesPerTask).toBe(50);
     expect(defaults.taskListDefaultPageSize).toBe(50);
     expect(defaults.taskListMaxPageSize).toBe(200);
     expect(defaults.maxProjectRuntimeEnvVarsPerProject).toBe(150);

@@ -33,12 +33,11 @@ vi.mock('../../../src/services/workspace-names', () => ({
 vi.mock('../../../src/services/limits', () => ({
   getRuntimeLimits: vi.fn().mockReturnValue({
     maxNodesPerUser: 10,
-    maxWorkspacesPerNode: 10,
     maxAgentSessionsPerWorkspace: 10,
     nodeHeartbeatStaleSeconds: 180,
-    maxProjectsPerUser: 25,
+    maxProjectsPerUser: 100,
     maxTasksPerProject: 500,
-    maxTaskDependenciesPerTask: 25,
+    maxTaskDependenciesPerTask: 50,
     taskListDefaultPageSize: 50,
     taskListMaxPageSize: 200,
     maxProjectRuntimeEnvVarsPerProject: 150,

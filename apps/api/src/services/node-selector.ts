@@ -3,7 +3,6 @@ import { drizzle } from 'drizzle-orm/d1';
 import {
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
-  DEFAULT_MAX_WORKSPACES_PER_NODE,
 } from '@simple-agent-manager/shared';
 import type { NodeMetrics } from '@simple-agent-manager/shared';
 import * as schema from '../db/schema';
@@ -27,7 +26,6 @@ export interface NodeSelectionResult {
 export interface NodeSelectorEnv {
   TASK_RUN_NODE_CPU_THRESHOLD_PERCENT?: string;
   TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;
-  MAX_WORKSPACES_PER_NODE?: string;
   NODE_LIFECYCLE?: DurableObjectNamespace;
 }
 
@@ -74,20 +72,15 @@ export function scoreNodeLoad(metrics: NodeMetrics | null): number | null {
 
 /**
  * Determine if a node has capacity for another workspace based on resource thresholds.
+ * Capacity is determined purely by CPU/memory usage — no hard workspace count limit.
  */
 export function nodeHasCapacity(
   metrics: NodeMetrics | null,
-  activeWorkspaceCount: number,
-  maxWorkspacesPerNode: number,
   cpuThreshold: number,
   memoryThreshold: number
 ): boolean {
-  if (activeWorkspaceCount >= maxWorkspacesPerNode) {
-    return false;
-  }
-
   if (!metrics) {
-    // If no metrics available, allow it if workspace count is under limit
+    // If no metrics available, allow it (node may still be starting up)
     return true;
   }
 
@@ -103,7 +96,7 @@ export function nodeHasCapacity(
  * Selection algorithm:
  * 0. Try to claim a warm node first (fast startup for sequential tasks)
  * 1. Get all running, healthy (or stale) nodes for the user
- * 2. For each node, check workspace count and resource metrics
+ * 2. For each node, check resource metrics (CPU/memory thresholds)
  * 3. Filter to nodes with capacity
  * 4. If a specific vmLocation is requested, prefer nodes in that location
  * 5. Sort by load score (lowest first) — prefer the least loaded node
@@ -125,9 +118,6 @@ export async function selectNodeForTaskRun(
     env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
     DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT
   );
-  const maxWorkspacesPerNode = env.MAX_WORKSPACES_PER_NODE
-    ? Number.parseInt(env.MAX_WORKSPACES_PER_NODE, 10) || DEFAULT_MAX_WORKSPACES_PER_NODE
-    : DEFAULT_MAX_WORKSPACES_PER_NODE;
 
   // Step 0: Try to claim a warm node (fast startup for sequential tasks)
   if (taskId && env.NODE_LIFECYCLE) {
@@ -211,7 +201,7 @@ export async function selectNodeForTaskRun(
     return null;
   }
 
-  // Get active workspace counts per node
+  // Filter by resource metrics (CPU/memory thresholds)
   const candidates: NodeCandidate[] = [];
   for (const node of nodes) {
     // Skip unhealthy nodes
@@ -243,7 +233,7 @@ export async function selectNodeForTaskRun(
       activeWorkspaceCount: activeCount,
     };
 
-    if (nodeHasCapacity(metrics, activeCount, maxWorkspacesPerNode, cpuThreshold, memoryThreshold)) {
+    if (nodeHasCapacity(metrics, cpuThreshold, memoryThreshold)) {
       candidates.push(candidate);
     }
   }

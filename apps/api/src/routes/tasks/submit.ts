@@ -31,8 +31,10 @@ import { generateBranchName } from '../../services/branch-name';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import * as projectDataService from '../../services/project-data';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
+import { parsePositiveInt } from '../../lib/route-helpers';
 
-const MAX_MESSAGE_LENGTH = 2000;
+/** Default max task message length. Override via MAX_TASK_MESSAGE_LENGTH env var. */
+const DEFAULT_MAX_MESSAGE_LENGTH = 16_000;
 const VALID_VM_SIZES: VMSize[] = ['small', 'medium', 'large'];
 
 const submitRoutes = new Hono<{ Bindings: Env }>();
@@ -64,8 +66,9 @@ submitRoutes.post('/submit', async (c) => {
   if (!body.message || typeof body.message !== 'string' || body.message.trim().length === 0) {
     throw errors.badRequest('Message is required');
   }
-  if (body.message.length > MAX_MESSAGE_LENGTH) {
-    throw errors.badRequest(`Message must be ${MAX_MESSAGE_LENGTH} characters or less`);
+  const maxMessageLength = parsePositiveInt(c.env.MAX_TASK_MESSAGE_LENGTH, DEFAULT_MAX_MESSAGE_LENGTH);
+  if (body.message.length > maxMessageLength) {
+    throw errors.badRequest(`Message must be ${maxMessageLength} characters or less`);
   }
   if (body.vmSize && !VALID_VM_SIZES.includes(body.vmSize)) {
     throw errors.badRequest('vmSize must be small, medium, or large');
