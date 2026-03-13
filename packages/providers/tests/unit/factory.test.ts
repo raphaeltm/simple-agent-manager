@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createProvider, HetznerProvider, ProviderError } from '../../src/index';
+import { createProvider, HetznerProvider, ScalewayProvider, ProviderError } from '../../src/index';
 
 describe('createProvider', () => {
   it('should return HetznerProvider for hetzner config', () => {
@@ -33,18 +33,20 @@ describe('createProvider', () => {
     }
   });
 
-  it('should throw ProviderError for scaleway (not yet implemented)', () => {
-    expect(() =>
-      createProvider({ provider: 'scaleway', secretKey: 'key', projectId: 'proj' }),
-    ).toThrow(ProviderError);
+  it('should return ScalewayProvider for scaleway config', () => {
+    const provider = createProvider({ provider: 'scaleway', secretKey: 'key', projectId: 'proj' });
+    expect(provider).toBeInstanceOf(ScalewayProvider);
+    expect(provider.name).toBe('scaleway');
+  });
 
-    try {
-      createProvider({ provider: 'scaleway', secretKey: 'key', projectId: 'proj' });
-    } catch (err) {
-      expect(err).toBeInstanceOf(ProviderError);
-      expect((err as ProviderError).message).toContain('not yet implemented');
-      expect((err as ProviderError).providerName).toBe('scaleway');
-    }
+  it('should pass zone to ScalewayProvider', () => {
+    const provider = createProvider({
+      provider: 'scaleway',
+      secretKey: 'key',
+      projectId: 'proj',
+      zone: 'nl-ams-1',
+    });
+    expect(provider).toBeInstanceOf(ScalewayProvider);
   });
 
   it('should not access process.env', () => {

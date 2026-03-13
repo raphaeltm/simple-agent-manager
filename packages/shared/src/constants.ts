@@ -196,6 +196,12 @@ export const DEFAULT_HETZNER_IMAGE = 'ubuntu-24.04';
 /** Backwards compatibility alias - use DEFAULT_HETZNER_IMAGE */
 export const HETZNER_IMAGE = DEFAULT_HETZNER_IMAGE;
 
+/** Default Scaleway zone. Override via SCALEWAY_ZONE env var. */
+export const DEFAULT_SCALEWAY_ZONE = 'fr-par-1';
+
+/** Default Scaleway image name for label-based lookup. Override via SCALEWAY_IMAGE_NAME env var. */
+export const DEFAULT_SCALEWAY_IMAGE_NAME = 'ubuntu_noble';
+
 // Note: GitHub App install URL is NOT provided as a constant.
 // It must be derived from the actual GitHub App configuration at runtime.
 // Format: https://github.com/apps/{app-slug}/installations/new
