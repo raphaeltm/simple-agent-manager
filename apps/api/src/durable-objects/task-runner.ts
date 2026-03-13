@@ -36,7 +36,6 @@ import {
   DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS,
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
-  DEFAULT_MAX_WORKSPACES_PER_NODE,
 } from '@simple-agent-manager/shared';
 import { log } from '../lib/logger';
 
@@ -62,7 +61,6 @@ type TaskRunnerEnv = {
   ENCRYPTION_KEY: string;
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
-  MAX_WORKSPACES_PER_NODE?: string;
   MAX_NODES_PER_USER?: string;
   TASK_RUN_NODE_CPU_THRESHOLD_PERCENT?: string;
   TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;
@@ -1333,7 +1331,6 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     const memThreshold = parseEnvInt(
       this.env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT, DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
     );
-    const maxWsPerNode = parseEnvInt(this.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE);
 
     const nodes = await this.env.DATABASE.prepare(
       `SELECT id, vm_size, vm_location, health_status, last_metrics FROM nodes
@@ -1353,20 +1350,13 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       vmSize: string;
       vmLocation: string;
       score: number | null;
-      wsCount: number;
     };
 
     const candidates: ScoredNode[] = [];
 
+    // Node capacity is determined by resource usage (CPU/memory thresholds),
+    // not by a hard workspace count limit.
     for (const node of nodes.results) {
-      const wsCountResult = await this.env.DATABASE.prepare(
-        `SELECT COUNT(*) as c FROM workspaces
-         WHERE node_id = ? AND user_id = ? AND status IN ('running', 'creating', 'recovery')`
-      ).bind(node.id, state.userId).first<{ c: number }>();
-
-      const wsCount = wsCountResult?.c ?? 0;
-      if (wsCount >= maxWsPerNode) continue;
-
       let metrics: { cpuLoadAvg1?: number; memoryPercent?: number } | null = null;
       if (node.last_metrics) {
         try { metrics = JSON.parse(node.last_metrics); } catch { /* ignore */ }
@@ -1381,7 +1371,6 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
           vmSize: node.vm_size,
           vmLocation: node.vm_location,
           score: cpu * 0.4 + mem * 0.6,
-          wsCount,
         });
       } else {
         candidates.push({
@@ -1389,7 +1378,6 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
           vmSize: node.vm_size,
           vmLocation: node.vm_location,
           score: null,
-          wsCount,
         });
       }
     }

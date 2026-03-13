@@ -83,150 +83,117 @@ describe('scoreNodeLoad', () => {
 describe('nodeHasCapacity', () => {
   const defaultCpuThreshold = 80;
   const defaultMemThreshold = 80;
-  const defaultMaxWs = 10;
-
-  describe('workspace count checks', () => {
-    it('returns false when at max workspaces per node', () => {
-      const metrics: NodeMetrics = { cpuLoadAvg1: 10, memoryPercent: 10 };
-      expect(nodeHasCapacity(metrics, 10, 10, defaultCpuThreshold, defaultMemThreshold)).toBe(false);
-    });
-
-    it('returns false when over max workspaces per node', () => {
-      const metrics: NodeMetrics = { cpuLoadAvg1: 10, memoryPercent: 10 };
-      expect(nodeHasCapacity(metrics, 15, 10, defaultCpuThreshold, defaultMemThreshold)).toBe(false);
-    });
-
-    it('returns true when under max workspaces per node', () => {
-      const metrics: NodeMetrics = { cpuLoadAvg1: 10, memoryPercent: 10 };
-      expect(nodeHasCapacity(metrics, 9, 10, defaultCpuThreshold, defaultMemThreshold)).toBe(true);
-    });
-
-    it('returns true with zero active workspaces', () => {
-      const metrics: NodeMetrics = { cpuLoadAvg1: 10, memoryPercent: 10 };
-      expect(nodeHasCapacity(metrics, 0, 10, defaultCpuThreshold, defaultMemThreshold)).toBe(true);
-    });
-
-    it('respects custom maxWorkspacesPerNode of 1', () => {
-      const metrics: NodeMetrics = { cpuLoadAvg1: 10, memoryPercent: 10 };
-      expect(nodeHasCapacity(metrics, 0, 1, defaultCpuThreshold, defaultMemThreshold)).toBe(true);
-      expect(nodeHasCapacity(metrics, 1, 1, defaultCpuThreshold, defaultMemThreshold)).toBe(false);
-    });
-  });
 
   describe('null metrics handling', () => {
-    it('returns true when metrics are null and workspace count is under limit', () => {
-      expect(nodeHasCapacity(null, 5, 10, defaultCpuThreshold, defaultMemThreshold)).toBe(true);
-    });
-
-    it('returns false when metrics are null but workspace count is at limit', () => {
-      expect(nodeHasCapacity(null, 10, 10, defaultCpuThreshold, defaultMemThreshold)).toBe(false);
+    it('returns true when metrics are null (node may still be starting up)', () => {
+      expect(nodeHasCapacity(null, defaultCpuThreshold, defaultMemThreshold)).toBe(true);
     });
   });
 
   describe('CPU threshold checks', () => {
     it('returns true when CPU is below threshold', () => {
       const metrics: NodeMetrics = { cpuLoadAvg1: 79, memoryPercent: 50 };
-      expect(nodeHasCapacity(metrics, 0, defaultMaxWs, 80, defaultMemThreshold)).toBe(true);
+      expect(nodeHasCapacity(metrics, 80, defaultMemThreshold)).toBe(true);
     });
 
     it('returns false when CPU is at threshold (>= means no capacity)', () => {
       const metrics: NodeMetrics = { cpuLoadAvg1: 80, memoryPercent: 50 };
-      expect(nodeHasCapacity(metrics, 0, defaultMaxWs, 80, defaultMemThreshold)).toBe(false);
+      expect(nodeHasCapacity(metrics, 80, defaultMemThreshold)).toBe(false);
     });
 
     it('returns false when CPU is above threshold', () => {
       const metrics: NodeMetrics = { cpuLoadAvg1: 81, memoryPercent: 50 };
-      expect(nodeHasCapacity(metrics, 0, defaultMaxWs, 80, defaultMemThreshold)).toBe(false);
+      expect(nodeHasCapacity(metrics, 80, defaultMemThreshold)).toBe(false);
     });
 
     it('passes at CPU 79% and fails at 80% (boundary test)', () => {
       const metricsPass: NodeMetrics = { cpuLoadAvg1: 79, memoryPercent: 0 };
       const metricsFail: NodeMetrics = { cpuLoadAvg1: 80, memoryPercent: 0 };
-      expect(nodeHasCapacity(metricsPass, 0, defaultMaxWs, 80, 100)).toBe(true);
-      expect(nodeHasCapacity(metricsFail, 0, defaultMaxWs, 80, 100)).toBe(false);
+      expect(nodeHasCapacity(metricsPass, 80, 100)).toBe(true);
+      expect(nodeHasCapacity(metricsFail, 80, 100)).toBe(false);
     });
   });
 
   describe('memory threshold checks', () => {
     it('returns true when memory is below threshold', () => {
       const metrics: NodeMetrics = { cpuLoadAvg1: 50, memoryPercent: 79 };
-      expect(nodeHasCapacity(metrics, 0, defaultMaxWs, defaultCpuThreshold, 80)).toBe(true);
+      expect(nodeHasCapacity(metrics, defaultCpuThreshold, 80)).toBe(true);
     });
 
     it('returns false when memory is at threshold (>= means no capacity)', () => {
       const metrics: NodeMetrics = { cpuLoadAvg1: 50, memoryPercent: 80 };
-      expect(nodeHasCapacity(metrics, 0, defaultMaxWs, defaultCpuThreshold, 80)).toBe(false);
+      expect(nodeHasCapacity(metrics, defaultCpuThreshold, 80)).toBe(false);
     });
 
     it('returns false when memory is above threshold', () => {
       const metrics: NodeMetrics = { cpuLoadAvg1: 50, memoryPercent: 81 };
-      expect(nodeHasCapacity(metrics, 0, defaultMaxWs, defaultCpuThreshold, 80)).toBe(false);
+      expect(nodeHasCapacity(metrics, defaultCpuThreshold, 80)).toBe(false);
     });
 
     it('passes at memory 79% and fails at 80% (boundary test)', () => {
       const metricsPass: NodeMetrics = { cpuLoadAvg1: 0, memoryPercent: 79 };
       const metricsFail: NodeMetrics = { cpuLoadAvg1: 0, memoryPercent: 80 };
-      expect(nodeHasCapacity(metricsPass, 0, defaultMaxWs, 100, 80)).toBe(true);
-      expect(nodeHasCapacity(metricsFail, 0, defaultMaxWs, 100, 80)).toBe(false);
+      expect(nodeHasCapacity(metricsPass, 100, 80)).toBe(true);
+      expect(nodeHasCapacity(metricsFail, 100, 80)).toBe(false);
     });
   });
 
   describe('combined threshold checks', () => {
     it('returns false when both CPU and memory exceed thresholds', () => {
       const metrics: NodeMetrics = { cpuLoadAvg1: 90, memoryPercent: 90 };
-      expect(nodeHasCapacity(metrics, 0, defaultMaxWs, 80, 80)).toBe(false);
+      expect(nodeHasCapacity(metrics, 80, 80)).toBe(false);
     });
 
     it('returns false when only CPU exceeds threshold', () => {
       const metrics: NodeMetrics = { cpuLoadAvg1: 90, memoryPercent: 50 };
-      expect(nodeHasCapacity(metrics, 0, defaultMaxWs, 80, 80)).toBe(false);
+      expect(nodeHasCapacity(metrics, 80, 80)).toBe(false);
     });
 
     it('returns false when only memory exceeds threshold', () => {
       const metrics: NodeMetrics = { cpuLoadAvg1: 50, memoryPercent: 90 };
-      expect(nodeHasCapacity(metrics, 0, defaultMaxWs, 80, 80)).toBe(false);
+      expect(nodeHasCapacity(metrics, 80, 80)).toBe(false);
     });
 
     it('returns true when both are below thresholds', () => {
       const metrics: NodeMetrics = { cpuLoadAvg1: 70, memoryPercent: 70 };
-      expect(nodeHasCapacity(metrics, 0, defaultMaxWs, 80, 80)).toBe(true);
+      expect(nodeHasCapacity(metrics, 80, 80)).toBe(true);
     });
   });
 
   describe('missing metric fields', () => {
     it('treats missing cpuLoadAvg1 as 0 (passes CPU check)', () => {
       const metrics: NodeMetrics = { memoryPercent: 50 };
-      expect(nodeHasCapacity(metrics, 0, defaultMaxWs, defaultCpuThreshold, defaultMemThreshold)).toBe(true);
+      expect(nodeHasCapacity(metrics, defaultCpuThreshold, defaultMemThreshold)).toBe(true);
     });
 
     it('treats missing memoryPercent as 0 (passes memory check)', () => {
       const metrics: NodeMetrics = { cpuLoadAvg1: 50 };
-      expect(nodeHasCapacity(metrics, 0, defaultMaxWs, defaultCpuThreshold, defaultMemThreshold)).toBe(true);
+      expect(nodeHasCapacity(metrics, defaultCpuThreshold, defaultMemThreshold)).toBe(true);
     });
 
     it('treats metrics with only diskPercent as having 0 CPU and 0 memory', () => {
       const metrics: NodeMetrics = { diskPercent: 95 };
-      expect(nodeHasCapacity(metrics, 0, defaultMaxWs, defaultCpuThreshold, defaultMemThreshold)).toBe(true);
+      expect(nodeHasCapacity(metrics, defaultCpuThreshold, defaultMemThreshold)).toBe(true);
     });
   });
 
   describe('custom thresholds', () => {
     it('works with very low CPU threshold (10%)', () => {
       const metrics: NodeMetrics = { cpuLoadAvg1: 9, memoryPercent: 0 };
-      expect(nodeHasCapacity(metrics, 0, defaultMaxWs, 10, 100)).toBe(true);
+      expect(nodeHasCapacity(metrics, 10, 100)).toBe(true);
       const metricsHigh: NodeMetrics = { cpuLoadAvg1: 10, memoryPercent: 0 };
-      expect(nodeHasCapacity(metricsHigh, 0, defaultMaxWs, 10, 100)).toBe(false);
+      expect(nodeHasCapacity(metricsHigh, 10, 100)).toBe(false);
     });
 
     it('works with 100% thresholds (allows any load below 100)', () => {
       const metrics: NodeMetrics = { cpuLoadAvg1: 99, memoryPercent: 99 };
-      expect(nodeHasCapacity(metrics, 0, defaultMaxWs, 100, 100)).toBe(true);
+      expect(nodeHasCapacity(metrics, 100, 100)).toBe(true);
     });
 
     it('works with 0% thresholds (rejects everything)', () => {
       const metrics: NodeMetrics = { cpuLoadAvg1: 0, memoryPercent: 0 };
       // 0 < 0 is false, so nothing passes
-      expect(nodeHasCapacity(metrics, 0, defaultMaxWs, 0, 0)).toBe(false);
+      expect(nodeHasCapacity(metrics, 0, 0)).toBe(false);
     });
   });
 });

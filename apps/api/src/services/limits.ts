@@ -9,7 +9,6 @@ import {
   DEFAULT_MAX_PROJECT_RUNTIME_FILES_PER_PROJECT,
   DEFAULT_MAX_TASK_DEPENDENCIES_PER_TASK,
   DEFAULT_MAX_TASKS_PER_PROJECT,
-  DEFAULT_MAX_WORKSPACES_PER_NODE,
   DEFAULT_NODE_HEARTBEAT_STALE_SECONDS,
   DEFAULT_TASK_CALLBACK_RETRY_MAX_ATTEMPTS,
   DEFAULT_TASK_CALLBACK_TIMEOUT_MS,
@@ -19,7 +18,6 @@ import {
 
 export interface RuntimeLimits {
   maxNodesPerUser: number;
-  maxWorkspacesPerNode: number;
   maxAgentSessionsPerWorkspace: number;
   nodeHeartbeatStaleSeconds: number;
   maxProjectsPerUser: number;
@@ -47,7 +45,6 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 
 export function getRuntimeLimits(env: {
   MAX_NODES_PER_USER?: string;
-  MAX_WORKSPACES_PER_NODE?: string;
   MAX_AGENT_SESSIONS_PER_WORKSPACE?: string;
   NODE_HEARTBEAT_STALE_SECONDS?: string;
   MAX_PROJECTS_PER_USER?: string;
@@ -65,7 +62,6 @@ export function getRuntimeLimits(env: {
 }): RuntimeLimits {
   return {
     maxNodesPerUser: parsePositiveInt(env.MAX_NODES_PER_USER, DEFAULT_MAX_NODES_PER_USER),
-    maxWorkspacesPerNode: parsePositiveInt(env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE),
     maxAgentSessionsPerWorkspace: parsePositiveInt(
       env.MAX_AGENT_SESSIONS_PER_WORKSPACE,
       DEFAULT_MAX_AGENT_SESSIONS_PER_WORKSPACE

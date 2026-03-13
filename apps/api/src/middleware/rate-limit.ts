@@ -28,9 +28,9 @@ export interface RateLimitConfig {
  * These values are used when environment variables are not set.
  */
 export const DEFAULT_RATE_LIMITS = {
-  WORKSPACE_CREATE: 10,
+  WORKSPACE_CREATE: 30,
   TERMINAL_TOKEN: 60,
-  CREDENTIAL_UPDATE: 5,
+  CREDENTIAL_UPDATE: 30,
   ANONYMOUS: 100,
   CLIENT_ERRORS: 200,
 } as const;

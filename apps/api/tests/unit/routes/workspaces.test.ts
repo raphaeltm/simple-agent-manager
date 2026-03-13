@@ -46,7 +46,6 @@ describe('workspaces routes source contract', () => {
   it('keeps rename and create duplicate protection tied to node scope', () => {
     expect(file).toContain('workspace.id');
     expect(file).toContain('nodeId: nodeScopeId');
-    expect(file).toContain('Maximum ${limits.maxWorkspacesPerNode} workspaces allowed per node');
   });
 
   it('removes idle-triggered request-shutdown route', () => {
@@ -94,12 +93,6 @@ describe('workspaces routes source contract', () => {
     // The node count query must only count active nodes — not deleted/stopped ones.
     // See: 2026-03-09-fix-node-workspace-limit-count-filters
     expect(file).toContain("inArray(schema.nodes.status, ['running', 'creating', 'recovery'])");
-  });
-
-  it('filters workspace count by active status when checking MAX_WORKSPACES_PER_NODE', () => {
-    // The workspace count query must only count active workspaces — not deleted/stopped ones.
-    // See: 2026-03-09-fix-node-workspace-limit-count-filters
-    expect(file).toContain("inArray(schema.workspaces.status, ['running', 'creating', 'recovery'])");
   });
 
   it('clears boot logs from KV on restart before new provisioning', () => {

@@ -467,7 +467,4 @@ describe('TaskRunner DO warm node selection', () => {
     expect(doSource).toContain('DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT');
   });
 
-  it('respects max workspaces per node via shared constant', () => {
-    expect(doSource).toContain('DEFAULT_MAX_WORKSPACES_PER_NODE');
-  });
 });

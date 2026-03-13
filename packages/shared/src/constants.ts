@@ -92,9 +92,6 @@ export const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['full', 'lightweigh
 /** Default max nodes per user. Override via MAX_NODES_PER_USER env var. */
 export const DEFAULT_MAX_NODES_PER_USER = 10;
 
-/** Default max workspaces per node. Override via MAX_WORKSPACES_PER_NODE env var. */
-export const DEFAULT_MAX_WORKSPACES_PER_NODE = 3;
-
 /** Default max agent sessions per workspace. Override via MAX_AGENT_SESSIONS_PER_WORKSPACE env var. */
 export const DEFAULT_MAX_AGENT_SESSIONS_PER_WORKSPACE = 10;
 
@@ -102,13 +99,13 @@ export const DEFAULT_MAX_AGENT_SESSIONS_PER_WORKSPACE = 10;
 export const DEFAULT_NODE_HEARTBEAT_STALE_SECONDS = 180;
 
 /** Default max projects per user. Override via MAX_PROJECTS_PER_USER env var. */
-export const DEFAULT_MAX_PROJECTS_PER_USER = 25;
+export const DEFAULT_MAX_PROJECTS_PER_USER = 100;
 
 /** Default max tasks per project. Override via MAX_TASKS_PER_PROJECT env var. */
 export const DEFAULT_MAX_TASKS_PER_PROJECT = 500;
 
 /** Default max dependency edges per task. Override via MAX_TASK_DEPENDENCIES_PER_TASK env var. */
-export const DEFAULT_MAX_TASK_DEPENDENCIES_PER_TASK = 25;
+export const DEFAULT_MAX_TASK_DEPENDENCIES_PER_TASK = 50;
 
 /** Default task list page size. Override via TASK_LIST_DEFAULT_PAGE_SIZE env var. */
 export const DEFAULT_TASK_LIST_DEFAULT_PAGE_SIZE = 50;

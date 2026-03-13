@@ -35,10 +35,10 @@ acpSessionRoutes.post('/:id/acp-sessions', async (c) => {
     throw errors.badRequest('chatSessionId is required');
   }
 
-  // Validate initialPrompt length (64 KB max)
-  const MAX_PROMPT_BYTES = 65536;
-  if (body.initialPrompt && new TextEncoder().encode(body.initialPrompt).length > MAX_PROMPT_BYTES) {
-    throw errors.badRequest(`initialPrompt exceeds maximum size of ${MAX_PROMPT_BYTES} bytes`);
+  // Validate initialPrompt length (256 KB default, configurable via MAX_ACP_PROMPT_BYTES)
+  const maxPromptBytes = parseInt(c.env.MAX_ACP_PROMPT_BYTES as string || '', 10) || 262144;
+  if (body.initialPrompt && new TextEncoder().encode(body.initialPrompt).length > maxPromptBytes) {
+    throw errors.badRequest(`initialPrompt exceeds maximum size of ${maxPromptBytes} bytes`);
   }
 
   const session = await projectDataService.createAcpSession(
@@ -247,10 +247,10 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/fork', async (c) => {
     throw errors.badRequest('contextSummary is required');
   }
 
-  // Validate contextSummary length (64 KB max)
-  const MAX_CONTEXT_BYTES = 65536;
-  if (new TextEncoder().encode(body.contextSummary).length > MAX_CONTEXT_BYTES) {
-    throw errors.badRequest(`contextSummary exceeds maximum size of ${MAX_CONTEXT_BYTES} bytes`);
+  // Validate contextSummary length (256 KB default, configurable via MAX_ACP_CONTEXT_BYTES)
+  const maxContextBytes = parseInt(c.env.MAX_ACP_CONTEXT_BYTES as string || '', 10) || 262144;
+  if (new TextEncoder().encode(body.contextSummary).length > maxContextBytes) {
+    throw errors.badRequest(`contextSummary exceeds maximum size of ${maxContextBytes} bytes`);
   }
 
   const forked = await projectDataService.forkAcpSession(

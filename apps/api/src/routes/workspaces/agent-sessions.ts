@@ -143,7 +143,8 @@ agentSessionRoutes.patch('/:id/agent-sessions/:sessionId', requireAuth(), requir
   }
 
   const body = await c.req.json<{ label?: string }>();
-  const label = body.label?.trim()?.slice(0, 50);
+  const maxLabelLength = parseInt(c.env.MAX_AGENT_SESSION_LABEL_LENGTH as string || '', 10) || 50;
+  const label = body.label?.trim()?.slice(0, maxLabelLength);
   if (!label) {
     throw errors.badRequest('Label is required and must be non-empty');
   }

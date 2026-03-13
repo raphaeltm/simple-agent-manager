@@ -25,9 +25,9 @@ describe('workspace messages batch endpoint source contract', () => {
     expect(file).toContain("'messages array must not be empty'");
   });
 
-  it('enforces maximum 100 messages per batch', () => {
-    expect(file).toContain('body.messages.length > 100');
-    expect(file).toContain("'Maximum 100 messages per batch'");
+  it('enforces configurable maximum messages per batch (default 100)', () => {
+    expect(file).toContain('body.messages.length > maxMessagesPerBatch');
+    expect(file).toContain('messages per batch');
   });
 
   it('validates role enum (user, assistant, system, tool, thinking, plan)', () => {

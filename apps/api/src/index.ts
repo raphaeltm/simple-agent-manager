@@ -91,7 +91,6 @@ export interface Env {
   RATE_LIMIT_ANONYMOUS?: string;
   // Hierarchy limits
   MAX_NODES_PER_USER?: string;
-  MAX_WORKSPACES_PER_NODE?: string;
   MAX_AGENT_SESSIONS_PER_WORKSPACE?: string;
   MAX_PROJECTS_PER_USER?: string;
   MAX_BRANCHES_PER_REPO?: string;
@@ -203,6 +202,16 @@ export interface Env {
   CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO?: string;
   // MCP token TTL in seconds (default 7200 = 2 hours)
   MCP_TOKEN_TTL_SECONDS?: string;
+  // Configurable content limits
+  MAX_TASK_MESSAGE_LENGTH?: string;
+  MAX_ACTIVITY_MESSAGE_LENGTH?: string;
+  MAX_LOG_MESSAGE_LENGTH?: string;
+  MAX_OUTPUT_SUMMARY_LENGTH?: string;
+  MAX_ACP_PROMPT_BYTES?: string;
+  MAX_ACP_CONTEXT_BYTES?: string;
+  MAX_MESSAGES_PER_BATCH?: string;
+  MAX_MESSAGES_PAYLOAD_BYTES?: string;
+  MAX_AGENT_SESSION_LABEL_LENGTH?: string;
   // VM agent TLS configuration
   VM_AGENT_PROTOCOL?: string;  // "https" (default) or "http"
   VM_AGENT_PORT?: string;      // "8443" (default) or custom port

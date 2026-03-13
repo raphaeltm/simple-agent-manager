@@ -13,7 +13,6 @@ import type { NodeMetrics } from '@simple-agent-manager/shared';
 import {
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
-  DEFAULT_MAX_WORKSPACES_PER_NODE,
 } from '@simple-agent-manager/shared';
 
 // =============================================================================
@@ -23,65 +22,44 @@ import {
 describe('nodeHasCapacity', () => {
   const cpuThreshold = DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT; // 50
   const memThreshold = DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT; // 50
-  const maxWs = DEFAULT_MAX_WORKSPACES_PER_NODE; // 3
 
   it('returns true when all metrics are below thresholds', () => {
     const metrics: NodeMetrics = { cpuLoadAvg1: 30, memoryPercent: 30, diskPercent: 20 };
-    expect(nodeHasCapacity(metrics, 1, maxWs, cpuThreshold, memThreshold)).toBe(true);
+    expect(nodeHasCapacity(metrics, cpuThreshold, memThreshold)).toBe(true);
   });
 
   it('returns false when CPU exceeds threshold', () => {
     const metrics: NodeMetrics = { cpuLoadAvg1: 51, memoryPercent: 30, diskPercent: 20 };
-    expect(nodeHasCapacity(metrics, 1, maxWs, cpuThreshold, memThreshold)).toBe(false);
+    expect(nodeHasCapacity(metrics, cpuThreshold, memThreshold)).toBe(false);
   });
 
   it('returns false when memory exceeds threshold', () => {
     const metrics: NodeMetrics = { cpuLoadAvg1: 30, memoryPercent: 51, diskPercent: 20 };
-    expect(nodeHasCapacity(metrics, 1, maxWs, cpuThreshold, memThreshold)).toBe(false);
+    expect(nodeHasCapacity(metrics, cpuThreshold, memThreshold)).toBe(false);
   });
 
   it('returns false when CPU equals threshold exactly', () => {
     const metrics: NodeMetrics = { cpuLoadAvg1: 50, memoryPercent: 30, diskPercent: 20 };
-    expect(nodeHasCapacity(metrics, 1, maxWs, cpuThreshold, memThreshold)).toBe(false);
+    expect(nodeHasCapacity(metrics, cpuThreshold, memThreshold)).toBe(false);
   });
 
   it('returns false when memory equals threshold exactly', () => {
     const metrics: NodeMetrics = { cpuLoadAvg1: 30, memoryPercent: 50, diskPercent: 20 };
-    expect(nodeHasCapacity(metrics, 1, maxWs, cpuThreshold, memThreshold)).toBe(false);
+    expect(nodeHasCapacity(metrics, cpuThreshold, memThreshold)).toBe(false);
   });
 
   it('returns true just below threshold', () => {
     const metrics: NodeMetrics = { cpuLoadAvg1: 49, memoryPercent: 49, diskPercent: 20 };
-    expect(nodeHasCapacity(metrics, 1, maxWs, cpuThreshold, memThreshold)).toBe(true);
+    expect(nodeHasCapacity(metrics, cpuThreshold, memThreshold)).toBe(true);
   });
 
-  it('returns false when workspace count equals max', () => {
-    const metrics: NodeMetrics = { cpuLoadAvg1: 10, memoryPercent: 10, diskPercent: 10 };
-    expect(nodeHasCapacity(metrics, 3, maxWs, cpuThreshold, memThreshold)).toBe(false);
+  it('returns true with null metrics (node may still be starting up)', () => {
+    expect(nodeHasCapacity(null, cpuThreshold, memThreshold)).toBe(true);
   });
 
-  it('returns false when workspace count exceeds max', () => {
-    const metrics: NodeMetrics = { cpuLoadAvg1: 10, memoryPercent: 10, diskPercent: 10 };
-    expect(nodeHasCapacity(metrics, 4, maxWs, cpuThreshold, memThreshold)).toBe(false);
-  });
-
-  it('returns true when workspace count is below max', () => {
-    const metrics: NodeMetrics = { cpuLoadAvg1: 10, memoryPercent: 10, diskPercent: 10 };
-    expect(nodeHasCapacity(metrics, 2, maxWs, cpuThreshold, memThreshold)).toBe(true);
-  });
-
-  it('returns true with null metrics if workspace count is under limit', () => {
-    expect(nodeHasCapacity(null, 2, maxWs, cpuThreshold, memThreshold)).toBe(true);
-  });
-
-  it('returns false with null metrics if workspace count is at limit', () => {
-    expect(nodeHasCapacity(null, 3, maxWs, cpuThreshold, memThreshold)).toBe(false);
-  });
-
-  it('uses the correct default thresholds (50% CPU, 50% memory, 3 max workspaces)', () => {
+  it('uses the correct default thresholds (50% CPU, 50% memory)', () => {
     expect(DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT).toBe(50);
     expect(DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT).toBe(50);
-    expect(DEFAULT_MAX_WORKSPACES_PER_NODE).toBe(3);
   });
 });
 
@@ -315,20 +293,12 @@ describe('selectNodeForTaskRun threshold configuration', () => {
     expect(selectorSource).toContain('env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT');
   });
 
-  it('reads max workspaces from MAX_WORKSPACES_PER_NODE env var', () => {
-    expect(selectorSource).toContain('env.MAX_WORKSPACES_PER_NODE');
-  });
-
   it('defaults CPU threshold to shared constant', () => {
     expect(selectorSource).toContain('DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT');
   });
 
   it('defaults memory threshold to shared constant', () => {
     expect(selectorSource).toContain('DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT');
-  });
-
-  it('defaults max workspaces per node to shared constant', () => {
-    expect(selectorSource).toContain('DEFAULT_MAX_WORKSPACES_PER_NODE');
   });
 
   it('parseThreshold rejects values < 0 or > 100', () => {
