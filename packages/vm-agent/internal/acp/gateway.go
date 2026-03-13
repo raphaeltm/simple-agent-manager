@@ -608,7 +608,7 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 	installCmd := exec.CommandContext(ctx, "docker", installArgs...)
 	output, err := installCmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("install command failed: %w: %s", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("install command for %q failed: %w\n%s", info.command, err, strings.TrimSpace(string(output)))
 	}
 
 	slog.Info("Agent binary installed successfully", "command", info.command)
@@ -621,7 +621,7 @@ type agentCommandInfo struct {
 	args          []string
 	envVarName    string
 	installCmd    string // install command to run if binary is missing (npm or curl-based)
-	injectionMode string // "env" (default) or "auth-file" — how the credential is injected
+	injectionMode string // "" (default, env var injection) or "auth-file" — how the credential is injected
 	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
 
@@ -659,7 +659,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			args:       nil,
 			envVarName: "MISTRAL_API_KEY",
 			installCmd: fmt.Sprintf(
-				`ARCH=$(uname -m) && curl -fLo /usr/local/bin/vibe-acp "%s/vibe-acp-linux-${ARCH}" && chmod +x /usr/local/bin/vibe-acp`,
+				`ARCH=$(uname -m) && case "$ARCH" in x86_64|aarch64) ;; *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;; esac && curl -fLo /usr/local/bin/vibe-acp "%s/vibe-acp-linux-${ARCH}" && chmod +x /usr/local/bin/vibe-acp`,
 				releaseURL,
 			),
 		}
