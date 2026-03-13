@@ -3,10 +3,10 @@
 // =============================================================================
 
 /** Supported agent identifiers */
-export type AgentType = 'claude-code' | 'openai-codex' | 'google-gemini';
+export type AgentType = 'claude-code' | 'openai-codex' | 'google-gemini' | 'mistral-vibe';
 
 /** API key provider identifiers */
-export type AgentProvider = 'anthropic' | 'openai' | 'google';
+export type AgentProvider = 'anthropic' | 'openai' | 'google' | 'mistral';
 
 // =============================================================================
 // Agent Definition (Configuration Registry)
@@ -96,6 +96,19 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     supportsAcp: true,
     credentialHelpUrl: 'https://aistudio.google.com/apikey',
     installCommand: 'npm install -g @google/gemini-cli',
+  },
+  {
+    id: 'mistral-vibe',
+    name: 'Mistral Vibe',
+    description: "Mistral AI's terminal-native coding agent",
+    provider: 'mistral',
+    envVarName: 'MISTRAL_API_KEY',
+    acpCommand: 'vibe-acp',
+    acpArgs: [],
+    supportsAcp: true,
+    credentialHelpUrl: 'https://console.mistral.ai',
+    installCommand:
+      'ARCH=$(uname -m) && curl -fLo /usr/local/bin/vibe-acp "https://github.com/mistralai/mistral-vibe/releases/latest/download/vibe-acp-linux-${ARCH}" && chmod +x /usr/local/bin/vibe-acp',
   },
 ] as const;
 

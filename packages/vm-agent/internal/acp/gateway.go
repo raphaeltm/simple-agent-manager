@@ -570,21 +570,34 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 
 	slog.Info("Agent binary not found in container, installing", "command", info.command)
 
-	// Clean up stale partial install directories left by previous failed npm installs.
-	// npm renames the target directory to a temp name (with random suffix) during install;
-	// if the install fails, these directories can block subsequent installs with ENOTEMPTY.
-	cleanupScript := fmt.Sprintf(
-		`rm -rf /usr/local/lib/node_modules/@zed-industries/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/@zed-industries/.%s-* 2>/dev/null; true`,
-		info.command, info.command,
-	)
-	cleanupArgs := []string{"exec", "-u", "root", containerID, "sh", "-c", cleanupScript}
-	cleanupCmd := exec.CommandContext(ctx, "docker", cleanupArgs...)
-	_ = cleanupCmd.Run() // best-effort cleanup
+	isNpmInstall := strings.HasPrefix(info.installCmd, "npm ") || strings.HasPrefix(info.installCmd, "npx ")
 
-	installScript := fmt.Sprintf(
-		`which npm >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq nodejs npm; }; %s`,
-		info.installCmd,
-	)
+	if isNpmInstall {
+		// Clean up stale partial install directories left by previous failed npm installs.
+		// npm renames the target directory to a temp name (with random suffix) during install;
+		// if the install fails, these directories can block subsequent installs with ENOTEMPTY.
+		cleanupScript := fmt.Sprintf(
+			`rm -rf /usr/local/lib/node_modules/@zed-industries/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/@zed-industries/.%s-* 2>/dev/null; true`,
+			info.command, info.command,
+		)
+		cleanupArgs := []string{"exec", "-u", "root", containerID, "sh", "-c", cleanupScript}
+		cleanupCmd := exec.CommandContext(ctx, "docker", cleanupArgs...)
+		_ = cleanupCmd.Run() // best-effort cleanup
+	}
+
+	var installScript string
+	if isNpmInstall {
+		installScript = fmt.Sprintf(
+			`which npm >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq nodejs npm; }; %s`,
+			info.installCmd,
+		)
+	} else {
+		// For non-npm installs (e.g. curl-based binary downloads), ensure curl is available.
+		installScript = fmt.Sprintf(
+			`which curl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq curl; }; %s`,
+			info.installCmd,
+		)
+	}
 
 	installArgs := []string{"exec", "-u", "root", containerID, "sh", "-c", installScript}
 	installCmd := exec.CommandContext(ctx, "docker", installArgs...)
@@ -602,7 +615,7 @@ type agentCommandInfo struct {
 	command       string
 	args          []string
 	envVarName    string
-	installCmd    string // npm install command to run if binary is missing
+	installCmd    string // install command to run if binary is missing (npm or curl-based)
 	injectionMode string // "env" (default) or "auth-file" — how the credential is injected
 	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
@@ -631,6 +644,13 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		return agentCommandInfo{"codex-acp", nil, "OPENAI_API_KEY", "npm install -g @zed-industries/codex-acp", "", ""}
 	case "google-gemini":
 		return agentCommandInfo{"gemini", []string{"--experimental-acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli", "", ""}
+	case "mistral-vibe":
+		return agentCommandInfo{
+			command:    "vibe-acp",
+			args:       nil,
+			envVarName: "MISTRAL_API_KEY",
+			installCmd: `ARCH=$(uname -m) && curl -fLo /usr/local/bin/vibe-acp "https://github.com/mistralai/mistral-vibe/releases/latest/download/vibe-acp-linux-${ARCH}" && chmod +x /usr/local/bin/vibe-acp`,
+		}
 	default:
 		return agentCommandInfo{agentType, nil, "API_KEY", "", "", ""}
 	}
@@ -646,6 +666,8 @@ func getModelEnvVar(agentType string) string {
 		return "OPENAI_MODEL"
 	case "google-gemini":
 		return "GEMINI_MODEL"
+	case "mistral-vibe":
+		return "MISTRAL_MODEL"
 	default:
 		return ""
 	}
