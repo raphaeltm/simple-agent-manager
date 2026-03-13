@@ -128,6 +128,11 @@ export const DEFAULT_NODE_WARM_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 /** Default maximum lifetime (ms) for an auto-provisioned node. Override via MAX_AUTO_NODE_LIFETIME_MS env var. */
 export const DEFAULT_MAX_AUTO_NODE_LIFETIME_MS = 4 * 60 * 60 * 1000; // 4 hours
 
+/** Absolute maximum lifetime (ms) for an auto-provisioned node — hard safety ceiling.
+ * Destroys nodes regardless of active workspaces to prevent unbounded cost.
+ * Override via ABSOLUTE_MAX_NODE_LIFETIME_MS env var. */
+export const DEFAULT_ABSOLUTE_MAX_NODE_LIFETIME_MS = 12 * 60 * 60 * 1000; // 12 hours
+
 /** Default grace period (ms) for cron sweep stale detection. Override via NODE_WARM_GRACE_PERIOD_MS env var. */
 export const DEFAULT_NODE_WARM_GRACE_PERIOD_MS = 35 * 60 * 1000; // 35 minutes (warm timeout + 5 min buffer)
 

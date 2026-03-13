@@ -23,6 +23,7 @@ import {
   DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS,
   DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS,
   DEFAULT_TASK_RUN_MAX_EXECUTION_MS,
+  DEFAULT_NODE_HEARTBEAT_STALE_SECONDS,
 } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import * as schema from '../db/schema';
@@ -59,6 +60,7 @@ export interface StuckTaskResult {
   failedQueued: number;
   failedDelegated: number;
   failedInProgress: number;
+  heartbeatSkipped: number;
   doHealthChecked: number;
   errors: number;
 }
@@ -181,6 +183,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     failedQueued: 0,
     failedDelegated: 0,
     failedInProgress: 0,
+    heartbeatSkipped: 0,
     doHealthChecked: 0,
     errors: 0,
   };
@@ -238,6 +241,40 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
         const executionMs = now.getTime() - startedAt;
         if (executionMs > maxExecutionMs) {
+          // Before failing, check if the VM agent is still alive via heartbeat.
+          // A recent heartbeat means the agent is actively working — don't kill it.
+          const nodeIdToCheck = await getTaskNodeId(env, task);
+          if (nodeIdToCheck) {
+            const staleSeconds = parseInt(env.NODE_HEARTBEAT_STALE_SECONDS || '', 10) || DEFAULT_NODE_HEARTBEAT_STALE_SECONDS;
+            const heartbeatRecent = await isNodeHeartbeatRecent(env, nodeIdToCheck, staleSeconds);
+            if (heartbeatRecent) {
+              log.info('stuck_task.skipped_active_heartbeat', {
+                taskId: task.id,
+                nodeId: nodeIdToCheck,
+                executionMs,
+                maxExecutionMs,
+              });
+
+              await persistError(env.OBSERVABILITY_DATABASE, {
+                source: 'api',
+                level: 'info',
+                message: `Skipped stuck task recovery: VM agent heartbeat is recent (task running ${Math.round(executionMs / 60000)} min)`,
+                context: {
+                  recoveryType: 'stuck_task_heartbeat_skip',
+                  taskId: task.id,
+                  nodeId: nodeIdToCheck,
+                  executionMs,
+                  maxExecutionMs,
+                },
+                userId: task.user_id,
+                nodeId: nodeIdToCheck,
+              });
+
+              result.heartbeatSkipped++;
+              break;
+            }
+          }
+
           isStuck = true;
           reason = `Task exceeded max execution time of ${Math.round(maxExecutionMs / 60000)} minutes.${stepInfo}`;
         }
@@ -445,4 +482,48 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
   }
 
   return result;
+}
+
+/**
+ * Look up the node ID for a task — via its workspace or auto-provisioned node.
+ * Best-effort: returns null if no node can be found.
+ */
+async function getTaskNodeId(
+  env: Env,
+  task: { workspace_id: string | null; auto_provisioned_node_id: string | null }
+): Promise<string | null> {
+  if (task.workspace_id) {
+    try {
+      const ws = await env.DATABASE.prepare(
+        `SELECT node_id FROM workspaces WHERE id = ?`
+      ).bind(task.workspace_id).first<{ node_id: string | null }>();
+      if (ws?.node_id) return ws.node_id;
+    } catch {
+      // Best-effort
+    }
+  }
+  return task.auto_provisioned_node_id;
+}
+
+/**
+ * Check whether a node's heartbeat is recent (within staleSeconds).
+ * Returns false if the node has no heartbeat or it's stale.
+ */
+async function isNodeHeartbeatRecent(
+  env: Env,
+  nodeId: string,
+  staleSeconds: number
+): Promise<boolean> {
+  try {
+    const node = await env.DATABASE.prepare(
+      `SELECT last_heartbeat_at FROM nodes WHERE id = ?`
+    ).bind(nodeId).first<{ last_heartbeat_at: string | null }>();
+
+    if (!node?.last_heartbeat_at) return false;
+
+    const heartbeatAge = (Date.now() - new Date(node.last_heartbeat_at).getTime()) / 1000;
+    return heartbeatAge < staleSeconds;
+  } catch {
+    return false;
+  }
 }

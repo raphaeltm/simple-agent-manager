@@ -82,7 +82,8 @@ describe('deleted status consistency across deletion paths', () => {
 
   it('cron lifetime guard skips deleted nodes', () => {
     const cleanupFile = readFileSync(resolve(process.cwd(), 'src/scheduled/node-cleanup.ts'), 'utf8');
-    expect(cleanupFile).toContain("node.status === 'deleted'");
+    // Layer 3 uses SQL filter to exclude stopped/deleted nodes
+    expect(cleanupFile).toContain("n.status NOT IN ('stopped', 'deleted')");
   });
 
   it('task runner guards against deleted node status', () => {

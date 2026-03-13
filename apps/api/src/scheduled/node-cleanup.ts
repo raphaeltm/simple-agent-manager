@@ -19,11 +19,12 @@
  *
  * See: specs/021-task-chat-architecture/tasks.md (T045-T047)
  */
-import { eq, isNotNull } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import {
   DEFAULT_NODE_WARM_GRACE_PERIOD_MS,
   DEFAULT_MAX_AUTO_NODE_LIFETIME_MS,
+  DEFAULT_ABSOLUTE_MAX_NODE_LIFETIME_MS,
 } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import * as schema from '../db/schema';
@@ -41,6 +42,8 @@ function parseMs(value: string | undefined, fallback: number): number {
 export interface NodeCleanupResult {
   staleDestroyed: number;
   lifetimeDestroyed: number;
+  lifetimeSkipped: number;
+  absoluteLifetimeDestroyed: number;
   orphanedWorkspacesFlagged: number;
   orphanedNodesFlagged: number;
   errors: number;
@@ -55,6 +58,8 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
   const result: NodeCleanupResult = {
     staleDestroyed: 0,
     lifetimeDestroyed: 0,
+    lifetimeSkipped: 0,
+    absoluteLifetimeDestroyed: 0,
     orphanedWorkspacesFlagged: 0,
     orphanedNodesFlagged: 0,
     errors: 0,
@@ -62,6 +67,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
 
   const gracePeriodMs = parseMs(env.NODE_WARM_GRACE_PERIOD_MS, DEFAULT_NODE_WARM_GRACE_PERIOD_MS);
   const maxLifetimeMs = parseMs(env.MAX_AUTO_NODE_LIFETIME_MS, DEFAULT_MAX_AUTO_NODE_LIFETIME_MS);
+  const absoluteMaxLifetimeMs = parseMs(env.ABSOLUTE_MAX_NODE_LIFETIME_MS, DEFAULT_ABSOLUTE_MAX_NODE_LIFETIME_MS);
 
   // 1. Find stale warm nodes with running workspace counts in a single query
   //    to avoid N+1 per-node workspace count lookups.
@@ -74,7 +80,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
      WHERE n.warm_since IS NOT NULL
        AND n.warm_since < ?
        AND n.status = 'running'
-     GROUP BY n.id`
+     GROUP BY n.id, n.user_id, n.warm_since`
   ).bind(staleThreshold).all<{
     id: string;
     user_id: string;
@@ -143,67 +149,115 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
   }
 
   // 2. Find auto-provisioned nodes exceeding max lifetime
+  //    Activity-aware: skip nodes with active workspaces (unless past absolute ceiling).
   const lifetimeThreshold = new Date(now.getTime() - maxLifetimeMs).toISOString();
+  const absoluteLifetimeThreshold = new Date(now.getTime() - absoluteMaxLifetimeMs).toISOString();
 
-  // Auto-provisioned nodes are those referenced by tasks.autoProvisionedNodeId
-  const autoProvisionedNodes = await db
-    .select({
-      nodeId: schema.tasks.autoProvisionedNodeId,
-    })
-    .from(schema.tasks)
-    .where(isNotNull(schema.tasks.autoProvisionedNodeId))
-    .groupBy(schema.tasks.autoProvisionedNodeId);
+  // Auto-provisioned nodes with active workspace counts in a single query.
+  // Drive from nodes table and join tasks to identify auto-provisioned ones.
+  const autoProvisionedNodesWithCounts = await env.DATABASE.prepare(
+    `SELECT n.id, n.user_id, n.status, n.created_at,
+            COUNT(CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN 1 END) as active_ws_count
+     FROM nodes n
+     INNER JOIN tasks t ON t.auto_provisioned_node_id = n.id
+     LEFT JOIN workspaces w ON w.node_id = n.id
+     WHERE t.auto_provisioned_node_id IS NOT NULL
+       AND n.status NOT IN ('stopped', 'deleted')
+       AND n.created_at < ?
+     GROUP BY n.id, n.user_id, n.status, n.created_at`
+  ).bind(lifetimeThreshold).all<{
+    id: string;
+    user_id: string;
+    status: string;
+    created_at: string;
+    active_ws_count: number;
+  }>();
 
-  for (const { nodeId } of autoProvisionedNodes) {
-    if (!nodeId) continue;
+  for (const node of autoProvisionedNodesWithCounts.results) {
+    const pastAbsoluteCeiling = node.created_at < absoluteLifetimeThreshold;
 
-    const [node] = await db
-      .select({
-        id: schema.nodes.id,
-        userId: schema.nodes.userId,
-        status: schema.nodes.status,
-        createdAt: schema.nodes.createdAt,
-      })
-      .from(schema.nodes)
-      .where(eq(schema.nodes.id, nodeId))
-      .limit(1);
+    if (node.active_ws_count > 0 && !pastAbsoluteCeiling) {
+      // Node has active workspaces and is below the absolute ceiling — skip
+      log.warn('node_cleanup.max_lifetime_skipped_active_workspaces', {
+        nodeId: node.id,
+        userId: node.user_id,
+        activeWorkspaces: node.active_ws_count,
+        createdAt: node.created_at,
+        maxLifetimeMs,
+      });
 
-    if (!node || node.status === 'stopped' || node.status === 'deleted') continue;
-    if (node.createdAt > lifetimeThreshold) continue; // Not past max lifetime
-
-    // Node exceeds max lifetime — destroy regardless
-    try {
-      log.info('node_cleanup.destroying_max_lifetime', { nodeId: node.id, userId: node.userId, createdAt: node.createdAt });
-
-      await deleteNodeResources(node.id, node.userId, env);
-
-      // Record successful cleanup in OBSERVABILITY_DATABASE (TDF-7)
       await persistError(env.OBSERVABILITY_DATABASE, {
         source: 'api',
-        level: 'warn',
-        message: `Destroyed auto-provisioned node exceeding max lifetime (Layer 3 defense)`,
+        level: 'info',
+        message: `Skipped max-lifetime cleanup: node has ${node.active_ws_count} active workspace(s)`,
         context: {
-          recoveryType: 'max_lifetime_node_cleanup',
+          recoveryType: 'max_lifetime_skipped_active',
           nodeId: node.id,
-          createdAt: node.createdAt,
+          activeWorkspaces: node.active_ws_count,
+          createdAt: node.created_at,
           maxLifetimeMs,
+          absoluteMaxLifetimeMs,
         },
-        userId: node.userId,
+        userId: node.user_id,
+        nodeId: node.id,
+      });
+
+      result.lifetimeSkipped++;
+      continue;
+    }
+
+    // Determine if this is a regular max-lifetime or absolute ceiling destruction
+    const isAbsoluteCeiling = pastAbsoluteCeiling && node.active_ws_count > 0;
+    const logEvent = isAbsoluteCeiling
+      ? 'node_cleanup.destroying_absolute_lifetime'
+      : 'node_cleanup.destroying_max_lifetime';
+    const message = isAbsoluteCeiling
+      ? `Destroyed auto-provisioned node exceeding ABSOLUTE max lifetime — had ${node.active_ws_count} active workspace(s) (Layer 3 hard ceiling)`
+      : `Destroyed auto-provisioned node exceeding max lifetime (Layer 3 defense)`;
+
+    try {
+      log.info(logEvent, {
+        nodeId: node.id,
+        userId: node.user_id,
+        createdAt: node.created_at,
+        activeWorkspaces: node.active_ws_count,
+        isAbsoluteCeiling,
+      });
+
+      await deleteNodeResources(node.id, node.user_id, env);
+
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: isAbsoluteCeiling ? 'error' : 'warn',
+        message,
+        context: {
+          recoveryType: isAbsoluteCeiling ? 'absolute_lifetime_node_cleanup' : 'max_lifetime_node_cleanup',
+          nodeId: node.id,
+          createdAt: node.created_at,
+          activeWorkspaces: node.active_ws_count,
+          maxLifetimeMs,
+          absoluteMaxLifetimeMs,
+        },
+        userId: node.user_id,
         nodeId: node.id,
       });
       await db
         .update(schema.nodes)
         .set({ status: 'deleted', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
         .where(eq(schema.nodes.id, node.id));
-      result.lifetimeDestroyed++;
+
+      if (isAbsoluteCeiling) {
+        result.absoluteLifetimeDestroyed++;
+      } else {
+        result.lifetimeDestroyed++;
+      }
     } catch (err) {
       log.error('node_cleanup.max_lifetime_destroy_failed', {
         nodeId: node.id,
-        userId: node.userId,
+        userId: node.user_id,
         error: err instanceof Error ? err.message : String(err),
       });
 
-      // Record failure in OBSERVABILITY_DATABASE (TDF-7)
       await persistError(env.OBSERVABILITY_DATABASE, {
         source: 'api',
         level: 'error',
@@ -212,9 +266,9 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
         context: {
           recoveryType: 'max_lifetime_node_cleanup_failure',
           nodeId: node.id,
-          createdAt: node.createdAt,
+          createdAt: node.created_at,
         },
-        userId: node.userId,
+        userId: node.user_id,
         nodeId: node.id,
       });
 

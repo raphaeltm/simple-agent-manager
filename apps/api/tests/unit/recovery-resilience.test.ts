@@ -222,7 +222,8 @@ describe('node-cleanup OBSERVABILITY_DATABASE recording (TDF-7)', () => {
   });
 
   it('records max lifetime destruction in OBSERVABILITY_DATABASE', () => {
-    expect(nodeCleanupSource).toContain("recoveryType: 'max_lifetime_node_cleanup'");
+    // The recovery type is now part of a ternary (regular vs absolute ceiling)
+    expect(nodeCleanupSource).toContain("'max_lifetime_node_cleanup'");
   });
 
   it('records max lifetime destruction failure in OBSERVABILITY_DATABASE', () => {
@@ -237,11 +238,9 @@ describe('node-cleanup OBSERVABILITY_DATABASE recording (TDF-7)', () => {
     expect(staleRecordSection).toContain("level: 'info'");
   });
 
-  it('uses "warn" for max lifetime (more severe)', () => {
-    // The success record uses warn level for max lifetime.
-    const idx = nodeCleanupSource.indexOf("recoveryType: 'max_lifetime_node_cleanup'");
-    const lifetimeRecordSection = nodeCleanupSource.slice(Math.max(0, idx - 200), idx + 50);
-    expect(lifetimeRecordSection).toContain("level: 'warn'");
+  it('uses warn or error level for max lifetime depending on ceiling type', () => {
+    // The level is now a ternary: 'error' for absolute ceiling, 'warn' for regular
+    expect(nodeCleanupSource).toContain("isAbsoluteCeiling ? 'error' : 'warn'");
   });
 });
 
@@ -399,11 +398,14 @@ describe('recovery type consistency (TDF-7)', () => {
     'stuck_task',
     'stuck_task_cleanup_failure',
     'stuck_task_recovery_failure',
+    'stuck_task_heartbeat_skip',
     'do_task_status_mismatch',
     'stale_warm_node_cleanup',
     'stale_warm_node_cleanup_failure',
     'max_lifetime_node_cleanup',
     'max_lifetime_node_cleanup_failure',
+    'max_lifetime_skipped_active',
+    'absolute_lifetime_node_cleanup',
     'orphaned_workspace',
     'orphaned_node',
     'provisioning_timeout',
@@ -412,7 +414,8 @@ describe('recovery type consistency (TDF-7)', () => {
   for (const recoveryType of allRecoveryTypes) {
     it(`uses recoveryType: '${recoveryType}'`, () => {
       const allSources = stuckTasksSource + nodeCleanupSource + timeoutSource;
-      expect(allSources).toContain(`recoveryType: '${recoveryType}'`);
+      // Recovery types may appear in ternary expressions, so check for the string literal
+      expect(allSources).toContain(`'${recoveryType}'`);
     });
   }
 
