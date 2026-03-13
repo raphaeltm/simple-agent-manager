@@ -155,12 +155,13 @@ export async function provisionNode(
       })
       .where(eq(schema.nodes.id, node.id));
   } catch (err) {
+    console.error('Node provisioning failed:', { nodeId: node.id, error: err instanceof Error ? err.message : err });
     await db
       .update(schema.nodes)
       .set({
         status: 'error',
         healthStatus: 'unhealthy',
-        errorMessage: err instanceof Error ? err.message : 'Node provisioning failed',
+        errorMessage: 'Node provisioning failed',
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.nodes.id, node.id));

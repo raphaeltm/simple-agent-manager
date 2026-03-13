@@ -7,9 +7,9 @@ describe('serializeCredentialToken', () => {
     expect(result).toBe('my-hetzner-token');
   });
 
-  it('should return raw token from apiToken field for hetzner', () => {
+  it('should return empty string when token field is missing for hetzner', () => {
     const result = serializeCredentialToken('hetzner', { apiToken: 'my-api-token' });
-    expect(result).toBe('my-api-token');
+    expect(result).toBe('');
   });
 
   it('should return JSON for scaleway with secretKey and projectId', () => {

@@ -21,26 +21,10 @@ const mockDecrypt = decrypt as ReturnType<typeof vi.fn>;
 // ============================================================================
 
 describe('serializeCredentialToken — edge cases', () => {
-  it('returns empty string when hetzner fields object has neither token nor apiToken', () => {
-    // If caller omits both expected field names the result is an empty string.
-    // This documents the current behavior as a regression guard: if the
-    // function is changed to throw instead, this test will catch the change.
+  it('returns empty string when hetzner fields object has no token field', () => {
+    // If caller omits the token field, the result is an empty string.
     const result = serializeCredentialToken('hetzner', { someOtherField: 'value' });
     expect(result).toBe('');
-  });
-
-  it('prefers token over apiToken for hetzner when both are present', () => {
-    // Confirms precedence ordering of ?? chain (token is checked first).
-    const result = serializeCredentialToken('hetzner', {
-      token: 'primary-token',
-      apiToken: 'fallback-token',
-    });
-    expect(result).toBe('primary-token');
-  });
-
-  it('falls back to apiToken when token is absent for hetzner', () => {
-    const result = serializeCredentialToken('hetzner', { apiToken: 'api-token-only' });
-    expect(result).toBe('api-token-only');
   });
 
   it('returns JSON string with only secretKey and projectId for scaleway, ignoring extra fields', () => {
@@ -86,14 +70,11 @@ describe('buildProviderConfig — edge cases', () => {
     expect(config).toEqual({ provider: 'hetzner', apiToken: '' });
   });
 
-  it('throws SyntaxError for scaleway with valid JSON but wrong shape (missing secretKey)', () => {
-    // JSON is parseable but the resulting object will have undefined fields.
-    // This documents that buildProviderConfig does NOT validate the parsed shape.
+  it('throws for scaleway with valid JSON but missing secretKey', () => {
     const token = JSON.stringify({ projectId: 'proj-only' });
-    const config = buildProviderConfig('scaleway', token);
-    // secretKey will be undefined; this documents current permissive behavior
-    expect((config as any).secretKey).toBeUndefined();
-    expect((config as any).projectId).toBe('proj-only');
+    expect(() => buildProviderConfig('scaleway', token)).toThrow(
+      'Invalid Scaleway credential format: missing secretKey or projectId',
+    );
   });
 
   it('throws for scaleway when JSON has extra keys (extra keys should not appear in config)', () => {
@@ -113,9 +94,10 @@ describe('buildProviderConfig — edge cases', () => {
     );
   });
 
-  it('throws SyntaxError (not a custom error) for malformed scaleway JSON', () => {
-    // Verifies the error type so callers can catch it correctly
-    expect(() => buildProviderConfig('scaleway', '{broken')).toThrow(SyntaxError);
+  it('throws descriptive error for malformed scaleway JSON', () => {
+    expect(() => buildProviderConfig('scaleway', '{broken')).toThrow(
+      'Invalid Scaleway credential format: malformed stored data',
+    );
   });
 
   it('round-trip preserves whitespace in hetzner token', () => {

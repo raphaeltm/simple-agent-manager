@@ -15,7 +15,7 @@ export function serializeCredentialToken(
 ): string {
   switch (provider) {
     case 'hetzner':
-      return fields.token ?? fields.apiToken ?? '';
+      return fields.token ?? '';
     case 'scaleway':
       return JSON.stringify({ secretKey: fields.secretKey, projectId: fields.projectId });
     default: {
@@ -37,8 +37,17 @@ export function buildProviderConfig(
     case 'hetzner':
       return { provider: 'hetzner', apiToken: decryptedToken };
     case 'scaleway': {
-      const parsed = JSON.parse(decryptedToken) as { secretKey: string; projectId: string };
-      return { provider: 'scaleway', secretKey: parsed.secretKey, projectId: parsed.projectId };
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(decryptedToken);
+      } catch {
+        throw new Error('Invalid Scaleway credential format: malformed stored data');
+      }
+      const obj = parsed as Record<string, unknown>;
+      if (typeof obj?.secretKey !== 'string' || !obj.secretKey || typeof obj?.projectId !== 'string' || !obj.projectId) {
+        throw new Error('Invalid Scaleway credential format: missing secretKey or projectId');
+      }
+      return { provider: 'scaleway', secretKey: obj.secretKey, projectId: obj.projectId };
     }
     default:
       throw new Error(`Unsupported provider: ${provider}`);
