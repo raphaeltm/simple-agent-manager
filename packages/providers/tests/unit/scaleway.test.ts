@@ -420,22 +420,24 @@ describe('ScalewayProvider', () => {
   describe('validateToken', () => {
     it('should return true for valid token', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ projects: [] }), { status: 200 }),
+        new Response(JSON.stringify({ servers: [] }), { status: 200 }),
       );
 
       const result = await provider.validateToken();
       expect(result).toBe(true);
     });
 
-    it('should call account API with X-Auth-Token', async () => {
+    it('should call Instance API with X-Auth-Token and project filter', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ projects: [] }), { status: 200 }),
+        new Response(JSON.stringify({ servers: [] }), { status: 200 }),
       );
 
       await provider.validateToken();
 
       const url = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]![0] as string;
-      expect(url).toContain('api.scaleway.com/account/v3/projects');
+      expect(url).toContain('api.scaleway.com/instance/v1/zones/fr-par-1/servers');
+      expect(url).toContain('per_page=1');
+      expect(url).toContain('project=test-project-id');
       const headers = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit;
       expect((headers.headers as Record<string, string>)['X-Auth-Token']).toBe('test-secret-key');
     });
