@@ -167,6 +167,59 @@ describe('runNodeCleanupSweep', () => {
     });
   });
 
+  describe('Layer 1: stale warm node destruction', () => {
+    it('destroys stale warm nodes with no active workspaces', async () => {
+      const { deleteNodeResources } = await import('../../src/services/nodes');
+      const now = Date.now();
+      const warmSince = new Date(now - 40 * 60 * 1000).toISOString(); // 40 min ago (> 35 min grace)
+
+      const responses = new Map<string, unknown[]>();
+      // Layer 1: one stale warm node with 0 running workspaces
+      responses.set('n.warm_since IS NOT NULL', [
+        {
+          id: 'node-warm',
+          user_id: 'user-1',
+          warm_since: warmSince,
+          running_ws_count: 0,
+        },
+      ]);
+      // Layer 3: no auto-provisioned nodes past lifetime
+      responses.set('auto_provisioned_node_id', []);
+      // Orphan checks: empty
+      responses.set("t.status IN ('completed', 'failed', 'cancelled')", []);
+      responses.set('n.warm_since IS NULL', []);
+
+      const env = createMockEnv(responses);
+      const result = await runNodeCleanupSweep(env);
+
+      expect(result.staleDestroyed).toBe(1);
+      expect(deleteNodeResources).toHaveBeenCalledWith('node-warm', 'user-1', env);
+    });
+
+    it('skips stale warm nodes that have active workspaces', async () => {
+      const now = Date.now();
+      const warmSince = new Date(now - 40 * 60 * 1000).toISOString();
+
+      const responses = new Map<string, unknown[]>();
+      responses.set('n.warm_since IS NOT NULL', [
+        {
+          id: 'node-warm',
+          user_id: 'user-1',
+          warm_since: warmSince,
+          running_ws_count: 1,
+        },
+      ]);
+      responses.set('auto_provisioned_node_id', []);
+      responses.set("t.status IN ('completed', 'failed', 'cancelled')", []);
+      responses.set('n.warm_since IS NULL', []);
+
+      const env = createMockEnv(responses);
+      const result = await runNodeCleanupSweep(env);
+
+      expect(result.staleDestroyed).toBe(0);
+    });
+  });
+
   describe('result structure', () => {
     it('returns all expected counters', async () => {
       const env = createMockEnv(new Map());

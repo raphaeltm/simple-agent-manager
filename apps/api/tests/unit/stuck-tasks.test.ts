@@ -214,6 +214,66 @@ describe('recoverStuckTasks', () => {
     });
   });
 
+  describe('queued and delegated stuck task recovery', () => {
+    it('fails queued tasks past the queued timeout', async () => {
+      const now = Date.now();
+      // Task stuck in queued for 11 minutes (> 10 min threshold)
+      const updatedAt = new Date(now - 11 * 60 * 1000).toISOString();
+
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+        results: [
+          {
+            id: 'task-q',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'queued',
+            execution_step: 'node_provisioning',
+            updated_at: updatedAt,
+            started_at: null,
+            workspace_id: null,
+            auto_provisioned_node_id: null,
+          },
+        ],
+      });
+      responses.set('UPDATE tasks SET status = \'failed\'', { results: [], changes: 1 });
+
+      const env = createMockEnv(responses);
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedQueued).toBe(1);
+    });
+
+    it('fails delegated tasks past the delegated timeout', async () => {
+      const now = Date.now();
+      // Task stuck in delegated for 32 minutes (> 31 min threshold)
+      const updatedAt = new Date(now - 32 * 60 * 1000).toISOString();
+
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+        results: [
+          {
+            id: 'task-d',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'delegated',
+            execution_step: 'workspace_creation',
+            updated_at: updatedAt,
+            started_at: null,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: 'node-1',
+          },
+        ],
+      });
+      responses.set('UPDATE tasks SET status = \'failed\'', { results: [], changes: 1 });
+
+      const env = createMockEnv(responses);
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedDelegated).toBe(1);
+    });
+  });
+
   describe('result structure', () => {
     it('returns all expected counters including heartbeatSkipped', async () => {
       const env = createMockEnv(new Map([
