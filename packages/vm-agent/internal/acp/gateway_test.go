@@ -266,8 +266,9 @@ func TestGetAgentCommandInfoMistralVibe(t *testing.T) {
 	if info.envVarName != "MISTRAL_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "MISTRAL_API_KEY")
 	}
-	if info.installCmd == "" {
-		t.Fatal("installCmd should not be empty for mistral-vibe")
+	wantInstall := `ARCH=$(uname -m) && curl -fLo /usr/local/bin/vibe-acp "https://github.com/mistralai/mistral-vibe/releases/latest/download/vibe-acp-linux-${ARCH}" && chmod +x /usr/local/bin/vibe-acp`
+	if info.installCmd != wantInstall {
+		t.Fatalf("installCmd=%q, want %q", info.installCmd, wantInstall)
 	}
 	if info.args != nil {
 		t.Fatalf("args=%v, want nil", info.args)
