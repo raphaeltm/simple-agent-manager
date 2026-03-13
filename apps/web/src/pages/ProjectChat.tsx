@@ -574,7 +574,7 @@ function SessionItem({
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onFork(session); }}
-          className="mt-1.5 ml-[calc(6px+8px)] flex items-center gap-1 text-xs text-accent-primary bg-transparent border-none cursor-pointer p-0 hover:underline"
+          className="mt-1 ml-[calc(6px+8px)] flex items-center gap-1 text-xs text-accent-primary bg-transparent border border-transparent rounded-sm cursor-pointer py-1 px-1.5 hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary transition-colors"
           title="Continue from this session"
         >
           <GitFork size={12} />

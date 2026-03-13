@@ -24,6 +24,7 @@ export function ForkDialog({
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [forkError, setForkError] = useState<string | null>(null);
 
   // Load summary when dialog opens
   useEffect(() => {
@@ -32,6 +33,7 @@ export function ForkDialog({
       setSummaryMeta(null);
       setSummaryError(null);
       setMessage('');
+      setForkError(null);
       return;
     }
 
@@ -60,12 +62,13 @@ export function ForkDialog({
     const trimmed = message.trim();
     if (!trimmed || !session?.task?.id) return;
 
+    setForkError(null);
     setSubmitting(true);
     try {
       await onFork(trimmed, summary, session.task.id);
       onClose();
-    } catch {
-      // Error handled by parent
+    } catch (err) {
+      setForkError(err instanceof Error ? err.message : 'Failed to start task');
     } finally {
       setSubmitting(false);
     }
@@ -76,9 +79,9 @@ export function ForkDialog({
   return (
     <Dialog isOpen={open && !!session} onClose={onClose} maxWidth="md">
       <div className="grid gap-3">
-        <strong className="text-fg-primary text-base">
+        <h3 id="dialog-title" className="text-fg-primary text-base font-semibold m-0">
           Continue from previous session
-        </strong>
+        </h3>
 
         {/* Parent session info */}
         <section className="p-3 rounded-md bg-info-tint border border-info/20 grid gap-1.5">
@@ -96,21 +99,21 @@ export function ForkDialog({
         </section>
 
         {/* Context summary */}
-        <label className="grid gap-1.5">
+        <div className="grid gap-1.5">
           <div className="flex items-center gap-2">
             <span className="text-sm text-fg-muted">Context summary</span>
             {summaryMeta && (
-              <span className="text-xs text-fg-muted">
-                ({summaryMeta.filteredCount} of {summaryMeta.messageCount} messages, {summaryMeta.method})
+              <span className="text-xs text-fg-muted" title={`Method: ${summaryMeta.method}`}>
+                ({summaryMeta.filteredCount} of {summaryMeta.messageCount} messages)
               </span>
             )}
           </div>
           {loadingSummary ? (
-            <div className="rounded-md border border-border-default bg-surface p-4 text-sm text-fg-muted text-center">
+            <div className="rounded-md border border-border-default bg-surface p-4 text-sm text-fg-muted text-center" role="status" aria-live="polite">
               Generating context summary...
             </div>
           ) : summaryError ? (
-            <div className="rounded-md border border-warning/30 bg-warning-tint p-3 text-sm text-fg-muted">
+            <div className="rounded-md border border-warning/30 bg-warning-tint p-3 text-sm text-fg-muted" role="alert">
               {summaryError}
             </div>
           ) : (
@@ -118,11 +121,12 @@ export function ForkDialog({
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
               rows={8}
+              aria-label="Context summary"
               className="rounded-md border border-border-default bg-surface text-fg-primary p-3 text-sm font-mono resize-y min-h-[120px]"
               placeholder="Context from previous session..."
             />
           )}
-        </label>
+        </div>
 
         {/* New task message */}
         <label className="grid gap-1.5">
@@ -136,6 +140,13 @@ export function ForkDialog({
             autoFocus
           />
         </label>
+
+        {/* Error display */}
+        {forkError && (
+          <div className="rounded-md border border-danger/30 bg-danger-tint p-3 text-sm text-danger" role="alert">
+            {forkError}
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex justify-end gap-2">
