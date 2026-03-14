@@ -566,8 +566,8 @@ nodesRoutes.post('/:id/heartbeat', async (c) => {
       });
       updatePayload.ipAddress = heartbeatIp;
 
-      // Transition error→running if the node was marked error due to missing IP
-      if (node.status === 'error' && node.errorMessage?.includes('no IP address')) {
+      // Transition to running if the node was awaiting IP allocation
+      if (node.status === 'creating' || node.status === 'error') {
         updatePayload.status = 'running';
         updatePayload.errorMessage = null;
       }

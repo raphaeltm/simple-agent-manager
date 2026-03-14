@@ -2,8 +2,6 @@ import type { VMSize } from '@simple-agent-manager/shared';
 import {
   DEFAULT_SCALEWAY_ZONE,
   DEFAULT_SCALEWAY_IMAGE_NAME,
-  DEFAULT_SCALEWAY_IP_POLL_TIMEOUT_MS,
-  DEFAULT_SCALEWAY_IP_POLL_INTERVAL_MS,
 } from '@simple-agent-manager/shared';
 import type { LocationMeta, Provider, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
 import { ProviderError } from './types';
@@ -85,24 +83,18 @@ export class ScalewayProvider implements Provider {
   private readonly projectId: string;
   private readonly zone: string;
   private readonly imageName: string;
-  private readonly ipPollTimeoutMs: number;
-  private readonly ipPollIntervalMs: number;
 
   constructor(
     secretKey: string,
     projectId: string,
     zone?: string,
     imageName?: string,
-    ipPollTimeoutMs?: number,
-    ipPollIntervalMs?: number,
   ) {
     this.secretKey = secretKey;
     this.projectId = projectId;
     this.zone = zone || DEFAULT_SCALEWAY_ZONE;
     this.defaultLocation = this.zone;
     this.imageName = imageName || DEFAULT_SCALEWAY_IMAGE_NAME;
-    this.ipPollTimeoutMs = ipPollTimeoutMs ?? DEFAULT_SCALEWAY_IP_POLL_TIMEOUT_MS;
-    this.ipPollIntervalMs = ipPollIntervalMs ?? DEFAULT_SCALEWAY_IP_POLL_INTERVAL_MS;
   }
 
   /**
@@ -110,6 +102,10 @@ export class ScalewayProvider implements Provider {
    * 1. POST /servers — creates server in stopped state
    * 2. PATCH /servers/:id/user_data/cloud-init — sets cloud-init (text/plain)
    * 3. POST /servers/:id/action — powers on the server
+   *
+   * Note: Scaleway allocates IPs only after boot, so the returned VMInstance
+   * will have an empty `ip` field. The caller (provisionNode) handles this via
+   * fail-fast guard + heartbeat IP backfill.
    */
   async createVM(config: VMConfig): Promise<VMInstance> {
     const sizeConfig = this.sizes[config.size];
@@ -162,10 +158,11 @@ export class ScalewayProvider implements Provider {
     // Step 3: Power on
     await this.performAction(location, serverId, 'poweron');
 
-    // Step 4: Poll for IP — Scaleway allocates IPs only after the server starts
-    const serverWithIp = await this.pollForIp(location, serverId);
-
-    return this.mapServerToVMInstance(serverWithIp);
+    // Return immediately — IP will be empty at this point.
+    // Scaleway allocates IPs asynchronously after boot.
+    // The heartbeat IP backfill in the nodes route will capture the IP
+    // when the VM agent sends its first heartbeat.
+    return this.mapServerToVMInstance(createData.server);
   }
 
   async deleteVM(id: string): Promise<void> {
@@ -309,49 +306,6 @@ export class ScalewayProvider implements Provider {
         },
         body: JSON.stringify({ action }),
       },
-    );
-  }
-
-  /**
-   * Poll Scaleway GET /servers/:id until a public IP is allocated.
-   * Scaleway assigns IPs only after the server transitions to 'running'.
-   */
-  private async pollForIp(
-    zone: string,
-    serverId: string,
-  ): Promise<ScalewayServerResponse['server']> {
-    const deadline = Date.now() + this.ipPollTimeoutMs;
-
-    // Sleep before first poll — IP is never ready immediately after poweron
-    await new Promise((resolve) => setTimeout(resolve, this.ipPollIntervalMs));
-
-    while (Date.now() < deadline) {
-      const response = await providerFetch(
-        this.name,
-        `${SCALEWAY_INSTANCE_API_URL}/${zone}/servers/${serverId}`,
-        {
-          headers: { 'X-Auth-Token': this.secretKey },
-        },
-      );
-
-      const data = (await response.json()) as ScalewayServerResponse;
-      const server = data.server;
-
-      const ip = server.public_ip?.address
-        || (server.public_ips?.length > 0 ? server.public_ips[0]!.address : '');
-
-      if (ip) {
-        return server;
-      }
-
-      // Wait before next poll
-      await new Promise((resolve) => setTimeout(resolve, this.ipPollIntervalMs));
-    }
-
-    throw new ProviderError(
-      this.name,
-      undefined,
-      `Scaleway server ${serverId} did not receive a public IP within ${this.ipPollTimeoutMs}ms`,
     );
   }
 

@@ -135,20 +135,7 @@ export async function provisionNode(
       throw new Error('Cloud-init config exceeds size limit');
     }
 
-    // Wire Scaleway IP poll env vars into provider config (if applicable)
-    const providerConfig = { ...credResult.config };
-    if (providerConfig.provider === 'scaleway') {
-      if (env.SCALEWAY_IP_POLL_TIMEOUT_MS) {
-        const parsed = parseInt(env.SCALEWAY_IP_POLL_TIMEOUT_MS, 10);
-        if (Number.isFinite(parsed) && parsed > 0) providerConfig.ipPollTimeoutMs = parsed;
-      }
-      if (env.SCALEWAY_IP_POLL_INTERVAL_MS) {
-        const parsed = parseInt(env.SCALEWAY_IP_POLL_INTERVAL_MS, 10);
-        if (Number.isFinite(parsed) && parsed > 0) providerConfig.ipPollIntervalMs = parsed;
-      }
-    }
-
-    const provider = createProvider(providerConfig);
+    const provider = createProvider(credResult.config);
 
     const vm = await provider.createVM({
       name: `node-${node.id.toLowerCase()}`,
@@ -161,21 +148,21 @@ export async function provisionNode(
       },
     });
 
-    // Fail-fast: reject empty IP before creating DNS records or marking as running.
-    // Scaleway allocates IPs asynchronously; if polling failed, vm.ip may be empty.
+    // Scaleway allocates IPs asynchronously after boot — vm.ip will be empty.
+    // Store the provider instance ID and mark as pending-ip; heartbeat backfill
+    // will capture the IP when the VM agent sends its first heartbeat.
     if (!vm.ip) {
-      console.error('Provider returned empty IP address', {
+      console.log('Provider returned empty IP — awaiting heartbeat backfill', {
         nodeId: node.id,
         providerInstanceId: vm.id,
-        action: 'node_marked_error',
+        action: 'node_awaiting_ip',
       });
       await db
         .update(schema.nodes)
         .set({
           providerInstanceId: vm.id,
-          status: 'error',
-          healthStatus: 'unhealthy',
-          errorMessage: 'Provider returned no IP address — server may still be starting',
+          status: 'creating',
+          errorMessage: 'Awaiting IP allocation — will be set on first heartbeat',
           updatedAt: new Date().toISOString(),
         })
         .where(eq(schema.nodes.id, node.id));
