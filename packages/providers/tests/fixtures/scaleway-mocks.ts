@@ -30,10 +30,18 @@ export function createScalewayFetchMock(overrides?: {
   listServers?: Record<string, unknown>[];
   /** Override images returned by resolveImageId */
   images?: Array<{ id: string; name: string }>;
+  /**
+   * Override responses for the IP poll GET /servers/:id calls during createVM.
+   * If a function, called on each poll attempt (for simulating delayed IP allocation).
+   */
+  pollServer?: Record<string, unknown> | (() => Record<string, unknown>);
 }) {
   const defaultImages = overrides?.images ?? [
     { id: 'img-uuid-1234', name: 'ubuntu_noble' },
   ];
+
+  // Track whether we're in a createVM flow (after POST /servers, before result)
+  let createVmInProgress = false;
 
   return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
     const method = (init?.method || 'GET').toUpperCase();
@@ -60,6 +68,7 @@ export function createScalewayFetchMock(overrides?: {
 
     // POST /servers → createVM
     if (method === 'POST' && urlStr.match(/\/servers$/)) {
+      createVmInProgress = true;
       const server = overrides?.createServer ?? createMockScalewayServer({
         id: 'new-server-uuid',
         name: 'contract-test',
@@ -84,13 +93,24 @@ export function createScalewayFetchMock(overrides?: {
       return Promise.resolve(new Response(null, { status: 204 }));
     }
 
-    // GET /servers/:id → getVM (single server, not list)
+    // GET /servers/:id → getVM or IP poll (single server, not list)
     if (method === 'GET' && urlStr.match(/\/servers\/[^/?]+$/) && !urlStr.includes('?')) {
       if (urlStr.includes('non-existent')) {
         return Promise.resolve(
           new Response(JSON.stringify({ message: 'Not found' }), { status: 404 }),
         );
       }
+
+      // During createVM flow, use pollServer override if provided
+      if (createVmInProgress && overrides?.pollServer) {
+        const server = typeof overrides.pollServer === 'function'
+          ? overrides.pollServer()
+          : overrides.pollServer;
+        return Promise.resolve(
+          new Response(JSON.stringify({ server }), { status: 200 }),
+        );
+      }
+
       const server = overrides?.getServer ?? createMockScalewayServer();
       return Promise.resolve(
         new Response(JSON.stringify({ server }), { status: 200 }),

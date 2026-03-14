@@ -148,6 +148,27 @@ export async function provisionNode(
       },
     });
 
+    // Fail-fast: reject empty IP before creating DNS records or marking as running.
+    // Scaleway allocates IPs asynchronously; if polling failed, vm.ip may be empty.
+    if (!vm.ip) {
+      console.error('Provider returned empty IP address', {
+        nodeId: node.id,
+        providerInstanceId: vm.id,
+        action: 'node_marked_error',
+      });
+      await db
+        .update(schema.nodes)
+        .set({
+          providerInstanceId: vm.id,
+          status: 'error',
+          healthStatus: 'unhealthy',
+          errorMessage: 'Provider returned no IP address — server may still be starting',
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.nodes.id, node.id));
+      return;
+    }
+
     let backendDnsRecordId: string | null = null;
     try {
       backendDnsRecordId = await createNodeBackendDNSRecord(node.id, vm.ip, env);

@@ -152,6 +152,10 @@ export interface ScalewayProviderConfig {
   secretKey: string;
   projectId: string;
   zone?: string;
+  /** Timeout for polling IP allocation after poweron (ms). Default: 60000 */
+  ipPollTimeoutMs?: number;
+  /** Interval between IP poll attempts (ms). Default: 3000 */
+  ipPollIntervalMs?: number;
 }
 
 /**

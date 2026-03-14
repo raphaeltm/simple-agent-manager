@@ -21,6 +21,7 @@ import {
   listNodeEventsOnNode,
   stopWorkspaceOnNode,
 } from '../services/node-agent';
+import { createNodeBackendDNSRecord, updateDNSRecord } from '../services/dns';
 import { log } from '../lib/logger';
 
 const nodesRoutes = new Hono<{ Bindings: Env }>();
@@ -531,21 +532,7 @@ nodesRoutes.post('/:id/heartbeat', async (c) => {
     };
   }>();
 
-  const updatePayload: Record<string, unknown> = {
-    lastHeartbeatAt: now,
-    healthStatus: 'healthy',
-    updatedAt: now,
-  };
-
-  if (body.metrics) {
-    updatePayload.lastMetrics = JSON.stringify(body.metrics);
-  }
-
-  await db
-    .update(schema.nodes)
-    .set(updatePayload)
-    .where(eq(schema.nodes.id, nodeId));
-
+  // Read the node first to check if IP backfill is needed
   const rows = await db
     .select()
     .from(schema.nodes)
@@ -556,6 +543,47 @@ nodesRoutes.post('/:id/heartbeat', async (c) => {
   if (!node) {
     throw errors.notFound('Node');
   }
+
+  const updatePayload: Record<string, unknown> = {
+    lastHeartbeatAt: now,
+    healthStatus: 'healthy',
+    updatedAt: now,
+  };
+
+  if (body.metrics) {
+    updatePayload.lastMetrics = JSON.stringify(body.metrics);
+  }
+
+  // Defense-in-depth: backfill IP from heartbeat if node has no IP stored.
+  // This self-heals Scaleway nodes where the IP wasn't captured at creation time.
+  if (!node.ipAddress) {
+    const heartbeatIp = c.req.header('CF-Connecting-IP') || c.req.header('X-Real-IP');
+    if (heartbeatIp) {
+      console.log('Heartbeat IP backfill', {
+        nodeId,
+        backfilledIp: heartbeatIp,
+        action: 'ip_backfilled',
+      });
+      updatePayload.ipAddress = heartbeatIp;
+
+      // Update DNS record if we have one, or create a new one
+      try {
+        if (node.backendDnsRecordId) {
+          await updateDNSRecord(node.backendDnsRecordId, heartbeatIp, c.env);
+        } else {
+          const dnsRecordId = await createNodeBackendDNSRecord(nodeId, heartbeatIp, c.env);
+          updatePayload.backendDnsRecordId = dnsRecordId;
+        }
+      } catch (dnsErr) {
+        console.error('Failed to update DNS during IP backfill:', dnsErr);
+      }
+    }
+  }
+
+  await db
+    .update(schema.nodes)
+    .set(updatePayload)
+    .where(eq(schema.nodes.id, nodeId));
 
   const response: Record<string, unknown> = {
     status: node.status,

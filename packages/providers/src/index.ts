@@ -43,6 +43,9 @@ export function createProvider(config: ProviderConfig): Provider {
         config.secretKey,
         config.projectId,
         config.zone,
+        undefined, // imageName — use default
+        config.ipPollTimeoutMs,
+        config.ipPollIntervalMs,
       );
     default:
       throw new ProviderError(

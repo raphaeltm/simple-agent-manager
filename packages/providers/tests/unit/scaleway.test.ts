@@ -138,14 +138,14 @@ describe('ScalewayProvider', () => {
       labels: { node: 'node-123', managed: 'simple-agent-manager' },
     };
 
-    it('should perform three-step creation: create server, set cloud-init, poweron', async () => {
+    it('should perform four-step creation: create server, set cloud-init, poweron, poll IP', async () => {
       const mockFetch = createScalewayFetchMock();
       globalThis.fetch = mockFetch;
 
       await provider.createVM(vmConfig);
 
-      // Should have made at least 4 calls: resolve image, create server, set cloud-init, poweron
-      expect(mockFetch).toHaveBeenCalledTimes(4);
+      // Should have made 5 calls: resolve image, create server, set cloud-init, poweron, poll IP
+      expect(mockFetch).toHaveBeenCalledTimes(5);
 
       // Call 1: GET images (resolve image ID)
       const call1Url = mockFetch.mock.calls[0]![0] as string;
@@ -171,6 +171,11 @@ describe('ScalewayProvider', () => {
       expect(call4Init.method).toBe('POST');
       const actionBody = JSON.parse(call4Init.body as string);
       expect(actionBody.action).toBe('poweron');
+
+      // Call 5: GET /servers/:id (poll for IP)
+      const call5Url = mockFetch.mock.calls[4]![0] as string;
+      expect(call5Url).toContain('/servers/');
+      expect((mockFetch.mock.calls[4]![1] as RequestInit | undefined)?.method ?? 'GET').toBe('GET');
     });
 
     it('should send correct server creation payload', async () => {
@@ -208,12 +213,22 @@ describe('ScalewayProvider', () => {
       expect(createUrl).toContain('/zones/nl-ams-1/servers');
     });
 
-    it('should return mapped VMInstance', async () => {
+    it('should return mapped VMInstance with IP from poll response', async () => {
       globalThis.fetch = createScalewayFetchMock({
         createServer: createMockScalewayServer({
           id: 'new-id',
           name: 'my-vm',
           state: 'stopped',
+          public_ip: null,
+          public_ips: [],
+          commercial_type: 'DEV1-XL',
+          creation_date: '2024-06-01T00:00:00Z',
+          tags: ['node=n1'],
+        }),
+        pollServer: createMockScalewayServer({
+          id: 'new-id',
+          name: 'my-vm',
+          state: 'running',
           public_ip: { address: '5.6.7.8' },
           public_ips: [{ address: '5.6.7.8' }],
           commercial_type: 'DEV1-XL',
@@ -228,7 +243,7 @@ describe('ScalewayProvider', () => {
         id: 'new-id',
         name: 'my-vm',
         ip: '5.6.7.8',
-        status: 'off', // 'stopped' maps to 'off' — server is created in stopped state before poweron
+        status: 'running',
         serverType: 'DEV1-XL',
         createdAt: '2024-06-01T00:00:00Z',
         labels: { node: 'n1' },
@@ -244,8 +259,8 @@ describe('ScalewayProvider', () => {
         image: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
       });
 
-      // Should be 3 calls (no image resolution): create, cloud-init, poweron
-      expect(mockFetch).toHaveBeenCalledTimes(3);
+      // Should be 4 calls (no image resolution): create, cloud-init, poweron, poll IP
+      expect(mockFetch).toHaveBeenCalledTimes(4);
       const createUrl = mockFetch.mock.calls[0]![0] as string;
       expect(createUrl).toContain('/servers');
     });
@@ -262,6 +277,61 @@ describe('ScalewayProvider', () => {
       );
 
       await expect(provider.createVM(vmConfig)).rejects.toThrow(ProviderError);
+    });
+
+    it('should poll for IP when server initially has no public IP', async () => {
+      let pollCount = 0;
+      const mockFetch = createScalewayFetchMock({
+        pollServer: () => {
+          pollCount++;
+          // First poll: no IP yet. Second poll: IP allocated.
+          if (pollCount < 2) {
+            return createMockScalewayServer({
+              id: 'new-server-uuid',
+              state: 'starting',
+              public_ip: null,
+              public_ips: [],
+            });
+          }
+          return createMockScalewayServer({
+            id: 'new-server-uuid',
+            state: 'running',
+            public_ip: { address: '10.0.0.1' },
+            public_ips: [{ address: '10.0.0.1' }],
+          });
+        },
+      });
+      globalThis.fetch = mockFetch;
+
+      // Use short poll interval for fast test
+      const fastProvider = new ScalewayProvider(
+        'test-secret-key', 'test-project-id', 'fr-par-1', undefined, 5000, 10,
+      );
+
+      const result = await fastProvider.createVM(vmConfig);
+
+      expect(result.ip).toBe('10.0.0.1');
+      expect(pollCount).toBe(2);
+    });
+
+    it('should throw ProviderError if IP is not allocated within timeout', async () => {
+      const mockFetch = createScalewayFetchMock({
+        pollServer: createMockScalewayServer({
+          id: 'new-server-uuid',
+          state: 'starting',
+          public_ip: null,
+          public_ips: [],
+        }),
+      });
+      globalThis.fetch = mockFetch;
+
+      // Very short timeout to trigger failure quickly
+      const fastProvider = new ScalewayProvider(
+        'test-secret-key', 'test-project-id', 'fr-par-1', undefined, 50, 10,
+      );
+
+      await expect(fastProvider.createVM(vmConfig)).rejects.toThrow(ProviderError);
+      await expect(fastProvider.createVM(vmConfig)).rejects.toThrow(/did not receive a public IP/);
     });
   });
 
