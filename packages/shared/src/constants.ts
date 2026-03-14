@@ -276,6 +276,40 @@ export const DEFAULT_TASK_TITLE_RETRY_DELAY_MS = 1000;
 export const DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS = 4000;
 
 // =============================================================================
+// Context Summarization (Conversation Forking)
+// =============================================================================
+
+/** Default Workers AI model for session summarization. Override via CONTEXT_SUMMARY_MODEL env var. */
+export const DEFAULT_CONTEXT_SUMMARY_MODEL = '@cf/google/gemma-3-12b-it';
+
+/** Default max summary output length in characters. Override via CONTEXT_SUMMARY_MAX_LENGTH env var. */
+export const DEFAULT_CONTEXT_SUMMARY_MAX_LENGTH = 4000;
+
+/** Default timeout (ms) for AI summarization. Override via CONTEXT_SUMMARY_TIMEOUT_MS env var. */
+export const DEFAULT_CONTEXT_SUMMARY_TIMEOUT_MS = 10000;
+
+/** Default max messages to include in summarization input. Override via CONTEXT_SUMMARY_MAX_MESSAGES env var. */
+export const DEFAULT_CONTEXT_SUMMARY_MAX_MESSAGES = 50;
+
+/** Default number of most-recent messages to always include. Override via CONTEXT_SUMMARY_RECENT_MESSAGES env var. */
+export const DEFAULT_CONTEXT_SUMMARY_RECENT_MESSAGES = 20;
+
+/** Sessions with filtered message count at or below this threshold skip AI and include messages verbatim.
+ * Override via CONTEXT_SUMMARY_SHORT_THRESHOLD env var. */
+export const DEFAULT_CONTEXT_SUMMARY_SHORT_THRESHOLD = 5;
+
+/** Default number of leading messages always included in summarization chunking.
+ * Override via CONTEXT_SUMMARY_HEAD_MESSAGES env var. */
+export const DEFAULT_CONTEXT_SUMMARY_HEAD_MESSAGES = 5;
+
+/** Default number of recent messages included in heuristic fallback summary.
+ * Override via CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES env var. */
+export const DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES = 10;
+
+/** Maximum size of contextSummary in bytes (64KB — schema constraint). */
+export const MAX_CONTEXT_SUMMARY_BYTES = 65536;
+
+// =============================================================================
 // Agent Settings
 // =============================================================================
 

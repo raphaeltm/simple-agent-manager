@@ -137,10 +137,22 @@ export async function getMessages(
   projectId: string,
   sessionId: string,
   limit: number = 100,
-  before: number | null = null
+  before: number | null = null,
+  roles?: string[]
 ): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
   const stub = await getStub(env, projectId);
-  return stub.getMessages(sessionId, limit, before);
+  return stub.getMessages(sessionId, limit, before, roles);
+}
+
+/** Get total message count for a session, optionally filtered by roles. */
+export async function getMessageCount(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  roles?: string[]
+): Promise<number> {
+  const stub = await getStub(env, projectId);
+  return stub.getMessageCount(sessionId, roles);
 }
 
 export async function getCleanupAt(

@@ -19,7 +19,7 @@ import type {
   VMLocation,
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES, MAX_CONTEXT_SUMMARY_BYTES } from '@simple-agent-manager/shared';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
 import { ulid } from '../../lib/ulid';
@@ -82,6 +82,36 @@ submitRoutes.post('/submit', async (c) => {
     throw errors.badRequest('workspaceProfile must be full or lightweight');
   }
 
+  // Validate contextSummary size if provided
+  if (body.contextSummary) {
+    const summaryBytes = new TextEncoder().encode(body.contextSummary).length;
+    if (summaryBytes > MAX_CONTEXT_SUMMARY_BYTES) {
+      throw errors.badRequest(`contextSummary exceeds maximum size of ${MAX_CONTEXT_SUMMARY_BYTES} bytes`);
+    }
+  }
+
+  // Validate parentTaskId if provided — must belong to the same project
+  let parentBranch: string | null = null;
+  if (body.parentTaskId) {
+    const [parentTask] = await db
+      .select({
+        id: schema.tasks.id,
+        projectId: schema.tasks.projectId,
+        outputBranch: schema.tasks.outputBranch,
+      })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.id, body.parentTaskId))
+      .limit(1);
+
+    if (!parentTask) {
+      throw errors.notFound('Parent task not found');
+    }
+    if (parentTask.projectId !== projectId) {
+      throw errors.badRequest('Parent task belongs to a different project');
+    }
+    parentBranch = parentTask.outputBranch;
+  }
+
   // Check cloud provider credentials
   const [credential] = await db
     .select({ id: schema.credentials.id })
@@ -139,7 +169,8 @@ submitRoutes.post('/submit', async (c) => {
   const workspaceProfile: WorkspaceProfile = body.workspaceProfile
     ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
     ?? DEFAULT_WORKSPACE_PROFILE;
-  const branch = project.defaultBranch;
+  // Use parent task's output branch if forking, otherwise use project default
+  const branch = parentBranch || project.defaultBranch;
 
   // Generate concise task title via AI (falls back to truncation on failure)
   const titleConfig = getTaskTitleConfig(c.env);
@@ -149,6 +180,7 @@ submitRoutes.post('/submit', async (c) => {
     id: taskId,
     projectId,
     userId,
+    parentTaskId: body.parentTaskId ?? null,
     title: taskTitle,
     description: message,
     status: 'queued',
@@ -186,6 +218,19 @@ submitRoutes.post('/submit', async (c) => {
       taskTitle,
       taskId
     );
+
+    // If this is a forked task, persist the context summary as a system message first.
+    // This gives the agent background context from the parent session.
+    if (body.contextSummary) {
+      await projectDataService.persistMessage(
+        c.env,
+        projectId,
+        sessionId,
+        'system',
+        body.contextSummary,
+        null
+      );
+    }
 
     // Persist initial user message — REQUIRED.
     // The user's message must be in the session before we return.
@@ -242,6 +287,9 @@ submitRoutes.post('/submit', async (c) => {
     vmSize,
     vmLocation,
     workspaceProfile,
+    parentTaskId: body.parentTaskId ?? null,
+    hasContextSummary: !!body.contextSummary,
+    checkoutBranch: branch,
   });
 
   // Look up user's githubId for noreply email fallback

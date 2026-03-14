@@ -316,6 +316,87 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
   return c.json(result as Record<string, unknown>);
 });
 
+/**
+ * POST /api/projects/:projectId/sessions/:sessionId/summarize
+ * Generate a context summary from a session's message history.
+ * Used for conversation forking — the UI calls this to get a summary,
+ * shows it for review, then submits as contextSummary when creating a new task.
+ */
+chatRoutes.post('/:sessionId/summarize', async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const sessionId = requireRouteParam(c, 'sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireOwnedProject(db, projectId, userId);
+
+  // Verify session exists
+  const session = await projectDataService.getSession(c.env, projectId, sessionId);
+  if (!session) {
+    throw errors.notFound('Session not found');
+  }
+
+  // Fetch all messages for the session (up to 1000)
+  const { messages: allMessages } = await projectDataService.getMessages(
+    c.env,
+    projectId,
+    sessionId,
+    1000,
+    null
+  );
+
+  if (allMessages.length === 0) {
+    throw errors.badRequest('Session has no messages');
+  }
+
+  // Look up task metadata for enriched context
+  let taskContext: import('../services/session-summarize').TaskContext | undefined;
+  const taskId = session.taskId as string | null;
+  if (taskId) {
+    try {
+      const [taskRow] = await db
+        .select({
+          title: schema.tasks.title,
+          description: schema.tasks.description,
+          outputBranch: schema.tasks.outputBranch,
+          outputPrUrl: schema.tasks.outputPrUrl,
+          outputSummary: schema.tasks.outputSummary,
+        })
+        .from(schema.tasks)
+        .where(eq(schema.tasks.id, taskId))
+        .limit(1);
+
+      if (taskRow) {
+        taskContext = {
+          title: taskRow.title ?? undefined,
+          description: taskRow.description ?? undefined,
+          outputBranch: taskRow.outputBranch ?? undefined,
+          outputPrUrl: taskRow.outputPrUrl ?? undefined,
+          outputSummary: taskRow.outputSummary ?? undefined,
+        };
+      }
+    } catch {
+      // Task lookup failure is non-fatal — summarize without task context
+    }
+  }
+
+  // Generate summary
+  const { summarizeSession, getSummarizeConfig } = await import('../services/session-summarize');
+  const config = getSummarizeConfig(c.env);
+  const result = await summarizeSession(
+    c.env.AI,
+    allMessages.map((m) => ({
+      role: m.role as string,
+      content: m.content as string,
+      created_at: m.createdAt as number,
+    })),
+    config,
+    taskContext
+  );
+
+  return c.json(result);
+});
+
 // Browser-side POST /:sessionId/messages route removed — messages are now
 // persisted exclusively by the VM agent via POST /api/workspaces/:id/messages.
 // See: specs/021-task-chat-architecture (US1 — Agent-Side Chat Persistence).

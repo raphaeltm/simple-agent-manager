@@ -556,6 +556,24 @@ export interface SubmitTaskRequest {
   agentType?: string;
   /** Workspace provisioning profile. 'lightweight' skips devcontainer build for faster startup. */
   workspaceProfile?: WorkspaceProfile;
+  /** ID of a parent task to continue from (conversation forking). When set, the new workspace
+   * checks out the parent task's output branch if available. */
+  parentTaskId?: string;
+  /** Context summary from the parent session. Persisted as the first system message in the new
+   * chat session to give the agent context about prior work. Max 64KB. */
+  contextSummary?: string;
+}
+
+/** Response from the session summarize endpoint. */
+export interface SessionSummaryResponse {
+  /** The generated context summary text. */
+  summary: string;
+  /** Total number of messages in the session. */
+  messageCount: number;
+  /** Number of messages after filtering (user + assistant only). */
+  filteredCount: number;
+  /** Method used to generate the summary. */
+  method: 'ai' | 'heuristic' | 'verbatim';
 }
 
 export interface SubmitTaskResponse {
