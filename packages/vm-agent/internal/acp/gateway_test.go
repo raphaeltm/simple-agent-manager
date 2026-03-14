@@ -411,6 +411,35 @@ func TestResolveVibeActiveModel(t *testing.T) {
 	}
 }
 
+func TestSanitizeVibeModelAlias(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"valid alias", "devstral-2", "devstral-2"},
+		{"valid with dots", "mistral-large-2512", "mistral-large-2512"},
+		{"valid with underscore", "my_model", "my_model"},
+		{"empty falls back", "", vibeDefaultActiveModel},
+		{"TOML injection rejected", `"; rm -rf ~`, vibeDefaultActiveModel},
+		{"newline rejected", "model\ninjection", vibeDefaultActiveModel},
+		{"quote rejected", `model"bad`, vibeDefaultActiveModel},
+		{"backslash rejected", `model\bad`, vibeDefaultActiveModel},
+		{"space rejected", "model bad", vibeDefaultActiveModel},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := sanitizeVibeModelAlias(tt.input)
+			if got != tt.want {
+				t.Errorf("sanitizeVibeModelAlias(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGetAgentCommandInfoUnknown(t *testing.T) {
 	t.Parallel()
 

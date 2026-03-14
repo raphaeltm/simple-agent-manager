@@ -865,7 +865,9 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 	if agentType == "mistral-vibe" {
 		activeModel := resolveVibeActiveModel(settings)
 		if err := writeVibeConfigToContainer(ctx, containerID, h.config.ContainerUser, activeModel); err != nil {
-			slog.Warn("Failed to write Vibe config.toml", "error", err)
+			slog.Warn("Failed to write Vibe config.toml",
+				"error", err, "activeModel", activeModel,
+				"workspaceId", h.config.WorkspaceID)
 			// Non-fatal: vibe-acp will fall back to built-in devstral-2 default
 		} else {
 			slog.Info("Wrote Vibe config.toml", "activeModel", activeModel)
