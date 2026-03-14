@@ -108,7 +108,7 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     supportsAcp: true,
     credentialHelpUrl: 'https://console.mistral.ai/api-keys',
     installCommand:
-      'ARCH=$(uname -m) && curl -fLo /usr/local/bin/vibe-acp "https://github.com/mistralai/mistral-vibe/releases/latest/download/vibe-acp-linux-${ARCH}" && chmod +x /usr/local/bin/vibe-acp',
+      'which pip3 >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq python3-pip; }; pip3 install --break-system-packages mistral-vibe',
   },
 ] as const;
 

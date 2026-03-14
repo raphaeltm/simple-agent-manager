@@ -570,21 +570,32 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 
 	slog.Info("Agent binary not found in container, installing", "command", info.command)
 
-	// Clean up stale partial install directories left by previous failed npm installs.
-	// npm renames the target directory to a temp name (with random suffix) during install;
-	// if the install fails, these directories can block subsequent installs with ENOTEMPTY.
-	cleanupScript := fmt.Sprintf(
-		`rm -rf /usr/local/lib/node_modules/@zed-industries/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/@zed-industries/.%s-* 2>/dev/null; true`,
-		info.command, info.command,
-	)
-	cleanupArgs := []string{"exec", "-u", "root", containerID, "sh", "-c", cleanupScript}
-	cleanupCmd := exec.CommandContext(ctx, "docker", cleanupArgs...)
-	_ = cleanupCmd.Run() // best-effort cleanup
+	// For npm-based installs, clean up stale partial install directories left
+	// by previous failed npm installs. npm renames the target directory to a temp
+	// name (with random suffix) during install; if the install fails, these
+	// directories can block subsequent installs with ENOTEMPTY.
+	isNpmInstall := strings.Contains(info.installCmd, "npm ")
+	if isNpmInstall {
+		cleanupScript := fmt.Sprintf(
+			`rm -rf /usr/local/lib/node_modules/@zed-industries/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/@zed-industries/.%s-* 2>/dev/null; true`,
+			info.command, info.command,
+		)
+		cleanupArgs := []string{"exec", "-u", "root", containerID, "sh", "-c", cleanupScript}
+		cleanupCmd := exec.CommandContext(ctx, "docker", cleanupArgs...)
+		_ = cleanupCmd.Run() // best-effort cleanup
+	}
 
-	installScript := fmt.Sprintf(
-		`which npm >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq nodejs npm; }; %s`,
-		info.installCmd,
-	)
+	// For npm-based agents, ensure npm is available before running the install.
+	// Non-npm agents (e.g., pip-based) handle their own prerequisites in installCmd.
+	var installScript string
+	if isNpmInstall {
+		installScript = fmt.Sprintf(
+			`which npm >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq nodejs npm; }; %s`,
+			info.installCmd,
+		)
+	} else {
+		installScript = info.installCmd
+	}
 
 	installArgs := []string{"exec", "-u", "root", containerID, "sh", "-c", installScript}
 	installCmd := exec.CommandContext(ctx, "docker", installArgs...)
@@ -632,7 +643,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 	case "google-gemini":
 		return agentCommandInfo{"gemini", []string{"--experimental-acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli", "", ""}
 	case "mistral-vibe":
-		return agentCommandInfo{"vibe-acp", nil, "MISTRAL_API_KEY", `ARCH=$(uname -m) && curl -fLo /usr/local/bin/vibe-acp "https://github.com/mistralai/mistral-vibe/releases/latest/download/vibe-acp-linux-${ARCH}" && chmod +x /usr/local/bin/vibe-acp`, "", ""}
+		return agentCommandInfo{"vibe-acp", nil, "MISTRAL_API_KEY", `which pip3 >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq python3-pip; }; pip3 install --break-system-packages mistral-vibe`, "", ""}
 	default:
 		return agentCommandInfo{agentType, nil, "API_KEY", "", "", ""}
 	}

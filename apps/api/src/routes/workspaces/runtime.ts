@@ -94,7 +94,7 @@ runtimeRoutes.post('/:id/agent-credential-sync', async (c) => {
   }
 
   // Validate against known values.
-  const validAgentTypes = new Set(['claude-code', 'openai-codex', 'google-gemini']);
+  const validAgentTypes = new Set(['claude-code', 'openai-codex', 'google-gemini', 'mistral-vibe']);
   const validCredentialKinds = new Set(['api-key', 'oauth-token']);
   if (!validAgentTypes.has(body.agentType)) {
     throw errors.badRequest('Invalid agentType');
