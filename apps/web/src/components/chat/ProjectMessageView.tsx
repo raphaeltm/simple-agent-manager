@@ -15,7 +15,8 @@ import { TruncatedSummary } from './TruncatedSummary';
 import { stripMarkdown } from '../../lib/text-utils';
 import { getChatSession, getTranscribeApiUrl, resetIdleTimer, getWorkspace, getNode } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
-import type { WorkspaceResponse, NodeResponse } from '@simple-agent-manager/shared';
+import type { WorkspaceResponse, NodeResponse, VMSize } from '@simple-agent-manager/shared';
+import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
 import { useProjectAgentSession } from '../../hooks/useProjectAgentSession';
@@ -863,15 +864,14 @@ function ContextItem({ icon, label, children }: { icon: React.ReactNode; label: 
   );
 }
 
-/** Human-readable VM size labels. */
+/** Human-readable VM size label from shared constants. */
 function formatVmSize(size: string): string {
-  switch (size) {
-    case 'small': return 'Small (lightweight)';
-    case 'medium': return 'Medium';
-    case 'large': return 'Large';
-    default: return size;
-  }
+  const config = VM_SIZE_LABELS[size as VMSize];
+  return config ? config.label : size;
 }
+
+/** Whether a VM size is considered "lightweight" (small profile). */
+const LIGHTWEIGHT_VM_SIZE: VMSize = 'small';
 
 /** Collapsible session header — shows title + state dot, with expandable details. */
 function SessionHeader({
@@ -913,11 +913,11 @@ function SessionHeader({
           <span
             className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0"
             style={{
-              backgroundColor: workspace.vmSize === 'small' ? 'var(--sam-color-info-tint, rgba(59,130,246,0.1))' : 'var(--sam-color-success-tint, rgba(34,197,94,0.1))',
-              color: workspace.vmSize === 'small' ? 'var(--sam-color-info, #3b82f6)' : 'var(--sam-color-success)',
+              backgroundColor: workspace.vmSize === LIGHTWEIGHT_VM_SIZE ? 'var(--sam-color-info-tint, rgba(59,130,246,0.1))' : 'var(--sam-color-success-tint, rgba(34,197,94,0.1))',
+              color: workspace.vmSize === LIGHTWEIGHT_VM_SIZE ? 'var(--sam-color-info, #3b82f6)' : 'var(--sam-color-success)',
             }}
           >
-            {workspace.vmSize === 'small' ? 'Lightweight' : 'Full'}
+            {workspace.vmSize === LIGHTWEIGHT_VM_SIZE ? 'Lightweight' : 'Full'}
           </span>
         )}
 
