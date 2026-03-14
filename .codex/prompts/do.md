@@ -13,6 +13,21 @@ You are an autonomous task executor. The user has described a task above. Your j
 
 ---
 
+## ⚠️ CRITICAL: State Persistence (Read This First)
+
+Long workflows lose context to compaction. You MUST maintain a `.do-state.md` file (gitignored) as external memory. **This is non-negotiable.** See `.claude/rules/14-do-workflow-persistence.md` for the full spec.
+
+**Before EVERY phase:**
+1. Re-read `.do-state.md` (create it if it doesn't exist — see rule 14)
+2. Re-read the task file to confirm what's done and what remains
+3. Update the state file with your current phase and progress
+
+**If your context feels incomplete or you're unsure where you are:** STOP. Read `.do-state.md` and the task file. They are your source of truth, not your memory of the conversation.
+
+**At the Phase 3 → Phase 4 boundary:** Enter Plan Mode briefly. Re-read the state file, re-read the task file, and verify every checklist item is genuinely complete before proceeding. This checkpoint prevents the "rush to PR" failure mode.
+
+---
+
 ## Phase 1: Research & Task Creation
 
 1. **Understand the request.** Parse the user input to identify:
@@ -40,11 +55,15 @@ You are an autonomous task executor. The user has described a task above. Your j
    git push origin main
    ```
 
+5. **Create `.do-state.md`** in the repo root with the task summary, task file path, and phase checklist. Check off Phase 1.
+
 > **IMPORTANT**: Only the task file goes to main. All implementation work goes on a feature branch.
 
 ---
 
 ## Phase 2: Worktree Setup
+
+> **Checkpoint**: Re-read `.do-state.md`. Confirm Phase 1 is complete. Update "Current Phase" to Phase 2.
 
 1. **Create a feature branch and worktree:**
    ```
@@ -62,9 +81,13 @@ You are an autonomous task executor. The user has described a task above. Your j
 
 4. **Verify the starting state** — run `pnpm typecheck && pnpm lint` to confirm a clean baseline.
 
+5. **Update `.do-state.md`** with the branch name and worktree path. Check off Phase 2.
+
 ---
 
 ## Phase 3: Implementation
+
+> **Checkpoint**: Re-read `.do-state.md` and the task file. Confirm Phases 1-2 are complete. Update "Current Phase" to Phase 3. Copy the implementation checklist into the state file's "Implementation Progress" section.
 
 Execute the checklist from the task file. Follow these rules:
 
@@ -89,9 +112,13 @@ Execute the checklist from the task file. Follow these rules:
    - `pnpm lint` after any code changes
    - `pnpm test` after adding/modifying tests
 
+5. **Update `.do-state.md`** after every commit — check off completed implementation items and add notes. This is your insurance against context loss.
+
 ---
 
 ## Phase 4: Pre-PR Validation
+
+> **Checkpoint (MANDATORY)**: Enter Plan Mode. Re-read `.do-state.md` AND the task file. Walk through every acceptance criterion and confirm it's met. Only exit Plan Mode and proceed once you've verified completeness. Update "Current Phase" to Phase 4.
 
 Before creating the PR, ensure everything is solid:
 
@@ -115,9 +142,13 @@ Before creating the PR, ensure everything is solid:
 
 4. **Move the task file** from `tasks/active/` to `tasks/archive/` and commit.
 
+5. **Update `.do-state.md`**: Check off Phase 4.
+
 ---
 
 ## Phase 5: Review
+
+> **Checkpoint**: Re-read `.do-state.md`. Confirm Phases 1-4 are complete. Update "Current Phase" to Phase 5.
 
 Dispatch review based on what the PR touches. **Always include** `$task-completion-validator` in addition to the domain-specific reviewers:
 
@@ -137,9 +168,13 @@ Address every bug or correctness issue raised. Push fixes and re-run quality che
 
 **STOP: Wait for all review agents to complete before proceeding.** If you launched reviewers in background, you MUST wait for their results and address findings before moving to Phase 6. Do NOT use idle time to jump ahead to PR creation.
 
+**Update `.do-state.md`**: Record which reviewers were dispatched and their findings. Check off Phase 5.
+
 ---
 
 ## Phase 6: Staging Verification (BLOCKING — DO NOT SKIP)
+
+> **Checkpoint**: Re-read `.do-state.md`. Confirm Phases 1-5 are complete (including review findings addressed). Update "Current Phase" to Phase 6.
 
 If this PR includes **any code changes** (not just docs/tasks), deploy to staging and verify before creating the PR.
 
@@ -188,9 +223,13 @@ If the PR touches **any** of: `packages/cloud-init/`, `packages/vm-agent/`, `scr
 
 You made a mistake. Close the PR, complete staging verification, then re-open. Do NOT merge a PR that skipped Phase 6 and "verify post-merge" — that is how bugs reach production.
 
+**Update `.do-state.md`**: Record staging verification results. Check off Phase 6.
+
 ---
 
 ## Phase 7: Pull Request
+
+> **Checkpoint**: Re-read `.do-state.md`. Confirm ALL Phases 1-6 are complete. If any phase is unchecked, GO BACK and complete it. Update "Current Phase" to Phase 7.
 
 1. **Create the PR** using `gh pr create`:
    - Title: short, under 70 characters
@@ -218,6 +257,8 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
    ```
    git pull origin main
    ```
+
+7. **Delete `.do-state.md`** — the workflow is complete.
 
 ---
 

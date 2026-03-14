@@ -51,3 +51,6 @@ pnpm-debug.log*
 .codex/log/
 .codex/sessions/
 .codex/tmp/
+
+# /do workflow state (ephemeral, per-session)
+.do-state.md

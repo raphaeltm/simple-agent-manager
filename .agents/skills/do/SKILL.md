@@ -18,3 +18,7 @@ Read the full workflow from `.codex/prompts/do.md` and execute it.
 7. **Staging** — deploy to staging, verify changed behavior end-to-end via Playwright. **For infrastructure changes** (cloud-init, VM agent, DNS, TLS, scripts/deploy): MUST provision a real VM and verify heartbeat arrives. See Phase 6b in `.codex/prompts/do.md`.
 8. **PR** — create with `gh pr create`, wait for CI, merge when green
 9. **Cleanup** — remove worktree, pull main
+
+## ⚠️ Anti-Compaction: State File
+
+Long `/do` runs lose context to compaction. You MUST maintain `.do-state.md` (gitignored) as external memory. Re-read it before every phase. See `.claude/rules/14-do-workflow-persistence.md`.
