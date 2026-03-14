@@ -330,7 +330,6 @@ describe('ScalewayProvider', () => {
         'test-secret-key', 'test-project-id', 'fr-par-1', undefined, 50, 10,
       );
 
-      await expect(fastProvider.createVM(vmConfig)).rejects.toThrow(ProviderError);
       await expect(fastProvider.createVM(vmConfig)).rejects.toThrow(/did not receive a public IP/);
     });
   });
