@@ -112,8 +112,18 @@ export const NodeCard: FC<NodeCardProps> = ({
         </div>
 
         {/* VM info */}
-        <div className="sam-type-caption text-fg-muted">
-          {node.cloudProvider ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider) : 'Unknown provider'} &middot; {sizeLabels ? `${sizeLabels.label} \u2014 ${sizeLabels.shortDescription}` : node.vmSize} &middot; {locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}
+        <div className="sam-type-caption text-fg-muted flex flex-wrap gap-x-1">
+          <span aria-label={`Provider: ${node.cloudProvider ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider) : 'Unknown'}`}>
+            {node.cloudProvider ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider) : 'Unknown'}
+          </span>
+          <span aria-hidden="true">&middot;</span>
+          <span aria-label={`Size: ${sizeLabels ? sizeLabels.label : node.vmSize}`}>
+            {sizeLabels ? `${sizeLabels.label} \u2014 ${sizeLabels.shortDescription}` : node.vmSize}
+          </span>
+          <span aria-hidden="true">&middot;</span>
+          <span aria-label={`Location: ${locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}`}>
+            {locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}
+          </span>
         </div>
 
         {/* Resource metrics */}
