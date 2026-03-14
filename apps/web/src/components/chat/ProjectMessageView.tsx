@@ -856,10 +856,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 /** Labeled value pill used in the session context panel. */
 function ContextItem({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-1.5 text-xs text-fg-muted">
-      <span className="shrink-0 opacity-60">{icon}</span>
-      <span className="font-medium">{label}:</span>
-      <span className="text-fg-primary">{children}</span>
+    <div className="flex items-center gap-1.5 text-xs text-fg-muted min-w-0">
+      <span className="shrink-0 opacity-60" aria-hidden="true">{icon}</span>
+      <span className="font-medium shrink-0">{label}:</span>
+      <span className="text-fg-primary truncate min-w-0">{children}</span>
     </div>
   );
 }
@@ -913,8 +913,8 @@ function SessionHeader({
           <span
             className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0"
             style={{
-              backgroundColor: workspace.vmSize === LIGHTWEIGHT_VM_SIZE ? 'var(--sam-color-info-tint, rgba(59,130,246,0.1))' : 'var(--sam-color-success-tint, rgba(34,197,94,0.1))',
-              color: workspace.vmSize === LIGHTWEIGHT_VM_SIZE ? 'var(--sam-color-info, #3b82f6)' : 'var(--sam-color-success)',
+              backgroundColor: workspace.vmSize === LIGHTWEIGHT_VM_SIZE ? 'var(--sam-color-info-tint)' : 'var(--sam-color-success-tint)',
+              color: workspace.vmSize === LIGHTWEIGHT_VM_SIZE ? 'var(--sam-color-info)' : 'var(--sam-color-success)',
             }}
           >
             {workspace.vmSize === LIGHTWEIGHT_VM_SIZE ? 'Lightweight' : 'Full'}
@@ -997,9 +997,7 @@ function SessionHeader({
             {session.workspaceId && sessionState === 'active' && (
               <a
                 href={`/workspaces/${session.workspaceId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="ml-auto"
+                className="ml-auto no-underline"
               >
                 <Button variant="ghost" size="sm">
                   Open Workspace
@@ -1009,8 +1007,8 @@ function SessionHeader({
           </div>
 
           {/* Infrastructure context — workspace & node details */}
-          {(workspace || node) && (
-            <div className="grid gap-1.5 pt-1 border-t border-border-default">
+          {session.workspaceId && (workspace || node) && (
+            <div className="flex flex-col gap-1.5 pt-1 border-t border-border-default">
               {workspace && (
                 <>
                   <ContextItem icon={<Box size={12} />} label="Workspace">
@@ -1067,13 +1065,20 @@ function SessionHeader({
                     href={workspace.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="no-underline hover:underline font-mono text-[11px]"
+                    className="inline-flex items-center gap-1 no-underline hover:underline font-mono text-[11px] truncate"
                     style={{ color: 'var(--sam-color-accent-primary)' }}
                   >
                     {workspace.url.replace('https://', '')}
+                    <ExternalLink size={9} className="shrink-0" aria-hidden="true" />
                   </a>
                 </ContextItem>
               )}
+            </div>
+          )}
+          {/* Fallback when workspace data is still loading or failed */}
+          {session.workspaceId && !workspace && !node && (
+            <div className="pt-1 border-t border-border-default">
+              <span className="text-xs text-fg-muted">Loading infrastructure details...</span>
             </div>
           )}
         </div>
