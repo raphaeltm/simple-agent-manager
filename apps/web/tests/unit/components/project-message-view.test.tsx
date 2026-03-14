@@ -1263,12 +1263,127 @@ describe('ProjectMessageView — session context dropdown', () => {
     const expandButton = screen.getByRole('button', { name: /show session details/i });
     fireEvent.click(expandButton);
 
-    // Should NOT show workspace-specific labels since the fetch failed
-    // Wait a tick to ensure the fetch rejection was processed
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(100);
+    // Should show loading fallback, then settle to no workspace/node labels
+    await waitFor(() => {
+      expect(screen.queryByText('Workspace:')).toBeNull();
+      expect(screen.queryByText('Node:')).toBeNull();
     });
-    expect(screen.queryByText('Workspace:')).toBeNull();
+  });
+
+  it('falls back to workspace name when displayName is absent', async () => {
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-nodn',
+      name: 'raw-workspace-name',
+      // no displayName
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+      nodeId: 'node-1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-1',
+      name: 'node-1',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+
+    const session = makeSession('sess-dn', 'active');
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-dn', 'Hello')],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-dn" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Session sess-dn')).toBeTruthy();
+    });
+
+    const expandButton = screen.getByRole('button', { name: /show session details/i });
+    fireEvent.click(expandButton);
+
+    // Should fall back to name when displayName is absent
+    await waitFor(() => {
+      expect(screen.getByText('raw-workspace-name')).toBeTruthy();
+    });
+  });
+
+  it('shows workspace details without node when workspace has no nodeId', async () => {
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-nonode',
+      name: 'standalone-ws',
+      status: 'running',
+      vmSize: 'small',
+      vmLocation: 'hel1',
+      // no nodeId
+    });
+
+    const session = makeSession('sess-nonode', 'active');
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-nonode', 'Hello')],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-nonode" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Session sess-nonode')).toBeTruthy();
+    });
+
+    const expandButton = screen.getByRole('button', { name: /show session details/i });
+    fireEvent.click(expandButton);
+
+    // Workspace details should appear
+    await waitFor(() => {
+      expect(screen.getByText('standalone-ws')).toBeTruthy();
+    });
+    expect(screen.getByText('Location:')).toBeTruthy();
+    expect(screen.getByText('hel1')).toBeTruthy();
+
+    // Node details should NOT appear — getNode was never called
     expect(screen.queryByText('Node:')).toBeNull();
+    expect(mocks.getNode).not.toHaveBeenCalled();
+  });
+
+  it('shows workspace details but not node when getNode fails', async () => {
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-partial',
+      name: 'partial-ws',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+      nodeId: 'node-fail',
+    });
+    mocks.getNode.mockRejectedValue(new Error('Node not found'));
+
+    const session = makeSession('sess-partial', 'active');
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-partial', 'Hello')],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-partial" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Session sess-partial')).toBeTruthy();
+    });
+
+    const expandButton = screen.getByRole('button', { name: /show session details/i });
+    fireEvent.click(expandButton);
+
+    // Workspace details should still appear despite node failure
+    await waitFor(() => {
+      expect(screen.getByText('partial-ws')).toBeTruthy();
+    });
+    expect(screen.getByText('Workspace:')).toBeTruthy();
+    expect(screen.getByText('VM Size:')).toBeTruthy();
+
+    // Node details should NOT appear
+    await waitFor(() => {
+      expect(screen.queryByText('Node:')).toBeNull();
+    });
   });
 });
