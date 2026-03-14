@@ -732,6 +732,16 @@ temperature = 0.2
 `, activeModel)
 }
 
+// resolveVibeActiveModel determines which model alias to use for a Mistral
+// Vibe session. Returns the user's model override if set, otherwise the
+// platform default (Mistral Large).
+func resolveVibeActiveModel(settings *agentSettingsPayload) string {
+	if settings != nil && settings.Model != "" {
+		return settings.Model
+	}
+	return vibeDefaultActiveModel
+}
+
 // writeVibeConfigToContainer writes a .vibe/config.toml into the container
 // for the Mistral Vibe agent. This is necessary because VIBE_ACTIVE_MODEL
 // expects a config alias (not a raw API model name), and only "devstral-2"

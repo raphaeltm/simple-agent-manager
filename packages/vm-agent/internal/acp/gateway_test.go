@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -336,17 +337,38 @@ func TestGenerateVibeConfig_DefaultModel(t *testing.T) {
 	t.Parallel()
 
 	config := generateVibeConfig("")
+
+	// Verify active_model references the default alias
 	if !strings.Contains(config, `active_model = "mistral-large"`) {
 		t.Errorf("expected default active_model to be mistral-large, got:\n%s", config)
 	}
-	if !strings.Contains(config, `name = "mistral-large-latest"`) {
-		t.Error("expected mistral-large-latest model entry")
+
+	// Verify all three model entries are defined with correct name→alias mappings
+	requiredModels := []struct {
+		name  string
+		alias string
+	}{
+		{"mistral-large-latest", "mistral-large"},
+		{"mistral-vibe-cli-latest", "devstral-2"},
+		{"codestral-latest", "codestral"},
 	}
-	if !strings.Contains(config, `alias = "devstral-2"`) {
-		t.Error("expected devstral-2 alias to be defined")
+	for _, m := range requiredModels {
+		if !strings.Contains(config, fmt.Sprintf(`name = "%s"`, m.name)) {
+			t.Errorf("missing model name %q", m.name)
+		}
+		if !strings.Contains(config, fmt.Sprintf(`alias = "%s"`, m.alias)) {
+			t.Errorf("missing model alias %q", m.alias)
+		}
 	}
-	if !strings.Contains(config, `alias = "codestral"`) {
-		t.Error("expected codestral alias to be defined")
+
+	// Verify the active_model alias is actually defined as a model entry
+	if !strings.Contains(config, `alias = "`+vibeDefaultActiveModel+`"`) {
+		t.Errorf("active_model %q is not defined as a model alias", vibeDefaultActiveModel)
+	}
+
+	// Count [[models]] entries — should be exactly 3
+	if count := strings.Count(config, "[[models]]"); count != 3 {
+		t.Errorf("expected 3 [[models]] entries, got %d", count)
 	}
 }
 
@@ -356,6 +378,36 @@ func TestGenerateVibeConfig_CustomModel(t *testing.T) {
 	config := generateVibeConfig("devstral-2")
 	if !strings.Contains(config, `active_model = "devstral-2"`) {
 		t.Errorf("expected active_model to be devstral-2, got:\n%s", config)
+	}
+	// All model aliases must still be present regardless of active model
+	for _, alias := range []string{"mistral-large", "devstral-2", "codestral"} {
+		if !strings.Contains(config, fmt.Sprintf(`alias = "%s"`, alias)) {
+			t.Errorf("missing model alias %q when active model is devstral-2", alias)
+		}
+	}
+}
+
+func TestResolveVibeActiveModel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		settings *agentSettingsPayload
+		want     string
+	}{
+		{"nil settings", nil, vibeDefaultActiveModel},
+		{"empty model", &agentSettingsPayload{Model: ""}, vibeDefaultActiveModel},
+		{"custom model", &agentSettingsPayload{Model: "devstral-2"}, "devstral-2"},
+		{"custom model with other settings", &agentSettingsPayload{Model: "codestral", PermissionMode: "full"}, "codestral"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := resolveVibeActiveModel(tt.settings)
+			if got != tt.want {
+				t.Errorf("resolveVibeActiveModel() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -863,10 +863,7 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 	// The config sets the active model based on user settings or defaults
 	// to Mistral Large (their most capable model).
 	if agentType == "mistral-vibe" {
-		activeModel := vibeDefaultActiveModel
-		if settings != nil && settings.Model != "" {
-			activeModel = settings.Model
-		}
+		activeModel := resolveVibeActiveModel(settings)
 		if err := writeVibeConfigToContainer(ctx, containerID, h.config.ContainerUser, activeModel); err != nil {
 			slog.Warn("Failed to write Vibe config.toml", "error", err)
 			// Non-fatal: vibe-acp will fall back to built-in devstral-2 default
