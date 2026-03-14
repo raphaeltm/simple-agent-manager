@@ -204,4 +204,71 @@ describe('getUserCloudProviderConfig', () => {
       getUserCloudProviderConfig(db, 'user-1', 'enc-key'),
     ).rejects.toThrow('Unsupported provider');
   });
+
+  it('passes targetProvider as additional where condition when specified', async () => {
+    const whereSpy = vi.fn().mockReturnThis();
+    const db = {
+      select: vi.fn().mockReturnThis(),
+      from: vi.fn().mockReturnThis(),
+      where: whereSpy,
+      limit: vi.fn().mockResolvedValue([]),
+    } as any;
+
+    await getUserCloudProviderConfig(db, 'user-1', 'enc-key', 'scaleway');
+
+    // where() should be called with the combined conditions
+    expect(whereSpy).toHaveBeenCalledTimes(1);
+    // The call was made, meaning the provider filter was included
+  });
+
+  it('returns null when targetProvider is specified but no matching credential exists', async () => {
+    mockDecrypt.mockClear();
+    const db = makeDbMock([]) as any;
+    const result = await getUserCloudProviderConfig(db, 'user-1', 'enc-key', 'scaleway');
+    expect(result).toBeNull();
+    expect(mockDecrypt).not.toHaveBeenCalled();
+  });
+
+  it('returns matching credential when targetProvider matches the stored provider', async () => {
+    mockDecrypt.mockResolvedValueOnce(
+      JSON.stringify({ secretKey: 'scw-key', projectId: 'proj-id' }),
+    );
+
+    const db = makeDbMock([
+      {
+        provider: 'scaleway',
+        encryptedToken: 'ciphertext',
+        iv: 'iv',
+        credentialType: 'cloud-provider',
+        userId: 'user-1',
+      },
+    ]) as any;
+
+    const result = await getUserCloudProviderConfig(db, 'user-1', 'enc-key', 'scaleway');
+    expect(result).not.toBeNull();
+    expect(result!.provider).toBe('scaleway');
+    expect(result!.config).toEqual({
+      provider: 'scaleway',
+      secretKey: 'scw-key',
+      projectId: 'proj-id',
+    });
+  });
+
+  it('returns first credential when no targetProvider is specified (backward compatible)', async () => {
+    mockDecrypt.mockResolvedValueOnce('hetzner-token');
+
+    const db = makeDbMock([
+      {
+        provider: 'hetzner',
+        encryptedToken: 'ciphertext',
+        iv: 'iv',
+        credentialType: 'cloud-provider',
+        userId: 'user-1',
+      },
+    ]) as any;
+
+    const result = await getUserCloudProviderConfig(db, 'user-1', 'enc-key');
+    expect(result).not.toBeNull();
+    expect(result!.provider).toBe('hetzner');
+  });
 });

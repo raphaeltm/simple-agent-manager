@@ -407,6 +407,96 @@ describe('task context passed to provisionNode for cloud-init', () => {
 });
 
 // =============================================================================
+// Provider-aware node creation and error observability
+// =============================================================================
+
+describe('provider-aware node provisioning', () => {
+  const nodesSource = readFileSync(
+    resolve(process.cwd(), 'src/services/nodes.ts'),
+    'utf8'
+  );
+
+  it('CreateNodeInput includes optional cloudProvider field', () => {
+    expect(nodesSource).toContain('cloudProvider?: string');
+  });
+
+  it('ProvisionedNode includes cloudProvider field', () => {
+    expect(nodesSource).toContain('cloudProvider: string | null');
+  });
+
+  it('createNodeRecord stores cloudProvider in DB insert', () => {
+    const section = nodesSource.slice(
+      nodesSource.indexOf('async function createNodeRecord'),
+      nodesSource.indexOf('async function provisionNode')
+    );
+    expect(section).toContain('cloudProvider: input.cloudProvider');
+  });
+
+  it('provisionNode reads cloudProvider from node record for credential lookup', () => {
+    const section = nodesSource.slice(
+      nodesSource.indexOf('async function provisionNode'),
+      nodesSource.indexOf('async function stopNodeResources')
+    );
+    expect(section).toContain('node.cloudProvider as CredentialProvider');
+    expect(section).toContain('targetProvider');
+  });
+
+  it('provisionNode passes targetProvider to getUserCloudProviderConfig', () => {
+    const section = nodesSource.slice(
+      nodesSource.indexOf('async function provisionNode'),
+      nodesSource.indexOf('async function stopNodeResources')
+    );
+    expect(section).toContain('getUserCloudProviderConfig(db, node.userId, env.ENCRYPTION_KEY, targetProvider)');
+  });
+
+  it('provisionNode persists error to observability database on failure', () => {
+    const section = nodesSource.slice(
+      nodesSource.indexOf('async function provisionNode'),
+      nodesSource.indexOf('async function stopNodeResources')
+    );
+    expect(section).toContain('persistError(env.OBSERVABILITY_DATABASE');
+    expect(section).toContain("source: 'api'");
+    expect(section).toContain("component: 'node-provisioning'");
+  });
+
+  it('provisionNode stores detailed error message in node record (not generic)', () => {
+    const section = nodesSource.slice(
+      nodesSource.indexOf('async function provisionNode'),
+      nodesSource.indexOf('async function stopNodeResources')
+    );
+    expect(section).toContain('`[${providerName}] ${truncatedError}`');
+    // Must NOT use the old generic message
+    expect(section).not.toContain("errorMessage: 'Node provisioning failed'");
+  });
+
+  it('provisionNode includes provider and statusCode in console.error context', () => {
+    const section = nodesSource.slice(
+      nodesSource.indexOf('async function provisionNode'),
+      nodesSource.indexOf('async function stopNodeResources')
+    );
+    expect(section).toContain('provider: providerName');
+    expect(section).toContain('statusCode');
+  });
+
+  it('stopNodeResources uses node cloudProvider for credential lookup', () => {
+    const section = nodesSource.slice(
+      nodesSource.indexOf('async function stopNodeResources'),
+      nodesSource.indexOf('async function deleteNodeResources')
+    );
+    expect(section).toContain('node.cloudProvider as CredentialProvider');
+    expect(section).toContain('getUserCloudProviderConfig(db, userId, env.ENCRYPTION_KEY, targetProvider)');
+  });
+
+  it('deleteNodeResources uses node cloudProvider for credential lookup', () => {
+    const section = nodesSource.slice(
+      nodesSource.indexOf('async function deleteNodeResources')
+    );
+    expect(section).toContain('node.cloudProvider as CredentialProvider');
+    expect(section).toContain('getUserCloudProviderConfig(db, userId, env.ENCRYPTION_KEY, targetProvider)');
+  });
+});
+
+// =============================================================================
 // provisionNode accepts task context (nodes.ts)
 // =============================================================================
 

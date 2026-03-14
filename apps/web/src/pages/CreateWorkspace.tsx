@@ -12,7 +12,7 @@ import {
   listGitHubInstallations,
   listNodes,
 } from '../lib/api';
-import type { GitHubInstallation, NodeResponse, ProjectDetailResponse, ProviderCatalog, VMSize } from '@simple-agent-manager/shared';
+import type { CredentialProvider, GitHubInstallation, NodeResponse, ProjectDetailResponse, ProviderCatalog, VMSize } from '@simple-agent-manager/shared';
 import { PROVIDER_LABELS } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, Input, PageLayout, Select, Spinner } from '@simple-agent-manager/ui';
 
@@ -275,6 +275,7 @@ export function CreateWorkspace() {
         installationId,
         vmSize,
         vmLocation,
+        ...(selectedProvider && !selectedNodeId ? { provider: selectedProvider as CredentialProvider } : {}),
       });
 
       navigate(`/workspaces/${workspace.id}`);

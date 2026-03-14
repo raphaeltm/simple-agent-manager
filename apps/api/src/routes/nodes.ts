@@ -76,6 +76,7 @@ function toNodeResponse(node: schema.Node): NodeResponse {
     name: node.name,
     status: node.status as NodeResponse['status'],
     healthStatus: node.healthStatus as NodeResponse['healthStatus'],
+    cloudProvider: (node.cloudProvider as NodeResponse['cloudProvider']) ?? null,
     vmSize: node.vmSize as NodeResponse['vmSize'],
     vmLocation: node.vmLocation as NodeResponse['vmLocation'],
     ipAddress: node.ipAddress,
@@ -163,6 +164,7 @@ nodesRoutes.post('/', async (c) => {
     name: body.name.trim(),
     vmSize: body.vmSize ?? DEFAULT_VM_SIZE,
     vmLocation: body.vmLocation ?? DEFAULT_VM_LOCATION,
+    cloudProvider: body.provider,
     heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
   });
 

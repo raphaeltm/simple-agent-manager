@@ -5,9 +5,11 @@ import { ulid } from '../lib/ulid';
 import * as schema from '../db/schema';
 import type { Env } from '../index';
 import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
-import { createProvider } from '@simple-agent-manager/providers';
+import { createProvider, ProviderError } from '@simple-agent-manager/providers';
+import type { CredentialProvider } from '@simple-agent-manager/shared';
 import { signCallbackToken } from './jwt';
 import { getUserCloudProviderConfig } from './provider-credentials';
+import { persistError } from './observability';
 
 export interface CreateNodeInput {
   userId: string;
@@ -15,6 +17,7 @@ export interface CreateNodeInput {
   vmSize: string;
   vmLocation: string;
   heartbeatStaleAfterSeconds: number;
+  cloudProvider?: string;
 }
 
 export interface ProvisionedNode {
@@ -24,6 +27,7 @@ export interface ProvisionedNode {
   status: string;
   vmSize: string;
   vmLocation: string;
+  cloudProvider: string | null;
   ipAddress: string | null;
   lastHeartbeatAt: string | null;
   healthStatus: string;
@@ -45,6 +49,7 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     status: 'creating',
     vmSize: input.vmSize,
     vmLocation: input.vmLocation,
+    cloudProvider: input.cloudProvider ?? null,
     healthStatus: 'stale',
     heartbeatStaleAfterSeconds: input.heartbeatStaleAfterSeconds,
     createdAt: now,
@@ -58,6 +63,7 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     status: 'creating',
     vmSize: input.vmSize,
     vmLocation: input.vmLocation,
+    cloudProvider: input.cloudProvider ?? null,
     ipAddress: null,
     lastHeartbeatAt: null,
     healthStatus: 'stale',
@@ -93,10 +99,16 @@ export async function provisionNode(
     return;
   }
 
+  const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
+
   try {
-    const credResult = await getUserCloudProviderConfig(db, node.userId, env.ENCRYPTION_KEY);
+    const credResult = await getUserCloudProviderConfig(db, node.userId, env.ENCRYPTION_KEY, targetProvider);
     if (!credResult) {
-      throw new Error('Cloud provider account not connected');
+      throw new Error(
+        targetProvider
+          ? `Cloud provider "${targetProvider}" not connected`
+          : 'Cloud provider account not connected',
+      );
     }
 
     const callbackToken = await signCallbackToken(node.id, env);
@@ -155,13 +167,49 @@ export async function provisionNode(
       })
       .where(eq(schema.nodes.id, node.id));
   } catch (err) {
-    console.error('Node provisioning failed:', { nodeId: node.id, error: err instanceof Error ? err.message : err });
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    const providerName = targetProvider ?? 'unknown';
+    const statusCode = err instanceof ProviderError ? err.statusCode : undefined;
+
+    console.error('Node provisioning failed:', {
+      nodeId: node.id,
+      provider: providerName,
+      vmSize: node.vmSize,
+      vmLocation: node.vmLocation,
+      statusCode,
+      error: errorMessage,
+    });
+
+    // Persist detailed error to observability database
+    try {
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'error',
+        message: `Node provisioning failed: ${errorMessage}`,
+        context: {
+          component: 'node-provisioning',
+          nodeId: node.id,
+          userId: node.userId,
+          provider: providerName,
+          vmSize: node.vmSize,
+          vmLocation: node.vmLocation,
+          statusCode,
+        },
+        nodeId: node.id,
+        userId: node.userId,
+      });
+    } catch (obsErr) {
+      console.error('Failed to persist provisioning error to observability DB:', obsErr);
+    }
+
+    // Store the actual error message (truncated) in the node record
+    const truncatedError = errorMessage.length > 500 ? errorMessage.slice(0, 500) + '...' : errorMessage;
     await db
       .update(schema.nodes)
       .set({
         status: 'error',
         healthStatus: 'unhealthy',
-        errorMessage: 'Node provisioning failed',
+        errorMessage: `[${providerName}] ${truncatedError}`,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.nodes.id, node.id));
@@ -190,7 +238,8 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
 
   // Delete the cloud provider server since stopped nodes cannot be restarted
   if (node.providerInstanceId) {
-    const credResult = await getUserCloudProviderConfig(db, userId, env.ENCRYPTION_KEY);
+    const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
+    const credResult = await getUserCloudProviderConfig(db, userId, env.ENCRYPTION_KEY, targetProvider);
     if (credResult) {
       try {
         const provider = createProvider(credResult.config);
@@ -259,7 +308,8 @@ export async function deleteNodeResources(nodeId: string, userId: string, env: E
   }
 
   if (node.providerInstanceId) {
-    const credResult = await getUserCloudProviderConfig(db, userId, env.ENCRYPTION_KEY);
+    const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
+    const credResult = await getUserCloudProviderConfig(db, userId, env.ENCRYPTION_KEY, targetProvider);
     if (credResult) {
       try {
         const provider = createProvider(credResult.config);
