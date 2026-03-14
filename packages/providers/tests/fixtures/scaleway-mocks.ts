@@ -84,13 +84,14 @@ export function createScalewayFetchMock(overrides?: {
       return Promise.resolve(new Response(null, { status: 204 }));
     }
 
-    // GET /servers/:id → getVM (single server, not list)
+    // GET /servers/:id → getVM or IP poll (single server, not list)
     if (method === 'GET' && urlStr.match(/\/servers\/[^/?]+$/) && !urlStr.includes('?')) {
       if (urlStr.includes('non-existent')) {
         return Promise.resolve(
           new Response(JSON.stringify({ message: 'Not found' }), { status: 404 }),
         );
       }
+
       const server = overrides?.getServer ?? createMockScalewayServer();
       return Promise.resolve(
         new Response(JSON.stringify({ server }), { status: 200 }),

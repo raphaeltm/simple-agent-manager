@@ -148,6 +148,27 @@ export async function provisionNode(
       },
     });
 
+    // Scaleway allocates IPs asynchronously after boot — vm.ip will be empty.
+    // Store the provider instance ID and mark as pending-ip; heartbeat backfill
+    // will capture the IP when the VM agent sends its first heartbeat.
+    if (!vm.ip) {
+      console.log('Provider returned empty IP — awaiting heartbeat backfill', {
+        nodeId: node.id,
+        providerInstanceId: vm.id,
+        action: 'node_awaiting_ip',
+      });
+      await db
+        .update(schema.nodes)
+        .set({
+          providerInstanceId: vm.id,
+          status: 'creating',
+          errorMessage: 'Awaiting IP allocation — will be set on first heartbeat',
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.nodes.id, node.id));
+      return;
+    }
+
     let backendDnsRecordId: string | null = null;
     try {
       backendDnsRecordId = await createNodeBackendDNSRecord(node.id, vm.ip, env);

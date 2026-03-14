@@ -1,5 +1,8 @@
 import type { VMSize } from '@simple-agent-manager/shared';
-import { DEFAULT_SCALEWAY_ZONE, DEFAULT_SCALEWAY_IMAGE_NAME } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_SCALEWAY_ZONE,
+  DEFAULT_SCALEWAY_IMAGE_NAME,
+} from '@simple-agent-manager/shared';
 import type { LocationMeta, Provider, SizeConfig, VMConfig, VMInstance, VMStatus } from './types';
 import { ProviderError } from './types';
 import { providerFetch } from './provider-fetch';
@@ -99,6 +102,10 @@ export class ScalewayProvider implements Provider {
    * 1. POST /servers — creates server in stopped state
    * 2. PATCH /servers/:id/user_data/cloud-init — sets cloud-init (text/plain)
    * 3. POST /servers/:id/action — powers on the server
+   *
+   * Note: Scaleway allocates IPs only after boot, so the returned VMInstance
+   * will have an empty `ip` field. The caller (provisionNode) handles this via
+   * fail-fast guard + heartbeat IP backfill.
    */
   async createVM(config: VMConfig): Promise<VMInstance> {
     const sizeConfig = this.sizes[config.size];
@@ -151,6 +158,10 @@ export class ScalewayProvider implements Provider {
     // Step 3: Power on
     await this.performAction(location, serverId, 'poweron');
 
+    // Return immediately — IP will be empty at this point.
+    // Scaleway allocates IPs asynchronously after boot.
+    // The heartbeat IP backfill in the nodes route will capture the IP
+    // when the VM agent sends its first heartbeat.
     return this.mapServerToVMInstance(createData.server);
   }
 

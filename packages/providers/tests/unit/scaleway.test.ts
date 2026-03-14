@@ -144,7 +144,7 @@ describe('ScalewayProvider', () => {
 
       await provider.createVM(vmConfig);
 
-      // Should have made at least 4 calls: resolve image, create server, set cloud-init, poweron
+      // Should have made 4 calls: resolve image, create server, set cloud-init, poweron
       expect(mockFetch).toHaveBeenCalledTimes(4);
 
       // Call 1: GET images (resolve image ID)
@@ -208,14 +208,14 @@ describe('ScalewayProvider', () => {
       expect(createUrl).toContain('/zones/nl-ams-1/servers');
     });
 
-    it('should return mapped VMInstance', async () => {
+    it('should return mapped VMInstance with empty IP (allocated after boot)', async () => {
       globalThis.fetch = createScalewayFetchMock({
         createServer: createMockScalewayServer({
           id: 'new-id',
           name: 'my-vm',
           state: 'stopped',
-          public_ip: { address: '5.6.7.8' },
-          public_ips: [{ address: '5.6.7.8' }],
+          public_ip: null,
+          public_ips: [],
           commercial_type: 'DEV1-XL',
           creation_date: '2024-06-01T00:00:00Z',
           tags: ['node=n1'],
@@ -224,11 +224,12 @@ describe('ScalewayProvider', () => {
 
       const result = await provider.createVM(vmConfig);
 
+      // IP is empty because Scaleway allocates it asynchronously after boot
       expect(result).toEqual({
         id: 'new-id',
         name: 'my-vm',
-        ip: '5.6.7.8',
-        status: 'off', // 'stopped' maps to 'off' — server is created in stopped state before poweron
+        ip: '',
+        status: 'off',
         serverType: 'DEV1-XL',
         createdAt: '2024-06-01T00:00:00Z',
         labels: { node: 'n1' },
@@ -263,6 +264,7 @@ describe('ScalewayProvider', () => {
 
       await expect(provider.createVM(vmConfig)).rejects.toThrow(ProviderError);
     });
+
   });
 
   describe('deleteVM', () => {
