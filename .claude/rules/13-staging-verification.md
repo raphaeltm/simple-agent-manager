@@ -116,6 +116,43 @@ If you find a bug unrelated to your PR, file it as a backlog task (`tasks/backlo
 - **Existing workflow is broken** → investigate whether your PR caused it; if yes, fix it; if pre-existing, file a backlog task but still do not merge with NEW regressions
 - **Cannot authenticate** → ask the human for credentials, do not skip verification
 
+## Feature-Specific Verification Is Mandatory (Not Just Page Loads)
+
+Staging verification means **exercising the actual functionality the PR changed**, not just confirming pages render. Checking that the dashboard loads after a provider fix is useless — it proves nothing about whether the fix works.
+
+### What "Verify Your Feature" Actually Means
+
+Match the verification to what the PR actually changes:
+
+| PR Changes | Required Verification |
+|------------|----------------------|
+| Provider/node creation | Create a node using that provider on staging, confirm it provisions and gets healthy |
+| IP allocation/backfill | Create a node, confirm it gets a real IP address, confirm DNS resolves |
+| Workspace creation | Create a workspace on a node, confirm it's accessible via `ws-*` subdomain |
+| Agent installation | Submit a task with that agent type, confirm the agent installs and runs |
+| Chat/messaging | Send messages in a project chat, confirm they persist and display |
+| Task execution | Submit a task, confirm it progresses through the lifecycle |
+| Auth changes | Log out and log back in, confirm the auth flow works end-to-end |
+| API endpoint changes | Call the affected endpoints and verify responses |
+
+### What Is NOT Acceptable as Feature Verification
+
+- Confirming pages load (this is a regression check, not feature verification)
+- Checking that navigation works
+- Verifying no console errors
+- "The code changes look correct"
+- "Unit tests pass"
+
+These are baseline regression checks. They do NOT verify that the specific fix or feature works on the live environment.
+
+### If You Cannot Verify the Feature
+
+If the feature genuinely cannot be tested on staging (e.g., requires credentials that aren't configured), you MUST:
+1. Explicitly state what is blocked and why
+2. Ask the human whether to proceed or wait
+3. Do NOT merge without human approval for the gap
+4. Do NOT substitute page-load checks as if they verify the feature
+
 ## No Self-Exemptions
 
 - "It's just a docs change" → if you changed ANY `.ts`, `.tsx`, `.go`, or other runtime code, you verify
