@@ -554,6 +554,12 @@ nodesRoutes.post('/:id/heartbeat', async (c) => {
     updatePayload.lastMetrics = JSON.stringify(body.metrics);
   }
 
+  // Self-heal stale "Awaiting IP allocation" error on nodes that already have an IP.
+  // This handles nodes where the IP was backfilled before this fix was deployed.
+  if (node.ipAddress && node.errorMessage?.includes('Awaiting IP allocation')) {
+    updatePayload.errorMessage = sql`NULL`;
+  }
+
   // Defense-in-depth: backfill IP from heartbeat if node has no IP stored.
   // This self-heals Scaleway nodes where the IP wasn't captured at creation time.
   if (!node.ipAddress) {
