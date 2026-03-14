@@ -381,6 +381,111 @@ func TestUpsertWorkspaceRuntimeHydratesFromSQLite(t *testing.T) {
 	}
 }
 
+func TestUpsertWorkspaceRuntimeSetsLightweightFlag(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		config: &config.Config{
+			WorkspaceDir: "/workspace",
+		},
+		workspaces:      map[string]*WorkspaceRuntime{},
+		workspaceEvents: map[string][]EventRecord{},
+	}
+
+	// Create with Lightweight=true
+	runtime := s.upsertWorkspaceRuntime("WS_LIGHT", "octo/repo", "main", "creating", "", workspaceRuntimeOpts{
+		Lightweight: true,
+	})
+	if !runtime.Lightweight {
+		t.Fatal("expected Lightweight=true on new runtime, got false")
+	}
+
+	// Create without Lightweight (defaults to false)
+	runtimeFull := s.upsertWorkspaceRuntime("WS_FULL", "octo/repo", "main", "creating", "")
+	if runtimeFull.Lightweight {
+		t.Fatal("expected Lightweight=false by default, got true")
+	}
+}
+
+func TestUpsertWorkspaceRuntimeLightweightPersistsToSQLite(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	store, err := persistence.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open store: %v", err)
+	}
+	defer store.Close()
+
+	s := &Server{
+		config: &config.Config{
+			WorkspaceDir: "/workspace",
+		},
+		workspaces:      map[string]*WorkspaceRuntime{},
+		workspaceEvents: map[string][]EventRecord{},
+		store:           store,
+	}
+
+	// Create workspace with lightweight=true
+	s.upsertWorkspaceRuntime("WS_PERSIST_LIGHT", "octo/repo", "main", "creating", "", workspaceRuntimeOpts{
+		Lightweight: true,
+	})
+
+	// Verify it persisted to SQLite
+	meta, err := store.GetWorkspaceMetadata("WS_PERSIST_LIGHT")
+	if err != nil {
+		t.Fatalf("GetWorkspaceMetadata: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("expected metadata to be persisted")
+	}
+	if !meta.Lightweight {
+		t.Error("expected Lightweight=true in persisted metadata, got false")
+	}
+}
+
+func TestUpsertWorkspaceRuntimeHydratesLightweightFromSQLite(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	store, err := persistence.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open store: %v", err)
+	}
+	defer store.Close()
+
+	// Pre-populate metadata with lightweight=true
+	err = store.UpsertWorkspaceMetadata(persistence.WorkspaceMetadata{
+		WorkspaceID:       "WS_HYDRATE",
+		Repository:        "octo/repo",
+		Branch:            "main",
+		ContainerWorkDir:  "/workspaces/repo",
+		ContainerUser:     "vscode",
+		ContainerLabelVal: "/workspace/WS_HYDRATE",
+		WorkspaceDir:      "/workspace/WS_HYDRATE",
+		Lightweight:       true,
+	})
+	if err != nil {
+		t.Fatalf("UpsertWorkspaceMetadata: %v", err)
+	}
+
+	s := &Server{
+		config: &config.Config{
+			WorkspaceDir: "/workspace",
+		},
+		workspaces:      map[string]*WorkspaceRuntime{},
+		workspaceEvents: map[string][]EventRecord{},
+		store:           store,
+	}
+
+	// Simulate reconnection — upsert with empty repo (hydrates from SQLite)
+	runtime := s.upsertWorkspaceRuntime("WS_HYDRATE", "", "", "running", "")
+
+	if !runtime.Lightweight {
+		t.Fatal("expected Lightweight=true hydrated from SQLite, got false")
+	}
+}
+
 func TestUpsertWorkspaceRuntimeWithoutStoreFallsBackToDerivation(t *testing.T) {
 	t.Parallel()
 

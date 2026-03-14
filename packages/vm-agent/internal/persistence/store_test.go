@@ -762,6 +762,108 @@ func TestSessionMcpServersPersistedAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestMigrationV6AddsLightweightColumn(t *testing.T) {
+	dbPath := tempDBPath(t)
+
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	err = store.UpsertWorkspaceMetadata(WorkspaceMetadata{
+		WorkspaceID:      "ws-1",
+		Repository:       "octo/repo",
+		ContainerWorkDir: "/workspaces/repo",
+		Lightweight:      true,
+	})
+	if err != nil {
+		t.Fatalf("UpsertWorkspaceMetadata with lightweight: %v", err)
+	}
+	store.Close()
+
+	// Reopen — migration must be idempotent
+	store2, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Reopen after migration v6: %v", err)
+	}
+	defer store2.Close()
+
+	meta, _ := store2.GetWorkspaceMetadata("ws-1")
+	if meta == nil {
+		t.Fatal("expected metadata to survive reopen")
+	}
+	if !meta.Lightweight {
+		t.Error("expected Lightweight=true persisted after reopen")
+	}
+}
+
+func TestWorkspaceMetadataLightweightRoundTrip(t *testing.T) {
+	store, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	// Upsert with lightweight=true
+	err = store.UpsertWorkspaceMetadata(WorkspaceMetadata{
+		WorkspaceID:       "ws-light",
+		Repository:        "octo/repo",
+		Branch:            "main",
+		ContainerWorkDir:  "/workspaces/repo",
+		ContainerUser:     "vscode",
+		ContainerLabelVal: "/workspace/ws-light",
+		WorkspaceDir:      "/workspace/ws-light",
+		Lightweight:       true,
+	})
+	if err != nil {
+		t.Fatalf("UpsertWorkspaceMetadata: %v", err)
+	}
+
+	meta, err := store.GetWorkspaceMetadata("ws-light")
+	if err != nil {
+		t.Fatalf("GetWorkspaceMetadata: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("expected non-nil metadata")
+	}
+	if !meta.Lightweight {
+		t.Error("expected Lightweight=true after round-trip, got false")
+	}
+}
+
+func TestWorkspaceMetadataLightweightDefaultsFalse(t *testing.T) {
+	store, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	// Upsert without setting Lightweight (zero value = false)
+	err = store.UpsertWorkspaceMetadata(WorkspaceMetadata{
+		WorkspaceID:       "ws-full",
+		Repository:        "octo/repo",
+		Branch:            "main",
+		ContainerWorkDir:  "/workspaces/repo",
+		ContainerUser:     "vscode",
+		ContainerLabelVal: "/workspace/ws-full",
+		WorkspaceDir:      "/workspace/ws-full",
+	})
+	if err != nil {
+		t.Fatalf("UpsertWorkspaceMetadata: %v", err)
+	}
+
+	meta, err := store.GetWorkspaceMetadata("ws-full")
+	if err != nil {
+		t.Fatalf("GetWorkspaceMetadata: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("expected non-nil metadata")
+	}
+	if meta.Lightweight {
+		t.Error("expected Lightweight=false by default, got true")
+	}
+}
+
 func TestMigrationV3AddsLastPromptColumn(t *testing.T) {
 	dbPath := tempDBPath(t)
 
