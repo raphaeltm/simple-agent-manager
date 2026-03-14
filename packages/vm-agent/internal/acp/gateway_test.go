@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -312,7 +313,7 @@ func TestGetAgentExtraEnvVars_MistralVibe(t *testing.T) {
 		t.Fatalf("expected 2 extra env vars for mistral-vibe, got %d", len(envVars))
 	}
 	wantName := "VIBE_CLIENT_NAME=sam"
-	wantVersion := "VIBE_CLIENT_VERSION=1.0.0"
+	wantVersion := "VIBE_CLIENT_VERSION=1.0.1"
 	if envVars[0] != wantName {
 		t.Errorf("envVars[0]=%q, want %q", envVars[0], wantName)
 	}
@@ -328,6 +329,33 @@ func TestGetAgentExtraEnvVars_OtherAgents(t *testing.T) {
 		if envVars := getAgentExtraEnvVars(agent); len(envVars) != 0 {
 			t.Errorf("getAgentExtraEnvVars(%q) returned %v, want nil", agent, envVars)
 		}
+	}
+}
+
+func TestGenerateVibeConfig_DefaultModel(t *testing.T) {
+	t.Parallel()
+
+	config := generateVibeConfig("")
+	if !strings.Contains(config, `active_model = "mistral-large"`) {
+		t.Errorf("expected default active_model to be mistral-large, got:\n%s", config)
+	}
+	if !strings.Contains(config, `name = "mistral-large-latest"`) {
+		t.Error("expected mistral-large-latest model entry")
+	}
+	if !strings.Contains(config, `alias = "devstral-2"`) {
+		t.Error("expected devstral-2 alias to be defined")
+	}
+	if !strings.Contains(config, `alias = "codestral"`) {
+		t.Error("expected codestral alias to be defined")
+	}
+}
+
+func TestGenerateVibeConfig_CustomModel(t *testing.T) {
+	t.Parallel()
+
+	config := generateVibeConfig("devstral-2")
+	if !strings.Contains(config, `active_model = "devstral-2"`) {
+		t.Errorf("expected active_model to be devstral-2, got:\n%s", config)
 	}
 }
 

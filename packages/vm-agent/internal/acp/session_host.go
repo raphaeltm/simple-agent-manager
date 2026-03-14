@@ -858,7 +858,24 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		envVars = append(envVars, fmt.Sprintf("%s=%s", info.envVarName, cred.credential))
 	}
 
-	if settings != nil && settings.Model != "" {
+	// For Mistral Vibe: write ~/.vibe/config.toml with model aliases so the
+	// user can select models beyond the built-in devstral-2 default.
+	// The config sets the active model based on user settings or defaults
+	// to Mistral Large (their most capable model).
+	if agentType == "mistral-vibe" {
+		activeModel := vibeDefaultActiveModel
+		if settings != nil && settings.Model != "" {
+			activeModel = settings.Model
+		}
+		if err := writeVibeConfigToContainer(ctx, containerID, h.config.ContainerUser, activeModel); err != nil {
+			slog.Warn("Failed to write Vibe config.toml", "error", err)
+			// Non-fatal: vibe-acp will fall back to built-in devstral-2 default
+		} else {
+			slog.Info("Wrote Vibe config.toml", "activeModel", activeModel)
+		}
+		// Still set VIBE_ACTIVE_MODEL env var as a belt-and-suspenders approach
+		envVars = append(envVars, fmt.Sprintf("VIBE_ACTIVE_MODEL=%s", activeModel))
+	} else if settings != nil && settings.Model != "" {
 		modelEnv := getModelEnvVar(agentType)
 		if modelEnv != "" {
 			envVars = append(envVars, fmt.Sprintf("%s=%s", modelEnv, settings.Model))
