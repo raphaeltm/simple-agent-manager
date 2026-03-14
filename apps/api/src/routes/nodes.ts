@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { and, desc, eq, inArray, ne } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { CreateNodeRequest, NodeHealthStatus, NodeResponse } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
@@ -566,10 +566,14 @@ nodesRoutes.post('/:id/heartbeat', async (c) => {
       });
       updatePayload.ipAddress = heartbeatIp;
 
+      // Always clear the "Awaiting IP allocation" error when IP is backfilled.
+      // Use explicit SQL null to ensure Drizzle/D1 generates SET errorMessage = NULL
+      // (assigning null to a Record<string, unknown> property may be silently dropped).
+      updatePayload.errorMessage = sql`NULL`;
+
       // Transition to running if the node was awaiting IP allocation
       if (node.status === 'creating' || node.status === 'error') {
         updatePayload.status = 'running';
-        updatePayload.errorMessage = null;
       }
 
       // Update DNS record if we have one, or create a new one

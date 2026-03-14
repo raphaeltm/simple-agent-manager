@@ -139,8 +139,8 @@ describe('WorkspaceSidebar', () => {
     render(<WorkspaceSidebar {...defaultProps} />);
     expect(screen.getByText('owner/repo')).toBeInTheDocument();
     expect(screen.getByText('main')).toBeInTheDocument();
-    expect(screen.getByText(/CX22/)).toBeInTheDocument();
-    expect(screen.getByText(/Nuremberg/)).toBeInTheDocument();
+    expect(screen.getByText(/Small.*2-3 vCPUs/)).toBeInTheDocument();
+    expect(screen.getByText(/Nuremberg, DE/)).toBeInTheDocument();
   });
 
   it('renders repository as external link', () => {

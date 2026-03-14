@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Button } from '@simple-agent-manager/ui';
 import { GitBranch, ExternalLink, Play, Trash2 } from 'lucide-react';
 import type { AgentSession } from '@simple-agent-manager/shared';
+import { VM_SIZE_LABELS, VM_LOCATIONS } from '@simple-agent-manager/shared';
 import { CollapsibleSection } from './CollapsibleSection';
 import { ResourceBar } from './node/ResourceBar';
 import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
@@ -84,17 +85,16 @@ function formatBytes(bytes: number): string {
   return `${val.toFixed(1)} ${units[i]}`;
 }
 
-const VM_SIZE_LABELS: Record<string, string> = {
-  small: 'CX22 (2 vCPU / 4 GB)',
-  medium: 'CX32 (4 vCPU / 8 GB)',
-  large: 'CX42 (8 vCPU / 16 GB)',
-};
+// VM display helpers using shared provider-agnostic constants
+function vmSizeLabel(size: string): string {
+  const config = VM_SIZE_LABELS[size as keyof typeof VM_SIZE_LABELS];
+  return config ? `${config.label} (${config.shortDescription})` : size;
+}
 
-const VM_LOCATION_LABELS: Record<string, string> = {
-  nbg1: 'Nuremberg',
-  fsn1: 'Falkenstein',
-  hel1: 'Helsinki',
-};
+function vmLocationLabel(location: string): string {
+  const config = VM_LOCATIONS[location];
+  return config ? `${config.name}, ${config.country}` : location;
+}
 
 function useRelativeTime(isoDate: string | null | undefined): string {
   const [now, setNow] = useState(Date.now());
@@ -330,9 +330,9 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
             {/* VM */}
             {workspace?.vmSize && (
               <InfoRow label="VM">
-                {VM_SIZE_LABELS[workspace.vmSize] ?? workspace.vmSize}
+                {vmSizeLabel(workspace.vmSize)}
                 {workspace.vmLocation
-                  ? ` \u00B7 ${VM_LOCATION_LABELS[workspace.vmLocation] ?? workspace.vmLocation}`
+                  ? ` \u00B7 ${vmLocationLabel(workspace.vmLocation)}`
                   : ''}
               </InfoRow>
             )}

@@ -85,7 +85,16 @@ describe('heartbeat IP backfill', () => {
     expect(heartbeatSection).toContain("node.status === 'creating'");
     expect(heartbeatSection).toContain("node.status === 'error'");
     expect(heartbeatSection).toContain("updatePayload.status = 'running'");
-    expect(heartbeatSection).toContain("updatePayload.errorMessage = null");
+  });
+
+  it('clears errorMessage unconditionally when IP is backfilled (not gated on status)', () => {
+    // errorMessage clearing must be OUTSIDE the status condition block
+    // to ensure "Awaiting IP allocation" is always cleared when IP arrives
+    const ipBackfillBlock = heartbeatSection.slice(
+      heartbeatSection.indexOf('updatePayload.ipAddress = heartbeatIp'),
+      heartbeatSection.indexOf("node.status === 'creating'")
+    );
+    expect(ipBackfillBlock).toContain('updatePayload.errorMessage');
   });
 
   it('updates ipAddress in the database update payload', () => {
