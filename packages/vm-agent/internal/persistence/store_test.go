@@ -762,6 +762,41 @@ func TestSessionMcpServersPersistedAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestMigrationV6AddsLightweightColumn(t *testing.T) {
+	dbPath := tempDBPath(t)
+
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	err = store.UpsertWorkspaceMetadata(WorkspaceMetadata{
+		WorkspaceID:      "ws-1",
+		Repository:       "octo/repo",
+		ContainerWorkDir: "/workspaces/repo",
+		Lightweight:      true,
+	})
+	if err != nil {
+		t.Fatalf("UpsertWorkspaceMetadata with lightweight: %v", err)
+	}
+	store.Close()
+
+	// Reopen — migration must be idempotent
+	store2, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Reopen after migration v6: %v", err)
+	}
+	defer store2.Close()
+
+	meta, _ := store2.GetWorkspaceMetadata("ws-1")
+	if meta == nil {
+		t.Fatal("expected metadata to survive reopen")
+	}
+	if !meta.Lightweight {
+		t.Error("expected Lightweight=true persisted after reopen")
+	}
+}
+
 func TestWorkspaceMetadataLightweightRoundTrip(t *testing.T) {
 	store, err := Open(tempDBPath(t))
 	if err != nil {
