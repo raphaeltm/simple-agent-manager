@@ -1665,3 +1665,110 @@ func TestCredentialMetadataTracking(t *testing.T) {
 
 	host.Stop()
 }
+
+func TestSessionHost_SelectAgent_SkipsRestartWhenSameAgentRunning(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+
+	// Simulate an agent that is already running with status Ready.
+	host.mu.Lock()
+	host.agentType = "mistral-vibe"
+	host.status = HostReady
+	host.process = &AgentProcess{agentType: "mistral-vibe"} // stub process
+	host.mu.Unlock()
+
+	// Call SelectAgent with the SAME agent type. This simulates the browser's
+	// auto-select sending select_agent("mistral-vibe") while the task-driven
+	// agent is already running. The call should be a no-op.
+	host.SelectAgent(context.Background(), "mistral-vibe")
+
+	// The process should NOT have been replaced or stopped.
+	host.mu.RLock()
+	status := host.status
+	agentType := host.agentType
+	hasProcess := host.process != nil
+	host.mu.RUnlock()
+
+	if status != HostReady {
+		t.Fatalf("status = %s, want %s (agent should not have been restarted)", status, HostReady)
+	}
+	if agentType != "mistral-vibe" {
+		t.Fatalf("agentType = %s, want mistral-vibe", agentType)
+	}
+	if !hasProcess {
+		t.Fatal("process is nil, should still be set (not stopped)")
+	}
+
+	// Clean up stub process before Stop() tries to call process.Stop().
+	host.mu.Lock()
+	host.process = nil
+	host.mu.Unlock()
+	host.Stop()
+}
+
+func TestSessionHost_SelectAgent_SkipsRestartWhenSameAgentStarting(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+
+	// Simulate an agent that is starting (HostStarting with process set).
+	host.mu.Lock()
+	host.agentType = "mistral-vibe"
+	host.status = HostStarting
+	host.process = &AgentProcess{agentType: "mistral-vibe"}
+	host.mu.Unlock()
+
+	host.SelectAgent(context.Background(), "mistral-vibe")
+
+	host.mu.RLock()
+	status := host.status
+	hasProcess := host.process != nil
+	host.mu.RUnlock()
+
+	if status != HostStarting {
+		t.Fatalf("status = %s, want %s (should not change during starting)", status, HostStarting)
+	}
+	if !hasProcess {
+		t.Fatal("process is nil, should still be set")
+	}
+
+	// Clean up stub process before Stop().
+	host.mu.Lock()
+	host.process = nil
+	host.mu.Unlock()
+	host.Stop()
+}
+
+func TestSessionHost_SelectAgent_AllowsSwitchToDifferentAgent(t *testing.T) {
+	t.Parallel()
+
+	// This test verifies that SelectAgent DOES proceed when the agent type
+	// is different, even if an agent is currently running. We can only verify
+	// the early part since we don't have a real container for startAgent.
+	host := newTestSessionHost(t)
+
+	host.mu.Lock()
+	host.agentType = "claude-code"
+	host.status = HostReady
+	host.process = &AgentProcess{agentType: "claude-code", stopped: true} // pre-mark stopped to avoid nil deref
+	host.mu.Unlock()
+
+	// SelectAgent with a DIFFERENT agent type. It will proceed (and eventually
+	// fail because there's no real container), but the important thing is that
+	// it does NOT return early — it should change status to HostStarting.
+	host.SelectAgent(context.Background(), "mistral-vibe")
+
+	// After SelectAgent tries and fails (no container), status should be error,
+	// NOT still HostReady (which would mean the early-return fired incorrectly).
+	host.mu.RLock()
+	status := host.status
+	agentType := host.agentType
+	host.mu.RUnlock()
+
+	if status == HostReady && agentType == "claude-code" {
+		t.Fatal("SelectAgent returned early for different agent type — should have proceeded")
+	}
+
+	host.Stop()
+}

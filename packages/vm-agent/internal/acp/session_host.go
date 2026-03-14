@@ -371,6 +371,18 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 
 	slog.Info("SessionHost: agent selection requested", "sessionID", h.config.SessionID, "agentType", agentType)
 
+	// If the requested agent is already running (or starting) with the same
+	// type, skip the restart. This prevents a race where the browser's
+	// auto-select WebSocket message kills a task-driven agent session that is
+	// already running: the browser connects before receiving the agent status
+	// update, sees agentType as empty, and sends select_agent redundantly.
+	if h.agentType == agentType && h.process != nil && (h.status == HostReady || h.status == HostStarting) {
+		h.mu.Unlock()
+		slog.Info("SessionHost: agent already running/starting with requested type, skipping restart",
+			"sessionID", h.config.SessionID, "agentType", agentType, "status", h.status)
+		return
+	}
+
 	// Capture previous ACP session ID before stopping the agent.
 	previousAcpSessionID := ""
 	previousAgentType := h.agentType
