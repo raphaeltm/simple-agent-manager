@@ -200,6 +200,7 @@ crudRoutes.post('/', requireAuth(), requireApproved(), async (c) => {
       name: `${workspaceName} Node`,
       vmSize,
       vmLocation,
+      cloudProvider: body.provider,
       heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
     });
 

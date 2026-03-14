@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { NodeResponse, WorkspaceResponse, ProviderCatalog, VMSize } from '@simple-agent-manager/shared';
+import type { NodeResponse, WorkspaceResponse, ProviderCatalog, VMSize, CredentialProvider } from '@simple-agent-manager/shared';
 import { PROVIDER_LABELS, DEFAULT_VM_LOCATION } from '@simple-agent-manager/shared';
 import { Alert, Button, PageLayout, Select, SkeletonCard, EmptyState, Spinner } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
@@ -82,6 +82,7 @@ export function Nodes() {
         name: `node-${timestamp}`,
         vmSize: newNodeSize,
         vmLocation: newNodeLocation,
+        ...(selectedProvider ? { provider: selectedProvider as CredentialProvider } : {}),
       });
       setShowCreateForm(false);
       navigate(`/nodes/${created.id}`);

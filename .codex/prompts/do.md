@@ -103,16 +103,27 @@ Before creating the PR, ensure everything is solid:
 
 2. **Verify documentation sync** — grep for references to anything you changed and update stale docs.
 
-3. **Move the task file** from `tasks/active/` to `tasks/archive/` and commit.
+3. **Run task completion validation** (BLOCKING — do not skip):
+   Dispatch the `$task-completion-validator` agent with the active task file and current branch. This agent cross-references:
+   - Research findings against the implementation checklist (did every identified problem get a checklist item?)
+   - Checklist items against the git diff (did every checked item produce real code changes?)
+   - Acceptance criteria against the test suite (does every criterion have test or manual verification?)
+   - UI inputs against backend propagation (does every new form field reach the API?)
+   - Multi-resource selection logic (do lookup functions accept a discriminator when multiple variants exist?)
+
+   **If the validator reports FAIL**: fix every CRITICAL and HIGH finding before proceeding. Convert unaddressed research findings into checklist items (and implement them) or into explicit backlog tasks with references. Do NOT archive the task until the validator passes or all gaps are explicitly deferred.
+
+4. **Move the task file** from `tasks/active/` to `tasks/archive/` and commit.
 
 ---
 
 ## Phase 5: Review
 
-Dispatch review based on what the PR touches:
+Dispatch review based on what the PR touches. **Always include** `$task-completion-validator` in addition to the domain-specific reviewers:
 
 | PR touches | Skill | What it checks |
 |------------|-------|----------------|
+| **Always** | `$task-completion-validator` | Planned vs. actual work — research gaps, unwired UI, missing tests |
 | Go code (`packages/vm-agent/`) | `$go-specialist` | Concurrency, resource leaks, Go idioms |
 | TypeScript API (`apps/api/`) | `$cloudflare-specialist` | D1, KV, Workers patterns |
 | UI code (`apps/web/`, `packages/ui/`) | `$ui-ux-specialist` | Accessibility, layout, interactions |

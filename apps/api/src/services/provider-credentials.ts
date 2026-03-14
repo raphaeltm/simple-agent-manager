@@ -56,22 +56,27 @@ export function buildProviderConfig(
 
 /**
  * Look up a user's cloud-provider credential, decrypt it, and return a ProviderConfig.
+ * When `targetProvider` is specified, only returns credentials for that specific provider.
  * Returns null if no credential is found.
  */
 export async function getUserCloudProviderConfig(
   db: ReturnType<typeof drizzle>,
   userId: string,
   encryptionKey: string,
+  targetProvider?: CredentialProvider,
 ): Promise<{ config: ProviderConfig; provider: CredentialProvider } | null> {
+  const conditions = [
+    eq(schema.credentials.userId, userId),
+    eq(schema.credentials.credentialType, 'cloud-provider'),
+  ];
+  if (targetProvider) {
+    conditions.push(eq(schema.credentials.provider, targetProvider));
+  }
+
   const creds = await db
     .select()
     .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.credentialType, 'cloud-provider'),
-      ),
-    )
+    .where(and(...conditions))
     .limit(1);
 
   const cred = creds[0];

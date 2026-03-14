@@ -10,7 +10,7 @@ apps/
 └── web/          # Control plane UI (React + Vite)
 packages/
 ├── shared/       # Shared types and utilities
-├── providers/    # Cloud provider abstraction (Hetzner)
+├── providers/    # Cloud provider abstraction (Hetzner, Scaleway)
 ├── terminal/     # Shared terminal component
 ├── cloud-init/   # Cloud-init template generator
 └── vm-agent/     # Go VM agent (PTY, WebSocket, ACP)

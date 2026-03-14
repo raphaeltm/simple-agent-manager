@@ -101,6 +101,39 @@ The CORS origin fallthrough bug (see `docs/notes/2026-03-09-cors-origin-fallthro
 4. **Write negative tests**: Every CORS configuration must have at least one test verifying that unknown origins are rejected (no `Access-Control-Allow-Origin` header)
 5. **Separate credentials for token-auth endpoints**: Endpoints using Bearer token auth (not cookies) should use `credentials: false` + `origin: '*'`
 
+## UI-to-Backend Data Path Verification (Required)
+
+When adding a new UI input element (form field, dropdown, toggle, radio group) that collects a user choice affecting backend behavior, you MUST verify the complete data path before marking the work complete.
+
+### Why This Rule Exists
+
+The Scaleway node creation bug (see `docs/notes/2026-03-14-scaleway-node-creation-failure-postmortem.md`) shipped a fully functional provider dropdown that looked correct — selecting Scaleway showed Scaleway locations and prices — but `handleCreateNode()` never included the selected provider in the API call. The `CreateNodeRequest` type didn't even have a `provider` field. The dropdown was cosmetic: it collected input that was silently discarded.
+
+### Required Steps
+
+When adding any new UI input that affects backend behavior:
+
+1. **Verify the request type accepts the field.** The shared type (e.g., `CreateNodeRequest`) must include the field. If TypeScript doesn't error when you omit it, the field isn't in the type.
+2. **Verify the submit handler includes the field.** The event handler (e.g., `handleCreateNode`) must include the state variable in the API call payload.
+3. **Verify the API route reads the field.** The backend handler must extract the field from the request body and pass it to the service layer.
+4. **Verify the service layer acts on the field.** The field must actually influence behavior (e.g., filtering a database query, selecting a provider).
+5. **Write a test that traces the value end-to-end.** At minimum, test that the backend function receives and uses the field correctly. Ideally, test from API request through to the observable outcome.
+
+### Red Flags
+
+- A `useState` variable that appears in JSX `value=` props but not in any `fetch`/API call
+- A `<Select>` or `<input>` whose `onChange` updates state that only affects local rendering (catalog display) but not the form submission
+- A request type that doesn't include a field the UI collects
+- A backend handler that destructures a request body but ignores a field the UI sends
+
+### Quick Check
+
+Before committing UI form changes:
+- [ ] Every new `useState` variable used in a form input also appears in the submit handler's API call
+- [ ] The API request type includes every field the form collects
+- [ ] The backend handler reads every field the API request type defines
+- [ ] At least one test verifies the field's value reaches the backend function that acts on it
+
 ## Adding New Features
 
 1. Check if types need to be added to `packages/shared`

@@ -391,6 +391,7 @@ export const nodes = sqliteTable(
     status: text('status').notNull().default('pending'),
     vmSize: text('vm_size').notNull().default('medium'),
     vmLocation: text('vm_location').notNull().default('nbg1'),
+    cloudProvider: text('cloud_provider'),
     providerInstanceId: text('provider_instance_id'),
     ipAddress: text('ip_address'),
     backendDnsRecordId: text('backend_dns_record_id'),

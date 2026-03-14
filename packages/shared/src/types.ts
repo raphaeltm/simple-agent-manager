@@ -708,6 +708,7 @@ export interface NodeResponse {
   name: string;
   status: NodeStatus;
   healthStatus?: NodeHealthStatus;
+  cloudProvider?: CredentialProvider | null;
   vmSize: VMSize;
   vmLocation: VMLocation;
   ipAddress: string | null;
@@ -774,6 +775,7 @@ export interface CreateNodeRequest {
   name: string;
   vmSize?: VMSize;
   vmLocation?: VMLocation;
+  provider?: CredentialProvider;
 }
 
 export interface Workspace {
@@ -837,6 +839,7 @@ export interface CreateWorkspaceRequest {
   vmSize?: VMSize;
   vmLocation?: VMLocation;
   installationId?: string;
+  provider?: CredentialProvider;
 }
 
 export interface UpdateWorkspaceRequest {
