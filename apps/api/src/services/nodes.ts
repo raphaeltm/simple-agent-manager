@@ -135,7 +135,20 @@ export async function provisionNode(
       throw new Error('Cloud-init config exceeds size limit');
     }
 
-    const provider = createProvider(credResult.config);
+    // Wire Scaleway IP poll env vars into provider config (if applicable)
+    const providerConfig = { ...credResult.config };
+    if (providerConfig.provider === 'scaleway') {
+      if (env.SCALEWAY_IP_POLL_TIMEOUT_MS) {
+        const parsed = parseInt(env.SCALEWAY_IP_POLL_TIMEOUT_MS, 10);
+        if (Number.isFinite(parsed) && parsed > 0) providerConfig.ipPollTimeoutMs = parsed;
+      }
+      if (env.SCALEWAY_IP_POLL_INTERVAL_MS) {
+        const parsed = parseInt(env.SCALEWAY_IP_POLL_INTERVAL_MS, 10);
+        if (Number.isFinite(parsed) && parsed > 0) providerConfig.ipPollIntervalMs = parsed;
+      }
+    }
+
+    const provider = createProvider(providerConfig);
 
     const vm = await provider.createVM({
       name: `node-${node.id.toLowerCase()}`,
