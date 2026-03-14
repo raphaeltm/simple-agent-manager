@@ -232,11 +232,12 @@ describe('ProjectChat new chat button', () => {
     fireEvent.change(textarea, { target: { value: 'Build a todo app' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
-    // Should submit the task with the default agent type and navigate to the new session
+    // Should submit the task with the default agent type, default workspace profile, and navigate to the new session
     await waitFor(() => {
       expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, {
         message: 'Build a todo app',
         agentType: 'claude-code',
+        workspaceProfile: 'full',
       });
     });
 
@@ -371,7 +372,112 @@ describe('ProjectChat agent type selection', () => {
       expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, {
         message: 'Fix the tests',
         agentType: 'openai-codex',
+        workspaceProfile: 'full',
       });
     });
+  });
+});
+
+describe('ProjectChat workspace profile selection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.listCredentials.mockResolvedValue([
+      { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
+    ]);
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+  });
+
+  it('shows workspace profile dropdown with Full selected by default', async () => {
+    renderProjectChat();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Workspace:')).toBeInTheDocument();
+    });
+
+    const select = screen.getByLabelText('Workspace:') as HTMLSelectElement;
+    expect(select.value).toBe('full');
+    expect(select.options).toHaveLength(2);
+    expect(select.options[0]!.textContent).toBe('Full');
+    expect(select.options[1]!.textContent).toBe('Lightweight');
+  });
+
+  it('submits task with selected workspace profile', async () => {
+    mocks.submitTask.mockResolvedValue({
+      taskId: 'task-new',
+      sessionId: 'session-new',
+      branchName: 'sam/task-new',
+      status: 'queued',
+    });
+    mocks.getProjectTask.mockResolvedValue({
+      id: 'task-new',
+      status: 'queued',
+      executionStep: null,
+      errorMessage: null,
+    });
+
+    renderProjectChat();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Workspace:')).toBeInTheDocument();
+    });
+
+    // Switch to lightweight
+    fireEvent.change(screen.getByLabelText('Workspace:'), { target: { value: 'lightweight' } });
+
+    // Type a message and submit
+    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
+    fireEvent.change(textarea, { target: { value: 'Quick question' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, {
+        message: 'Quick question',
+        agentType: 'claude-code',
+        workspaceProfile: 'lightweight',
+      });
+    });
+  });
+
+  it('defaults to project workspace profile when set', async () => {
+    // Re-render with a project that has a default workspace profile
+    const contextValue: ProjectContextValue = {
+      projectId: PROJECT_ID,
+      project: {
+        id: PROJECT_ID,
+        userId: 'user-1',
+        name: 'Test Project',
+        description: null,
+        installationId: 'inst-1',
+        repository: 'test/repo',
+        defaultBranch: 'main',
+        defaultWorkspaceProfile: 'lightweight',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      installations: [],
+      reload: vi.fn(),
+      settingsOpen: false,
+      setSettingsOpen: vi.fn(),
+      infoPanelOpen: false,
+      setInfoPanelOpen: vi.fn(),
+    };
+
+    render(
+      <MemoryRouter initialEntries={[`/projects/${PROJECT_ID}/chat`]}>
+        <ProjectContext.Provider value={contextValue}>
+          <Routes>
+            <Route path="/projects/:id/chat" element={<ProjectChat />} />
+          </Routes>
+        </ProjectContext.Provider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Workspace:')).toBeInTheDocument();
+    });
+
+    const select = screen.getByLabelText('Workspace:') as HTMLSelectElement;
+    expect(select.value).toBe('lightweight');
   });
 });
