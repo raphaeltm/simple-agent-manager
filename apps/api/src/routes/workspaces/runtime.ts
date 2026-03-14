@@ -465,20 +465,52 @@ runtimeRoutes.post('/:id/messages', async (c) => {
     );
   }
 
-  // Delegate to ProjectData DO
-  const result = await projectDataService.persistMessageBatch(
-    c.env,
-    workspace.projectId,
-    sessionId!,
-    body.messages.map((m) => ({
-      messageId: m.messageId,
-      role: m.role,
-      content: m.content,
-      toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : null,
-      timestamp: m.timestamp,
-      sequence: m.sequence,
-    }))
-  );
+  // Delegate to ProjectData DO with structured error handling.
+  // On failure, return appropriate status codes so the VM agent outbox
+  // can distinguish transient (retry) from permanent (discard) errors.
+  let result: { persisted: number; duplicates: number };
+  try {
+    result = await projectDataService.persistMessageBatch(
+      c.env,
+      workspace.projectId,
+      sessionId!,
+      body.messages.map((m) => ({
+        messageId: m.messageId,
+        role: m.role,
+        content: m.content,
+        toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : null,
+        timestamp: m.timestamp,
+        sequence: m.sequence,
+      }))
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to persist messages';
+
+    // Session-not-found and stopped-session errors are permanent — do not retry
+    if (message.includes('not found') || message.includes('is stopped')) {
+      console.error('Message persistence rejected by DO', {
+        workspaceId,
+        projectId: workspace.projectId,
+        sessionId,
+        error: message,
+        action: 'rejected_permanent',
+      });
+      throw errors.badRequest(message);
+    }
+
+    // All other DO errors are transient — return 503 so the outbox retries
+    console.error('Message persistence DO error (transient)', {
+      workspaceId,
+      projectId: workspace.projectId,
+      sessionId,
+      error: message,
+      action: 'rejected_transient',
+    });
+    return c.json(
+      { error: 'SERVICE_UNAVAILABLE', message: 'Message persistence temporarily unavailable' },
+      503
+    );
+  }
 
   return c.json({
     persisted: result.persisted,

@@ -79,4 +79,14 @@ describe('workspace messages batch endpoint source contract', () => {
     expect(file).toContain('persisted: result.persisted');
     expect(file).toContain('duplicates: result.duplicates');
   });
+
+  it('handles DO errors with structured error responses', () => {
+    // Permanent errors (session not found, stopped) return 400
+    expect(file).toContain("message.includes('not found')");
+    expect(file).toContain("message.includes('is stopped')");
+    expect(file).toContain('rejected_permanent');
+    // Transient errors return 503 for retry
+    expect(file).toContain('rejected_transient');
+    expect(file).toContain('503');
+  });
 });

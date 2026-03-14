@@ -496,6 +496,21 @@ describe('ProjectData Durable Object', () => {
       ).rejects.toThrow(/not found/i);
     });
 
+    it('rejects messages to stopped sessions', async () => {
+      const stub = getStub('project-batch-stopped');
+      const sessionId = await stub.createSession(null, null);
+
+      // Stop the session
+      await stub.stopSession(sessionId);
+
+      // Attempting to persist messages to a stopped session should throw
+      await expect(
+        stub.persistMessageBatch(sessionId, [
+          { messageId: crypto.randomUUID(), role: 'user', content: 'Late message', toolMetadata: null, timestamp: new Date().toISOString() },
+        ])
+      ).rejects.toThrow(/stopped/i);
+    });
+
     it('handles empty batch gracefully', async () => {
       const stub = getStub('project-batch-empty');
       const sessionId = await stub.createSession(null, null);

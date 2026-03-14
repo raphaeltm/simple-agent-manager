@@ -265,6 +265,12 @@ export class ProjectData extends DurableObject<Env> {
       throw new Error(`Session ${sessionId} not found`);
     }
 
+    // Reject messages targeting stopped sessions.
+    // Only 'active' sessions should accept new messages.
+    if (session.status === 'stopped') {
+      throw new Error(`Session ${sessionId} is stopped and cannot accept messages`);
+    }
+
     const maxMessages = parseInt(this.env.MAX_MESSAGES_PER_SESSION || '10000', 10);
     let persisted = 0;
     let duplicates = 0;
@@ -1536,6 +1542,44 @@ export class ProjectData extends DurableObject<Env> {
           ws.send(JSON.stringify({ type: 'error', message: 'Missing sessionId or content' }));
           return;
         }
+
+        // Validate sessionId matches the WebSocket's session tag (Principle XIII: Fail-Fast).
+        // Clients connect with ?sessionId=X which sets a session tag. Messages must target
+        // the same session to prevent cross-session message injection.
+        const wsTags = this.ctx.getTags(ws);
+        const wsSessionTag = wsTags.find((t) => t.startsWith('session:'));
+        if (wsSessionTag) {
+          const wsSessionId = wsSessionTag.slice('session:'.length);
+          if (wsSessionId !== sessionId) {
+            console.error('WebSocket message.send session mismatch', {
+              wsSessionId,
+              messageSessionId: sessionId,
+              action: 'rejected',
+            });
+            ws.send(JSON.stringify({
+              type: 'error',
+              message: `Session mismatch: WebSocket connected to session ${wsSessionId}, but message targets ${sessionId}`,
+            }));
+            return;
+          }
+        }
+
+        // Validate the target session exists and is active before persisting
+        const targetSession = this.sql
+          .exec('SELECT id, status FROM chat_sessions WHERE id = ?', sessionId)
+          .toArray()[0];
+        if (!targetSession) {
+          ws.send(JSON.stringify({ type: 'error', message: `Session ${sessionId} not found` }));
+          return;
+        }
+        if (targetSession.status !== 'active') {
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: `Session ${sessionId} is ${targetSession.status}, not active`,
+          }));
+          return;
+        }
+
         const sanitizedRole = role === 'user' ? 'user' : 'user'; // Only allow user role from clients
         const trimmed = content.trim();
         if (!trimmed || trimmed.length > 2000) {
