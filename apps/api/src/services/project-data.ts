@@ -155,6 +155,27 @@ export async function getMessageCount(
   return stub.getMessageCount(sessionId, roles);
 }
 
+/** Search messages across sessions by keyword. */
+export async function searchMessages(
+  env: Env,
+  projectId: string,
+  query: string,
+  sessionId: string | null = null,
+  roles: string[] | null = null,
+  limit: number = 10,
+): Promise<Array<{
+  id: string;
+  sessionId: string;
+  role: string;
+  snippet: string;
+  createdAt: number;
+  sessionTopic: string | null;
+  sessionTaskId: string | null;
+}>> {
+  const stub = await getStub(env, projectId);
+  return stub.searchMessages(query, sessionId, roles, limit);
+}
+
 export async function getCleanupAt(
   env: Env,
   projectId: string,

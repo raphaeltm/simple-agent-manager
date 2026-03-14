@@ -539,6 +539,80 @@ export class ProjectData extends DurableObject<Env> {
     return (rows[0]?.count as number) ?? 0;
   }
 
+  /**
+   * Search messages across all sessions by keyword (LIKE match on content).
+   * Returns message snippets with session context for agent discovery.
+   */
+  searchMessages(
+    query: string,
+    sessionId: string | null = null,
+    roles: string[] | null = null,
+    limit: number = 10,
+  ): Array<{
+    id: string;
+    sessionId: string;
+    role: string;
+    snippet: string;
+    createdAt: number;
+    sessionTopic: string | null;
+    sessionTaskId: string | null;
+  }> {
+    const conditions: string[] = ['m.content LIKE ?'];
+    // Escape LIKE wildcards in the search term, then wrap with %
+    const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
+    const params: (string | number)[] = [`%${escapedQuery}%`];
+
+    if (sessionId) {
+      conditions.push('m.session_id = ?');
+      params.push(sessionId);
+    }
+
+    if (roles && roles.length > 0) {
+      const placeholders = roles.map(() => '?').join(', ');
+      conditions.push(`m.role IN (${placeholders})`);
+      params.push(...roles);
+    }
+
+    const whereClause = conditions.join(' AND ');
+    const sql = `
+      SELECT m.id, m.session_id, m.role, m.content, m.created_at,
+             s.topic AS session_topic, s.task_id AS session_task_id
+      FROM chat_messages m
+      JOIN chat_sessions s ON s.id = m.session_id
+      WHERE ${whereClause}
+      ORDER BY m.created_at DESC
+      LIMIT ?
+    `;
+    params.push(limit);
+
+    const rows = this.sql.exec(sql, ...params).toArray();
+
+    return rows.map((row) => {
+      const content = row.content as string;
+      // Extract a snippet around the first match (200 chars window)
+      const lowerContent = content.toLowerCase();
+      const matchIdx = lowerContent.indexOf(query.toLowerCase());
+      let snippet: string;
+      if (matchIdx === -1) {
+        snippet = content.slice(0, 200);
+      } else {
+        const start = Math.max(0, matchIdx - 80);
+        const end = Math.min(content.length, matchIdx + query.length + 120);
+        snippet = (start > 0 ? '...' : '') + content.slice(start, end) + (end < content.length ? '...' : '');
+      }
+
+      return {
+        id: row.id as string,
+        sessionId: row.session_id as string,
+        role: row.role as string,
+        snippet,
+        createdAt: row.created_at as number,
+        sessionTopic: (row.session_topic as string) ?? null,
+        sessionTaskId: (row.session_task_id as string) ?? null,
+      };
+    });
+  }
+
   // =========================================================================
   // Activity Events
   // =========================================================================

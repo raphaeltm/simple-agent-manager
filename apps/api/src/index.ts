@@ -222,6 +222,7 @@ export interface Env {
   MAX_MESSAGES_PAYLOAD_BYTES?: string;
   MAX_AGENT_SESSION_LABEL_LENGTH?: string;
   MAX_AGENT_CREDENTIAL_SYNC_BYTES?: string;
+  MCP_TASK_DESCRIPTION_SNIPPET_LENGTH?: string;
   // VM agent TLS configuration
   VM_AGENT_PROTOCOL?: string;  // "https" (default) or "http"
   VM_AGENT_PORT?: string;      // "8443" (default) or custom port

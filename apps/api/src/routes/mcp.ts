@@ -2,22 +2,33 @@
  * MCP Server Route
  *
  * Implements a lightweight MCP (Model Context Protocol) server using
- * JSON-RPC 2.0 over HTTP (Streamable HTTP transport). Exposes three tools
+ * JSON-RPC 2.0 over HTTP (Streamable HTTP transport). Exposes tools
  * to agents running in SAM workspaces:
  *
+ * Task lifecycle:
  * - get_instructions: Bootstrap tool — returns task context, project info, and behavioral guidance
  * - update_task_status: Report incremental progress on task checklist items
  * - complete_task: Mark the task as completed with an optional summary
+ *
+ * Project awareness (read-only):
+ * - list_tasks: List other tasks in the same project
+ * - get_task_details: Get full details of a specific task
+ * - search_tasks: Search tasks by keyword in title/description
+ * - list_sessions: List chat sessions in the project
+ * - get_session_messages: Read messages from a specific session
+ * - search_messages: Search messages across sessions by keyword
  *
  * Auth: task-scoped opaque token stored in KV, passed as Bearer token.
  */
 
 import { Hono } from 'hono';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, like, or, desc } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Env } from '../index';
 import * as schema from '../db/schema';
 import { validateMcpToken, type McpTokenData } from '../services/mcp-token';
+import * as projectDataService from '../services/project-data';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 
@@ -66,11 +77,35 @@ const DEFAULT_LOG_MESSAGE_MAX_LENGTH = 1000;
 /** Default max length for task output summary stored in D1. Override via MAX_OUTPUT_SUMMARY_LENGTH env var. */
 const DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH = 2000;
 
+/** Default page sizes for project awareness tools. Override via MCP_* env vars. */
+const DEFAULT_MCP_TASK_LIST_LIMIT = 10;
+const DEFAULT_MCP_TASK_LIST_MAX = 50;
+const DEFAULT_MCP_TASK_SEARCH_MAX = 20;
+const DEFAULT_MCP_SESSION_LIST_LIMIT = 10;
+const DEFAULT_MCP_SESSION_LIST_MAX = 50;
+const DEFAULT_MCP_MESSAGE_LIST_LIMIT = 50;
+const DEFAULT_MCP_MESSAGE_LIST_MAX = 200;
+const DEFAULT_MCP_MESSAGE_SEARCH_MAX = 20;
+/** Max length for task description in list/search results. Override via MCP_TASK_DESCRIPTION_SNIPPET_LENGTH env var. */
+const DEFAULT_MCP_TASK_DESCRIPTION_SNIPPET_LENGTH = 200;
+
 function getMcpLimits(env: Env) {
   return {
     activityMessageMaxLength: parsePositiveInt(env.MAX_ACTIVITY_MESSAGE_LENGTH as string, DEFAULT_ACTIVITY_MESSAGE_MAX_LENGTH),
     logMessageMaxLength: parsePositiveInt(env.MAX_LOG_MESSAGE_LENGTH as string, DEFAULT_LOG_MESSAGE_MAX_LENGTH),
     outputSummaryMaxLength: parsePositiveInt(env.MAX_OUTPUT_SUMMARY_LENGTH as string, DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH),
+    taskListLimit: DEFAULT_MCP_TASK_LIST_LIMIT,
+    taskListMax: DEFAULT_MCP_TASK_LIST_MAX,
+    taskSearchMax: DEFAULT_MCP_TASK_SEARCH_MAX,
+    sessionListLimit: DEFAULT_MCP_SESSION_LIST_LIMIT,
+    sessionListMax: DEFAULT_MCP_SESSION_LIST_MAX,
+    messageListLimit: DEFAULT_MCP_MESSAGE_LIST_LIMIT,
+    messageListMax: DEFAULT_MCP_MESSAGE_LIST_MAX,
+    messageSearchMax: DEFAULT_MCP_MESSAGE_SEARCH_MAX,
+    taskDescriptionSnippetLength: parsePositiveInt(
+      env.MCP_TASK_DESCRIPTION_SNIPPET_LENGTH as string,
+      DEFAULT_MCP_TASK_DESCRIPTION_SNIPPET_LENGTH,
+    ),
   };
 }
 
@@ -123,6 +158,146 @@ const MCP_TOOLS = [
           description: 'Brief summary of what was accomplished',
         },
       },
+      additionalProperties: false,
+    },
+  },
+  // ─── Project awareness tools (read-only) ──────────────────────────────
+  {
+    name: 'list_tasks',
+    description:
+      'List tasks in your project. Useful for understanding what other work exists, avoiding duplicates, or finding context from completed tasks. Your own task is excluded by default.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        status: {
+          type: 'string',
+          description: 'Filter by task status (draft, queued, in_progress, delegated, awaiting_followup, completed, failed, cancelled). Omit for all statuses.',
+          enum: ['draft', 'queued', 'in_progress', 'delegated', 'awaiting_followup', 'completed', 'failed', 'cancelled'],
+        },
+        include_own: {
+          type: 'boolean',
+          description: 'Include your own task in the results (default: false)',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max results to return (default: 10, max: 50)',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_task_details',
+    description:
+      'Get full details of a specific task in your project, including its description, output summary, output branch, and PR URL.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'The task ID to retrieve',
+        },
+      },
+      required: ['taskId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'search_tasks',
+    description:
+      'Search tasks in your project by keyword. Searches both title and description fields.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search keyword to find in task titles and descriptions',
+        },
+        status: {
+          type: 'string',
+          description: 'Filter by task status. Omit for all statuses.',
+          enum: ['draft', 'queued', 'in_progress', 'delegated', 'awaiting_followup', 'completed', 'failed', 'cancelled'],
+        },
+        limit: {
+          type: 'number',
+          description: 'Max results to return (default: 10, max: 20)',
+        },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_sessions',
+    description:
+      'List chat sessions in your project. Each session represents a conversation between a user and an agent. Sessions may be linked to tasks.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        status: {
+          type: 'string',
+          description: 'Filter by session status (active, stopped). Omit for all.',
+          enum: ['active', 'stopped'],
+        },
+        limit: {
+          type: 'number',
+          description: 'Max results to return (default: 10, max: 50)',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_session_messages',
+    description:
+      'Read messages from a specific chat session. Returns messages in chronological order. By default only returns user and assistant messages (skips tool calls and system messages).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        sessionId: {
+          type: 'string',
+          description: 'The session ID to read messages from',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max messages to return (default: 50, max: 200)',
+        },
+        roles: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Filter by message roles (default: ["user", "assistant"]). Use ["user", "assistant", "system", "tool", "thinking", "plan"] for all.',
+        },
+      },
+      required: ['sessionId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'search_messages',
+    description:
+      'Search messages across all chat sessions in your project by keyword. Returns matching message snippets with session context. Useful for finding past discussions about specific topics, decisions, or code.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search keyword to find in message content',
+        },
+        sessionId: {
+          type: 'string',
+          description: 'Narrow search to a specific session (optional)',
+        },
+        roles: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Filter by message roles (default: ["user", "assistant"])',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max results to return (default: 10, max: 20)',
+        },
+      },
+      required: ['query'],
       additionalProperties: false,
     },
   },
@@ -360,6 +535,351 @@ async function handleCompleteTask(
   });
 }
 
+// ─── Project awareness handlers (read-only) ─────────────────────────────────
+
+async function handleListTasks(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const limits = getMcpLimits(env);
+  const status = typeof params.status === 'string' ? params.status : undefined;
+  const includeOwn = params.include_own === true;
+  const requestedLimit = typeof params.limit === 'number' ? params.limit : limits.taskListLimit;
+  const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.taskListMax);
+
+  const db = drizzle(env.DATABASE, { schema });
+
+  const conditions: SQL[] = [eq(schema.tasks.projectId, tokenData.projectId)];
+
+  if (!includeOwn) {
+    // We can't easily do "not equal" with drizzle's eq helper, so we filter post-query
+  }
+
+  if (status) {
+    conditions.push(eq(schema.tasks.status, status));
+  }
+
+  // Fetch one extra so we can filter out own task without reducing results
+  const fetchLimit = includeOwn ? limit : limit + 1;
+
+  const rows = await db
+    .select({
+      id: schema.tasks.id,
+      title: schema.tasks.title,
+      description: schema.tasks.description,
+      status: schema.tasks.status,
+      priority: schema.tasks.priority,
+      outputBranch: schema.tasks.outputBranch,
+      outputPrUrl: schema.tasks.outputPrUrl,
+      outputSummary: schema.tasks.outputSummary,
+      createdAt: schema.tasks.createdAt,
+      updatedAt: schema.tasks.updatedAt,
+    })
+    .from(schema.tasks)
+    .where(and(...conditions))
+    .orderBy(desc(schema.tasks.updatedAt))
+    .limit(fetchLimit);
+
+  let tasks = includeOwn
+    ? rows
+    : rows.filter((t) => t.id !== tokenData.taskId);
+
+  // Trim to requested limit after filtering
+  tasks = tasks.slice(0, limit);
+
+  const snippetLen = limits.taskDescriptionSnippetLength;
+  const result = tasks.map((t) => ({
+    id: t.id,
+    title: t.title,
+    status: t.status,
+    priority: t.priority,
+    descriptionSnippet: t.description ? t.description.slice(0, snippetLen) + (t.description.length > snippetLen ? '...' : '') : null,
+    outputBranch: t.outputBranch,
+    outputPrUrl: t.outputPrUrl,
+    outputSummary: t.outputSummary ? t.outputSummary.slice(0, snippetLen) + (t.outputSummary.length > snippetLen ? '...' : '') : null,
+    updatedAt: t.updatedAt,
+  }));
+
+  return jsonRpcSuccess(requestId, {
+    content: [{ type: 'text', text: JSON.stringify({ tasks: result, count: result.length }, null, 2) }],
+  });
+}
+
+async function handleGetTaskDetails(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const taskId = typeof params.taskId === 'string' ? params.taskId.trim() : '';
+  if (!taskId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'taskId is required');
+  }
+
+  const db = drizzle(env.DATABASE, { schema });
+
+  const rows = await db
+    .select({
+      id: schema.tasks.id,
+      title: schema.tasks.title,
+      description: schema.tasks.description,
+      status: schema.tasks.status,
+      priority: schema.tasks.priority,
+      outputBranch: schema.tasks.outputBranch,
+      outputPrUrl: schema.tasks.outputPrUrl,
+      outputSummary: schema.tasks.outputSummary,
+      errorMessage: schema.tasks.errorMessage,
+      createdAt: schema.tasks.createdAt,
+      updatedAt: schema.tasks.updatedAt,
+      startedAt: schema.tasks.startedAt,
+      completedAt: schema.tasks.completedAt,
+    })
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.id, taskId),
+        eq(schema.tasks.projectId, tokenData.projectId),
+      ),
+    )
+    .limit(1);
+
+  const task = rows[0];
+  if (!task) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'Task not found in this project');
+  }
+
+  const result = {
+    id: task.id,
+    title: task.title,
+    description: task.description,
+    status: task.status,
+    priority: task.priority,
+    outputBranch: task.outputBranch,
+    outputPrUrl: task.outputPrUrl,
+    outputSummary: task.outputSummary,
+    errorMessage: task.errorMessage,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    startedAt: task.startedAt,
+    completedAt: task.completedAt,
+  };
+
+  return jsonRpcSuccess(requestId, {
+    content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+  });
+}
+
+async function handleSearchTasks(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const query = typeof params.query === 'string' ? params.query.trim() : '';
+  if (!query) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'query is required and must be a non-empty string');
+  }
+  if (query.length < 2) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'query must be at least 2 characters');
+  }
+
+  const limits = getMcpLimits(env);
+  const status = typeof params.status === 'string' ? params.status : undefined;
+  const requestedLimit = typeof params.limit === 'number' ? params.limit : 10;
+  const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.taskSearchMax);
+
+  const db = drizzle(env.DATABASE, { schema });
+  const searchPattern = `%${query}%`;
+
+  const conditions: SQL[] = [
+    eq(schema.tasks.projectId, tokenData.projectId),
+    or(
+      like(schema.tasks.title, searchPattern),
+      like(schema.tasks.description, searchPattern),
+    )!,
+  ];
+
+  if (status) {
+    conditions.push(eq(schema.tasks.status, status));
+  }
+
+  const rows = await db
+    .select({
+      id: schema.tasks.id,
+      title: schema.tasks.title,
+      description: schema.tasks.description,
+      status: schema.tasks.status,
+      priority: schema.tasks.priority,
+      outputBranch: schema.tasks.outputBranch,
+      outputPrUrl: schema.tasks.outputPrUrl,
+      outputSummary: schema.tasks.outputSummary,
+      updatedAt: schema.tasks.updatedAt,
+    })
+    .from(schema.tasks)
+    .where(and(...conditions))
+    .orderBy(desc(schema.tasks.updatedAt))
+    .limit(limit);
+
+  const snippetLen = limits.taskDescriptionSnippetLength;
+  const result = rows.map((t) => ({
+    id: t.id,
+    title: t.title,
+    status: t.status,
+    priority: t.priority,
+    descriptionSnippet: t.description ? t.description.slice(0, snippetLen) + (t.description.length > snippetLen ? '...' : '') : null,
+    outputBranch: t.outputBranch,
+    outputPrUrl: t.outputPrUrl,
+    outputSummary: t.outputSummary ? t.outputSummary.slice(0, snippetLen) + (t.outputSummary.length > snippetLen ? '...' : '') : null,
+    updatedAt: t.updatedAt,
+  }));
+
+  return jsonRpcSuccess(requestId, {
+    content: [{ type: 'text', text: JSON.stringify({ tasks: result, count: result.length, query }, null, 2) }],
+  });
+}
+
+async function handleListSessions(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const limits = getMcpLimits(env);
+  const status = typeof params.status === 'string' ? params.status : null;
+  const requestedLimit = typeof params.limit === 'number' ? params.limit : limits.sessionListLimit;
+  const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.sessionListMax);
+
+  const { sessions, total } = await projectDataService.listSessions(
+    env,
+    tokenData.projectId,
+    status,
+    limit,
+  );
+
+  const result = sessions.map((s: Record<string, unknown>) => ({
+    id: s.id,
+    topic: s.topic,
+    status: s.status,
+    messageCount: s.messageCount,
+    taskId: s.taskId,
+    workspaceId: s.workspaceId,
+    startedAt: s.startedAt,
+    endedAt: s.endedAt,
+  }));
+
+  return jsonRpcSuccess(requestId, {
+    content: [{ type: 'text', text: JSON.stringify({ sessions: result, total }, null, 2) }],
+  });
+}
+
+async function handleGetSessionMessages(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : '';
+  if (!sessionId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'sessionId is required');
+  }
+
+  const limits = getMcpLimits(env);
+  const requestedLimit = typeof params.limit === 'number' ? params.limit : limits.messageListLimit;
+  const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.messageListMax);
+  const roles = Array.isArray(params.roles)
+    ? params.roles.filter((r): r is string => typeof r === 'string')
+    : ['user', 'assistant'];
+
+  // Verify session belongs to this project
+  const session = await projectDataService.getSession(env, tokenData.projectId, sessionId);
+  if (!session) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'Session not found in this project');
+  }
+
+  const { messages, hasMore } = await projectDataService.getMessages(
+    env,
+    tokenData.projectId,
+    sessionId,
+    limit,
+    null,
+    roles,
+  );
+
+  const result = messages.map((m: Record<string, unknown>) => ({
+    id: m.id,
+    role: m.role,
+    content: m.content,
+    createdAt: m.createdAt,
+  }));
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        sessionId,
+        topic: session.topic,
+        taskId: session.taskId,
+        messages: result,
+        messageCount: result.length,
+        hasMore,
+      }, null, 2),
+    }],
+  });
+}
+
+async function handleSearchMessages(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const query = typeof params.query === 'string' ? params.query.trim() : '';
+  if (!query) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'query is required and must be a non-empty string');
+  }
+  if (query.length < 2) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'query must be at least 2 characters');
+  }
+
+  const limits = getMcpLimits(env);
+  const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : null;
+  const roles = Array.isArray(params.roles)
+    ? params.roles.filter((r): r is string => typeof r === 'string')
+    : ['user', 'assistant'];
+  const requestedLimit = typeof params.limit === 'number' ? params.limit : 10;
+  const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.messageSearchMax);
+
+  const results = await projectDataService.searchMessages(
+    env,
+    tokenData.projectId,
+    query,
+    sessionId,
+    roles,
+    limit,
+  );
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        results: results.map((r) => ({
+          messageId: r.id,
+          sessionId: r.sessionId,
+          sessionTopic: r.sessionTopic,
+          sessionTaskId: r.sessionTaskId,
+          role: r.role,
+          snippet: r.snippet,
+          createdAt: r.createdAt,
+        })),
+        count: results.length,
+        query,
+      }, null, 2),
+    }],
+  });
+}
+
 // ─── MCP endpoint ────────────────────────────────────────────────────────────
 
 mcpRoutes.post('/', async (c) => {
@@ -415,6 +935,18 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleUpdateTaskStatus(requestId, toolArgs, tokenData, c.env));
         case 'complete_task':
           return c.json(await handleCompleteTask(requestId, toolArgs, tokenData, c.env));
+        case 'list_tasks':
+          return c.json(await handleListTasks(requestId, toolArgs, tokenData, c.env));
+        case 'get_task_details':
+          return c.json(await handleGetTaskDetails(requestId, toolArgs, tokenData, c.env));
+        case 'search_tasks':
+          return c.json(await handleSearchTasks(requestId, toolArgs, tokenData, c.env));
+        case 'list_sessions':
+          return c.json(await handleListSessions(requestId, toolArgs, tokenData, c.env));
+        case 'get_session_messages':
+          return c.json(await handleGetSessionMessages(requestId, toolArgs, tokenData, c.env));
+        case 'search_messages':
+          return c.json(await handleSearchMessages(requestId, toolArgs, tokenData, c.env));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
       }
