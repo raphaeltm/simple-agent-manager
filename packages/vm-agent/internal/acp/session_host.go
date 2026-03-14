@@ -18,6 +18,7 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/gorilla/websocket"
+	"github.com/workspace/vm-agent/internal/sysinfo"
 )
 
 // SessionHostStatus represents the lifecycle state of a SessionHost.
@@ -903,6 +904,10 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 	})
 	initResp, err := h.acpConn.Initialize(initCtx, acpsdk.InitializeRequest{
 		ProtocolVersion: acpsdk.ProtocolVersionNumber,
+		ClientInfo: &acpsdk.Implementation{
+			Name:    "sam",
+			Version: sysinfo.Version,
+		},
 		ClientCapabilities: acpsdk.ClientCapabilities{
 			Fs: acpsdk.FileSystemCapability{ReadTextFile: true, WriteTextFile: true},
 		},
