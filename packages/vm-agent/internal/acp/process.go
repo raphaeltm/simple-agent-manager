@@ -103,6 +103,13 @@ type AgentProcess struct {
 	stopTimeout      time.Duration
 	mu               sync.Mutex
 	stopped          bool
+
+	// waitOnce ensures cmd.Wait() is called exactly once; both Stop() and
+	// monitorProcessExit call Wait(), and Go's exec.Cmd panics or returns
+	// ECHILD on the second call.
+	waitOnce sync.Once
+	waitErr  error
+	waitDone chan struct{} // closed when cmd.Wait() returns
 }
 
 // ProcessConfig holds configuration for spawning an agent process.
@@ -199,6 +206,7 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 		startTime:       time.Now(),
 		stopGracePeriod: gracePeriod,
 		stopTimeout:     stopTimeout,
+		waitDone:        make(chan struct{}),
 	}, nil
 }
 
@@ -252,13 +260,10 @@ func (p *AgentProcess) Stop() error {
 		return nil
 	}
 
-	// waitCh is closed when cmd.Wait() returns. We use it to detect when the
-	// process has actually exited, avoiding busy-polling.
-	waitCh := make(chan struct{})
-	go func() {
-		_ = p.cmd.Wait()
-		close(waitCh)
-	}()
+	// Trigger the Wait-once machinery so waitDone closes when the process exits.
+	// This also starts cmd.Wait() if it hasn't been called yet.
+	go func() { _ = p.Wait() }()
+	waitCh := p.waitDone
 
 	// Overall deadline — Stop() must not block longer than this.
 	deadline := time.NewTimer(p.stopTimeout)
@@ -347,6 +352,12 @@ func (p *AgentProcess) killContainerProcesses(sig syscall.Signal) {
 }
 
 // Wait waits for the agent process to exit and returns the error (if any).
+// Safe to call from multiple goroutines — cmd.Wait() is invoked exactly once.
 func (p *AgentProcess) Wait() error {
-	return p.cmd.Wait()
+	p.waitOnce.Do(func() {
+		p.waitErr = p.cmd.Wait()
+		close(p.waitDone)
+	})
+	<-p.waitDone
+	return p.waitErr
 }

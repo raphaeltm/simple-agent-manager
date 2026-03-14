@@ -673,3 +673,21 @@ func getModelEnvVar(agentType string) string {
 		return ""
 	}
 }
+
+// getAgentExtraEnvVars returns additional environment variables required by
+// specific agent types. These are always injected regardless of user settings.
+func getAgentExtraEnvVars(agentType string) []string {
+	switch agentType {
+	case "mistral-vibe":
+		// vibe-acp v2.4.2 sends empty client_name and client_version in API
+		// request metadata when running in ACP (headless) mode. Mistral's API
+		// validates that metadata values are non-empty, rejecting all requests.
+		// Inject these via VIBE_-prefixed env vars to work around the upstream bug.
+		return []string{
+			"VIBE_CLIENT_NAME=sam",
+			"VIBE_CLIENT_VERSION=1.0.0",
+		}
+	default:
+		return nil
+	}
+}
