@@ -3,7 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { List, Settings, LayoutGrid, GitFork } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
 import { VoiceButton } from '@simple-agent-manager/acp-client';
-import type { AgentInfo } from '@simple-agent-manager/shared';
+import type { AgentInfo, WorkspaceProfile } from '@simple-agent-manager/shared';
+import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { ProjectMessageView } from '../components/chat/ProjectMessageView';
 import { useIsMobile } from '../hooks/useIsMobile';
 import type { TaskStatus, TaskExecutionStep } from '@simple-agent-manager/shared';
@@ -115,6 +116,11 @@ export function ProjectChat() {
   // Agent type selection
   const [configuredAgents, setConfiguredAgents] = useState<AgentInfo[]>([]);
   const [selectedAgentType, setSelectedAgentType] = useState<string | null>(null);
+
+  // Workspace profile selection — defaults to project setting or platform default
+  const [selectedWorkspaceProfile, setSelectedWorkspaceProfile] = useState<WorkspaceProfile>(
+    (project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE,
+  );
 
   // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
@@ -279,6 +285,7 @@ export function ProjectChat() {
       const result = await submitTask(projectId, {
         message: trimmed,
         ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
+        workspaceProfile: selectedWorkspaceProfile,
       });
       setMessage('');
       setProvisioning({
@@ -324,6 +331,7 @@ export function ProjectChat() {
         parentTaskId,
         contextSummary,
         ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
+        workspaceProfile: selectedWorkspaceProfile,
       });
       setProvisioning({
         taskId: result.taskId,
@@ -490,6 +498,8 @@ export function ProjectChat() {
               agents={configuredAgents}
               selectedAgentType={selectedAgentType}
               onAgentTypeChange={setSelectedAgentType}
+              selectedWorkspaceProfile={selectedWorkspaceProfile}
+              onWorkspaceProfileChange={setSelectedWorkspaceProfile}
             />
           </div>
         ) : (
@@ -771,6 +781,8 @@ function ChatInput({
   agents,
   selectedAgentType,
   onAgentTypeChange,
+  selectedWorkspaceProfile,
+  onWorkspaceProfileChange,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -782,6 +794,8 @@ function ChatInput({
   agents: AgentInfo[];
   selectedAgentType: string | null;
   onAgentTypeChange: (agentType: string) => void;
+  selectedWorkspaceProfile: WorkspaceProfile;
+  onWorkspaceProfileChange: (profile: WorkspaceProfile) => void;
 }) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -813,24 +827,39 @@ function ChatInput({
           {error}
         </div>
       )}
-      {agents.length > 1 && (
-        <div className="flex items-center gap-2 mb-2">
-          <label htmlFor="agent-type-select" className="text-xs text-fg-muted whitespace-nowrap">Agent:</label>
+      <div className="flex items-center gap-4 mb-2 flex-wrap">
+        {agents.length > 1 && (
+          <div className="flex items-center gap-2">
+            <label htmlFor="agent-type-select" className="text-xs text-fg-muted whitespace-nowrap">Agent:</label>
+            <select
+              id="agent-type-select"
+              value={selectedAgentType ?? ''}
+              onChange={(e) => onAgentTypeChange(e.target.value)}
+              disabled={submitting}
+              className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs outline-none cursor-pointer"
+            >
+              {agents.map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div className="flex items-center gap-2">
+          <label htmlFor="workspace-profile-select" className="text-xs text-fg-muted whitespace-nowrap">Workspace:</label>
           <select
-            id="agent-type-select"
-            value={selectedAgentType ?? ''}
-            onChange={(e) => onAgentTypeChange(e.target.value)}
+            id="workspace-profile-select"
+            value={selectedWorkspaceProfile}
+            onChange={(e) => onWorkspaceProfileChange(e.target.value as WorkspaceProfile)}
             disabled={submitting}
             className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs outline-none cursor-pointer"
           >
-            {agents.map((agent) => (
-              <option key={agent.id} value={agent.id}>
-                {agent.name}
-              </option>
-            ))}
+            <option value="full">Full</option>
+            <option value="lightweight">Lightweight</option>
           </select>
         </div>
-      )}
+      </div>
       <div className="flex gap-2 items-end">
         <textarea
           ref={inputRef}

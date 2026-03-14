@@ -305,6 +305,7 @@ export interface SubmitTaskRequest {
   vmLocation?: string;
   nodeId?: string;
   agentType?: string;
+  workspaceProfile?: 'full' | 'lightweight';
   parentTaskId?: string;
   contextSummary?: string;
 }
