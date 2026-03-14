@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -693,8 +694,14 @@ func getAgentExtraEnvVars(agentType string) []string {
 }
 
 // vibeDefaultActiveModel is the model alias used when no user model override
-// is configured. Set to Mistral Large (their most capable model).
-const vibeDefaultActiveModel = "mistral-large"
+// is configured. Defaults to Mistral Large (their most capable model).
+// Override at deployment via VIBE_DEFAULT_ACTIVE_MODEL env var.
+var vibeDefaultActiveModel = func() string {
+	if v := os.Getenv("VIBE_DEFAULT_ACTIVE_MODEL"); v != "" {
+		return v
+	}
+	return "mistral-large"
+}()
 
 // generateVibeConfig produces a TOML config for ~/.vibe/config.toml that
 // defines model aliases so users can select models beyond the built-in
