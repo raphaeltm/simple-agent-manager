@@ -9,7 +9,8 @@ describe('ScalewayProvider', () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
-    provider = new ScalewayProvider('test-secret-key', 'test-project-id', 'fr-par-1');
+    // Use short poll config to avoid 3-second sleeps in tests
+    provider = new ScalewayProvider('test-secret-key', 'test-project-id', 'fr-par-1', undefined, 5000, 10);
     vi.resetAllMocks();
   });
 

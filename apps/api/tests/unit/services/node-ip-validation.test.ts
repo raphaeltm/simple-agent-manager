@@ -78,8 +78,14 @@ describe('heartbeat IP backfill', () => {
     expect(heartbeatSection).toContain("c.req.header('CF-Connecting-IP')");
   });
 
-  it('falls back to X-Real-IP header', () => {
-    expect(heartbeatSection).toContain("c.req.header('X-Real-IP')");
+  it('only trusts CF-Connecting-IP (not X-Real-IP)', () => {
+    expect(heartbeatSection).not.toContain("c.req.header('X-Real-IP')");
+  });
+
+  it('transitions error→running when node was marked error due to missing IP', () => {
+    expect(heartbeatSection).toContain("node.status === 'error'");
+    expect(heartbeatSection).toContain("updatePayload.status = 'running'");
+    expect(heartbeatSection).toContain("updatePayload.errorMessage = null");
   });
 
   it('updates ipAddress in the database update payload', () => {

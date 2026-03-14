@@ -322,6 +322,9 @@ export class ScalewayProvider implements Provider {
   ): Promise<ScalewayServerResponse['server']> {
     const deadline = Date.now() + this.ipPollTimeoutMs;
 
+    // Sleep before first poll — IP is never ready immediately after poweron
+    await new Promise((resolve) => setTimeout(resolve, this.ipPollIntervalMs));
+
     while (Date.now() < deadline) {
       const response = await providerFetch(
         this.name,

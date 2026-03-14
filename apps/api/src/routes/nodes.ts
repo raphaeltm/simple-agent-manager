@@ -557,7 +557,7 @@ nodesRoutes.post('/:id/heartbeat', async (c) => {
   // Defense-in-depth: backfill IP from heartbeat if node has no IP stored.
   // This self-heals Scaleway nodes where the IP wasn't captured at creation time.
   if (!node.ipAddress) {
-    const heartbeatIp = c.req.header('CF-Connecting-IP') || c.req.header('X-Real-IP');
+    const heartbeatIp = c.req.header('CF-Connecting-IP');
     if (heartbeatIp) {
       console.log('Heartbeat IP backfill', {
         nodeId,
@@ -565,6 +565,12 @@ nodesRoutes.post('/:id/heartbeat', async (c) => {
         action: 'ip_backfilled',
       });
       updatePayload.ipAddress = heartbeatIp;
+
+      // Transition error→running if the node was marked error due to missing IP
+      if (node.status === 'error' && node.errorMessage?.includes('no IP address')) {
+        updatePayload.status = 'running';
+        updatePayload.errorMessage = null;
+      }
 
       // Update DNS record if we have one, or create a new one
       try {
