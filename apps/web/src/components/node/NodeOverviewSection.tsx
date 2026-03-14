@@ -42,7 +42,7 @@ export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({ node, system
   return (
     <Section>
       <SectionHeader
-        icon={<Server size={20} color="#60a5fa" />}
+        icon={<Server size={20} color="var(--sam-color-info-fg)" />}
         iconBg="var(--sam-color-info-tint)"
         title={node.name}
         description="Node overview and configuration"
