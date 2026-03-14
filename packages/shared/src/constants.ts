@@ -245,12 +245,6 @@ export const DEFAULT_SCALEWAY_ZONE = 'fr-par-1';
 /** Default Scaleway image name for label-based lookup. Override via SCALEWAY_IMAGE_NAME env var. */
 export const DEFAULT_SCALEWAY_IMAGE_NAME = 'ubuntu_noble';
 
-/** Default timeout for polling Scaleway IP allocation after poweron (ms). Override via SCALEWAY_IP_POLL_TIMEOUT_MS.
- *  Must fit within Cloudflare Worker wall-clock limits (~30s) minus time for create+cloud-init+poweron calls. */
-export const DEFAULT_SCALEWAY_IP_POLL_TIMEOUT_MS = 20_000;
-
-/** Default interval between Scaleway IP poll attempts (ms). Override via SCALEWAY_IP_POLL_INTERVAL_MS. */
-export const DEFAULT_SCALEWAY_IP_POLL_INTERVAL_MS = 3_000;
 
 // Note: GitHub App install URL is NOT provided as a constant.
 // It must be derived from the actual GitHub App configuration at runtime.

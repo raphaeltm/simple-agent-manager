@@ -2,7 +2,7 @@
  * Tests for IP validation in node provisioning and heartbeat IP backfill.
  *
  * Validates:
- * 1. provisionNode rejects empty IP before creating DNS records
+ * 1. provisionNode handles empty IP by keeping node in creating state (awaiting heartbeat backfill)
  * 2. Heartbeat handler backfills IP when node has empty ipAddress
  * 3. DNS records are not created with empty IPs
  */
@@ -26,17 +26,16 @@ describe('provisionNode empty IP guard', () => {
     expect(ipCheckIdx).toBeLessThan(dnsCreateIdx);
   });
 
-  it('sets node status to error when IP is empty', () => {
+  it('keeps node in creating status when IP is empty (awaiting heartbeat backfill)', () => {
     const ipGuardBlock = section.slice(
       section.indexOf('if (!vm.ip)'),
       section.indexOf('let backendDnsRecordId')
     );
-    expect(ipGuardBlock).toContain("status: 'error'");
-    expect(ipGuardBlock).toContain("healthStatus: 'unhealthy'");
-    expect(ipGuardBlock).toContain('Provider returned no IP address');
+    expect(ipGuardBlock).toContain("status: 'creating'");
+    expect(ipGuardBlock).toContain('Awaiting IP allocation');
   });
 
-  it('returns early after setting error status for empty IP', () => {
+  it('returns early after setting creating status for empty IP', () => {
     const ipGuardBlock = section.slice(
       section.indexOf('if (!vm.ip)'),
       section.indexOf('let backendDnsRecordId')
@@ -52,14 +51,14 @@ describe('provisionNode empty IP guard', () => {
     expect(ipGuardBlock).toContain('providerInstanceId: vm.id');
   });
 
-  it('logs structured error with nodeId and providerInstanceId', () => {
+  it('logs structured info with nodeId and providerInstanceId', () => {
     const ipGuardBlock = section.slice(
       section.indexOf('if (!vm.ip)'),
       section.indexOf('let backendDnsRecordId')
     );
     expect(ipGuardBlock).toContain('nodeId: node.id');
     expect(ipGuardBlock).toContain('providerInstanceId: vm.id');
-    expect(ipGuardBlock).toContain("action: 'node_marked_error'");
+    expect(ipGuardBlock).toContain("action: 'node_awaiting_ip'");
   });
 });
 
@@ -82,7 +81,8 @@ describe('heartbeat IP backfill', () => {
     expect(heartbeatSection).not.toContain("c.req.header('X-Real-IP')");
   });
 
-  it('transitions error→running when node was marked error due to missing IP', () => {
+  it('transitions creating/error→running when node was awaiting IP allocation', () => {
+    expect(heartbeatSection).toContain("node.status === 'creating'");
     expect(heartbeatSection).toContain("node.status === 'error'");
     expect(heartbeatSection).toContain("updatePayload.status = 'running'");
     expect(heartbeatSection).toContain("updatePayload.errorMessage = null");
