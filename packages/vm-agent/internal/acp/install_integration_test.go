@@ -122,6 +122,7 @@ func mockAgentInfoRequiringNpm(binaryName string) agentCommandInfo {
 		command:    binaryName,
 		envVarName: "TEST_API_KEY",
 		installCmd: installCmd,
+		isNpmBased: true,
 	}
 }
 
