@@ -866,6 +866,11 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		}
 	}
 
+	// Inject agent-specific extra env vars (e.g., workarounds for upstream bugs).
+	if extraEnv := getAgentExtraEnvVars(agentType); len(extraEnv) > 0 {
+		envVars = append(envVars, extraEnv...)
+	}
+
 	if settings != nil && settings.PermissionMode != "" {
 		h.permissionMode = settings.PermissionMode
 	} else {

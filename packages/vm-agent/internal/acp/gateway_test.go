@@ -304,6 +304,33 @@ func TestGetModelEnvVarMistralVibe(t *testing.T) {
 	}
 }
 
+func TestGetAgentExtraEnvVars_MistralVibe(t *testing.T) {
+	t.Parallel()
+
+	envVars := getAgentExtraEnvVars("mistral-vibe")
+	if len(envVars) != 2 {
+		t.Fatalf("expected 2 extra env vars for mistral-vibe, got %d", len(envVars))
+	}
+	wantName := "VIBE_CLIENT_NAME=sam"
+	wantVersion := "VIBE_CLIENT_VERSION=1.0.0"
+	if envVars[0] != wantName {
+		t.Errorf("envVars[0]=%q, want %q", envVars[0], wantName)
+	}
+	if envVars[1] != wantVersion {
+		t.Errorf("envVars[1]=%q, want %q", envVars[1], wantVersion)
+	}
+}
+
+func TestGetAgentExtraEnvVars_OtherAgents(t *testing.T) {
+	t.Parallel()
+
+	for _, agent := range []string{"claude-code", "openai-codex", "google-gemini", "unknown"} {
+		if envVars := getAgentExtraEnvVars(agent); len(envVars) != 0 {
+			t.Errorf("getAgentExtraEnvVars(%q) returned %v, want nil", agent, envVars)
+		}
+	}
+}
+
 func TestGetAgentCommandInfoUnknown(t *testing.T) {
 	t.Parallel()
 
