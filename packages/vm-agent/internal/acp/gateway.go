@@ -685,7 +685,7 @@ func getAgentExtraEnvVars(agentType string) []string {
 		// Inject these via VIBE_-prefixed env vars to work around the upstream bug.
 		return []string{
 			"VIBE_CLIENT_NAME=sam",
-			"VIBE_CLIENT_VERSION=1.0.0",
+			"VIBE_CLIENT_VERSION=1.0.1",
 		}
 	default:
 		return nil
