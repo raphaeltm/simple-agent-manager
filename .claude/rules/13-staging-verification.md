@@ -9,6 +9,15 @@ Every PR that changes code MUST:
 
 **No exceptions. No self-exemptions. No "it's just a small change."** If you write code, you deploy it and test it live before merge.
 
+## Staging vs Production Domains
+
+| Environment | Base Domain | App URL | API URL |
+|-------------|-------------|---------|---------|
+| **Staging** | `sammy.party` | `https://app.sammy.party` | `https://api.sammy.party` |
+| **Production** | `simple-agent-manager.org` | `https://app.simple-agent-manager.org` | `https://api.simple-agent-manager.org` |
+
+**Staging is `sammy.party`, NOT `simple-agent-manager.org`.** When verifying PRs, always test against the staging domain.
+
 ## Why This Exists
 
 Local tests run against Miniflare mocks. CI runs unit tests in isolation. Neither environment has real OAuth, real DNS, real D1/KV/DO persistence, or real VM infrastructure. Bugs that only manifest in the real Cloudflare environment have shipped to production repeatedly because agents treated staging verification as optional.
@@ -39,7 +48,7 @@ The `deploy / Deploy to Cloudflare` check MUST pass. If it fails:
 
 After staging deployment succeeds, use Playwright to test the live app:
 
-1. Navigate to `https://app.simple-agent-manager.org`
+1. Navigate to `https://app.sammy.party` (staging)
 2. Authenticate using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`
    - If the file is missing, ask the human for credentials — do NOT skip this step
 3. Verify your changes work as intended (see verification checklists below)
@@ -59,12 +68,12 @@ Include verification evidence in the PR description or as a comment:
 
 Every PR must verify these existing workflows are not broken:
 
-- [ ] App loads without errors at `https://app.simple-agent-manager.org`
+- [ ] App loads without errors at `https://app.sammy.party`
 - [ ] Dashboard renders with project cards visible
 - [ ] Can navigate to a project page
 - [ ] Settings page loads and displays current configuration
 - [ ] No new console errors in the browser developer tools
-- [ ] API health endpoint responds: `https://api.simple-agent-manager.org/health`
+- [ ] API health endpoint responds: `https://api.sammy.party/health`
 
 ### For UI Changes (Additional)
 

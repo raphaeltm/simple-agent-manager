@@ -142,7 +142,7 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
    ```
    Or trigger the staging deployment via GitHub Actions.
 
-2. **Open the live app** using Playwright — navigate to `app.simple-agent-manager.org`.
+2. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging).
 
 3. **Authenticate** using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`. If the file is missing, ask the human for credentials.
 

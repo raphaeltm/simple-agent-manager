@@ -15,7 +15,7 @@
 All checkboxes below are mandatory for any PR that changes runtime code (`.ts`, `.tsx`, `.go`, etc.). Write `N/A: docs-only` ONLY if the PR contains zero runtime code changes. See `.claude/rules/13-staging-verification.md`.
 
 - [ ] **Staging deployment green** — `Deploy Staging` workflow passed on this PR
-- [ ] **Live app verified via Playwright** — logged into `app.simple-agent-manager.org` using test credentials and actively tested the application
+- [ ] **Live app verified via Playwright** — logged into `app.sammy.party` (staging) using test credentials and actively tested the application
 - [ ] **Existing workflows confirmed working** — navigated dashboard, projects, and settings; confirmed no regressions in core flows (pages load, data displays, navigation works, no new console errors)
 - [ ] **New feature/fix verified on staging** — the specific changes in this PR work correctly on the live staging environment (describe what was tested below)
 - [ ] Infrastructure verification completed — VM provisioned and heartbeat confirmed (required for changes to cloud-init, VM agent, DNS, TLS, scripts/deploy). Write `N/A: no infra changes` ONLY if the PR does not touch any infrastructure paths.

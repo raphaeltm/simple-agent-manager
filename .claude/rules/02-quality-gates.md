@@ -198,7 +198,7 @@ String containment tests on structured output create false confidence. The test 
 **Full details in `.claude/rules/13-staging-verification.md`.** Summary of the hard requirements:
 
 1. **Staging deployment MUST be green.** The `Deploy Staging` workflow runs on every PR. A failed staging deployment is the same severity as a failed test — it blocks merge. Do NOT treat staging deploy failures as "expected on PRs."
-2. **Live app MUST be verified via Playwright.** After staging deploys, log into `app.simple-agent-manager.org` using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`, and actively test the application.
+2. **Live app MUST be verified via Playwright.** After staging deploys, log into `app.sammy.party` (staging — NOT `app.simple-agent-manager.org`, which is production) using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`, and actively test the application.
 3. **Existing workflows MUST be confirmed working.** Navigate the dashboard, projects, settings. Verify no regressions — pages load, data displays, navigation works, no new console errors.
 4. **New feature/fix MUST be verified on staging.** The specific changes in the PR must work correctly on the live staging environment.
 5. **Evidence MUST be reported.** Include screenshots, API responses, or Playwright observations in the PR.
@@ -221,7 +221,7 @@ For pull requests, keep the PR template filled (including Agent Preflight block 
 After ANY merge to main, the production deployment triggers automatically. You MUST verify the deployed feature works using Playwright against the live app.
 
 1. Wait for the Deploy Production workflow to complete successfully in GitHub Actions.
-2. Use Playwright to navigate to `app.simple-agent-manager.org` and test the deployed feature end-to-end.
+2. Use Playwright to navigate to `app.simple-agent-manager.org` (production) and test the deployed feature end-to-end.
 3. Use the test credentials stored at `/workspaces/.tmp/secure/demo-credentials.md` to authenticate. If the file is missing, ask the human for credentials.
 4. If the feature cannot be tested via Playwright, document why and what was verified manually.
 5. Report results to the user — do not assume deployment success just because CI passed.
