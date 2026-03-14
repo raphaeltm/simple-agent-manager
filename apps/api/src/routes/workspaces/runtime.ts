@@ -6,7 +6,7 @@ import type { Env } from '../../index';
 import { requireAuth, requireApproved } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import * as schema from '../../db/schema';
-import type { BootLogEntry, BootstrapTokenData } from '@simple-agent-manager/shared';
+import { isValidAgentType, type BootLogEntry, type BootstrapTokenData } from '@simple-agent-manager/shared';
 import { getDecryptedAgentKey } from '../credentials';
 import { getInstallationToken } from '../../services/github-app';
 import { appendBootLog } from '../../services/boot-log';
@@ -93,10 +93,10 @@ runtimeRoutes.post('/:id/agent-credential-sync', async (c) => {
     throw errors.badRequest('agentType, credentialKind, and credential are required');
   }
 
-  // Validate against known values.
-  const validAgentTypes = new Set(['claude-code', 'openai-codex', 'google-gemini', 'mistral-vibe']);
+  // Validate against known values. Use the shared catalog so new agents
+  // are accepted automatically without a manual allowlist update.
   const validCredentialKinds = new Set(['api-key', 'oauth-token']);
-  if (!validAgentTypes.has(body.agentType)) {
+  if (!isValidAgentType(body.agentType)) {
     throw errors.badRequest('Invalid agentType');
   }
   if (!validCredentialKinds.has(body.credentialKind)) {
