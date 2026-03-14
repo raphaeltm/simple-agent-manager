@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ProjectRuntimeConfigResponse, ProviderCatalog, VMSize } from '@simple-agent-manager/shared';
-import { AGENT_CATALOG } from '@simple-agent-manager/shared';
+import type { ProjectRuntimeConfigResponse, ProviderCatalog, VMSize, CredentialProvider } from '@simple-agent-manager/shared';
+import { AGENT_CATALOG, CREDENTIAL_PROVIDERS } from '@simple-agent-manager/shared';
 import { Button, Spinner, Skeleton } from '@simple-agent-manager/ui';
 import {
   getProjectRuntimeConfig,
   getProviderCatalog,
+  listCredentials,
   updateProject,
   upsertProjectRuntimeEnvVar,
   deleteProjectRuntimeEnvVar,
@@ -28,6 +29,9 @@ export function ProjectSettings() {
   const [savingVmSize, setSavingVmSize] = useState(false);
   const [defaultAgentType, setDefaultAgentType] = useState<string | null>(project?.defaultAgentType ?? null);
   const [savingAgentType, setSavingAgentType] = useState(false);
+  const [defaultProvider, setDefaultProvider] = useState<CredentialProvider | null>(project?.defaultProvider ?? null);
+  const [savingProvider, setSavingProvider] = useState(false);
+  const [configuredProviders, setConfiguredProviders] = useState<CredentialProvider[]>([]);
 
   // Provider catalog for accurate VM size descriptions
   const [catalog, setCatalog] = useState<ProviderCatalog | null>(null);
@@ -61,11 +65,23 @@ export function ProjectSettings() {
       })
     : FALLBACK_VM_SIZES;
 
+  // Load user's configured cloud providers
+  useEffect(() => {
+    listCredentials()
+      .then((creds) => {
+        const providers = creds
+          .map((c) => c.provider);
+        setConfiguredProviders(providers);
+      })
+      .catch(() => { /* credentials unavailable */ });
+  }, []);
+
   // Sync from project when it reloads
   useEffect(() => {
     if (project) {
       setDefaultVmSize(project.defaultVmSize ?? null);
       setDefaultAgentType(project.defaultAgentType ?? null);
+      setDefaultProvider(project.defaultProvider ?? null);
     }
   }, [project]);
 
@@ -100,6 +116,22 @@ export function ProjectSettings() {
       toast.error(err instanceof Error ? err.message : 'Failed to update agent type');
     } finally {
       setSavingAgentType(false);
+    }
+  };
+
+  const handleSaveProvider = async (provider: CredentialProvider) => {
+    const newProvider = provider === defaultProvider ? null : provider;
+    setSavingProvider(true);
+    setDefaultProvider(newProvider);
+    try {
+      await updateProject(projectId, { defaultProvider: newProvider });
+      await reload();
+      toast.success(newProvider ? `Default provider set to ${newProvider}` : 'Default provider cleared (will use any available)');
+    } catch (err) {
+      setDefaultProvider(project?.defaultProvider ?? null);
+      toast.error(err instanceof Error ? err.message : 'Failed to update provider');
+    } finally {
+      setSavingProvider(false);
     }
   };
 
@@ -289,6 +321,46 @@ export function ProjectSettings() {
           </div>
         )}
       </section>
+
+      {/* Default Cloud Provider */}
+      {configuredProviders.length > 1 && (
+        <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
+          <div>
+            <h2 className="sam-type-section-heading m-0 text-fg-primary">
+              Default Cloud Provider
+            </h2>
+            <p className="m-0 mt-1 text-xs text-fg-muted">
+              Which cloud provider to use for auto-provisioned nodes. Click again to clear.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {CREDENTIAL_PROVIDERS.filter((p) => configuredProviders.includes(p)).map((provider) => {
+              const isSelected = defaultProvider === provider;
+              return (
+                <button
+                  key={provider}
+                  type="button"
+                  aria-pressed={isSelected}
+                  disabled={savingProvider}
+                  onClick={() => void handleSaveProvider(provider)}
+                  className={`p-3 rounded-md text-left text-fg-primary transition-all ${
+                    isSelected
+                      ? 'border-2 border-accent bg-accent-tint'
+                      : 'border border-border-default bg-inset'
+                  } ${savingProvider ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
+                >
+                  <div className="font-medium capitalize">{provider}</div>
+                </button>
+              );
+            })}
+          </div>
+          {!defaultProvider && (
+            <div className="text-xs text-fg-muted">
+              No default set — system will use any available provider credential.
+            </div>
+          )}
+        </section>
+      )}
 
     {/* Runtime Config */}
     <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">

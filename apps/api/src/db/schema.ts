@@ -190,6 +190,7 @@ export const projects = sqliteTable(
     defaultVmSize: text('default_vm_size'),
     defaultAgentType: text('default_agent_type'),
     defaultWorkspaceProfile: text('default_workspace_profile'),
+    defaultProvider: text('default_provider'),
     status: text('status').notNull().default('active'),
     lastActivityAt: text('last_activity_at'),
     activeSessionCount: integer('active_session_count').notNull().default(0),

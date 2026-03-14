@@ -71,6 +71,7 @@ export function toProjectResponse(project: schema.Project): Project {
     defaultVmSize: (project.defaultVmSize as Project['defaultVmSize']) ?? null,
     defaultAgentType: project.defaultAgentType ?? null,
     defaultWorkspaceProfile: (project.defaultWorkspaceProfile as Project['defaultWorkspaceProfile']) ?? null,
+    defaultProvider: (project.defaultProvider as Project['defaultProvider']) ?? null,
     status: (project.status as 'active' | 'detached') || 'active',
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,

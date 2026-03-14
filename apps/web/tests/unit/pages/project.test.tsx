@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   listActivityEvents: vi.fn(),
   listChatSessions: vi.fn(),
   getProviderCatalog: vi.fn(),
+  listCredentials: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
@@ -55,6 +56,7 @@ vi.mock('../../../src/lib/api', () => ({
   listActivityEvents: mocks.listActivityEvents,
   listChatSessions: mocks.listChatSessions,
   getProviderCatalog: mocks.getProviderCatalog,
+  listCredentials: mocks.listCredentials,
 }));
 
 vi.mock('../../../src/components/UserMenu', () => ({
@@ -162,6 +164,7 @@ describe('Project page', () => {
     mocks.listActivityEvents.mockResolvedValue({ events: [], hasMore: false });
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
+    mocks.listCredentials.mockResolvedValue([]);
   });
 
   it('loads project details and renders task backlog on tasks tab', async () => {

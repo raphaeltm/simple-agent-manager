@@ -193,6 +193,7 @@ export interface Project {
   defaultVmSize?: VMSize | null;
   defaultAgentType?: string | null;
   defaultWorkspaceProfile?: WorkspaceProfile | null;
+  defaultProvider?: CredentialProvider | null;
   status?: ProjectStatus;
   createdAt: string;
   updatedAt: string;
@@ -376,6 +377,7 @@ export interface UpdateProjectRequest {
   defaultVmSize?: VMSize | null;
   defaultAgentType?: string | null;
   defaultWorkspaceProfile?: WorkspaceProfile | null;
+  defaultProvider?: CredentialProvider | null;
 }
 
 export interface ProjectRuntimeEnvVarResponse {
@@ -556,6 +558,8 @@ export interface SubmitTaskRequest {
   agentType?: string;
   /** Workspace provisioning profile. 'lightweight' skips devcontainer build for faster startup. */
   workspaceProfile?: WorkspaceProfile;
+  /** Cloud provider to use for auto-provisioned nodes. Falls back to project default, then any available credential. */
+  provider?: CredentialProvider;
   /** ID of a parent task to continue from (conversation forking). When set, the new workspace
    * checks out the parent task's output branch if available. */
   parentTaskId?: string;
