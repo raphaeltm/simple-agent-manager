@@ -190,6 +190,10 @@ export function useProjectAgentSession({
     if (!preferredAgentType || !connected) return;
     if (agentType === preferredAgentType) return;
     if (hasAutoSelectedRef.current && agentType) return;
+    // Don't override a running agent — the task runner already started the
+    // correct agent for this session. Auto-selecting a different agent would
+    // kill the task-driven process (e.g., mistral-vibe killed by claude-code).
+    if (agentType) return;
     if (
       state === 'connecting' ||
       state === 'reconnecting' ||

@@ -375,7 +375,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     workspaceId: session?.workspaceId ?? null,
     sessionId: agentSessionId ?? sessionId, // Hook needs a string; disabled when null
     enabled: (sessionState === 'active' || sessionState === 'idle') && agentSessionId !== null,
-    preferredAgentType: 'claude-code',
+    // Don't hardcode a preferred agent — let the task runner's agent selection
+    // stand. Hardcoding 'claude-code' caused the browser to auto-select claude-code
+    // and kill task-driven agents like mistral-vibe on first connect.
+    preferredAgentType: undefined,
   });
 
   // Reset grace state when switching sessions
