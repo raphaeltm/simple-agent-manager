@@ -118,6 +118,7 @@ Dispatch reviewers **in parallel** covering each language and discipline touched
 
 | PR touches | Required reviewer agent |
 |------------|----------------------|
+| **Always (if task-driven)** | `task-completion-validator` — planned vs. actual work, research gaps, unwired UI, missing tests |
 | Go code (`packages/vm-agent/`) | `go-specialist` — concurrency, resource leaks, Go idioms |
 | TypeScript API (`apps/api/`) | `cloudflare-specialist` — D1, KV, Workers patterns |
 | UI code (`apps/web/`, `packages/ui/`) | `ui-ux-specialist` — accessibility, layout, interactions |
