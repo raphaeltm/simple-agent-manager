@@ -561,6 +561,11 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 	agentInstallMu.Lock()
 	defer agentInstallMu.Unlock()
 
+	// Bail out if context was cancelled while waiting for the mutex.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	// Double-check after acquiring mutex — another goroutine may have installed it.
 	recheckCmd := exec.CommandContext(ctx, "docker", checkArgs...)
 	if err := recheckCmd.Run(); err == nil {
@@ -570,21 +575,31 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 
 	slog.Info("Agent binary not found in container, installing", "command", info.command)
 
-	// Clean up stale partial install directories left by previous failed npm installs.
-	// npm renames the target directory to a temp name (with random suffix) during install;
-	// if the install fails, these directories can block subsequent installs with ENOTEMPTY.
-	cleanupScript := fmt.Sprintf(
-		`rm -rf /usr/local/lib/node_modules/@zed-industries/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/@zed-industries/.%s-* 2>/dev/null; true`,
-		info.command, info.command,
-	)
-	cleanupArgs := []string{"exec", "-u", "root", containerID, "sh", "-c", cleanupScript}
-	cleanupCmd := exec.CommandContext(ctx, "docker", cleanupArgs...)
-	_ = cleanupCmd.Run() // best-effort cleanup
+	// For npm-based installs, clean up stale partial install directories left
+	// by previous failed npm installs. npm renames the target directory to a temp
+	// name (with random suffix) during install; if the install fails, these
+	// directories can block subsequent installs with ENOTEMPTY.
+	if info.isNpmBased {
+		cleanupScript := fmt.Sprintf(
+			`rm -rf /usr/local/lib/node_modules/@zed-industries/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/@zed-industries/.%s-* 2>/dev/null; true`,
+			info.command, info.command,
+		)
+		cleanupArgs := []string{"exec", "-u", "root", containerID, "sh", "-c", cleanupScript}
+		cleanupCmd := exec.CommandContext(ctx, "docker", cleanupArgs...)
+		_ = cleanupCmd.Run() // best-effort cleanup
+	}
 
-	installScript := fmt.Sprintf(
-		`which npm >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq nodejs npm; }; %s`,
-		info.installCmd,
-	)
+	// For npm-based agents, ensure npm is available before running the install.
+	// Non-npm agents (e.g., pip-based) handle their own prerequisites in installCmd.
+	var installScript string
+	if info.isNpmBased {
+		installScript = fmt.Sprintf(
+			`which npm >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq nodejs npm; }; %s`,
+			info.installCmd,
+		)
+	} else {
+		installScript = info.installCmd
+	}
 
 	installArgs := []string{"exec", "-u", "root", containerID, "sh", "-c", installScript}
 	installCmd := exec.CommandContext(ctx, "docker", installArgs...)
@@ -598,11 +613,14 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 }
 
 // agentCommandInfo holds the command, args, env var, and install command for an agent.
+// SECURITY: installCmd is passed to sh -c inside the container. It must always be a
+// hardcoded literal from getAgentCommandInfo — never derived from external input.
 type agentCommandInfo struct {
 	command       string
 	args          []string
 	envVarName    string
-	installCmd    string // npm install command to run if binary is missing
+	installCmd    string // shell command to run if binary is missing (npm, pip, etc.)
+	isNpmBased    bool   // true for agents installed via npm; controls prerequisite injection and cleanup
 	injectionMode string // "env" (default) or "auth-file" — how the credential is injected
 	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
@@ -614,27 +632,28 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 	switch agentType {
 	case "claude-code":
 		if credentialKind == "oauth-token" {
-			return agentCommandInfo{"claude-agent-acp", nil, "CLAUDE_CODE_OAUTH_TOKEN", "npm install -g @zed-industries/claude-agent-acp", "", ""}
+			return agentCommandInfo{"claude-agent-acp", nil, "CLAUDE_CODE_OAUTH_TOKEN", "npm install -g @zed-industries/claude-agent-acp", true, "", ""}
 		}
-		return agentCommandInfo{"claude-agent-acp", nil, "ANTHROPIC_API_KEY", "npm install -g @zed-industries/claude-agent-acp", "", ""}
+		return agentCommandInfo{"claude-agent-acp", nil, "ANTHROPIC_API_KEY", "npm install -g @zed-industries/claude-agent-acp", true, "", ""}
 	case "openai-codex":
 		if credentialKind == "oauth-token" {
 			return agentCommandInfo{
-				command:       "codex-acp",
-				args:          nil,
-				envVarName:    "",
-				installCmd:    "npm install -g @zed-industries/codex-acp",
+				command:    "codex-acp",
+				args:       nil,
+				envVarName: "",
+				installCmd: "npm install -g @zed-industries/codex-acp",
+				isNpmBased: true,
 				injectionMode: "auth-file",
 				authFilePath:  ".codex/auth.json",
 			}
 		}
-		return agentCommandInfo{"codex-acp", nil, "OPENAI_API_KEY", "npm install -g @zed-industries/codex-acp", "", ""}
+		return agentCommandInfo{"codex-acp", nil, "OPENAI_API_KEY", "npm install -g @zed-industries/codex-acp", true, "", ""}
 	case "google-gemini":
-		return agentCommandInfo{"gemini", []string{"--experimental-acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli", "", ""}
+		return agentCommandInfo{"gemini", []string{"--experimental-acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli", true, "", ""}
 	case "mistral-vibe":
-		return agentCommandInfo{"vibe-acp", nil, "MISTRAL_API_KEY", `ARCH=$(uname -m) && curl -fLo /usr/local/bin/vibe-acp "https://github.com/mistralai/mistral-vibe/releases/latest/download/vibe-acp-linux-${ARCH}" && chmod +x /usr/local/bin/vibe-acp`, "", ""}
+		return agentCommandInfo{"vibe-acp", nil, "MISTRAL_API_KEY", `which pip3 >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq python3-pip; }; pip3 install --break-system-packages mistral-vibe`, false, "", ""}
 	default:
-		return agentCommandInfo{agentType, nil, "API_KEY", "", "", ""}
+		return agentCommandInfo{agentType, nil, "API_KEY", "", false, "", ""}
 	}
 }
 

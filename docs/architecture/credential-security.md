@@ -305,7 +305,7 @@ Responses:
 | `{ success: true, updated: false }` | Credential unchanged, no write performed |
 | `{ success: true, updated: true }` | Credential refreshed and re-encrypted in DB |
 
-Input validation: `agentType` must be one of `claude-code`, `openai-codex`, `google-gemini`. `credentialKind` must be `api-key` or `oauth-token`. Payload capped at 64 KB.
+Input validation: `agentType` is validated against `AGENT_CATALOG` via `isValidAgentType()` from `packages/shared/src/agents.ts`. `credentialKind` must be `api-key` or `oauth-token`. Payload capped at 64 KB.
 
 ### Security Considerations
 
