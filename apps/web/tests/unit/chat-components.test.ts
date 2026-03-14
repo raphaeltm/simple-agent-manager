@@ -106,11 +106,14 @@ describe('ProjectMessageView', () => {
     expect(source).toContain('ConversationItem');
   });
 
-  it('uses agent session ID (ULID) for ACP WebSocket routing when available', () => {
+  it('uses agent session ID (ULID) for ACP WebSocket routing — never falls back to chat session ID', () => {
     // The ACP WebSocket must connect using the agent session ID from D1,
     // not the chat session ID, to avoid creating a duplicate session on the VM agent.
-    expect(source).toContain('session?.agentSessionId ?? sessionId');
-    expect(source).toContain('sessionId: agentSessionId');
+    // When agentSessionId is null, the ACP connection must be DISABLED — never
+    // fall back to the chat session ID which would create a second ACP session.
+    expect(source).toContain('session?.agentSessionId ?? null');
+    expect(source).toContain('agentSessionId !== null');
+    expect(source).toContain('sessionId: agentSessionId ?? sessionId');
   });
 
   it('cleans up polling on unmount', () => {

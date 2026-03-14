@@ -7,7 +7,7 @@
  * See: specs/018-project-first-architecture/tasks.md (T027)
  */
 import { Hono } from 'hono';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, desc } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { isTaskExecutionStep } from '@simple-agent-manager/shared';
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
@@ -166,8 +166,16 @@ chatRoutes.get('/:sessionId', async (c) => {
     }
   }
 
-  // Look up active agent session ID (ULID) from D1 so the UI can route
-  // ACP WebSocket to the correct VM agent session instead of creating a duplicate.
+  // Look up the most recent agent session ID (ULID) from D1 so the UI can
+  // route ACP WebSocket to the correct VM agent session instead of creating a
+  // duplicate.  We intentionally do NOT filter by status='running' — the
+  // agent session may be suspended (idle timeout) or briefly in another
+  // transient state.  The VM agent auto-resumes suspended sessions on
+  // WebSocket attach (agent_ws.go:96-117), so the browser should always
+  // reconnect with the original agent session ID to preserve conversation
+  // context.  Filtering by status caused the UI to fall back to the chat
+  // session ID, which created a new SessionHost on the VM and wiped the
+  // conversation history.
   let agentSessionId: string | null = null;
   const workspaceId = (session as Record<string, unknown>).workspaceId as string | null;
   if (workspaceId) {
@@ -175,12 +183,8 @@ chatRoutes.get('/:sessionId', async (c) => {
       const [agentRow] = await db
         .select({ id: schema.agentSessions.id })
         .from(schema.agentSessions)
-        .where(
-          and(
-            eq(schema.agentSessions.workspaceId, workspaceId),
-            eq(schema.agentSessions.status, 'running')
-          )
-        )
+        .where(eq(schema.agentSessions.workspaceId, workspaceId))
+        .orderBy(desc(schema.agentSessions.createdAt))
         .limit(1);
       if (agentRow) {
         agentSessionId = agentRow.id;
