@@ -35,19 +35,19 @@ The lightweight workspace profile feature (`WorkspaceProfile = 'full' | 'lightwe
 
 ## Implementation Checklist
 
-- [ ] Add `lightweight` field to `CreateWorkspaceAgentRequestSchema` in `packages/shared/src/vm-agent-contract.ts`
-- [ ] Add contract test: `CreateWorkspaceAgentRequestSchema` validates payload with `lightweight: true`
-- [ ] Add contract test: `CreateWorkspaceAgentRequestSchema` validates payload without `lightweight` (backward compat)
-- [ ] Add API unit test: task submit with `workspaceProfile: 'lightweight'` passes validation
-- [ ] Add API unit test: task submit with invalid `workspaceProfile` returns 400
-- [ ] Add API unit test: task submit falls back to project default workspace profile
-- [ ] Add API unit test: task submit falls back to platform default (`full`) when no project default
-- [ ] Add API unit test: project PATCH with `defaultWorkspaceProfile: 'lightweight'` succeeds
-- [ ] Add API unit test: project PATCH with invalid workspace profile returns 400
-- [ ] Add Go unit test: workspace creation with `lightweight: true` sets runtime flag
-- [ ] Add Go unit test: workspace creation without `lightweight` defaults to false
-- [ ] Add Go unit test: lightweight flag persists through persistence store round-trip
-- [ ] Add Go unit test: lightweight runtime propagates to ProvisionState in provisioning
+- [x] Add `lightweight` field to `CreateWorkspaceAgentRequestSchema` in `packages/shared/src/vm-agent-contract.ts`
+- [x] Add contract test: `CreateWorkspaceAgentRequestSchema` validates payload with `lightweight: true`
+- [x] Add contract test: `CreateWorkspaceAgentRequestSchema` validates payload without `lightweight` (backward compat)
+- [x] Add API unit test: task submit with `workspaceProfile: 'lightweight'` passes validation
+- [x] Add API unit test: task submit with invalid `workspaceProfile` returns 400
+- [x] Add API unit test: task submit falls back to project default workspace profile
+- [x] Add API unit test: task submit falls back to platform default (`full`) when no project default
+- [x] Add API unit test: project PATCH with `defaultWorkspaceProfile: 'lightweight'` succeeds
+- [x] Add API unit test: project PATCH with invalid workspace profile returns 400
+- [x] Add Go unit test: workspace creation with `lightweight: true` sets runtime flag
+- [x] Add Go unit test: workspace creation without `lightweight` defaults to false
+- [x] Add Go unit test: lightweight flag persists through persistence store round-trip
+- [x] Add Go unit test: lightweight runtime propagates to ProvisionState in provisioning
 
 ## Acceptance Criteria
 
