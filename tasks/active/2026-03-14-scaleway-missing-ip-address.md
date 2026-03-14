@@ -49,30 +49,31 @@ Heartbeats work because the VM agent initiates the connection outbound to the co
 
 ### Fix 1: Poll for IP After Scaleway Poweron (Primary Fix)
 
-- [ ] In `ScalewayProvider.createVM()`, after `performAction(location, serverId, 'poweron')`, poll `GET /servers/{id}` until the server has a non-empty `public_ip.address` or `public_ips[0].address`
-- [ ] Add configurable timeout for IP polling (e.g., `SCALEWAY_IP_POLL_TIMEOUT_MS`, default 60s) and poll interval (e.g., 3s)
-- [ ] Return the updated server state with IP from the poll, not from the initial create response
-- [ ] Add error handling: if timeout is reached without an IP, throw a `ProviderError` with a clear message
+- [x] In `ScalewayProvider.createVM()`, after `performAction(location, serverId, 'poweron')`, poll `GET /servers/{id}` until the server has a non-empty `public_ip.address` or `public_ips[0].address`
+- [x] Add configurable timeout for IP polling (e.g., `SCALEWAY_IP_POLL_TIMEOUT_MS`, default 60s) and poll interval (e.g., 3s)
+- [x] Return the updated server state with IP from the poll, not from the initial create response
+- [x] Add error handling: if timeout is reached without an IP, throw a `ProviderError` with a clear message
 
 ### Fix 2: Heartbeat IP Backfill (Defense in Depth)
 
-- [ ] Modify the heartbeat handler (`apps/api/src/routes/nodes.ts:510+`) to check if `node.ipAddress` is empty/null
-- [ ] If empty, extract the IP from the heartbeat request (e.g., `c.req.header('CF-Connecting-IP')` or similar)
-- [ ] Update the node's `ipAddress` in the DB and update/create the DNS record
-- [ ] This ensures that even if the primary fix fails or the IP changes, the control plane self-heals
+- [x] Modify the heartbeat handler (`apps/api/src/routes/nodes.ts:510+`) to check if `node.ipAddress` is empty/null
+- [x] If empty, extract the IP from the heartbeat request (e.g., `c.req.header('CF-Connecting-IP')` or similar)
+- [x] Update the node's `ipAddress` in the DB and update/create the DNS record
+- [x] This ensures that even if the primary fix fails or the IP changes, the control plane self-heals
 
 ### Fix 3: Fail-Fast on Empty IP (Guard)
 
-- [ ] In `provisionNode()` (`apps/api/src/services/nodes.ts`), after `createVM()`, validate that `vm.ip` is a non-empty string before creating DNS records or marking the node as running
-- [ ] If IP is empty, set node status to `error` with message `"Provider returned no IP address — server may still be starting"`
-- [ ] Do not create DNS records with empty IP
+- [x] In `provisionNode()` (`apps/api/src/services/nodes.ts`), after `createVM()`, validate that `vm.ip` is a non-empty string before creating DNS records or marking the node as running
+- [x] If IP is empty, set node status to `error` with message `"Provider returned no IP address — server may still be starting"`
+- [x] Do not create DNS records with empty IP
 
 ### Tests
 
-- [ ] Unit test: `ScalewayProvider.createVM()` returns a non-empty IP after polling
-- [ ] Unit test: heartbeat handler backfills IP when node has empty ipAddress
-- [ ] Unit test: `provisionNode()` rejects empty IP from provider
-- [ ] Integration test: mock Scaleway 3-step flow with delayed IP, verify IP is captured
+- [x] Unit test: `ScalewayProvider.createVM()` returns a non-empty IP after polling
+- [x] Unit test: IP poll timeout throws ProviderError
+- [x] Unit test: delayed IP allocation (multiple poll attempts) works correctly
+- [ ] Integration test: heartbeat handler backfills IP when node has empty ipAddress
+- [ ] Integration test: `provisionNode()` rejects empty IP from provider
 
 ### Documentation
 
