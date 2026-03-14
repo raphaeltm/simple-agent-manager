@@ -1,7 +1,7 @@
 import type { FC } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { VM_SIZE_LABELS, VM_LOCATIONS } from '@simple-agent-manager/shared';
+import { VM_SIZE_LABELS, VM_LOCATIONS, PROVIDER_LABELS } from '@simple-agent-manager/shared';
 import { Card, Button, StatusBadge, DropdownMenu, type DropdownMenuItem } from '@simple-agent-manager/ui';
 import { Server, Plus } from 'lucide-react';
 import { MiniMetricBadge } from './MiniMetricBadge';
@@ -113,7 +113,7 @@ export const NodeCard: FC<NodeCardProps> = ({
 
         {/* VM info */}
         <div className="sam-type-caption text-fg-muted">
-          {sizeLabels ? `${sizeLabels.label} \u2014 ${sizeLabels.shortDescription}` : node.vmSize} &middot; {locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}
+          {node.cloudProvider ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider) : 'Unknown provider'} &middot; {sizeLabels ? `${sizeLabels.label} \u2014 ${sizeLabels.shortDescription}` : node.vmSize} &middot; {locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}
         </div>
 
         {/* Resource metrics */}

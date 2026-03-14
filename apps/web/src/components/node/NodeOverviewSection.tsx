@@ -1,6 +1,6 @@
 import type { FC } from 'react';
 import type { NodeResponse, NodeSystemInfo } from '@simple-agent-manager/shared';
-import { VM_SIZE_CONFIG, VM_LOCATIONS } from '@simple-agent-manager/shared';
+import { VM_SIZE_CONFIG, VM_LOCATIONS, PROVIDER_LABELS } from '@simple-agent-manager/shared';
 import { StatusBadge } from '@simple-agent-manager/ui';
 import { Server } from 'lucide-react';
 import { SectionHeader } from './SectionHeader';
@@ -54,6 +54,10 @@ export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({ node, system
       </div>
 
       <div className="grid gap-4 border-t border-border-default pt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+        <div>
+          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>Provider</div>
+          <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>{node.cloudProvider ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider) : 'Unknown'}</div>
+        </div>
         <div>
           <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>Size</div>
           <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>{sizeLabel}</div>
