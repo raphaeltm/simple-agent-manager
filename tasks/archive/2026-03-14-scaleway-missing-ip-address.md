@@ -1,7 +1,7 @@
 # Scaleway Nodes: Missing IP Address Breaks Workspace Operations
 
 **Created**: 2026-03-14
-**Status**: Backlog
+**Status**: Complete
 **Priority**: Critical
 **Estimated Effort**: Medium
 
