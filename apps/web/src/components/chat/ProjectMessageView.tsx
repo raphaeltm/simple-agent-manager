@@ -10,11 +10,13 @@ import {
 } from '@simple-agent-manager/acp-client';
 import type { ConversationItem } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent } from '@simple-agent-manager/acp-client';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, ExternalLink, Server, Box, Cpu, MapPin, Cloud } from 'lucide-react';
 import { TruncatedSummary } from './TruncatedSummary';
 import { stripMarkdown } from '../../lib/text-utils';
-import { getChatSession, getTranscribeApiUrl, resetIdleTimer } from '../../lib/api';
+import { getChatSession, getTranscribeApiUrl, resetIdleTimer, getWorkspace, getNode } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
+import type { WorkspaceResponse, NodeResponse, VMSize } from '@simple-agent-manager/shared';
+import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
 import { useProjectAgentSession } from '../../hooks/useProjectAgentSession';
@@ -309,6 +311,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Workspace & node context for session header
+  const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
+  const [node, setNode] = useState<NodeResponse | null>(null);
+
   // Follow-up input state
   const [followUp, setFollowUp] = useState('');
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
@@ -437,6 +443,31 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   useEffect(() => {
     void loadSession();
   }, [loadSession]);
+
+  // Fetch workspace and node details for the session header context dropdown.
+  // Fires once when the session's workspaceId first becomes available.
+  useEffect(() => {
+    const wsId = session?.workspaceId;
+    if (!wsId) return;
+    // Skip if already fetched for this workspace
+    if (workspace?.id === wsId) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const ws = await getWorkspace(wsId);
+        if (cancelled) return;
+        setWorkspace(ws);
+        if (ws.nodeId) {
+          const nd = await getNode(ws.nodeId);
+          if (!cancelled) setNode(nd);
+        }
+      } catch {
+        // Best-effort — context info is supplementary
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [session?.workspaceId, workspace?.id]);
 
   // Auto-scroll to bottom on initial load, session switch, and new messages.
   // Skip when older messages were prepended via "Load earlier messages".
@@ -680,6 +711,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           loading={loading}
           idleCountdownMs={idleCountdownMs}
           taskEmbed={taskEmbed}
+          workspace={workspace}
+          node={node}
         />
       )}
 
@@ -820,6 +853,26 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   );
 };
 
+/** Labeled value pill used in the session context panel. */
+function ContextItem({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-fg-muted min-w-0">
+      <span className="shrink-0 opacity-60" aria-hidden="true">{icon}</span>
+      <span className="font-medium shrink-0">{label}:</span>
+      <span className="text-fg-primary truncate min-w-0">{children}</span>
+    </div>
+  );
+}
+
+/** Human-readable VM size label from shared constants. */
+function formatVmSize(size: string): string {
+  const config = VM_SIZE_LABELS[size as VMSize];
+  return config ? config.label : size;
+}
+
+/** Whether a VM size is considered "lightweight" (small profile). */
+const LIGHTWEIGHT_VM_SIZE: VMSize = 'small';
+
 /** Collapsible session header — shows title + state dot, with expandable details. */
 function SessionHeader({
   session,
@@ -827,19 +880,23 @@ function SessionHeader({
   loading,
   idleCountdownMs,
   taskEmbed,
+  workspace,
+  node,
 }: {
   session: ChatSessionResponse;
   sessionState: SessionState;
   loading: boolean;
   idleCountdownMs: number | null;
   taskEmbed: ChatSessionResponse['task'] | null;
+  workspace: WorkspaceResponse | null;
+  node: NodeResponse | null;
 }) {
   const [expanded, setExpanded] = useState(false);
 
   const hasDetails = !!(
     taskEmbed?.outputBranch ||
     taskEmbed?.outputPrUrl ||
-    (session.workspaceId && sessionState === 'active') ||
+    session.workspaceId ||
     (sessionState === 'idle' && idleCountdownMs !== null)
   );
 
@@ -850,6 +907,19 @@ function SessionHeader({
         <span className="text-sm font-semibold text-fg-primary truncate flex-1 min-w-0">
           {session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`}
         </span>
+
+        {/* Workspace profile badge */}
+        {workspace && (
+          <span
+            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0"
+            style={{
+              backgroundColor: workspace.vmSize === LIGHTWEIGHT_VM_SIZE ? 'var(--sam-color-info-tint)' : 'var(--sam-color-success-tint)',
+              color: workspace.vmSize === LIGHTWEIGHT_VM_SIZE ? 'var(--sam-color-info)' : 'var(--sam-color-success)',
+            }}
+          >
+            {workspace.vmSize === LIGHTWEIGHT_VM_SIZE ? 'Lightweight' : 'Full'}
+          </span>
+        )}
 
         {/* State indicator */}
         <span
@@ -885,54 +955,131 @@ function SessionHeader({
         )}
       </div>
 
-      {/* Expanded details row */}
+      {/* Expanded details panel */}
       {expanded && hasDetails && (
-        <div className="flex items-center gap-3 px-4 py-1.5 border-t border-border-default flex-wrap bg-inset">
-          {/* Idle countdown (TDF-8) */}
-          {sessionState === 'idle' && idleCountdownMs !== null && (
-            <span
-              className="sam-type-caption font-mono"
-              style={{
-                color: idleCountdownMs < 5 * 60 * 1000
-                  ? 'var(--sam-color-danger)'
-                  : 'var(--sam-color-warning, #f59e0b)',
-              }}
-            >
-              Cleanup in {formatCountdown(idleCountdownMs)}
-            </span>
-          )}
+        <div className="px-4 py-2 border-t border-border-default bg-inset space-y-2">
+          {/* Status row — idle countdown, branch, PR */}
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* Idle countdown (TDF-8) */}
+            {sessionState === 'idle' && idleCountdownMs !== null && (
+              <span
+                className="sam-type-caption font-mono"
+                style={{
+                  color: idleCountdownMs < 5 * 60 * 1000
+                    ? 'var(--sam-color-danger)'
+                    : 'var(--sam-color-warning, #f59e0b)',
+                }}
+              >
+                Cleanup in {formatCountdown(idleCountdownMs)}
+              </span>
+            )}
 
-          {/* Branch name (T021) */}
-          {taskEmbed?.outputBranch && (
-            <span className="sam-type-caption text-fg-muted font-mono bg-surface px-[6px] py-[1px] rounded-sm">
-              {taskEmbed.outputBranch}
-            </span>
-          )}
+            {/* Branch name (T021) */}
+            {taskEmbed?.outputBranch && (
+              <span className="sam-type-caption text-fg-muted font-mono bg-surface px-[6px] py-[1px] rounded-sm">
+                {taskEmbed.outputBranch}
+              </span>
+            )}
 
-          {/* PR link (T021) */}
-          {taskEmbed?.outputPrUrl && (
-            <a
-              href={taskEmbed.outputPrUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="sam-type-caption font-medium no-underline"
-              style={{ color: 'var(--sam-color-accent-primary)' }}
-            >
-              View PR
-            </a>
-          )}
+            {/* PR link (T021) */}
+            {taskEmbed?.outputPrUrl && (
+              <a
+                href={taskEmbed.outputPrUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="sam-type-caption font-medium no-underline"
+                style={{ color: 'var(--sam-color-accent-primary)' }}
+              >
+                View PR
+              </a>
+            )}
 
-          {session.workspaceId && sessionState === 'active' && (
-            <a
-              href={`/workspaces/${session.workspaceId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ml-auto"
-            >
-              <Button variant="ghost" size="sm">
-                Open Workspace
-              </Button>
-            </a>
+            {session.workspaceId && sessionState === 'active' && (
+              <a
+                href={`/workspaces/${session.workspaceId}`}
+                className="ml-auto no-underline"
+              >
+                <Button variant="ghost" size="sm">
+                  Open Workspace
+                </Button>
+              </a>
+            )}
+          </div>
+
+          {/* Infrastructure context — workspace & node details */}
+          {session.workspaceId && (workspace || node) && (
+            <div className="flex flex-col gap-1.5 pt-1 border-t border-border-default">
+              {workspace && (
+                <>
+                  <ContextItem icon={<Box size={12} />} label="Workspace">
+                    <a
+                      href={`/workspaces/${workspace.id}`}
+                      className="no-underline hover:underline"
+                      style={{ color: 'var(--sam-color-accent-primary)' }}
+                    >
+                      {workspace.displayName || workspace.name}
+                    </a>
+                    <span className="text-fg-muted ml-1">({workspace.status})</span>
+                  </ContextItem>
+                  <ContextItem icon={<Cpu size={12} />} label="VM Size">
+                    {formatVmSize(workspace.vmSize)}
+                  </ContextItem>
+                  <ContextItem icon={<MapPin size={12} />} label="Location">
+                    {workspace.vmLocation}
+                  </ContextItem>
+                </>
+              )}
+              {node && (
+                <>
+                  <ContextItem icon={<Server size={12} />} label="Node">
+                    <a
+                      href={`/nodes/${node.id}`}
+                      className="no-underline hover:underline"
+                      style={{ color: 'var(--sam-color-accent-primary)' }}
+                    >
+                      {node.name}
+                    </a>
+                    {node.healthStatus && (
+                      <span
+                        className="ml-1"
+                        style={{
+                          color: node.healthStatus === 'healthy' ? 'var(--sam-color-success)'
+                            : node.healthStatus === 'stale' ? 'var(--sam-color-warning, #f59e0b)'
+                            : 'var(--sam-color-danger)',
+                        }}
+                      >
+                        ({node.healthStatus})
+                      </span>
+                    )}
+                  </ContextItem>
+                  {node.cloudProvider && (
+                    <ContextItem icon={<Cloud size={12} />} label="Provider">
+                      {node.cloudProvider.charAt(0).toUpperCase() + node.cloudProvider.slice(1)}
+                    </ContextItem>
+                  )}
+                </>
+              )}
+              {workspace?.url && (
+                <ContextItem icon={<ExternalLink size={12} />} label="Direct URL">
+                  <a
+                    href={workspace.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 no-underline hover:underline font-mono text-[11px] truncate"
+                    style={{ color: 'var(--sam-color-accent-primary)' }}
+                  >
+                    {workspace.url.replace('https://', '')}
+                    <ExternalLink size={9} className="shrink-0" aria-hidden="true" />
+                  </a>
+                </ContextItem>
+              )}
+            </div>
+          )}
+          {/* Fallback when workspace data is still loading or failed */}
+          {session.workspaceId && !workspace && !node && (
+            <div className="pt-1 border-t border-border-default">
+              <span className="text-xs text-fg-muted">Loading infrastructure details...</span>
+            </div>
           )}
         </div>
       )}

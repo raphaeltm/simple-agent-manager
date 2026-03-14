@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   getTranscribeApiUrl: vi.fn(() => 'https://api.test.com/api/transcribe'),
   resetIdleTimer: vi.fn(),
   sendFollowUpPrompt: vi.fn(),
+  getWorkspace: vi.fn(),
+  getNode: vi.fn(),
   useProjectAgentSession: vi.fn(),
 }));
 
@@ -29,6 +31,8 @@ vi.mock('../../../src/lib/api', () => ({
   getTranscribeApiUrl: mocks.getTranscribeApiUrl,
   resetIdleTimer: mocks.resetIdleTimer,
   sendFollowUpPrompt: mocks.sendFollowUpPrompt,
+  getWorkspace: mocks.getWorkspace,
+  getNode: mocks.getNode,
 }));
 
 vi.mock('../../../src/hooks/useChatWebSocket', () => ({
@@ -115,6 +119,9 @@ describe('ProjectMessageView — session isolation', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
     mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
+    // Default workspace/node mocks — return pending promises to avoid side effects
+    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
+    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
   });
 
   afterEach(() => {
@@ -287,6 +294,8 @@ describe('ProjectMessageView — ACP integration', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
     mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
+    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
+    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
   });
 
   afterEach(() => {
@@ -508,6 +517,8 @@ describe('ProjectMessageView — DO + ACP message merge', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
     mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
+    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
+    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
   });
 
   afterEach(() => {
@@ -899,6 +910,8 @@ describe('ProjectMessageView — collapsible session header', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
     mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
+    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
+    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
   });
 
   afterEach(() => {
@@ -1067,7 +1080,7 @@ describe('ProjectMessageView — collapsible session header', () => {
 
   it('does not show expand toggle when there are no details', async () => {
     // Session without branch, PR, or workspace link
-    const session = makeSession('sess-4', 'stopped');
+    const session = { ...makeSession('sess-4', 'stopped'), workspaceId: null };
     const response = {
       session,
       messages: [makeMessage('m1', 'sess-4', 'Done')],
@@ -1084,5 +1097,293 @@ describe('ProjectMessageView — collapsible session header', () => {
     // No toggle should exist
     expect(screen.queryByRole('button', { name: /show session details/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /hide session details/i })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Session context dropdown — workspace & node info
+// ---------------------------------------------------------------------------
+
+describe('ProjectMessageView — session context dropdown', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.clearAllMocks();
+    mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('shows workspace and node details in expanded header', async () => {
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-ctx-1',
+      name: 'my-workspace',
+      displayName: 'My Workspace',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+      nodeId: 'node-ctx-1',
+      url: 'https://ws-ctx-1.example.com',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-ctx-1',
+      name: 'htz-fsn1-abc',
+      status: 'active',
+      healthStatus: 'healthy',
+      cloudProvider: 'hetzner',
+    });
+
+    const session = makeSession('sess-ctx', 'active');
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-ctx', 'Hello')],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-ctx" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Session sess-ctx')).toBeTruthy();
+    });
+
+    // Expand the header
+    const expandButton = screen.getByRole('button', { name: /show session details/i });
+    fireEvent.click(expandButton);
+
+    // Wait for workspace/node data to load and render
+    await waitFor(() => {
+      expect(screen.getByText('My Workspace')).toBeTruthy();
+    });
+
+    // Should show workspace info
+    expect(screen.getByText('Workspace:')).toBeTruthy();
+    expect(screen.getByText('(running)')).toBeTruthy();
+
+    // Should show VM size
+    expect(screen.getByText('VM Size:')).toBeTruthy();
+    expect(screen.getByText('Medium')).toBeTruthy();
+
+    // Should show location
+    expect(screen.getByText('Location:')).toBeTruthy();
+    expect(screen.getByText('fsn1')).toBeTruthy();
+
+    // Should show node info
+    expect(screen.getByText('Node:')).toBeTruthy();
+    expect(screen.getByText('htz-fsn1-abc')).toBeTruthy();
+    expect(screen.getByText('(healthy)')).toBeTruthy();
+
+    // Should show cloud provider
+    expect(screen.getByText('Provider:')).toBeTruthy();
+    expect(screen.getByText('Hetzner')).toBeTruthy();
+
+    // Should show direct URL
+    expect(screen.getByText('Direct URL:')).toBeTruthy();
+    expect(screen.getByText('ws-ctx-1.example.com')).toBeTruthy();
+  });
+
+  it('shows lightweight badge for small VM size', async () => {
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-light',
+      name: 'light-ws',
+      status: 'running',
+      vmSize: 'small',
+      vmLocation: 'fsn1',
+      nodeId: 'node-1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-1',
+      name: 'node-1',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+
+    const session = makeSession('sess-light', 'active');
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-light', 'Hello')],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-light" />);
+
+    // Wait for workspace data to load — the badge appears in the compact row
+    await waitFor(() => {
+      expect(screen.getByText('Lightweight')).toBeTruthy();
+    });
+  });
+
+  it('shows full badge for medium/large VM size', async () => {
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-full',
+      name: 'full-ws',
+      status: 'running',
+      vmSize: 'large',
+      vmLocation: 'fsn1',
+      nodeId: 'node-1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-1',
+      name: 'node-1',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+
+    const session = makeSession('sess-full', 'active');
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-full', 'Hello')],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-full" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Full')).toBeTruthy();
+    });
+  });
+
+  it('does not show context section when workspace fetch fails', async () => {
+    mocks.getWorkspace.mockRejectedValue(new Error('Not found'));
+
+    const session = makeSession('sess-err', 'active');
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-err', 'Hello')],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-err" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Session sess-err')).toBeTruthy();
+    });
+
+    // Expand the header
+    const expandButton = screen.getByRole('button', { name: /show session details/i });
+    fireEvent.click(expandButton);
+
+    // Should show loading fallback, then settle to no workspace/node labels
+    await waitFor(() => {
+      expect(screen.queryByText('Workspace:')).toBeNull();
+      expect(screen.queryByText('Node:')).toBeNull();
+    });
+  });
+
+  it('falls back to workspace name when displayName is absent', async () => {
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-nodn',
+      name: 'raw-workspace-name',
+      // no displayName
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+      nodeId: 'node-1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-1',
+      name: 'node-1',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+
+    const session = makeSession('sess-dn', 'active');
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-dn', 'Hello')],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-dn" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Session sess-dn')).toBeTruthy();
+    });
+
+    const expandButton = screen.getByRole('button', { name: /show session details/i });
+    fireEvent.click(expandButton);
+
+    // Should fall back to name when displayName is absent
+    await waitFor(() => {
+      expect(screen.getByText('raw-workspace-name')).toBeTruthy();
+    });
+  });
+
+  it('shows workspace details without node when workspace has no nodeId', async () => {
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-nonode',
+      name: 'standalone-ws',
+      status: 'running',
+      vmSize: 'small',
+      vmLocation: 'hel1',
+      // no nodeId
+    });
+
+    const session = makeSession('sess-nonode', 'active');
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-nonode', 'Hello')],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-nonode" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Session sess-nonode')).toBeTruthy();
+    });
+
+    const expandButton = screen.getByRole('button', { name: /show session details/i });
+    fireEvent.click(expandButton);
+
+    // Workspace details should appear
+    await waitFor(() => {
+      expect(screen.getByText('standalone-ws')).toBeTruthy();
+    });
+    expect(screen.getByText('Location:')).toBeTruthy();
+    expect(screen.getByText('hel1')).toBeTruthy();
+
+    // Node details should NOT appear — getNode was never called
+    expect(screen.queryByText('Node:')).toBeNull();
+    expect(mocks.getNode).not.toHaveBeenCalled();
+  });
+
+  it('shows workspace details but not node when getNode fails', async () => {
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-partial',
+      name: 'partial-ws',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+      nodeId: 'node-fail',
+    });
+    mocks.getNode.mockRejectedValue(new Error('Node not found'));
+
+    const session = makeSession('sess-partial', 'active');
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-partial', 'Hello')],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-partial" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Session sess-partial')).toBeTruthy();
+    });
+
+    const expandButton = screen.getByRole('button', { name: /show session details/i });
+    fireEvent.click(expandButton);
+
+    // Workspace details should still appear despite node failure
+    await waitFor(() => {
+      expect(screen.getByText('partial-ws')).toBeTruthy();
+    });
+    expect(screen.getByText('Workspace:')).toBeTruthy();
+    expect(screen.getByText('VM Size:')).toBeTruthy();
+
+    // Node details should NOT appear
+    await waitFor(() => {
+      expect(screen.queryByText('Node:')).toBeNull();
+    });
   });
 });
