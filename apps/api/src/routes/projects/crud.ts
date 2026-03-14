@@ -11,7 +11,7 @@ import type {
   UpsertProjectRuntimeFileRequest,
   UpdateProjectRequest,
 } from '@simple-agent-manager/shared';
-import { isValidAgentType, VALID_WORKSPACE_PROFILES } from '@simple-agent-manager/shared';
+import { isValidAgentType, VALID_WORKSPACE_PROFILES, CREDENTIAL_PROVIDERS } from '@simple-agent-manager/shared';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
 import { ulid } from '../../lib/ulid';
@@ -539,7 +539,8 @@ crudRoutes.patch('/:id', async (c) => {
     body.defaultBranch === undefined &&
     body.defaultVmSize === undefined &&
     body.defaultAgentType === undefined &&
-    body.defaultWorkspaceProfile === undefined
+    body.defaultWorkspaceProfile === undefined &&
+    body.defaultProvider === undefined
   ) {
     throw errors.badRequest('At least one field is required');
   }
@@ -566,6 +567,10 @@ crudRoutes.patch('/:id', async (c) => {
 
   if (body.defaultWorkspaceProfile !== undefined && body.defaultWorkspaceProfile !== null && !VALID_WORKSPACE_PROFILES.includes(body.defaultWorkspaceProfile)) {
     throw errors.badRequest('defaultWorkspaceProfile must be full or lightweight');
+  }
+
+  if (body.defaultProvider !== undefined && body.defaultProvider !== null && !CREDENTIAL_PROVIDERS.includes(body.defaultProvider)) {
+    throw errors.badRequest(`defaultProvider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
   }
 
   await assertRepositoryAccess(
@@ -602,6 +607,7 @@ crudRoutes.patch('/:id', async (c) => {
       defaultVmSize: body.defaultVmSize === undefined ? existing.defaultVmSize : (body.defaultVmSize ?? null),
       defaultAgentType: body.defaultAgentType === undefined ? existing.defaultAgentType : (body.defaultAgentType ?? null),
       defaultWorkspaceProfile: body.defaultWorkspaceProfile === undefined ? existing.defaultWorkspaceProfile : (body.defaultWorkspaceProfile ?? null),
+      defaultProvider: body.defaultProvider === undefined ? existing.defaultProvider : (body.defaultProvider ?? null),
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)));

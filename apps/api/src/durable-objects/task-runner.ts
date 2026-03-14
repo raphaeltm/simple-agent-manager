@@ -24,7 +24,7 @@
  * See: specs/tdf-2-orchestration-engine/ for full design.
  */
 import { DurableObject } from 'cloudflare:workers';
-import type { TaskExecutionStep, VMSize, VMLocation, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type { TaskExecutionStep, VMSize, VMLocation, WorkspaceProfile, CredentialProvider } from '@simple-agent-manager/shared';
 import type { NodeLifecycle } from './node-lifecycle';
 import {
   DEFAULT_TASK_RUNNER_STEP_MAX_RETRIES,
@@ -108,6 +108,8 @@ interface TaskRunConfig {
   agentType: string | null;
   /** Workspace provisioning profile. 'lightweight' skips devcontainer build for faster startup. */
   workspaceProfile: WorkspaceProfile | null;
+  /** Cloud provider for auto-provisioned nodes. Null means system picks any available credential. */
+  cloudProvider: CredentialProvider | null;
 }
 
 export interface TaskRunnerState {
@@ -445,6 +447,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
       vmSize: state.config.vmSize,
       vmLocation: state.config.vmLocation,
       heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
+      cloudProvider: state.config.cloudProvider ?? undefined,
     });
 
     state.stepResults.nodeId = createdNode.id;

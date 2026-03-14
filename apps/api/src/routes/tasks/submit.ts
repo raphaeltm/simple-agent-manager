@@ -18,8 +18,9 @@ import type {
   VMSize,
   VMLocation,
   WorkspaceProfile,
+  CredentialProvider,
 } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES, MAX_CONTEXT_SUMMARY_BYTES } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES, MAX_CONTEXT_SUMMARY_BYTES, CREDENTIAL_PROVIDERS } from '@simple-agent-manager/shared';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
 import { ulid } from '../../lib/ulid';
@@ -169,6 +170,15 @@ submitRoutes.post('/submit', async (c) => {
   const workspaceProfile: WorkspaceProfile = body.workspaceProfile
     ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
     ?? DEFAULT_WORKSPACE_PROFILE;
+  // Determine cloud provider: explicit override > project default > null (system picks)
+  const provider: CredentialProvider | null = body.provider
+    ?? (project.defaultProvider as CredentialProvider | null)
+    ?? null;
+
+  if (provider !== null && !CREDENTIAL_PROVIDERS.includes(provider)) {
+    throw errors.badRequest(`provider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
+  }
+
   // Use parent task's output branch if forking, otherwise use project default
   const branch = parentBranch || project.defaultBranch;
 
@@ -324,6 +334,7 @@ submitRoutes.post('/submit', async (c) => {
       chatSessionId: sessionId,
       agentType: body.agentType ?? project.defaultAgentType ?? null,
       workspaceProfile,
+      cloudProvider: provider,
     });
   } catch (err) {
     // TaskRunner DO startup failed — mark task as failed.

@@ -13,7 +13,7 @@
 import { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type { RunTaskRequest, RunTaskResponse, TaskStatus, VMSize, VMLocation, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type { RunTaskRequest, RunTaskResponse, TaskStatus, VMSize, VMLocation, WorkspaceProfile, CredentialProvider } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, VALID_WORKSPACE_PROFILES } from '@simple-agent-manager/shared';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
@@ -250,6 +250,7 @@ runRoutes.post('/:taskId/run', async (c) => {
       chatSessionId: sessionId,
       agentType: project.defaultAgentType ?? null,
       workspaceProfile,
+      cloudProvider: (project.defaultProvider as CredentialProvider | null) ?? null,
     });
   } catch (err) {
     const failedAt = new Date().toISOString();
