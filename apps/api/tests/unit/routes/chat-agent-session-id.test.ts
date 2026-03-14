@@ -1,9 +1,14 @@
 /**
- * Session ID mismatch fix — source contract tests.
+ * Session ID stability fix — source contract tests.
  *
- * Verifies that the chat session detail route looks up the active agent session
- * ID from D1 and includes it in the response, so the UI can route ACP WebSocket
- * connections to the correct VM agent session instead of creating duplicates.
+ * Verifies that the chat session detail route looks up the most recent agent
+ * session ID from D1 (regardless of status) and includes it in the response,
+ * so the UI can route ACP WebSocket connections to the correct VM agent
+ * session instead of creating duplicates.
+ *
+ * The query MUST NOT filter by status='running' — suspended or other
+ * transient statuses should still return the agent session ID so the browser
+ * reconnects to the same SessionHost and preserves conversation context.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -15,10 +20,23 @@ const chatRouteSource = readFileSync(
 );
 
 describe('Chat session detail includes agentSessionId', () => {
-  it('queries agent_sessions table by workspaceId and running status', () => {
+  it('queries agent_sessions table by workspaceId without status filter', () => {
+    // Must query by workspaceId
     expect(chatRouteSource).toContain('schema.agentSessions.workspaceId');
-    expect(chatRouteSource).toContain('schema.agentSessions.status');
-    expect(chatRouteSource).toContain("'running'");
+
+    // Extract the agentSessionId lookup block
+    const lookupStart = chatRouteSource.indexOf('let agentSessionId');
+    const lookupEnd = chatRouteSource.indexOf('return c.json({', lookupStart);
+    const lookupBlock = chatRouteSource.slice(lookupStart, lookupEnd);
+
+    // Must NOT filter by status='running' — this was the root cause of the
+    // conversation-clearing bug. When the agent session was suspended, the
+    // query returned null, causing the UI to switch to the chat session ID
+    // and create a new SessionHost on the VM agent.
+    expect(lookupBlock).not.toContain("'running'");
+
+    // Must order by creation date descending to get the most recent session
+    expect(chatRouteSource).toContain('desc(schema.agentSessions.createdAt)');
   });
 
   it('includes agentSessionId in the response JSON', () => {
