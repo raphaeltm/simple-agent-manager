@@ -1,10 +1,6 @@
 name: Deploy Staging
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-    paths-ignore:
-      - 'apps/www/**'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -13,10 +9,10 @@ on:
         type: boolean
         default: false
 
-# Persistent staging: all PRs share one staging environment, last push wins
+# Only one staging deployment at a time; queue (don't cancel) concurrent requests
 concurrency:
   group: deploy-staging
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read

@@ -32,16 +32,30 @@ All other checks (CI, Deploy Staging, VM Agent Smoke, Preflight Evidence, etc.) 
 
 ### 1. Staging Deployment Must Be Green
 
-The `deploy-staging.yml` workflow runs automatically on every PR. Check its status:
+Staging deployment is **manual** — it does NOT run automatically on PRs. You must trigger it yourself:
 
-```bash
-gh pr checks <PR_NUMBER>
-```
+1. **Check for existing active runs** before triggering:
+   ```bash
+   gh run list --workflow=deploy-staging.yml --status=in_progress --status=queued --json databaseId,status,createdAt,headBranch
+   ```
+   If there are active or queued runs, wait at least **5 minutes** from the most recent run's `createdAt` before triggering yours.
 
-The `deploy / Deploy to Cloudflare` check MUST pass. If it fails:
-- Inspect the deployment logs: `gh run view <RUN_ID> --job <JOB_ID> --log-failed`
+2. **Trigger the deployment:**
+   ```bash
+   gh workflow run deploy-staging.yml --ref <your-branch>
+   ```
+
+3. **Watch for completion:**
+   ```bash
+   sleep 5
+   gh run list --workflow=deploy-staging.yml --branch=<your-branch> --limit=1 --json databaseId,status
+   gh run watch <run-id>
+   ```
+
+If the deployment fails:
+- Inspect the deployment logs: `gh run view <RUN_ID> --log-failed`
 - Fix the deployment issue in your branch
-- Push and wait for the re-triggered deployment to succeed
+- Push and re-trigger the deployment
 - **A failed staging deployment is the same severity as a failed test — it blocks merge**
 
 ### 2. Log In and Verify Using Playwright

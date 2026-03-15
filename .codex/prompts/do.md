@@ -182,23 +182,37 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
 
 ### 6a. Standard Verification (All Code Changes)
 
-1. **Deploy to staging:**
+1. **Check for existing staging deployments** before triggering your own:
+   ```bash
+   gh run list --workflow=deploy-staging.yml --status=in_progress --status=queued --json databaseId,status,createdAt,headBranch
    ```
-   pnpm deploy:setup --environment staging
+   - If there are **active or queued runs**, wait at least **5 minutes** from the most recent run's `createdAt` before triggering yours. Check again after waiting — if another run started in the meantime, wait another 5 minutes.
+   - If there are **no active runs**, proceed immediately.
+
+2. **Trigger the staging deployment manually:**
+   ```bash
+   gh workflow run deploy-staging.yml --ref <your-branch-name>
    ```
-   Or trigger the staging deployment via GitHub Actions.
+   Then watch for it to complete:
+   ```bash
+   # Wait a few seconds for the run to register, then watch it
+   sleep 5
+   gh run list --workflow=deploy-staging.yml --branch=<your-branch-name> --limit=1 --json databaseId,status
+   gh run watch <run-id>
+   ```
+   If the deployment fails, inspect logs with `gh run view <run-id> --log-failed`, fix the issue, and re-trigger.
 
-2. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging).
+3. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging).
 
-3. **Authenticate** using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`. If the file is missing, ask the human for credentials.
+4. **Authenticate** using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`. If the file is missing, ask the human for credentials.
 
-4. **Verify the changed behavior works end-to-end:**
+5. **Verify the changed behavior works end-to-end:**
    - **UI changes**: interact as a real user — click buttons, submit forms, navigate pages
    - **API/backend changes**: verify affected endpoints respond correctly and downstream behavior works through the UI
 
-5. **Report findings** to the user with evidence (screenshots or Playwright observations).
+6. **Report findings** to the user with evidence (screenshots or Playwright observations).
 
-6. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT proceed to PR creation with known staging failures.
+7. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT proceed to PR creation with known staging failures.
 
 ### 6b. Infrastructure Verification (MANDATORY for Infrastructure Changes)
 

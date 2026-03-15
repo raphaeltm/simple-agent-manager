@@ -55,13 +55,13 @@ pnpm --filter @simple-agent-manager/api build
 Merge to `main` automatically deploys to production via GitHub Actions.
 
 - **CI** (`ci.yml`): lint, typecheck, test, build on all pushes/PRs
-- **Deploy Staging** (`deploy-staging.yml`): deploys to staging on every PR — **this MUST pass before merge**
+- **Deploy Staging** (`deploy-staging.yml`): manual trigger only (`workflow_dispatch`) — agents trigger this explicitly during `/do` Phase 6
 - **Deploy Production** (`deploy.yml`): full Pulumi + Wrangler deployment on push to main
 - **Teardown** (`teardown.yml`): manual only — destroys all resources
 
 ### Staging Deployment is a Merge Gate
 
-Every PR that changes code triggers a staging deployment. This is NOT optional — a failed staging deploy blocks merge just like a failed test. After staging deploys successfully, you MUST verify the live app works using Playwright and test credentials (see `.claude/rules/13-staging-verification.md`).
+Staging deployment is manual — triggered via `gh workflow run deploy-staging.yml --ref <branch>`. Agents executing the `/do` workflow MUST deploy to staging and verify the live app before merging. A failed staging deploy blocks merge just like a failed test. Before triggering a deployment, check for existing active runs and wait at least 5 minutes if one is in progress. See `.claude/rules/13-staging-verification.md`.
 
 ## Key Concepts
 
