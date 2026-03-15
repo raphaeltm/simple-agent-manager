@@ -697,6 +697,14 @@ func getAgentExtraEnvVars(agentType string) []string {
 	}
 }
 
+// tomlEscapeBasicString escapes a string for use inside a TOML basic string
+// (double-quoted). Backslashes must be escaped first, then double quotes.
+func tomlEscapeBasicString(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s
+}
+
 // vibeDefaultActiveModel is the model alias used when no user model override
 // is configured. Defaults to Mistral Large (their most capable model).
 // Override at deployment via VIBE_DEFAULT_ACTIVE_MODEL env var.
@@ -760,10 +768,16 @@ temperature = 0.2
 
 	// Append MCP server configurations if provided
 	for i, server := range mcpServers {
-		safeURL := strings.ReplaceAll(server.URL, `"`, `\"`)
+		// Skip entries with control characters that would corrupt TOML
+		if strings.ContainsAny(server.URL, "\n\r") || strings.ContainsAny(server.Token, "\n\r") {
+			slog.Warn("Skipping MCP server with control characters in URL or token",
+				"index", i, "url_length", len(server.URL))
+			continue
+		}
+		safeURL := tomlEscapeBasicString(server.URL)
 		config += fmt.Sprintf("\n[[mcp_servers]]\nname = \"sam-mcp-%d\"\nurl = \"%s\"\n", i, safeURL)
 		if server.Token != "" {
-			safeToken := strings.ReplaceAll(server.Token, `"`, `\"`)
+			safeToken := tomlEscapeBasicString(server.Token)
 			config += fmt.Sprintf("headers = { Authorization = \"Bearer %s\" }\n", safeToken)
 		}
 	}

@@ -752,3 +752,40 @@ func TestGenerateVibeConfig_McpServerSpecialCharsInURL(t *testing.T) {
 		t.Error("expected URL with query params to be preserved")
 	}
 }
+
+func TestGenerateVibeConfig_McpServerBackslashEscaping(t *testing.T) {
+	t.Parallel()
+
+	config := generateVibeConfig("mistral-large", []McpServerEntry{
+		{URL: `https://example.com/path\with\backslash`, Token: `tok\en`},
+	})
+
+	// Backslashes must be doubled in TOML basic strings
+	if !strings.Contains(config, `url = "https://example.com/path\\with\\backslash"`) {
+		t.Errorf("backslash not escaped in URL:\n%s", config)
+	}
+	if !strings.Contains(config, `Bearer tok\\en`) {
+		t.Errorf("backslash not escaped in token:\n%s", config)
+	}
+}
+
+func TestGenerateVibeConfig_McpServerNewlineRejected(t *testing.T) {
+	t.Parallel()
+
+	config := generateVibeConfig("mistral-large", []McpServerEntry{
+		{URL: "https://good.example.com/mcp", Token: "good-token"},
+		{URL: "https://bad.example.com/mcp", Token: "bad\ninjection"},
+	})
+
+	// Good server should be present
+	if !strings.Contains(config, `url = "https://good.example.com/mcp"`) {
+		t.Error("expected good MCP server to be present")
+	}
+	// Bad server with newline in token should be skipped entirely
+	if strings.Contains(config, "bad.example.com") {
+		t.Error("MCP server with newline in token should be skipped")
+	}
+	if strings.Contains(config, "injection") {
+		t.Error("newline in token must not inject content into TOML")
+	}
+}
