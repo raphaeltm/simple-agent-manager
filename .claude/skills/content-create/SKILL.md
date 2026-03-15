@@ -11,13 +11,24 @@ Transform strategy documents, product changes, and competitive insights into pub
 ## Prerequisites — Read These First
 
 Before creating ANY content:
-1. Read `strategy/marketing/messaging-guide.md` for voice, tone, approved language
-2. Read `strategy/marketing/positioning.md` for core positioning and differentiators
-3. Read `strategy/competitive/` for competitive context
-4. For changelogs: check `git log`, recent PRs, and `specs/`
-5. For technical content: read relevant source code and architecture docs
+1. Read `strategy/content/style-guide-raph.md` for Raph's personal writing style
+2. Read `strategy/marketing/messaging-guide.md` for voice, tone, approved language
+3. Read `strategy/marketing/positioning.md` for core positioning and differentiators
+4. Read `strategy/competitive/` for competitive context
+5. For changelogs: check `git log`, recent PRs, and `specs/`
+6. For technical content: read relevant source code and architecture docs
 
-**Never create content without reading the messaging guide first.**
+**Never create content without reading the style guide and messaging guide first.**
+
+## Personal Hook Requirement
+
+Every blog post and long-form piece needs a personal hook — a real story, experience, or observation from Raph that grounds the piece. Before writing:
+
+1. Search the repo for relevant context: `docs/notes/`, `tasks/`, commit history, PR descriptions, post-mortems
+2. Check `strategy/content/` for any existing notes or hooks the human may have left
+3. **If you cannot find a personal story or hook in the repo, ASK the human before writing.** Say something like: "I have the technical content but I need a personal angle. Do you have a story about how this came up, what prompted it, or what surprised you?"
+
+Do NOT fabricate personal stories. Do NOT substitute a generic "as developers, we all know..." opening. If there's no personal hook available, ask for one.
 
 ## Content Types
 

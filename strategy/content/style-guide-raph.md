@@ -5,17 +5,22 @@
 
 ## Voice
 
-Raph writes like he's talking to a friend who happens to be interested in the same stuff. Conversational, first-person, thinking-out-loud. He doesn't perform authority — he shares what he's noticed, what he's tried, and what he thinks. He's comfortable saying "I'm not sure" or "I don't really know."
+Raph writes like he's talking to a friend who happens to be interested in the same stuff. Conversational, first-person, thinking-out-loud. Confident in what he knows, honest about what he doesn't. He shares what he's built, what he's tried, and what he thinks — without hedging everything into mush or pretending to have all the answers.
 
-Not a lecturer. Not a marketer. A person writing about things he finds interesting.
+Not a lecturer. Not a marketer. A builder writing about things he finds interesting.
 
 ## Tone Markers
 
-- **Self-deprecating openers**: "I'm kinda pulling a blank here", "I don't really have much to say about this", "Okay, so… I missed a couple days"
-- **Honest hedging**: "I make no claim to expertise", "I'm sure as hell not an economist", "I'm not completely sure"
+- **Confident but not absolute**: states opinions and observations directly, qualifies only when genuinely uncertain — not as a reflex
 - **Genuine enthusiasm without hype**: "I'm really excited about this release", "I really love standing by the bbq", "Man, did we have some wacky conversations"
 - **Casual asides**: "see what I did there?", "pardon the pun", "to anyone wondering"
-- **Light self-awareness**: "Thanks for reading, or not reading, my word salad"
+- **Honest about limits**: acknowledges what he doesn't know or hasn't figured out yet, but doesn't lead with it or make it the vibe
+
+### What this is NOT
+
+- **Not self-deprecating**. Don't open with "I'm pulling a blank" or "I don't really have much to say." That undercuts the writing before it starts. If you're writing about something, you have something to say — say it.
+- **Not falsely modest**. "I'm no expert but…" before a clearly expert take reads as performative. Just make the point.
+- **Not hedging everything**. "I think maybe possibly this could be…" — pick a position. It's fine to be wrong. It's not fine to be vague out of reflex.
 
 ## Sentence Structure
 
@@ -57,12 +62,12 @@ He also uses "we" naturally for collaborative work without making it feel corpor
 
 Almost always personal or situational:
 - "I remember meeting Lionello Lunesu in March 2022."
-- "I'm kinda pulling a blank here, but I told myself I would do this..."
 - "People are having feelings about AI-generated imagery."
 - "When was the last time you were excited about an OS update?"
 - "Some of you might land here because you shared your email at some point..."
 
 Never: "In today's fast-moving AI landscape..." or "Here's why X matters."
+Never: self-deprecating openers that undercut the piece before it starts.
 
 ## Closings
 
@@ -78,14 +83,15 @@ Not salesy. Not urgent. Just wrapping up like you'd end a conversation.
 
 - Marketing-speak: no "unlock", "leverage", "revolutionize", "game-changing"
 - Structured authority: no "In this post, I will cover X, Y, and Z"
-- Performative confidence: doesn't pretend to have all the answers
+- Self-deprecation: no "I'm no expert", "I'm pulling a blank", "my word salad"
+- Reflexive hedging: don't qualify every sentence with "I think maybe"
 - Heavy formatting: no bold-everything, no emoji-heavy lists
 - Clickbait: titles are descriptive or curious, not alarming
 
 ## What Makes It Feel Like Raph
 
 1. **Personal stories as the way in**: even technical posts start with "I was doing X and then Y happened"
-2. **Thinking out loud**: he works through ideas on the page, doesn't present pre-formed conclusions
+2. **Thinking out loud**: he works through ideas on the page, follows the thread where it goes
 3. **Comfort with tangents**: the Monitors post wanders from multi-monitor setups to Apple ecosystem critique to iPad Pro appreciation — and that's fine
 4. **Respects the reader's intelligence**: doesn't over-explain technical concepts, trusts context
-5. **Genuine, not performed**: enthusiasm is real, caveats are honest, opinions come with "I think" and "maybe"
+5. **Confident and genuine**: enthusiasm is real, opinions are stated directly, uncertainty is acknowledged when real (not performed)
