@@ -68,18 +68,9 @@ describe('SessionHeader UI structure', () => {
 });
 
 describe('SessionHeader mark complete handler logic', () => {
-  let mockConfirm: ReturnType<typeof vi.fn>;
-  let mockAlert: ReturnType<typeof vi.fn>;
-  let mockReload: ReturnType<typeof vi.fn>;
-
   beforeEach(() => {
-    mockConfirm = vi.fn();
-    mockAlert = vi.fn();
-    mockReload = vi.fn();
-    vi.stubGlobal('confirm', mockConfirm);
-    vi.stubGlobal('alert', mockAlert);
-    // We can't easily test window.location.reload in a unit test
-    // but we verify the source calls it
+    vi.stubGlobal('confirm', vi.fn());
+    vi.stubGlobal('alert', vi.fn());
   });
 
   it('handler requires both projectId and taskId', () => {
