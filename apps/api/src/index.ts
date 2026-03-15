@@ -25,6 +25,7 @@ import { uiGovernanceRoutes } from './routes/ui-governance';
 import { transcribeRoutes } from './routes/transcribe';
 import { ttsRoutes } from './routes/tts';
 import { agentSettingsRoutes } from './routes/agent-settings';
+import { agentProfileRoutes } from './routes/agent-profiles';
 import { clientErrorsRoutes } from './routes/client-errors';
 import { projectsRoutes } from './routes/projects';
 import { tasksRoutes } from './routes/tasks';
@@ -120,6 +121,9 @@ export interface Env {
   NODE_WARM_GRACE_PERIOD_MS?: string;
   // Task agent configuration
   DEFAULT_TASK_AGENT_TYPE?: string;
+  // Built-in profile model overrides (defaults: claude-sonnet-4-5-20250929, claude-opus-4-6)
+  BUILTIN_PROFILE_SONNET_MODEL?: string;
+  BUILTIN_PROFILE_OPUS_MODEL?: string;
   // Task execution timeout (stuck task recovery)
   TASK_RUN_MAX_EXECUTION_MS?: string;
   TASK_STUCK_QUEUED_TIMEOUT_MS?: string;
@@ -508,6 +512,7 @@ app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
+app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 // MCP endpoint CORS override — MCP uses Bearer token auth (not cookies/sessions),

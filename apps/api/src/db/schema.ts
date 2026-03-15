@@ -544,6 +544,51 @@ export const agentSettings = sqliteTable(
 );
 
 // =============================================================================
+// Agent Profiles (per-project role definitions)
+// =============================================================================
+export const agentProfiles = sqliteTable(
+  'agent_profiles',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    agentType: text('agent_type').notNull().default('claude-code'),
+    model: text('model'),
+    permissionMode: text('permission_mode'),
+    systemPromptAppend: text('system_prompt_append'),
+    maxTurns: integer('max_turns'),
+    timeoutMinutes: integer('timeout_minutes'),
+    vmSizeOverride: text('vm_size_override'),
+    isBuiltin: integer('is_builtin').notNull().default(0),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    // Note: The SQL migration (0028_agent_profiles.sql) defines two partial unique indexes:
+    //   idx_agent_profiles_project_name WHERE project_id IS NOT NULL
+    //   idx_agent_profiles_global_name  WHERE project_id IS NULL (per-user)
+    // Drizzle ORM does not support partial/conditional indexes, so only the
+    // project-scoped index is represented here. Global-profile uniqueness is
+    // enforced by the raw SQL migration only.
+    projectNameUnique: uniqueIndex('idx_agent_profiles_project_name')
+      .on(table.projectId, table.name),
+    projectIdIdx: index('idx_agent_profiles_project_id').on(table.projectId),
+    userIdIdx: index('idx_agent_profiles_user_id').on(table.userId),
+  })
+);
+
+export type AgentProfileRow = typeof agentProfiles.$inferSelect;
+export type NewAgentProfileRow = typeof agentProfiles.$inferInsert;
+
+// =============================================================================
 // UI Governance
 // =============================================================================
 export const uiStandards = sqliteTable(
