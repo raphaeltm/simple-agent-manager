@@ -1,6 +1,8 @@
 package acp
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -312,7 +314,7 @@ func TestGetAgentExtraEnvVars_MistralVibe(t *testing.T) {
 		t.Fatalf("expected 2 extra env vars for mistral-vibe, got %d", len(envVars))
 	}
 	wantName := "VIBE_CLIENT_NAME=sam"
-	wantVersion := "VIBE_CLIENT_VERSION=1.0.0"
+	wantVersion := "VIBE_CLIENT_VERSION=1.0.1"
 	if envVars[0] != wantName {
 		t.Errorf("envVars[0]=%q, want %q", envVars[0], wantName)
 	}
@@ -328,6 +330,113 @@ func TestGetAgentExtraEnvVars_OtherAgents(t *testing.T) {
 		if envVars := getAgentExtraEnvVars(agent); len(envVars) != 0 {
 			t.Errorf("getAgentExtraEnvVars(%q) returned %v, want nil", agent, envVars)
 		}
+	}
+}
+
+func TestGenerateVibeConfig_DefaultModel(t *testing.T) {
+	t.Parallel()
+
+	config := generateVibeConfig("")
+
+	// Verify active_model references the default alias
+	if !strings.Contains(config, `active_model = "mistral-large"`) {
+		t.Errorf("expected default active_model to be mistral-large, got:\n%s", config)
+	}
+
+	// Verify all three model entries are defined with correct name→alias mappings
+	requiredModels := []struct {
+		name  string
+		alias string
+	}{
+		{"mistral-large-latest", "mistral-large"},
+		{"mistral-vibe-cli-latest", "devstral-2"},
+		{"codestral-latest", "codestral"},
+	}
+	for _, m := range requiredModels {
+		if !strings.Contains(config, fmt.Sprintf(`name = "%s"`, m.name)) {
+			t.Errorf("missing model name %q", m.name)
+		}
+		if !strings.Contains(config, fmt.Sprintf(`alias = "%s"`, m.alias)) {
+			t.Errorf("missing model alias %q", m.alias)
+		}
+	}
+
+	// Verify the active_model alias is actually defined as a model entry
+	if !strings.Contains(config, `alias = "`+vibeDefaultActiveModel+`"`) {
+		t.Errorf("active_model %q is not defined as a model alias", vibeDefaultActiveModel)
+	}
+
+	// Count [[models]] entries — should be exactly 3
+	if count := strings.Count(config, "[[models]]"); count != 3 {
+		t.Errorf("expected 3 [[models]] entries, got %d", count)
+	}
+}
+
+func TestGenerateVibeConfig_CustomModel(t *testing.T) {
+	t.Parallel()
+
+	config := generateVibeConfig("devstral-2")
+	if !strings.Contains(config, `active_model = "devstral-2"`) {
+		t.Errorf("expected active_model to be devstral-2, got:\n%s", config)
+	}
+	// All model aliases must still be present regardless of active model
+	for _, alias := range []string{"mistral-large", "devstral-2", "codestral"} {
+		if !strings.Contains(config, fmt.Sprintf(`alias = "%s"`, alias)) {
+			t.Errorf("missing model alias %q when active model is devstral-2", alias)
+		}
+	}
+}
+
+func TestResolveVibeActiveModel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		settings *agentSettingsPayload
+		want     string
+	}{
+		{"nil settings", nil, vibeDefaultActiveModel},
+		{"empty model", &agentSettingsPayload{Model: ""}, vibeDefaultActiveModel},
+		{"custom model", &agentSettingsPayload{Model: "devstral-2"}, "devstral-2"},
+		{"custom model with other settings", &agentSettingsPayload{Model: "codestral", PermissionMode: "full"}, "codestral"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := resolveVibeActiveModel(tt.settings)
+			if got != tt.want {
+				t.Errorf("resolveVibeActiveModel() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSanitizeVibeModelAlias(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"valid alias", "devstral-2", "devstral-2"},
+		{"valid with dots", "mistral-large-2512", "mistral-large-2512"},
+		{"valid with underscore", "my_model", "my_model"},
+		{"empty falls back", "", vibeDefaultActiveModel},
+		{"TOML injection rejected", `"; rm -rf ~`, vibeDefaultActiveModel},
+		{"newline rejected", "model\ninjection", vibeDefaultActiveModel},
+		{"quote rejected", `model"bad`, vibeDefaultActiveModel},
+		{"backslash rejected", `model\bad`, vibeDefaultActiveModel},
+		{"space rejected", "model bad", vibeDefaultActiveModel},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := sanitizeVibeModelAlias(tt.input)
+			if got != tt.want {
+				t.Errorf("sanitizeVibeModelAlias(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 
