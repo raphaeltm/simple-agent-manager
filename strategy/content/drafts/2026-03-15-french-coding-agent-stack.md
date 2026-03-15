@@ -231,23 +231,78 @@ Added Scaleway + Mistral Vibe to SAM. Four agents, two cloud providers. The Prov
 
 ---
 
+### Bluesky
+
+I added Scaleway and Mistral to SAM (open-source AI coding agent platform). Both companies I've used for years. Scaleway since Vancouver, Mistral since deploying it on GPUs with Defang.
+
+The Provider abstraction held up. The agent abstraction took six debugging sessions. Wrote up what happened: [link]
+
+---
+
+### Mastodon
+
+Added Scaleway and Mistral Vibe to SAM, an open-source platform for running AI coding agents on your own cloud. Two French companies, four agents total (Claude Code, Mistral Vibe, OpenAI Codex, Google Gemini), two cloud providers.
+
+The engineering story: what actually happens when you add a second provider and a second agent to a multi-cloud, multi-agent platform. Spoiler: the cloud abstraction was easier than the agent abstraction.
+
+Blog post: [link]
+GitHub: [link]
+
+#opensource #devtools #selfhosted #foss #AIagents
+
+---
+
 ### Hacker News
 
-**Title:** Show HN: What I learned adding a second cloud provider and AI agent to an open-source coding platform
+**Note:** This is a blog post link submission, not a Show HN (Show HN requires something people can try, not a blog post). If submitting alongside a live demo or the GitHub repo, use Show HN with the GitHub link instead.
 
-**Text:**
+**Title (link submission):** What I learned adding a second cloud provider and AI agent to an open-source coding platform
+
+**Title (Show HN, if linking to GitHub):** Show HN: SAM, an open-source platform for running AI coding agents on your own cloud
+
+**Comment to post in thread:**
 I build SAM, an open-source platform for running AI coding agents (Claude Code, Mistral Vibe, OpenAI Codex, Google Gemini) on your own cloud (Hetzner, Scaleway). BYOC model: you bring your cloud credentials, SAM orchestrates provisioning and agent lifecycle.
 
-I recently added Scaleway and Mistral Vibe as the second cloud provider and second AI agent. Blog post covers what I learned:
+I recently added Scaleway and Mistral Vibe as the second cloud provider and second AI agent. The blog post covers what I learned:
 
 - The Provider interface abstraction held up, but Scaleway's deferred IP allocation broke lifecycle assumptions in the calling code (Hetzner gives you an IP at creation time, Scaleway after boot)
-- Multi-agent was harder than multi-cloud. Each agent has different config formats, installation methods, and credential patterns. Six debugging sessions to get Vibe working end-to-end.
+- Multi-agent was harder than multi-cloud. Each agent has different config formats, installation methods, and credential patterns. Six debugging sessions to get Vibe working end-to-end
 - The bugs were things like: a missing `transport = "http"` field causing a cryptic Pydantic validation error, and a UI dropdown that silently hardcoded Claude Code regardless of selection
 
 Architecture: Cloudflare Workers control plane + ephemeral VMs on user's cloud. TypeScript API, Go VM agent, React frontend.
 
-Blog post: [link]
 GitHub: [link]
+
+---
+
+### Dev.to (cross-post)
+
+Cross-post the full blog post to Dev.to with canonical_url pointing to the original.
+
+**Frontmatter:**
+```
+---
+title: Adding Scaleway and Mistral to SAM
+published: true
+tags: opensource, devops, ai, cloudflare
+canonical_url: [original blog post URL]
+cover_image: [optional]
+---
+```
+
+Use the full blog post body. Dev.to supports markdown natively so no reformatting needed.
+
+---
+
+### Lobste.rs
+
+**Note:** Requires an invite. If Raph has an account, submit as a link post.
+
+**Title:** What I learned adding a second cloud provider and AI agent to an open-source coding platform
+
+**Tags:** `devops`, `practices`, `go`, `typescript`
+
+No text body needed for link submissions. The article speaks for itself. Don't oversell in comments. Keep self-promotion to < 25% of total activity on the site.
 
 ---
 
@@ -272,6 +327,32 @@ GitHub: [link]
 
 ---
 
+### Reddit r/programming
+
+**Title:** What I learned adding a second cloud provider and AI agent to a multi-provider platform
+
+Submit as a link post to the blog. Add a comment with context:
+
+I built an open-source platform (SAM) for running AI coding agents on your own cloud. This post is about what happened when I added a second cloud provider (Scaleway, alongside Hetzner) and a second AI agent (Mistral Vibe, alongside Claude Code). The interesting parts are the IP allocation difference between providers and the six debugging sessions to get Mistral working. Not a product pitch, just the engineering story.
+
+---
+
+### Reddit r/opensource
+
+**Title:** SAM: open-source multi-agent, multi-cloud platform for AI coding agents (now with Scaleway + Mistral)
+
+**Text:**
+SAM is an open-source platform for running AI coding agents on your own cloud. You bring your cloud credentials (Hetzner or Scaleway), pick an agent (Claude Code, Mistral Vibe, OpenAI Codex, Google Gemini), and SAM handles provisioning and lifecycle.
+
+Just added Scaleway and Mistral as the second cloud provider and AI agent. Wrote up the engineering story, including the debugging journey and what the abstraction layer looks like.
+
+The whole thing is open source. TypeScript + Go.
+
+Blog post: [link]
+GitHub: [link]
+
+---
+
 ### Reddit r/france
 
 **Title:** J'ai ajouté Scaleway et Mistral à SAM, un gestionnaire open-source d'agents IA de code
@@ -287,3 +368,13 @@ SAM supporte maintenant 4 agents IA sur 2 fournisseurs cloud. Open source.
 
 Blog : [link]
 GitHub : [link]
+
+---
+
+### Newsletter (ontech.raphaeltm.com)
+
+Use the personal hook paragraphs (Scaleway since Vancouver, Mistral with Defang, meeting Miguel) as the newsletter intro, then link to the full blog post. Something like:
+
+"I just published a post about adding Scaleway and Mistral to SAM. Both companies I have a history with, even from before I moved to France. [2-3 sentences of the personal hook]. The full post covers the engineering story, including what broke and what held up. [link]"
+
+Keep it short. The newsletter audience already follows Raph. They don't need the full pitch.
