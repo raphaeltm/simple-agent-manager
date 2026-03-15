@@ -480,8 +480,8 @@ Infrastructure changes require testing before production deployment.
 **Deployment Process:**
 1. Merge to `main` triggers CI/CD
 2. CI runs tests, lint, typecheck
-3. CI deploys to staging automatically
-4. Manual promotion to production after staging verification
+3. Agent triggers staging deployment manually via `gh workflow run deploy-staging.yml --ref <branch>`
+4. Staging verification confirms the deployment works before merge
 5. Production deployment creates immutable version in Cloudflare
 
 **Rollback Procedures:**

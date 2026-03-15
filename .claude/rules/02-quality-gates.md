@@ -198,7 +198,7 @@ String containment tests on structured output create false confidence. The test 
 
 **Full details in `.claude/rules/13-staging-verification.md`.** Summary of the hard requirements:
 
-1. **Staging deployment MUST be green.** The `Deploy Staging` workflow runs on every PR. A failed staging deployment is the same severity as a failed test — it blocks merge. Do NOT treat staging deploy failures as "expected on PRs."
+1. **Staging deployment MUST be green.** The `Deploy Staging` workflow is manual — you must trigger it via `gh workflow run deploy-staging.yml --ref <branch>`. Check for existing active runs first and wait at least 5 minutes if one is in progress. A failed staging deployment is the same severity as a failed test — it blocks merge.
 2. **Live app MUST be verified via Playwright.** After staging deploys, log into `app.sammy.party` (staging — NOT `app.simple-agent-manager.org`, which is production) using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`, and actively test the application.
 3. **Existing workflows MUST be confirmed working.** Navigate the dashboard, projects, settings. Verify no regressions — pages load, data displays, navigation works, no new console errors.
 4. **New feature/fix MUST be verified on staging.** The specific changes in the PR must work correctly on the live staging environment.
