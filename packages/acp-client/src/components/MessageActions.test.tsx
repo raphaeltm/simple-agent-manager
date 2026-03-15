@@ -614,10 +614,9 @@ describe('MessageActions', () => {
         expect(mockFetch).toHaveBeenCalled();
       });
 
-      // Should only have made one synthesis call (2 fetches: synthesize + audio fetch)
-      // The second click should be caught by the re-entrance guard or state check
-      // At most 2 fetches for one play cycle, not 4 for two
-      expect(mockFetch.mock.calls.length).toBeLessThanOrEqual(2);
+      // Exactly 2 fetches from the first click (synthesize + audio fetch).
+      // The second click must be blocked by the re-entrance guard — not 0 (both blocked), not 4 (both went through).
+      expect(mockFetch.mock.calls.length).toBe(2);
     });
 
     it('reuses cached blob URL on replay (no extra API calls)', async () => {
@@ -689,6 +688,7 @@ describe('MessageActions', () => {
     it('aborts in-flight requests when stopping during loading', async () => {
       const abortSpy = vi.fn();
       const originalAbortController = globalThis.AbortController;
+      let capturedSignal: unknown = null;
 
       vi.stubGlobal('AbortController', class {
         signal = { aborted: false, addEventListener: vi.fn(), removeEventListener: vi.fn() };
@@ -698,14 +698,21 @@ describe('MessageActions', () => {
         };
       });
 
-      // Make fetch hang
-      vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})));
+      // Make fetch hang, but capture the signal argument
+      const mockFetch = vi.fn().mockImplementation((_url: string, opts?: { signal?: unknown }) => {
+        if (opts?.signal) capturedSignal = opts.signal;
+        return new Promise(() => {});
+      });
+      vi.stubGlobal('fetch', mockFetch);
 
       render(<MessageActions {...ttsProps} />);
 
       await act(async () => {
         fireEvent.click(screen.getByLabelText('Read aloud'));
       });
+
+      // Verify fetch was called with an abort signal
+      expect(capturedSignal).not.toBeNull();
 
       // Should be in loading state (both speaker button and player show cancel)
       const cancelBtns = screen.getAllByLabelText('Cancel audio generation');
@@ -722,6 +729,60 @@ describe('MessageActions', () => {
 
       // Restore
       vi.stubGlobal('AbortController', originalAbortController);
+    });
+
+    it('cleans up blob URL and resets state on audio error', async () => {
+      const mockPlay = vi.fn().mockResolvedValue(undefined);
+      const mockRevokeObjectURL = vi.fn();
+
+      URL.createObjectURL = vi.fn().mockReturnValue('blob:error-test-url');
+      URL.revokeObjectURL = mockRevokeObjectURL;
+
+      const mockFetch = vi.fn();
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ audioUrl: '/api/tts/audio/msg-123' }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['audio'], { type: 'audio/mpeg' })),
+      });
+      vi.stubGlobal('fetch', mockFetch);
+
+      let latestAudio: { onerror?: (() => void) | null };
+      vi.stubGlobal('Audio', class {
+        src = '';
+        onloadedmetadata: (() => void) | null = null;
+        onended: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        playbackRate = 1;
+        currentTime = 0;
+        duration = 60;
+        play = mockPlay;
+        pause = vi.fn();
+        constructor() {
+          // eslint-disable-next-line @typescript-eslint/no-this-alias
+          latestAudio = this;
+        }
+      });
+
+      render(<MessageActions {...ttsProps} />);
+
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+      await waitFor(() => expect(mockPlay).toHaveBeenCalledTimes(1));
+
+      // Trigger audio error
+      await act(async () => {
+        latestAudio!.onerror?.();
+      });
+
+      // Should return to idle state
+      await waitFor(() => {
+        expect(screen.getByLabelText('Read aloud')).toBeTruthy();
+      });
+
+      // Blob URL should have been revoked on error
+      expect(mockRevokeObjectURL).toHaveBeenCalledWith('blob:error-test-url');
     });
   });
 
