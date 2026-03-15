@@ -212,7 +212,7 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
 
 6. **Report findings** to the user with evidence (screenshots or Playwright observations).
 
-6. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT proceed to PR creation with known staging failures.
+7. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT proceed to PR creation with known staging failures.
 
 ### 6b. Infrastructure Verification (MANDATORY for Infrastructure Changes)
 
