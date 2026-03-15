@@ -104,6 +104,18 @@ export const MessageActions = React.memo(function MessageActions({
     setIsLoading(false);
   }, []);
 
+  // Browser-native TTS fallback
+  const playBrowserTTS = useCallback(() => {
+    if (!window.speechSynthesis) return;
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(plain);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+    setIsSpeaking(true);
+  }, [plain]);
+
   // Server-side TTS: call API to synthesize, then fetch audio and play
   const playServerTTS = useCallback(async () => {
     if (!ttsApiUrl || !ttsStorageId) return;
@@ -155,6 +167,10 @@ export const MessageActions = React.memo(function MessageActions({
       audio.onended = () => {
         setIsSpeaking(false);
         audioRef.current = null;
+        if (blobUrlRef.current) {
+          URL.revokeObjectURL(blobUrlRef.current);
+          blobUrlRef.current = null;
+        }
       };
       audio.onerror = () => {
         setIsSpeaking(false);
@@ -169,20 +185,12 @@ export const MessageActions = React.memo(function MessageActions({
       console.error('TTS playback error:', err);
       setIsLoading(false);
       setIsSpeaking(false);
+      // Fall back to browser TTS on server failure
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        playBrowserTTS();
+      }
     }
-  }, [ttsApiUrl, ttsStorageId, text]);
-
-  // Browser-native TTS fallback
-  const playBrowserTTS = useCallback(() => {
-    if (!window.speechSynthesis) return;
-
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(plain);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-    window.speechSynthesis.speak(utterance);
-    setIsSpeaking(true);
-  }, [plain]);
+  }, [ttsApiUrl, ttsStorageId, text, playBrowserTTS]);
 
   const toggleSpeak = useCallback(() => {
     if (isSpeaking || isLoading) {
@@ -262,20 +270,24 @@ export const MessageActions = React.memo(function MessageActions({
         </svg>
       </button>
 
+      {/* TTS state announcements for screen readers */}
+      <span className="sr-only" aria-live="polite" aria-atomic="true">
+        {isLoading ? 'Generating audio' : isSpeaking ? 'Now playing' : ''}
+      </span>
+
       {/* Speaker button */}
       {showSpeaker && (
         <button
           type="button"
           onClick={toggleSpeak}
-          disabled={isLoading}
-          className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded transition-colors"
+          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors"
           style={{
             color: (isSpeaking || isLoading) ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
             backgroundColor: isSpeaking ? 'var(--sam-color-bg-inset)' : undefined,
             opacity: isLoading ? 0.7 : 1,
           }}
-          aria-label={isLoading ? 'Generating audio...' : isSpeaking ? 'Stop reading' : 'Read aloud'}
-          title={isLoading ? 'Generating audio...' : isSpeaking ? 'Stop reading' : 'Read aloud'}
+          aria-label={isLoading ? 'Cancel audio generation' : isSpeaking ? 'Stop reading' : 'Read aloud'}
+          title={isLoading ? 'Cancel audio generation' : isSpeaking ? 'Stop reading' : 'Read aloud'}
         >
           {isLoading ? (
             // Loading spinner

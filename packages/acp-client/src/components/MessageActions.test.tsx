@@ -495,8 +495,8 @@ describe('MessageActions', () => {
         fireEvent.click(screen.getByLabelText('Read aloud'));
       });
 
-      // Should show loading label
-      expect(screen.getByLabelText('Generating audio...')).toBeTruthy();
+      // Should show loading label (cancel action available during loading)
+      expect(screen.getByLabelText('Cancel audio generation')).toBeTruthy();
 
       // Clean up
       resolveFetch!({
@@ -505,7 +505,7 @@ describe('MessageActions', () => {
       });
     });
 
-    it('handles synthesis API failure gracefully', async () => {
+    it('falls back to browser TTS on synthesis API failure', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
         ok: false,
         status: 500,
@@ -520,8 +520,8 @@ describe('MessageActions', () => {
         fireEvent.click(screen.getByLabelText('Read aloud'));
       });
 
-      // Should revert to Read aloud state (not stuck in loading)
-      expect(screen.getByLabelText('Read aloud')).toBeTruthy();
+      // Should fall back to browser TTS (speechSynthesis.speak is called)
+      expect(mockSpeak).toHaveBeenCalled();
 
       consoleSpy.mockRestore();
     });
