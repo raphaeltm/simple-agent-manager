@@ -28,6 +28,7 @@ import {
   DEFAULT_TTS_R2_PREFIX,
 } from '@simple-agent-manager/shared';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -63,10 +64,10 @@ export function getTTSConfig(env: TTSEnvVars): TTSConfig {
     speaker: env.TTS_SPEAKER || DEFAULT_TTS_SPEAKER,
     encoding: env.TTS_ENCODING || DEFAULT_TTS_ENCODING,
     cleanupModel: env.TTS_CLEANUP_MODEL || DEFAULT_TTS_CLEANUP_MODEL,
-    cleanupMaxTokens: parseInt(env.TTS_CLEANUP_MAX_TOKENS || String(DEFAULT_TTS_CLEANUP_MAX_TOKENS), 10),
-    maxTextLength: parseInt(env.TTS_MAX_TEXT_LENGTH || String(DEFAULT_TTS_MAX_TEXT_LENGTH), 10),
-    timeoutMs: parseInt(env.TTS_TIMEOUT_MS || String(DEFAULT_TTS_TIMEOUT_MS), 10),
-    cleanupTimeoutMs: parseInt(env.TTS_CLEANUP_TIMEOUT_MS || String(DEFAULT_TTS_CLEANUP_TIMEOUT_MS), 10),
+    cleanupMaxTokens: parsePositiveInt(env.TTS_CLEANUP_MAX_TOKENS, DEFAULT_TTS_CLEANUP_MAX_TOKENS),
+    maxTextLength: parsePositiveInt(env.TTS_MAX_TEXT_LENGTH, DEFAULT_TTS_MAX_TEXT_LENGTH),
+    timeoutMs: parsePositiveInt(env.TTS_TIMEOUT_MS, DEFAULT_TTS_TIMEOUT_MS),
+    cleanupTimeoutMs: parsePositiveInt(env.TTS_CLEANUP_TIMEOUT_MS, DEFAULT_TTS_CLEANUP_TIMEOUT_MS),
     r2Prefix: env.TTS_R2_PREFIX || DEFAULT_TTS_R2_PREFIX,
     enabled: env.TTS_ENABLED !== 'false',
   };
