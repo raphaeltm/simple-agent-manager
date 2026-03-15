@@ -25,6 +25,7 @@ import { uiGovernanceRoutes } from './routes/ui-governance';
 import { transcribeRoutes } from './routes/transcribe';
 import { ttsRoutes } from './routes/tts';
 import { agentSettingsRoutes } from './routes/agent-settings';
+import { agentProfileRoutes } from './routes/agent-profiles';
 import { clientErrorsRoutes } from './routes/client-errors';
 import { projectsRoutes } from './routes/projects';
 import { tasksRoutes } from './routes/tasks';
@@ -508,6 +509,7 @@ app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
+app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 // MCP endpoint CORS override — MCP uses Bearer token auth (not cookies/sessions),

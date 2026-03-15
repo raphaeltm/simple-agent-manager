@@ -1330,3 +1330,65 @@ export interface SaveAgentSettingsRequest {
   deniedTools?: string[] | null;
   additionalEnv?: Record<string, string> | null;
 }
+
+// =============================================================================
+// Agent Profiles (per-project role definitions)
+// =============================================================================
+
+/** Agent profile — a reusable, project-scoped agent configuration for task roles */
+export interface AgentProfile {
+  id: string;
+  projectId: string | null;
+  userId: string;
+  name: string;
+  description: string | null;
+  agentType: string;
+  model: string | null;
+  permissionMode: string | null;
+  systemPromptAppend: string | null;
+  maxTurns: number | null;
+  timeoutMinutes: number | null;
+  vmSizeOverride: string | null;
+  isBuiltin: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Request body for POST /api/projects/:projectId/agent-profiles */
+export interface CreateAgentProfileRequest {
+  name: string;
+  description?: string | null;
+  agentType?: string;
+  model?: string | null;
+  permissionMode?: string | null;
+  systemPromptAppend?: string | null;
+  maxTurns?: number | null;
+  timeoutMinutes?: number | null;
+  vmSizeOverride?: string | null;
+}
+
+/** Request body for PUT /api/projects/:projectId/agent-profiles/:profileId */
+export interface UpdateAgentProfileRequest {
+  name?: string;
+  description?: string | null;
+  agentType?: string;
+  model?: string | null;
+  permissionMode?: string | null;
+  systemPromptAppend?: string | null;
+  maxTurns?: number | null;
+  timeoutMinutes?: number | null;
+  vmSizeOverride?: string | null;
+}
+
+/** Resolved agent profile for task execution */
+export interface ResolvedAgentProfile {
+  profileId: string | null;
+  profileName: string | null;
+  agentType: string;
+  model: string | null;
+  permissionMode: string | null;
+  systemPromptAppend: string | null;
+  maxTurns: number | null;
+  timeoutMinutes: number | null;
+  vmSizeOverride: string | null;
+}

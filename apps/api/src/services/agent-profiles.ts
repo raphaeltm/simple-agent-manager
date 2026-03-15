@@ -1,0 +1,441 @@
+import { and, eq, isNull, or } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import type {
+  AgentProfile,
+  CreateAgentProfileRequest,
+  ResolvedAgentProfile,
+  UpdateAgentProfileRequest,
+} from '@simple-agent-manager/shared';
+import { isValidAgentType } from '@simple-agent-manager/shared';
+import type { Env } from '../index';
+import * as schema from '../db/schema';
+import { ulid } from '../lib/ulid';
+import { errors } from '../middleware/error';
+
+type Db = ReturnType<typeof drizzle<typeof schema>>;
+
+/** Built-in profile definitions seeded on first access */
+const BUILTIN_PROFILES = [
+  {
+    name: 'default',
+    description: 'General-purpose coding agent',
+    agentType: 'claude-code',
+    model: 'claude-sonnet-4-5-20250929',
+    permissionMode: 'acceptEdits',
+  },
+  {
+    name: 'planner',
+    description: 'Task decomposition and architecture planning',
+    agentType: 'claude-code',
+    model: 'claude-opus-4-6',
+    permissionMode: 'plan',
+    systemPromptAppend: 'Decompose tasks. Do not write code directly.',
+  },
+  {
+    name: 'implementer',
+    description: 'Feature implementation with tests',
+    agentType: 'claude-code',
+    model: 'claude-sonnet-4-5-20250929',
+    permissionMode: 'acceptEdits',
+    systemPromptAppend: 'Focus on implementation. Write tests for all changes.',
+  },
+  {
+    name: 'reviewer',
+    description: 'Code review for correctness, security, and style',
+    agentType: 'claude-code',
+    model: 'claude-opus-4-6',
+    permissionMode: 'plan',
+    systemPromptAppend: 'Review code for correctness, security, and style.',
+  },
+] as const;
+
+/** Convert a DB row to an API response */
+function toAgentProfile(row: schema.AgentProfileRow): AgentProfile {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    userId: row.userId,
+    name: row.name,
+    description: row.description,
+    agentType: row.agentType,
+    model: row.model,
+    permissionMode: row.permissionMode,
+    systemPromptAppend: row.systemPromptAppend,
+    maxTurns: row.maxTurns,
+    timeoutMinutes: row.timeoutMinutes,
+    vmSizeOverride: row.vmSizeOverride,
+    isBuiltin: row.isBuiltin === 1,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/**
+ * Seed built-in profiles for a project if they don't already exist.
+ * Built-in profiles have is_builtin = 1 and are owned by the project owner.
+ */
+export async function seedBuiltinProfiles(
+  db: Db,
+  projectId: string,
+  userId: string
+): Promise<void> {
+  // Check if any built-in profiles already exist for this project
+  const existing = await db
+    .select({ name: schema.agentProfiles.name })
+    .from(schema.agentProfiles)
+    .where(
+      and(
+        eq(schema.agentProfiles.projectId, projectId),
+        eq(schema.agentProfiles.isBuiltin, 1)
+      )
+    );
+
+  const existingNames = new Set(existing.map((r) => r.name));
+
+  for (const profile of BUILTIN_PROFILES) {
+    if (existingNames.has(profile.name)) {
+      continue;
+    }
+    await db.insert(schema.agentProfiles).values({
+      id: ulid(),
+      projectId,
+      userId,
+      name: profile.name,
+      description: profile.description,
+      agentType: profile.agentType,
+      model: profile.model,
+      permissionMode: profile.permissionMode,
+      systemPromptAppend: 'systemPromptAppend' in profile ? profile.systemPromptAppend : null,
+      isBuiltin: 1,
+    });
+  }
+}
+
+/**
+ * List all profiles for a project (project-scoped + global).
+ * Seeds built-in profiles on first access if none exist.
+ */
+export async function listProfiles(
+  db: Db,
+  projectId: string,
+  userId: string
+): Promise<AgentProfile[]> {
+  // Seed built-in profiles on first access
+  await seedBuiltinProfiles(db, projectId, userId);
+
+  const rows = await db
+    .select()
+    .from(schema.agentProfiles)
+    .where(
+      or(
+        eq(schema.agentProfiles.projectId, projectId),
+        and(
+          isNull(schema.agentProfiles.projectId),
+          eq(schema.agentProfiles.userId, userId)
+        )
+      )
+    )
+    .orderBy(schema.agentProfiles.name);
+
+  return rows.map(toAgentProfile);
+}
+
+/** Get a single profile by ID, verifying project + user access */
+export async function getProfile(
+  db: Db,
+  projectId: string,
+  profileId: string,
+  userId: string
+): Promise<AgentProfile> {
+  const rows = await db
+    .select()
+    .from(schema.agentProfiles)
+    .where(
+      and(
+        eq(schema.agentProfiles.id, profileId),
+        or(
+          eq(schema.agentProfiles.projectId, projectId),
+          and(
+            isNull(schema.agentProfiles.projectId),
+            eq(schema.agentProfiles.userId, userId)
+          )
+        )
+      )
+    )
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) {
+    throw errors.notFound('Agent profile');
+  }
+
+  return toAgentProfile(row);
+}
+
+/** Create a new profile scoped to a project */
+export async function createProfile(
+  db: Db,
+  projectId: string,
+  userId: string,
+  body: CreateAgentProfileRequest
+): Promise<AgentProfile> {
+  const name = body.name?.trim();
+  if (!name) {
+    throw errors.badRequest('name is required');
+  }
+
+  if (body.agentType && !isValidAgentType(body.agentType)) {
+    throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
+  }
+
+  // Check for duplicate name in this project
+  const existing = await db
+    .select({ id: schema.agentProfiles.id })
+    .from(schema.agentProfiles)
+    .where(
+      and(
+        eq(schema.agentProfiles.projectId, projectId),
+        eq(schema.agentProfiles.name, name)
+      )
+    )
+    .limit(1);
+
+  if (existing.length > 0) {
+    throw errors.conflict(`Profile "${name}" already exists in this project`);
+  }
+
+  const id = ulid();
+  await db.insert(schema.agentProfiles).values({
+    id,
+    projectId,
+    userId,
+    name,
+    description: body.description ?? null,
+    agentType: body.agentType ?? 'claude-code',
+    model: body.model ?? null,
+    permissionMode: body.permissionMode ?? null,
+    systemPromptAppend: body.systemPromptAppend ?? null,
+    maxTurns: body.maxTurns ?? null,
+    timeoutMinutes: body.timeoutMinutes ?? null,
+    vmSizeOverride: body.vmSizeOverride ?? null,
+    isBuiltin: 0,
+  });
+
+  return getProfile(db, projectId, id, userId);
+}
+
+/** Update an existing profile */
+export async function updateProfile(
+  db: Db,
+  projectId: string,
+  profileId: string,
+  userId: string,
+  body: UpdateAgentProfileRequest
+): Promise<AgentProfile> {
+  // Verify profile exists and user has access
+  const profile = await getProfile(db, projectId, profileId, userId);
+
+  if (body.agentType && !isValidAgentType(body.agentType)) {
+    throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
+  }
+
+  // If renaming, check for duplicate in the same project scope
+  if (body.name !== undefined) {
+    const name = body.name.trim();
+    if (!name) {
+      throw errors.badRequest('name cannot be empty');
+    }
+
+    if (name !== profile.name) {
+      const existing = await db
+        .select({ id: schema.agentProfiles.id })
+        .from(schema.agentProfiles)
+        .where(
+          and(
+            eq(schema.agentProfiles.projectId, projectId),
+            eq(schema.agentProfiles.name, name)
+          )
+        )
+        .limit(1);
+
+      if (existing.length > 0) {
+        throw errors.conflict(`Profile "${name}" already exists in this project`);
+      }
+    }
+  }
+
+  const updates: Record<string, unknown> = {
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (body.name !== undefined) updates.name = body.name.trim();
+  if (body.description !== undefined) updates.description = body.description;
+  if (body.agentType !== undefined) updates.agentType = body.agentType;
+  if (body.model !== undefined) updates.model = body.model;
+  if (body.permissionMode !== undefined) updates.permissionMode = body.permissionMode;
+  if (body.systemPromptAppend !== undefined) updates.systemPromptAppend = body.systemPromptAppend;
+  if (body.maxTurns !== undefined) updates.maxTurns = body.maxTurns;
+  if (body.timeoutMinutes !== undefined) updates.timeoutMinutes = body.timeoutMinutes;
+  if (body.vmSizeOverride !== undefined) updates.vmSizeOverride = body.vmSizeOverride;
+
+  await db
+    .update(schema.agentProfiles)
+    .set(updates)
+    .where(eq(schema.agentProfiles.id, profileId));
+
+  return getProfile(db, projectId, profileId, userId);
+}
+
+/** Delete a profile */
+export async function deleteProfile(
+  db: Db,
+  projectId: string,
+  profileId: string,
+  userId: string
+): Promise<void> {
+  // Verify it exists and user has access
+  await getProfile(db, projectId, profileId, userId);
+
+  await db
+    .delete(schema.agentProfiles)
+    .where(eq(schema.agentProfiles.id, profileId));
+}
+
+/**
+ * Resolve an agent profile by name or ID for a given project.
+ * Resolution order:
+ *   1. Exact match by ID in project scope
+ *   2. Exact match by name in project scope
+ *   3. Exact match by name in global scope (user's profiles with project_id = NULL)
+ *   4. Fallback to platform defaults
+ */
+export async function resolveAgentProfile(
+  db: Db,
+  projectId: string,
+  profileNameOrId: string | null | undefined,
+  userId: string,
+  env: Pick<Env, 'DEFAULT_TASK_AGENT_TYPE'>
+): Promise<ResolvedAgentProfile> {
+  // No profile hint → return platform defaults
+  if (!profileNameOrId) {
+    return {
+      profileId: null,
+      profileName: null,
+      agentType: env.DEFAULT_TASK_AGENT_TYPE || 'claude-code',
+      model: null,
+      permissionMode: null,
+      systemPromptAppend: null,
+      maxTurns: null,
+      timeoutMinutes: null,
+      vmSizeOverride: null,
+    };
+  }
+
+  // Seed built-in profiles to ensure they're available for resolution
+  await seedBuiltinProfiles(db, projectId, userId);
+
+  // Try by ID first
+  const byId = await db
+    .select()
+    .from(schema.agentProfiles)
+    .where(
+      and(
+        eq(schema.agentProfiles.id, profileNameOrId),
+        or(
+          eq(schema.agentProfiles.projectId, projectId),
+          and(
+            isNull(schema.agentProfiles.projectId),
+            eq(schema.agentProfiles.userId, userId)
+          )
+        )
+      )
+    )
+    .limit(1);
+
+  if (byId[0]) {
+    const p = byId[0];
+    return {
+      profileId: p.id,
+      profileName: p.name,
+      agentType: p.agentType,
+      model: p.model,
+      permissionMode: p.permissionMode,
+      systemPromptAppend: p.systemPromptAppend,
+      maxTurns: p.maxTurns,
+      timeoutMinutes: p.timeoutMinutes,
+      vmSizeOverride: p.vmSizeOverride,
+    };
+  }
+
+  // Try by name in project scope
+  const byNameProject = await db
+    .select()
+    .from(schema.agentProfiles)
+    .where(
+      and(
+        eq(schema.agentProfiles.name, profileNameOrId),
+        eq(schema.agentProfiles.projectId, projectId)
+      )
+    )
+    .limit(1);
+
+  if (byNameProject[0]) {
+    const p = byNameProject[0];
+    return {
+      profileId: p.id,
+      profileName: p.name,
+      agentType: p.agentType,
+      model: p.model,
+      permissionMode: p.permissionMode,
+      systemPromptAppend: p.systemPromptAppend,
+      maxTurns: p.maxTurns,
+      timeoutMinutes: p.timeoutMinutes,
+      vmSizeOverride: p.vmSizeOverride,
+    };
+  }
+
+  // Try by name in global scope (user's profiles with no project)
+  const byNameGlobal = await db
+    .select()
+    .from(schema.agentProfiles)
+    .where(
+      and(
+        eq(schema.agentProfiles.name, profileNameOrId),
+        isNull(schema.agentProfiles.projectId),
+        eq(schema.agentProfiles.userId, userId)
+      )
+    )
+    .limit(1);
+
+  if (byNameGlobal[0]) {
+    const p = byNameGlobal[0];
+    return {
+      profileId: p.id,
+      profileName: p.name,
+      agentType: p.agentType,
+      model: p.model,
+      permissionMode: p.permissionMode,
+      systemPromptAppend: p.systemPromptAppend,
+      maxTurns: p.maxTurns,
+      timeoutMinutes: p.timeoutMinutes,
+      vmSizeOverride: p.vmSizeOverride,
+    };
+  }
+
+  // No matching profile found — return defaults with the hint as agent type if valid
+  const agentType = isValidAgentType(profileNameOrId)
+    ? profileNameOrId
+    : env.DEFAULT_TASK_AGENT_TYPE || 'claude-code';
+
+  return {
+    profileId: null,
+    profileName: null,
+    agentType,
+    model: null,
+    permissionMode: null,
+    systemPromptAppend: null,
+    maxTurns: null,
+    timeoutMinutes: null,
+    vmSizeOverride: null,
+  };
+}
