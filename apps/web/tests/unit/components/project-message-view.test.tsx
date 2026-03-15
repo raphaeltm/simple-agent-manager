@@ -1184,13 +1184,14 @@ describe('ProjectMessageView — session context dropdown', () => {
     expect(screen.queryByText('Direct URL:')).toBeNull();
   });
 
-  it('shows lightweight badge for small VM size', async () => {
+  it('shows lightweight badge for lightweight workspace profile', async () => {
     mocks.getWorkspace.mockResolvedValue({
       id: 'ws-light',
       name: 'light-ws',
       status: 'running',
       vmSize: 'small',
       vmLocation: 'fsn1',
+      workspaceProfile: 'lightweight',
       nodeId: 'node-1',
     });
     mocks.getNode.mockResolvedValue({
@@ -1215,13 +1216,14 @@ describe('ProjectMessageView — session context dropdown', () => {
     });
   });
 
-  it('shows full badge for medium/large VM size', async () => {
+  it('shows full badge for full workspace profile', async () => {
     mocks.getWorkspace.mockResolvedValue({
       id: 'ws-full',
       name: 'full-ws',
       status: 'running',
       vmSize: 'large',
       vmLocation: 'fsn1',
+      workspaceProfile: 'full',
       nodeId: 'node-1',
     });
     mocks.getNode.mockResolvedValue({
@@ -1239,6 +1241,37 @@ describe('ProjectMessageView — session context dropdown', () => {
     });
 
     render(<ProjectMessageView projectId="proj-1" sessionId="sess-full" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Full')).toBeTruthy();
+    });
+  });
+
+  it('shows full badge when workspaceProfile is null (default)', async () => {
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-null',
+      name: 'null-ws',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+      workspaceProfile: null,
+      nodeId: 'node-1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-1',
+      name: 'node-1',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+
+    const session = makeSession('sess-null', 'active');
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-null', 'Hello')],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-null" />);
 
     await waitFor(() => {
       expect(screen.getByText('Full')).toBeTruthy();

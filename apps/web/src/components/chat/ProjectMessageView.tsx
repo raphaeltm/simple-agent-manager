@@ -880,9 +880,6 @@ function formatVmSize(size: string): string {
   return config ? config.label : size;
 }
 
-/** Whether a VM size is considered "lightweight" (small profile). */
-const LIGHTWEIGHT_VM_SIZE: VMSize = 'small';
-
 /** Collapsible session header — shows title + state dot, with expandable details. */
 function SessionHeader({
   projectId,
@@ -953,16 +950,17 @@ function SessionHeader({
           {session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`}
         </span>
 
-        {/* Workspace profile badge */}
+        {/* Workspace profile badge — null/undefined defaults to 'Full' (matches DEFAULT_WORKSPACE_PROFILE) */}
         {workspace && (
           <span
             className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0"
+            aria-label={`Workspace profile: ${workspace.workspaceProfile === 'lightweight' ? 'Lightweight' : 'Full'}`}
             style={{
-              backgroundColor: workspace.vmSize === LIGHTWEIGHT_VM_SIZE ? 'var(--sam-color-info-tint)' : 'var(--sam-color-success-tint)',
-              color: workspace.vmSize === LIGHTWEIGHT_VM_SIZE ? 'var(--sam-color-info)' : 'var(--sam-color-success)',
+              backgroundColor: workspace.workspaceProfile === 'lightweight' ? 'var(--sam-color-info-tint)' : 'var(--sam-color-success-tint)',
+              color: workspace.workspaceProfile === 'lightweight' ? 'var(--sam-color-info)' : 'var(--sam-color-success)',
             }}
           >
-            {workspace.vmSize === LIGHTWEIGHT_VM_SIZE ? 'Lightweight' : 'Full'}
+            {workspace.workspaceProfile === 'lightweight' ? 'Lightweight' : 'Full'}
           </span>
         )}
 

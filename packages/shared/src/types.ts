@@ -825,6 +825,7 @@ export interface WorkspaceResponse {
   status: WorkspaceStatus;
   vmSize: VMSize;
   vmLocation: VMLocation;
+  workspaceProfile?: WorkspaceProfile | null;
   vmIp: string | null;
   lastActivityAt: string | null;
   errorMessage: string | null;
