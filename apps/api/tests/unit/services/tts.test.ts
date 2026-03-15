@@ -183,28 +183,28 @@ describe('generateSpeechAudio', () => {
 // ─── R2 Storage ──────────────────────────────────────────────────────────────
 
 describe('buildR2Key', () => {
-  it('builds default key with tts prefix and mp3 extension', () => {
-    expect(buildR2Key('msg-123')).toBe('tts/msg-123.mp3');
+  it('builds default key with tts prefix, userId, and mp3 extension', () => {
+    expect(buildR2Key('msg-123', 'user-1')).toBe('tts/user-1/msg-123.mp3');
   });
 
   it('respects custom prefix and encoding', () => {
-    expect(buildR2Key('msg-456', { r2Prefix: 'audio', encoding: 'wav' })).toBe('audio/msg-456.wav');
+    expect(buildR2Key('msg-456', 'user-2', { r2Prefix: 'audio', encoding: 'wav' })).toBe('audio/user-2/msg-456.wav');
   });
 });
 
 describe('getAudioFromR2', () => {
   it('returns null when audio does not exist', async () => {
     const r2 = createMockR2();
-    const result = await getAudioFromR2(r2, 'nonexistent');
+    const result = await getAudioFromR2(r2, 'nonexistent', 'user-1');
     expect(result).toBeNull();
-    expect(r2.get).toHaveBeenCalledWith('tts/nonexistent.mp3');
+    expect(r2.get).toHaveBeenCalledWith('tts/user-1/nonexistent.mp3');
   });
 
   it('returns the R2 object when audio exists', async () => {
     const r2 = createMockR2();
     const fakeBody = { body: new ReadableStream(), size: 1024 };
     (r2.get as ReturnType<typeof vi.fn>).mockResolvedValue(fakeBody);
-    const result = await getAudioFromR2(r2, 'existing-msg');
+    const result = await getAudioFromR2(r2, 'existing-msg', 'user-1');
     expect(result).toBe(fakeBody);
   });
 });
@@ -213,8 +213,8 @@ describe('storeAudioInR2', () => {
   it('stores audio bytes with correct key and content type', async () => {
     const r2 = createMockR2();
     const audio = new ArrayBuffer(512);
-    await storeAudioInR2(r2, 'msg-789', audio);
-    expect(r2.put).toHaveBeenCalledWith('tts/msg-789.mp3', audio, {
+    await storeAudioInR2(r2, 'msg-789', 'user-1', audio);
+    expect(r2.put).toHaveBeenCalledWith('tts/user-1/msg-789.mp3', audio, {
       httpMetadata: { contentType: 'audio/mpeg' },
     });
   });
@@ -222,8 +222,8 @@ describe('storeAudioInR2', () => {
   it('uses correct content type for wav encoding', async () => {
     const r2 = createMockR2();
     const audio = new ArrayBuffer(512);
-    await storeAudioInR2(r2, 'msg-wav', audio, { encoding: 'wav' });
-    expect(r2.put).toHaveBeenCalledWith('tts/msg-wav.wav', audio, {
+    await storeAudioInR2(r2, 'msg-wav', 'user-1', audio, { encoding: 'wav' });
+    expect(r2.put).toHaveBeenCalledWith('tts/user-1/msg-wav.wav', audio, {
       httpMetadata: { contentType: 'audio/wav' },
     });
   });
@@ -246,7 +246,7 @@ describe('synthesizeSpeech', () => {
     });
 
     const ai = createMockAi();
-    const result = await synthesizeSpeech('Some text', 'cached-id', ai, r2);
+    const result = await synthesizeSpeech('Some text', 'cached-id', ai, r2, {}, 'user-1');
 
     expect(result.cached).toBe(true);
     expect(result.audioBody).toBe(fakeBody);
@@ -265,13 +265,13 @@ describe('synthesizeSpeech', () => {
       arrayBuffer: () => Promise.resolve(fakeAudio),
     });
 
-    const result = await synthesizeSpeech('## Hello **world**', 'new-id', ai, r2);
+    const result = await synthesizeSpeech('## Hello **world**', 'new-id', ai, r2, {}, 'user-1');
 
     expect(result.cached).toBe(false);
     expect(result.audioBody).toBe(fakeAudio);
     expect(result.contentType).toBe('audio/mpeg');
     // Should store in R2
-    expect(r2.put).toHaveBeenCalledWith('tts/new-id.mp3', fakeAudio, {
+    expect(r2.put).toHaveBeenCalledWith('tts/user-1/new-id.mp3', fakeAudio, {
       httpMetadata: { contentType: 'audio/mpeg' },
     });
   });
@@ -288,7 +288,7 @@ describe('synthesizeSpeech', () => {
 
     // Use markdown text so LLM cleanup path is triggered
     const longText = '## ' + 'a'.repeat(10000);
-    await synthesizeSpeech(longText, 'long-id', ai, r2, { maxTextLength: 100 });
+    await synthesizeSpeech(longText, 'long-id', ai, r2, { maxTextLength: 100 }, 'user-1');
 
     // The LLM cleanup should have been called with the truncated text
     expect(mockGenerate).toHaveBeenCalled();
@@ -305,7 +305,7 @@ describe('synthesizeSpeech', () => {
       arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
     });
 
-    await expect(synthesizeSpeech('Hello', 'empty-id', ai, r2))
+    await expect(synthesizeSpeech('Hello', 'empty-id', ai, r2, {}, 'user-1'))
       .rejects.toThrow('TTS model returned empty audio');
   });
 });

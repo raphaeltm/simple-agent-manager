@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../index';
-import { requireAuth, requireApproved } from '../middleware/auth';
+import { getAuth, requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { synthesizeSpeech, getAudioFromR2, getTTSConfig } from '../services/tts';
 import { log } from '../lib/logger';
@@ -20,6 +20,8 @@ ttsRoutes.use('*', requireAuth(), requireApproved());
  * Response: { audioUrl: string, cached: boolean }
  */
 ttsRoutes.post('/synthesize', async (c) => {
+  const auth = getAuth(c);
+  const userId = auth.user.id;
   const config = getTTSConfig(c.env);
 
   if (!config.enabled) {
@@ -43,7 +45,7 @@ ttsRoutes.post('/synthesize', async (c) => {
   }
 
   try {
-    const result = await synthesizeSpeech(text, storageId, c.env.AI, c.env.R2, config);
+    const result = await synthesizeSpeech(text, storageId, c.env.AI, c.env.R2, config, userId);
 
     // Return the audio URL for the client to fetch
     return c.json({
@@ -67,6 +69,8 @@ ttsRoutes.post('/synthesize', async (c) => {
  * The client should call POST /synthesize first, then use this URL for playback.
  */
 ttsRoutes.get('/audio/:storageId', async (c) => {
+  const auth = getAuth(c);
+  const userId = auth.user.id;
   const { storageId } = c.req.param();
   const config = getTTSConfig(c.env);
 
@@ -75,7 +79,7 @@ ttsRoutes.get('/audio/:storageId', async (c) => {
     throw errors.badRequest('Invalid storageId format');
   }
 
-  const audioObject = await getAudioFromR2(c.env.R2, storageId, config);
+  const audioObject = await getAudioFromR2(c.env.R2, storageId, userId, config);
   if (!audioObject) {
     throw errors.notFound('Audio not found');
   }
@@ -86,7 +90,7 @@ ttsRoutes.get('/audio/:storageId', async (c) => {
   return new Response(audioObject.body, {
     headers: {
       'Content-Type': contentType,
-      'Cache-Control': 'public, max-age=86400',
+      'Cache-Control': 'private, max-age=86400',
       'Content-Length': String(audioObject.size),
     },
   });

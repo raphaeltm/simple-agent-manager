@@ -213,11 +213,11 @@ export async function generateSpeechAudio(
 
 // ─── R2 Storage ──────────────────────────────────────────────────────────────
 
-/** Build the R2 object key for a TTS audio file. */
-export function buildR2Key(storageId: string, config: TTSConfig = {}): string {
+/** Build the R2 object key for a TTS audio file, scoped by userId. */
+export function buildR2Key(storageId: string, userId: string, config: TTSConfig = {}): string {
   const prefix = config.r2Prefix ?? DEFAULT_TTS_R2_PREFIX;
   const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
-  return `${prefix}/${storageId}.${encoding}`;
+  return `${prefix}/${userId}/${storageId}.${encoding}`;
 }
 
 /** Content-Type mapping for audio encodings. */
@@ -237,9 +237,10 @@ function audioContentType(encoding: string): string {
 export async function getAudioFromR2(
   r2: R2Bucket,
   storageId: string,
+  userId: string,
   config: TTSConfig = {},
 ): Promise<R2ObjectBody | null> {
-  const key = buildR2Key(storageId, config);
+  const key = buildR2Key(storageId, userId, config);
   return r2.get(key);
 }
 
@@ -247,10 +248,11 @@ export async function getAudioFromR2(
 export async function storeAudioInR2(
   r2: R2Bucket,
   storageId: string,
+  userId: string,
   audio: ArrayBuffer,
   config: TTSConfig = {},
 ): Promise<void> {
-  const key = buildR2Key(storageId, config);
+  const key = buildR2Key(storageId, userId, config);
   const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
   await r2.put(key, audio, {
     httpMetadata: {
@@ -283,15 +285,16 @@ export async function synthesizeSpeech(
   ai: Ai,
   r2: R2Bucket,
   config: TTSConfig = {},
+  userId: string = 'anonymous',
 ): Promise<SynthesizeResult> {
   const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
   const maxTextLength = config.maxTextLength ?? DEFAULT_TTS_MAX_TEXT_LENGTH;
   const contentType = audioContentType(encoding);
 
   // 1. Check R2 cache
-  const cached = await getAudioFromR2(r2, storageId, config);
+  const cached = await getAudioFromR2(r2, storageId, userId, config);
   if (cached) {
-    log.info('tts.cache_hit', { storageId });
+    log.info('tts.cache_hit', { storageId, userId });
     return {
       audioBody: cached.body,
       contentType,
@@ -317,7 +320,7 @@ export async function synthesizeSpeech(
   }
 
   // 5. Store in R2 (fire-and-forget is fine, but we await for reliability)
-  await storeAudioInR2(r2, storageId, audioBuffer, config);
+  await storeAudioInR2(r2, storageId, userId, audioBuffer, config);
 
   return {
     audioBody: audioBuffer,
