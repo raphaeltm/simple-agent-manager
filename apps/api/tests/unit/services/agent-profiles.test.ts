@@ -306,6 +306,178 @@ describe('Agent Profile Service', () => {
     });
   });
 
+  describe('listProfiles', () => {
+    it('seeds built-in profiles and returns all profiles for a project', async () => {
+      const db = createMockDB();
+      // seedBuiltinProfiles: all 4 already exist
+      db._pushResult([
+        { name: 'default' }, { name: 'planner' }, { name: 'implementer' }, { name: 'reviewer' },
+      ]);
+      // listProfiles query (select + from + where + orderBy)
+      db._pushResult([
+        makeProfileRow({ id: 'p1', name: 'default' }),
+        makeProfileRow({ id: 'p2', name: 'planner', isBuiltin: 1 }),
+      ]);
+
+      const result = await agentProfileService.listProfiles(db, 'project-1', 'user-1', env);
+
+      expect(result).toHaveLength(2);
+      expect(result[0].id).toBe('p1');
+      expect(result[1].id).toBe('p2');
+      // isBuiltin should be converted from integer to boolean
+      expect(result[0].isBuiltin).toBe(true);
+    });
+
+    it('converts isBuiltin from integer 0 to boolean false', async () => {
+      const db = createMockDB();
+      db._pushResult([
+        { name: 'default' }, { name: 'planner' }, { name: 'implementer' }, { name: 'reviewer' },
+      ]);
+      db._pushResult([
+        makeProfileRow({ id: 'p1', isBuiltin: 0 }),
+      ]);
+
+      const result = await agentProfileService.listProfiles(db, 'project-1', 'user-1', env);
+
+      expect(result[0].isBuiltin).toBe(false);
+    });
+  });
+
+  describe('getProfile', () => {
+    it('returns a profile by ID', async () => {
+      const db = createMockDB();
+      const row = makeProfileRow({ id: 'profile-abc', name: 'my-profile' });
+      db._pushResult([row]);
+
+      const result = await agentProfileService.getProfile(db, 'project-1', 'profile-abc', 'user-1');
+
+      expect(result.id).toBe('profile-abc');
+      expect(result.name).toBe('my-profile');
+      expect(result.isBuiltin).toBe(true); // isBuiltin: 1 -> true
+    });
+
+    it('throws NOT_FOUND when profile does not exist', async () => {
+      const db = createMockDB();
+      db._pushResult([]);
+
+      await expect(
+        agentProfileService.getProfile(db, 'project-1', 'nonexistent', 'user-1')
+      ).rejects.toThrow();
+    });
+  });
+
+  describe('updateProfile', () => {
+    it('updates profile fields', async () => {
+      const db = createMockDB();
+      const existingRow = makeProfileRow({ id: 'profile-1', name: 'default' });
+      // getProfile (verify exists) — select + from + where + limit
+      db._pushResult([existingRow]);
+      // update().set().where() consumes a result from queue
+      db._pushResult([]);
+      // getProfile (return updated) — select + from + where + limit
+      db._pushResult([makeProfileRow({ id: 'profile-1', name: 'default', model: 'claude-opus-4-6' })]);
+
+      const result = await agentProfileService.updateProfile(
+        db, 'project-1', 'profile-1', 'user-1',
+        { model: 'claude-opus-4-6' }
+      );
+
+      expect(result.model).toBe('claude-opus-4-6');
+      expect(db.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects invalid agent type on update', async () => {
+      const db = createMockDB();
+      const existingRow = makeProfileRow({ id: 'profile-1' });
+      db._pushResult([existingRow]);
+
+      await expect(
+        agentProfileService.updateProfile(
+          db, 'project-1', 'profile-1', 'user-1',
+          { agentType: 'invalid-type' }
+        )
+      ).rejects.toThrow('Invalid agent type');
+    });
+
+    it('rejects empty name on update', async () => {
+      const db = createMockDB();
+      const existingRow = makeProfileRow({ id: 'profile-1' });
+      db._pushResult([existingRow]);
+
+      await expect(
+        agentProfileService.updateProfile(
+          db, 'project-1', 'profile-1', 'user-1',
+          { name: '   ' }
+        )
+      ).rejects.toThrow('name cannot be empty');
+    });
+
+    it('rejects duplicate name when renaming', async () => {
+      const db = createMockDB();
+      const existingRow = makeProfileRow({ id: 'profile-1', name: 'old-name' });
+      // getProfile (verify exists)
+      db._pushResult([existingRow]);
+      // duplicate name check
+      db._pushResult([{ id: 'other-profile' }]);
+
+      await expect(
+        agentProfileService.updateProfile(
+          db, 'project-1', 'profile-1', 'user-1',
+          { name: 'taken-name' }
+        )
+      ).rejects.toThrow('already exists');
+    });
+  });
+
+  describe('deleteProfile', () => {
+    it('deletes an existing profile', async () => {
+      const db = createMockDB();
+      const existingRow = makeProfileRow({ id: 'profile-1' });
+      // getProfile (verify exists)
+      db._pushResult([existingRow]);
+
+      await agentProfileService.deleteProfile(db, 'project-1', 'profile-1', 'user-1');
+
+      expect(db.delete).toHaveBeenCalledTimes(1);
+    });
+
+    it('throws when profile does not exist', async () => {
+      const db = createMockDB();
+      db._pushResult([]);
+
+      await expect(
+        agentProfileService.deleteProfile(db, 'project-1', 'nonexistent', 'user-1')
+      ).rejects.toThrow();
+    });
+  });
+
+  describe('createProfile (success path)', () => {
+    it('creates a profile with default agent type from env', async () => {
+      const db = createMockDB();
+      // duplicate check — none found
+      db._pushResult([]);
+      // insert (void)
+      // getProfile after insert — returns the created row
+      db._pushResult([makeProfileRow({
+        id: 'mock-ulid-1',
+        name: 'my-custom',
+        isBuiltin: 0,
+        agentType: 'claude-code',
+      })]);
+
+      const result = await agentProfileService.createProfile(
+        db, 'project-1', 'user-1',
+        { name: 'my-custom' },
+        env
+      );
+
+      expect(result.id).toBe('mock-ulid-1');
+      expect(result.name).toBe('my-custom');
+      expect(result.isBuiltin).toBe(false);
+      expect(db.insert).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('seedBuiltinProfiles', () => {
     it('seeds 4 built-in profiles when none exist', async () => {
       const db = createMockDB();
