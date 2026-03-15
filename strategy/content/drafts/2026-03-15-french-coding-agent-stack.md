@@ -15,7 +15,13 @@ I've been building SAM from France for a while now. It's an open-source platform
 
 Until recently, "your cloud" meant Hetzner, and "an agent" meant Claude Code. Good defaults, but the whole point of SAM is that you should be able to bring your own stuff. Your cloud, your agent, your choice. And if that's just a tagline and not an architectural reality, I wanted to find out.
 
-So when it came time to add a second cloud provider and a second AI agent, I reached for Scaleway and Mistral. Both French companies — which felt good, building on tech from the same country I'm sitting in. But the real reason: they're good, and they're different enough from Hetzner and Claude Code to actually stress-test the abstractions.
+So when it came time to add a second cloud provider and a second AI agent, I reached for Scaleway and Mistral. Both French companies, and both companies I have a history with — even before I moved to France.
+
+I first came across Scaleway a couple years ago while I was still living in Vancouver, looking for an S3 alternative. Since moving to Paris, the touchpoints have multiplied: I met one of my best friends, Miguel Liezun, at a meetup in the Scaleway offices in November 2024 (it was about managing technical documentation, of all things). I recently went to a RISC-V meetup they hosted. They've become part of my tech life here.
+
+Mistral was the first LLM I managed to deploy to a GPU instance using the Defang CLI — the tool I was building at my employer. I remember being genuinely excited that a model that good was reasonably easy to get running, and that it was released with open weights. I love when things are open.
+
+So the choice wasn't random. These are companies I know and like. But they're also different enough from Hetzner and Claude Code to actually stress-test the abstractions — which is what mattered for SAM.
 
 ### What SAM does (quick version)
 
@@ -176,7 +182,7 @@ Submit a task in French if you want. The agents don't mind.
 
 I've been building SAM from France — an open-source platform for running AI coding agents on your own cloud. Until recently it only supported Hetzner and Claude Code. I wanted to know if the architecture was as flexible as I'd designed it to be, so I added Scaleway and Mistral.
 
-Both French companies, which felt good. But the real reason: they're different enough from the defaults to stress-test the abstractions.
+Both French companies I have a history with. I first found Scaleway looking for an S3 alternative back in Vancouver. Met one of my best friends at a meetup in their Paris offices. Mistral was the first LLM I deployed to a GPU using the Defang CLI — I remember being excited that a model that good was released with open weights.
 
 Adding Scaleway went well. The Provider interface held up. But Scaleway allocates IPs after boot (Hetzner gives them at creation time), which broke an assumption buried in the calling code. Clean fix — but I wouldn't have found it without a second provider.
 
@@ -193,9 +199,9 @@ Open source → [link]
 ### Twitter/X Thread
 
 **Tweet 1:**
-I added Scaleway and Mistral Vibe to SAM (open-source AI coding agent platform) to put the "bring your own everything" architecture to the test.
+I added Scaleway and Mistral to SAM (open-source AI coding agent platform). Both companies I've used for years — Scaleway since Vancouver, Mistral since deploying it on GPUs with Defang.
 
-It held up. With some surprises. 🧵
+Here's what happened when I put the "bring your own everything" architecture to the test. 🧵
 
 **Tweet 2:**
 The Scaleway integration went well. Same Provider interface as Hetzner. But Scaleway allocates IPs after boot, not at creation time. Our DNS code assumed the IP would be there immediately. It wasn't.
