@@ -1,5 +1,5 @@
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Spinner } from '@simple-agent-manager/ui';
+import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
 import {
   VoiceButton,
   MessageBubble as AcpMessageBubble,
@@ -905,6 +905,8 @@ function SessionHeader({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [completing, setCompleting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [completeError, setCompleteError] = useState<string | null>(null);
 
   const hasDetails = !!(
     taskEmbed?.outputBranch ||
@@ -922,12 +924,9 @@ function SessionHeader({
 
   const handleMarkComplete = useCallback(async () => {
     if (!taskEmbed?.id || completing) return;
-    const confirmed = window.confirm(
-      'Mark this task as complete? This will archive the task and delete the workspace.'
-    );
-    if (!confirmed) return;
-
+    setCompleteError(null);
     setCompleting(true);
+    setConfirmOpen(false);
     try {
       // 1. Mark the task as completed (this also stops the chat session server-side)
       await updateProjectTaskStatus(projectId, taskEmbed.id, { toStatus: 'completed' });
@@ -941,7 +940,7 @@ function SessionHeader({
       window.location.reload();
     } catch (err) {
       console.error('Failed to mark task complete:', err);
-      alert(`Failed to complete task: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setCompleteError(err instanceof Error ? err.message : 'Failed to complete task');
       setCompleting(false);
     }
   }, [projectId, taskEmbed?.id, session.workspaceId, completing]);
@@ -1049,19 +1048,31 @@ function SessionHeader({
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={handleMarkComplete}
+                  onClick={() => setConfirmOpen(true)}
                   disabled={completing}
+                  style={{ color: completing ? undefined : 'var(--sam-color-success)' }}
                 >
-                  {completing ? (
-                    <Spinner size="sm" />
-                  ) : (
-                    <CheckCircle2 size={14} className="mr-1" />
-                  )}
+                  <CheckCircle2 size={14} className="mr-1" />
                   {completing ? 'Completing...' : 'Mark Complete'}
                 </Button>
               )}
             </div>
           </div>
+
+          {/* Inline error for mark-complete failures */}
+          {completeError && (
+            <div className="flex items-center gap-2 px-1 py-1">
+              <span className="text-xs" style={{ color: 'var(--sam-color-danger)' }}>{completeError}</span>
+              <button
+                type="button"
+                onClick={() => setCompleteError(null)}
+                className="text-xs bg-transparent border-none cursor-pointer underline"
+                style={{ color: 'var(--sam-color-fg-muted)' }}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
 
           {/* Infrastructure context — workspace & node details */}
           {session.workspaceId && (workspace || node) && (
@@ -1106,14 +1117,14 @@ function SessionHeader({
                       </span>
                     )}
                   </ContextItem>
-                  <ContextItem icon={<Cloud size={12} />} label="Provider">
-                    {node.cloudProvider
-                      ? node.cloudProvider.charAt(0).toUpperCase() + node.cloudProvider.slice(1)
-                      : 'Unknown'}
-                    {workspace?.vmLocation && (
-                      <span className="text-fg-muted ml-1">— {workspace.vmLocation}</span>
-                    )}
-                  </ContextItem>
+                  {node.cloudProvider && (
+                    <ContextItem icon={<Cloud size={12} />} label="Provider">
+                      {node.cloudProvider.charAt(0).toUpperCase() + node.cloudProvider.slice(1)}
+                      {workspace?.vmLocation && (
+                        <span className="text-fg-muted ml-1">— {workspace.vmLocation}</span>
+                      )}
+                    </ContextItem>
+                  )}
                 </>
               )}
               {!node && workspace?.vmLocation && (
@@ -1138,6 +1149,24 @@ function SessionHeader({
           )}
         </div>
       )}
+
+      {/* Confirmation dialog for mark-complete action */}
+      <Dialog isOpen={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="sm">
+        <h3 id="dialog-title" className="text-base font-semibold text-fg-primary mb-2">
+          Mark task as complete?
+        </h3>
+        <p className="text-sm text-fg-muted mb-4">
+          This will archive the task and delete the workspace. This action cannot be undone.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setConfirmOpen(false)}>
+            Cancel
+          </Button>
+          <Button variant="primary" size="sm" onClick={handleMarkComplete}>
+            Complete & Delete
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }

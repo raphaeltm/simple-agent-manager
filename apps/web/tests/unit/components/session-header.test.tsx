@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -51,12 +51,20 @@ describe('SessionHeader UI structure', () => {
     expect(source).toContain('deleteWorkspace(session.workspaceId)');
   });
 
-  it('shows confirmation dialog before completing', () => {
-    expect(source).toContain('window.confirm');
-    expect(source).toContain('Mark this task as complete');
+  it('uses Dialog component for confirmation instead of window.confirm', () => {
+    expect(source).toContain('Dialog');
+    expect(source).toContain('confirmOpen');
+    expect(source).toContain('Mark task as complete?');
+    expect(source).not.toContain('window.confirm');
+    expect(source).not.toContain('window.alert');
   });
 
-  it('disables button and shows spinner while completing', () => {
+  it('shows inline error on failure instead of window.alert', () => {
+    expect(source).toContain('completeError');
+    expect(source).toContain('Dismiss');
+  });
+
+  it('disables button while completing', () => {
     expect(source).toContain('completing');
     expect(source).toContain("'Completing...'");
     expect(source).toContain('disabled={completing}');
@@ -68,11 +76,6 @@ describe('SessionHeader UI structure', () => {
 });
 
 describe('SessionHeader mark complete handler logic', () => {
-  beforeEach(() => {
-    vi.stubGlobal('confirm', vi.fn());
-    vi.stubGlobal('alert', vi.fn());
-  });
-
   it('handler requires both projectId and taskId', () => {
     const source = readSource('components/chat/ProjectMessageView.tsx');
     // The handler checks for taskEmbed?.id before proceeding
