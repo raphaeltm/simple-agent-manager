@@ -572,6 +572,12 @@ export const agentProfiles = sqliteTable(
       .default(sql`(datetime('now'))`),
   },
   (table) => ({
+    // Note: The SQL migration (0028_agent_profiles.sql) defines two partial unique indexes:
+    //   idx_agent_profiles_project_name WHERE project_id IS NOT NULL
+    //   idx_agent_profiles_global_name  WHERE project_id IS NULL (per-user)
+    // Drizzle ORM does not support partial/conditional indexes, so only the
+    // project-scoped index is represented here. Global-profile uniqueness is
+    // enforced by the raw SQL migration only.
     projectNameUnique: uniqueIndex('idx_agent_profiles_project_name')
       .on(table.projectId, table.name),
     projectIdIdx: index('idx_agent_profiles_project_id').on(table.projectId),
