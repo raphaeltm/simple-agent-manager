@@ -712,8 +712,9 @@ describe('MessageActions', () => {
       expect(cancelBtns.length).toBeGreaterThanOrEqual(1);
 
       // Stop/cancel — click the first cancel button (speaker button)
+      const cancelBtn = cancelBtns[0]!;
       await act(async () => {
-        fireEvent.click(cancelBtns[0]);
+        fireEvent.click(cancelBtn);
       });
 
       // AbortController.abort() should have been called

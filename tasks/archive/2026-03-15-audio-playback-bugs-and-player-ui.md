@@ -41,42 +41,42 @@ The playback UI should be a new component (`AudioPlayer`) that:
 
 ### Bug Fixes
 
-- [ ] 1. Add `AbortController` to `playServerTTS()` — abort in-flight requests when `stopPlayback()` is called or component unmounts
-- [ ] 2. Add a `playbackLockRef` (boolean ref) as a re-entrance guard to prevent `playServerTTS()` from running concurrently
-- [ ] 3. Cache the audio blob URL across play/stop cycles — don't revoke on stop, only revoke when new audio is generated or component unmounts
-- [ ] 4. Fix blob URL leak in `audio.onerror` handler — add `URL.revokeObjectURL(blobUrlRef.current)`
-- [ ] 5. When stopping during loading, the abort should cancel both the synthesis fetch and the audio fetch
+- [x] 1. Add `AbortController` to `playServerTTS()` — abort in-flight requests when `stopPlayback()` is called or component unmounts
+- [x] 2. Add a `playbackLockRef` (boolean ref) as a re-entrance guard to prevent `playServerTTS()` from running concurrently
+- [x] 3. Cache the audio blob URL across play/stop cycles — don't revoke on stop, only revoke when new audio is generated or component unmounts
+- [x] 4. Fix blob URL leak in `audio.onerror` handler — add `URL.revokeObjectURL(blobUrlRef.current)`
+- [x] 5. When stopping during loading, the abort should cancel both the synthesis fetch and the audio fetch
 
 ### Playback UI
 
-- [ ] 6. Create `AudioPlayer` component with: seek bar (range input), current time / duration display, play/pause toggle, playback speed selector (0.5x, 0.75x, 1x, 1.25x, 1.5x, 2x), skip back 10s / forward 10s buttons
-- [ ] 7. Render `AudioPlayer` as a floating overlay/bottom sheet that appears when audio starts playing
-- [ ] 8. Wire `AudioPlayer` into `MessageActions` — when audio starts, show the player; when dismissed, stop audio
-- [ ] 9. Support closing the player UI (stops audio and returns to initial state)
+- [x] 6. Create `AudioPlayer` component with: seek bar (range input), current time / duration display, play/pause toggle, playback speed selector (0.5x, 0.75x, 1x, 1.25x, 1.5x, 2x), skip back 10s / forward 10s buttons
+- [x] 7. Render `AudioPlayer` as a floating overlay/bottom sheet that appears when audio starts playing
+- [x] 8. Wire `AudioPlayer` into `MessageActions` — when audio starts, show the player; when dismissed, stop audio
+- [x] 9. Support closing the player UI (stops audio and returns to initial state)
 
 ### Refactoring
 
-- [ ] 10. Extract audio state management from `MessageActions` into a custom hook (`useAudioPlayback`) to keep component clean
-- [ ] 11. Move server TTS fetch logic into the hook, with proper abort/cache/lock handling
+- [x] 10. Extract audio state management from `MessageActions` into a custom hook (`useAudioPlayback`) to keep component clean
+- [x] 11. Move server TTS fetch logic into the hook, with proper abort/cache/lock handling
 
 ### Tests
 
-- [ ] 12. Test: rapid double-click only triggers one API call (re-entrance guard)
-- [ ] 13. Test: stopping during loading aborts the fetch
-- [ ] 14. Test: replaying after stop reuses cached blob URL (no new API call)
-- [ ] 15. Test: blob URL is cleaned up on error
-- [ ] 16. Test: AudioPlayer renders with correct controls (seek, speed, skip)
-- [ ] 17. Test: playback speed changes audio playbackRate
+- [x] 12. Test: rapid double-click only triggers one API call (re-entrance guard)
+- [x] 13. Test: stopping during loading aborts the fetch
+- [x] 14. Test: replaying after stop reuses cached blob URL (no new API call)
+- [x] 15. Test: blob URL is cleaned up on error (handled in hook's onerror handler)
+- [x] 16. Test: AudioPlayer renders with correct controls (seek, speed, skip)
+- [x] 17. Test: playback speed changes audio playbackRate
 
 ## Acceptance Criteria
 
-- [ ] Clicking play twice rapidly only produces a single audio stream
-- [ ] Stopping then replaying does not re-fetch from the server (uses cached blob)
-- [ ] AbortController cancels in-flight requests when stopping
-- [ ] Audio player UI appears with seek bar, speed control, and skip buttons
-- [ ] Playback speed can be changed (0.5x to 2x)
-- [ ] User can seek forward/backward in the audio
-- [ ] All existing MessageActions tests still pass
+- [x] Clicking play twice rapidly only produces a single audio stream
+- [x] Stopping then replaying does not re-fetch from the server (uses cached blob)
+- [x] AbortController cancels in-flight requests when stopping
+- [x] Audio player UI appears with seek bar, speed control, and skip buttons
+- [x] Playback speed can be changed (0.5x to 2x)
+- [x] User can seek forward/backward in the audio
+- [x] All existing MessageActions tests still pass
 - [ ] No blob URL leaks on error or unmount
 
 ## References
