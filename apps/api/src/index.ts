@@ -121,6 +121,9 @@ export interface Env {
   NODE_WARM_GRACE_PERIOD_MS?: string;
   // Task agent configuration
   DEFAULT_TASK_AGENT_TYPE?: string;
+  // Built-in profile model overrides (defaults: claude-sonnet-4-5-20250929, claude-opus-4-6)
+  BUILTIN_PROFILE_SONNET_MODEL?: string;
+  BUILTIN_PROFILE_OPUS_MODEL?: string;
   // Task execution timeout (stuck task recovery)
   TASK_RUN_MAX_EXECUTION_MS?: string;
   TASK_STUCK_QUEUED_TIMEOUT_MS?: string;

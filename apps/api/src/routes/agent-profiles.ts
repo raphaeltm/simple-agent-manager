@@ -24,7 +24,7 @@ agentProfileRoutes.get('/', async (c) => {
 
   await requireOwnedProject(db, projectId, userId);
 
-  const profiles = await agentProfileService.listProfiles(db, projectId, userId);
+  const profiles = await agentProfileService.listProfiles(db, projectId, userId, c.env);
   return c.json({ items: profiles });
 });
 
@@ -37,7 +37,7 @@ agentProfileRoutes.post('/', async (c) => {
   await requireOwnedProject(db, projectId, userId);
 
   const body = await c.req.json<CreateAgentProfileRequest>();
-  const profile = await agentProfileService.createProfile(db, projectId, userId, body);
+  const profile = await agentProfileService.createProfile(db, projectId, userId, body, c.env);
   return c.json(profile, 201);
 });
 

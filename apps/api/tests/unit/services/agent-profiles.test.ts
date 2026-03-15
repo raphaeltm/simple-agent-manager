@@ -98,13 +98,14 @@ function makeProfileRow(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Agent Profile Service', () => {
+  const env = { DEFAULT_TASK_AGENT_TYPE: 'claude-code' } as any;
+
   beforeEach(() => {
     vi.clearAllMocks();
     ulidCounter = 0;
   });
 
   describe('resolveAgentProfile', () => {
-    const env = { DEFAULT_TASK_AGENT_TYPE: 'claude-code' };
 
     it('returns platform defaults when profileNameOrId is null', async () => {
       const db = createMockDB();
@@ -278,7 +279,7 @@ describe('Agent Profile Service', () => {
       await expect(
         agentProfileService.createProfile(db, 'project-1', 'user-1', {
           name: '   ',
-        })
+        }, env)
       ).rejects.toThrow('name is required');
     });
 
@@ -288,7 +289,7 @@ describe('Agent Profile Service', () => {
         agentProfileService.createProfile(db, 'project-1', 'user-1', {
           name: 'test',
           agentType: 'invalid-type',
-        })
+        }, env)
       ).rejects.toThrow('Invalid agent type');
     });
 
@@ -300,7 +301,7 @@ describe('Agent Profile Service', () => {
       await expect(
         agentProfileService.createProfile(db, 'project-1', 'user-1', {
           name: 'default',
-        })
+        }, env)
       ).rejects.toThrow('already exists');
     });
   });
@@ -311,7 +312,7 @@ describe('Agent Profile Service', () => {
       // No existing built-in profiles
       db._pushResult([]);
 
-      await agentProfileService.seedBuiltinProfiles(db, 'project-1', 'user-1');
+      await agentProfileService.seedBuiltinProfiles(db, 'project-1', 'user-1', env);
 
       // Should have called insert 4 times (default, planner, implementer, reviewer)
       expect(db.insert).toHaveBeenCalledTimes(4);
@@ -322,7 +323,7 @@ describe('Agent Profile Service', () => {
       // Two built-in profiles already exist
       db._pushResult([{ name: 'default' }, { name: 'planner' }]);
 
-      await agentProfileService.seedBuiltinProfiles(db, 'project-1', 'user-1');
+      await agentProfileService.seedBuiltinProfiles(db, 'project-1', 'user-1', env);
 
       // Should only insert 2 (implementer, reviewer)
       expect(db.insert).toHaveBeenCalledTimes(2);
@@ -334,7 +335,7 @@ describe('Agent Profile Service', () => {
         { name: 'default' }, { name: 'planner' }, { name: 'implementer' }, { name: 'reviewer' },
       ]);
 
-      await agentProfileService.seedBuiltinProfiles(db, 'project-1', 'user-1');
+      await agentProfileService.seedBuiltinProfiles(db, 'project-1', 'user-1', env);
 
       expect(db.insert).not.toHaveBeenCalled();
     });

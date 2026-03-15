@@ -14,40 +14,55 @@ import { errors } from '../middleware/error';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
-/** Built-in profile definitions seeded on first access */
-const BUILTIN_PROFILES = [
-  {
-    name: 'default',
-    description: 'General-purpose coding agent',
-    agentType: 'claude-code',
-    model: 'claude-sonnet-4-5-20250929',
-    permissionMode: 'acceptEdits',
-  },
-  {
-    name: 'planner',
-    description: 'Task decomposition and architecture planning',
-    agentType: 'claude-code',
-    model: 'claude-opus-4-6',
-    permissionMode: 'plan',
-    systemPromptAppend: 'Decompose tasks. Do not write code directly.',
-  },
-  {
-    name: 'implementer',
-    description: 'Feature implementation with tests',
-    agentType: 'claude-code',
-    model: 'claude-sonnet-4-5-20250929',
-    permissionMode: 'acceptEdits',
-    systemPromptAppend: 'Focus on implementation. Write tests for all changes.',
-  },
-  {
-    name: 'reviewer',
-    description: 'Code review for correctness, security, and style',
-    agentType: 'claude-code',
-    model: 'claude-opus-4-6',
-    permissionMode: 'plan',
-    systemPromptAppend: 'Review code for correctness, security, and style.',
-  },
-] as const;
+/** Env vars used by agent profile service */
+type ProfileEnv = Pick<Env,
+  | 'DEFAULT_TASK_AGENT_TYPE'
+  | 'BUILTIN_PROFILE_SONNET_MODEL'
+  | 'BUILTIN_PROFILE_OPUS_MODEL'
+>;
+
+const DEFAULT_SONNET_MODEL = 'claude-sonnet-4-5-20250929';
+const DEFAULT_OPUS_MODEL = 'claude-opus-4-6';
+
+/** Built-in profile definitions seeded on first access. Models are configurable via env vars. */
+function getBuiltinProfiles(env: ProfileEnv) {
+  const sonnetModel = env.BUILTIN_PROFILE_SONNET_MODEL || DEFAULT_SONNET_MODEL;
+  const opusModel = env.BUILTIN_PROFILE_OPUS_MODEL || DEFAULT_OPUS_MODEL;
+
+  return [
+    {
+      name: 'default',
+      description: 'General-purpose coding agent',
+      agentType: 'claude-code',
+      model: sonnetModel,
+      permissionMode: 'acceptEdits',
+    },
+    {
+      name: 'planner',
+      description: 'Task decomposition and architecture planning',
+      agentType: 'claude-code',
+      model: opusModel,
+      permissionMode: 'plan',
+      systemPromptAppend: 'Decompose tasks. Do not write code directly.',
+    },
+    {
+      name: 'implementer',
+      description: 'Feature implementation with tests',
+      agentType: 'claude-code',
+      model: sonnetModel,
+      permissionMode: 'acceptEdits',
+      systemPromptAppend: 'Focus on implementation. Write tests for all changes.',
+    },
+    {
+      name: 'reviewer',
+      description: 'Code review for correctness, security, and style',
+      agentType: 'claude-code',
+      model: opusModel,
+      permissionMode: 'plan',
+      systemPromptAppend: 'Review code for correctness, security, and style.',
+    },
+  ];
+}
 
 /** Convert a DB row to an API response */
 function toAgentProfile(row: schema.AgentProfileRow): AgentProfile {
@@ -77,7 +92,8 @@ function toAgentProfile(row: schema.AgentProfileRow): AgentProfile {
 export async function seedBuiltinProfiles(
   db: Db,
   projectId: string,
-  userId: string
+  userId: string,
+  env: ProfileEnv
 ): Promise<void> {
   // Check if any built-in profiles already exist for this project
   const existing = await db
@@ -91,8 +107,9 @@ export async function seedBuiltinProfiles(
     );
 
   const existingNames = new Set(existing.map((r) => r.name));
+  const builtinProfiles = getBuiltinProfiles(env);
 
-  for (const profile of BUILTIN_PROFILES) {
+  for (const profile of builtinProfiles) {
     if (existingNames.has(profile.name)) {
       continue;
     }
@@ -118,10 +135,11 @@ export async function seedBuiltinProfiles(
 export async function listProfiles(
   db: Db,
   projectId: string,
-  userId: string
+  userId: string,
+  env: ProfileEnv
 ): Promise<AgentProfile[]> {
   // Seed built-in profiles on first access
-  await seedBuiltinProfiles(db, projectId, userId);
+  await seedBuiltinProfiles(db, projectId, userId, env);
 
   const rows = await db
     .select()
@@ -177,7 +195,8 @@ export async function createProfile(
   db: Db,
   projectId: string,
   userId: string,
-  body: CreateAgentProfileRequest
+  body: CreateAgentProfileRequest,
+  env: Pick<Env, 'DEFAULT_TASK_AGENT_TYPE'>
 ): Promise<AgentProfile> {
   const name = body.name?.trim();
   if (!name) {
@@ -211,7 +230,7 @@ export async function createProfile(
     userId,
     name,
     description: body.description ?? null,
-    agentType: body.agentType ?? 'claude-code',
+    agentType: body.agentType ?? env.DEFAULT_TASK_AGENT_TYPE ?? 'claude-code',
     model: body.model ?? null,
     permissionMode: body.permissionMode ?? null,
     systemPromptAppend: body.systemPromptAppend ?? null,
@@ -314,7 +333,7 @@ export async function resolveAgentProfile(
   projectId: string,
   profileNameOrId: string | null | undefined,
   userId: string,
-  env: Pick<Env, 'DEFAULT_TASK_AGENT_TYPE'>
+  env: ProfileEnv
 ): Promise<ResolvedAgentProfile> {
   // No profile hint → return platform defaults
   if (!profileNameOrId) {
@@ -332,7 +351,7 @@ export async function resolveAgentProfile(
   }
 
   // Seed built-in profiles to ensure they're available for resolution
-  await seedBuiltinProfiles(db, projectId, userId);
+  await seedBuiltinProfiles(db, projectId, userId, env);
 
   // Try by ID first
   const byId = await db
