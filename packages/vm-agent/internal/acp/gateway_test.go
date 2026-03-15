@@ -336,7 +336,7 @@ func TestGetAgentExtraEnvVars_OtherAgents(t *testing.T) {
 func TestGenerateVibeConfig_DefaultModel(t *testing.T) {
 	t.Parallel()
 
-	config := generateVibeConfig("")
+	config := generateVibeConfig("", nil)
 
 	// Verify active_model references the default alias
 	if !strings.Contains(config, `active_model = "mistral-large"`) {
@@ -375,7 +375,7 @@ func TestGenerateVibeConfig_DefaultModel(t *testing.T) {
 func TestGenerateVibeConfig_CustomModel(t *testing.T) {
 	t.Parallel()
 
-	config := generateVibeConfig("devstral-2")
+	config := generateVibeConfig("devstral-2", nil)
 	if !strings.Contains(config, `active_model = "devstral-2"`) {
 		t.Errorf("expected active_model to be devstral-2, got:\n%s", config)
 	}
@@ -644,5 +644,148 @@ export SAM_WORKSPACE_ID="ws-123"
 				}
 			}
 		})
+	}
+}
+
+func TestGenerateVibeConfig_NoMcpServers(t *testing.T) {
+	t.Parallel()
+
+	config := generateVibeConfig("mistral-large", nil)
+
+	// No [[mcp_servers]] section should appear
+	if strings.Contains(config, "[[mcp_servers]]") {
+		t.Error("expected no [[mcp_servers]] section when mcpServers is nil")
+	}
+
+	// All model aliases must still be present
+	for _, alias := range []string{"mistral-large", "devstral-2", "codestral"} {
+		if !strings.Contains(config, fmt.Sprintf(`alias = "%s"`, alias)) {
+			t.Errorf("missing model alias %q", alias)
+		}
+	}
+}
+
+func TestGenerateVibeConfig_McpServerWithToken(t *testing.T) {
+	t.Parallel()
+
+	config := generateVibeConfig("mistral-large", []McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: "test-token-123"},
+	})
+
+	if !strings.Contains(config, "[[mcp_servers]]") {
+		t.Fatal("expected [[mcp_servers]] section in config")
+	}
+	if !strings.Contains(config, `name = "sam-mcp-0"`) {
+		t.Error("expected MCP server name sam-mcp-0")
+	}
+	if !strings.Contains(config, `url = "https://api.example.com/mcp"`) {
+		t.Error("expected MCP server URL")
+	}
+	if !strings.Contains(config, `headers = { Authorization = "Bearer test-token-123" }`) {
+		t.Error("expected Authorization header with token")
+	}
+
+	// Model aliases must still be present
+	for _, alias := range []string{"mistral-large", "devstral-2", "codestral"} {
+		if !strings.Contains(config, fmt.Sprintf(`alias = "%s"`, alias)) {
+			t.Errorf("missing model alias %q", alias)
+		}
+	}
+}
+
+func TestGenerateVibeConfig_McpServerWithoutToken(t *testing.T) {
+	t.Parallel()
+
+	config := generateVibeConfig("devstral-2", []McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: ""},
+	})
+
+	if !strings.Contains(config, `url = "https://api.example.com/mcp"`) {
+		t.Error("expected MCP server URL")
+	}
+	// No Authorization header when token is empty
+	if strings.Contains(config, "Authorization") {
+		t.Error("expected no Authorization header when token is empty")
+	}
+}
+
+func TestGenerateVibeConfig_MultipleMcpServers(t *testing.T) {
+	t.Parallel()
+
+	config := generateVibeConfig("codestral", []McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: "token-1"},
+		{URL: "https://backup.example.com/mcp", Token: "token-2"},
+	})
+
+	// Both servers should be present
+	if count := strings.Count(config, "[[mcp_servers]]"); count != 2 {
+		t.Errorf("expected 2 [[mcp_servers]] entries, got %d", count)
+	}
+	if !strings.Contains(config, `name = "sam-mcp-0"`) {
+		t.Error("expected sam-mcp-0")
+	}
+	if !strings.Contains(config, `name = "sam-mcp-1"`) {
+		t.Error("expected sam-mcp-1")
+	}
+	if !strings.Contains(config, `url = "https://api.example.com/mcp"`) {
+		t.Error("expected first MCP server URL")
+	}
+	if !strings.Contains(config, `url = "https://backup.example.com/mcp"`) {
+		t.Error("expected second MCP server URL")
+	}
+	if !strings.Contains(config, `"Bearer token-1"`) {
+		t.Error("expected first token")
+	}
+	if !strings.Contains(config, `"Bearer token-2"`) {
+		t.Error("expected second token")
+	}
+}
+
+func TestGenerateVibeConfig_McpServerSpecialCharsInURL(t *testing.T) {
+	t.Parallel()
+
+	config := generateVibeConfig("mistral-large", []McpServerEntry{
+		{URL: "https://api.example.com/path?param=value&other=test", Token: "tok"},
+	})
+
+	if !strings.Contains(config, `url = "https://api.example.com/path?param=value&other=test"`) {
+		t.Error("expected URL with query params to be preserved")
+	}
+}
+
+func TestGenerateVibeConfig_McpServerBackslashEscaping(t *testing.T) {
+	t.Parallel()
+
+	config := generateVibeConfig("mistral-large", []McpServerEntry{
+		{URL: `https://example.com/path\with\backslash`, Token: `tok\en`},
+	})
+
+	// Backslashes must be doubled in TOML basic strings
+	if !strings.Contains(config, `url = "https://example.com/path\\with\\backslash"`) {
+		t.Errorf("backslash not escaped in URL:\n%s", config)
+	}
+	if !strings.Contains(config, `Bearer tok\\en`) {
+		t.Errorf("backslash not escaped in token:\n%s", config)
+	}
+}
+
+func TestGenerateVibeConfig_McpServerNewlineRejected(t *testing.T) {
+	t.Parallel()
+
+	config := generateVibeConfig("mistral-large", []McpServerEntry{
+		{URL: "https://good.example.com/mcp", Token: "good-token"},
+		{URL: "https://bad.example.com/mcp", Token: "bad\ninjection"},
+	})
+
+	// Good server should be present
+	if !strings.Contains(config, `url = "https://good.example.com/mcp"`) {
+		t.Error("expected good MCP server to be present")
+	}
+	// Bad server with newline in token should be skipped entirely
+	if strings.Contains(config, "bad.example.com") {
+		t.Error("MCP server with newline in token should be skipped")
+	}
+	if strings.Contains(config, "injection") {
+		t.Error("newline in token must not inject content into TOML")
 	}
 }
