@@ -206,6 +206,13 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    name: '009-add-updated-at-index',
+    run: (sql) => {
+      // Index for ordering sessions by last activity (most recent messages first)
+      sql.exec(`CREATE INDEX idx_chat_sessions_updated_at ON chat_sessions(updated_at DESC)`);
+    },
+  },
 ];
 
 /**

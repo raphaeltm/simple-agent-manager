@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { List, Settings, LayoutGrid, GitFork } from 'lucide-react';
+import { List, Settings, LayoutGrid, GitFork, Search, ChevronDown, ChevronRight, X } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
 import { VoiceButton } from '@simple-agent-manager/acp-client';
 import type { AgentInfo, WorkspaceProfile } from '@simple-agent-manager/shared';
@@ -34,6 +34,8 @@ import { ForkDialog } from '../components/project/ForkDialog';
 const ACTIVE_SESSION_POLL_MS = 3000;
 /** How often to poll task status during provisioning (ms). */
 const TASK_STATUS_POLL_MS = 2000;
+/** Sessions with no activity in this window are considered stale and hidden by default (ms). */
+const STALE_SESSION_THRESHOLD_MS = 3 * 60 * 60 * 1000; // 3 hours
 
 // ---------------------------------------------------------------------------
 // Types
@@ -86,6 +88,16 @@ function formatRelativeTime(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString();
 }
 
+/** Returns the most relevant activity timestamp for a session. */
+function getLastActivity(session: ChatSessionResponse): number {
+  return session.lastMessageAt ?? session.startedAt;
+}
+
+/** Whether a session is "stale" — no activity within the threshold window. */
+function isStaleSession(session: ChatSessionResponse): boolean {
+  return Date.now() - getLastActivity(session) > STALE_SESSION_THRESHOLD_MS;
+}
+
 function isTerminal(status: TaskStatus): boolean {
   return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
@@ -104,6 +116,10 @@ export function ProjectChat() {
   const [loading, setLoading] = useState(true);
   const [hasCloudCredentials, setHasCloudCredentials] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Sidebar filtering
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showStale, setShowStale] = useState(false);
 
   // Track explicit "new chat" intent so auto-select doesn't override it
   const newChatIntentRef = useRef(false);
@@ -130,6 +146,42 @@ export function ProjectChat() {
   const [forkSession, setForkSession] = useState<ChatSessionResponse | null>(null);
 
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
+
+  // ---------------------------------------------------------------------------
+  // Session filtering: recent vs stale, with search
+  // ---------------------------------------------------------------------------
+
+  const { recentSessions, staleSessions } = useMemo(() => {
+    const recent: ChatSessionResponse[] = [];
+    const stale: ChatSessionResponse[] = [];
+    for (const s of sessions) {
+      if (isStaleSession(s)) {
+        stale.push(s);
+      } else {
+        recent.push(s);
+      }
+    }
+    return { recentSessions: recent, staleSessions: stale };
+  }, [sessions]);
+
+  const filteredRecent = useMemo(() => {
+    if (!searchQuery.trim()) return recentSessions;
+    const q = searchQuery.toLowerCase();
+    return recentSessions.filter(
+      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q)) || s.id.includes(q),
+    );
+  }, [recentSessions, searchQuery]);
+
+  const filteredStale = useMemo(() => {
+    if (!searchQuery.trim()) return staleSessions;
+    const q = searchQuery.toLowerCase();
+    return staleSessions.filter(
+      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q)) || s.id.includes(q),
+    );
+  }, [staleSessions, searchQuery]);
+
+  // When searching, always show stale results too
+  const effectiveShowStale = showStale || !!searchQuery.trim();
 
   // ---------------------------------------------------------------------------
   // Effects (all preserved from original)
@@ -418,10 +470,36 @@ export function ProjectChat() {
             </button>
           </div>
 
+          {/* Search */}
+          {hasSessions && (
+            <div className="shrink-0 px-2 py-1.5 border-b border-border-default">
+              <div className="relative flex items-center">
+                <Search size={13} className="absolute left-2 text-fg-muted pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search chats..."
+                  className="w-full pl-7 pr-7 py-1 text-xs rounded-md border border-border-default bg-transparent text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent-primary"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-1.5 p-0.5 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary"
+                    aria-label="Clear search"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Session list — scrollable */}
           {hasSessions ? (
             <nav className="flex-1 overflow-y-auto min-h-0">
-              {sessions.map((session) => (
+              {filteredRecent.map((session) => (
                 <SessionItem
                   key={session.id}
                   session={session}
@@ -430,6 +508,34 @@ export function ProjectChat() {
                   onFork={setForkSession}
                 />
               ))}
+              {filteredStale.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowStale(!effectiveShowStale)}
+                    className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-fg-muted bg-transparent border-none border-b border-border-default cursor-pointer hover:bg-surface-hover transition-colors"
+                  >
+                    {effectiveShowStale ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                    <span>Older ({filteredStale.length})</span>
+                  </button>
+                  {effectiveShowStale && filteredStale.map((session) => (
+                    <SessionItem
+                      key={session.id}
+                      session={session}
+                      isSelected={session.id === sessionId}
+                      onSelect={handleSelect}
+                      onFork={setForkSession}
+                    />
+                  ))}
+                </>
+              )}
+              {filteredRecent.length === 0 && !effectiveShowStale && (
+                <div className="flex items-center justify-center p-4">
+                  <span className="text-xs text-fg-muted text-center">
+                    {searchQuery ? 'No matching chats' : 'No recent chats'}
+                  </span>
+                </div>
+              )}
             </nav>
           ) : (
             <div className="flex-1 flex items-center justify-center p-4">
@@ -591,7 +697,7 @@ function SessionItem({
             {STATE_LABELS[state]}
           </span>
           <span>{session.messageCount} msg{session.messageCount !== 1 ? 's' : ''}</span>
-          <span className="ml-auto">{formatRelativeTime(session.startedAt)}</span>
+          <span className="ml-auto">{formatRelativeTime(getLastActivity(session))}</span>
         </div>
       </button>
       {canFork && onFork && (
@@ -628,6 +734,37 @@ function MobileSessionDrawer({
   onNewChat: () => void;
   onClose: () => void;
 }) {
+  const [mobileSearch, setMobileSearch] = useState('');
+  const [mobileShowStale, setMobileShowStale] = useState(false);
+
+  const { recent, stale } = useMemo(() => {
+    const r: ChatSessionResponse[] = [];
+    const s: ChatSessionResponse[] = [];
+    for (const sess of sessions) {
+      if (isStaleSession(sess)) s.push(sess);
+      else r.push(sess);
+    }
+    return { recent: r, stale: s };
+  }, [sessions]);
+
+  const filteredR = useMemo(() => {
+    if (!mobileSearch.trim()) return recent;
+    const q = mobileSearch.toLowerCase();
+    return recent.filter(
+      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q)) || s.id.includes(q),
+    );
+  }, [recent, mobileSearch]);
+
+  const filteredS = useMemo(() => {
+    if (!mobileSearch.trim()) return stale;
+    const q = mobileSearch.toLowerCase();
+    return stale.filter(
+      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q)) || s.id.includes(q),
+    );
+  }, [stale, mobileSearch]);
+
+  const showOlder = mobileShowStale || !!mobileSearch.trim();
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -675,9 +812,33 @@ function MobileSessionDrawer({
           </button>
         </div>
 
+        {/* Search */}
+        <div className="shrink-0 px-2 py-1.5 border-b border-border-default">
+          <div className="relative flex items-center">
+            <Search size={13} className="absolute left-2 text-fg-muted pointer-events-none" />
+            <input
+              type="text"
+              value={mobileSearch}
+              onChange={(e) => setMobileSearch(e.target.value)}
+              placeholder="Search chats..."
+              className="w-full pl-7 pr-7 py-1 text-xs rounded-md border border-border-default bg-transparent text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent-primary"
+            />
+            {mobileSearch && (
+              <button
+                type="button"
+                onClick={() => setMobileSearch('')}
+                className="absolute right-1.5 p-0.5 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary"
+                aria-label="Clear search"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* Session list */}
         <nav className="flex-1 overflow-y-auto min-h-0">
-          {sessions.map((session) => (
+          {filteredR.map((session) => (
             <SessionItem
               key={session.id}
               session={session}
@@ -686,6 +847,27 @@ function MobileSessionDrawer({
               onFork={onFork}
             />
           ))}
+          {filteredS.length > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => setMobileShowStale(!showOlder)}
+                className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-fg-muted bg-transparent border-none border-b border-border-default cursor-pointer hover:bg-surface-hover transition-colors"
+              >
+                {showOlder ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                <span>Older ({filteredS.length})</span>
+              </button>
+              {showOlder && filteredS.map((session) => (
+                <SessionItem
+                  key={session.id}
+                  session={session}
+                  isSelected={session.id === selectedSessionId}
+                  onSelect={onSelect}
+                  onFork={onFork}
+                />
+              ))}
+            </>
+          )}
         </nav>
       </div>
     </>
