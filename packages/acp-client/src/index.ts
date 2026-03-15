@@ -12,6 +12,7 @@ export * from './transport/websocket';
 export * from './hooks/useAcpSession';
 export * from './hooks/useAcpMessages';
 export * from './hooks/useAutoScroll';
+export * from './hooks/useAudioPlayback';
 
 // Components
 export { AgentPanel, CLIENT_COMMANDS } from './components/AgentPanel';
@@ -21,6 +22,8 @@ export type { SlashCommandPaletteHandle, SlashCommandPaletteProps } from './comp
 export { MessageBubble } from './components/MessageBubble';
 export { MessageActions } from './components/MessageActions';
 export type { MessageActionsProps } from './components/MessageActions';
+export { AudioPlayer } from './components/AudioPlayer';
+export type { AudioPlayerProps } from './components/AudioPlayer';
 export { ToolCallCard } from './components/ToolCallCard';
 export { PermissionDialog } from './components/PermissionDialog';
 export { ThinkingBlock } from './components/ThinkingBlock';

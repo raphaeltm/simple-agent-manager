@@ -105,7 +105,7 @@ describe('MessageActions', () => {
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
-      expect(screen.getByRole('tooltip')).toBeTruthy();
+      expect(screen.getByRole('dialog')).toBeTruthy();
       expect(screen.getByText(/Time:/)).toBeTruthy();
       expect(screen.getByText(/Words:/)).toBeTruthy();
       expect(screen.getByText(/Characters:/)).toBeTruthy();
@@ -116,7 +116,7 @@ describe('MessageActions', () => {
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
-      const dialog = screen.getByRole('tooltip');
+      const dialog = screen.getByRole('dialog');
       expect(getMetadataValue(dialog, 'Words')).toBe('5');
     });
 
@@ -125,7 +125,7 @@ describe('MessageActions', () => {
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
-      const dialog = screen.getByRole('tooltip');
+      const dialog = screen.getByRole('dialog');
       expect(getMetadataValue(dialog, 'Characters')).toBe('5');
       expect(getMetadataValue(dialog, 'Words')).toBe('1');
     });
@@ -135,7 +135,7 @@ describe('MessageActions', () => {
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
-      const dialog = screen.getByRole('tooltip');
+      const dialog = screen.getByRole('dialog');
       expect(getMetadataValue(dialog, 'Words')).toBe('0');
       expect(getMetadataValue(dialog, 'Characters')).toBe('0');
     });
@@ -145,7 +145,7 @@ describe('MessageActions', () => {
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
-      const dialog = screen.getByRole('tooltip');
+      const dialog = screen.getByRole('dialog');
       // "Use the  function" stripped → "Use the function" = 3 words
       expect(getMetadataValue(dialog, 'Words')).toBe('3');
     });
@@ -156,7 +156,7 @@ describe('MessageActions', () => {
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
-      const dialog = screen.getByRole('tooltip');
+      const dialog = screen.getByRole('dialog');
       expect(getMetadataValue(dialog, 'Words')).toBe('2');
     });
 
@@ -165,7 +165,7 @@ describe('MessageActions', () => {
 
       fireEvent.click(screen.getByLabelText('Message info'));
 
-      const dialog = screen.getByRole('tooltip');
+      const dialog = screen.getByRole('dialog');
       const timeValue = getMetadataValue(dialog, 'Time');
       // Should contain year 2024 from the timestamp
       expect(timeValue).toContain('2024');
@@ -176,20 +176,20 @@ describe('MessageActions', () => {
 
       const btn = screen.getByLabelText('Message info');
       fireEvent.click(btn);
-      expect(screen.getByRole('tooltip')).toBeTruthy();
+      expect(screen.getByRole('dialog')).toBeTruthy();
 
       fireEvent.click(btn);
-      expect(screen.queryByRole('tooltip')).toBeNull();
+      expect(screen.queryByRole('dialog')).toBeNull();
     });
 
     it('closes metadata popover on Escape key', () => {
       render(<MessageActions {...defaultProps} />);
 
       fireEvent.click(screen.getByLabelText('Message info'));
-      expect(screen.getByRole('tooltip')).toBeTruthy();
+      expect(screen.getByRole('dialog')).toBeTruthy();
 
       fireEvent.keyDown(document, { key: 'Escape' });
-      expect(screen.queryByRole('tooltip')).toBeNull();
+      expect(screen.queryByRole('dialog')).toBeNull();
     });
 
     it('closes metadata popover on outside click', () => {
@@ -201,11 +201,11 @@ describe('MessageActions', () => {
       );
 
       fireEvent.click(screen.getByLabelText('Message info'));
-      expect(screen.getByRole('tooltip')).toBeTruthy();
+      expect(screen.getByRole('dialog')).toBeTruthy();
 
       // Click outside the component
       fireEvent.mouseDown(screen.getByTestId('outside'));
-      expect(screen.queryByRole('tooltip')).toBeNull();
+      expect(screen.queryByRole('dialog')).toBeNull();
     });
 
     it('sets aria-expanded on info button', () => {
@@ -218,7 +218,7 @@ describe('MessageActions', () => {
     });
   });
 
-  describe('text-to-speech', () => {
+  describe('text-to-speech (browser fallback)', () => {
     it('calls speechSynthesis.speak when speaker button is clicked', () => {
       render(<MessageActions {...defaultProps} />);
 
@@ -228,23 +228,25 @@ describe('MessageActions', () => {
       expect(mockSpeak).toHaveBeenCalledTimes(1);
     });
 
-    it('changes button label to "Stop reading" while speaking', () => {
+    it('changes button to pause when playing', () => {
       render(<MessageActions {...defaultProps} />);
 
       fireEvent.click(screen.getByLabelText('Read aloud'));
 
-      expect(screen.getByLabelText('Stop reading')).toBeTruthy();
+      // Both the speaker button and the AudioPlayer have a Pause button
+      expect(screen.getAllByLabelText('Pause').length).toBeGreaterThanOrEqual(1);
     });
 
-    it('cancels speech when stop button is clicked', () => {
+    it('cancels speech when stop is clicked via player close', () => {
       render(<MessageActions {...defaultProps} />);
 
       // Start speaking
       fireEvent.click(screen.getByLabelText('Read aloud'));
       mockCancel.mockReset();
 
-      // Stop speaking
-      fireEvent.click(screen.getByLabelText('Stop reading'));
+      // The audio player should appear — click the close button
+      const closeBtn = screen.getByLabelText('Close player');
+      fireEvent.click(closeBtn);
 
       expect(mockCancel).toHaveBeenCalled();
     });
@@ -253,9 +255,9 @@ describe('MessageActions', () => {
       render(<MessageActions {...defaultProps} />);
 
       fireEvent.click(screen.getByLabelText('Read aloud'));
-      expect(screen.getByLabelText('Stop reading')).toBeTruthy();
+      expect(screen.getAllByLabelText('Pause').length).toBeGreaterThanOrEqual(1);
 
-      // Simulate speech ending — must be wrapped in act() to flush state update
+      // Simulate speech ending
       act(() => {
         capturedUtterance?.onend?.();
       });
@@ -413,11 +415,14 @@ describe('MessageActions', () => {
       const mockPlay = vi.fn().mockResolvedValue(undefined);
       vi.stubGlobal('Audio', class {
         src = '';
+        onloadedmetadata: (() => void) | null = null;
         onended: (() => void) | null = null;
         onerror: (() => void) | null = null;
+        playbackRate = 1;
+        currentTime = 0;
+        duration = 60;
         play = mockPlay;
         pause = vi.fn();
-        currentTime = 0;
       });
 
       render(<MessageActions {...ttsProps} />);
@@ -464,11 +469,14 @@ describe('MessageActions', () => {
       vi.stubGlobal('fetch', mockFetch);
       vi.stubGlobal('Audio', class {
         src = '';
+        onloadedmetadata: (() => void) | null = null;
         onended: (() => void) | null = null;
         onerror: (() => void) | null = null;
+        playbackRate = 1;
+        currentTime = 0;
+        duration = 60;
         play = vi.fn().mockResolvedValue(undefined);
         pause = vi.fn();
-        currentTime = 0;
       });
       render(<MessageActions {...ttsProps} />);
 
@@ -484,7 +492,9 @@ describe('MessageActions', () => {
     });
 
     it('shows loading state while generating audio', async () => {
-      // Make the fetch hang
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      // Make the fetch hang until we resolve it
       let resolveFetch: (value: unknown) => void;
       const pendingFetch = new Promise((resolve) => { resolveFetch = resolve; });
       vi.stubGlobal('fetch', vi.fn().mockReturnValue(pendingFetch));
@@ -495,14 +505,18 @@ describe('MessageActions', () => {
         fireEvent.click(screen.getByLabelText('Read aloud'));
       });
 
-      // Should show loading label (cancel action available during loading)
-      expect(screen.getByLabelText('Cancel audio generation')).toBeTruthy();
+      // Should show loading labels (both speaker button and AudioPlayer have cancel)
+      expect(screen.getAllByLabelText('Cancel audio generation').length).toBeGreaterThanOrEqual(1);
 
-      // Clean up
-      resolveFetch!({
-        ok: false,
-        json: () => Promise.resolve({ message: 'cancelled' }),
+      // Clean up: resolve the pending fetch and wait for state updates to settle
+      await act(async () => {
+        resolveFetch!({
+          ok: false,
+          json: () => Promise.resolve({ message: 'cancelled' }),
+        });
       });
+
+      consoleSpy.mockRestore();
     });
 
     it('falls back to browser TTS on synthesis API failure', async () => {
@@ -524,6 +538,301 @@ describe('MessageActions', () => {
       expect(mockSpeak).toHaveBeenCalled();
 
       consoleSpy.mockRestore();
+    });
+
+    it('shows audio player UI when playing', async () => {
+      const mockFetch = vi.fn();
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ audioUrl: '/api/tts/audio/msg-123' }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['audio'], { type: 'audio/mpeg' })),
+      });
+      vi.stubGlobal('fetch', mockFetch);
+      vi.stubGlobal('Audio', class {
+        src = '';
+        onloadedmetadata: (() => void) | null = null;
+        onended: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        playbackRate = 1;
+        currentTime = 0;
+        duration = 60;
+        play = vi.fn().mockResolvedValue(undefined);
+        pause = vi.fn();
+      });
+
+      render(<MessageActions {...ttsProps} />);
+
+      // No player visible initially
+      expect(screen.queryByRole('region', { name: 'Audio player' })).toBeNull();
+
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+
+      // Wait for async chain
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
+
+      // Player should be visible
+      await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Audio player' })).toBeTruthy();
+      });
+    });
+
+    it('prevents double playback on rapid clicks (re-entrance guard)', async () => {
+      const mockFetch = vi.fn();
+      // Both calls resolve successfully
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ audioUrl: '/api/tts/audio/msg-123' }),
+        blob: () => Promise.resolve(new Blob(['audio'], { type: 'audio/mpeg' })),
+      });
+      vi.stubGlobal('fetch', mockFetch);
+      vi.stubGlobal('Audio', class {
+        src = '';
+        onloadedmetadata: (() => void) | null = null;
+        onended: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        playbackRate = 1;
+        currentTime = 0;
+        duration = 60;
+        play = vi.fn().mockResolvedValue(undefined);
+        pause = vi.fn();
+      });
+
+      render(<MessageActions {...ttsProps} />);
+      const btn = screen.getByLabelText('Read aloud');
+
+      // Click twice rapidly (synchronous — both before React re-renders)
+      fireEvent.click(btn);
+      fireEvent.click(btn);
+
+      // Wait for any async processing
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalled();
+      });
+
+      // Exactly 2 fetches from the first click (synthesize + audio fetch).
+      // The second click must be blocked by the re-entrance guard — not 0 (both blocked), not 4 (both went through).
+      expect(mockFetch.mock.calls.length).toBe(2);
+    });
+
+    it('reuses cached blob URL on replay (no extra API calls)', async () => {
+      const mockPlay = vi.fn().mockResolvedValue(undefined);
+      const mockPause = vi.fn();
+      const mockFetch = vi.fn();
+
+      // Set up URL mocks explicitly for this test
+      URL.createObjectURL = vi.fn().mockReturnValue('blob:test-cached-url');
+      URL.revokeObjectURL = vi.fn();
+
+      // First play: two fetches (synthesize + audio)
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ audioUrl: '/api/tts/audio/msg-123' }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['audio'], { type: 'audio/mpeg' })),
+      });
+      vi.stubGlobal('fetch', mockFetch);
+
+      let latestAudio: { onended?: (() => void) | null };
+      vi.stubGlobal('Audio', class {
+        src = '';
+        onloadedmetadata: (() => void) | null = null;
+        onended: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        playbackRate = 1;
+        currentTime = 0;
+        duration = 60;
+        play = mockPlay;
+        pause = mockPause;
+        constructor() {
+          // eslint-disable-next-line @typescript-eslint/no-this-alias
+          latestAudio = this;
+        }
+      });
+
+      render(<MessageActions {...ttsProps} />);
+
+      // First play — triggers fetch
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(mockPlay).toHaveBeenCalledTimes(1));
+
+      // Simulate audio ending naturally
+      await act(async () => {
+        latestAudio!.onended?.();
+      });
+
+      // Should return to idle state
+      await waitFor(() => {
+        expect(screen.getByLabelText('Read aloud')).toBeTruthy();
+      });
+
+      // Clear mocks to track second play
+      mockFetch.mockClear();
+      mockPlay.mockClear();
+
+      // Second play — should reuse cached blob URL, no new fetch
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+      await waitFor(() => expect(mockPlay).toHaveBeenCalledTimes(1));
+
+      // No new API calls — blob URL was reused from cache
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('aborts in-flight requests when stopping during loading', async () => {
+      const abortSpy = vi.fn();
+      const originalAbortController = globalThis.AbortController;
+      let capturedSignal: unknown = null;
+
+      vi.stubGlobal('AbortController', class {
+        signal = { aborted: false, addEventListener: vi.fn(), removeEventListener: vi.fn() };
+        abort = () => {
+          abortSpy();
+          (this.signal as { aborted: boolean }).aborted = true;
+        };
+      });
+
+      // Make fetch hang, but capture the signal argument
+      const mockFetch = vi.fn().mockImplementation((_url: string, opts?: { signal?: unknown }) => {
+        if (opts?.signal) capturedSignal = opts.signal;
+        return new Promise(() => {});
+      });
+      vi.stubGlobal('fetch', mockFetch);
+
+      render(<MessageActions {...ttsProps} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText('Read aloud'));
+      });
+
+      // Verify fetch was called with an abort signal
+      expect(capturedSignal).not.toBeNull();
+
+      // Should be in loading state (both speaker button and player show cancel)
+      const cancelBtns = screen.getAllByLabelText('Cancel audio generation');
+      expect(cancelBtns.length).toBeGreaterThanOrEqual(1);
+
+      // Stop/cancel — click the first cancel button (speaker button)
+      const cancelBtn = cancelBtns[0]!;
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+
+      // AbortController.abort() should have been called
+      expect(abortSpy).toHaveBeenCalled();
+
+      // Restore
+      vi.stubGlobal('AbortController', originalAbortController);
+    });
+
+    it('cleans up blob URL and resets state on audio error', async () => {
+      const mockPlay = vi.fn().mockResolvedValue(undefined);
+      const mockRevokeObjectURL = vi.fn();
+
+      URL.createObjectURL = vi.fn().mockReturnValue('blob:error-test-url');
+      URL.revokeObjectURL = mockRevokeObjectURL;
+
+      const mockFetch = vi.fn();
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ audioUrl: '/api/tts/audio/msg-123' }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['audio'], { type: 'audio/mpeg' })),
+      });
+      vi.stubGlobal('fetch', mockFetch);
+
+      let latestAudio: { onerror?: (() => void) | null };
+      vi.stubGlobal('Audio', class {
+        src = '';
+        onloadedmetadata: (() => void) | null = null;
+        onended: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        playbackRate = 1;
+        currentTime = 0;
+        duration = 60;
+        play = mockPlay;
+        pause = vi.fn();
+        constructor() {
+          // eslint-disable-next-line @typescript-eslint/no-this-alias
+          latestAudio = this;
+        }
+      });
+
+      render(<MessageActions {...ttsProps} />);
+
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+      await waitFor(() => expect(mockPlay).toHaveBeenCalledTimes(1));
+
+      // Trigger audio error
+      await act(async () => {
+        latestAudio!.onerror?.();
+      });
+
+      // Should return to idle state
+      await waitFor(() => {
+        expect(screen.getByLabelText('Read aloud')).toBeTruthy();
+      });
+
+      // Blob URL should have been revoked on error
+      expect(mockRevokeObjectURL).toHaveBeenCalledWith('blob:error-test-url');
+    });
+  });
+
+  describe('audio player controls', () => {
+    it('has speed selector with correct options', async () => {
+      // Use browser TTS to get player to show
+      render(<MessageActions {...defaultProps} />);
+
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+
+      // Player should appear
+      await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Audio player' })).toBeTruthy();
+      });
+
+      const speedSelect = screen.getByLabelText('Playback speed');
+      expect(speedSelect).toBeTruthy();
+
+      // Check speed options exist
+      const options = speedSelect.querySelectorAll('option');
+      const values = Array.from(options).map((o) => o.value);
+      expect(values).toEqual(['0.5', '0.75', '1', '1.25', '1.5', '2']);
+    });
+
+    it('has skip forward and skip back buttons', async () => {
+      render(<MessageActions {...defaultProps} />);
+
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Skip back 10 seconds')).toBeTruthy();
+        expect(screen.getByLabelText('Skip forward 10 seconds')).toBeTruthy();
+      });
+    });
+
+    it('has close button that stops playback', async () => {
+      render(<MessageActions {...defaultProps} />);
+
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+
+      await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Audio player' })).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByLabelText('Close player'));
+
+      // Player should be gone
+      expect(screen.queryByRole('region', { name: 'Audio player' })).toBeNull();
+      // Button should be back to "Read aloud"
+      expect(screen.getByLabelText('Read aloud')).toBeTruthy();
     });
   });
 });

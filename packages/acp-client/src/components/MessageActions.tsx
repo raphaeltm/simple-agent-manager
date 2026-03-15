@@ -1,4 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { useAudioPlayback } from '../hooks/useAudioPlayback';
+import { AudioPlayer } from './AudioPlayer';
 
 export interface MessageActionsProps {
   /** The plain text content of the message (used for TTS and word/char counts). */
@@ -42,6 +44,9 @@ function formatTimestamp(ts: number): string {
  * - Info icon: shows metadata popover (timestamp, word count, char count)
  * - Speaker icon: reads the message aloud via server-side TTS (preferred) or Web Speech API (fallback)
  * - Copy icon: copies message text to clipboard
+ *
+ * When audio playback starts, an AudioPlayer component is shown with seek,
+ * speed control, and skip forward/backward.
  */
 export const MessageActions = React.memo(function MessageActions({
   text,
@@ -50,20 +55,19 @@ export const MessageActions = React.memo(function MessageActions({
   ttsStorageId,
 }: MessageActionsProps) {
   const [showMeta, setShowMeta] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const metaRef = useRef<HTMLDivElement>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const blobUrlRef = useRef<string | null>(null);
   const popoverId = React.useId();
+
+  const audio = useAudioPlayback({ text, ttsApiUrl, ttsStorageId });
 
   const plain = stripMarkdownForCount(text);
   const words = plain ? plain.split(/\s+/).filter(Boolean).length : 0;
   const chars = plain.length;
 
-  const useServerTTS = !!(ttsApiUrl && ttsStorageId);
+  const showPlayer = audio.state !== 'idle';
+  const showSpeaker = audio.hasServerTTS || (typeof window !== 'undefined' && !!window.speechSynthesis);
 
   // Close metadata popover on outside click or Escape key
   useEffect(() => {
@@ -90,121 +94,6 @@ export const MessageActions = React.memo(function MessageActions({
     setShowMeta((v) => !v);
   }, []);
 
-  // Stop audio playback (works for both server TTS and browser TTS)
-  const stopPlayback = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      audioRef.current = null;
-    }
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
-    setIsSpeaking(false);
-    setIsLoading(false);
-  }, []);
-
-  // Browser-native TTS fallback
-  const playBrowserTTS = useCallback(() => {
-    if (!window.speechSynthesis) return;
-
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(plain);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-    window.speechSynthesis.speak(utterance);
-    setIsSpeaking(true);
-  }, [plain]);
-
-  // Server-side TTS: call API to synthesize, then fetch audio and play
-  const playServerTTS = useCallback(async () => {
-    if (!ttsApiUrl || !ttsStorageId) return;
-
-    setIsLoading(true);
-
-    try {
-      // Step 1: Trigger synthesis (may return cached)
-      const synthesizeRes = await fetch(`${ttsApiUrl}/synthesize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ text, storageId: ttsStorageId }),
-      });
-
-      if (!synthesizeRes.ok) {
-        const errData = await synthesizeRes.json().catch(() => null);
-        throw new Error(errData?.message || `Synthesis failed: ${synthesizeRes.status}`);
-      }
-
-      const { audioUrl } = await synthesizeRes.json() as { audioUrl: string };
-
-      // Step 2: Fetch the audio blob
-      // Build absolute URL from the relative path returned by the API
-      const baseOrigin = new URL(ttsApiUrl).origin;
-      const fullAudioUrl = `${baseOrigin}${audioUrl}`;
-
-      const audioRes = await fetch(fullAudioUrl, {
-        credentials: 'include',
-      });
-
-      if (!audioRes.ok) {
-        throw new Error(`Audio fetch failed: ${audioRes.status}`);
-      }
-
-      const audioBlob = await audioRes.blob();
-      const blobUrl = URL.createObjectURL(audioBlob);
-
-      // Clean up previous blob URL
-      if (blobUrlRef.current) {
-        URL.revokeObjectURL(blobUrlRef.current);
-      }
-      blobUrlRef.current = blobUrl;
-
-      // Step 3: Play audio
-      const audio = new Audio(blobUrl);
-      audioRef.current = audio;
-
-      audio.onended = () => {
-        setIsSpeaking(false);
-        audioRef.current = null;
-        if (blobUrlRef.current) {
-          URL.revokeObjectURL(blobUrlRef.current);
-          blobUrlRef.current = null;
-        }
-      };
-      audio.onerror = () => {
-        setIsSpeaking(false);
-        setIsLoading(false);
-        audioRef.current = null;
-      };
-
-      await audio.play();
-      setIsLoading(false);
-      setIsSpeaking(true);
-    } catch (err) {
-      console.error('TTS playback error:', err);
-      setIsLoading(false);
-      setIsSpeaking(false);
-      // Fall back to browser TTS on server failure
-      if (typeof window !== 'undefined' && window.speechSynthesis) {
-        playBrowserTTS();
-      }
-    }
-  }, [ttsApiUrl, ttsStorageId, text, playBrowserTTS]);
-
-  const toggleSpeak = useCallback(() => {
-    if (isSpeaking || isLoading) {
-      stopPlayback();
-      return;
-    }
-
-    if (useServerTTS) {
-      playServerTTS();
-    } else if (window.speechSynthesis) {
-      playBrowserTTS();
-    }
-  }, [isSpeaking, isLoading, useServerTTS, playServerTTS, playBrowserTTS, stopPlayback]);
-
   const handleCopy = useCallback(() => {
     if (!navigator.clipboard) return;
     navigator.clipboard.writeText(text).then(() => {
@@ -212,182 +101,203 @@ export const MessageActions = React.memo(function MessageActions({
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
       copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
     }, () => {
-      // Clipboard write failed (e.g., permission denied) — silently ignore
+      // Clipboard write failed — silently ignore
     });
   }, [text]);
 
-  // Clean up on unmount
+  // Clean up copy timer on unmount
   useEffect(() => {
     return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-      if (blobUrlRef.current) {
-        URL.revokeObjectURL(blobUrlRef.current);
-        blobUrlRef.current = null;
-      }
-      if (typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-      }
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
     };
   }, []);
 
-  // Show speaker button if server TTS is available OR browser TTS is available
-  const showSpeaker = useServerTTS || (typeof window !== 'undefined' && !!window.speechSynthesis);
-
   return (
-    <div className="flex items-center gap-1 mt-1 relative" ref={metaRef}>
-      {/* Info button */}
-      <button
-        type="button"
-        onClick={toggleMeta}
-        className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded transition-colors"
-        style={{
-          color: showMeta ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
-        }}
-        aria-label="Message info"
-        title="Message info"
-        aria-expanded={showMeta}
-        aria-controls={showMeta ? popoverId : undefined}
-        aria-haspopup="true"
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <circle cx="12" cy="12" r="10" />
-          <line x1="12" y1="16" x2="12" y2="12" />
-          <line x1="12" y1="8" x2="12.01" y2="8" />
-        </svg>
-      </button>
-
-      {/* TTS state announcements for screen readers */}
-      <span className="sr-only" aria-live="polite" aria-atomic="true">
-        {isLoading ? 'Generating audio' : isSpeaking ? 'Now playing' : ''}
-      </span>
-
-      {/* Speaker button */}
-      {showSpeaker && (
+    <div className="flex flex-col mt-1 relative" ref={metaRef}>
+      <div className="flex items-center gap-1">
+        {/* Info button */}
         <button
           type="button"
-          onClick={toggleSpeak}
-          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors"
-          style={{
-            color: (isSpeaking || isLoading) ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
-            backgroundColor: isSpeaking ? 'var(--sam-color-bg-inset)' : undefined,
-            opacity: isLoading ? 0.7 : 1,
-          }}
-          aria-label={isLoading ? 'Cancel audio generation' : isSpeaking ? 'Stop reading' : 'Read aloud'}
-          title={isLoading ? 'Cancel audio generation' : isSpeaking ? 'Stop reading' : 'Read aloud'}
-        >
-          {isLoading ? (
-            // Loading spinner
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden="true"
-              className="animate-spin"
-            >
-              <circle cx="12" cy="12" r="10" strokeDasharray="31.4 31.4" strokeLinecap="round" />
-            </svg>
-          ) : isSpeaking ? (
-            // Stop/square icon
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              stroke="none"
-              aria-hidden="true"
-            >
-              <rect x="6" y="6" width="12" height="12" rx="1" />
-            </svg>
-          ) : (
-            // Volume/speaker icon
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-              <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-              <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-            </svg>
-          )}
-        </button>
-      )}
-
-      {/* Copy button */}
-      {navigator.clipboard && (
-        <button
-          type="button"
-          onClick={handleCopy}
+          onClick={toggleMeta}
           className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded transition-colors"
           style={{
-            color: copied ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
+            color: showMeta ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
           }}
-          aria-label={copied ? 'Copied' : 'Copy message'}
-          title={copied ? 'Copied' : 'Copy message'}
+          aria-label="Message info"
+          title="Message info"
+          aria-expanded={showMeta}
+          aria-controls={showMeta ? popoverId : undefined}
+          aria-haspopup="true"
         >
-          {copied ? (
-            // Check icon
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-          ) : (
-            // Clipboard/copy icon
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-          )}
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="16" x2="12" y2="12" />
+            <line x1="12" y1="8" x2="12.01" y2="8" />
+          </svg>
         </button>
+
+        {/* TTS state announcements for screen readers */}
+        <span className="sr-only" aria-live="polite" aria-atomic="true">
+          {audio.state === 'loading' ? 'Generating audio' : audio.state === 'playing' ? 'Now playing' : ''}
+        </span>
+
+        {/* Speaker button */}
+        {showSpeaker && (
+          <button
+            type="button"
+            onClick={audio.toggle}
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors"
+            style={{
+              color: audio.state !== 'idle' ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
+              backgroundColor: audio.state === 'playing' ? 'var(--sam-color-bg-inset)' : undefined,
+              opacity: audio.state === 'loading' ? 0.7 : 1,
+            }}
+            aria-label={
+              audio.state === 'loading' ? 'Cancel audio generation' :
+              audio.state === 'playing' ? 'Pause' :
+              audio.state === 'paused' ? 'Resume' :
+              'Read aloud'
+            }
+            title={
+              audio.state === 'loading' ? 'Cancel audio generation' :
+              audio.state === 'playing' ? 'Pause' :
+              audio.state === 'paused' ? 'Resume' :
+              'Read aloud'
+            }
+          >
+            {audio.state === 'loading' ? (
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+                className="animate-spin motion-reduce:animate-none"
+              >
+                <circle cx="12" cy="12" r="10" strokeDasharray="31.4 31.4" strokeLinecap="round" />
+              </svg>
+            ) : audio.state === 'playing' ? (
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                stroke="none"
+                aria-hidden="true"
+              >
+                <rect x="6" y="4" width="4" height="16" rx="1" />
+                <rect x="14" y="4" width="4" height="16" rx="1" />
+              </svg>
+            ) : audio.state === 'paused' ? (
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                stroke="none"
+                aria-hidden="true"
+              >
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+            ) : (
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+              </svg>
+            )}
+          </button>
+        )}
+
+        {/* Copy button */}
+        {typeof navigator !== 'undefined' && navigator.clipboard && (
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded transition-colors"
+            style={{
+              color: copied ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
+            }}
+            aria-label={copied ? 'Copied' : 'Copy message'}
+            title={copied ? 'Copied' : 'Copy message'}
+          >
+            {copied ? (
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            ) : (
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+            )}
+          </button>
+        )}
+      </div>
+
+      {/* Audio Player UI */}
+      {showPlayer && (
+        <AudioPlayer
+          state={audio.state}
+          currentTime={audio.currentTime}
+          duration={audio.duration}
+          playbackRate={audio.playbackRate}
+          onToggle={audio.toggle}
+          onStop={audio.stop}
+          onSeek={audio.seekTo}
+          onSkipForward={audio.skipForward}
+          onSkipBackward={audio.skipBackward}
+          onPlaybackRateChange={audio.setPlaybackRate}
+        />
       )}
 
       {/* Metadata popover */}
       {showMeta && (
         <div
           id={popoverId}
-          role="tooltip"
+          role="dialog"
           aria-label="Message metadata"
           className="absolute left-0 top-full mt-1 z-10 rounded-md shadow-md px-3 py-2 text-xs max-w-[calc(100vw-2rem)] break-words"
           style={{
