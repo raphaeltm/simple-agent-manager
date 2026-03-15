@@ -40,12 +40,18 @@ vi.mock('../../../src/lib/api', () => ({
   deleteWorkspace: mocks.deleteWorkspace,
 }));
 
+// Captured WebSocket onMessage callback — tests can call this to inject messages
+let capturedWsOnMessage: ((msg: ReturnType<typeof makeMessage>) => void) | null = null;
+
 vi.mock('../../../src/hooks/useChatWebSocket', () => ({
-  useChatWebSocket: () => ({
-    connectionState: 'connected' as const,
-    wsRef: { current: null },
-    retry: vi.fn(),
-  }),
+  useChatWebSocket: (opts: { onMessage?: (msg: unknown) => void }) => {
+    capturedWsOnMessage = (opts.onMessage ?? null) as typeof capturedWsOnMessage;
+    return {
+      connectionState: 'connected' as const,
+      wsRef: { current: null },
+      retry: vi.fn(),
+    };
+  },
 }));
 
 function defaultAgentSession() {
@@ -1420,5 +1426,195 @@ describe('ProjectMessageView — session context dropdown', () => {
     await waitFor(() => {
       expect(screen.queryByText('Node:')).toBeNull();
     });
+  });
+});
+
+describe('ProjectMessageView — autoscroll pause', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.clearAllMocks();
+    (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mockClear();
+    mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
+    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
+    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /**
+   * Helper: simulate scroll position on the messages container.
+   * jsdom has no layout engine, so we mock the properties.
+   */
+  function setScrollPosition(container: Element, pos: { scrollTop: number; scrollHeight: number; clientHeight: number }) {
+    Object.defineProperty(container, 'scrollTop', { value: pos.scrollTop, writable: true, configurable: true });
+    Object.defineProperty(container, 'scrollHeight', { value: pos.scrollHeight, configurable: true });
+    Object.defineProperty(container, 'clientHeight', { value: pos.clientHeight, configurable: true });
+  }
+
+  /**
+   * Helper: render the component, wait for initial load, flush rAFs, clear
+   * scrollIntoView mock, and return the scroll container element.
+   * The scroll event listener is guaranteed to be registered after this
+   * returns because loading has transitioned to false.
+   */
+  async function renderAndSetup(sessionId = 'session-1') {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse(sessionId, [
+        makeMessage('msg-1', sessionId, 'First message'),
+      ]),
+    );
+
+    const result = render(<ProjectMessageView projectId="proj-1" sessionId={sessionId} />);
+
+    // Wait for initial load — after this, loading=false and the scroll
+    // listener useEffect has re-run with the container ref attached.
+    await waitFor(() => {
+      expect(screen.getByText('First message')).toBeTruthy();
+    });
+
+    // Flush pending rAFs from initial autoscroll. With shouldAdvanceTime,
+    // rAF fires based on real wall-clock time; multiple act cycles ensure it fires.
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mockClear();
+
+    const scrollContainer = result.container.querySelector('.overflow-y-auto');
+    expect(scrollContainer).toBeTruthy();
+
+    return { ...result, scrollContainer: scrollContainer! };
+  }
+
+  it('does not autoscroll when user has scrolled up and new messages arrive', async () => {
+    // Use a stopped session to prevent polling interference with scroll assertions.
+    // Polling only runs for active sessions, so stopped sessions isolate the test
+    // to only the autoscroll effect triggered by WebSocket message injection.
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession('session-1', 'stopped'),
+      messages: [makeMessage('msg-1', 'session-1', 'First message')],
+      hasMore: false,
+    });
+
+    const { container } = render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('First message')).toBeTruthy();
+    });
+
+    // Flush the initial autoscroll rAF. With shouldAdvanceTime, rAF fires
+    // based on real wall-clock time, not advanceTimersByTime. We need multiple
+    // act() cycles to ensure the rAF callback from the autoscroll effect has
+    // fired before we clear the mock.
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mockClear();
+
+    // Find the scroll container (the overflow-y-auto div).
+    // The scroll listener useEffect has run because loading transitioned to false.
+    const scrollContainer = container.querySelector('.overflow-y-auto');
+    expect(scrollContainer).toBeTruthy();
+
+    // Simulate user scrolling up: scrollTop is far from bottom
+    setScrollPosition(scrollContainer!, { scrollTop: 0, scrollHeight: 1000, clientHeight: 500 });
+    fireEvent.scroll(scrollContainer!);
+
+    // Inject a new message via WebSocket callback
+    expect(capturedWsOnMessage).toBeTruthy();
+    await act(async () => {
+      capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'Second message'));
+    });
+    await act(async () => { vi.advanceTimersByTime(100); });
+
+    expect(document.body.textContent).toContain('Second message');
+
+    // scrollIntoView should NOT have been called since user scrolled up
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('resumes autoscroll when user scrolls back to bottom after scrolling up', async () => {
+    const { scrollContainer } = await renderAndSetup();
+
+    // Simulate user scrolling up
+    setScrollPosition(scrollContainer, { scrollTop: 0, scrollHeight: 1000, clientHeight: 500 });
+    fireEvent.scroll(scrollContainer);
+
+    // Simulate user scrolling back to bottom (within 50px threshold)
+    setScrollPosition(scrollContainer, { scrollTop: 480, scrollHeight: 1000, clientHeight: 500 });
+    fireEvent.scroll(scrollContainer);
+
+    // Inject a new message via WebSocket
+    expect(capturedWsOnMessage).toBeTruthy();
+    await act(async () => {
+      capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'Second message'));
+    });
+    await act(async () => { vi.advanceTimersByTime(100); });
+
+    expect(document.body.textContent).toContain('Second message');
+
+    // scrollIntoView SHOULD have been called since user scrolled back to bottom
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('treats exactly 50px from bottom as "at bottom" (threshold boundary)', async () => {
+    const { scrollContainer } = await renderAndSetup();
+
+    // distanceFromBottom = 1000 - 450 - 500 = 50, exactly at threshold
+    setScrollPosition(scrollContainer, { scrollTop: 450, scrollHeight: 1000, clientHeight: 500 });
+    fireEvent.scroll(scrollContainer);
+
+    expect(capturedWsOnMessage).toBeTruthy();
+    await act(async () => {
+      capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'Threshold message'));
+    });
+    await act(async () => { vi.advanceTimersByTime(100); });
+
+    expect(document.body.textContent).toContain('Threshold message');
+
+    // At exactly 50px: should be considered "at bottom" → autoscroll fires
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('treats 51px from bottom as "scrolled up" (just past threshold)', async () => {
+    const { scrollContainer } = await renderAndSetup();
+
+    // distanceFromBottom = 1000 - 449 - 500 = 51, just past threshold
+    setScrollPosition(scrollContainer, { scrollTop: 449, scrollHeight: 1000, clientHeight: 500 });
+    fireEvent.scroll(scrollContainer);
+
+    expect(capturedWsOnMessage).toBeTruthy();
+    await act(async () => {
+      capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'Past threshold'));
+    });
+    await act(async () => { vi.advanceTimersByTime(100); });
+
+    expect(document.body.textContent).toContain('Past threshold');
+
+    // At 51px: should be considered "scrolled up" → no autoscroll
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('always scrolls on session switch even when user was scrolled up', async () => {
+    const { scrollContainer, rerender } = await renderAndSetup('session-A');
+
+    // Simulate user scrolling up
+    setScrollPosition(scrollContainer, { scrollTop: 0, scrollHeight: 1000, clientHeight: 500 });
+    fireEvent.scroll(scrollContainer);
+
+    // Switch to a new session
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-B', [
+        makeMessage('msg-b1', 'session-B', 'Session B message'),
+      ]),
+    );
+    rerender(<ProjectMessageView projectId="proj-1" sessionId="session-B" />);
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('Session B message');
+    });
+    await act(async () => { vi.advanceTimersByTime(100); });
+
+    // Session switch should ALWAYS scroll to bottom, even if user was scrolled up
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
   });
 });

@@ -310,6 +310,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isLoadingMoreRef = useRef(false);
+  const isStuckToBottomRef = useRef(true);
 
   const [session, setSession] = useState<ChatSessionResponse | null>(null);
   const [taskEmbed, setTaskEmbed] = useState<ChatSessionResponse['task'] | null>(null);
@@ -480,8 +481,26 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     return () => { cancelled = true; };
   }, [session?.workspaceId, workspace?.id]);
 
+  // Track scroll position to pause autoscroll when user scrolls up.
+  // Re-enable when user scrolls back to the bottom (within threshold).
+  const SCROLL_BOTTOM_THRESHOLD = 50;
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+      isStuckToBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD;
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [loading]);
+
   // Auto-scroll to bottom on initial load, session switch, and new messages.
   // Skip when older messages were prepended via "Load earlier messages".
+  // Skip when user has manually scrolled up (not stuck to bottom).
   const prevMessageCountRef = useRef(0);
   const prevSessionIdRef = useRef(sessionId);
   useEffect(() => {
@@ -497,10 +516,15 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     const hasNewMessages = messages.length > prevMessageCountRef.current;
     const isInitialLoad = prevMessageCountRef.current === 0 && messages.length > 0;
 
-    if (isNewSession || hasNewMessages || isInitialLoad) {
+    // Always scroll on new session or initial load; only scroll for new messages
+    // if the user hasn't manually scrolled up.
+    const shouldScroll = isNewSession || isInitialLoad || (hasNewMessages && isStuckToBottomRef.current);
+
+    if (shouldScroll) {
       requestAnimationFrame(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: isNewSession ? 'instant' : 'smooth' });
       });
+      isStuckToBottomRef.current = true;
     }
 
     prevMessageCountRef.current = messages.length;
