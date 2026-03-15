@@ -39,7 +39,7 @@ Not a lecturer. Not a marketer. A builder writing about things he finds interest
 ## Punctuation
 
 - **Ellipses** (…): Used often, as thinking pauses. "So… what is this?", "Okay, so… I missed a couple days"
-- **Em dashes** (—): Used but not heavily. Tends toward parentheses or ellipses instead.
+- **Em dashes** (—): Essentially never. Max 1 per blog post, none in social content. If you're reaching for an em dash, use a period, a parenthetical, or an ellipsis instead. Em dashes in Raph's published writing are almost certainly AI edits, not his voice.
 - **Italics**: For emphasis on specific words, not whole phrases. "*literally*", "*have*", "kindof"
 - **Quotes**: Around conceptual terms he's examining: "Content Creation", "creator economy", "artless"
 - **Light on exclamation marks**: Uses them, but sparingly and genuinely — not for marketing energy.
