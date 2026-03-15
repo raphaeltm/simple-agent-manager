@@ -117,54 +117,10 @@ describe('MobileNavDrawer', () => {
     expect(dashboardButton.className).not.toContain('text-accent');
   });
 
-  describe('command palette button', () => {
-    it('renders search button when onOpenCommandPalette is provided', () => {
-      const onOpenCommandPalette = vi.fn();
-      render(<MobileNavDrawer {...defaultProps} onOpenCommandPalette={onOpenCommandPalette} />);
 
-      expect(screen.getByLabelText('Open command palette')).toBeInTheDocument();
-      expect(screen.getByText('Search...')).toBeInTheDocument();
-    });
+  it('does not render command palette search button in drawer', () => {
+    render(<MobileNavDrawer {...defaultProps} />);
 
-    it('does not render search button when onOpenCommandPalette is not provided', () => {
-      render(<MobileNavDrawer {...defaultProps} />);
-
-      expect(screen.queryByLabelText('Open command palette')).not.toBeInTheDocument();
-    });
-
-    it('calls onOpenCommandPalette when search button is clicked', () => {
-      const onOpenCommandPalette = vi.fn();
-      render(<MobileNavDrawer {...defaultProps} onOpenCommandPalette={onOpenCommandPalette} />);
-
-      fireEvent.click(screen.getByLabelText('Open command palette'));
-
-      expect(onOpenCommandPalette).toHaveBeenCalledTimes(1);
-    });
-
-    it('does not trigger onClose when search button is clicked', () => {
-      const onClose = vi.fn();
-      const onOpenCommandPalette = vi.fn();
-      render(
-        <MobileNavDrawer
-          {...defaultProps}
-          onClose={onClose}
-          onOpenCommandPalette={onOpenCommandPalette}
-        />
-      );
-
-      fireEvent.click(screen.getByLabelText('Open command palette'));
-
-      expect(onOpenCommandPalette).toHaveBeenCalledTimes(1);
-      expect(onClose).not.toHaveBeenCalled();
-    });
-
-    it('search button is a focusable button element', () => {
-      const onOpenCommandPalette = vi.fn();
-      render(<MobileNavDrawer {...defaultProps} onOpenCommandPalette={onOpenCommandPalette} />);
-
-      const button = screen.getByLabelText('Open command palette');
-      expect(button.tagName).toBe('BUTTON');
-      expect(button.tabIndex).not.toBe(-1);
-    });
+    expect(screen.queryByLabelText('Open command palette')).not.toBeInTheDocument();
   });
 });

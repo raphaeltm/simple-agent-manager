@@ -63,14 +63,23 @@ export function AppShell({ children }: AppShellProps) {
           <span className="text-lg font-semibold text-fg-primary">
             SAM
           </span>
-          {/* Hamburger on the right -- matches drawer slide-in direction */}
-          <button
-            onClick={() => setDrawerOpen(true)}
-            aria-label="Open navigation menu"
-            className="flex items-center justify-center w-9 h-9 bg-transparent border-none text-fg-muted cursor-pointer"
-          >
-            <Menu size={20} />
-          </button>
+          {/* Search + Hamburger on the right */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={commandPalette.open}
+              aria-label="Open command palette"
+              className="flex items-center justify-center w-9 h-9 bg-transparent border-none text-fg-muted cursor-pointer"
+            >
+              <Search size={18} />
+            </button>
+            <button
+              onClick={() => setDrawerOpen(true)}
+              aria-label="Open navigation menu"
+              className="flex items-center justify-center w-9 h-9 bg-transparent border-none text-fg-muted cursor-pointer"
+            >
+              <Menu size={20} />
+            </button>
+          </div>
         </header>
 
         <main className="flex-1 overflow-y-auto flex flex-col">
@@ -85,7 +94,6 @@ export function AppShell({ children }: AppShellProps) {
             currentPath={location.pathname}
             onNavigate={(path) => { navigate(path); setDrawerOpen(false); }}
             onSignOut={handleSignOut}
-            onOpenCommandPalette={() => { setDrawerOpen(false); commandPalette.open(); }}
           />
         )}
 
