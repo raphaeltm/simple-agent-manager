@@ -1,5 +1,5 @@
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Spinner } from '@simple-agent-manager/ui';
+import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
 import {
   VoiceButton,
   MessageBubble as AcpMessageBubble,
@@ -11,10 +11,10 @@ import {
 import type { ConversationItem } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent, getErrorMeta } from '@simple-agent-manager/acp-client';
 import type { AcpSessionHandle } from '@simple-agent-manager/acp-client';
-import { ChevronDown, ChevronUp, ExternalLink, Server, Box, Cpu, MapPin, Cloud } from 'lucide-react';
+import { ChevronDown, ChevronUp, Server, Box, Cpu, MapPin, Cloud, GitBranch, CheckCircle2 } from 'lucide-react';
 import { TruncatedSummary } from './TruncatedSummary';
 import { stripMarkdown } from '../../lib/text-utils';
-import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode } from '../../lib/api';
+import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode, updateProjectTaskStatus, deleteWorkspace } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 import type { WorkspaceResponse, NodeResponse, VMSize } from '@simple-agent-manager/shared';
 import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
@@ -715,6 +715,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       {/* Session header — compact by default, expandable for details */}
       {session && (
         <SessionHeader
+          projectId={projectId}
           session={session}
           sessionState={sessionState}
           loading={loading}
@@ -884,6 +885,7 @@ const LIGHTWEIGHT_VM_SIZE: VMSize = 'small';
 
 /** Collapsible session header — shows title + state dot, with expandable details. */
 function SessionHeader({
+  projectId,
   session,
   sessionState,
   loading,
@@ -892,6 +894,7 @@ function SessionHeader({
   workspace,
   node,
 }: {
+  projectId: string;
   session: ChatSessionResponse;
   sessionState: SessionState;
   loading: boolean;
@@ -901,6 +904,9 @@ function SessionHeader({
   node: NodeResponse | null;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [completing, setCompleting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [completeError, setCompleteError] = useState<string | null>(null);
 
   const hasDetails = !!(
     taskEmbed?.outputBranch ||
@@ -908,6 +914,36 @@ function SessionHeader({
     session.workspaceId ||
     (sessionState === 'idle' && idleCountdownMs !== null)
   );
+
+  const canMarkComplete = !!(
+    taskEmbed?.id &&
+    taskEmbed.status !== 'completed' &&
+    taskEmbed.status !== 'cancelled' &&
+    taskEmbed.status !== 'failed'
+  );
+
+  const handleMarkComplete = useCallback(async () => {
+    if (!taskEmbed?.id || completing) return;
+    setCompleteError(null);
+    setCompleting(true);
+    setConfirmOpen(false);
+    try {
+      // 1. Mark the task as completed (this also stops the chat session server-side)
+      await updateProjectTaskStatus(projectId, taskEmbed.id, { toStatus: 'completed' });
+
+      // 2. Delete the workspace if one exists
+      if (session.workspaceId) {
+        await deleteWorkspace(session.workspaceId);
+      }
+
+      // Force a page reload to reflect the new state
+      window.location.reload();
+    } catch (err) {
+      console.error('Failed to mark task complete:', err);
+      setCompleteError(err instanceof Error ? err.message : 'Failed to complete task');
+      setCompleting(false);
+    }
+  }, [projectId, taskEmbed?.id, session.workspaceId, completing]);
 
   return (
     <div className="border-b border-border-default shrink-0">
@@ -967,7 +1003,7 @@ function SessionHeader({
       {/* Expanded details panel */}
       {expanded && hasDetails && (
         <div className="px-4 py-2 border-t border-border-default bg-inset space-y-2">
-          {/* Status row — idle countdown, branch, PR */}
+          {/* Action row — idle countdown, PR link, action buttons */}
           <div className="flex items-center gap-3 flex-wrap">
             {/* Idle countdown (TDF-8) */}
             {sessionState === 'idle' && idleCountdownMs !== null && (
@@ -980,13 +1016,6 @@ function SessionHeader({
                 }}
               >
                 Cleanup in {formatCountdown(idleCountdownMs)}
-              </span>
-            )}
-
-            {/* Branch name (T021) */}
-            {taskEmbed?.outputBranch && (
-              <span className="sam-type-caption text-fg-muted font-mono bg-surface px-[6px] py-[1px] rounded-sm">
-                {taskEmbed.outputBranch}
               </span>
             )}
 
@@ -1003,17 +1032,47 @@ function SessionHeader({
               </a>
             )}
 
-            {session.workspaceId && sessionState === 'active' && (
-              <a
-                href={`/workspaces/${session.workspaceId}`}
-                className="ml-auto no-underline"
-              >
-                <Button variant="ghost" size="sm">
-                  Open Workspace
+            <div className="ml-auto flex items-center gap-2">
+              {session.workspaceId && sessionState === 'active' && (
+                <a
+                  href={`/workspaces/${session.workspaceId}`}
+                  className="no-underline"
+                >
+                  <Button variant="ghost" size="sm">
+                    Open Workspace
+                  </Button>
+                </a>
+              )}
+
+              {canMarkComplete && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setConfirmOpen(true)}
+                  disabled={completing}
+                  style={{ color: completing ? undefined : 'var(--sam-color-success)' }}
+                >
+                  <CheckCircle2 size={14} className="mr-1" />
+                  {completing ? 'Completing...' : 'Mark Complete'}
                 </Button>
-              </a>
-            )}
+              )}
+            </div>
           </div>
+
+          {/* Inline error for mark-complete failures */}
+          {completeError && (
+            <div className="flex items-center gap-2 px-1 py-1">
+              <span className="text-xs" style={{ color: 'var(--sam-color-danger)' }}>{completeError}</span>
+              <button
+                type="button"
+                onClick={() => setCompleteError(null)}
+                className="text-xs bg-transparent border-none cursor-pointer underline"
+                style={{ color: 'var(--sam-color-fg-muted)' }}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
 
           {/* Infrastructure context — workspace & node details */}
           {session.workspaceId && (workspace || node) && (
@@ -1032,9 +1091,6 @@ function SessionHeader({
                   </ContextItem>
                   <ContextItem icon={<Cpu size={12} />} label="VM Size">
                     {formatVmSize(workspace.vmSize)}
-                  </ContextItem>
-                  <ContextItem icon={<MapPin size={12} />} label="Location">
-                    {workspace.vmLocation}
                   </ContextItem>
                 </>
               )}
@@ -1064,22 +1120,23 @@ function SessionHeader({
                   {node.cloudProvider && (
                     <ContextItem icon={<Cloud size={12} />} label="Provider">
                       {node.cloudProvider.charAt(0).toUpperCase() + node.cloudProvider.slice(1)}
+                      {workspace?.vmLocation && (
+                        <span className="text-fg-muted ml-1">— {workspace.vmLocation}</span>
+                      )}
                     </ContextItem>
                   )}
                 </>
               )}
-              {workspace?.url && (
-                <ContextItem icon={<ExternalLink size={12} />} label="Direct URL">
-                  <a
-                    href={workspace.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 no-underline hover:underline font-mono text-[11px] truncate"
-                    style={{ color: 'var(--sam-color-accent-primary)' }}
-                  >
-                    {workspace.url.replace('https://', '')}
-                    <ExternalLink size={9} className="shrink-0" aria-hidden="true" />
-                  </a>
+              {!node && workspace?.vmLocation && (
+                <ContextItem icon={<MapPin size={12} />} label="Location">
+                  {workspace.vmLocation}
+                </ContextItem>
+              )}
+              {taskEmbed?.outputBranch && (
+                <ContextItem icon={<GitBranch size={12} />} label="Branch">
+                  <span className="font-mono text-[11px]">
+                    {taskEmbed.outputBranch}
+                  </span>
                 </ContextItem>
               )}
             </div>
@@ -1092,6 +1149,24 @@ function SessionHeader({
           )}
         </div>
       )}
+
+      {/* Confirmation dialog for mark-complete action */}
+      <Dialog isOpen={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="sm">
+        <h3 id="dialog-title" className="text-base font-semibold text-fg-primary mb-2">
+          Mark task as complete?
+        </h3>
+        <p className="text-sm text-fg-muted mb-4">
+          This will archive the task and delete the workspace. This action cannot be undone.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setConfirmOpen(false)}>
+            Cancel
+          </Button>
+          <Button variant="primary" size="sm" onClick={handleMarkComplete}>
+            Complete & Delete
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }

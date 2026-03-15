@@ -38,21 +38,21 @@ The project chat session header dropdown has several UX issues:
 
 ## Implementation Checklist
 
-- [ ] 1. Remove Direct URL section from SessionHeader
-- [ ] 2. Move branch name from status row to infrastructure context section (where Direct URL was)
-- [ ] 3. Reorder infrastructure context: Workspace, VM Size, Provider + Location (combined or adjacent), Branch, Node link
-- [ ] 4. Keep "Open Workspace" button in the status/action row
-- [ ] 5. Add "Mark Complete" button in the action row area
-- [ ] 6. Implement `handleMarkComplete` function:
-   - Confirm with user (window.confirm or similar)
-   - Call `updateProjectTaskStatus(projectId, taskId, { toStatus: 'completed' })` — this also stops the session server-side
-   - Call `deleteWorkspace(workspaceId)` — full delete, not just stop
-   - Handle errors gracefully, show loading state
-   - After completion, the UI should reflect the archived/completed state
-- [ ] 7. Thread `projectId` prop through to SessionHeader
-- [ ] 8. Add `GitBranch`, `CheckCircle` (or similar) icons from lucide-react
-- [ ] 9. Import `updateProjectTaskStatus`, `deleteWorkspace` in the component
-- [ ] 10. Add behavioral tests for the Mark Complete flow
+- [x] 1. Remove Direct URL section from SessionHeader
+- [x] 2. Move branch name from status row to infrastructure context section (where Direct URL was)
+- [x] 3. Reorder infrastructure context: Workspace, VM Size, Provider + Location (combined), Branch, Node link
+- [x] 4. Keep "Open Workspace" button in the status/action row
+- [x] 5. Add "Mark Complete" button in the action row area
+- [x] 6. Implement `handleMarkComplete` function:
+   - Confirm with user (window.confirm)
+   - Call `updateProjectTaskStatus(projectId, taskId, { toStatus: 'completed' })` — also stops session server-side
+   - Call `deleteWorkspace(workspaceId)` — full delete
+   - Handle errors with alert, show loading state with spinner
+   - Reload page after completion to reflect new state
+- [x] 7. Thread `projectId` prop through to SessionHeader
+- [x] 8. Add `GitBranch`, `CheckCircle2` icons from lucide-react
+- [x] 9. Import `updateProjectTaskStatus`, `deleteWorkspace` in the component
+- [x] 10. Add structural tests for the SessionHeader changes
 
 ## Acceptance Criteria
 

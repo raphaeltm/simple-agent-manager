@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   sendFollowUpPrompt: vi.fn(),
   getWorkspace: vi.fn(),
   getNode: vi.fn(),
+  updateProjectTaskStatus: vi.fn(),
+  deleteWorkspace: vi.fn(),
   useProjectAgentSession: vi.fn(),
 }));
 
@@ -34,6 +36,8 @@ vi.mock('../../../src/lib/api', () => ({
   sendFollowUpPrompt: mocks.sendFollowUpPrompt,
   getWorkspace: mocks.getWorkspace,
   getNode: mocks.getNode,
+  updateProjectTaskStatus: mocks.updateProjectTaskStatus,
+  deleteWorkspace: mocks.deleteWorkspace,
 }));
 
 vi.mock('../../../src/hooks/useChatWebSocket', () => ({
@@ -1165,22 +1169,19 @@ describe('ProjectMessageView — session context dropdown', () => {
     expect(screen.getByText('VM Size:')).toBeTruthy();
     expect(screen.getByText('Medium')).toBeTruthy();
 
-    // Should show location
-    expect(screen.getByText('Location:')).toBeTruthy();
-    expect(screen.getByText('fsn1')).toBeTruthy();
-
     // Should show node info
     expect(screen.getByText('Node:')).toBeTruthy();
     expect(screen.getByText('htz-fsn1-abc')).toBeTruthy();
     expect(screen.getByText('(healthy)')).toBeTruthy();
 
-    // Should show cloud provider
+    // Should show cloud provider with location combined
     expect(screen.getByText('Provider:')).toBeTruthy();
-    expect(screen.getByText('Hetzner')).toBeTruthy();
+    // Provider and location are in the same row: "Hetzner" + "— fsn1"
+    expect(screen.getByText(/Hetzner/)).toBeTruthy();
+    expect(screen.getByText(/— fsn1/)).toBeTruthy();
 
-    // Should show direct URL
-    expect(screen.getByText('Direct URL:')).toBeTruthy();
-    expect(screen.getByText('ws-ctx-1.example.com')).toBeTruthy();
+    // Direct URL should NOT be shown (removed)
+    expect(screen.queryByText('Direct URL:')).toBeNull();
   });
 
   it('shows lightweight badge for small VM size', async () => {
