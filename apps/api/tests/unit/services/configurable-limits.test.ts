@@ -251,8 +251,8 @@ describe('MCP routes — configurable message length limits', () => {
     expect(mcpSource).toContain('env.MAX_OUTPUT_SUMMARY_LENGTH');
   });
 
-  it('defaults output summary max length to 2000', () => {
-    expect(mcpSource).toContain('DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH = 2000');
+  it('defaults output summary max length to 10000', () => {
+    expect(mcpSource).toContain('DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH = 10000');
   });
 
   it('uses getMcpLimits(env) at call sites (not module-level constants)', () => {

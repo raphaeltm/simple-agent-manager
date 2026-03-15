@@ -141,6 +141,26 @@ describe('cleanTextForSpeech', () => {
     expect(result.length).toBeGreaterThan(0);
     expect(result).not.toContain('##');
   });
+
+  it('passes maxOutputTokens to agent.generate() via modelSettings', async () => {
+    const ai = createMockAi();
+    await cleanTextForSpeech('## Heading with **markdown**', ai, { cleanupMaxTokens: 8192 });
+    expect(mockGenerate).toHaveBeenCalledOnce();
+    const callArgs = mockGenerate.mock.calls[0]!;
+    expect(callArgs[1]).toMatchObject({
+      modelSettings: { maxOutputTokens: 8192 },
+    });
+  });
+
+  it('uses default cleanup max tokens when not specified', async () => {
+    const ai = createMockAi();
+    await cleanTextForSpeech('## Heading with **markdown**', ai);
+    expect(mockGenerate).toHaveBeenCalledOnce();
+    const callArgs = mockGenerate.mock.calls[0]!;
+    expect(callArgs[1]).toMatchObject({
+      modelSettings: { maxOutputTokens: 4096 },
+    });
+  });
 });
 
 // ─── generateSpeechAudio ────────────────────────────────────────────────────
@@ -319,9 +339,10 @@ describe('getTTSConfig', () => {
     expect(config.speaker).toBe('luna');
     expect(config.encoding).toBe('mp3');
     expect(config.cleanupModel).toBe('@cf/google/gemma-3-12b-it');
-    expect(config.maxTextLength).toBe(5000);
-    expect(config.timeoutMs).toBe(30000);
-    expect(config.cleanupTimeoutMs).toBe(10000);
+    expect(config.cleanupMaxTokens).toBe(4096);
+    expect(config.maxTextLength).toBe(10000);
+    expect(config.timeoutMs).toBe(60000);
+    expect(config.cleanupTimeoutMs).toBe(15000);
     expect(config.r2Prefix).toBe('tts');
     expect(config.enabled).toBe(true);
   });
@@ -332,18 +353,20 @@ describe('getTTSConfig', () => {
       TTS_SPEAKER: 'asteria',
       TTS_ENCODING: 'wav',
       TTS_CLEANUP_MODEL: '@cf/meta/llama-3.1-8b-instruct',
-      TTS_MAX_TEXT_LENGTH: '10000',
-      TTS_TIMEOUT_MS: '60000',
-      TTS_CLEANUP_TIMEOUT_MS: '20000',
+      TTS_CLEANUP_MAX_TOKENS: '8192',
+      TTS_MAX_TEXT_LENGTH: '20000',
+      TTS_TIMEOUT_MS: '90000',
+      TTS_CLEANUP_TIMEOUT_MS: '30000',
       TTS_R2_PREFIX: 'audio-cache',
     });
     expect(config.model).toBe('@cf/myshell-ai/melotts');
     expect(config.speaker).toBe('asteria');
     expect(config.encoding).toBe('wav');
     expect(config.cleanupModel).toBe('@cf/meta/llama-3.1-8b-instruct');
-    expect(config.maxTextLength).toBe(10000);
-    expect(config.timeoutMs).toBe(60000);
-    expect(config.cleanupTimeoutMs).toBe(20000);
+    expect(config.cleanupMaxTokens).toBe(8192);
+    expect(config.maxTextLength).toBe(20000);
+    expect(config.timeoutMs).toBe(90000);
+    expect(config.cleanupTimeoutMs).toBe(30000);
     expect(config.r2Prefix).toBe('audio-cache');
   });
 

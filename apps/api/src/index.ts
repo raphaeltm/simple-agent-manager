@@ -232,6 +232,7 @@ export interface Env {
   TTS_MAX_TEXT_LENGTH?: string;
   TTS_TIMEOUT_MS?: string;
   TTS_CLEANUP_TIMEOUT_MS?: string;
+  TTS_CLEANUP_MAX_TOKENS?: string;
   TTS_R2_PREFIX?: string;
   TTS_ENABLED?: string;
   // VM agent TLS configuration

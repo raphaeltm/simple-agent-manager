@@ -22,11 +22,13 @@ import {
   DEFAULT_TTS_ENCODING,
   DEFAULT_TTS_CLEANUP_MODEL,
   DEFAULT_TTS_MAX_TEXT_LENGTH,
+  DEFAULT_TTS_CLEANUP_MAX_TOKENS,
   DEFAULT_TTS_TIMEOUT_MS,
   DEFAULT_TTS_CLEANUP_TIMEOUT_MS,
   DEFAULT_TTS_R2_PREFIX,
 } from '@simple-agent-manager/shared';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -35,6 +37,7 @@ export interface TTSConfig {
   speaker?: string;
   encoding?: string;
   cleanupModel?: string;
+  cleanupMaxTokens?: number;
   maxTextLength?: number;
   timeoutMs?: number;
   cleanupTimeoutMs?: number;
@@ -47,6 +50,7 @@ export interface TTSEnvVars {
   TTS_SPEAKER?: string;
   TTS_ENCODING?: string;
   TTS_CLEANUP_MODEL?: string;
+  TTS_CLEANUP_MAX_TOKENS?: string;
   TTS_MAX_TEXT_LENGTH?: string;
   TTS_TIMEOUT_MS?: string;
   TTS_CLEANUP_TIMEOUT_MS?: string;
@@ -60,9 +64,10 @@ export function getTTSConfig(env: TTSEnvVars): TTSConfig {
     speaker: env.TTS_SPEAKER || DEFAULT_TTS_SPEAKER,
     encoding: env.TTS_ENCODING || DEFAULT_TTS_ENCODING,
     cleanupModel: env.TTS_CLEANUP_MODEL || DEFAULT_TTS_CLEANUP_MODEL,
-    maxTextLength: parseInt(env.TTS_MAX_TEXT_LENGTH || String(DEFAULT_TTS_MAX_TEXT_LENGTH), 10),
-    timeoutMs: parseInt(env.TTS_TIMEOUT_MS || String(DEFAULT_TTS_TIMEOUT_MS), 10),
-    cleanupTimeoutMs: parseInt(env.TTS_CLEANUP_TIMEOUT_MS || String(DEFAULT_TTS_CLEANUP_TIMEOUT_MS), 10),
+    cleanupMaxTokens: parsePositiveInt(env.TTS_CLEANUP_MAX_TOKENS, DEFAULT_TTS_CLEANUP_MAX_TOKENS),
+    maxTextLength: parsePositiveInt(env.TTS_MAX_TEXT_LENGTH, DEFAULT_TTS_MAX_TEXT_LENGTH),
+    timeoutMs: parsePositiveInt(env.TTS_TIMEOUT_MS, DEFAULT_TTS_TIMEOUT_MS),
+    cleanupTimeoutMs: parsePositiveInt(env.TTS_CLEANUP_TIMEOUT_MS, DEFAULT_TTS_CLEANUP_TIMEOUT_MS),
     r2Prefix: env.TTS_R2_PREFIX || DEFAULT_TTS_R2_PREFIX,
     enabled: env.TTS_ENABLED !== 'false',
   };
@@ -94,6 +99,7 @@ export async function cleanTextForSpeech(
 ): Promise<string> {
   const cleanupModel = config.cleanupModel ?? DEFAULT_TTS_CLEANUP_MODEL;
   const cleanupTimeoutMs = config.cleanupTimeoutMs ?? DEFAULT_TTS_CLEANUP_TIMEOUT_MS;
+  const cleanupMaxTokens = config.cleanupMaxTokens ?? DEFAULT_TTS_CLEANUP_MAX_TOKENS;
 
   // If text has no markdown indicators, skip LLM cleanup
   if (!hasMarkdown(text)) {
@@ -112,6 +118,9 @@ export async function cleanTextForSpeech(
 
     const result = await agent.generate(text, {
       abortSignal: AbortSignal.timeout(cleanupTimeoutMs),
+      modelSettings: {
+        maxOutputTokens: cleanupMaxTokens,
+      },
     });
 
     const cleaned = result.text?.trim();
@@ -119,6 +128,14 @@ export async function cleanTextForSpeech(
       log.warn('tts.cleanup_empty', { textLength: text.length, cleanupModel });
       return fallbackStripMarkdown(text);
     }
+
+    log.info('tts.cleanup_complete', {
+      inputLength: text.length,
+      outputLength: cleaned.length,
+      ratio: Math.round((cleaned.length / text.length) * 100),
+      cleanupModel,
+      cleanupMaxTokens,
+    });
 
     return cleaned;
   } catch (err) {
@@ -303,6 +320,13 @@ export async function synthesizeSpeech(
   }
 
   // 2. Truncate if too long
+  if (text.length > maxTextLength) {
+    log.info('tts.text_truncated', {
+      originalLength: text.length,
+      maxTextLength,
+      storageId,
+    });
+  }
   const inputText = text.length > maxTextLength ? text.slice(0, maxTextLength) : text;
 
   // 3. Clean markdown for natural speech
