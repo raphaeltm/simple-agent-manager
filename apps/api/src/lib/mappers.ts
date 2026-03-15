@@ -33,6 +33,7 @@ export function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): W
     status: ws.status as WorkspaceResponse['status'],
     vmSize: ws.vmSize as WorkspaceResponse['vmSize'],
     vmLocation: ws.vmLocation as WorkspaceResponse['vmLocation'],
+    workspaceProfile: (ws.workspaceProfile as WorkspaceResponse['workspaceProfile']) ?? 'full',
     vmIp: ws.vmIp,
     lastActivityAt: ws.lastActivityAt,
     errorMessage: ws.errorMessage,

@@ -628,6 +628,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         status: 'creating',
         vmSize: state.config.vmSize,
         vmLocation: state.config.vmLocation,
+        workspaceProfile: state.config.workspaceProfile ?? 'full',
         createdAt: now,
         updatedAt: now,
       });

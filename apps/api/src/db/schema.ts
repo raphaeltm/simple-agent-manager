@@ -435,6 +435,7 @@ export const workspaces = sqliteTable(
     status: text('status').notNull().default('pending'),
     vmSize: text('vm_size').notNull(),
     vmLocation: text('vm_location').notNull(),
+    workspaceProfile: text('workspace_profile').default('full'),
     hetznerServerId: text('hetzner_server_id'),
     vmIp: text('vm_ip'),
     dnsRecordId: text('dns_record_id'),
