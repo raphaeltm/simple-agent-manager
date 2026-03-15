@@ -1182,13 +1182,14 @@ describe('ProjectMessageView — session context dropdown', () => {
     expect(screen.getByText('ws-ctx-1.example.com')).toBeTruthy();
   });
 
-  it('shows lightweight badge for small VM size', async () => {
+  it('shows lightweight badge for lightweight workspace profile', async () => {
     mocks.getWorkspace.mockResolvedValue({
       id: 'ws-light',
       name: 'light-ws',
       status: 'running',
       vmSize: 'small',
       vmLocation: 'fsn1',
+      workspaceProfile: 'lightweight',
       nodeId: 'node-1',
     });
     mocks.getNode.mockResolvedValue({
@@ -1213,13 +1214,14 @@ describe('ProjectMessageView — session context dropdown', () => {
     });
   });
 
-  it('shows full badge for medium/large VM size', async () => {
+  it('shows full badge for full workspace profile', async () => {
     mocks.getWorkspace.mockResolvedValue({
       id: 'ws-full',
       name: 'full-ws',
       status: 'running',
       vmSize: 'large',
       vmLocation: 'fsn1',
+      workspaceProfile: 'full',
       nodeId: 'node-1',
     });
     mocks.getNode.mockResolvedValue({
