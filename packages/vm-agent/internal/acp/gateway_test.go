@@ -74,7 +74,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "vibe-acp",
 			wantEnvVar:     "MISTRAL_API_KEY",
-			wantInstallCmd: `which pip3 >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq python3-pip; }; pip3 install --break-system-packages mistral-vibe`,
+			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | sh 2>/dev/null && export PATH="/root/.local/bin:$PATH" && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe --python 3.12`,
 		},
 	}
 
@@ -268,7 +268,7 @@ func TestGetAgentCommandInfoMistralVibe(t *testing.T) {
 	if info.envVarName != "MISTRAL_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "MISTRAL_API_KEY")
 	}
-	wantInstall := `which pip3 >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq python3-pip; }; pip3 install --break-system-packages mistral-vibe`
+	wantInstall := `curl -LsSf https://astral.sh/uv/install.sh | sh 2>/dev/null && export PATH="/root/.local/bin:$PATH" && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe --python 3.12`
 	if info.installCmd != wantInstall {
 		t.Fatalf("installCmd=%q, want %q", info.installCmd, wantInstall)
 	}
