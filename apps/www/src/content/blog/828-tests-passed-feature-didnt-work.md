@@ -1,7 +1,7 @@
 ---
 title: "828 Tests Passed. The Feature Didn't Work."
 date: 2026-02-28
-author: Raphael Titsworth-Morin
+author: Raphaël Titsworth-Morin
 category: devlog
 tags: ["testing", "ai-agents", "architecture", "open-source", "integration-testing"]
 excerpt: "A post-mortem on how 8 PRs, 828 passing tests, and automated code review all missed that our AI agent platform's core feature was completely broken."

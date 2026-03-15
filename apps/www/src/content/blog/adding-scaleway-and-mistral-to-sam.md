@@ -1,7 +1,7 @@
 ---
 title: "Adding Scaleway and Mistral to SAM"
 date: 2026-03-15
-author: Raphael Titsworth-Morin
+author: Raphaël Titsworth-Morin
 category: engineering
 tags: ["open-source", "ai-agents", "architecture", "scaleway", "mistral", "multi-cloud", "typescript", "go"]
 excerpt: "What happened when I added a second cloud provider and a second AI agent to SAM. The Provider abstraction held up. The agent abstraction took six debugging sessions."
