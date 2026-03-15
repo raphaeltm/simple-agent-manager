@@ -738,7 +738,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
       {taskEmbed?.outputSummary && (
-        <TruncatedSummary summary={taskEmbed.outputSummary} />
+        <TruncatedSummary summary={taskEmbed.outputSummary} taskId={taskEmbed.id} />
       )}
 
       {/* Messages area — merged DO (persistent) + ACP (streaming/unpersisted) */}
