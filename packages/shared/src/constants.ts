@@ -327,13 +327,16 @@ export const DEFAULT_TTS_ENCODING = 'mp3';
 export const DEFAULT_TTS_CLEANUP_MODEL = '@cf/google/gemma-3-12b-it';
 
 /** Default max text length (characters) for TTS input. Override via TTS_MAX_TEXT_LENGTH env var. */
-export const DEFAULT_TTS_MAX_TEXT_LENGTH = 5000;
+export const DEFAULT_TTS_MAX_TEXT_LENGTH = 10000;
+
+/** Default max output tokens for the markdown cleanup LLM. Override via TTS_CLEANUP_MAX_TOKENS env var. */
+export const DEFAULT_TTS_CLEANUP_MAX_TOKENS = 4096;
 
 /** Default timeout (ms) for TTS audio generation. Override via TTS_TIMEOUT_MS env var. */
-export const DEFAULT_TTS_TIMEOUT_MS = 30000;
+export const DEFAULT_TTS_TIMEOUT_MS = 60000;
 
 /** Default timeout (ms) for markdown cleanup LLM call. Override via TTS_CLEANUP_TIMEOUT_MS env var. */
-export const DEFAULT_TTS_CLEANUP_TIMEOUT_MS = 10000;
+export const DEFAULT_TTS_CLEANUP_TIMEOUT_MS = 15000;
 
 /** Default R2 key prefix for TTS audio files. Override via TTS_R2_PREFIX env var. */
 export const DEFAULT_TTS_R2_PREFIX = 'tts';

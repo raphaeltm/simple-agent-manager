@@ -75,7 +75,7 @@ const DEFAULT_ACTIVITY_MESSAGE_MAX_LENGTH = 2000;
 /** Default max length for log messages. Override via MAX_LOG_MESSAGE_LENGTH env var. */
 const DEFAULT_LOG_MESSAGE_MAX_LENGTH = 1000;
 /** Default max length for task output summary stored in D1. Override via MAX_OUTPUT_SUMMARY_LENGTH env var. */
-const DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH = 2000;
+const DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH = 10000;
 
 /** Default page sizes for project awareness tools. Override via MCP_* env vars. */
 const DEFAULT_MCP_TASK_LIST_LIMIT = 10;
