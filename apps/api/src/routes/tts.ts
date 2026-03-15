@@ -3,7 +3,6 @@ import type { Env } from '../index';
 import { requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { synthesizeSpeech, getAudioFromR2, getTTSConfig } from '../services/tts';
-import { DEFAULT_TTS_ENCODING } from '@simple-agent-manager/shared';
 import { log } from '../lib/logger';
 
 const ttsRoutes = new Hono<{ Bindings: Env }>();
@@ -41,11 +40,6 @@ ttsRoutes.post('/synthesize', async (c) => {
 
   if (text.length === 0) {
     throw errors.badRequest('Text cannot be empty');
-  }
-
-  const maxTextLength = config.maxTextLength ?? 5000;
-  if (text.length > maxTextLength) {
-    log.warn('tts.text_truncated', { originalLength: text.length, maxTextLength });
   }
 
   try {
@@ -86,16 +80,13 @@ ttsRoutes.get('/audio/:storageId', async (c) => {
     throw errors.notFound('Audio not found');
   }
 
-  const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
-  const contentType = encoding === 'mp3' ? 'audio/mpeg'
-    : encoding === 'wav' ? 'audio/wav'
-    : encoding === 'ogg' ? 'audio/ogg'
-    : 'audio/mpeg';
+  // Read content type from R2 metadata (set at store time), fallback to audio/mpeg
+  const contentType = audioObject.httpMetadata?.contentType ?? 'audio/mpeg';
 
   return new Response(audioObject.body, {
     headers: {
       'Content-Type': contentType,
-      'Cache-Control': 'public, max-age=86400', // 24h browser cache
+      'Cache-Control': 'public, max-age=86400',
       'Content-Length': String(audioObject.size),
     },
   });

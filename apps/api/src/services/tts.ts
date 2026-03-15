@@ -170,18 +170,27 @@ export async function generateSpeechAudio(
   const model = config.model ?? DEFAULT_TTS_MODEL;
   const speaker = config.speaker ?? DEFAULT_TTS_SPEAKER;
   const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
+  const timeoutMs = config.timeoutMs ?? DEFAULT_TTS_TIMEOUT_MS;
 
   const startTime = Date.now();
 
   // Use returnRawResponse to get streaming audio bytes
-  const response = await ai.run(
-    model as Parameters<typeof ai.run>[0],
-    { text, speaker, encoding } as never,
-    { returnRawResponse: true },
-  );
+  const response = await Promise.race([
+    ai.run(
+      model as Parameters<typeof ai.run>[0],
+      { text, speaker, encoding } as never,
+      { returnRawResponse: true },
+    ),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`TTS generation timed out after ${timeoutMs}ms`)), timeoutMs),
+    ),
+  ]);
 
   // The response is a standard Response object when returnRawResponse is true
   const rawResponse = response as unknown as Response;
+  if (typeof rawResponse.ok !== 'boolean') {
+    throw new Error(`TTS model did not return a Response (got ${typeof response})`);
+  }
   if (!rawResponse.ok) {
     const errorText = await rawResponse.text().catch(() => 'unknown');
     throw new Error(`TTS model returned ${rawResponse.status}: ${errorText}`);
