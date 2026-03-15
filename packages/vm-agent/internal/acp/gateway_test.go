@@ -681,6 +681,9 @@ func TestGenerateVibeConfig_McpServerWithToken(t *testing.T) {
 	if !strings.Contains(config, `name = "sam-mcp-0"`) {
 		t.Error("expected MCP server name sam-mcp-0")
 	}
+	if !strings.Contains(config, `transport = "http"`) {
+		t.Error("expected transport = http for MCP server")
+	}
 	if !strings.Contains(config, `url = "https://api.example.com/mcp"`) {
 		t.Error("expected MCP server URL")
 	}
@@ -703,6 +706,9 @@ func TestGenerateVibeConfig_McpServerWithoutToken(t *testing.T) {
 		{URL: "https://api.example.com/mcp", Token: ""},
 	})
 
+	if !strings.Contains(config, `transport = "http"`) {
+		t.Error("expected transport = http for MCP server")
+	}
 	if !strings.Contains(config, `url = "https://api.example.com/mcp"`) {
 		t.Error("expected MCP server URL")
 	}
@@ -720,9 +726,12 @@ func TestGenerateVibeConfig_MultipleMcpServers(t *testing.T) {
 		{URL: "https://backup.example.com/mcp", Token: "token-2"},
 	})
 
-	// Both servers should be present
+	// Both servers should be present with transport field
 	if count := strings.Count(config, "[[mcp_servers]]"); count != 2 {
 		t.Errorf("expected 2 [[mcp_servers]] entries, got %d", count)
+	}
+	if count := strings.Count(config, `transport = "http"`); count != 2 {
+		t.Errorf("expected 2 transport = http fields, got %d", count)
 	}
 	if !strings.Contains(config, `name = "sam-mcp-0"`) {
 		t.Error("expected sam-mcp-0")
@@ -751,6 +760,9 @@ func TestGenerateVibeConfig_McpServerSpecialCharsInURL(t *testing.T) {
 		{URL: "https://api.example.com/path?param=value&other=test", Token: "tok"},
 	})
 
+	if !strings.Contains(config, `transport = "http"`) {
+		t.Error("expected transport = http for MCP server")
+	}
 	if !strings.Contains(config, `url = "https://api.example.com/path?param=value&other=test"`) {
 		t.Error("expected URL with query params to be preserved")
 	}
