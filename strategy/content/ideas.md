@@ -23,6 +23,32 @@ A living pipeline of content topics with enough context to pick up and draft. Ea
 
 ## Ideas
 
+### The French Coding Agent Stack: Scaleway + Mistral on SAM
+
+**Status**: In Draft
+**Priority**: High
+**Type**: Blog post / product story
+**Audience**: European developers, French tech community, infrastructure sovereignty advocates
+**Draft**: `strategy/content/drafts/2026-03-15-french-coding-agent-stack.md`
+
+**Angle**: SAM's creator builds from France. The platform now supports a fully European AI coding stack — Scaleway VMs in Paris running Mistral's coding agents. Your code, your cloud, your continent. Frames multi-provider and multi-agent as a sovereignty story, not just a technical feature.
+
+**Why it's interesting externally**:
+- European tech sovereignty is a hot topic (GDPR, data residency, EU AI Act)
+- Personal founder story adds authenticity
+- Honest debugging section shows real integration challenges
+- Positions SAM uniquely vs US-centric platforms
+
+**Key code references**:
+- Provider abstraction: `packages/providers/src/types.ts` — `Provider` interface
+- Scaleway implementation: `packages/providers/src/scaleway.ts` — locations, sizes, IP handling
+- Mistral Vibe config: `packages/vm-agent/internal/acp/gateway.go` — `generateVibeConfig()`, model aliases
+- Agent catalog: `packages/vm-agent/internal/acp/gateway.go` — `getAgentCommandInfo()` (Claude, Codex, Gemini, Vibe)
+
+**Messaging hooks**: European sovereignty, infrastructure freedom, no vendor lock-in, BYOC
+
+---
+
 ### Multi-Agent Architecture: One Platform, Any AI
 
 **Status**: New
