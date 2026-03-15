@@ -17,7 +17,7 @@ import type {
   TaskStatus,
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
-import { isTaskExecutionStep } from '@simple-agent-manager/shared';
+import { isTaskExecutionStep, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import type * as schema from '../db/schema';
 import { getWorkspaceUrl } from '../services/dns';
 
@@ -33,7 +33,7 @@ export function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): W
     status: ws.status as WorkspaceResponse['status'],
     vmSize: ws.vmSize as WorkspaceResponse['vmSize'],
     vmLocation: ws.vmLocation as WorkspaceResponse['vmLocation'],
-    workspaceProfile: (ws.workspaceProfile as WorkspaceResponse['workspaceProfile']) ?? 'full',
+    workspaceProfile: (ws.workspaceProfile as WorkspaceResponse['workspaceProfile']) ?? DEFAULT_WORKSPACE_PROFILE,
     vmIp: ws.vmIp,
     lastActivityAt: ws.lastActivityAt,
     errorMessage: ws.errorMessage,

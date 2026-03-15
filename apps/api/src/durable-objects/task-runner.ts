@@ -36,6 +36,7 @@ import {
   DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS,
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
+  DEFAULT_WORKSPACE_PROFILE,
 } from '@simple-agent-manager/shared';
 import { log } from '../lib/logger';
 
@@ -628,7 +629,7 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         status: 'creating',
         vmSize: state.config.vmSize,
         vmLocation: state.config.vmLocation,
-        workspaceProfile: state.config.workspaceProfile ?? 'full',
+        workspaceProfile: state.config.workspaceProfile ?? DEFAULT_WORKSPACE_PROFILE,
         createdAt: now,
         updatedAt: now,
       });
