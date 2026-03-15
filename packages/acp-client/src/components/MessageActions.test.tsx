@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act, within } from '@testing-library/react';
+import { render, screen, fireEvent, act, within, waitFor } from '@testing-library/react';
 import { MessageActions } from './MessageActions';
 
 // Mock clipboard API
@@ -363,6 +363,167 @@ describe('MessageActions', () => {
       });
 
       expect(mockWriteText).toHaveBeenCalledWith(mdText);
+    });
+  });
+
+  describe('server-side TTS', () => {
+    const ttsProps = {
+      ...defaultProps,
+      ttsApiUrl: 'https://api.example.com/api/tts',
+      ttsStorageId: 'msg-123',
+    };
+
+    // jsdom doesn't provide URL.createObjectURL/revokeObjectURL
+    beforeEach(() => {
+      if (!URL.createObjectURL) {
+        URL.createObjectURL = vi.fn().mockReturnValue('blob:mock-url');
+      }
+      if (!URL.revokeObjectURL) {
+        URL.revokeObjectURL = vi.fn();
+      }
+    });
+
+    it('shows speaker button when ttsApiUrl is provided (even without speechSynthesis)', () => {
+      // Remove browser speechSynthesis
+      Object.defineProperty(window, 'speechSynthesis', {
+        value: undefined,
+        writable: true,
+        configurable: true,
+      });
+
+      render(<MessageActions {...ttsProps} />);
+      expect(screen.getByLabelText('Read aloud')).toBeTruthy();
+    });
+
+    it('calls server TTS API when ttsApiUrl is provided', async () => {
+      const mockFetch = vi.fn();
+      // First call: POST /synthesize
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ audioUrl: '/api/tts/audio/msg-123' }),
+      });
+      // Second call: GET /audio
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['fake-audio'], { type: 'audio/mpeg' })),
+      });
+      vi.stubGlobal('fetch', mockFetch);
+
+      // Mock Audio constructor
+      const mockPlay = vi.fn().mockResolvedValue(undefined);
+      vi.stubGlobal('Audio', class {
+        src = '';
+        onended: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        play = mockPlay;
+        pause = vi.fn();
+        currentTime = 0;
+      });
+
+      render(<MessageActions {...ttsProps} />);
+
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+
+      // Wait for the full async chain (synthesize → fetch audio → play) to complete
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
+
+      // Verify synthesis API was called with correct params
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.example.com/api/tts/synthesize',
+        expect.objectContaining({
+          method: 'POST',
+          credentials: 'include',
+          body: JSON.stringify({ text: ttsProps.text, storageId: 'msg-123' }),
+        }),
+      );
+
+      // Verify audio was fetched
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.example.com/api/tts/audio/msg-123',
+        expect.objectContaining({ credentials: 'include' }),
+      );
+
+      // Verify audio playback started
+      await waitFor(() => {
+        expect(mockPlay).toHaveBeenCalled();
+      });
+    });
+
+    it('does not use browser speechSynthesis when ttsApiUrl is provided', async () => {
+      const mockFetch = vi.fn();
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ audioUrl: '/api/tts/audio/msg-123' }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['audio'], { type: 'audio/mpeg' })),
+      });
+      vi.stubGlobal('fetch', mockFetch);
+      vi.stubGlobal('Audio', class {
+        src = '';
+        onended: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        play = vi.fn().mockResolvedValue(undefined);
+        pause = vi.fn();
+        currentTime = 0;
+      });
+      render(<MessageActions {...ttsProps} />);
+
+      fireEvent.click(screen.getByLabelText('Read aloud'));
+
+      // Wait for async TTS chain to complete
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
+
+      // Browser speechSynthesis should NOT have been called
+      expect(mockSpeak).not.toHaveBeenCalled();
+    });
+
+    it('shows loading state while generating audio', async () => {
+      // Make the fetch hang
+      let resolveFetch: (value: unknown) => void;
+      const pendingFetch = new Promise((resolve) => { resolveFetch = resolve; });
+      vi.stubGlobal('fetch', vi.fn().mockReturnValue(pendingFetch));
+
+      render(<MessageActions {...ttsProps} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText('Read aloud'));
+      });
+
+      // Should show loading label
+      expect(screen.getByLabelText('Generating audio...')).toBeTruthy();
+
+      // Clean up
+      resolveFetch!({
+        ok: false,
+        json: () => Promise.resolve({ message: 'cancelled' }),
+      });
+    });
+
+    it('handles synthesis API failure gracefully', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({ message: 'Server error' }),
+      }));
+
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      render(<MessageActions {...ttsProps} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText('Read aloud'));
+      });
+
+      // Should revert to Read aloud state (not stuck in loading)
+      expect(screen.getByLabelText('Read aloud')).toBeTruthy();
+
+      consoleSpy.mockRestore();
     });
   });
 });

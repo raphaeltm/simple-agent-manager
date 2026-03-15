@@ -48,6 +48,9 @@ interface AgentPanelProps {
   /** URL for the voice transcription API endpoint (e.g., https://api.example.com/api/transcribe).
    *  When provided, a voice input button is shown next to the send button. */
   transcribeApiUrl?: string;
+  /** URL for the TTS API endpoint (e.g., https://api.example.com/api/tts).
+   *  When provided, uses server-side TTS for read-aloud instead of browser speechSynthesis. */
+  ttsApiUrl?: string;
   /** Current agent settings (null = not loaded yet) */
   agentSettings?: ChatSettingsData | null;
   /** Whether agent settings are loading */
@@ -72,6 +75,7 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
   currentMode,
   onSelectMode,
   transcribeApiUrl,
+  ttsApiUrl,
   agentSettings,
   agentSettingsLoading,
   permissionModes,
@@ -291,7 +295,7 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
             </div>
           )}
           {messages.items.map((item) => (
-            <ConversationItemView key={item.id} item={item} />
+            <ConversationItemView key={item.id} item={item} ttsApiUrl={ttsApiUrl} />
           ))}
         </div>
         {/* Scroll-to-bottom FAB — z-10 required because overflow-y-auto creates a stacking context */}
@@ -468,12 +472,12 @@ function ErrorBanner({ session }: { session: AcpSessionHandle }) {
  * state toggles, palette visibility) don't cascade into every conversation
  * item. Only re-renders when the item object itself changes.
  */
-const ConversationItemView = React.memo(function ConversationItemView({ item }: { item: ConversationItem }) {
+const ConversationItemView = React.memo(function ConversationItemView({ item, ttsApiUrl }: { item: ConversationItem; ttsApiUrl?: string }) {
   switch (item.kind) {
     case 'user_message':
       return <MessageBubble text={item.text} role="user" />;
     case 'agent_message':
-      return <MessageBubble text={item.text} role="agent" streaming={item.streaming} timestamp={item.timestamp} />;
+      return <MessageBubble text={item.text} role="agent" streaming={item.streaming} timestamp={item.timestamp} ttsApiUrl={ttsApiUrl} ttsStorageId={item.id} />;
     case 'thinking':
       return <ThinkingBlock text={item.text} active={item.active} />;
     case 'tool_call':

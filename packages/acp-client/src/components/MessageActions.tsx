@@ -5,6 +5,12 @@ export interface MessageActionsProps {
   text: string;
   /** Unix-millisecond timestamp of the message. */
   timestamp: number;
+  /** Optional TTS API base URL (e.g., "https://api.example.com/api/tts").
+   *  When provided, uses server-side TTS via Cloudflare Workers AI.
+   *  When absent, falls back to browser speechSynthesis. */
+  ttsApiUrl?: string;
+  /** Unique storage ID for caching TTS audio (e.g., message ID). Required when ttsApiUrl is set. */
+  ttsStorageId?: string;
 }
 
 /** Strips markdown syntax for a cleaner word/char count and TTS reading. */
@@ -34,20 +40,30 @@ function formatTimestamp(ts: number): string {
 /**
  * Action buttons displayed below agent messages.
  * - Info icon: shows metadata popover (timestamp, word count, char count)
- * - Speaker icon: reads the message aloud via Web Speech API
+ * - Speaker icon: reads the message aloud via server-side TTS (preferred) or Web Speech API (fallback)
  * - Copy icon: copies message text to clipboard
  */
-export const MessageActions = React.memo(function MessageActions({ text, timestamp }: MessageActionsProps) {
+export const MessageActions = React.memo(function MessageActions({
+  text,
+  timestamp,
+  ttsApiUrl,
+  ttsStorageId,
+}: MessageActionsProps) {
   const [showMeta, setShowMeta] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const metaRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
   const popoverId = React.useId();
 
   const plain = stripMarkdownForCount(text);
   const words = plain ? plain.split(/\s+/).filter(Boolean).length : 0;
   const chars = plain.length;
+
+  const useServerTTS = !!(ttsApiUrl && ttsStorageId);
 
   // Close metadata popover on outside click or Escape key
   useEffect(() => {
@@ -74,24 +90,112 @@ export const MessageActions = React.memo(function MessageActions({ text, timesta
     setShowMeta((v) => !v);
   }, []);
 
-  const toggleSpeak = useCallback(() => {
+  // Stop audio playback (works for both server TTS and browser TTS)
+  const stopPlayback = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    setIsSpeaking(false);
+    setIsLoading(false);
+  }, []);
+
+  // Server-side TTS: call API to synthesize, then fetch audio and play
+  const playServerTTS = useCallback(async () => {
+    if (!ttsApiUrl || !ttsStorageId) return;
+
+    setIsLoading(true);
+
+    try {
+      // Step 1: Trigger synthesis (may return cached)
+      const synthesizeRes = await fetch(`${ttsApiUrl}/synthesize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ text, storageId: ttsStorageId }),
+      });
+
+      if (!synthesizeRes.ok) {
+        const errData = await synthesizeRes.json().catch(() => null);
+        throw new Error(errData?.message || `Synthesis failed: ${synthesizeRes.status}`);
+      }
+
+      const { audioUrl } = await synthesizeRes.json() as { audioUrl: string };
+
+      // Step 2: Fetch the audio blob
+      // Build absolute URL from the relative path returned by the API
+      const baseOrigin = new URL(ttsApiUrl).origin;
+      const fullAudioUrl = `${baseOrigin}${audioUrl}`;
+
+      const audioRes = await fetch(fullAudioUrl, {
+        credentials: 'include',
+      });
+
+      if (!audioRes.ok) {
+        throw new Error(`Audio fetch failed: ${audioRes.status}`);
+      }
+
+      const audioBlob = await audioRes.blob();
+      const blobUrl = URL.createObjectURL(audioBlob);
+
+      // Clean up previous blob URL
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+      }
+      blobUrlRef.current = blobUrl;
+
+      // Step 3: Play audio
+      const audio = new Audio(blobUrl);
+      audioRef.current = audio;
+
+      audio.onended = () => {
+        setIsSpeaking(false);
+        audioRef.current = null;
+      };
+      audio.onerror = () => {
+        setIsSpeaking(false);
+        setIsLoading(false);
+        audioRef.current = null;
+      };
+
+      await audio.play();
+      setIsLoading(false);
+      setIsSpeaking(true);
+    } catch (err) {
+      console.error('TTS playback error:', err);
+      setIsLoading(false);
+      setIsSpeaking(false);
+    }
+  }, [ttsApiUrl, ttsStorageId, text]);
+
+  // Browser-native TTS fallback
+  const playBrowserTTS = useCallback(() => {
     if (!window.speechSynthesis) return;
 
-    if (isSpeaking) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-      return;
-    }
-
-    // Cancel any ongoing speech first
     window.speechSynthesis.cancel();
-
     const utterance = new SpeechSynthesisUtterance(plain);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
     window.speechSynthesis.speak(utterance);
     setIsSpeaking(true);
-  }, [isSpeaking, plain]);
+  }, [plain]);
+
+  const toggleSpeak = useCallback(() => {
+    if (isSpeaking || isLoading) {
+      stopPlayback();
+      return;
+    }
+
+    if (useServerTTS) {
+      playServerTTS();
+    } else if (window.speechSynthesis) {
+      playBrowserTTS();
+    }
+  }, [isSpeaking, isLoading, useServerTTS, playServerTTS, playBrowserTTS, stopPlayback]);
 
   const handleCopy = useCallback(() => {
     if (!navigator.clipboard) return;
@@ -104,15 +208,26 @@ export const MessageActions = React.memo(function MessageActions({ text, timesta
     });
   }, [text]);
 
-  // Clean up speech on unmount
+  // Clean up on unmount
   useEffect(() => {
     return () => {
-      if (window.speechSynthesis && isSpeaking) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+      }
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
         window.speechSynthesis.cancel();
       }
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
     };
-  }, [isSpeaking]);
+  }, []);
+
+  // Show speaker button if server TTS is available OR browser TTS is available
+  const showSpeaker = useServerTTS || (typeof window !== 'undefined' && !!window.speechSynthesis);
 
   return (
     <div className="flex items-center gap-1 mt-1 relative" ref={metaRef}>
@@ -148,19 +263,35 @@ export const MessageActions = React.memo(function MessageActions({ text, timesta
       </button>
 
       {/* Speaker button */}
-      {window.speechSynthesis && (
+      {showSpeaker && (
         <button
           type="button"
           onClick={toggleSpeak}
+          disabled={isLoading}
           className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded transition-colors"
           style={{
-            color: isSpeaking ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
+            color: (isSpeaking || isLoading) ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
             backgroundColor: isSpeaking ? 'var(--sam-color-bg-inset)' : undefined,
+            opacity: isLoading ? 0.7 : 1,
           }}
-          aria-label={isSpeaking ? 'Stop reading' : 'Read aloud'}
-          title={isSpeaking ? 'Stop reading' : 'Read aloud'}
+          aria-label={isLoading ? 'Generating audio...' : isSpeaking ? 'Stop reading' : 'Read aloud'}
+          title={isLoading ? 'Generating audio...' : isSpeaking ? 'Stop reading' : 'Read aloud'}
         >
-          {isSpeaking ? (
+          {isLoading ? (
+            // Loading spinner
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+              className="animate-spin"
+            >
+              <circle cx="12" cy="12" r="10" strokeDasharray="31.4 31.4" strokeLinecap="round" />
+            </svg>
+          ) : isSpeaking ? (
             // Stop/square icon
             <svg
               width="14"

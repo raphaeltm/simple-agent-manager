@@ -311,6 +311,34 @@ export const DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES = 10;
 export const MAX_CONTEXT_SUMMARY_BYTES = 65536;
 
 // =============================================================================
+// Text-to-Speech (Cloudflare Workers AI)
+// =============================================================================
+
+/** Default Workers AI model for text-to-speech. Override via TTS_MODEL env var. */
+export const DEFAULT_TTS_MODEL = '@cf/deepgram/aura-2-en';
+
+/** Default TTS voice/speaker. Override via TTS_SPEAKER env var. */
+export const DEFAULT_TTS_SPEAKER = 'luna';
+
+/** Default TTS audio encoding. Override via TTS_ENCODING env var. */
+export const DEFAULT_TTS_ENCODING = 'mp3';
+
+/** Default Workers AI model for cleaning markdown before TTS. Override via TTS_CLEANUP_MODEL env var. */
+export const DEFAULT_TTS_CLEANUP_MODEL = '@cf/google/gemma-3-12b-it';
+
+/** Default max text length (characters) for TTS input. Override via TTS_MAX_TEXT_LENGTH env var. */
+export const DEFAULT_TTS_MAX_TEXT_LENGTH = 5000;
+
+/** Default timeout (ms) for TTS audio generation. Override via TTS_TIMEOUT_MS env var. */
+export const DEFAULT_TTS_TIMEOUT_MS = 30000;
+
+/** Default timeout (ms) for markdown cleanup LLM call. Override via TTS_CLEANUP_TIMEOUT_MS env var. */
+export const DEFAULT_TTS_CLEANUP_TIMEOUT_MS = 10000;
+
+/** Default R2 key prefix for TTS audio files. Override via TTS_R2_PREFIX env var. */
+export const DEFAULT_TTS_R2_PREFIX = 'tts';
+
+// =============================================================================
 // Agent Settings
 // =============================================================================
 

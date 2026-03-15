@@ -11,6 +11,10 @@ interface MessageBubbleProps {
   streaming?: boolean;
   /** Unix-millisecond timestamp for metadata display (agent messages only). */
   timestamp?: number;
+  /** TTS API base URL for server-side text-to-speech (e.g., "https://api.example.com/api/tts"). */
+  ttsApiUrl?: string;
+  /** Unique storage ID for caching TTS audio (e.g., message ID). */
+  ttsStorageId?: string;
 }
 
 // Stable remark plugins array — avoids creating a new array reference on every render
@@ -138,7 +142,7 @@ const AGENT_MARKDOWN_COMPONENTS: Components = {
  * Wrapped in React.memo to prevent re-renders when parent state changes
  * (e.g., scroll position, input value) don't affect this component's props.
  */
-export const MessageBubble = React.memo(function MessageBubble({ text, role, streaming, timestamp }: MessageBubbleProps) {
+export const MessageBubble = React.memo(function MessageBubble({ text, role, streaming, timestamp, ttsApiUrl, ttsStorageId }: MessageBubbleProps) {
   const isUser = role === 'user';
   const isAgent = role === 'agent';
   const components = isUser ? USER_MARKDOWN_COMPONENTS : AGENT_MARKDOWN_COMPONENTS;
@@ -166,7 +170,7 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
         )}
         {showActions && (
           <div className="opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
-            <MessageActions text={text} timestamp={timestamp} />
+            <MessageActions text={text} timestamp={timestamp} ttsApiUrl={ttsApiUrl} ttsStorageId={ttsStorageId} />
           </div>
         )}
       </div>

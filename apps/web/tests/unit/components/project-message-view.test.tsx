@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../src/lib/api', () => ({
   getChatSession: mocks.getChatSession,
   getTranscribeApiUrl: mocks.getTranscribeApiUrl,
+  getTtsApiUrl: vi.fn().mockReturnValue('https://api.example.com/api/tts'),
   resetIdleTimer: mocks.resetIdleTimer,
   sendFollowUpPrompt: mocks.sendFollowUpPrompt,
   getWorkspace: mocks.getWorkspace,
