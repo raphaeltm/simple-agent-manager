@@ -73,11 +73,15 @@ function TaskOutputSection({ task }: { task: TaskDetailResponse }) {
         <h2 className="sam-type-card-title m-0 text-fg-primary">
           Output
         </h2>
+        {/* TTS state announcements for screen readers */}
+        <span className="sr-only" aria-live="polite" aria-atomic="true">
+          {audio.state === 'loading' ? 'Generating audio' : audio.state === 'playing' ? 'Now playing' : ''}
+        </span>
         {showSpeaker && (
           <button
             type="button"
             onClick={audio.toggle}
-            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors"
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors hover:bg-[var(--sam-color-bg-inset)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-accent-primary,#16a34a)]"
             style={{
               color: audio.state !== 'idle' ? 'var(--sam-color-accent-primary)' : 'var(--sam-color-fg-muted)',
               backgroundColor: audio.state === 'playing' ? 'var(--sam-color-bg-inset)' : undefined,
@@ -90,7 +94,7 @@ function TaskOutputSection({ task }: { task: TaskDetailResponse }) {
               'Read summary aloud'
             }
             title={
-              audio.state === 'loading' ? 'Cancel' :
+              audio.state === 'loading' ? 'Cancel audio generation' :
               audio.state === 'playing' ? 'Pause' :
               audio.state === 'paused' ? 'Resume' :
               'Read summary aloud'
@@ -119,11 +123,6 @@ function TaskOutputSection({ task }: { task: TaskDetailResponse }) {
           </button>
         )}
       </div>
-
-      {/* TTS state announcements for screen readers */}
-      <span className="sr-only" aria-live="polite" aria-atomic="true">
-        {audio.state === 'loading' ? 'Generating audio' : audio.state === 'playing' ? 'Now playing' : ''}
-      </span>
 
       {showPlayer && (
         <AudioPlayer
