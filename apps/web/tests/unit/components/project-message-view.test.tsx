@@ -40,12 +40,18 @@ vi.mock('../../../src/lib/api', () => ({
   deleteWorkspace: mocks.deleteWorkspace,
 }));
 
+// Captured WebSocket onMessage callback — tests can call this to inject messages
+let capturedWsOnMessage: ((msg: ReturnType<typeof makeMessage>) => void) | null = null;
+
 vi.mock('../../../src/hooks/useChatWebSocket', () => ({
-  useChatWebSocket: () => ({
-    connectionState: 'connected' as const,
-    wsRef: { current: null },
-    retry: vi.fn(),
-  }),
+  useChatWebSocket: (opts: { onMessage?: (msg: unknown) => void }) => {
+    capturedWsOnMessage = (opts.onMessage ?? null) as typeof capturedWsOnMessage;
+    return {
+      connectionState: 'connected' as const,
+      wsRef: { current: null },
+      retry: vi.fn(),
+    };
+  },
 }));
 
 function defaultAgentSession() {
@@ -1420,5 +1426,109 @@ describe('ProjectMessageView — session context dropdown', () => {
     await waitFor(() => {
       expect(screen.queryByText('Node:')).toBeNull();
     });
+  });
+});
+
+describe('ProjectMessageView — autoscroll pause', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.clearAllMocks();
+    (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mockClear();
+    mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
+    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
+    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /**
+   * Helper: simulate scroll position on the messages container.
+   * jsdom has no layout engine, so we mock the properties.
+   */
+  function setScrollPosition(container: Element, pos: { scrollTop: number; scrollHeight: number; clientHeight: number }) {
+    Object.defineProperty(container, 'scrollTop', { value: pos.scrollTop, writable: true, configurable: true });
+    Object.defineProperty(container, 'scrollHeight', { value: pos.scrollHeight, configurable: true });
+    Object.defineProperty(container, 'clientHeight', { value: pos.clientHeight, configurable: true });
+  }
+
+  it('does not autoscroll when user has scrolled up and new messages arrive', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        makeMessage('msg-1', 'session-1', 'First message'),
+      ]),
+    );
+
+    const { container } = render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('First message')).toBeTruthy();
+    });
+
+    // Clear scrollIntoView calls from initial load and flush pending rAFs
+    await act(async () => { vi.advanceTimersByTime(100); });
+    (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mockClear();
+
+    // Find the scroll container (the overflow-y-auto div)
+    const scrollContainer = container.querySelector('.overflow-y-auto');
+    expect(scrollContainer).toBeTruthy();
+
+    // Simulate user scrolling up: scrollTop is far from bottom
+    setScrollPosition(scrollContainer!, { scrollTop: 0, scrollHeight: 1000, clientHeight: 500 });
+    fireEvent.scroll(scrollContainer!);
+
+    // Inject a new message via WebSocket callback
+    expect(capturedWsOnMessage).toBeTruthy();
+    await act(async () => {
+      capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'Second message'));
+    });
+    await act(async () => { vi.advanceTimersByTime(100); });
+
+    // The message should appear in DOM (may share a text node with adjacent messages)
+    expect(document.body.textContent).toContain('Second message');
+
+    // scrollIntoView should NOT have been called since user scrolled up
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('resumes autoscroll when user scrolls back to bottom after scrolling up', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        makeMessage('msg-1', 'session-1', 'First message'),
+      ]),
+    );
+
+    const { container } = render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('First message')).toBeTruthy();
+    });
+
+    await act(async () => { vi.advanceTimersByTime(100); });
+    (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mockClear();
+
+    const scrollContainer = container.querySelector('.overflow-y-auto');
+    expect(scrollContainer).toBeTruthy();
+
+    // Simulate user scrolling up
+    setScrollPosition(scrollContainer!, { scrollTop: 0, scrollHeight: 1000, clientHeight: 500 });
+    fireEvent.scroll(scrollContainer!);
+
+    // Simulate user scrolling back to bottom (within 50px threshold)
+    setScrollPosition(scrollContainer!, { scrollTop: 480, scrollHeight: 1000, clientHeight: 500 });
+    fireEvent.scroll(scrollContainer!);
+
+    // Inject a new message via WebSocket
+    expect(capturedWsOnMessage).toBeTruthy();
+    await act(async () => {
+      capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'Second message'));
+    });
+    await act(async () => { vi.advanceTimersByTime(100); });
+
+    expect(document.body.textContent).toContain('Second message');
+
+    // scrollIntoView SHOULD have been called since user scrolled back to bottom
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
   });
 });
