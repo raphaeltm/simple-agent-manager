@@ -117,8 +117,9 @@ export interface Env {
   // Warm node pooling configuration
   NODE_WARM_TIMEOUT_MS?: string;
   MAX_AUTO_NODE_LIFETIME_MS?: string;
-  ABSOLUTE_MAX_NODE_LIFETIME_MS?: string;
   NODE_WARM_GRACE_PERIOD_MS?: string;
+  // Workspace idle timeout (global default, overridable per-project)
+  WORKSPACE_IDLE_TIMEOUT_MS?: string;
   // Task agent configuration
   DEFAULT_TASK_AGENT_TYPE?: string;
   // Built-in profile model overrides (defaults: claude-sonnet-4-5-20250929, claude-opus-4-6)
@@ -586,7 +587,6 @@ export default {
       staleNodesDestroyed: nodeCleanup.staleDestroyed,
       lifetimeNodesDestroyed: nodeCleanup.lifetimeDestroyed,
       lifetimeNodesSkipped: nodeCleanup.lifetimeSkipped,
-      absoluteLifetimeNodesDestroyed: nodeCleanup.absoluteLifetimeDestroyed,
       nodeCleanupErrors: nodeCleanup.errors,
       orphanedWorkspacesFlagged: nodeCleanup.orphanedWorkspacesFlagged,
       orphanedNodesFlagged: nodeCleanup.orphanedNodesFlagged,

@@ -6,6 +6,7 @@ import { requireAuth, requireApproved, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { signTerminalToken } from '../services/jwt';
 import * as schema from '../db/schema';
+import * as projectDataService from '../services/project-data';
 import type { TerminalTokenResponse } from '@simple-agent-manager/shared';
 
 const terminalRoutes = new Hono<{ Bindings: Env }>();
@@ -57,6 +58,17 @@ terminalRoutes.post('/token', async (c) => {
   // In multi-workspace-per-node mode, routing no longer depends on vmIp in this record.
   const workspaceUrl = `https://ws-${ws.id}.${c.env.BASE_DOMAIN}`;
 
+  // Record terminal activity for workspace idle detection
+  if (ws.projectId) {
+    c.executionCtx.waitUntil(
+      projectDataService.updateTerminalActivity(
+        c.env, ws.projectId, ws.id, ws.chatSessionId
+      ).catch(() => {
+        // Best-effort: don't block token generation
+      })
+    );
+  }
+
   const response: TerminalTokenResponse = {
     token,
     expiresAt,
@@ -64,6 +76,48 @@ terminalRoutes.post('/token', async (c) => {
   };
 
   return c.json(response);
+});
+
+/**
+ * POST /api/terminal/activity - Report terminal activity for idle detection.
+ * Called periodically by the frontend while a terminal session is active.
+ */
+terminalRoutes.post('/activity', async (c) => {
+  const userId = getUserId(c);
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  const body = await c.req.json<{ workspaceId: string }>();
+  if (!body.workspaceId) {
+    throw errors.badRequest('workspaceId is required');
+  }
+
+  const workspace = await db
+    .select({
+      id: schema.workspaces.id,
+      projectId: schema.workspaces.projectId,
+      chatSessionId: schema.workspaces.chatSessionId,
+    })
+    .from(schema.workspaces)
+    .where(
+      and(
+        eq(schema.workspaces.id, body.workspaceId),
+        eq(schema.workspaces.userId, userId)
+      )
+    )
+    .limit(1);
+
+  const ws = workspace[0];
+  if (!ws) {
+    throw errors.notFound('Workspace');
+  }
+
+  if (ws.projectId) {
+    await projectDataService.updateTerminalActivity(
+      c.env, ws.projectId, ws.id, ws.chatSessionId
+    );
+  }
+
+  return c.json({ ok: true });
 });
 
 export { terminalRoutes };

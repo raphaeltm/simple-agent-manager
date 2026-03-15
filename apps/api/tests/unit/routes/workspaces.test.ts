@@ -79,10 +79,11 @@ describe('workspaces routes source contract', () => {
     expect(file).toContain('Node agent not reachable after provisioning');
   });
 
-  it('supports launching workspaces directly from project context', () => {
-    expect(file).toContain('const projectId = body.projectId?.trim() || null');
+  it('requires projectId on workspace creation and rejects unlinked workspaces', () => {
+    // projectId is now required — no more optional chaining with fallback to null
+    expect(file).toContain("const projectId = body.projectId?.trim()");
+    expect(file).toContain("throw errors.badRequest('projectId is required')");
     expect(file).toContain('requireOwnedProject');
-    expect(file).toContain('projectId: linkedProject?.id ?? null');
   });
 
   it('excludes deleted workspaces from list endpoint by default', () => {

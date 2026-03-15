@@ -118,26 +118,21 @@ crudRoutes.post('/', requireAuth(), requireApproved(), async (c) => {
   const body = await c.req.json<CreateWorkspaceRequest>();
   const now = new Date().toISOString();
   const limits = getRuntimeLimits(c.env);
-  const projectId = body.projectId?.trim() || null;
+  const projectId = body.projectId?.trim();
   const workspaceName = body.name?.trim();
 
   if (!workspaceName) {
     throw errors.badRequest('name is required');
   }
 
-  let resolvedInstallationId = body.installationId?.trim() || '';
-  let resolvedRepository = body.repository?.trim() || '';
-  let resolvedBranch = body.branch?.trim() || 'main';
-  let linkedProject: schema.Project | null = null;
-
-  if (projectId) {
-    linkedProject = await requireOwnedProject(db, projectId, userId);
-    resolvedInstallationId = linkedProject.installationId;
-    resolvedRepository = linkedProject.repository;
-    if (!body.branch?.trim()) {
-      resolvedBranch = linkedProject.defaultBranch;
-    }
+  if (!projectId) {
+    throw errors.badRequest('projectId is required');
   }
+
+  const linkedProject = await requireOwnedProject(db, projectId, userId);
+  const resolvedInstallationId = linkedProject.installationId;
+  const resolvedRepository = linkedProject.repository;
+  const resolvedBranch = body.branch?.trim() || linkedProject.defaultBranch;
 
   if (!resolvedRepository || !resolvedInstallationId) {
     throw errors.badRequest('repository and installationId are required');
@@ -231,7 +226,7 @@ crudRoutes.post('/', requireAuth(), requireApproved(), async (c) => {
   await db.insert(schema.workspaces).values({
     id: workspaceId,
     nodeId: targetNodeId,
-    projectId: linkedProject?.id ?? null,
+    projectId: linkedProject.id,
     userId,
     installationId: resolvedInstallationId,
     name: workspaceName,
@@ -246,23 +241,21 @@ crudRoutes.post('/', requireAuth(), requireApproved(), async (c) => {
     updatedAt: now,
   });
 
-  // Create chat session in ProjectData DO when workspace is linked to a project
-  if (linkedProject) {
-    try {
-      const chatSessionId = await projectDataService.createSession(
-        c.env,
-        linkedProject.id,
-        workspaceId,
-        workspaceName
-      );
-      await db
-        .update(schema.workspaces)
-        .set({ chatSessionId, updatedAt: now })
-        .where(eq(schema.workspaces.id, workspaceId));
-    } catch (err) {
-      // Best-effort: session creation failure should not block workspace creation
-      console.error('Failed to create chat session for workspace:', err);
-    }
+  // Create chat session in ProjectData DO (workspace always linked to project)
+  try {
+    const chatSessionId = await projectDataService.createSession(
+      c.env,
+      linkedProject.id,
+      workspaceId,
+      workspaceName
+    );
+    await db
+      .update(schema.workspaces)
+      .set({ chatSessionId, updatedAt: now })
+      .where(eq(schema.workspaces.id, workspaceId));
+  } catch (err) {
+    // Best-effort: session creation failure should not block workspace creation
+    console.error('Failed to create chat session for workspace:', err);
   }
 
   const nodeCountForUser = userNodeCountVal + (mustProvisionNode ? 1 : 0);
@@ -356,14 +349,12 @@ crudRoutes.post('/', requireAuth(), requireApproved(), async (c) => {
   const created = await getOwnedWorkspace(db, workspaceId, userId);
 
   // Record activity event for workspace creation
-  if (created.projectId) {
-    c.executionCtx.waitUntil(
-      projectDataService.recordActivityEvent(
-        c.env, created.projectId, 'workspace.created', 'user', userId,
-        workspaceId, null, null, { name: created.name, repository: resolvedRepository }
-      ).catch((e) => { log.warn('workspace.activity_created_failed', { workspaceId, error: String(e) }); })
-    );
-  }
+  c.executionCtx.waitUntil(
+    projectDataService.recordActivityEvent(
+      c.env, linkedProject.id, 'workspace.created', 'user', userId,
+      workspaceId, null, null, { name: created.name, repository: resolvedRepository }
+    ).catch((e) => { log.warn('workspace.activity_created_failed', { workspaceId, error: String(e) }); })
+  );
 
   return c.json(toWorkspaceResponse(created, c.env.BASE_DOMAIN), 201);
 });

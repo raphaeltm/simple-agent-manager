@@ -11,8 +11,9 @@ import {
   listCredentials,
   listGitHubInstallations,
   listNodes,
+  listProjects,
 } from '../lib/api';
-import type { CredentialProvider, GitHubInstallation, NodeResponse, ProjectDetailResponse, ProviderCatalog, VMSize } from '@simple-agent-manager/shared';
+import type { CredentialProvider, GitHubInstallation, NodeResponse, Project, ProjectDetailResponse, ProviderCatalog, VMSize } from '@simple-agent-manager/shared';
 import { PROVIDER_LABELS } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, Input, PageLayout, Select, Spinner } from '@simple-agent-manager/ui';
 
@@ -89,6 +90,8 @@ export function CreateWorkspace() {
   const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
   const [nodes, setNodes] = useState<NodeResponse[]>([]);
   const [linkedProject, setLinkedProject] = useState<ProjectDetailResponse | null>(null);
+  const [allProjects, setAllProjects] = useState<Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(locationState?.projectId ?? '');
 
   // Provider catalog state
   const [catalogs, setCatalogs] = useState<ProviderCatalog[]>([]);
@@ -152,6 +155,17 @@ export function CreateWorkspace() {
       })
       .catch(() => setGithubStatus('error'));
 
+    // Load all projects for project selector (when no project in location state)
+    if (!locationState?.projectId) {
+      listProjects(100)
+        .then((resp) => {
+          setAllProjects(resp.projects);
+        })
+        .catch(() => {
+          // Best effort — project list will be empty
+        });
+    }
+
     // Available nodes
     listNodes()
       .then((nodeRows) => {
@@ -164,31 +178,6 @@ export function CreateWorkspace() {
       })
       .catch(() => setNodesStatus('error'));
   }, []);
-
-  // Load project context if navigated from a project
-  useEffect(() => {
-    const projectId = locationState?.projectId;
-    if (!projectId) return;
-
-    getProject(projectId)
-      .then((proj) => {
-        setLinkedProject(proj);
-        setName(`${proj.name} Workspace`);
-        setRepository(proj.repository);
-        const defBranch = proj.defaultBranch ?? 'main';
-        setBranch(defBranch);
-        setRepoDefaultBranch(defBranch);
-        setInstallationId(proj.installationId);
-        if (proj.defaultVmSize) {
-          setVmSize(proj.defaultVmSize as VMSize);
-        }
-        // Fetch branches even when project-linked so the selector has data
-        void fetchBranches(proj.repository, proj.installationId, defBranch);
-      })
-      .catch(() => {
-        // Project fetch failed — continue without project context
-      });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const checkingPrereqs = cloudStatus === 'loading' || githubStatus === 'loading';
 
@@ -243,6 +232,50 @@ export function CreateWorkspace() {
     [isProjectLinked]
   );
 
+  // Load project details when a project is selected
+  const loadProjectDetails = useCallback((projectId: string) => {
+    getProject(projectId)
+      .then((proj) => {
+        setLinkedProject(proj);
+        setName(`${proj.name} Workspace`);
+        setRepository(proj.repository);
+        const defBranch = proj.defaultBranch ?? 'main';
+        setBranch(defBranch);
+        setRepoDefaultBranch(defBranch);
+        setInstallationId(proj.installationId);
+        if (proj.defaultVmSize) {
+          setVmSize(proj.defaultVmSize as VMSize);
+        }
+        void fetchBranches(proj.repository, proj.installationId, defBranch);
+      })
+      .catch(() => {
+        // Project fetch failed
+      });
+  }, [fetchBranches]);
+
+  // Load project context if navigated from a project
+  useEffect(() => {
+    const projectId = locationState?.projectId;
+    if (!projectId) return;
+    loadProjectDetails(projectId);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle project selection from dropdown
+  const handleProjectSelect = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    const projectId = e.target.value;
+    setSelectedProjectId(projectId);
+    if (projectId) {
+      loadProjectDetails(projectId);
+    } else {
+      setLinkedProject(null);
+      setName('');
+      setRepository('');
+      setBranch('main');
+      setBranches([]);
+      setRepoDefaultBranch(undefined);
+    }
+  }, [loadProjectDetails]);
+
   const handleProviderChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       const provider = e.target.value;
@@ -266,9 +299,15 @@ export function CreateWorkspace() {
         repo = repository.replace('https://github.com/', '').replace(/\.git$/, '');
       }
 
+      if (!linkedProject) {
+        setError('A project must be selected');
+        setLoading(false);
+        return;
+      }
+
       const workspace = await createWorkspace({
         name,
-        projectId: linkedProject?.id,
+        projectId: linkedProject.id,
         nodeId: selectedNodeId || undefined,
         repository: repo,
         branch,
@@ -286,7 +325,7 @@ export function CreateWorkspace() {
     }
   };
 
-  const canCreate = hasCloudProvider && installations.length > 0;
+  const canCreate = hasCloudProvider && installations.length > 0 && !!linkedProject;
   const anyMissing = cloudStatus === 'missing' || githubStatus === 'missing'
     || cloudStatus === 'error' || githubStatus === 'error';
   const showPrereqs = checkingPrereqs || anyMissing;
@@ -377,6 +416,28 @@ export function CreateWorkspace() {
                 : nodesStatus === 'error' ? 'Failed to load nodes' : undefined
             }
           />
+        </Card>
+      )}
+
+      {/* Project selector — shown when not navigated from a project */}
+      {!locationState?.projectId && hasCloudProvider && installations.length > 0 && (
+        <Card className="mb-6 p-6">
+          <label htmlFor="project-select" style={labelStyle}>
+            Project
+          </label>
+          <Select id="project-select" value={selectedProjectId} onChange={handleProjectSelect}>
+            <option value="">Select a project...</option>
+            {allProjects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </Select>
+          {!linkedProject && (
+            <p className="text-fg-muted mt-2" style={{ fontSize: 'var(--sam-type-caption-size)', margin: '0.5rem 0 0' }}>
+              All workspaces must be linked to a project for lifecycle management.
+            </p>
+          )}
         </Card>
       )}
 
@@ -565,7 +626,7 @@ export function CreateWorkspace() {
             <Button type="button" onClick={() => navigate('/dashboard')} variant="secondary" size="md">
               Cancel
             </Button>
-            <Button type="submit" disabled={loading || !name || !repository} size="lg" loading={loading}>
+            <Button type="submit" disabled={loading || !name || !repository || !linkedProject} size="lg" loading={loading}>
               Create Workspace
             </Button>
           </div>

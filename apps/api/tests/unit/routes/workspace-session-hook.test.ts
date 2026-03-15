@@ -1,8 +1,8 @@
 /**
  * Source contract tests for workspace creation chat session hook.
  *
- * Verifies that workspace creation creates a chat session when linked
- * to a project, and that the runtime endpoint returns chatSessionId.
+ * Verifies that workspace creation always creates a chat session (projectId
+ * is now required), and that the runtime endpoint returns chatSessionId.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -15,10 +15,11 @@ describe('workspace creation chat session hook source contract', () => {
   ].join('\n');
   const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
 
-  it('creates chat session when workspace is linked to a project', () => {
+  it('always creates chat session for workspace (projectId is required)', () => {
     expect(routesFile).toContain('projectDataService.createSession');
-    expect(routesFile).toContain('if (linkedProject)');
     expect(routesFile).toContain('chatSessionId');
+    // projectId is now required — no conditional check
+    expect(routesFile).toContain("throw errors.badRequest('projectId is required')");
   });
 
   it('stores chatSessionId on the workspace record', () => {
@@ -35,10 +36,5 @@ describe('workspace creation chat session hook source contract', () => {
   it('runtime endpoint returns chatSessionId', () => {
     expect(routesFile).toContain('chatSessionId: schema.workspaces.chatSessionId');
     expect(routesFile).toContain('chatSessionId: workspace.chatSessionId');
-  });
-
-  it('workspace without project skips session creation', () => {
-    // The condition checks for linkedProject (which is null when no projectId)
-    expect(routesFile).toContain('if (linkedProject)');
   });
 });

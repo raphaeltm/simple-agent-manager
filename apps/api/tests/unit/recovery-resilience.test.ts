@@ -238,9 +238,11 @@ describe('node-cleanup OBSERVABILITY_DATABASE recording (TDF-7)', () => {
     expect(staleRecordSection).toContain("level: 'info'");
   });
 
-  it('uses warn or error level for max lifetime depending on ceiling type', () => {
-    // The level is now a ternary: 'error' for absolute ceiling, 'warn' for regular
-    expect(nodeCleanupSource).toContain("isAbsoluteCeiling ? 'error' : 'warn'");
+  it('uses warn level for max lifetime destruction', () => {
+    // Max lifetime destruction uses warn level (absolute ceiling was removed)
+    const idx = nodeCleanupSource.indexOf("recoveryType: 'max_lifetime_node_cleanup'");
+    const section = nodeCleanupSource.slice(Math.max(0, idx - 200), idx + 50);
+    expect(section).toContain("level: 'warn'");
   });
 });
 
@@ -404,8 +406,6 @@ describe('recovery type consistency (TDF-7)', () => {
     'stale_warm_node_cleanup_failure',
     'max_lifetime_node_cleanup',
     'max_lifetime_node_cleanup_failure',
-    'max_lifetime_skipped_active',
-    'absolute_lifetime_node_cleanup',
     'orphaned_workspace',
     'orphaned_node',
     'provisioning_timeout',
@@ -442,7 +442,8 @@ describe('three-layer node defense integration (TDF-7)', () => {
   });
 
   it('Layer 3 (max lifetime): hard cap on auto-provisioned node age', () => {
-    expect(nodeCleanupSource).toContain('Layer 3 defense');
+    expect(nodeCleanupSource).toContain('Max lifetime');
+    expect(nodeCleanupSource).toContain('hard cap on auto-provisioned node age');
   });
 
   it('stuck-tasks cron serves as outer safety net for task orchestration', () => {

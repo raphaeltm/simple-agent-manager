@@ -194,6 +194,8 @@ export interface Project {
   defaultAgentType?: string | null;
   defaultWorkspaceProfile?: WorkspaceProfile | null;
   defaultProvider?: CredentialProvider | null;
+  workspaceIdleTimeoutMs?: number | null;
+  nodeIdleTimeoutMs?: number | null;
   status?: ProjectStatus;
   createdAt: string;
   updatedAt: string;
@@ -378,6 +380,8 @@ export interface UpdateProjectRequest {
   defaultAgentType?: string | null;
   defaultWorkspaceProfile?: WorkspaceProfile | null;
   defaultProvider?: CredentialProvider | null;
+  workspaceIdleTimeoutMs?: number | null;
+  nodeIdleTimeoutMs?: number | null;
 }
 
 export interface ProjectRuntimeEnvVarResponse {
@@ -837,7 +841,7 @@ export interface WorkspaceResponse {
 
 export interface CreateWorkspaceRequest {
   name: string;
-  projectId?: string;
+  projectId: string;
   nodeId?: string;
   repository?: string;
   branch?: string;

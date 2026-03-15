@@ -213,6 +213,23 @@ export const MIGRATIONS: Migration[] = [
       sql.exec(`CREATE INDEX idx_chat_sessions_updated_at ON chat_sessions(updated_at DESC)`);
     },
   },
+  {
+    name: '010-workspace-activity-tracking',
+    run: (sql) => {
+      // Track last terminal activity per workspace for idle detection.
+      // Messages are tracked via chat_messages.created_at; terminal activity
+      // needs a separate signal since terminal WebSocket traffic bypasses the DO.
+      sql.exec(`
+        CREATE TABLE workspace_activity (
+          workspace_id TEXT PRIMARY KEY,
+          session_id TEXT,
+          last_terminal_activity_at INTEGER,
+          last_message_at INTEGER,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+        )
+      `);
+    },
+  },
 ];
 
 /**
