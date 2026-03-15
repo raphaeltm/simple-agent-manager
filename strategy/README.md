@@ -27,6 +27,7 @@ strategy/
 │   ├── tech-debt.md      # Prioritized tech debt register
 │   └── adr/              # Architecture Decision Records
 └── content/              # Content creation workspace
+    ├── ideas.md          # Content topic pipeline with angles and code refs
     ├── templates/        # Reusable content templates
     └── drafts/           # Work-in-progress content
 ```
