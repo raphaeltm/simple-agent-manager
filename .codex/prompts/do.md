@@ -204,13 +204,13 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
 
 3. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging).
 
-3. **Authenticate** using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`. If the file is missing, ask the human for credentials.
+4. **Authenticate** using test credentials at `/workspaces/.tmp/secure/demo-credentials.md`. If the file is missing, ask the human for credentials.
 
-4. **Verify the changed behavior works end-to-end:**
+5. **Verify the changed behavior works end-to-end:**
    - **UI changes**: interact as a real user — click buttons, submit forms, navigate pages
    - **API/backend changes**: verify affected endpoints respond correctly and downstream behavior works through the UI
 
-5. **Report findings** to the user with evidence (screenshots or Playwright observations).
+6. **Report findings** to the user with evidence (screenshots or Playwright observations).
 
 6. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT proceed to PR creation with known staging failures.
 
