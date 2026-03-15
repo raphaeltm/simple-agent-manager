@@ -8,7 +8,6 @@ import {
   storeAudioInR2,
   synthesizeSpeech,
   getTTSConfig,
-  type TTSConfig,
 } from '../../../src/services/tts';
 
 // Mock @mastra/core/agent — factory must not reference outer variables
