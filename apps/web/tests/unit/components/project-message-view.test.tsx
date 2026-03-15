@@ -1245,6 +1245,37 @@ describe('ProjectMessageView — session context dropdown', () => {
     });
   });
 
+  it('shows full badge when workspaceProfile is null (default)', async () => {
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-null',
+      name: 'null-ws',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+      workspaceProfile: null,
+      nodeId: 'node-1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-1',
+      name: 'node-1',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+
+    const session = makeSession('sess-null', 'active');
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-null', 'Hello')],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="sess-null" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Full')).toBeTruthy();
+    });
+  });
+
   it('does not show context section when workspace fetch fails', async () => {
     mocks.getWorkspace.mockRejectedValue(new Error('Not found'));
 
