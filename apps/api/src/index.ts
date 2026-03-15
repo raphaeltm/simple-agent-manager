@@ -23,6 +23,7 @@ import { agentsCatalogRoutes } from './routes/agents-catalog';
 import { bootstrapRoutes } from './routes/bootstrap';
 import { uiGovernanceRoutes } from './routes/ui-governance';
 import { transcribeRoutes } from './routes/transcribe';
+import { ttsRoutes } from './routes/tts';
 import { agentSettingsRoutes } from './routes/agent-settings';
 import { clientErrorsRoutes } from './routes/client-errors';
 import { projectsRoutes } from './routes/projects';
@@ -223,6 +224,16 @@ export interface Env {
   MAX_AGENT_SESSION_LABEL_LENGTH?: string;
   MAX_AGENT_CREDENTIAL_SYNC_BYTES?: string;
   MCP_TASK_DESCRIPTION_SNIPPET_LENGTH?: string;
+  // Text-to-speech (Workers AI)
+  TTS_MODEL?: string;
+  TTS_SPEAKER?: string;
+  TTS_ENCODING?: string;
+  TTS_CLEANUP_MODEL?: string;
+  TTS_MAX_TEXT_LENGTH?: string;
+  TTS_TIMEOUT_MS?: string;
+  TTS_CLEANUP_TIMEOUT_MS?: string;
+  TTS_R2_PREFIX?: string;
+  TTS_ENABLED?: string;
   // VM agent TLS configuration
   VM_AGENT_PROTOCOL?: string;  // "https" (default) or "http"
   VM_AGENT_PORT?: string;      // "8443" (default) or custom port
@@ -489,6 +500,7 @@ app.route('/api/agents', agentsCatalogRoutes);
 app.route('/api/bootstrap', bootstrapRoutes);
 app.route('/api/ui-governance', uiGovernanceRoutes);
 app.route('/api/transcribe', transcribeRoutes);
+app.route('/api/tts', ttsRoutes);
 app.route('/api/agent-settings', agentSettingsRoutes);
 app.route('/api/client-errors', clientErrorsRoutes);
 app.route('/api/projects', projectsRoutes);

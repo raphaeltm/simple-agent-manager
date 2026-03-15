@@ -14,7 +14,7 @@ import type { AcpSessionHandle } from '@simple-agent-manager/acp-client';
 import { ChevronDown, ChevronUp, ExternalLink, Server, Box, Cpu, MapPin, Cloud } from 'lucide-react';
 import { TruncatedSummary } from './TruncatedSummary';
 import { stripMarkdown } from '../../lib/text-utils';
-import { getChatSession, getTranscribeApiUrl, resetIdleTimer, getWorkspace, getNode } from '../../lib/api';
+import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
 import type { WorkspaceResponse, NodeResponse, VMSize } from '@simple-agent-manager/shared';
 import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
@@ -82,13 +82,20 @@ function formatCountdown(ms: number): string {
 // ACP ConversationItem rendering — reuses exported acp-client components
 // ---------------------------------------------------------------------------
 
+/** Lazily computed TTS API URL — avoids module-scope errors in test environments. */
+let _cachedTtsApiUrl: string | undefined;
+function getTtsUrl(): string {
+  if (!_cachedTtsApiUrl) _cachedTtsApiUrl = getTtsApiUrl();
+  return _cachedTtsApiUrl;
+}
+
 /** Renders a single ACP ConversationItem using the shared acp-client components. */
 function AcpConversationItemView({ item }: { item: ConversationItem }) {
   switch (item.kind) {
     case 'user_message':
       return <AcpMessageBubble text={item.text} role="user" />;
     case 'agent_message':
-      return <AcpMessageBubble text={item.text} role="agent" streaming={item.streaming} timestamp={item.timestamp} />;
+      return <AcpMessageBubble text={item.text} role="agent" streaming={item.streaming} timestamp={item.timestamp} ttsApiUrl={getTtsUrl()} ttsStorageId={item.id} />;
     case 'thinking':
       return <AcpThinkingBlock text={item.text} active={item.active} />;
     case 'tool_call':

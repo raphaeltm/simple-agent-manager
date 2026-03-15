@@ -1016,6 +1016,14 @@ export function getTranscribeApiUrl(): string {
 }
 
 /**
+ * Get the full URL for the TTS API endpoint.
+ * Used by MessageActions to generate and retrieve text-to-speech audio.
+ */
+export function getTtsApiUrl(): string {
+  return `${API_URL}/api/tts`;
+}
+
+/**
  * Get the full URL for the client error reporting API endpoint.
  * Used by the error reporter to send batched client-side errors.
  */
