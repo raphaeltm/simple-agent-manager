@@ -184,7 +184,7 @@ export const MessageActions = React.memo(function MessageActions({
                 stroke="currentColor"
                 strokeWidth="2"
                 aria-hidden="true"
-                className="animate-spin"
+                className="animate-spin motion-reduce:animate-none"
               >
                 <circle cx="12" cy="12" r="10" strokeDasharray="31.4 31.4" strokeLinecap="round" />
               </svg>
@@ -232,7 +232,7 @@ export const MessageActions = React.memo(function MessageActions({
         )}
 
         {/* Copy button */}
-        {navigator.clipboard && (
+        {typeof navigator !== 'undefined' && navigator.clipboard && (
           <button
             type="button"
             onClick={handleCopy}
@@ -297,7 +297,7 @@ export const MessageActions = React.memo(function MessageActions({
       {showMeta && (
         <div
           id={popoverId}
-          role="tooltip"
+          role="dialog"
           aria-label="Message metadata"
           className="absolute left-0 top-full mt-1 z-10 rounded-md shadow-md px-3 py-2 text-xs max-w-[calc(100vw-2rem)] break-words"
           style={{

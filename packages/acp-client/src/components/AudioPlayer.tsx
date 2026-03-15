@@ -1,6 +1,8 @@
 import React, { useCallback } from 'react';
 import type { AudioPlaybackState } from '../hooks/useAudioPlayback';
 
+const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-accent-primary,#16a34a)]';
+
 export interface AudioPlayerProps {
   state: AudioPlaybackState;
   currentTime: number;
@@ -62,6 +64,8 @@ export const AudioPlayer = React.memo(function AudioPlayer({
     [onPlaybackRateChange],
   );
 
+  const speedId = React.useId();
+
   const isLoading = state === 'loading';
   const isPlaying = state === 'playing';
   const isPaused = state === 'paused';
@@ -86,7 +90,7 @@ export const AudioPlayer = React.memo(function AudioPlayer({
           type="button"
           onClick={handleSkipBack}
           disabled={isLoading || !showSeekBar}
-          className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded transition-colors disabled:opacity-30"
+          className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors disabled:opacity-30 ${FOCUS_RING}`}
           style={{ color: 'var(--sam-color-fg-muted)' }}
           aria-label={`Skip back ${SKIP_SECONDS} seconds`}
           title={`Skip back ${SKIP_SECONDS}s`}
@@ -101,9 +105,9 @@ export const AudioPlayer = React.memo(function AudioPlayer({
         <button
           type="button"
           onClick={onToggle}
-          className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full transition-colors"
+          className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full transition-colors ${FOCUS_RING}`}
           style={{
-            backgroundColor: 'var(--sam-color-accent-primary, #3b82f6)',
+            backgroundColor: 'var(--sam-color-accent-primary, #16a34a)',
             color: 'white',
             opacity: isLoading ? 0.7 : 1,
           }}
@@ -111,7 +115,7 @@ export const AudioPlayer = React.memo(function AudioPlayer({
           title={isLoading ? 'Cancel' : isPlaying ? 'Pause' : 'Play'}
         >
           {isLoading ? (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="animate-spin">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="animate-spin motion-reduce:animate-none">
               <circle cx="12" cy="12" r="10" strokeDasharray="31.4 31.4" strokeLinecap="round" />
             </svg>
           ) : isPlaying ? (
@@ -131,7 +135,7 @@ export const AudioPlayer = React.memo(function AudioPlayer({
           type="button"
           onClick={handleSkipForward}
           disabled={isLoading || !showSeekBar}
-          className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded transition-colors disabled:opacity-30"
+          className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors disabled:opacity-30 ${FOCUS_RING}`}
           style={{ color: 'var(--sam-color-fg-muted)' }}
           aria-label={`Skip forward ${SKIP_SECONDS} seconds`}
           title={`Skip forward ${SKIP_SECONDS}s`}
@@ -146,7 +150,7 @@ export const AudioPlayer = React.memo(function AudioPlayer({
         <button
           type="button"
           onClick={onStop}
-          className="min-w-[28px] min-h-[28px] flex items-center justify-center rounded transition-colors ml-auto"
+          className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors ml-auto ${FOCUS_RING}`}
           style={{ color: 'var(--sam-color-fg-muted)' }}
           aria-label="Close player"
           title="Close player"
@@ -171,7 +175,7 @@ export const AudioPlayer = React.memo(function AudioPlayer({
             step={0.1}
             value={currentTime}
             onChange={handleSeek}
-            className="flex-1 h-1 accent-[var(--sam-color-accent-primary,#3b82f6)] cursor-pointer"
+            className="flex-1 h-1 accent-[var(--sam-color-accent-primary,#16a34a)] cursor-pointer"
             aria-label="Seek position"
             aria-valuemin={0}
             aria-valuemax={duration}
@@ -186,11 +190,11 @@ export const AudioPlayer = React.memo(function AudioPlayer({
 
       {/* Speed selector (always visible when player is open) */}
       <div className="flex items-center gap-2 justify-end">
-        <label className="text-[10px]" style={{ color: 'var(--sam-color-fg-muted)' }} htmlFor="audio-speed">
+        <label className="text-[10px]" style={{ color: 'var(--sam-color-fg-muted)' }} htmlFor={speedId}>
           Speed
         </label>
         <select
-          id="audio-speed"
+          id={speedId}
           value={playbackRate}
           onChange={handleSpeedChange}
           className="text-[10px] rounded px-1 py-0.5 cursor-pointer"
