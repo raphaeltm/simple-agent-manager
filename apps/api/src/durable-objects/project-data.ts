@@ -423,7 +423,7 @@ export class ProjectData extends DurableObject<Env> {
 
     const rows = this.sql
       .exec(
-        `SELECT id, workspace_id, task_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at FROM chat_sessions ${whereClause} ORDER BY started_at DESC LIMIT ? OFFSET ?`,
+        `SELECT id, workspace_id, task_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at FROM chat_sessions ${whereClause} ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
         ...params,
         limit,
         offset
