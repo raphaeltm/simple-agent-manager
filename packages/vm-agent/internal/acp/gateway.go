@@ -775,7 +775,7 @@ temperature = 0.2
 			continue
 		}
 		safeURL := tomlEscapeBasicString(server.URL)
-		config += fmt.Sprintf("\n[[mcp_servers]]\nname = \"sam-mcp-%d\"\nurl = \"%s\"\n", i, safeURL)
+		config += fmt.Sprintf("\n[[mcp_servers]]\nname = \"sam-mcp-%d\"\ntransport = \"http\"\nurl = \"%s\"\n", i, safeURL)
 		if server.Token != "" {
 			safeToken := tomlEscapeBasicString(server.Token)
 			config += fmt.Sprintf("headers = { Authorization = \"Bearer %s\" }\n", safeToken)

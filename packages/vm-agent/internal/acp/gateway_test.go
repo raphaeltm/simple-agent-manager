@@ -681,6 +681,9 @@ func TestGenerateVibeConfig_McpServerWithToken(t *testing.T) {
 	if !strings.Contains(config, `name = "sam-mcp-0"`) {
 		t.Error("expected MCP server name sam-mcp-0")
 	}
+	if !strings.Contains(config, `transport = "http"`) {
+		t.Error("expected transport = http for MCP server")
+	}
 	if !strings.Contains(config, `url = "https://api.example.com/mcp"`) {
 		t.Error("expected MCP server URL")
 	}
