@@ -220,7 +220,7 @@ describe('Initial prompt delivery: TaskRunner DO wiring', () => {
     expect(doSource).toContain('state.config.taskDescription || state.config.taskTitle');
   });
 
-  it('prefixes initial prompt with get_instructions MCP instruction', () => {
+  it('appends get_instructions MCP instruction after task content', () => {
     expect(doSource).toContain('get_instructions');
     expect(doSource).toContain('sam-mcp');
     expect(doSource).toContain('taskContent');
