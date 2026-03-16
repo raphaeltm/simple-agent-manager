@@ -51,6 +51,16 @@ describe('parseWorkspaceSubdomain', () => {
       const result = parseWorkspaceSubdomain('ws-abc123---1.example.com', baseDomain);
       expect(result).toEqual({ error: 'Port must be between 1 and 65535' });
     });
+
+    it('rejects trailing -- with empty port', () => {
+      const result = parseWorkspaceSubdomain('ws-abc123--.example.com', baseDomain);
+      expect(result).toEqual({ error: 'Port must be between 1 and 65535' });
+    });
+
+    it('rejects partial numeric port like 3000abc', () => {
+      const result = parseWorkspaceSubdomain('ws-abc123--3000abc.example.com', baseDomain);
+      expect(result).toEqual({ error: 'Port must be between 1 and 65535' });
+    });
   });
 
   describe('non-workspace hostnames', () => {

@@ -378,6 +378,7 @@ app.use('*', async (c, next) => {
     workspaceId,
     nodeId: workspace.nodeId || workspaceId,
     backendHostname,
+    targetPort,
     method: c.req.raw.method,
     path: url.pathname,
   }));
@@ -396,7 +397,8 @@ app.use('*', async (c, next) => {
   // Route port-specific requests to the VM agent's port proxy endpoint.
   // ws-{id}--3000.example.com/foo → {backend}/workspaces/{id}/ports/3000/foo
   if (targetPort !== null) {
-    vmUrl.pathname = `/workspaces/${workspaceId}/ports/${targetPort}${url.pathname}`;
+    const subPath = url.pathname === '/' ? '' : url.pathname;
+    vmUrl.pathname = `/workspaces/${workspaceId}/ports/${targetPort}${subPath}`;
   }
 
   // Strip client-supplied routing headers and inject trusted routing context.

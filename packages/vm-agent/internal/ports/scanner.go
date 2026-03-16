@@ -48,6 +48,7 @@ type Scanner struct {
 	containerID string
 	stop        chan struct{}
 	stopped     chan struct{}
+	closeOnce   sync.Once
 }
 
 // NewScanner creates a new port scanner for a workspace container.
@@ -73,8 +74,11 @@ func (s *Scanner) Start() {
 }
 
 // Stop signals the scanner to stop and waits for it to finish.
+// Safe to call multiple times.
 func (s *Scanner) Stop() {
-	close(s.stop)
+	s.closeOnce.Do(func() {
+		close(s.stop)
+	})
 	<-s.stopped
 }
 
@@ -99,6 +103,9 @@ func (s *Scanner) SetContainerID(id string) {
 
 func (s *Scanner) loop() {
 	defer close(s.stopped)
+
+	// Perform an initial scan immediately rather than waiting for the first tick.
+	s.scan()
 
 	ticker := time.NewTicker(s.cfg.Interval)
 	defer ticker.Stop()
@@ -142,8 +149,15 @@ func (s *Scanner) scan() {
 		current[e.LocalPort] = e
 	}
 
+	// portEvent holds event data to emit after releasing the lock.
+	type portEvent struct {
+		eventType string
+		message   string
+		detail    map[string]interface{}
+	}
+	var events []portEvent
+
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	// Detect new ports
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -159,14 +173,16 @@ func (s *Scanner) scan() {
 			s.ports[port] = dp
 
 			if s.cfg.EventEmitter != nil {
-				s.cfg.EventEmitter("port.detected",
-					fmt.Sprintf("Port %d detected (%s)", port, dp.Label),
-					map[string]interface{}{
+				events = append(events, portEvent{
+					eventType: "port.detected",
+					message:   fmt.Sprintf("Port %d detected (%s)", port, dp.Label),
+					detail: map[string]interface{}{
 						"port":    port,
 						"address": dp.Address,
 						"label":   dp.Label,
 						"url":     dp.URL,
-					})
+					},
+				})
 			}
 		}
 	}
@@ -177,14 +193,23 @@ func (s *Scanner) scan() {
 			delete(s.ports, port)
 
 			if s.cfg.EventEmitter != nil {
-				s.cfg.EventEmitter("port.closed",
-					fmt.Sprintf("Port %d closed (%s)", port, dp.Label),
-					map[string]interface{}{
+				events = append(events, portEvent{
+					eventType: "port.closed",
+					message:   fmt.Sprintf("Port %d closed (%s)", port, dp.Label),
+					detail: map[string]interface{}{
 						"port":  port,
 						"label": dp.Label,
-					})
+					},
+				})
 			}
 		}
+	}
+
+	s.mu.Unlock()
+
+	// Emit events outside the lock to prevent deadlocks
+	for _, e := range events {
+		s.cfg.EventEmitter(e.eventType, e.message, e.detail)
 	}
 }
 

@@ -31,8 +31,11 @@ export function parseWorkspaceSubdomain(
     const wsSubdomain = parts[0] ?? '';
     const portStr = parts[1] ?? '';
     workspaceId = wsSubdomain.replace(/^ws-/, '').toUpperCase();
+    if (!/^\d+$/.test(portStr)) {
+      return { error: 'Port must be between 1 and 65535' };
+    }
     const parsed = parseInt(portStr, 10);
-    if (isNaN(parsed) || parsed <= 0 || parsed > 65535) {
+    if (parsed <= 0 || parsed > 65535) {
       return { error: 'Port must be between 1 and 65535' };
     }
     targetPort = parsed;
