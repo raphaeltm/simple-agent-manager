@@ -444,6 +444,48 @@ describe('ProjectChat workspace profile selection', () => {
     });
   });
 
+  it('submits task with explicitly selected task mode', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+    mocks.listCredentials.mockResolvedValue([
+      { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
+    ]);
+    mocks.submitTask.mockResolvedValue({
+      taskId: 'task-mode-test',
+      sessionId: 'session-mode-test',
+      branchName: 'sam/mode-test',
+      status: 'queued',
+    });
+    mocks.getProjectTask.mockResolvedValue({
+      id: 'task-mode-test',
+      status: 'queued',
+      executionStep: null,
+      errorMessage: null,
+    });
+
+    renderProjectChat();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Run mode:')).toBeInTheDocument();
+    });
+
+    // Default is 'task' for full workspace profile — change to conversation explicitly
+    fireEvent.change(screen.getByLabelText('Run mode:'), { target: { value: 'conversation' } });
+
+    // Type and submit
+    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
+    fireEvent.change(textarea, { target: { value: 'Help me debug' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, {
+        message: 'Help me debug',
+        agentType: 'claude-code',
+        workspaceProfile: 'full',
+        taskMode: 'conversation',
+      });
+    });
+  });
+
   it('defaults to project workspace profile when set', async () => {
     // Re-render with a project that has a default workspace profile
     const contextValue: ProjectContextValue = {
@@ -484,5 +526,67 @@ describe('ProjectChat workspace profile selection', () => {
 
     const select = screen.getByLabelText('Workspace:') as HTMLSelectElement;
     expect(select.value).toBe('lightweight');
+  });
+});
+
+describe('ProjectChat close conversation button', () => {
+  const IDLE_SESSION_WITH_TASK = {
+    id: 'session-idle',
+    workspaceId: 'ws-idle',
+    topic: 'Idle conversation',
+    status: 'active' as const,
+    isIdle: true,
+    taskId: 'task-conv-1',
+    messageCount: 5,
+    startedAt: Date.now() - 60000,
+    endedAt: null,
+    createdAt: Date.now() - 60000,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.listCredentials.mockResolvedValue([]);
+    mocks.listAgents.mockResolvedValue({ agents: [{ agentType: 'claude-code', label: 'Claude Code' }] });
+    mocks.closeConversationTask.mockResolvedValue({});
+  });
+
+  it('shows close conversation button for idle session with task and calls API on click', async () => {
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [IDLE_SESSION_WITH_TASK],
+      total: 1,
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${IDLE_SESSION_WITH_TASK.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByText('Close conversation')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('Close conversation'));
+
+    await waitFor(() => {
+      expect(mocks.closeConversationTask).toHaveBeenCalledWith(PROJECT_ID, 'task-conv-1');
+    });
+  });
+
+  it('does not show close conversation button for active (non-idle) session', async () => {
+    const activeSession = {
+      ...IDLE_SESSION_WITH_TASK,
+      id: 'session-active',
+      isIdle: false,
+    };
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [activeSession],
+      total: 1,
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${activeSession.id}`);
+
+    // Wait for session content to load
+    await waitFor(() => {
+      expect(screen.getByTestId('message-view')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('Close conversation')).not.toBeInTheDocument();
   });
 });
