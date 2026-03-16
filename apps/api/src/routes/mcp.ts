@@ -91,6 +91,9 @@ const DEFAULT_MCP_DISPATCH_MAX_DEPTH = 3;
 const DEFAULT_MCP_DISPATCH_MAX_PER_TASK = 5;
 const DEFAULT_MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT = 10;
 const DEFAULT_MCP_DISPATCH_DESCRIPTION_MAX_LENGTH = 32_000;
+const DEFAULT_MCP_DISPATCH_MAX_REFERENCES = 20;
+const DEFAULT_MCP_DISPATCH_MAX_REFERENCE_LENGTH = 500;
+const DEFAULT_MCP_DISPATCH_MAX_PRIORITY = 100;
 
 /** Default page sizes for project awareness tools. Override via MCP_* env vars. */
 const DEFAULT_MCP_TASK_LIST_LIMIT = 10;
@@ -125,6 +128,9 @@ function getMcpLimits(env: Env) {
     dispatchMaxPerTask: parsePositiveInt(env.MCP_DISPATCH_MAX_PER_TASK as string, DEFAULT_MCP_DISPATCH_MAX_PER_TASK),
     dispatchMaxActivePerProject: parsePositiveInt(env.MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT as string, DEFAULT_MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT),
     dispatchDescriptionMaxLength: parsePositiveInt(env.MCP_DISPATCH_DESCRIPTION_MAX_LENGTH as string, DEFAULT_MCP_DISPATCH_DESCRIPTION_MAX_LENGTH),
+    dispatchMaxReferences: parsePositiveInt(env.MCP_DISPATCH_MAX_REFERENCES as string, DEFAULT_MCP_DISPATCH_MAX_REFERENCES),
+    dispatchMaxReferenceLength: parsePositiveInt(env.MCP_DISPATCH_MAX_REFERENCE_LENGTH as string, DEFAULT_MCP_DISPATCH_MAX_REFERENCE_LENGTH),
+    dispatchMaxPriority: parsePositiveInt(env.MCP_DISPATCH_MAX_PRIORITY as string, DEFAULT_MCP_DISPATCH_MAX_PRIORITY),
   };
 }
 
@@ -609,14 +615,23 @@ async function handleDispatchTask(
     );
   }
 
-  const vmSize = typeof params.vmSize === 'string' ? params.vmSize as VMSize : undefined;
-  if (vmSize && !['small', 'medium', 'large'].includes(vmSize)) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'vmSize must be small, medium, or large');
+  let vmSize: VMSize | undefined;
+  if (params.vmSize !== undefined) {
+    if (typeof params.vmSize !== 'string' || !['small', 'medium', 'large'].includes(params.vmSize)) {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'vmSize must be small, medium, or large');
+    }
+    vmSize = params.vmSize as VMSize;
   }
 
-  const priority = typeof params.priority === 'number' ? Math.round(params.priority) : 0;
+  // Clamp priority to [0, max] to prevent agents from monopolizing the task queue
+  const priority = typeof params.priority === 'number'
+    ? Math.min(Math.max(0, Math.round(params.priority)), limits.dispatchMaxPriority)
+    : 0;
   const references = Array.isArray(params.references)
-    ? params.references.filter((r): r is string => typeof r === 'string').slice(0, 20)
+    ? params.references
+        .filter((r): r is string => typeof r === 'string')
+        .slice(0, limits.dispatchMaxReferences)
+        .map((r) => r.slice(0, limits.dispatchMaxReferenceLength))
     : [];
 
   // ── Look up current task to get dispatch depth ──────────────────────────
@@ -665,17 +680,51 @@ async function handleDispatchTask(
     );
   }
 
-  // ── Enforce per-task dispatch limit ─────────────────────────────────────
-  const [childCountResult] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.tasks)
-    .where(
-      and(
+  // ── Parallel: rate-limit checks, credential check, project fetch, and AI title ─
+  // These queries are independent of each other (only depend on currentTask for depth,
+  // which was already checked above). Running them in parallel saves 4 sequential D1
+  // round-trips + 1 Workers AI call.
+  // NOTE: Rate-limit checks are advisory, not atomic. Two concurrent dispatch calls
+  // from the same agent could both pass the COUNT checks before either INSERT completes,
+  // resulting in limit+1 children. This is acceptable given the low frequency of dispatch
+  // calls and the conservative default limits.
+  const titleConfig = getTaskTitleConfig(env);
+  const [
+    [childCountResult],
+    [activeDispatchedResult],
+    [credential],
+    [project],
+    taskTitle,
+  ] = await Promise.all([
+    db.select({ count: sql<number>`count(*)` })
+      .from(schema.tasks)
+      .where(and(
         eq(schema.tasks.parentTaskId, tokenData.taskId),
         eq(schema.tasks.projectId, tokenData.projectId),
-      ),
-    );
+        inArray(schema.tasks.status, ACTIVE_STATUSES),
+      )),
+    db.select({ count: sql<number>`count(*)` })
+      .from(schema.tasks)
+      .where(and(
+        eq(schema.tasks.projectId, tokenData.projectId),
+        inArray(schema.tasks.status, ACTIVE_STATUSES),
+        sql`${schema.tasks.dispatchDepth} > 0`,
+      )),
+    db.select({ id: schema.credentials.id })
+      .from(schema.credentials)
+      .where(and(
+        eq(schema.credentials.userId, tokenData.userId),
+        eq(schema.credentials.credentialType, 'cloud-provider'),
+      ))
+      .limit(1),
+    db.select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, tokenData.projectId))
+      .limit(1),
+    generateTaskTitle(env.AI, description, titleConfig),
+  ]);
 
+  // ── Enforce per-task dispatch limit ─────────────────────────────────────
   const childCount = childCountResult?.count ?? 0;
   if (childCount >= limits.dispatchMaxPerTask) {
     log.warn('mcp.dispatch_task.per_task_limit', {
@@ -693,17 +742,6 @@ async function handleDispatchTask(
   }
 
   // ── Enforce per-project active dispatched task limit ────────────────────
-  const [activeDispatchedResult] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.projectId, tokenData.projectId),
-        inArray(schema.tasks.status, ACTIVE_STATUSES),
-        sql`${schema.tasks.dispatchDepth} > 0`,
-      ),
-    );
-
   const activeDispatched = activeDispatchedResult?.count ?? 0;
   if (activeDispatched >= limits.dispatchMaxActivePerProject) {
     log.warn('mcp.dispatch_task.project_active_limit', {
@@ -720,17 +758,6 @@ async function handleDispatchTask(
   }
 
   // ── Verify cloud credentials exist for the user ─────────────────────────
-  const [credential] = await db
-    .select({ id: schema.credentials.id })
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, tokenData.userId),
-        eq(schema.credentials.credentialType, 'cloud-provider'),
-      ),
-    )
-    .limit(1);
-
   if (!credential) {
     return jsonRpcError(
       requestId,
@@ -739,13 +766,7 @@ async function handleDispatchTask(
     );
   }
 
-  // ── Fetch project for defaults ──────────────────────────────────────────
-  const [project] = await db
-    .select()
-    .from(schema.projects)
-    .where(eq(schema.projects.id, tokenData.projectId))
-    .limit(1);
-
+  // ── Verify project exists ──────────────────────────────────────────────
   if (!project) {
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Project not found');
   }
@@ -755,21 +776,22 @@ async function handleDispatchTask(
   if (references.length > 0) {
     fullDescription += '\n\n## References\n' + references.map((r) => `- ${r}`).join('\n');
   }
+  // Enforce length limit on the final description (after reference concatenation)
+  if (fullDescription.length > limits.dispatchDescriptionMaxLength) {
+    fullDescription = fullDescription.slice(0, limits.dispatchDescriptionMaxLength);
+  }
 
   // ── Create the task ─────────────────────────────────────────────────────
   const taskId = ulid();
   const now = new Date().toISOString();
 
-  // Generate branch name and AI title
+  // Generate branch name (CPU-only, no I/O)
   const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
   const branchMaxLength = parseInt(env.BRANCH_NAME_MAX_LENGTH || '60', 10);
   const branchName = generateBranchName(description, taskId, {
     prefix: branchPrefix,
     maxLength: branchMaxLength,
   });
-
-  const titleConfig = getTaskTitleConfig(env);
-  const taskTitle = await generateTaskTitle(env.AI, description, titleConfig);
 
   // Determine VM config (explicit > project default > platform default)
   const resolvedVmSize: VMSize = vmSize
