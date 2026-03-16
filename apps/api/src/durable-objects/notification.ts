@@ -55,6 +55,36 @@ export class NotificationService extends DurableObject<Env> {
     userId: string,
     request: CreateNotificationRequest
   ): Promise<NotificationResponse> {
+    // Check if this notification type is enabled for the user
+    const enabled = await this.isNotificationEnabled(
+      userId,
+      request.type,
+      request.projectId
+    );
+    if (!enabled) {
+      // Return a stub response without persisting
+      return {
+        id: 'suppressed',
+        projectId: request.projectId ?? null,
+        taskId: request.taskId ?? null,
+        sessionId: request.sessionId ?? null,
+        type: request.type,
+        urgency: request.urgency,
+        title: request.title,
+        body: request.body ?? null,
+        actionUrl: request.actionUrl ?? null,
+        metadata: request.metadata ?? null,
+        readAt: null,
+        dismissedAt: null,
+        createdAt: new Date().toISOString(),
+      };
+    }
+
+    // Validate actionUrl is a safe relative path
+    if (request.actionUrl && !request.actionUrl.startsWith('/')) {
+      request = { ...request, actionUrl: null };
+    }
+
     const id = generateId();
     const now = Date.now();
 
@@ -333,12 +363,13 @@ export class NotificationService extends DurableObject<Env> {
   }
 
   async webSocketClose(
-    ws: WebSocket,
+    _ws: WebSocket,
     _code: number,
     _reason: string,
     _wasClean: boolean
   ): Promise<void> {
-    ws.close();
+    // WebSocket is already closing — no action needed.
+    // Calling ws.close() here would throw a runtime error.
   }
 
   async webSocketError(ws: WebSocket, _error: unknown): Promise<void> {

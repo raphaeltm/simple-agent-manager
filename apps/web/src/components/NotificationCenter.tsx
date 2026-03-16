@@ -82,7 +82,7 @@ export function NotificationCenter() {
       if (!notification.readAt) {
         markRead(notification.id);
       }
-      if (notification.actionUrl) {
+      if (notification.actionUrl && notification.actionUrl.startsWith('/')) {
         navigate(notification.actionUrl);
         setIsOpen(false);
       }
@@ -115,7 +115,9 @@ export function NotificationCenter() {
       {isOpen && (
         <div
           ref={panelRef}
-          className="absolute right-0 top-full mt-2 w-[380px] max-h-[520px] bg-surface border border-border-default rounded-lg shadow-lg flex flex-col z-50 overflow-hidden"
+          role="dialog"
+          aria-label="Notifications"
+          className="absolute right-0 top-full mt-2 w-[calc(100vw-2rem)] sm:w-[380px] max-h-[520px] bg-surface border border-border-default rounded-lg shadow-lg flex flex-col z-50 overflow-hidden"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
@@ -219,8 +221,8 @@ function NotificationItem({
       onClick={onClick}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter') onClick(); }}
-      className={`flex gap-3 px-4 py-3 cursor-pointer border-b border-border-default transition-colors hover:bg-surface-hover ${
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
+      className={`group flex gap-3 px-4 py-3 cursor-pointer border-b border-border-default transition-colors hover:bg-surface-hover ${
         isUnread ? 'bg-inset' : ''
       }`}
     >

@@ -60,6 +60,14 @@ notificationRoutes.get('/unread-count', requireAuth(), requireApproved(), async 
   return c.json({ count });
 });
 
+// POST /api/notifications/read-all — must be before /:id/read to avoid being shadowed
+notificationRoutes.post('/read-all', requireAuth(), requireApproved(), async (c) => {
+  const userId = getUserId(c);
+  const stub = getNotificationStub(c.env, userId);
+  await stub.markAllRead(userId);
+  return c.json({ success: true });
+});
+
 // POST /api/notifications/:id/read
 notificationRoutes.post('/:id/read', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
@@ -68,14 +76,6 @@ notificationRoutes.post('/:id/read', requireAuth(), requireApproved(), async (c)
 
   const stub = getNotificationStub(c.env, userId);
   await stub.markRead(userId, notificationId);
-  return c.json({ success: true });
-});
-
-// POST /api/notifications/read-all
-notificationRoutes.post('/read-all', requireAuth(), requireApproved(), async (c) => {
-  const userId = getUserId(c);
-  const stub = getNotificationStub(c.env, userId);
-  await stub.markAllRead(userId);
   return c.json({ success: true });
 });
 
