@@ -845,6 +845,9 @@ export class ProjectData extends DurableObject<Env> {
         }
         await this.stopWorkspaceInD1(workspaceId);
 
+        // Clean up workspace activity tracking (prevents perpetual alarm loop)
+        this.sql.exec('DELETE FROM workspace_activity WHERE workspace_id = ?', workspaceId);
+
         // Remove from schedule
         this.sql.exec('DELETE FROM idle_cleanup_schedule WHERE session_id = ?', sessionId);
 
@@ -1118,9 +1121,10 @@ export class ProjectData extends DurableObject<Env> {
     // Find active workspaces with activity data that have been idle
     const idleThreshold = now - timeoutMs;
 
-    // Get all active workspaces tracked in workspace_activity
+    // Get all active workspaces tracked in workspace_activity (single query, no N+1)
     const activeWorkspaces = this.sql.exec(
-      `SELECT wa.workspace_id, wa.session_id, wa.last_terminal_activity_at, wa.last_message_at
+      `SELECT wa.workspace_id, wa.session_id, wa.last_terminal_activity_at, wa.last_message_at,
+              cs.updated_at as session_updated_at
        FROM workspace_activity wa
        INNER JOIN chat_sessions cs ON cs.workspace_id = wa.workspace_id
        WHERE cs.status = 'active'`
@@ -1131,13 +1135,7 @@ export class ProjectData extends DurableObject<Env> {
       const sessionId = ws.session_id as string | null;
       const lastTerminal = (ws.last_terminal_activity_at as number) || 0;
       const lastMessage = (ws.last_message_at as number) || 0;
-
-      // Also check the chat_sessions.updated_at as a message activity signal
-      const sessionRow = this.sql.exec(
-        'SELECT updated_at FROM chat_sessions WHERE workspace_id = ? AND status = \'active\'',
-        workspaceId
-      ).toArray()[0];
-      const sessionUpdatedAt = (sessionRow?.updated_at as number) || 0;
+      const sessionUpdatedAt = (ws.session_updated_at as number) || 0;
 
       const lastActivity = Math.max(lastTerminal, lastMessage, sessionUpdatedAt);
 
