@@ -179,6 +179,9 @@ submitRoutes.post('/submit', async (c) => {
     throw errors.badRequest(`provider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
   }
 
+  // Determine task mode: explicit override > inferred from workspace profile > default 'task'
+  const taskMode = body.taskMode ?? (workspaceProfile === 'lightweight' ? 'conversation' : 'task');
+
   // Use parent task's output branch if forking, otherwise use project default
   const branch = parentBranch || project.defaultBranch;
 
@@ -196,6 +199,7 @@ submitRoutes.post('/submit', async (c) => {
     status: 'queued',
     executionStep: 'node_selection',
     priority: 0,
+    taskMode,
     outputBranch: branchName,
     createdBy: userId,
     createdAt: now,
@@ -297,6 +301,7 @@ submitRoutes.post('/submit', async (c) => {
     vmSize,
     vmLocation,
     workspaceProfile,
+    taskMode,
     parentTaskId: body.parentTaskId ?? null,
     hasContextSummary: !!body.contextSummary,
     checkoutBranch: branch,
@@ -335,6 +340,7 @@ submitRoutes.post('/submit', async (c) => {
       agentType: body.agentType ?? project.defaultAgentType ?? null,
       workspaceProfile,
       cloudProvider: provider,
+      taskMode,
     });
   } catch (err) {
     // TaskRunner DO startup failed — mark task as failed.

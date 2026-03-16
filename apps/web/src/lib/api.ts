@@ -308,6 +308,7 @@ export interface SubmitTaskRequest {
   workspaceProfile?: 'full' | 'lightweight';
   parentTaskId?: string;
   contextSummary?: string;
+  taskMode?: 'task' | 'conversation';
 }
 
 export interface SubmitTaskResponse {
@@ -324,6 +325,15 @@ export async function submitTask(
   return request<SubmitTaskResponse>(`/api/projects/${projectId}/tasks/submit`, {
     method: 'POST',
     body: JSON.stringify(data),
+  });
+}
+
+export async function closeConversationTask(
+  projectId: string,
+  taskId: string,
+): Promise<{ status: string; closedAt: string }> {
+  return request<{ status: string; closedAt: string }>(`/api/projects/${projectId}/tasks/${taskId}/close`, {
+    method: 'POST',
   });
 }
 

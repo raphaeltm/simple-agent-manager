@@ -21,6 +21,8 @@ export interface CloudInitVariables {
   chatSessionId?: string;
   /** Task ID for task-driven workspaces (nullable — omitted for interactive workspaces) */
   taskId?: string;
+  /** Task execution mode: 'task' (default) or 'conversation' */
+  taskMode?: string;
   /** Docker daemon DNS servers as JSON array content (default: "1.1.1.1", "8.8.8.8") */
   dockerDnsServers?: string;
   /** Origin CA certificate PEM for TLS between CF edge and VM agent (nullable) */
@@ -49,6 +51,7 @@ export function generateCloudInit(variables: CloudInitVariables): string {
     '{{ project_id }}': variables.projectId ?? '',
     '{{ chat_session_id }}': variables.chatSessionId ?? '',
     '{{ task_id }}': variables.taskId ?? '',
+    '{{ task_mode }}': variables.taskMode ?? 'task',
     '{{ docker_name_tag }}': '{{.Name}}',
     '{{ docker_dns_servers }}': variables.dockerDnsServers ?? '"1.1.1.1", "8.8.8.8"',
     '{{ origin_ca_cert }}': indentForYamlBlock(variables.originCaCert ?? '', 6),

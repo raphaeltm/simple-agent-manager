@@ -519,12 +519,20 @@ async function handleGetInstructions(
       repository: project.repository,
       defaultBranch: project.defaultBranch,
     },
-    instructions: [
-      'Call `update_task_status` to report progress as you complete significant milestones.',
-      'Call `complete_task` with a summary when all work is done.',
-      'Push your changes to the output branch before calling `complete_task`.',
-      'If you encounter blockers, report them via `update_task_status` with a clear description.',
-    ],
+    instructions: task.taskMode === 'conversation'
+      ? [
+          'You are in a conversation with a human. Respond to their messages directly.',
+          'Use `dispatch_task` to spawn follow-up work to other agents when needed.',
+          'Use `update_task_status` to report significant findings or progress.',
+          'Do NOT call `complete_task` — the human will end the conversation when they are ready.',
+          'If you encounter blockers, report them via `update_task_status` with a clear description.',
+        ]
+      : [
+          'Call `update_task_status` to report progress as you complete significant milestones.',
+          'Call `complete_task` with a summary when all work is done.',
+          'Push your changes to the output branch before calling `complete_task`.',
+          'If you encounter blockers, report them via `update_task_status` with a clear description.',
+        ],
   };
 
   return jsonRpcSuccess(requestId, {
@@ -616,6 +624,47 @@ async function handleCompleteTask(
 
   const now = new Date().toISOString();
 
+  // Check task mode — in conversation mode, complete_task silently remaps to awaiting_followup
+  // instead of completing the task. This prevents agents that ignore conversation-mode instructions
+  // from prematurely ending the conversation.
+  const taskRow = await env.DATABASE.prepare(
+    `SELECT task_mode FROM tasks WHERE id = ? AND project_id = ?`,
+  ).bind(tokenData.taskId, tokenData.projectId).first<{ task_mode: string }>();
+
+  const isConversation = taskRow?.task_mode === 'conversation';
+
+  if (isConversation) {
+    // In conversation mode, remap complete_task to awaiting_followup — keep the task active.
+    const result = await env.DATABASE.prepare(
+      `UPDATE tasks SET execution_step = 'awaiting_followup', output_summary = COALESCE(?, output_summary), updated_at = ?
+       WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`,
+    ).bind(
+      summary ? summary.slice(0, getMcpLimits(env).outputSummaryMaxLength) : null,
+      now,
+      tokenData.taskId,
+      tokenData.projectId,
+    ).run();
+
+    if (!result.meta.changes || result.meta.changes === 0) {
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        'Task cannot be updated — it may not exist or is not in an active status',
+      );
+    }
+
+    log.info('mcp.complete_task.conversation_remapped', {
+      taskId: tokenData.taskId,
+      projectId: tokenData.projectId,
+      summary: summary?.slice(0, getMcpLimits(env).logMessageMaxLength) ?? null,
+    });
+
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: 'Acknowledged. Conversation remains open for follow-up.' }],
+    });
+  }
+
+  // Task mode: standard completion
   // Atomic conditional UPDATE — only transitions from completable statuses.
   // This prevents the TOCTOU race of a separate SELECT + UPDATE.
   const result = await env.DATABASE.prepare(

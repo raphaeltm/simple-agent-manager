@@ -79,6 +79,7 @@ export interface ProvisionTaskContext {
   projectId: string;
   chatSessionId: string;
   taskId: string;
+  taskMode?: string;
 }
 
 export async function provisionNode(
@@ -125,6 +126,7 @@ export async function provisionNode(
       projectId: taskContext?.projectId,
       chatSessionId: taskContext?.chatSessionId,
       taskId: taskContext?.taskId,
+      taskMode: taskContext?.taskMode,
       dockerDnsServers: env.DOCKER_DNS_SERVERS,
       originCaCert: env.ORIGIN_CA_CERT,
       originCaKey: env.ORIGIN_CA_KEY,

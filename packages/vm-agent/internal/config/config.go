@@ -128,6 +128,7 @@ type Config struct {
 	ProjectID     string // Linked project ID (env: PROJECT_ID)
 	ChatSessionID string // Chat session created during workspace provisioning (env: CHAT_SESSION_ID)
 	TaskID        string // Task ID for task-driven workspaces (env: TASK_ID)
+	TaskMode      string // Task execution mode: "task" or "conversation" (env: TASK_MODE, default: "task")
 
 	// Persistence settings - configurable per constitution principle XI
 	PersistenceDBPath string // SQLite database path for session state persistence
@@ -285,6 +286,7 @@ func Load() (*Config, error) {
 		ProjectID:     getEnv("PROJECT_ID", ""),
 		ChatSessionID: getEnv("CHAT_SESSION_ID", ""),
 		TaskID:        getEnv("TASK_ID", ""),
+		TaskMode:      getEnv("TASK_MODE", "task"),
 
 		// Persistence settings
 		PersistenceDBPath: getEnv("PERSISTENCE_DB_PATH", "/var/lib/vm-agent/state.db"),
@@ -486,6 +488,7 @@ func (c *Config) BuildSAMEnvFallback() []string {
 		{"SAM_PROJECT_ID", c.ProjectID},
 		{"SAM_CHAT_SESSION_ID", c.ChatSessionID},
 		{"SAM_TASK_ID", c.TaskID},
+		{"SAM_TASK_MODE", c.TaskMode},
 		{"SAM_REPOSITORY", c.Repository},
 		{"SAM_WORKSPACE_ID", c.WorkspaceID},
 	}
