@@ -238,6 +238,7 @@ describe('ProjectChat new chat button', () => {
         message: 'Build a todo app',
         agentType: 'claude-code',
         workspaceProfile: 'full',
+        taskMode: 'task',
       });
     });
 
@@ -373,6 +374,7 @@ describe('ProjectChat agent type selection', () => {
         message: 'Fix the tests',
         agentType: 'openai-codex',
         workspaceProfile: 'full',
+        taskMode: 'task',
       });
     });
   });
@@ -435,6 +437,7 @@ describe('ProjectChat workspace profile selection', () => {
         message: 'Quick question',
         agentType: 'claude-code',
         workspaceProfile: 'lightweight',
+        taskMode: 'conversation',
       });
     });
   });
