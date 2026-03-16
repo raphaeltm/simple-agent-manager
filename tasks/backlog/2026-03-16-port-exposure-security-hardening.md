@@ -1,7 +1,7 @@
 # Port Exposure Security Hardening
 
 **Created**: 2026-03-16
-**Source**: Cloudflare specialist review of PR #419 (workspace port exposure)
+**Source**: Cloudflare specialist + Go specialist reviews of PR #419 (workspace port exposure)
 **Priority**: HIGH
 
 ## Problem
@@ -30,6 +30,16 @@ The auth gap predates the port exposure feature (the standard workspace proxy ha
   - Double-dash workspace ID: `ws-abc--def--3000.example.com`
   - Suffix-domain rejection: `ws-abc123.notexample.com` with baseDomain `example.com`
 - [ ] Add comment to `split('--', 2)` documenting ULID ID format assumption
+- [ ] Add timeout to `readProcNetTCP` via `exec.CommandContext` (Go specialist HIGH)
+  - Add `PORT_SCAN_EXEC_TIMEOUT` env var (default: 5s)
+  - Prevents goroutine stall on unresponsive Docker daemon
+- [ ] VM agent: validate proxied port against detected port set or document unrestricted intent
+  - `handleWorkspacePortProxy` allows any port 1-65535 regardless of `ExcludePorts`
+  - Either enforce detected-only or explicitly document that exclude list is display-only
+- [ ] Add `s.sessionManager.Stop()` to `Server.Stop()` (Go specialist MEDIUM — goroutine leak)
+- [ ] Call `stopAllPortScanners()` from `StopAllWorkspacesAndSessions` (Go specialist MEDIUM)
+- [ ] Fix CORS wildcard suffix check to use URL parsing (Go specialist MEDIUM — pre-existing)
+- [ ] Log warning when multiple containers match discovery label (Go specialist LOW)
 
 ## Acceptance Criteria
 
@@ -38,6 +48,8 @@ The auth gap predates the port exposure feature (the standard workspace proxy ha
 - [ ] Port 8443 (VM agent) is not proxiable from the public subdomain
 - [ ] Path traversal sequences in the proxied URL are normalized
 - [ ] Boot-log exception does not apply to port-proxy requests on creating workspaces
+- [ ] `readProcNetTCP` has configurable timeout, doesn't block indefinitely
+- [ ] No goroutine leaks in server shutdown path (session manager + port scanners)
 
 ## References
 
