@@ -145,6 +145,7 @@ export function ProjectChat() {
       ? 'conversation'
       : 'task',
   );
+  const userSetTaskModeRef = useRef(false);
 
   // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
@@ -195,9 +196,11 @@ export function ProjectChat() {
   // Effects (all preserved from original)
   // ---------------------------------------------------------------------------
 
-  // Sync task mode default when workspace profile changes
+  // Sync task mode default when workspace profile changes (only if user hasn't explicitly set mode)
   useEffect(() => {
-    setSelectedTaskMode(selectedWorkspaceProfile === 'lightweight' ? 'conversation' : 'task');
+    if (!userSetTaskModeRef.current) {
+      setSelectedTaskMode(selectedWorkspaceProfile === 'lightweight' ? 'conversation' : 'task');
+    }
   }, [selectedWorkspaceProfile]);
 
   // Check for cloud provider credentials
@@ -419,15 +422,22 @@ export function ProjectChat() {
     }
   };
 
+  const [closingConversation, setClosingConversation] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
+
   const handleCloseConversation = useCallback(async () => {
     const selectedSession = sessions.find((s) => s.id === sessionId);
     if (!selectedSession?.taskId) return;
+    setClosingConversation(true);
+    setCloseError(null);
     try {
       await closeConversationTask(projectId, selectedSession.taskId);
       void loadSessions();
     } catch (err) {
-      // The endpoint validates that the task is conversation-mode; silently ignore errors
       console.warn('Failed to close conversation:', err);
+      setCloseError(err instanceof Error ? err.message : 'Failed to close conversation');
+    } finally {
+      setClosingConversation(false);
     }
   }, [projectId, sessionId, sessions, loadSessions]);
 
@@ -634,7 +644,7 @@ export function ProjectChat() {
               selectedWorkspaceProfile={selectedWorkspaceProfile}
               onWorkspaceProfileChange={setSelectedWorkspaceProfile}
               selectedTaskMode={selectedTaskMode}
-              onTaskModeChange={setSelectedTaskMode}
+              onTaskModeChange={(mode: TaskMode) => { userSetTaskModeRef.current = true; setSelectedTaskMode(mode); }}
             />
           </div>
         ) : (
@@ -656,14 +666,16 @@ export function ProjectChat() {
               const state = getSessionState(selectedSession);
               if (state !== 'idle') return null;
               return (
-                <div className="shrink-0 border-t border-border-default px-4 py-2 bg-surface flex justify-center">
+                <div className="shrink-0 border-t border-border-default px-4 py-2 bg-surface flex flex-col items-center gap-1">
                   <button
                     type="button"
                     onClick={handleCloseConversation}
-                    className="px-3 py-1.5 text-xs rounded-md border border-border-default bg-page text-fg-muted hover:text-fg-primary hover:border-fg-muted cursor-pointer"
+                    disabled={closingConversation}
+                    className="px-4 py-2.5 min-h-[44px] text-xs rounded-md border border-border-default bg-page text-fg-muted hover:text-fg-primary hover:border-fg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Close conversation
+                    {closingConversation ? 'Closing...' : 'Close conversation'}
                   </button>
+                  {closeError && <p className="text-xs text-red-500">{closeError}</p>}
                 </div>
               );
             })()}
@@ -1093,20 +1105,23 @@ function ChatInput({
           </select>
         </div>
         <div className="flex items-center gap-2">
-          <label htmlFor="task-mode-select" className="text-xs text-fg-muted whitespace-nowrap">Mode:</label>
+          <label htmlFor="task-mode-select" className="text-xs text-fg-muted whitespace-nowrap">Run mode:</label>
           <select
             id="task-mode-select"
             value={selectedTaskMode}
             onChange={(e) => onTaskModeChange(e.target.value as TaskMode)}
             disabled={submitting}
-            className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs outline-none cursor-pointer"
-            title={selectedTaskMode === 'task'
-              ? 'Agent will do the work, push changes, and create a PR'
-              : 'Chat with an agent. You decide when it\'s done.'}
+            className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs outline-none cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+            aria-describedby="task-mode-desc"
           >
             <option value="task">Task</option>
             <option value="conversation">Conversation</option>
           </select>
+          <span id="task-mode-desc" className="sr-only">
+            {selectedTaskMode === 'task'
+              ? 'Agent will do the work, push changes, and create a PR'
+              : 'Chat with an agent. You decide when it\'s done.'}
+          </span>
         </div>
       </div>
       <div className="flex gap-2 items-end">

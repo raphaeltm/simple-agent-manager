@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   submitTask: vi.fn(),
   getProjectTask: vi.fn(),
   getTranscribeApiUrl: vi.fn(() => 'https://api.test.com/api/transcribe'),
+  closeConversationTask: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
@@ -18,6 +19,7 @@ vi.mock('../../../src/lib/api', () => ({
   submitTask: mocks.submitTask,
   getProjectTask: mocks.getProjectTask,
   getTranscribeApiUrl: mocks.getTranscribeApiUrl,
+  closeConversationTask: mocks.closeConversationTask,
 }));
 
 vi.mock('@simple-agent-manager/acp-client', () => ({
