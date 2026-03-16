@@ -1544,6 +1544,23 @@ describe('MCP Routes', () => {
       expect(body.result.content[0].text).toContain('Conversation remains open');
     });
 
+    it('should return error when conversation task is not in active status', async () => {
+      // First query: check task_mode — returns conversation
+      mockD1._stmt.first.mockResolvedValueOnce({ task_mode: 'conversation' });
+      // Second query: update fails — task in terminal status (0 changes)
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 0 } });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'complete_task',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('cannot be updated');
+    });
+
     it('should complete normally for task-mode tasks', async () => {
       // First query: check task_mode — returns task
       mockD1._stmt.first.mockResolvedValueOnce({ task_mode: 'task' });
