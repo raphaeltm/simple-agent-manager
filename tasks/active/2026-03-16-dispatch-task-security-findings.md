@@ -39,17 +39,17 @@ MCP tokens remain valid for read access for up to 2 hours after task completion.
 
 ## Implementation Checklist
 
-- [ ] Mitigate TOCTOU in dispatch rate limiting (D1 batch or DO mutex)
-- [ ] Add HTTP-level rate limiting to `/mcp` endpoint
-- [ ] Add allowlist validation for `roles` array in session/message tools
-- [ ] Review post-completion token TTL — consider reducing from 2 hours
+- [x] Mitigate TOCTOU in dispatch rate limiting (D1 batch) — used D1 `.batch()` for atomic COUNT + INSERT; advisory pre-checks remain for fast-fail
+- [x] Add HTTP-level rate limiting to `/mcp` endpoint — 120 req/min per task, configurable via `MCP_RATE_LIMIT` and `MCP_RATE_LIMIT_WINDOW_SECONDS`
+- [x] Add allowlist validation for `roles` array in session/message tools — `VALID_MESSAGE_ROLES` allowlist, returns 400 with invalid role names
+- [x] Review post-completion token TTL — reduced default from 2 hours to 30 minutes; still configurable via `MCP_TOKEN_TTL_SECONDS`
 
 ## Acceptance Criteria
 
-- [ ] Concurrent dispatch requests cannot bypass rate limits (test with parallel requests)
-- [ ] `/mcp` endpoint returns 429 when rate limit exceeded
-- [ ] Invalid `roles` values are rejected with 400
-- [ ] Existing MCP tool functionality is not broken (regression tests pass)
+- [x] Concurrent dispatch requests cannot bypass rate limits (test: "should cancel task when atomic check reveals TOCTOU race")
+- [x] `/mcp` endpoint returns 429 when rate limit exceeded (test: "should return 429 when rate limit is exceeded")
+- [x] Invalid `roles` values are rejected with 400 (tests: "should reject invalid roles in get_session_messages/search_messages")
+- [x] Existing MCP tool functionality is not broken (all 2079 tests pass)
 
 ## References
 
