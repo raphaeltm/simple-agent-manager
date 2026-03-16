@@ -138,7 +138,9 @@ export class ProjectData extends DurableObject<Env> {
         now
       );
       // Ensure alarm is scheduled for workspace idle checks
-      this.recalculateAlarm().catch(() => {});
+      this.recalculateAlarm().catch((err) => {
+        console.warn('Failed to schedule workspace idle alarm', workspaceId, err);
+      });
     }
 
     this.recordActivityEventInternal('session.started', 'system', null, workspaceId, id, taskId, null);
@@ -925,13 +927,24 @@ export class ProjectData extends DurableObject<Env> {
       heartbeatTime = earliestHb + detectionWindow;
     }
 
-    // Schedule periodic workspace idle check if any workspaces are tracked
+    // Schedule periodic workspace idle check if any workspaces are tracked.
+    // Use the earliest workspace activity timestamp + timeout to derive the next
+    // check time, so frequent DO activity doesn't push idle checks into the future.
     let workspaceIdleCheckTime: number | null = null;
-    const trackedWorkspaces = this.sql
-      .exec('SELECT COUNT(*) as cnt FROM workspace_activity')
+    const earliestActivityRow = this.sql
+      .exec(
+        `SELECT MIN(COALESCE(
+          CASE WHEN last_terminal_activity_at > last_message_at THEN last_terminal_activity_at ELSE last_message_at END,
+          last_message_at, created_at
+        )) as earliest FROM workspace_activity`
+      )
       .toArray()[0];
-    if (trackedWorkspaces && (trackedWorkspaces.cnt as number) > 0) {
-      workspaceIdleCheckTime = Date.now() + WORKSPACE_IDLE_CHECK_INTERVAL_MS;
+    const earliestActivity = earliestActivityRow?.earliest as number | null;
+    if (earliestActivity !== null) {
+      // Schedule check at: earliest quiet workspace's last activity + check interval
+      // This ensures idle workspaces are checked promptly even during high DO activity
+      const nextCheck = earliestActivity + WORKSPACE_IDLE_CHECK_INTERVAL_MS;
+      workspaceIdleCheckTime = Math.max(nextCheck, Date.now() + 60_000); // at least 1 min from now
     }
 
     const candidates = [idleEarliest, heartbeatTime, workspaceIdleCheckTime].filter((t): t is number => t !== null);
@@ -1096,8 +1109,9 @@ export class ProjectData extends DurableObject<Env> {
         if (row?.workspace_idle_timeout_ms) {
           timeoutMs = row.workspace_idle_timeout_ms;
         }
-      } catch {
+      } catch (err) {
         // Best-effort: fall back to env/default
+        console.warn('D1 project timeout query failed, using default', projectId, err);
       }
     }
 
@@ -1144,10 +1158,7 @@ export class ProjectData extends DurableObject<Env> {
             this.stopSessionInternal(sessionId);
           }
 
-          // Stop workspace in D1
-          await this.stopWorkspaceInD1(workspaceId);
-
-          // Delete workspace resources via D1 (the cron sweep handles actual VM cleanup)
+          // Mark workspace for cleanup in D1 (the cron sweep handles actual VM cleanup)
           await this.deleteWorkspaceInD1(workspaceId);
 
           // Remove activity tracking

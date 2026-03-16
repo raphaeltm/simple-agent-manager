@@ -404,7 +404,7 @@ export async function updateTerminalActivity(
   sessionId: string | null
 ): Promise<void> {
   const stub = await getStub(env, projectId);
-  stub.updateTerminalActivity(workspaceId, sessionId);
+  await stub.updateTerminalActivity(workspaceId, sessionId);
 }
 
 // =========================================================================

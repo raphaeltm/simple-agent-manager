@@ -191,7 +191,8 @@ export const MAX_NODE_IDLE_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
 /** Interval (ms) at which the ProjectData DO checks workspace idle state. */
 export const WORKSPACE_IDLE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
-/** Minimum interval (ms) between terminal activity updates to the DO to avoid write amplification. */
+/** Minimum interval (ms) between terminal activity updates to the DO to avoid write amplification.
+ * Intended for frontend heartbeat interval — not yet enforced server-side. */
 export const TERMINAL_ACTIVITY_THROTTLE_MS = 60 * 1000; // 1 minute
 
 // =============================================================================
