@@ -19,4 +19,17 @@ describe('terminal routes source contract', () => {
     expect(file).toContain('body.workspaceId');
     expect(file).toContain('projectDataService.updateTerminalActivity');
   });
+
+  it('validates workspaceId is required on activity endpoint', () => {
+    expect(file).toContain("throw errors.badRequest('workspaceId is required')");
+  });
+
+  it('skips activity tracking when workspace has no projectId', () => {
+    expect(file).toContain('if (ws.projectId)');
+  });
+
+  it('uses waitUntil for fire-and-forget terminal activity on token endpoint', () => {
+    expect(file).toContain('c.executionCtx.waitUntil');
+    expect(file).toContain('updateTerminalActivity');
+  });
 });
