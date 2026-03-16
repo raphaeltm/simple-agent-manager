@@ -580,7 +580,7 @@ describe('GlobalCommandPalette', () => {
     expect(apiNewChat).toBeDefined();
     fireEvent.click(apiNewChat!);
 
-    expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/chat', { state: { newChat: true } });
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/chat', );
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -614,7 +614,7 @@ describe('GlobalCommandPalette', () => {
     // First matching result should be selected; press Enter
     fireEvent.keyDown(input, { key: 'Enter' });
 
-    expect(mockNavigate).toHaveBeenCalledWith('/projects/p3/chat', { state: { newChat: true } });
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/p3/chat', );
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

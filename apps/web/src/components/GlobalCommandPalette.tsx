@@ -349,7 +349,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
             kind: 'action',
             id: `quick-new-chat-${projectId}`,
             label: searchText,
-            action: () => navigate(`/projects/${projectId}/chat`, { state: { newChat: true } }),
+            action: () => navigate(`/projects/${projectId}/chat`),
             icon: <MessageSquarePlus size={14} />,
             score: m.score,
             matches: m.matches,

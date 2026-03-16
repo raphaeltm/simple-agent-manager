@@ -149,7 +149,7 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
   const showActions = isAgent && !streaming && timestamp != null && timestamp > 0;
 
   return (
-    <div className={`group/msg flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
+    <div className={`group flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       <div
         className={`max-w-[80%] rounded-lg px-4 py-3 ${
           isUser
@@ -169,7 +169,7 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
           <span className="inline-block mt-1 text-xs opacity-60 animate-pulse">...</span>
         )}
         {showActions && (
-          <div className="opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
+          <div className="opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
             <MessageActions text={text} timestamp={timestamp} ttsApiUrl={ttsApiUrl} ttsStorageId={ttsStorageId} />
           </div>
         )}
