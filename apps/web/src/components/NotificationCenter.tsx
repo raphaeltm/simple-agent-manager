@@ -37,6 +37,7 @@ type FilterTab = 'all' | 'unread';
 export function NotificationCenter() {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
   const panelRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
@@ -51,6 +52,18 @@ export function NotificationCenter() {
     loadMore,
     hasMore,
   } = useNotifications();
+
+  // Position the panel relative to the bell button
+  useEffect(() => {
+    if (!isOpen || !buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const isMobile = window.innerWidth < 640;
+    if (isMobile) {
+      setPanelStyle({ top: rect.bottom + 8 });
+    } else {
+      setPanelStyle({ top: rect.bottom + 8, left: rect.left });
+    }
+  }, [isOpen]);
 
   // Close on click outside
   useEffect(() => {
@@ -140,7 +153,8 @@ export function NotificationCenter() {
           ref={panelRef}
           role="dialog"
           aria-label="Notifications"
-          className="fixed inset-x-4 top-14 sm:absolute sm:inset-x-auto sm:left-0 sm:top-full sm:mt-2 sm:w-[380px] max-h-[calc(100vh-5rem)] sm:max-h-[520px] bg-surface border border-border-default rounded-lg shadow-lg flex flex-col z-50 overflow-hidden"
+          style={panelStyle}
+          className="fixed inset-x-4 sm:inset-x-auto sm:w-[380px] max-h-[calc(100vh-5rem)] sm:max-h-[520px] bg-surface border border-border-default rounded-lg shadow-lg flex flex-col z-[100] overflow-hidden"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
