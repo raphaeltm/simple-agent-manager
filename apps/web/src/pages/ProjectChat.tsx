@@ -246,18 +246,12 @@ export function ProjectChat() {
   // True when realtime updates are permanently degraded (exhausted retries).
   const realtimeDegraded = connectionState === 'disconnected';
 
-  // Initial load — auto-select the most recent session when navigating to the
-  // project without a specific sessionId (e.g., from the dashboard). This
-  // prevents users from accidentally creating a new session when they intended
-  // to continue an existing conversation. The "+ New Chat" button sets
-  // newChatIntentRef to bypass this behavior.
+  // Initial load — load sessions but default to the new-chat view.
+  // Users pick an existing session from the sidebar; visiting the project
+  // without a sessionId always shows the new-chat input.
   useEffect(() => {
     setLoading(true);
-    void loadSessions().then((loaded) => {
-      if (!sessionId && !newChatIntentRef.current && loaded.length > 0) {
-        navigate(`/projects/${projectId}/chat/${loaded[0]!.id}`, { replace: true });
-      }
-    }).finally(() => setLoading(false));
+    void loadSessions().finally(() => setLoading(false));
   }, [loadSessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll task status during provisioning

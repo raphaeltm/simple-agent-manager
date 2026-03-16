@@ -1,5 +1,10 @@
 @import '@simple-agent-manager/ui/tokens/theme.css';
 
+/* Tailwind v4 auto-detection skips node_modules (even symlinked workspace
+   packages). Explicitly include acp-client so named group variants like
+   group-hover/msg are generated. */
+@source "../../../packages/acp-client/dist";
+
 :root {
   --sam-app-height: 100vh;
   --sam-keyboard-offset: 0px;

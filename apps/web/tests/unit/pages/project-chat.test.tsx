@@ -137,7 +137,7 @@ describe('ProjectChat new chat button', () => {
     });
   });
 
-  it('auto-selects the most recent session when sessions exist and no sessionId in URL', async () => {
+  it('shows new chat input when sessions exist but no sessionId in URL', async () => {
     mocks.listChatSessions.mockResolvedValue({
       sessions: [SESSION_1, SESSION_2],
       total: 2,
@@ -145,13 +145,10 @@ describe('ProjectChat new chat button', () => {
 
     renderProjectChat();
 
-    // Should auto-navigate to the most recent session (SESSION_1)
+    // Should show new chat input (not auto-select a session)
     await waitFor(() => {
-      expect(screen.getByTestId('message-view')).toHaveTextContent('session-1');
+      expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
     });
-
-    // New chat input should NOT be shown
-    expect(screen.queryByText('What do you want to build?')).not.toBeInTheDocument();
   });
 
   it('shows new chat input after clicking "+ New Chat" from a session', async () => {
