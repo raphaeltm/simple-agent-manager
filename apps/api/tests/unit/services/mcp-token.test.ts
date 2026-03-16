@@ -84,13 +84,13 @@ describe('MCP Token Service', () => {
       };
 
       await storeMcpToken(mockKV as unknown as KVNamespace, token, data, {
-        MCP_TOKEN_TTL_SECONDS: '1800',
+        MCP_TOKEN_TTL_SECONDS: '3600',
       });
 
       expect(mockKV.put).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(String),
-        { expirationTtl: 1800 },
+        { expirationTtl: 3600 },
       );
     });
   });

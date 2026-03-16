@@ -1190,6 +1190,57 @@ describe('MCP Routes', () => {
       );
       expect(rateLimitPut).toBeDefined();
     });
+
+    it('should allow request at count=119 (boundary: exactly at limit)', async () => {
+      // count=119, newCount=120, limit=120 → newCount <= limit → allowed
+      mockKV.get.mockImplementation(async (key: string, _opts?: unknown) => {
+        if (typeof key === 'string' && key.startsWith('ratelimit:mcp:')) {
+          return { count: 119, windowStart: Math.floor(Date.now() / 1000 / 60) * 60 };
+        }
+        return validTokenData;
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('ping'));
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('X-RateLimit-Remaining')).toBe('0');
+    });
+
+    it('should deny request at count=120 (boundary: one over limit)', async () => {
+      // count=120, newCount=121, limit=120 → newCount > limit → denied
+      mockKV.get.mockImplementation(async (key: string, _opts?: unknown) => {
+        if (typeof key === 'string' && key.startsWith('ratelimit:mcp:')) {
+          return { count: 120, windowStart: Math.floor(Date.now() / 1000 / 60) * 60 };
+        }
+        return validTokenData;
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('ping'));
+
+      expect(res.status).toBe(429);
+    });
+
+    it('should reset counter for stale window', async () => {
+      // Return a rate limit entry with an old windowStart — should be treated as fresh
+      mockKV.get.mockImplementation(async (key: string, _opts?: unknown) => {
+        if (typeof key === 'string' && key.startsWith('ratelimit:mcp:')) {
+          return { count: 999, windowStart: 0 }; // ancient window
+        }
+        return validTokenData;
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('ping'));
+
+      expect(res.status).toBe(200);
+      // Should have reset the counter since the window doesn't match
+      const putCalls = mockKV.put.mock.calls;
+      const rateLimitPut = putCalls.find((c: unknown[]) =>
+        typeof c[0] === 'string' && (c[0] as string).startsWith('ratelimit:mcp:'),
+      );
+      expect(rateLimitPut).toBeDefined();
+      const stored = JSON.parse(rateLimitPut![1] as string);
+      expect(stored.count).toBe(1);
+    });
   });
 
   // ─── Roles validation ──────────────────────────────────────────────
@@ -1250,6 +1301,41 @@ describe('MCP Routes', () => {
         arguments: { sessionId: 'sess-1' },
       }));
 
+      expect(mockDoStub.getMessages).toHaveBeenCalledWith(
+        'sess-1',
+        expect.any(Number),
+        null,
+        ['user', 'assistant'],
+      );
+    });
+
+    it('should default to user and assistant for empty roles array', async () => {
+      mockDoStub.getSession.mockResolvedValue({ id: 'sess-1', topic: null, taskId: null });
+      mockDoStub.getMessages.mockResolvedValue({ messages: [], hasMore: false });
+
+      await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_session_messages',
+        arguments: { sessionId: 'sess-1', roles: [] },
+      }));
+
+      expect(mockDoStub.getMessages).toHaveBeenCalledWith(
+        'sess-1',
+        expect.any(Number),
+        null,
+        ['user', 'assistant'],
+      );
+    });
+
+    it('should treat non-array roles as default (string fallback)', async () => {
+      mockDoStub.getSession.mockResolvedValue({ id: 'sess-1', topic: null, taskId: null });
+      mockDoStub.getMessages.mockResolvedValue({ messages: [], hasMore: false });
+
+      await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_session_messages',
+        arguments: { sessionId: 'sess-1', roles: 'user' },
+      }));
+
+      // Non-array input should fall back to default roles
       expect(mockDoStub.getMessages).toHaveBeenCalledWith(
         'sess-1',
         expect.any(Number),
