@@ -64,26 +64,50 @@ This feature pairs naturally with the notification system (see `tasks/backlog/20
 
 ## Acceptance Criteria
 
-- [ ] New `dispatch_task` MCP tool registered in `apps/api/src/routes/mcp.ts`
-- [ ] Tool creates a task via existing task submission flow (reuses TaskRunner DO orchestration)
-- [ ] Agent synthesizes conversation context into a coherent task description
-- [ ] User receives confirmation with task ID and link
-- [ ] Dispatched task runs independently — current conversation continues uninterrupted
-- [ ] Cross-project dispatch works (agent in Project A can dispatch a task in Project B)
-- [ ] Task description includes relevant file references from the conversation
-- [ ] Dispatched task appears in the target project's task list / kanban board
+- [x] New `dispatch_task` MCP tool registered in `apps/api/src/routes/mcp.ts`
+- [x] Tool creates a task via existing task submission flow (reuses TaskRunner DO orchestration)
+- [x] Agent synthesizes conversation context into a coherent task description
+- [x] User receives confirmation with task ID and link
+- [x] Dispatched task runs independently — current conversation continues uninterrupted
+- [ ] Cross-project dispatch works (agent in Project A can dispatch a task in Project B) — **Deferred**: token is project-scoped; cross-project dispatch requires a new auth model
+- [x] Task description includes relevant file references from the conversation
+- [x] Dispatched task appears in the target project's task list / kanban board
+
+## Implementation Details
+
+### Rate Limiting (Three-Layer Defense)
+
+1. **Dispatch depth** (`dispatch_depth` column on tasks table): User-created tasks = 0, each agent dispatch increments by 1. Configurable max via `MCP_DISPATCH_MAX_DEPTH` (default: 3). Prevents unbounded recursive spawning.
+2. **Per-task child limit**: Each agent can dispatch at most `MCP_DISPATCH_MAX_PER_TASK` tasks (default: 5). Prevents a single runaway agent from monopolizing resources.
+3. **Per-project active limit**: At most `MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT` (default: 10) agent-dispatched tasks can be active concurrently per project. Prevents project-level resource exhaustion.
+
+### Auth Scoping
+
+The existing task-scoped MCP token (`McpTokenData`) already contains `projectId` and `userId`. For same-project dispatch, no token scope change is needed — the handler validates the agent has credentials and the project exists. Cross-project dispatch is deferred.
+
+### Schema Change
+
+Added `dispatch_depth INTEGER NOT NULL DEFAULT 0` to the `tasks` table. Requires D1 migration at deploy time.
+
+### Key Design Decisions
+
+- **No cross-project dispatch** in v1 — the MCP token is project-scoped, and cross-project auth raises trust/permission questions
+- **D1 COUNT queries for rate limiting** — dispatch is infrequent enough (not per-message) that D1 queries are fine
+- **Parent task's output branch used as checkout branch** — dispatched agents continue from where the parent left off
+- **References appended to description** — file paths/URLs are appended as a `## References` section rather than a separate field
 
 ## Key Files
 
-- `apps/api/src/routes/mcp.ts` — MCP server; add `dispatch_task` tool here
-- `apps/api/src/routes/tasks/crud.ts` — existing task submission endpoint to reuse
-- `apps/api/src/durable-objects/task-runner.ts` — existing orchestration (no changes needed)
-- `packages/vm-agent/internal/server/mcp.go` — VM agent MCP tool registration (if applicable)
+- `apps/api/src/routes/mcp.ts` — MCP server; `dispatch_task` tool + `handleDispatchTask` handler
+- `apps/api/src/db/schema.ts` — `dispatchDepth` column on tasks table
+- `apps/api/src/index.ts` — `MCP_DISPATCH_*` env vars in Env interface
+- `apps/api/.env.example` — documented dispatch config vars
+- `apps/api/tests/unit/routes/mcp.test.ts` — unit tests for dispatch_task validation
 
-## Design Considerations
+## Design Considerations (Resolved)
 
-- **Auth scoping**: The MCP token is currently task-scoped. A `dispatch_task` tool would need permission to create tasks in the current project (or other projects if cross-project dispatch is supported). May need a broader token scope or a separate auth mechanism.
-- **Rate limiting**: Prevent runaway agent-spawning-agent loops. Consider a max dispatch depth or per-user concurrency limit.
-- **Context window**: The dispatching agent has a finite context window. Context synthesis should happen before dispatch, not by passing raw conversation history.
-- **Cost awareness**: Dispatching agents consumes compute resources. Consider requiring explicit user confirmation for dispatch, or at least surfacing the estimated cost.
-- **Circular dispatch prevention**: An agent dispatched by another agent should probably not be able to dispatch further agents (or should have a depth limit).
+- **Auth scoping**: Resolved — same-project dispatch uses existing token. Cross-project deferred.
+- **Rate limiting**: Resolved — three-layer defense (depth + per-task + per-project).
+- **Context window**: Resolved — tool description instructs agents to synthesize context, not dump raw history.
+- **Cost awareness**: Partially addressed — rate limits cap resource usage. User confirmation deferred to future UI work.
+- **Circular dispatch prevention**: Resolved — dispatch depth limit prevents unbounded recursion.
