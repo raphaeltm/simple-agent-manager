@@ -659,6 +659,30 @@ async function handleCompleteTask(
       summary: summary?.slice(0, getMcpLimits(env).logMessageMaxLength) ?? null,
     });
 
+    // Fire activity event so the remap is visible in activity feeds
+    try {
+      const doId = env.PROJECT_DATA.idFromName(tokenData.projectId);
+      const doStub = env.PROJECT_DATA.get(doId);
+      await doStub.fetch(new Request('https://do/activity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'task.awaiting_followup',
+          actorType: 'agent',
+          actorId: tokenData.workspaceId,
+          metadata: {
+            taskId: tokenData.taskId,
+            summary: summary?.slice(0, getMcpLimits(env).activityMessageMaxLength) ?? null,
+          },
+        }),
+      }));
+    } catch (err) {
+      log.warn('mcp.complete_task.conversation_activity_event_failed', {
+        taskId: tokenData.taskId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     return jsonRpcSuccess(requestId, {
       content: [{ type: 'text', text: 'Acknowledged. Conversation remains open for follow-up.' }],
     });

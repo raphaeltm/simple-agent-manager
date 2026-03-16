@@ -829,6 +829,21 @@ crudRoutes.post('/:taskId/close', async (c) => {
     ).catch(() => { /* best-effort */ })
   );
 
+  // Stop the DO session if the task has a workspace with a chat session (best-effort)
+  if (task.workspaceId) {
+    c.executionCtx.waitUntil(
+      (async () => {
+        const [ws] = await db.select({ chatSessionId: schema.workspaces.chatSessionId })
+          .from(schema.workspaces)
+          .where(eq(schema.workspaces.id, task.workspaceId!))
+          .limit(1);
+        if (ws?.chatSessionId) {
+          await projectDataService.stopSession(c.env, projectId, ws.chatSessionId);
+        }
+      })().catch((e) => { log.error('task.close_session_stop_failed', { taskId, projectId, error: String(e) }); })
+    );
+  }
+
   log.info('task.conversation_closed', { taskId, projectId, userId });
 
   return c.json({ status: 'completed', closedAt: now });

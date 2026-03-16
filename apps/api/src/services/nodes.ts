@@ -6,7 +6,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../index';
 import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
 import { createProvider, ProviderError } from '@simple-agent-manager/providers';
-import type { CredentialProvider } from '@simple-agent-manager/shared';
+import type { CredentialProvider, TaskMode } from '@simple-agent-manager/shared';
 import { signCallbackToken } from './jwt';
 import { getUserCloudProviderConfig } from './provider-credentials';
 import { persistError } from './observability';
@@ -79,7 +79,7 @@ export interface ProvisionTaskContext {
   projectId: string;
   chatSessionId: string;
   taskId: string;
-  taskMode?: string;
+  taskMode?: TaskMode;
 }
 
 export async function provisionNode(
