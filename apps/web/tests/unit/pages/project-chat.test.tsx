@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const mocks = vi.hoisted(() => ({
@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   getProjectTask: vi.fn(),
   getTranscribeApiUrl: vi.fn(() => 'https://api.test.com/api/transcribe'),
   closeConversationTask: vi.fn(),
+  /** Captures the onSessionChange callback passed to useProjectWebSocket. */
+  capturedOnSessionChange: null as (() => void) | null,
 }));
 
 vi.mock('../../../src/lib/api', () => ({
@@ -41,7 +43,10 @@ vi.mock('@simple-agent-manager/acp-client', () => ({
 }));
 
 vi.mock('../../../src/hooks/useProjectWebSocket', () => ({
-  useProjectWebSocket: () => ({ connectionState: 'connected' }),
+  useProjectWebSocket: ({ onSessionChange }: { onSessionChange: () => void }) => {
+    mocks.capturedOnSessionChange = onSessionChange;
+    return { connectionState: 'connected' };
+  },
 }));
 
 vi.mock('../../../src/components/chat/ProjectMessageView', () => ({
@@ -592,5 +597,63 @@ describe('ProjectChat close conversation button', () => {
     });
 
     expect(screen.queryByText('Close conversation')).not.toBeInTheDocument();
+  });
+});
+
+describe('ProjectChat realtime sidebar updates (capability test)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.listCredentials.mockResolvedValue([]);
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+  });
+
+  it('refreshes the session list when onSessionChange fires (simulating a WebSocket event)', async () => {
+    // Initial load returns one session
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [SESSION_1],
+      total: 1,
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_1.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByText('First chat')).toBeInTheDocument();
+    });
+
+    // Initial load should have called listChatSessions once
+    const initialCallCount = mocks.listChatSessions.mock.calls.length;
+
+    // Now simulate a new session appearing (server-side event)
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [
+        { ...SESSION_1 },
+        {
+          id: 'session-new',
+          workspaceId: 'ws-new',
+          topic: 'New realtime session',
+          status: 'active',
+          messageCount: 0,
+          startedAt: Date.now(),
+          endedAt: null,
+          createdAt: Date.now(),
+        },
+      ],
+      total: 2,
+    });
+
+    // Invoke the captured onSessionChange callback (this is what the real
+    // WebSocket hook calls when a session lifecycle event arrives)
+    expect(mocks.capturedOnSessionChange).toBeTruthy();
+    await act(async () => {
+      mocks.capturedOnSessionChange!();
+    });
+
+    // listChatSessions should have been called again
+    expect(mocks.listChatSessions.mock.calls.length).toBeGreaterThan(initialCallCount);
+
+    // The new session should appear in the sidebar
+    await waitFor(() => {
+      expect(screen.getByText('New realtime session')).toBeInTheDocument();
+    });
   });
 });
