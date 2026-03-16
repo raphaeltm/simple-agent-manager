@@ -40,6 +40,10 @@ vi.mock('@simple-agent-manager/acp-client', () => ({
   ),
 }));
 
+vi.mock('../../../src/hooks/useProjectWebSocket', () => ({
+  useProjectWebSocket: () => ({ connectionState: 'connected' }),
+}));
+
 vi.mock('../../../src/components/chat/ProjectMessageView', () => ({
   ProjectMessageView: ({ sessionId }: { sessionId: string }) => (
     <div data-testid="message-view">{sessionId}</div>

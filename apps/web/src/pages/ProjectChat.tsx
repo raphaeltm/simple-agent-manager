@@ -26,13 +26,12 @@ import type { ChatSessionResponse } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 import { stripMarkdown } from '../lib/text-utils';
 import { ForkDialog } from '../components/project/ForkDialog';
+import { useProjectWebSocket } from '../hooks/useProjectWebSocket';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-/** How often to re-poll sessions when a task is actively executing (ms). */
-const ACTIVE_SESSION_POLL_MS = 3000;
 /** How often to poll task status during provisioning (ms). */
 const TASK_STATUS_POLL_MS = 2000;
 /** Sessions with no activity in this window are considered stale and hidden by default (ms). */
@@ -149,7 +148,6 @@ export function ProjectChat() {
 
   // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
-  const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fork dialog state
   const [forkSession, setForkSession] = useState<ChatSessionResponse | null>(null);
@@ -237,6 +235,14 @@ export function ProjectChat() {
     }
   }, [projectId]);
 
+  // Project-wide WebSocket for realtime sidebar updates — receives session
+  // lifecycle events (created, stopped, updated, agent_completed) and refreshes
+  // the session list when any arrive.
+  useProjectWebSocket({
+    projectId,
+    onSessionChange: loadSessions,
+  });
+
   // Initial load — auto-select the most recent session when navigating to the
   // project without a specific sessionId (e.g., from the dashboard). This
   // prevents users from accidentally creating a new session when they intended
@@ -280,22 +286,6 @@ export function ProjectChat() {
     return () => clearInterval(interval);
   }, [provisioning?.taskId, provisioning?.status, projectId, navigate, loadSessions, provisioning?.sessionId]);
 
-  // Aggressive session polling during provisioning
-  useEffect(() => {
-    if (!provisioning || isTerminal(provisioning.status)) {
-      if (sessionPollRef.current) {
-        clearInterval(sessionPollRef.current);
-        sessionPollRef.current = null;
-      }
-      return;
-    }
-
-    sessionPollRef.current = setInterval(() => void loadSessions(), ACTIVE_SESSION_POLL_MS);
-    return () => {
-      if (sessionPollRef.current) clearInterval(sessionPollRef.current);
-    };
-  }, [provisioning?.taskId, provisioning?.status, loadSessions]);
-
   // Restore provisioning state when navigating to a session with an active task
   useEffect(() => {
     if (!sessionId || provisioning) return;
@@ -326,13 +316,6 @@ export function ProjectChat() {
 
     return () => { cancelled = true; };
   }, [sessionId, sessions, projectId, provisioning]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (sessionPollRef.current) clearInterval(sessionPollRef.current);
-    };
-  }, []);
 
   // ---------------------------------------------------------------------------
   // Handlers (all preserved from original)
