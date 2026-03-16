@@ -1514,4 +1514,50 @@ describe('MCP Routes', () => {
       // logic — the auth layer should not block the request
     });
   });
+
+  // ─── Task mode vs conversation mode ───────────────────────────────────
+
+  describe('Task mode vs conversation mode', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    // Note: get_instructions branching on taskMode is tested via integration
+    // tests on staging. Unit tests for drizzle ORM queries require matching
+    // the exact column mapping that drizzle generates, which is fragile in
+    // mock D1. The complete_task tests below use raw D1 prepare/bind which
+    // makes them reliable unit tests for the core behavioral difference.
+
+    it('should remap complete_task to awaiting_followup in conversation mode', async () => {
+      // First query: check task_mode — returns conversation
+      mockD1._stmt.first.mockResolvedValueOnce({ task_mode: 'conversation' });
+      // Second query: update task to awaiting_followup — succeeds
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'complete_task',
+        arguments: { summary: 'Done exploring' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.result.content[0].text).toContain('Conversation remains open');
+    });
+
+    it('should complete normally for task-mode tasks', async () => {
+      // First query: check task_mode — returns task
+      mockD1._stmt.first.mockResolvedValueOnce({ task_mode: 'task' });
+      // Second query: update task to completed — succeeds
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'complete_task',
+        arguments: { summary: 'Bug fixed' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.result.content[0].text).toContain('completed');
+    });
+  });
 });
