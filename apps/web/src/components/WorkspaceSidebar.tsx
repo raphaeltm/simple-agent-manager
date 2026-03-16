@@ -1,13 +1,13 @@
 import { useState, useEffect, useMemo, type FC } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@simple-agent-manager/ui';
-import { GitBranch, ExternalLink, Play, Trash2 } from 'lucide-react';
+import { GitBranch, ExternalLink, Play, Trash2, Globe } from 'lucide-react';
 import type { AgentSession } from '@simple-agent-manager/shared';
 import { VM_SIZE_LABELS, VM_LOCATIONS } from '@simple-agent-manager/shared';
 import { CollapsibleSection } from './CollapsibleSection';
 import { ResourceBar } from './node/ResourceBar';
 import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
-import type { WorkspaceResponse, Event } from '@simple-agent-manager/shared';
+import type { WorkspaceResponse, Event, DetectedPort } from '@simple-agent-manager/shared';
 import type { GitStatusData } from '../lib/api';
 import type { TokenUsage } from '@simple-agent-manager/acp-client';
 
@@ -63,6 +63,9 @@ interface WorkspaceSidebarProps {
 
   // Token usage (aggregated from ChatSession callbacks)
   sessionTokenUsages: SessionTokenUsage[];
+
+  // Detected ports
+  detectedPorts: DetectedPort[];
 
   // Events
   workspaceEvents: Event[];
@@ -194,6 +197,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
   gitStatus,
   onOpenGitChanges,
   sessionTokenUsages,
+  detectedPorts,
   workspaceEvents,
 }) => {
   const uptime = useRelativeTime(workspace?.createdAt);
@@ -389,6 +393,39 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                 Loading...
               </span>
             )}
+          </CollapsibleSection>
+        )}
+
+        {/* Active Ports */}
+        {isRunning && detectedPorts.length > 0 && (
+          <CollapsibleSection
+            title="Active Ports"
+            badge={detectedPorts.length}
+            storageKey="sam-sidebar-active-ports"
+          >
+            <div className="flex flex-col gap-1">
+              {detectedPorts
+                .slice()
+                .sort((a, b) => a.port - b.port)
+                .map((p) => (
+                  <a
+                    key={p.port}
+                    href={p.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-fg-default hover:bg-surface-alt transition-colors"
+                    style={{ fontSize: 'var(--sam-type-caption-size)' }}
+                  >
+                    <Globe className="w-3.5 h-3.5 text-fg-muted flex-shrink-0" />
+                    <span className="font-mono font-medium">{p.port}</span>
+                    <span className="text-fg-muted truncate">{p.label}</span>
+                    {p.address === '127.0.0.1' && (
+                      <span className="text-fg-muted ml-auto text-xs">(local)</span>
+                    )}
+                    <ExternalLink className="w-3 h-3 text-fg-muted ml-auto flex-shrink-0" />
+                  </a>
+                ))}
+            </div>
           </CollapsibleSection>
         )}
 

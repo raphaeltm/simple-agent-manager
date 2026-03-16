@@ -63,6 +63,7 @@ import type {
   NotificationType,
   NotificationPreferencesResponse,
   UpdateNotificationPreferenceRequest,
+  DetectedPort,
 } from '@simple-agent-manager/shared';
 
 // In production, VITE_API_URL must be explicitly set
@@ -856,6 +857,33 @@ export async function listWorkspaceEvents(
   }
   const data = (await res.json()) as { events: Event[]; nextCursor?: string | null };
   return { events: data.events ?? [], nextCursor: data.nextCursor ?? null };
+}
+
+// =============================================================================
+// Port Detection
+// =============================================================================
+
+/**
+ * Fetch detected ports from the VM Agent.
+ * Requires a workspace JWT token for authentication.
+ */
+export async function listWorkspacePorts(
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string
+): Promise<DetectedPort[]> {
+  const params = new URLSearchParams();
+  params.set('token', token);
+
+  const res = await fetch(
+    `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/ports?${params.toString()}`
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Unknown error');
+    throw new Error(`Failed to load workspace ports: ${text}`);
+  }
+  const data = (await res.json()) as { ports: DetectedPort[] };
+  return data.ports ?? [];
 }
 
 // =============================================================================

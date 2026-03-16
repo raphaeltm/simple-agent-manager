@@ -875,6 +875,20 @@ export interface Event {
   createdAt: string;
 }
 
+/** A port detected listening inside a workspace container. */
+export interface DetectedPort {
+  port: number;
+  address: string;
+  label: string;
+  url: string;
+  detectedAt: string;
+}
+
+/** Response from GET /workspaces/{id}/ports on the VM agent. */
+export interface PortsResponse {
+  ports: DetectedPort[];
+}
+
 export type AgentSessionStatus = 'running' | 'suspended' | 'stopped' | 'error';
 
 /** Live host status from the VM Agent's SessionHost (more granular than AgentSessionStatus). */
