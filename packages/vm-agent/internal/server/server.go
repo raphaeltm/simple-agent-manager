@@ -777,7 +777,7 @@ func (s *Server) makeTaskCompletionCallback(
 
 		// On success, push changes and report awaiting_followup.
 		// In conversation mode, skip PR creation — the human controls lifecycle.
-		skipPR := s.config.TaskMode == "conversation"
+		skipPR := s.config.TaskMode == config.TaskModeConversation
 		pushResult := s.gitPushWorkspaceChanges(workspaceID, skipPR)
 
 		slog.Info("Agent completion git push result",

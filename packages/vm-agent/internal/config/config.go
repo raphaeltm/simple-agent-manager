@@ -21,6 +21,12 @@ import (
 // ENV vars (e.g. NPM_CONFIG_PREFIX). See hasDevcontainerConfig() in bootstrap.go.
 const DefaultAdditionalFeatures = `{"ghcr.io/devcontainers/features/node:1":{"version":"22"}}`
 
+// TaskMode constants for discriminating task vs conversation mode.
+const (
+	TaskModeTask         = "task"
+	TaskModeConversation = "conversation"
+)
+
 // DefaultDevcontainerImage is the default container image used when a repo has no devcontainer config.
 // Uses a lighter base image so fallback workspaces bootstrap quickly on modest nodes.
 // Override via DEFAULT_DEVCONTAINER_IMAGE env var.
@@ -364,6 +370,14 @@ func Load() (*Config, error) {
 		// Extract base domain from control plane URL to allow workspace subdomains
 		// e.g., https://api.example.com -> allow *.example.com
 		cfg.AllowedOrigins = deriveAllowedOrigins(cfg.ControlPlaneURL)
+	}
+
+	// Validate TaskMode enum
+	switch cfg.TaskMode {
+	case TaskModeTask, TaskModeConversation:
+		// valid
+	default:
+		return nil, fmt.Errorf("TASK_MODE must be %q or %q, got %q", TaskModeTask, TaskModeConversation, cfg.TaskMode)
 	}
 
 	if cfg.NodeID == "" {
