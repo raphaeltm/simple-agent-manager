@@ -9,4 +9,27 @@ describe('terminal routes source contract', () => {
     expect(file).toContain("ws.status !== 'running' && ws.status !== 'recovery' && ws.status !== 'creating'");
     expect(file).toContain('Workspace is not accessible');
   });
+
+  it('records terminal activity when issuing tokens', () => {
+    expect(file).toContain('projectDataService.updateTerminalActivity');
+  });
+
+  it('exposes a POST /activity endpoint for frontend heartbeats', () => {
+    expect(file).toContain("terminalRoutes.post('/activity'");
+    expect(file).toContain('body.workspaceId');
+    expect(file).toContain('projectDataService.updateTerminalActivity');
+  });
+
+  it('validates workspaceId is required on activity endpoint', () => {
+    expect(file).toContain("throw errors.badRequest('workspaceId is required')");
+  });
+
+  it('skips activity tracking when workspace has no projectId', () => {
+    expect(file).toContain('if (ws.projectId)');
+  });
+
+  it('uses waitUntil for fire-and-forget terminal activity on token endpoint', () => {
+    expect(file).toContain('c.executionCtx.waitUntil');
+    expect(file).toContain('updateTerminalActivity');
+  });
 });

@@ -390,6 +390,24 @@ export async function getSummary(
 }
 
 // =========================================================================
+// Workspace Activity Tracking
+// =========================================================================
+
+/**
+ * Record terminal activity for a workspace. Called when a terminal token
+ * is requested or the frontend sends a terminal heartbeat.
+ */
+export async function updateTerminalActivity(
+  env: Env,
+  projectId: string,
+  workspaceId: string,
+  sessionId: string | null
+): Promise<void> {
+  const stub = await getStub(env, projectId);
+  await stub.updateTerminalActivity(workspaceId, sessionId);
+}
+
+// =========================================================================
 // WebSocket
 // =========================================================================
 

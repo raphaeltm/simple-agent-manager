@@ -192,6 +192,8 @@ export const projects = sqliteTable(
     defaultAgentType: text('default_agent_type'),
     defaultWorkspaceProfile: text('default_workspace_profile'),
     defaultProvider: text('default_provider'),
+    workspaceIdleTimeoutMs: integer('workspace_idle_timeout_ms'),
+    nodeIdleTimeoutMs: integer('node_idle_timeout_ms'), // Stored for future use — not yet consumed by NodeLifecycle DO
     status: text('status').notNull().default('active'),
     lastActivityAt: text('last_activity_at'),
     activeSessionCount: integer('active_session_count').notNull().default(0),

@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ProjectRuntimeConfigResponse, ProviderCatalog, VMSize, CredentialProvider } from '@simple-agent-manager/shared';
-import { AGENT_CATALOG, CREDENTIAL_PROVIDERS } from '@simple-agent-manager/shared';
+import {
+  AGENT_CATALOG,
+  CREDENTIAL_PROVIDERS,
+  DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS,
+  MIN_WORKSPACE_IDLE_TIMEOUT_MS,
+  MAX_WORKSPACE_IDLE_TIMEOUT_MS,
+  DEFAULT_NODE_WARM_TIMEOUT_MS,
+  MIN_NODE_IDLE_TIMEOUT_MS,
+  MAX_NODE_IDLE_TIMEOUT_MS,
+} from '@simple-agent-manager/shared';
 import { Button, Spinner, Skeleton } from '@simple-agent-manager/ui';
 import {
   getProjectRuntimeConfig,
@@ -32,6 +41,15 @@ export function ProjectSettings() {
   const [defaultProvider, setDefaultProvider] = useState<CredentialProvider | null>(project?.defaultProvider ?? null);
   const [savingProvider, setSavingProvider] = useState(false);
   const [configuredProviders, setConfiguredProviders] = useState<CredentialProvider[]>([]);
+
+  // Idle timeout settings
+  const [workspaceIdleTimeoutMs, setWorkspaceIdleTimeoutMs] = useState<number>(
+    project?.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
+  );
+  const [nodeIdleTimeoutMs, setNodeIdleTimeoutMs] = useState<number>(
+    project?.nodeIdleTimeoutMs ?? DEFAULT_NODE_WARM_TIMEOUT_MS
+  );
+  const [savingTimeouts, setSavingTimeouts] = useState(false);
 
   // Provider catalog for accurate VM size descriptions
   const [catalog, setCatalog] = useState<ProviderCatalog | null>(null);
@@ -82,6 +100,8 @@ export function ProjectSettings() {
       setDefaultVmSize(project.defaultVmSize ?? null);
       setDefaultAgentType(project.defaultAgentType ?? null);
       setDefaultProvider(project.defaultProvider ?? null);
+      setWorkspaceIdleTimeoutMs(project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS);
+      setNodeIdleTimeoutMs(project.nodeIdleTimeoutMs ?? DEFAULT_NODE_WARM_TIMEOUT_MS);
     }
   }, [project]);
 
@@ -132,6 +152,24 @@ export function ProjectSettings() {
       toast.error(err instanceof Error ? err.message : 'Failed to update provider');
     } finally {
       setSavingProvider(false);
+    }
+  };
+
+  const handleSaveTimeouts = async () => {
+    setSavingTimeouts(true);
+    try {
+      await updateProject(projectId, {
+        workspaceIdleTimeoutMs: workspaceIdleTimeoutMs,
+        nodeIdleTimeoutMs: nodeIdleTimeoutMs,
+      });
+      await reload();
+      toast.success('Idle timeout settings saved');
+    } catch (err) {
+      setWorkspaceIdleTimeoutMs(project?.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS);
+      setNodeIdleTimeoutMs(project?.nodeIdleTimeoutMs ?? DEFAULT_NODE_WARM_TIMEOUT_MS);
+      toast.error(err instanceof Error ? err.message : 'Failed to update timeout settings');
+    } finally {
+      setSavingTimeouts(false);
     }
   };
 
@@ -246,7 +284,7 @@ export function ProjectSettings() {
             Used when launching new workspaces from this project. Click again to clear.
           </p>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {vmSizes.map((size) => {
             const isSelected = defaultVmSize === size.value;
             return (
@@ -291,7 +329,7 @@ export function ProjectSettings() {
             Which AI coding agent to use for tasks in this project. Click again to clear.
           </p>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {AGENT_CATALOG.map((agent) => {
             const isSelected = defaultAgentType === agent.id;
             return (
@@ -361,6 +399,102 @@ export function ProjectSettings() {
           )}
         </section>
       )}
+
+      {/* Idle Timeout Settings */}
+      <section className="border border-border-default rounded-md bg-surface p-4 grid gap-4">
+        <div>
+          <h2 className="sam-type-section-heading m-0 text-fg-primary">
+            Compute Lifecycle
+          </h2>
+          <p className="m-0 mt-1 text-xs text-fg-muted">
+            Configure how long workspaces and nodes stay active when idle. Workspaces with no messages or terminal activity beyond the timeout are automatically cleaned up.
+          </p>
+        </div>
+        <div className="grid gap-4">
+          <div>
+            <label htmlFor="workspace-idle-timeout" className="block text-xs font-medium text-fg-muted mb-1">
+              Workspace Idle Timeout
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                id="workspace-idle-timeout"
+                type="range"
+                min={MIN_WORKSPACE_IDLE_TIMEOUT_MS}
+                max={MAX_WORKSPACE_IDLE_TIMEOUT_MS}
+                step={MIN_WORKSPACE_IDLE_TIMEOUT_MS}
+                value={workspaceIdleTimeoutMs}
+                onChange={(e) => setWorkspaceIdleTimeoutMs(Number(e.target.value))}
+                aria-valuetext={
+                  workspaceIdleTimeoutMs >= 60 * 60 * 1000
+                    ? `${(workspaceIdleTimeoutMs / (60 * 60 * 1000)).toFixed(1)} hours`
+                    : `${(workspaceIdleTimeoutMs / (60 * 1000)).toFixed(0)} minutes`
+                }
+                className="flex-1 accent-[var(--sam-color-accent-primary)] h-2 cursor-pointer"
+              />
+              <span
+                aria-live="polite"
+                aria-atomic="true"
+                className="text-sm text-fg-primary font-medium min-w-[4rem] text-right tabular-nums"
+              >
+                {workspaceIdleTimeoutMs >= 60 * 60 * 1000
+                  ? `${(workspaceIdleTimeoutMs / (60 * 60 * 1000)).toFixed(1)}h`
+                  : `${(workspaceIdleTimeoutMs / (60 * 1000)).toFixed(0)}m`}
+              </span>
+            </div>
+            <p className="m-0 mt-1 text-xs text-fg-muted">
+              Default: {DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS / (60 * 60 * 1000)}h. Range: 30m \u2013 24h.
+            </p>
+          </div>
+          <div>
+            <label htmlFor="node-idle-timeout" className="block text-xs font-medium text-fg-muted mb-1">
+              Node Idle Timeout
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                id="node-idle-timeout"
+                type="range"
+                min={MIN_NODE_IDLE_TIMEOUT_MS}
+                max={MAX_NODE_IDLE_TIMEOUT_MS}
+                step={MIN_NODE_IDLE_TIMEOUT_MS}
+                value={nodeIdleTimeoutMs}
+                onChange={(e) => setNodeIdleTimeoutMs(Number(e.target.value))}
+                aria-valuetext={
+                  nodeIdleTimeoutMs >= 60 * 60 * 1000
+                    ? `${(nodeIdleTimeoutMs / (60 * 60 * 1000)).toFixed(1)} hours`
+                    : `${(nodeIdleTimeoutMs / (60 * 1000)).toFixed(0)} minutes`
+                }
+                className="flex-1 accent-[var(--sam-color-accent-primary)] h-2 cursor-pointer"
+              />
+              <span
+                aria-live="polite"
+                aria-atomic="true"
+                className="text-sm text-fg-primary font-medium min-w-[4rem] text-right tabular-nums"
+              >
+                {nodeIdleTimeoutMs >= 60 * 60 * 1000
+                  ? `${(nodeIdleTimeoutMs / (60 * 60 * 1000)).toFixed(1)}h`
+                  : `${(nodeIdleTimeoutMs / (60 * 1000)).toFixed(0)}m`}
+              </span>
+            </div>
+            <p className="m-0 mt-1 text-xs text-fg-muted">
+              Default: {DEFAULT_NODE_WARM_TIMEOUT_MS / (60 * 1000)}m. How long an empty node stays warm before being destroyed. Range: 5m \u2013 4h.
+            </p>
+          </div>
+        </div>
+        <div className="flex justify-end">
+          <Button
+            size="sm"
+            loading={savingTimeouts}
+            disabled={
+              savingTimeouts ||
+              (workspaceIdleTimeoutMs === (project?.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS) &&
+               nodeIdleTimeoutMs === (project?.nodeIdleTimeoutMs ?? DEFAULT_NODE_WARM_TIMEOUT_MS))
+            }
+            onClick={() => void handleSaveTimeouts()}
+          >
+            Save Timeouts
+          </Button>
+        </div>
+      </section>
 
     {/* Runtime Config */}
     <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">

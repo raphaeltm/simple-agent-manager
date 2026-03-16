@@ -1109,4 +1109,57 @@ describe('ProjectData Durable Object', () => {
       expect(messages.find((m) => m.role === 'user')!.content).toBe('Build the project');
     });
   });
+
+  // =========================================================================
+  // Workspace Activity Tracking
+  // =========================================================================
+
+  describe('workspace activity tracking', () => {
+    it('records terminal activity via updateTerminalActivity', async () => {
+      const stub = getStub('project-terminal-activity');
+      const sessionId = await stub.createSession('ws-term-1', 'Terminal test');
+
+      // Record terminal activity
+      stub.updateTerminalActivity('ws-term-1', sessionId);
+
+      // Verify: persist a message to ensure the DO processes the terminal update
+      // (updateTerminalActivity is fire-and-forget on the RPC side, but synchronous in the DO)
+      await stub.persistMessage(sessionId, 'user', 'test', null);
+
+      // The workspace_activity table should have a record — verify indirectly
+      // by checking the session is still retrievable (no errors from the activity write)
+      const session = await stub.getSession(sessionId);
+      expect(session).not.toBeNull();
+      expect(session!.workspaceId).toBe('ws-term-1');
+    });
+
+    it('message persistence updates workspace activity automatically', async () => {
+      const stub = getStub('project-msg-activity');
+      const sessionId = await stub.createSession('ws-msg-act', 'Message activity test');
+
+      // Persist a message — should update workspace_activity.last_message_at
+      await stub.persistMessage(sessionId, 'user', 'Hello', null);
+
+      // Persist batch — should also update workspace_activity.last_message_at
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Hi there', toolMetadata: null, timestamp: new Date().toISOString() },
+      ]);
+
+      const session = await stub.getSession(sessionId);
+      expect(session!.messageCount).toBe(2);
+    });
+
+    it('terminal activity works without a session id', async () => {
+      const stub = getStub('project-terminal-no-session');
+      // Create a session to ensure the DO is initialized
+      await stub.createSession('ws-nosess', 'No session terminal');
+
+      // Should not throw when sessionId is null
+      stub.updateTerminalActivity('ws-nosess', null);
+
+      // Verify DO is still functional
+      const { sessions } = await stub.listSessions(null);
+      expect(sessions.length).toBeGreaterThanOrEqual(1);
+    });
+  });
 });

@@ -53,4 +53,27 @@ describe('projects routes source contract', () => {
     expect(file).toContain('value = null');
     expect(file).toContain('content = null');
   });
+
+  it('validates workspace and node idle timeout bounds on PATCH', () => {
+    // workspaceIdleTimeoutMs validation
+    expect(crudFile).toContain('body.workspaceIdleTimeoutMs');
+    expect(crudFile).toContain('MIN_WORKSPACE_IDLE_TIMEOUT_MS');
+    expect(crudFile).toContain('MAX_WORKSPACE_IDLE_TIMEOUT_MS');
+    expect(crudFile).toContain('workspaceIdleTimeoutMs must be between');
+
+    // nodeIdleTimeoutMs validation
+    expect(crudFile).toContain('body.nodeIdleTimeoutMs');
+    expect(crudFile).toContain('MIN_NODE_IDLE_TIMEOUT_MS');
+    expect(crudFile).toContain('MAX_NODE_IDLE_TIMEOUT_MS');
+    expect(crudFile).toContain('nodeIdleTimeoutMs must be between');
+  });
+
+  it('allows null to clear idle timeout settings (revert to platform default)', () => {
+    // null values bypass validation and clear the setting
+    expect(crudFile).toContain('body.workspaceIdleTimeoutMs !== undefined && body.workspaceIdleTimeoutMs !== null');
+    expect(crudFile).toContain('body.nodeIdleTimeoutMs !== undefined && body.nodeIdleTimeoutMs !== null');
+    // null coalescing persists null to DB
+    expect(crudFile).toContain('body.workspaceIdleTimeoutMs ?? null');
+    expect(crudFile).toContain('body.nodeIdleTimeoutMs ?? null');
+  });
 });

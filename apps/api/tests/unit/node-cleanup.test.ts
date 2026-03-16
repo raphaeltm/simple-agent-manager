@@ -2,9 +2,8 @@
  * Unit tests for node cleanup cron sweep — activity-aware lifecycle.
  *
  * Verifies:
- * 1. Layer 3 max lifetime skips nodes with active workspaces
- * 2. Absolute ceiling destroys nodes regardless of active workspaces
- * 3. Nodes without active workspaces are destroyed normally
+ * 1. Layer 3 max lifetime skips nodes with active workspaces (no absolute ceiling)
+ * 2. Nodes without active workspaces are destroyed normally
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
@@ -68,7 +67,6 @@ function createMockEnv(prepareResponses: Map<string, unknown[]> = new Map()): En
     } as unknown as D1Database,
     NODE_WARM_GRACE_PERIOD_MS: '2100000', // 35 min
     MAX_AUTO_NODE_LIFETIME_MS: '14400000', // 4 hours
-    ABSOLUTE_MAX_NODE_LIFETIME_MS: '43200000', // 12 hours
   } as unknown as Env;
 }
 
@@ -106,7 +104,6 @@ describe('runNodeCleanupSweep', () => {
 
       expect(result.lifetimeSkipped).toBe(1);
       expect(result.lifetimeDestroyed).toBe(0);
-      expect(result.absoluteLifetimeDestroyed).toBe(0);
     });
 
     it('destroys nodes without active workspaces past max lifetime', async () => {
@@ -137,10 +134,10 @@ describe('runNodeCleanupSweep', () => {
       expect(deleteNodeResources).toHaveBeenCalledWith('node-1', 'user-1', env);
     });
 
-    it('destroys nodes past absolute ceiling even with active workspaces', async () => {
-      const { deleteNodeResources } = await import('../../src/services/nodes');
+    it('always skips nodes with active workspaces (no absolute ceiling)', async () => {
       const now = Date.now();
-      // Node created 13 hours ago (past 12h absolute ceiling)
+      // Node created 13 hours ago — would have been destroyed by old absolute ceiling,
+      // but now nodes with active workspaces are always skipped.
       const createdAt = new Date(now - 13 * 60 * 60 * 1000).toISOString();
 
       const responses = new Map<string, unknown[]>();
@@ -161,9 +158,8 @@ describe('runNodeCleanupSweep', () => {
       const env = createMockEnv(responses);
       const result = await runNodeCleanupSweep(env);
 
-      expect(result.absoluteLifetimeDestroyed).toBe(1);
-      expect(result.lifetimeSkipped).toBe(0);
-      expect(deleteNodeResources).toHaveBeenCalledWith('node-1', 'user-1', env);
+      expect(result.lifetimeSkipped).toBe(1);
+      expect(result.lifetimeDestroyed).toBe(0);
     });
   });
 
@@ -229,7 +225,6 @@ describe('runNodeCleanupSweep', () => {
         staleDestroyed: 0,
         lifetimeDestroyed: 0,
         lifetimeSkipped: 0,
-        absoluteLifetimeDestroyed: 0,
         orphanedWorkspacesFlagged: 0,
         orphanedNodesFlagged: 0,
         errors: 0,

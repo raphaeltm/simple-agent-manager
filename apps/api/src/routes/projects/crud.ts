@@ -11,7 +11,15 @@ import type {
   UpsertProjectRuntimeFileRequest,
   UpdateProjectRequest,
 } from '@simple-agent-manager/shared';
-import { isValidAgentType, VALID_WORKSPACE_PROFILES, CREDENTIAL_PROVIDERS } from '@simple-agent-manager/shared';
+import {
+  isValidAgentType,
+  VALID_WORKSPACE_PROFILES,
+  CREDENTIAL_PROVIDERS,
+  MIN_WORKSPACE_IDLE_TIMEOUT_MS,
+  MAX_WORKSPACE_IDLE_TIMEOUT_MS,
+  MIN_NODE_IDLE_TIMEOUT_MS,
+  MAX_NODE_IDLE_TIMEOUT_MS,
+} from '@simple-agent-manager/shared';
 import type { Env } from '../../index';
 import * as schema from '../../db/schema';
 import { ulid } from '../../lib/ulid';
@@ -540,7 +548,9 @@ crudRoutes.patch('/:id', async (c) => {
     body.defaultVmSize === undefined &&
     body.defaultAgentType === undefined &&
     body.defaultWorkspaceProfile === undefined &&
-    body.defaultProvider === undefined
+    body.defaultProvider === undefined &&
+    body.workspaceIdleTimeoutMs === undefined &&
+    body.nodeIdleTimeoutMs === undefined
   ) {
     throw errors.badRequest('At least one field is required');
   }
@@ -571,6 +581,18 @@ crudRoutes.patch('/:id', async (c) => {
 
   if (body.defaultProvider !== undefined && body.defaultProvider !== null && !CREDENTIAL_PROVIDERS.includes(body.defaultProvider)) {
     throw errors.badRequest(`defaultProvider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
+  }
+
+  if (body.workspaceIdleTimeoutMs !== undefined && body.workspaceIdleTimeoutMs !== null) {
+    if (!Number.isFinite(body.workspaceIdleTimeoutMs) || body.workspaceIdleTimeoutMs < MIN_WORKSPACE_IDLE_TIMEOUT_MS || body.workspaceIdleTimeoutMs > MAX_WORKSPACE_IDLE_TIMEOUT_MS) {
+      throw errors.badRequest(`workspaceIdleTimeoutMs must be between ${MIN_WORKSPACE_IDLE_TIMEOUT_MS} and ${MAX_WORKSPACE_IDLE_TIMEOUT_MS}`);
+    }
+  }
+
+  if (body.nodeIdleTimeoutMs !== undefined && body.nodeIdleTimeoutMs !== null) {
+    if (!Number.isFinite(body.nodeIdleTimeoutMs) || body.nodeIdleTimeoutMs < MIN_NODE_IDLE_TIMEOUT_MS || body.nodeIdleTimeoutMs > MAX_NODE_IDLE_TIMEOUT_MS) {
+      throw errors.badRequest(`nodeIdleTimeoutMs must be between ${MIN_NODE_IDLE_TIMEOUT_MS} and ${MAX_NODE_IDLE_TIMEOUT_MS}`);
+    }
   }
 
   await assertRepositoryAccess(
@@ -608,6 +630,8 @@ crudRoutes.patch('/:id', async (c) => {
       defaultAgentType: body.defaultAgentType === undefined ? existing.defaultAgentType : (body.defaultAgentType ?? null),
       defaultWorkspaceProfile: body.defaultWorkspaceProfile === undefined ? existing.defaultWorkspaceProfile : (body.defaultWorkspaceProfile ?? null),
       defaultProvider: body.defaultProvider === undefined ? existing.defaultProvider : (body.defaultProvider ?? null),
+      workspaceIdleTimeoutMs: body.workspaceIdleTimeoutMs === undefined ? existing.workspaceIdleTimeoutMs : (body.workspaceIdleTimeoutMs ?? null),
+      nodeIdleTimeoutMs: body.nodeIdleTimeoutMs === undefined ? existing.nodeIdleTimeoutMs : (body.nodeIdleTimeoutMs ?? null),
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)));

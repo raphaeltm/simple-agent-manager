@@ -19,6 +19,8 @@ import {
   ACP_SESSION_VALID_TRANSITIONS,
   ACP_SESSION_TERMINAL_STATUSES,
   ACP_SESSION_DEFAULTS,
+  DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS,
+  WORKSPACE_IDLE_CHECK_INTERVAL_MS,
 } from '@simple-agent-manager/shared';
 
 type Env = {
@@ -33,6 +35,7 @@ type Env = {
   IDLE_CLEANUP_MAX_RETRIES?: string;
   ACP_SESSION_DETECTION_WINDOW_MS?: string;
   ACP_SESSION_MAX_FORK_DEPTH?: string;
+  WORKSPACE_IDLE_TIMEOUT_MS?: string;
 };
 
 interface SummaryData {
@@ -123,6 +126,22 @@ export class ProjectData extends DurableObject<Env> {
       now,
       now
     );
+
+    // Initialize workspace activity tracking for idle detection
+    if (workspaceId) {
+      this.sql.exec(
+        `INSERT OR IGNORE INTO workspace_activity (workspace_id, session_id, last_message_at, created_at)
+         VALUES (?, ?, ?, ?)`,
+        workspaceId,
+        id,
+        now,
+        now
+      );
+      // Ensure alarm is scheduled for workspace idle checks
+      this.recalculateAlarm().catch((err) => {
+        console.warn('Failed to schedule workspace idle alarm', workspaceId, err);
+      });
+    }
 
     this.recordActivityEventInternal('session.started', 'system', null, workspaceId, id, taskId, null);
     this.scheduleSummarySync();
@@ -227,6 +246,14 @@ export class ProjectData extends DurableObject<Env> {
           sessionId
         );
       }
+    }
+
+    // Track message activity for workspace idle detection
+    const wsRow = this.sql
+      .exec('SELECT workspace_id FROM chat_sessions WHERE id = ?', sessionId)
+      .toArray()[0];
+    if (wsRow?.workspace_id) {
+      this.updateMessageActivity(wsRow.workspace_id as string, sessionId);
     }
 
     this.scheduleSummarySync();
@@ -353,6 +380,14 @@ export class ProjectData extends DurableObject<Env> {
             sessionId
           );
         }
+      }
+
+      // Track message activity for workspace idle detection
+      const wsRow = this.sql
+        .exec('SELECT workspace_id FROM chat_sessions WHERE id = ?', sessionId)
+        .toArray()[0];
+      if (wsRow?.workspace_id) {
+        this.updateMessageActivity(wsRow.workspace_id as string, sessionId);
       }
 
       this.scheduleSummarySync();
@@ -780,6 +815,9 @@ export class ProjectData extends DurableObject<Env> {
     // Check for ACP session heartbeat timeouts first
     await this.checkHeartbeatTimeouts();
 
+    // Check workspace idle timeouts
+    await this.checkWorkspaceIdleTimeouts();
+
     const now = Date.now();
     const maxRetries = parseInt(this.env.IDLE_CLEANUP_MAX_RETRIES || '1', 10);
     const retryDelay = parseInt(this.env.IDLE_CLEANUP_RETRY_DELAY_MS || '300000', 10);
@@ -806,6 +844,9 @@ export class ProjectData extends DurableObject<Env> {
           await this.completeTaskInD1(taskId);
         }
         await this.stopWorkspaceInD1(workspaceId);
+
+        // Clean up workspace activity tracking (prevents perpetual alarm loop)
+        this.sql.exec('DELETE FROM workspace_activity WHERE workspace_id = ?', workspaceId);
 
         // Remove from schedule
         this.sql.exec('DELETE FROM idle_cleanup_schedule WHERE session_id = ?', sessionId);
@@ -889,7 +930,27 @@ export class ProjectData extends DurableObject<Env> {
       heartbeatTime = earliestHb + detectionWindow;
     }
 
-    const candidates = [idleEarliest, heartbeatTime].filter((t): t is number => t !== null);
+    // Schedule periodic workspace idle check if any workspaces are tracked.
+    // Use the earliest workspace activity timestamp + timeout to derive the next
+    // check time, so frequent DO activity doesn't push idle checks into the future.
+    let workspaceIdleCheckTime: number | null = null;
+    const earliestActivityRow = this.sql
+      .exec(
+        `SELECT MIN(COALESCE(
+          CASE WHEN last_terminal_activity_at > last_message_at THEN last_terminal_activity_at ELSE last_message_at END,
+          last_message_at, created_at
+        )) as earliest FROM workspace_activity`
+      )
+      .toArray()[0];
+    const earliestActivity = earliestActivityRow?.earliest as number | null;
+    if (earliestActivity !== null) {
+      // Schedule check at: earliest quiet workspace's last activity + check interval
+      // This ensures idle workspaces are checked promptly even during high DO activity
+      const nextCheck = earliestActivity + WORKSPACE_IDLE_CHECK_INTERVAL_MS;
+      workspaceIdleCheckTime = Math.max(nextCheck, Date.now() + 60_000); // at least 1 min from now
+    }
+
+    const candidates = [idleEarliest, heartbeatTime, workspaceIdleCheckTime].filter((t): t is number => t !== null);
     if (candidates.length > 0) {
       await this.ctx.storage.setAlarm(Math.min(...candidates));
     } else {
@@ -979,6 +1040,166 @@ export class ProjectData extends DurableObject<Env> {
       }, sessionId);
     } catch (e) {
       console.warn(JSON.stringify({ event: 'project_data.system_message_insert_failed', sessionId, error: String(e) }));
+    }
+  }
+
+  // =========================================================================
+  // Workspace Activity Tracking (Compute Lifecycle Management)
+  // =========================================================================
+
+  /**
+   * Record terminal activity for a workspace. Called by the API when the
+   * terminal token endpoint is hit or the frontend sends a terminal heartbeat.
+   * Upserts into workspace_activity to track the last terminal interaction.
+   */
+  updateTerminalActivity(workspaceId: string, sessionId: string | null): void {
+    const now = Date.now();
+    this.sql.exec(
+      `INSERT INTO workspace_activity (workspace_id, session_id, last_terminal_activity_at, created_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(workspace_id) DO UPDATE SET last_terminal_activity_at = ?, session_id = COALESCE(?, session_id)`,
+      workspaceId,
+      sessionId,
+      now,
+      now,
+      now,
+      sessionId
+    );
+  }
+
+  /**
+   * Record message activity for a workspace. Called internally when messages
+   * are persisted, to keep the workspace_activity table in sync.
+   */
+  private updateMessageActivity(workspaceId: string, sessionId: string): void {
+    const now = Date.now();
+    this.sql.exec(
+      `INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id)`,
+      workspaceId,
+      sessionId,
+      now,
+      now,
+      now,
+      sessionId
+    );
+  }
+
+  /**
+   * Check workspace idle timeouts and delete workspaces that have been idle
+   * for longer than the configured timeout. Called from the DO alarm handler.
+   *
+   * "Idle" means: no messages AND no terminal activity for the timeout period.
+   * The timeout can be configured per-project via D1 project settings, falling
+   * back to the WORKSPACE_IDLE_TIMEOUT_MS env var or DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS.
+   */
+  private async checkWorkspaceIdleTimeouts(): Promise<void> {
+    const now = Date.now();
+
+    // Get the project-level timeout from D1 (cached per alarm cycle)
+    const projectId = this.getProjectId();
+    let timeoutMs = parseInt(
+      this.env.WORKSPACE_IDLE_TIMEOUT_MS || String(DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS),
+      10
+    );
+
+    if (projectId) {
+      try {
+        const row = await this.env.DATABASE.prepare(
+          'SELECT workspace_idle_timeout_ms FROM projects WHERE id = ?'
+        ).bind(projectId).first<{ workspace_idle_timeout_ms: number | null }>();
+        if (row?.workspace_idle_timeout_ms) {
+          timeoutMs = row.workspace_idle_timeout_ms;
+        }
+      } catch (err) {
+        // Best-effort: fall back to env/default
+        console.warn('D1 project timeout query failed, using default', projectId, err);
+      }
+    }
+
+    // Find active workspaces with activity data that have been idle
+    const idleThreshold = now - timeoutMs;
+
+    // Get all active workspaces tracked in workspace_activity (single query, no N+1)
+    const activeWorkspaces = this.sql.exec(
+      `SELECT wa.workspace_id, wa.session_id, wa.last_terminal_activity_at, wa.last_message_at,
+              cs.updated_at as session_updated_at
+       FROM workspace_activity wa
+       INNER JOIN chat_sessions cs ON cs.workspace_id = wa.workspace_id
+       WHERE cs.status = 'active'`
+    ).toArray();
+
+    for (const ws of activeWorkspaces) {
+      const workspaceId = ws.workspace_id as string;
+      const sessionId = ws.session_id as string | null;
+      const lastTerminal = (ws.last_terminal_activity_at as number) || 0;
+      const lastMessage = (ws.last_message_at as number) || 0;
+      const sessionUpdatedAt = (ws.session_updated_at as number) || 0;
+
+      const lastActivity = Math.max(lastTerminal, lastMessage, sessionUpdatedAt);
+
+      if (lastActivity > 0 && lastActivity < idleThreshold) {
+        // Workspace is idle — clean it up
+        console.log(JSON.stringify({
+          event: 'workspace_idle_timeout',
+          workspaceId,
+          sessionId,
+          lastActivity,
+          timeoutMs,
+          idleDurationMs: now - lastActivity,
+        }));
+
+        try {
+          // Stop the session
+          if (sessionId) {
+            this.stopSessionInternal(sessionId);
+          }
+
+          // Mark workspace for cleanup in D1 (the cron sweep handles actual VM cleanup)
+          await this.deleteWorkspaceInD1(workspaceId);
+
+          // Remove activity tracking
+          this.sql.exec('DELETE FROM workspace_activity WHERE workspace_id = ?', workspaceId);
+
+          // Record activity event
+          this.recordActivityEventInternal(
+            'workspace.idle_timeout',
+            'system',
+            null,
+            workspaceId,
+            sessionId,
+            null,
+            JSON.stringify({
+              lastActivity,
+              timeoutMs,
+              idleDurationMs: now - lastActivity,
+            })
+          );
+          this.broadcastEvent('workspace.idle_timeout', { workspaceId, sessionId });
+          this.scheduleSummarySync();
+        } catch (err) {
+          console.error('Workspace idle timeout cleanup failed', workspaceId, err);
+        }
+      }
+    }
+  }
+
+  /**
+   * Mark a workspace as 'stopped' and trigger deletion in D1.
+   * Sets status to 'stopped' so the cron sweep can clean up the VM.
+   */
+  private async deleteWorkspaceInD1(workspaceId: string): Promise<void> {
+    const now = new Date().toISOString();
+    try {
+      await this.env.DATABASE.prepare(
+        `UPDATE workspaces SET status = 'stopped', updated_at = ? WHERE id = ? AND status IN ('running', 'creating', 'recovery')`
+      )
+        .bind(now, workspaceId)
+        .run();
+    } catch (err) {
+      console.error('D1 workspace deletion failed for', workspaceId, err);
+      throw err;
     }
   }
 
