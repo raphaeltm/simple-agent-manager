@@ -340,6 +340,13 @@ export async function deleteNodeResources(nodeId: string, userId: string, env: E
       } catch (err) {
         console.error('Failed to delete node server:', err);
       }
+    } else {
+      console.error('node_cleanup.credential_missing_vm_orphaned: cannot delete VM — user cloud credentials not found', {
+        nodeId,
+        userId,
+        providerInstanceId: node.providerInstanceId,
+        cloudProvider: node.cloudProvider,
+      });
     }
   }
 
@@ -350,4 +357,14 @@ export async function deleteNodeResources(nodeId: string, userId: string, env: E
       console.error('Failed to delete node backend DNS record:', err);
     }
   }
+
+  // Cascade workspace status: mark all workspaces on this node as deleted
+  const now = new Date().toISOString();
+  await db
+    .update(schema.workspaces)
+    .set({ status: 'deleted', updatedAt: now })
+    .where(and(
+      eq(schema.workspaces.nodeId, nodeId),
+      eq(schema.workspaces.userId, userId)
+    ));
 }
