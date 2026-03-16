@@ -39,6 +39,10 @@ Phase 1: Research & Task Creation
 - [ ] Phase 6: Staging Verification
 - [ ] Phase 7: Pull Request & Cleanup
 
+## Phase 5: Review Tracker
+<populated when Phase 5 starts — one line per dispatched reviewer>
+<Phase 5 is NOT complete until every entry shows PASS or ADDRESSED>
+
 ## Implementation Progress
 <checklist items from the task file, updated as you go>
 
@@ -81,10 +85,45 @@ This forces a deliberate pause that prevents the "rush to PR" failure mode.
 | Forgetting the branch/worktree path | Recorded at creation time |
 | Repeating already-done work | Checked items + notes show what's been accomplished |
 | Jumping to PR creation early | Phase checklist enforces ordering |
+| Merging before reviewers finish | Review Tracker blocks Phase 5 completion until all reviewers report back |
 
 ## Cleanup
 
 Delete `.do-state.md` at the end of Phase 7 (after PR merge and worktree cleanup). It's gitignored, so even if you forget, it won't pollute the repo.
+
+## Phase 5 → Phase 6 Transition Guard
+
+Before advancing past Phase 5, you MUST:
+
+1. Re-read `.do-state.md`
+2. Check the "Phase 5: Review Tracker" section
+3. If ANY reviewer shows `DISPATCHED`, **STOP** — you are not done with Phase 5
+4. Wait for the outstanding reviewer(s) to complete, then update their status
+5. Only after every reviewer shows `PASS` or `ADDRESSED` may you check off Phase 5
+
+**Why this exists:** PR #409's security auditor was dispatched during Phase 5 but completed after the PR was merged. Context compaction caused the agent to forget it was waiting for a reviewer and advance through Phases 6-7. The review tracker makes outstanding reviewers visible across context boundaries.
+
+### Updating the Review Tracker
+
+When dispatching a reviewer agent, immediately write:
+```markdown
+- [ ] security-auditor — DISPATCHED (agent-id: <id>)
+```
+
+When the reviewer completes with no blockers:
+```markdown
+- [x] security-auditor — PASS, no critical findings
+```
+
+When the reviewer finds issues that you fix:
+```markdown
+- [x] security-auditor — ADDRESSED, 2 HIGH fixed in commit abc123
+```
+
+When the reviewer finds issues deferred to backlog:
+```markdown
+- [x] security-auditor — DEFERRED, 1 MEDIUM → tasks/backlog/2026-03-16-rate-limiting.md
+```
 
 ## This Rule Is Non-Negotiable
 
