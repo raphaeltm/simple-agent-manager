@@ -1082,7 +1082,7 @@ function ChatInput({
               onChange={(e) => onAgentTypeChange(e.target.value)}
               disabled={submitting}
               aria-label="Agent"
-              className="min-w-0 flex-1 px-2 py-1.5 min-h-[44px] border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer truncate focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+              className="min-w-0 flex-1 px-2 py-1.5 min-h-[44px] border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
             >
               {agents.map((agent) => (
                 <option key={agent.id} value={agent.id}>
@@ -1096,7 +1096,7 @@ function ChatInput({
             onChange={(e) => onWorkspaceProfileChange(e.target.value as WorkspaceProfile)}
             disabled={submitting}
             aria-label="Workspace profile"
-            className="min-w-0 px-2 py-1.5 min-h-[44px] border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+            className="min-w-0 flex-1 px-2 py-1.5 min-h-[44px] border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
           >
             <option value="full">Full</option>
             <option value="lightweight">Lightweight</option>
@@ -1107,7 +1107,7 @@ function ChatInput({
             disabled={submitting}
             aria-label="Run mode"
             aria-describedby="mobile-task-mode-desc"
-            className="min-w-0 px-2 py-1.5 min-h-[44px] border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+            className="min-w-0 flex-1 px-2 py-1.5 min-h-[44px] border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
           >
             <option value="task">Task</option>
             <option value="conversation">Conversation</option>
@@ -1129,7 +1129,7 @@ function ChatInput({
                 value={selectedAgentType ?? ''}
                 onChange={(e) => onAgentTypeChange(e.target.value)}
                 disabled={submitting}
-                className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs outline-none cursor-pointer"
+                className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
               >
                 {agents.map((agent) => (
                   <option key={agent.id} value={agent.id}>
@@ -1146,7 +1146,7 @@ function ChatInput({
               value={selectedWorkspaceProfile}
               onChange={(e) => onWorkspaceProfileChange(e.target.value as WorkspaceProfile)}
               disabled={submitting}
-              className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs outline-none cursor-pointer"
+              className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
             >
               <option value="full">Full</option>
               <option value="lightweight">Lightweight</option>
