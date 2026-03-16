@@ -1177,7 +1177,7 @@ describe('MCP Routes', () => {
 
     it('should return 429 when rate limit is exceeded', async () => {
       // First call: authenticate successfully
-      mockKV.get.mockImplementation(async (key: string, opts?: unknown) => {
+      mockKV.get.mockImplementation(async (key: string, _opts?: unknown) => {
         // Rate limit check returns a count at the limit
         if (typeof key === 'string' && key.startsWith('ratelimit:mcp:')) {
           return { count: 120, windowStart: Math.floor(Date.now() / 1000 / 60) * 60 };
