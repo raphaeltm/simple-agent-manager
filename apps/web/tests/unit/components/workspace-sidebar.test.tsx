@@ -81,6 +81,7 @@ const defaultProps = {
   gitStatus: makeGitStatus(),
   onOpenGitChanges: vi.fn(),
   sessionTokenUsages: makeTokenUsages(),
+  detectedPorts: [],
   workspaceEvents: makeEvents(),
 };
 
@@ -272,5 +273,61 @@ describe('WorkspaceSidebar', () => {
   it('hides git section when not running', () => {
     render(<WorkspaceSidebar {...defaultProps} isRunning={false} workspace={makeWorkspace({ status: 'stopped' })} />);
     expect(screen.queryByText('Git Changes')).not.toBeInTheDocument();
+  });
+
+  // ── Active Ports ──
+
+  it('renders Active Ports section when ports are detected', () => {
+    const ports = [
+      { port: 3000, address: '0.0.0.0', label: 'Dev Server', url: 'https://ws-ws1--3000.example.com', detectedAt: new Date().toISOString() },
+      { port: 8080, address: '127.0.0.1', label: 'HTTP Alt', url: 'https://ws-ws1--8080.example.com', detectedAt: new Date().toISOString() },
+    ];
+    render(<WorkspaceSidebar {...defaultProps} detectedPorts={ports} />);
+    expect(screen.getByText('Active Ports')).toBeInTheDocument();
+    expect(screen.getByText('3000')).toBeInTheDocument();
+    expect(screen.getByText('8080')).toBeInTheDocument();
+    expect(screen.getByText('Dev Server')).toBeInTheDocument();
+    expect(screen.getByText('HTTP Alt')).toBeInTheDocument();
+  });
+
+  it('shows (local) indicator for 127.0.0.1 bindings', () => {
+    const ports = [
+      { port: 8080, address: '127.0.0.1', label: 'HTTP Alt', url: 'https://ws-ws1--8080.example.com', detectedAt: new Date().toISOString() },
+    ];
+    render(<WorkspaceSidebar {...defaultProps} detectedPorts={ports} />);
+    expect(screen.getByText('(local)')).toBeInTheDocument();
+  });
+
+  it('hides Active Ports section when no ports detected', () => {
+    render(<WorkspaceSidebar {...defaultProps} detectedPorts={[]} />);
+    expect(screen.queryByText('Active Ports')).not.toBeInTheDocument();
+  });
+
+  it('hides Active Ports section when not running', () => {
+    const ports = [
+      { port: 3000, address: '0.0.0.0', label: 'Dev Server', url: 'https://ws-ws1--3000.example.com', detectedAt: new Date().toISOString() },
+    ];
+    render(<WorkspaceSidebar {...defaultProps} isRunning={false} detectedPorts={ports} workspace={makeWorkspace({ status: 'stopped' })} />);
+    expect(screen.queryByText('Active Ports')).not.toBeInTheDocument();
+  });
+
+  it('renders port links with correct href', () => {
+    const ports = [
+      { port: 3000, address: '0.0.0.0', label: 'Dev Server', url: 'https://ws-ws1--3000.example.com', detectedAt: new Date().toISOString() },
+    ];
+    render(<WorkspaceSidebar {...defaultProps} detectedPorts={ports} />);
+    const link = screen.getByText('3000').closest('a');
+    expect(link).toHaveAttribute('href', 'https://ws-ws1--3000.example.com');
+    expect(link).toHaveAttribute('target', '_blank');
+  });
+
+  it('shows port badge with count', () => {
+    const ports = [
+      { port: 3000, address: '0.0.0.0', label: 'Dev Server', url: 'https://ws-ws1--3000.example.com', detectedAt: new Date().toISOString() },
+      { port: 5173, address: '0.0.0.0', label: 'Vite', url: 'https://ws-ws1--5173.example.com', detectedAt: new Date().toISOString() },
+    ];
+    render(<WorkspaceSidebar {...defaultProps} detectedPorts={ports} />);
+    // Badge should show "2" - use getAllByText since other "2" badges may exist
+    expect(screen.getAllByText('2').length).toBeGreaterThanOrEqual(1);
   });
 });

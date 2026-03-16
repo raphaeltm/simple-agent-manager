@@ -43,6 +43,7 @@ import { recoverStuckTasks } from './scheduled/stuck-tasks';
 import { runObservabilityPurge } from './scheduled/observability-purge';
 import { getRuntimeLimits } from './services/limits';
 import { recordNodeRoutingMetric } from './services/telemetry';
+import { parseWorkspaceSubdomain } from './lib/workspace-subdomain';
 
 // Cloudflare bindings type
 export interface Env {
@@ -333,19 +334,16 @@ app.use('*', async (c, next) => {
   const hostname = url.hostname;
   const baseDomain = c.env?.BASE_DOMAIN || '';
 
-  if (!baseDomain || !hostname.startsWith('ws-') || !hostname.endsWith(`.${baseDomain}`)) {
+  // Parse workspace ID and optional port from subdomain.
+  const parsed = parseWorkspaceSubdomain(hostname, baseDomain);
+  if (!parsed) {
     await next();
     return;
   }
-
-  // Extract workspace ID from subdomain: ws-{id}.{domain} → {id}
-  // DNS hostnames are case-insensitive (lowercased), but workspace IDs (ULIDs) are uppercase.
-  const subdomain = hostname.replace(`.${baseDomain}`, '');
-  const workspaceId = subdomain.replace(/^ws-/, '').toUpperCase();
-
-  if (!workspaceId) {
-    return c.json({ error: 'INVALID_WORKSPACE', message: 'Invalid workspace subdomain' }, 400);
+  if ('error' in parsed) {
+    return c.json({ error: 'INVALID_WORKSPACE', message: parsed.error }, 400);
   }
+  const { workspaceId, targetPort } = parsed;
 
   // Look up workspace routing metadata from D1.
   const db = drizzle(c.env.DATABASE, { schema });
@@ -382,6 +380,7 @@ app.use('*', async (c, next) => {
     workspaceId,
     nodeId: workspace.nodeId || workspaceId,
     backendHostname,
+    targetPort,
     method: c.req.raw.method,
     path: url.pathname,
   }));
@@ -396,6 +395,13 @@ app.use('*', async (c, next) => {
   vmUrl.protocol = `${vmAgentProtocol}:`;
   vmUrl.hostname = backendHostname;
   vmUrl.port = vmAgentPort;
+
+  // Route port-specific requests to the VM agent's port proxy endpoint.
+  // ws-{id}--3000.example.com/foo → {backend}/workspaces/{id}/ports/3000/foo
+  if (targetPort !== null) {
+    const subPath = url.pathname === '/' ? '' : url.pathname;
+    vmUrl.pathname = `/workspaces/${workspaceId}/ports/${targetPort}${subPath}`;
+  }
 
   // Strip client-supplied routing headers and inject trusted routing context.
   const headers = new Headers(c.req.raw.headers);

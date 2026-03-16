@@ -172,6 +172,13 @@ type Config struct {
 	TLSCertPath string // Path to TLS certificate PEM (env: TLS_CERT_PATH)
 	TLSKeyPath  string // Path to TLS private key PEM (env: TLS_KEY_PATH)
 	TLSEnabled  bool   // Derived: true when both TLSCertPath and TLSKeyPath are set
+
+	// Port scanning settings - configurable per constitution principle XI
+	PortScanEnabled      bool          // Enable port detection (env: PORT_SCAN_ENABLED, default: true)
+	PortScanInterval     time.Duration // Scan interval (env: PORT_SCAN_INTERVAL, default: 5s)
+	PortScanExclude      string        // Comma-separated ports to exclude (env: PORT_SCAN_EXCLUDE, default: "22,2375,2376,8443")
+	PortScanEphemeralMin int           // Min ephemeral port to exclude (env: PORT_SCAN_EPHEMERAL_MIN, default: 32768)
+	PortProxyCacheTTL    time.Duration // Bridge IP cache TTL (env: PORT_PROXY_CACHE_TTL, default: 30s)
 }
 
 // Load reads configuration from environment variables.
@@ -329,6 +336,13 @@ func Load() (*Config, error) {
 		// TLS settings - configurable per constitution principle XI
 		TLSCertPath: getEnv("TLS_CERT_PATH", ""),
 		TLSKeyPath:  getEnv("TLS_KEY_PATH", ""),
+
+		// Port scanning settings - configurable per constitution principle XI
+		PortScanEnabled:      getEnvBool("PORT_SCAN_ENABLED", true),
+		PortScanInterval:     getEnvDuration("PORT_SCAN_INTERVAL", 5*time.Second),
+		PortScanExclude:      getEnv("PORT_SCAN_EXCLUDE", "22,2375,2376,8443"),
+		PortScanEphemeralMin: getEnvInt("PORT_SCAN_EPHEMERAL_MIN", 32768),
+		PortProxyCacheTTL:    getEnvDuration("PORT_PROXY_CACHE_TTL", 30*time.Second),
 	}
 
 	// Derive TLS enabled state from cert/key paths

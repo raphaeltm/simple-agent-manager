@@ -17,6 +17,7 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useTabOrder } from '../hooks/useTabOrder';
 import { useTokenRefresh } from '../hooks/useTokenRefresh';
 import { useBootLogStream } from '../hooks/useBootLogStream';
+import { useWorkspacePorts } from '../hooks/useWorkspacePorts';
 import { WorkspaceTabStrip, type WorkspaceTabItem } from '../components/WorkspaceTabStrip';
 import { WorktreeSelector } from '../components/WorktreeSelector';
 import { MoreVertical, X } from 'lucide-react';
@@ -384,6 +385,14 @@ export function Workspace() {
     setTerminalError(null);
     wsUrlSetRef.current = true;
   }, [workspace?.url, terminalToken, isRunning, buildTerminalWsUrl]);
+
+  // Poll detected ports from VM Agent
+  const { ports: detectedPorts } = useWorkspacePorts(
+    workspace?.url ?? undefined,
+    id,
+    terminalToken ?? undefined,
+    isRunning
+  );
 
   // Fetch workspace events directly from the VM Agent (not proxied through control plane)
   useEffect(() => {
@@ -1693,6 +1702,7 @@ export function Workspace() {
       gitStatus={gitStatus}
       onOpenGitChanges={handleOpenGitChanges}
       sessionTokenUsages={sessionTokenUsages}
+      detectedPorts={detectedPorts}
       workspaceEvents={workspaceEvents}
     />
   );

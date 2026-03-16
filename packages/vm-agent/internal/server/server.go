@@ -28,6 +28,7 @@ import (
 	"github.com/workspace/vm-agent/internal/logreader"
 	"github.com/workspace/vm-agent/internal/messagereport"
 	"github.com/workspace/vm-agent/internal/persistence"
+	"github.com/workspace/vm-agent/internal/ports"
 	"github.com/workspace/vm-agent/internal/pty"
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
@@ -59,12 +60,15 @@ type Server struct {
 	messageReporters    map[string]*messagereport.Reporter // keyed by workspaceID
 	worktreeCacheMu     sync.RWMutex
 	worktreeCache       map[string]cachedWorktreeList
-	logReader           *logreader.Reader
-	bootLogBroadcasters *BootLogBroadcasterManager
-	bootstrapComplete   bool
-	callbackTokenMu     sync.RWMutex
-	callbackToken       string
-	done                chan struct{}
+	logReader            *logreader.Reader
+	bootLogBroadcasters  *BootLogBroadcasterManager
+	containerDiscovery   *container.Discovery
+	portScannerMu        sync.RWMutex
+	portScanners         map[string]*ports.Scanner
+	bootstrapComplete    bool
+	callbackTokenMu      sync.RWMutex
+	callbackToken        string
+	done                 chan struct{}
 }
 
 type cachedWorktreeList struct {
@@ -130,6 +134,15 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to create JWT validator: %w", err)
 	}
 
+	// Derive cookie domain from control plane URL for cross-subdomain sharing.
+	// This allows session cookies set on ws-ABC123.example.com to also be sent
+	// to ws-ABC123--3000.example.com (port proxy subdomains).
+	baseDomain := config.DeriveBaseDomain(cfg.ControlPlaneURL)
+	cookieDomain := ""
+	if baseDomain != "" {
+		cookieDomain = "." + baseDomain
+	}
+
 	// Create session manager with full configuration
 	sessionManager := auth.NewSessionManagerWithConfig(auth.SessionManagerConfig{
 		CookieName:      cfg.CookieName,
@@ -137,20 +150,24 @@ func New(cfg *config.Config) (*Server, error) {
 		TTL:             cfg.SessionTTL,
 		CleanupInterval: cfg.SessionCleanupInterval,
 		MaxSessions:     cfg.SessionMaxCount,
+		CookieDomain:    cookieDomain,
 	})
 
 	// Setup container discovery for devcontainer exec
 	var containerResolver pty.ContainerResolver
+	var containerDiscoveryInstance *container.Discovery
 	containerWorkDir := "/workspace" // host fallback
 	containerUser := ""
 
 	if cfg.ContainerMode {
 		discovery := container.NewDiscovery(container.Config{
-			LabelKey:   cfg.ContainerLabelKey,
-			LabelValue: cfg.ContainerLabelValue,
-			CacheTTL:   cfg.ContainerCacheTTL,
+			LabelKey:    cfg.ContainerLabelKey,
+			LabelValue:  cfg.ContainerLabelValue,
+			CacheTTL:    cfg.ContainerCacheTTL,
+			BridgeIPTTL: cfg.PortProxyCacheTTL,
 		})
 		containerResolver = discovery.GetContainerID
+		containerDiscoveryInstance = discovery
 		containerWorkDir = cfg.ContainerWorkDir
 		containerUser = cfg.ContainerUser
 		slog.Info("Container mode enabled", "user", containerUser, "workDir", containerWorkDir)
@@ -254,26 +271,28 @@ func New(cfg *config.Config) (*Server, error) {
 	})
 
 	s := &Server{
-		config:             cfg,
-		jwtValidator:       jwtValidator,
-		sessionManager:     sessionManager,
-		ptyManager:         ptyManager,
-		sysInfoCollector:   sysInfoCollector,
-		workspaces:         make(map[string]*WorkspaceRuntime),
-		nodeEvents:         make([]EventRecord, 0, 512),
-		workspaceEvents:    make(map[string][]EventRecord),
-		agentSessions:      agentsessions.NewManager(),
-		acpConfig:          acpGatewayConfig,
-		sessionHosts:       make(map[string]*acp.SessionHost),
-		sessionMcpServers:  make(map[string][]acp.McpServerEntry),
-		store:              store,
-		errorReporter:      errorReporter,
-		messageReporters:   messageReporters,
-		worktreeCache:      make(map[string]cachedWorktreeList),
-		logReader:           logreader.NewReaderWithTimeout(cfg.LogReaderTimeout),
-		bootLogBroadcasters: NewBootLogBroadcasterManager(),
-		callbackToken:       cfg.CallbackToken,
-		done:                make(chan struct{}),
+		config:              cfg,
+		jwtValidator:        jwtValidator,
+		sessionManager:      sessionManager,
+		ptyManager:          ptyManager,
+		sysInfoCollector:    sysInfoCollector,
+		workspaces:          make(map[string]*WorkspaceRuntime),
+		nodeEvents:          make([]EventRecord, 0, 512),
+		workspaceEvents:     make(map[string][]EventRecord),
+		agentSessions:       agentsessions.NewManager(),
+		acpConfig:           acpGatewayConfig,
+		sessionHosts:        make(map[string]*acp.SessionHost),
+		sessionMcpServers:   make(map[string][]acp.McpServerEntry),
+		store:               store,
+		errorReporter:       errorReporter,
+		messageReporters:    messageReporters,
+		worktreeCache:       make(map[string]cachedWorktreeList),
+		logReader:            logreader.NewReaderWithTimeout(cfg.LogReaderTimeout),
+		bootLogBroadcasters:  NewBootLogBroadcasterManager(),
+		containerDiscovery:   containerDiscoveryInstance,
+		portScanners:         make(map[string]*ports.Scanner),
+		callbackToken:        cfg.CallbackToken,
+		done:                 make(chan struct{}),
 	}
 
 	// Wire the git token fetcher now that the server exists.
@@ -393,11 +412,97 @@ func (s *Server) UpdateAfterBootstrap(cfg *config.Config) {
 
 	s.bootstrapComplete = true
 
+	// Start port scanner for the boot-time workspace now that the container is available.
+	if cfg.WorkspaceID != "" {
+		s.StartPortScanner(cfg.WorkspaceID)
+	}
+
 	// Notify WebSocket clients that bootstrap is complete.
 	if s.config.WorkspaceID != "" {
 		if broadcaster := s.bootLogBroadcasters.Get(s.config.WorkspaceID); broadcaster != nil {
 			broadcaster.MarkComplete()
 		}
+	}
+}
+
+// StartPortScanner starts port scanning for a workspace if enabled.
+// Called after bootstrap completes and the container is available.
+func (s *Server) StartPortScanner(workspaceID string) {
+	if !s.config.PortScanEnabled || !s.config.ContainerMode {
+		return
+	}
+
+	// Resolve container ID for scanning
+	var containerID string
+	if s.containerDiscovery != nil {
+		if id, err := s.containerDiscovery.GetContainerID(); err == nil {
+			containerID = id
+		} else {
+			slog.Warn("Port scanner: cannot resolve container ID", "workspaceId", workspaceID, "error", err)
+			return
+		}
+	}
+
+	baseDomain := config.DeriveBaseDomain(s.config.ControlPlaneURL)
+	excludePorts := ports.ParseExcludePorts(s.config.PortScanExclude)
+	// Merge with defaults
+	for port := range ports.DefaultExcludePorts() {
+		excludePorts[port] = true
+	}
+
+	scanner := ports.NewScanner(ports.ScannerConfig{
+		Enabled:      true,
+		Interval:     s.config.PortScanInterval,
+		ExcludePorts: excludePorts,
+		EphemeralMin: s.config.PortScanEphemeralMin,
+		BaseDomain:   baseDomain,
+		WorkspaceID:  workspaceID,
+		ContainerID:  containerID,
+		EventEmitter: func(eventType, message string, detail map[string]interface{}) {
+			s.appendNodeEvent(workspaceID, "info", eventType, message, detail)
+		},
+	})
+
+	s.portScannerMu.Lock()
+	// Stop existing scanner if any
+	if existing, ok := s.portScanners[workspaceID]; ok {
+		existing.Stop()
+	}
+	s.portScanners[workspaceID] = scanner
+	s.portScannerMu.Unlock()
+
+	scanner.Start()
+	slog.Info("Port scanner started", "workspaceId", workspaceID, "interval", s.config.PortScanInterval)
+}
+
+// stopPortScanner stops the port scanner for a workspace.
+func (s *Server) stopPortScanner(workspaceID string) {
+	s.portScannerMu.Lock()
+	scanner, ok := s.portScanners[workspaceID]
+	if ok {
+		delete(s.portScanners, workspaceID)
+	}
+	s.portScannerMu.Unlock()
+
+	if scanner != nil {
+		scanner.Stop()
+		slog.Info("Port scanner stopped", "workspaceId", workspaceID)
+	}
+}
+
+// stopAllPortScanners stops all active port scanners.
+func (s *Server) stopAllPortScanners() {
+	s.portScannerMu.Lock()
+	scanners := make(map[string]*ports.Scanner, len(s.portScanners))
+	for k, v := range s.portScanners {
+		scanners[k] = v
+	}
+	s.portScanners = make(map[string]*ports.Scanner)
+	s.portScannerMu.Unlock()
+
+	for wsID, scanner := range scanners {
+		scanner.Stop()
+		slog.Info("Port scanner stopped", "workspaceId", wsID)
 	}
 }
 
@@ -450,6 +555,9 @@ func (s *Server) StopAllWorkspacesAndSessions() {
 func (s *Server) Stop(ctx context.Context) error {
 	// Signal background goroutines to stop.
 	close(s.done)
+
+	// Stop all port scanners
+	s.stopAllPortScanners()
 
 	// Close JWT validator
 	s.jwtValidator.Close()
@@ -536,7 +644,9 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /system-info", s.handleSystemInfo)
 	mux.HandleFunc("GET /logs", s.handleLogs)
 	mux.HandleFunc("GET /logs/stream", s.handleLogStream)
-	mux.HandleFunc("GET /workspaces/{workspaceId}/ports/{port}", s.handleWorkspacePortProxy)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/ports", s.handleListWorkspacePorts)
+	mux.HandleFunc("/workspaces/{workspaceId}/ports/{port}/{path...}", s.handleWorkspacePortProxy)
+	mux.HandleFunc("/workspaces/{workspaceId}/ports/{port}", s.handleWorkspacePortProxy)
 
 	// Boot log WebSocket (available during bootstrap for real-time streaming)
 	mux.HandleFunc("GET /boot-log/ws", s.handleBootLogWS)
