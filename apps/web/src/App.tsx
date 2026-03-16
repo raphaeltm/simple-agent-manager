@@ -11,6 +11,7 @@ import { SettingsCloudProvider } from './pages/SettingsCloudProvider';
 import { SettingsGitHub } from './pages/SettingsGitHub';
 import { SettingsAgentKeys } from './pages/SettingsAgentKeys';
 import { SettingsAgentConfig } from './pages/SettingsAgentConfig';
+import { SettingsNotifications } from './pages/SettingsNotifications';
 import { CreateWorkspace } from './pages/CreateWorkspace';
 import { Workspace } from './pages/Workspace';
 import { Workspaces } from './pages/Workspaces';
@@ -87,6 +88,7 @@ export default function App() {
               <Route path="github" element={<SettingsGitHub />} />
               <Route path="agent-keys" element={<SettingsAgentKeys />} />
               <Route path="agent-config" element={<SettingsAgentConfig />} />
+              <Route path="notifications" element={<SettingsNotifications />} />
             </Route>
             <Route path="/ui-standards" element={<UiStandards />} />
             <Route path="/admin" element={<Admin />}>

@@ -9,6 +9,7 @@ import { GlobalCommandPalette } from './GlobalCommandPalette';
 import { useGlobalCommandPalette } from '../hooks/useGlobalCommandPalette';
 import { isMacPlatform } from '../lib/keyboard-shortcuts';
 import { signOut } from '../lib/auth';
+import { NotificationCenter } from './NotificationCenter';
 
 interface AppShellProps {
   children?: ReactNode;
@@ -63,7 +64,7 @@ export function AppShell({ children }: AppShellProps) {
           <span className="text-lg font-semibold text-fg-primary">
             SAM
           </span>
-          {/* Search + Hamburger on the right */}
+          {/* Search + Notifications + Hamburger on the right */}
           <div className="flex items-center gap-1">
             <button
               onClick={commandPalette.open}
@@ -72,6 +73,7 @@ export function AppShell({ children }: AppShellProps) {
             >
               <Search size={18} />
             </button>
+            <NotificationCenter />
             <button
               onClick={() => setDrawerOpen(true)}
               aria-label="Open navigation menu"
@@ -107,7 +109,10 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <div className="grid bg-canvas h-screen" style={{ gridTemplateColumns: '220px 1fr' }}>
       <aside className="flex flex-col border-r border-border-default bg-surface sticky top-0 h-screen overflow-y-auto">
-        <div className="p-4 text-lg font-semibold text-fg-primary border-b border-border-default">SAM</div>
+        <div className="p-4 text-lg font-semibold text-fg-primary border-b border-border-default flex items-center justify-between">
+          <span>SAM</span>
+          <NotificationCenter />
+        </div>
         {/* Command palette trigger */}
         <button
           onClick={commandPalette.open}

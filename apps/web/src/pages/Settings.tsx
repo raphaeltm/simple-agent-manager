@@ -11,6 +11,7 @@ const SETTINGS_TABS = [
   { id: 'github', label: 'GitHub', path: 'github' },
   { id: 'agent-keys', label: 'Agent Keys', path: 'agent-keys' },
   { id: 'agent-config', label: 'Agent Config', path: 'agent-config' },
+  { id: 'notifications', label: 'Notifications', path: 'notifications' },
 ];
 
 /**

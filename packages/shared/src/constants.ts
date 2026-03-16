@@ -389,3 +389,29 @@ export const AGENT_PERMISSION_MODE_DESCRIPTIONS: Record<string, string> = {
   dontAsk: "Don't prompt for permissions, deny if not pre-approved",
   bypassPermissions: 'Bypass all permission checks',
 };
+
+// =============================================================================
+// Notification Defaults (Constitution Principle XI — all configurable)
+// =============================================================================
+
+/** Maximum notifications stored per user before oldest are auto-deleted */
+export const DEFAULT_MAX_NOTIFICATIONS_PER_USER = 500;
+
+/** Auto-delete notifications older than this (milliseconds). Default: 90 days */
+export const DEFAULT_NOTIFICATION_AUTO_DELETE_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+
+/** Maximum notifications returned in a single list request */
+export const DEFAULT_NOTIFICATION_PAGE_SIZE = 50;
+
+/** Maximum page size for notification list requests */
+export const MAX_NOTIFICATION_PAGE_SIZE = 100;
+
+/** Default urgency mapping for each notification type */
+export const NOTIFICATION_TYPE_URGENCY: Record<string, 'high' | 'medium' | 'low'> = {
+  task_complete: 'medium',
+  needs_input: 'high',
+  error: 'high',
+  progress: 'low',
+  session_ended: 'medium',
+  pr_created: 'medium',
+};

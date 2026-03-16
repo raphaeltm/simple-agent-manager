@@ -40,6 +40,7 @@ import { ulid } from '../lib/ulid';
 import { generateBranchName } from '../services/branch-name';
 import { startTaskRunnerDO } from '../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../services/task-title';
+import * as notificationService from '../services/notification';
 
 export const mcpRoutes = new Hono<{ Bindings: Env }>();
 
@@ -632,8 +633,14 @@ async function handleCompleteTask(
   // instead of completing the task. This prevents agents that ignore conversation-mode instructions
   // from prematurely ending the conversation.
   const taskRow = await env.DATABASE.prepare(
-    `SELECT task_mode FROM tasks WHERE id = ? AND project_id = ?`,
-  ).bind(tokenData.taskId, tokenData.projectId).first<{ task_mode: string }>();
+    `SELECT task_mode, user_id, title, output_pr_url, output_branch FROM tasks WHERE id = ? AND project_id = ?`,
+  ).bind(tokenData.taskId, tokenData.projectId).first<{
+    task_mode: string;
+    user_id: string;
+    title: string;
+    output_pr_url: string | null;
+    output_branch: string | null;
+  }>();
 
   const isConversation = taskRow?.task_mode === 'conversation';
 
@@ -745,6 +752,24 @@ async function handleCompleteTask(
   // Token cleanup is handled by:
   //   1. KV TTL auto-expiration (default 30 minutes, configurable via MCP_TOKEN_TTL_SECONDS)
   //   2. Task-runner DO cleanup on failure (task-runner.ts)
+
+  // Emit task completion notification (best-effort)
+  if (env.NOTIFICATION && taskRow?.user_id) {
+    try {
+      await notificationService.notifyTaskComplete(env as any, taskRow.user_id, {
+        projectId: tokenData.projectId,
+        taskId: tokenData.taskId,
+        taskTitle: taskRow.title,
+        outputPrUrl: taskRow.output_pr_url,
+        outputBranch: taskRow.output_branch,
+      });
+    } catch (err) {
+      log.warn('mcp.complete_task.notification_failed', {
+        taskId: tokenData.taskId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   log.info('mcp.complete_task', {
     taskId: tokenData.taskId,

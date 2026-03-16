@@ -3,6 +3,7 @@ export { ProjectData } from './durable-objects/project-data';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
 export { AdminLogs } from './durable-objects/admin-logs';
 export { TaskRunner } from './durable-objects/task-runner';
+export { NotificationService } from './durable-objects/notification';
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -34,6 +35,7 @@ import { activityRoutes } from './routes/activity';
 import { adminRoutes } from './routes/admin';
 import { dashboardRoutes } from './routes/dashboard';
 import { mcpRoutes } from './routes/mcp';
+import { notificationRoutes } from './routes/notifications';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
@@ -59,6 +61,7 @@ export interface Env {
   NODE_LIFECYCLE: DurableObjectNamespace;
   ADMIN_LOGS: DurableObjectNamespace;
   TASK_RUNNER: DurableObjectNamespace;
+  NOTIFICATION: DurableObjectNamespace;
   // Environment variables
   BASE_DOMAIN: string;
   VERSION: string;
@@ -257,6 +260,10 @@ export interface Env {
   // Origin CA certificate/key (injected into cloud-init for VM TLS)
   ORIGIN_CA_CERT?: string;
   ORIGIN_CA_KEY?: string;
+  // Notification system configuration
+  MAX_NOTIFICATIONS_PER_USER?: string;
+  NOTIFICATION_AUTO_DELETE_AGE_MS?: string;
+  NOTIFICATION_PAGE_SIZE?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -468,6 +475,7 @@ app.get('/health', (c) => {
     NODE_LIFECYCLE: !!c.env.NODE_LIFECYCLE,
     TASK_RUNNER: !!c.env.TASK_RUNNER,
     ADMIN_LOGS: !!c.env.ADMIN_LOGS,
+    NOTIFICATION: !!c.env.NOTIFICATION,
   };
 
   const missingBindings = Object.entries(bindings)
@@ -527,6 +535,7 @@ app.route('/api/projects/:projectId/activity', activityRoutes);
 app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/dashboard', dashboardRoutes);
+app.route('/api/notifications', notificationRoutes);
 // MCP endpoint CORS override — MCP uses Bearer token auth (not cookies/sessions),
 // so it needs credentials: false + origin: '*' to allow VM agent requests from any origin.
 // This must run after the global CORS middleware to overwrite its headers.
