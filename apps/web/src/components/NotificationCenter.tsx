@@ -109,7 +109,7 @@ export function NotificationCenter() {
       const key = n.projectId ?? 'none';
       if (!groupMap.has(key)) {
         const projectName = (n.metadata as Record<string, unknown> | null)?.projectName as string | undefined
-          ?? (n.projectId ? `Project` : 'General');
+          ?? (n.projectId ? `Project ${n.projectId.slice(0, 8)}` : 'General');
         groupMap.set(key, { projectId: n.projectId, projectName, notifications: [] });
       }
       groupMap.get(key)!.notifications.push(n);
@@ -343,10 +343,12 @@ function NotificationGroup({
     <div>
       <button
         onClick={() => setIsCollapsed(!isCollapsed)}
-        className="w-full flex items-center gap-2 px-4 py-2 bg-inset border-none cursor-pointer border-b border-border-default hover:bg-surface-hover transition-colors"
+        aria-expanded={!isCollapsed}
+        aria-label={`${projectName} — ${notifications.length} notifications${unreadInGroup > 0 ? `, ${unreadInGroup} unread` : ''}`}
+        className="w-full flex items-center gap-2 px-4 py-2.5 min-h-[44px] bg-surface border-none cursor-pointer border-b border-border-default hover:bg-surface-hover transition-colors"
       >
-        {isCollapsed ? <ChevronRight size={12} className="text-fg-muted" /> : <ChevronDown size={12} className="text-fg-muted" />}
-        <Folder size={12} className="text-fg-muted" />
+        {isCollapsed ? <ChevronRight size={14} className="text-fg-muted" /> : <ChevronDown size={14} className="text-fg-muted" />}
+        <Folder size={14} className="text-fg-muted" />
         <span className="text-xs font-medium text-fg-secondary flex-1 text-left">{projectName}</span>
         <span className="text-[10px] text-fg-muted">
           {notifications.length}
