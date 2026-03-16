@@ -56,10 +56,16 @@ async function main() {
 
   const { config, render } = templateModule;
 
+  // Load icon as base64 data URI
+  const iconPath = resolve(__dirname, '../../assets/images/icon.png');
+  const iconBuffer = readFileSync(iconPath);
+  const iconDataUri = `data:image/png;base64,${iconBuffer.toString('base64')}`;
+
   // Render the template
   const element = render({
     title: args.title,
     subtitle: args.subtitle,
+    iconDataUri,
   });
 
   // Load fonts

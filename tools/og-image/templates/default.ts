@@ -30,7 +30,11 @@ export const config: TemplateConfig = {
   height: 630,
 };
 
-export function render(opts?: { title?: string; subtitle?: string }) {
+export function render(opts?: {
+  title?: string;
+  subtitle?: string;
+  iconDataUri?: string;
+}) {
   const title = opts?.title ?? 'SAM';
   const subtitle =
     opts?.subtitle ??
@@ -96,52 +100,22 @@ export function render(opts?: { title?: string; subtitle?: string }) {
               gap: '32px',
             },
             children: [
-              // Icon row: terminal icon
-              {
-                type: 'div',
-                props: {
-                  style: {
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: '88px',
-                    height: '88px',
-                    borderRadius: '22px',
-                    backgroundColor: colors.bgSurface,
-                    border: `3px solid ${colors.border}`,
-                  },
-                  children: [
-                    // Terminal prompt icon (> _) built with divs
+              // Icon
+              ...(opts?.iconDataUri
+                ? [
                     {
-                      type: 'div',
+                      type: 'img',
                       props: {
+                        src: opts.iconDataUri,
+                        width: 160,
+                        height: 160,
                         style: {
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'flex-start',
-                          gap: '4px',
+                          borderRadius: '32px',
                         },
-                        children: [
-                          // Chevron >
-                          {
-                            type: 'div',
-                            props: {
-                              style: {
-                                fontSize: '36px',
-                                fontWeight: '700',
-                                color: colors.accent,
-                                lineHeight: '1',
-                                fontFamily: 'monospace',
-                              },
-                              children: '>_',
-                            },
-                          },
-                        ],
                       },
                     },
-                  ],
-                },
-              },
+                  ]
+                : []),
               // Title
               {
                 type: 'div',
