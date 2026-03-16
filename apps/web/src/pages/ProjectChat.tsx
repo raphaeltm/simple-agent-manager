@@ -1048,7 +1048,7 @@ function ChatInput({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && e.shiftKey && !submitting) {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !submitting) {
               e.preventDefault();
               onSubmit();
             }
@@ -1078,7 +1078,7 @@ function ChatInput({
         </button>
       </div>
       <div className="sam-type-caption text-fg-muted mt-1">
-        Press Shift+Enter to send, Enter for new line
+        Press Ctrl+Enter to send, Enter for new line
       </div>
     </div>
   );

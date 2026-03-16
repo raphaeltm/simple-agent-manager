@@ -311,6 +311,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isLoadingMoreRef = useRef(false);
   const isStuckToBottomRef = useRef(true);
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
   const [session, setSession] = useState<ChatSessionResponse | null>(null);
   const [taskEmbed, setTaskEmbed] = useState<ChatSessionResponse['task'] | null>(null);
@@ -492,6 +493,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       const { scrollTop, scrollHeight, clientHeight } = container;
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
       isStuckToBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD;
+      setShowScrollButton(distanceFromBottom > SCROLL_BOTTOM_THRESHOLD);
     };
 
     container.addEventListener('scroll', handleScroll, { passive: true });
@@ -852,6 +854,24 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         <div className="flex items-center gap-2 px-4 py-1 border-t border-border-default bg-surface shrink-0">
           <Spinner size="sm" />
           <span className="text-xs text-fg-muted">Connecting to agent...</span>
+        </div>
+      )}
+
+      {/* Scroll to bottom button */}
+      {showScrollButton && (
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+              isStuckToBottomRef.current = true;
+              setShowScrollButton(false);
+            }}
+            className="absolute -top-10 right-4 z-10 flex items-center justify-center w-8 h-8 rounded-full border border-border-default bg-surface shadow-md cursor-pointer hover:bg-page transition-colors"
+            aria-label="Scroll to bottom"
+          >
+            <ChevronDown size={16} className="text-fg-muted" />
+          </button>
         </div>
       )}
 
@@ -1321,7 +1341,7 @@ function FollowUpInput({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && e.shiftKey && !sending) {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !sending) {
               e.preventDefault();
               onSend();
             }
