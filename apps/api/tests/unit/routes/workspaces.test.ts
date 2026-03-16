@@ -107,4 +107,19 @@ describe('workspaces routes source contract', () => {
     expect(file).toContain("lifecycleRoutes.post('/:id/rebuild'");
     expect(file).toContain('writeBootLogs(c.env.KV, workspace.id, [], c.env)');
   });
+
+  it('stops chat session when workspace is stopped', () => {
+    expect(file).toContain('projectDataService.stopSession');
+    expect(file).toContain('workspace.stop_session_failed');
+  });
+
+  it('stops chat session when workspace is deleted', () => {
+    expect(file).toContain('workspace.delete_stop_session_failed');
+  });
+
+  it('cleans up workspace activity on stop and delete', () => {
+    expect(file).toContain('projectDataService.cleanupWorkspaceActivity');
+    expect(file).toContain('workspace.cleanup_activity_failed');
+    expect(file).toContain('workspace.delete_cleanup_activity_failed');
+  });
 });
