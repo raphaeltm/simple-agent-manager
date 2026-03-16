@@ -760,7 +760,7 @@ async function handleCompleteTask(
       try {
         await notificationService.notifySessionEnded(env as any, tokenData.userId, {
           projectId: tokenData.projectId,
-          sessionId: tokenData.taskId, // use taskId as session context
+          sessionId: null, // MCP token does not carry session ID
           taskId: tokenData.taskId,
           taskTitle: taskRow.title,
         });

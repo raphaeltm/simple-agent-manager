@@ -108,7 +108,7 @@ export async function notifySessionEnded(
   userId: string,
   opts: {
     projectId: string;
-    sessionId: string;
+    sessionId?: string | null;
     taskId?: string | null;
     taskTitle?: string | null;
   }
@@ -175,7 +175,7 @@ export async function notifyNeedsInput(
   }
 ): Promise<void> {
   const categoryLabel = opts.category
-    ? opts.category.charAt(0).toUpperCase() + opts.category.slice(1).replace('_', ' ')
+    ? opts.category.charAt(0).toUpperCase() + opts.category.slice(1).replaceAll('_', ' ')
     : 'Input';
 
   await sendNotification(env, userId, {

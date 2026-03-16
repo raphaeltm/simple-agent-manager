@@ -46,6 +46,9 @@ export const NOTIFICATION_MIGRATIONS: NotificationMigration[] = [
       sql.exec(
         `CREATE INDEX idx_notifications_type ON notifications(user_id, type, created_at DESC)`
       );
+      sql.exec(
+        `CREATE INDEX idx_notifications_task ON notifications(user_id, type, task_id, created_at DESC)`
+      );
 
       // User notification preferences
       // Use empty string '' instead of NULL for global (no project) preferences

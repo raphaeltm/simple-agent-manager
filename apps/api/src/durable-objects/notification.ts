@@ -141,7 +141,7 @@ export class NotificationService extends DurableObject<Env> {
       const cutoff = now - dedupWindow;
       const existing = this.sql
         .exec(
-          `SELECT id FROM notifications WHERE user_id = ? AND type = 'task_complete' AND task_id = ? AND created_at > ?`,
+          `SELECT id FROM notifications WHERE user_id = ? AND type = 'task_complete' AND task_id = ? AND created_at > ? AND dismissed_at IS NULL`,
           userId,
           request.taskId,
           cutoff
