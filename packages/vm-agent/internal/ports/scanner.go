@@ -34,6 +34,12 @@ type ScannerConfig struct {
 	EventEmitter EventEmitter
 }
 
+// Default scanner configuration values.
+const (
+	DefaultScanInterval  = 5 * time.Second
+	DefaultEphemeralMin  = 32768
+)
+
 // Scanner polls /proc/net/tcp inside a container to detect listening ports.
 type Scanner struct {
 	cfg         ScannerConfig
@@ -47,10 +53,10 @@ type Scanner struct {
 // NewScanner creates a new port scanner for a workspace container.
 func NewScanner(cfg ScannerConfig) *Scanner {
 	if cfg.Interval <= 0 {
-		cfg.Interval = 5 * time.Second
+		cfg.Interval = DefaultScanInterval
 	}
 	if cfg.EphemeralMin <= 0 {
-		cfg.EphemeralMin = 32768
+		cfg.EphemeralMin = DefaultEphemeralMin
 	}
 	return &Scanner{
 		cfg:         cfg,
