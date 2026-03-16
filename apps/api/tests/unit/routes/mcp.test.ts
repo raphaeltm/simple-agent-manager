@@ -843,6 +843,8 @@ describe('MCP Routes', () => {
       );
       expect(dispatchTool).toBeDefined();
       expect(dispatchTool.inputSchema.required).toContain('description');
+      expect(dispatchTool.inputSchema.properties.branch).toBeDefined();
+      expect(dispatchTool.inputSchema.properties.branch.type).toBe('string');
       expect(dispatchTool.description).toContain('Dispatch a new task');
       expect(dispatchTool.description).toContain('Rate-limited');
     });
@@ -964,6 +966,65 @@ describe('MCP Routes', () => {
       expect(data.url).toContain('app.example.com');
       expect(data.url).toContain('proj-456');
       expect(data.message).toContain('dispatched successfully');
+    });
+
+    it('should use explicit branch parameter over parent outputBranch', async () => {
+      setupHappyPathMocks();
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: {
+          description: 'Work from main branch',
+          branch: 'main',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(body.result).toBeDefined();
+
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.taskId).toBeDefined();
+      expect(data.status).toBe('queued');
+    });
+
+    it('should reject empty branch parameter', async () => {
+      mockD1Results(mockD1._stmt, [{
+        id: 'task-123',
+        dispatch_depth: 0,
+        output_branch: 'sam/parent',
+        status: 'in_progress',
+      }]);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Some task', branch: '  ' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('branch must be a non-empty string');
+    });
+
+    it('should reject non-string branch parameter', async () => {
+      mockD1Results(mockD1._stmt, [{
+        id: 'task-123',
+        dispatch_depth: 0,
+        output_branch: 'sam/parent',
+        status: 'in_progress',
+      }]);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Some task', branch: 123 },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('branch must be a non-empty string');
     });
 
     it('should reject when per-task dispatch limit is reached', async () => {

@@ -220,6 +220,10 @@ const MCP_TOOLS = [
           items: { type: 'string' },
           description: 'File paths, spec references, or URLs to include as context for the dispatched agent.',
         },
+        branch: {
+          type: 'string',
+          description: 'Git branch for the new workspace to check out. Defaults to the parent task\'s output branch (if it exists remotely) or the project\'s default branch.',
+        },
       },
       required: ['description'],
       additionalProperties: false,
@@ -796,6 +800,15 @@ async function handleDispatchTask(
         .map((r) => r.slice(0, limits.dispatchMaxReferenceLength))
     : [];
 
+  // Validate optional branch parameter
+  let explicitBranch: string | undefined;
+  if (params.branch !== undefined) {
+    if (typeof params.branch !== 'string' || params.branch.trim().length === 0) {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'branch must be a non-empty string');
+    }
+    explicitBranch = params.branch.trim();
+  }
+
   // ── Look up current task to get dispatch depth ──────────────────────────
   const [currentTask] = await db
     .select({
@@ -961,8 +974,8 @@ async function handleDispatchTask(
     ?? DEFAULT_WORKSPACE_PROFILE;
   const resolvedProvider: CredentialProvider | null = (project.defaultProvider as CredentialProvider | null) ?? null;
 
-  // Use parent task's output branch as checkout branch if available
-  const checkoutBranch = currentTask.outputBranch || project.defaultBranch;
+  // Explicit branch > parent task's output branch > project default branch
+  const checkoutBranch = explicitBranch || currentTask.outputBranch || project.defaultBranch;
 
   // ── Atomic conditional INSERT (prevents TOCTOU race) ─────────────────
   // Uses INSERT ... SELECT ... WHERE to embed the rate-limit check as a
