@@ -72,7 +72,8 @@ describe('workspace lifecycle synchronization', () => {
     });
 
     it('cron sweep updates orphaned workspace status to stopped in D1', () => {
-      expect(cleanupFile).toContain("SET status = 'stopped'");
+      expect(cleanupFile).toContain("status: 'stopped'");
+      expect(cleanupFile).toContain('schema.workspaces');
       expect(cleanupFile).toContain('node_cleanup.orphaned_workspace_stopping');
     });
 

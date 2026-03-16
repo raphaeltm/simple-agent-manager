@@ -24,6 +24,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import {
   DEFAULT_NODE_WARM_GRACE_PERIOD_MS,
   DEFAULT_MAX_AUTO_NODE_LIFETIME_MS,
+  DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS,
 } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import * as schema from '../db/schema';
@@ -66,6 +67,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
 
   const gracePeriodMs = parseMs(env.NODE_WARM_GRACE_PERIOD_MS, DEFAULT_NODE_WARM_GRACE_PERIOD_MS);
   const maxLifetimeMs = parseMs(env.MAX_AUTO_NODE_LIFETIME_MS, DEFAULT_MAX_AUTO_NODE_LIFETIME_MS);
+  const orphanGracePeriodMs = parseMs(env.ORPHANED_WORKSPACE_GRACE_PERIOD_MS, DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS);
 
   // 1. Find stale warm nodes with running workspace counts in a single query
   //    to avoid N+1 per-node workspace count lookups.
@@ -257,7 +259,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
            AND t.status IN ('queued', 'delegated', 'in_progress')
        )
        AND w.created_at < ?`
-  ).bind(new Date(now.getTime() - gracePeriodMs).toISOString()).all<{
+  ).bind(new Date(now.getTime() - orphanGracePeriodMs).toISOString()).all<{
     id: string;
     node_id: string | null;
     user_id: string;
@@ -284,9 +286,10 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
       }
 
       // Mark workspace as stopped in D1
-      await env.DATABASE.prepare(
-        `UPDATE workspaces SET status = 'stopped', updated_at = ? WHERE id = ? AND status = 'running'`
-      ).bind(new Date().toISOString(), ws.id).run();
+      await db
+        .update(schema.workspaces)
+        .set({ status: 'stopped', updatedAt: new Date().toISOString() })
+        .where(eq(schema.workspaces.id, ws.id));
 
       // Stop the chat session and clean up activity tracking
       if (ws.project_id && ws.chat_session_id) {
@@ -297,27 +300,27 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
           log.warn('node_cleanup.orphan_activity_cleanup_failed', { workspaceId: ws.id, error: String(e) });
         });
       }
+
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'warn',
+        message: `Orphaned workspace stopped: was running with no active task`,
+        context: {
+          recoveryType: 'orphaned_workspace',
+          workspaceId: ws.id,
+          nodeId: ws.node_id,
+          createdAt: ws.created_at,
+        },
+        userId: ws.user_id,
+        nodeId: ws.node_id,
+        workspaceId: ws.id,
+      });
+
+      result.orphanedWorkspacesFlagged++;
     } catch (e) {
       log.error('node_cleanup.orphan_workspace_stop_failed', { workspaceId: ws.id, error: String(e) });
       result.errors++;
     }
-
-    await persistError(env.OBSERVABILITY_DATABASE, {
-      source: 'api',
-      level: 'warn',
-      message: `Orphaned workspace stopped: was running with no active task`,
-      context: {
-        recoveryType: 'orphaned_workspace',
-        workspaceId: ws.id,
-        nodeId: ws.node_id,
-        createdAt: ws.created_at,
-      },
-      userId: ws.user_id,
-      nodeId: ws.node_id,
-      workspaceId: ws.id,
-    });
-
-    result.orphanedWorkspacesFlagged++;
   }
 
   // 4. Orphan detection: running nodes with no workspaces past warm timeout (TDF-7)
@@ -334,7 +337,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
          WHERE w.node_id = n.id
            AND w.status IN ('running', 'creating', 'recovery')
        )`
-  ).bind(new Date(now.getTime() - gracePeriodMs).toISOString()).all<{
+  ).bind(new Date(now.getTime() - orphanGracePeriodMs).toISOString()).all<{
     id: string;
     user_id: string;
     status: string;

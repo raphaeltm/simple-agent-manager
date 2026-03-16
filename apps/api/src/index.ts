@@ -122,6 +122,7 @@ export interface Env {
   NODE_WARM_TIMEOUT_MS?: string;
   MAX_AUTO_NODE_LIFETIME_MS?: string;
   NODE_WARM_GRACE_PERIOD_MS?: string;
+  ORPHANED_WORKSPACE_GRACE_PERIOD_MS?: string;
   // Workspace idle timeout (global default, overridable per-project)
   WORKSPACE_IDLE_TIMEOUT_MS?: string;
   // Task agent configuration

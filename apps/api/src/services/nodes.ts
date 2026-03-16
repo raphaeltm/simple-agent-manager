@@ -9,6 +9,7 @@ import { createProvider, ProviderError } from '@simple-agent-manager/providers';
 import type { CredentialProvider, TaskMode } from '@simple-agent-manager/shared';
 import { signCallbackToken } from './jwt';
 import { getUserCloudProviderConfig } from './provider-credentials';
+import { log } from '../lib/logger';
 import { persistError } from './observability';
 
 export interface CreateNodeInput {
@@ -341,7 +342,7 @@ export async function deleteNodeResources(nodeId: string, userId: string, env: E
         console.error('Failed to delete node server:', err);
       }
     } else {
-      console.error('node_cleanup.credential_missing_vm_orphaned: cannot delete VM — user cloud credentials not found', {
+      log.error('node_cleanup.credential_missing_vm_orphaned', {
         nodeId,
         userId,
         providerInstanceId: node.providerInstanceId,
