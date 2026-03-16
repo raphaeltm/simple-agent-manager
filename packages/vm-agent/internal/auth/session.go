@@ -28,6 +28,7 @@ type SessionManager struct {
 	ttl             time.Duration
 	cleanupInterval time.Duration
 	maxSessions     int
+	cookieDomain    string // Domain for cookie sharing across subdomains (e.g., ".example.com")
 	stopCleanup     chan struct{}
 }
 
@@ -38,6 +39,7 @@ type SessionManagerConfig struct {
 	TTL             time.Duration
 	CleanupInterval time.Duration
 	MaxSessions     int
+	CookieDomain    string // Domain for cookie sharing (e.g., ".example.com"); empty = exact hostname
 }
 
 // NewSessionManager creates a new session manager.
@@ -61,6 +63,7 @@ func NewSessionManagerWithConfig(cfg SessionManagerConfig) *SessionManager {
 		ttl:             cfg.TTL,
 		cleanupInterval: cfg.CleanupInterval,
 		maxSessions:     cfg.MaxSessions,
+		cookieDomain:    cfg.CookieDomain,
 		stopCleanup:     make(chan struct{}),
 	}
 
@@ -138,30 +141,42 @@ func (sm *SessionManager) DeleteSession(sessionID string) {
 }
 
 // SetCookie sets the session cookie on the response.
-// Uses SameSite=Strict as required by the constitution for security.
+// When CookieDomain is configured, the cookie is shared across all subdomains
+// (e.g., ws-ABC123.example.com and ws-ABC123--3000.example.com).
+// Uses SameSite=Lax when domain is set (required for cross-subdomain cookies)
+// and SameSite=Strict otherwise.
 func (sm *SessionManager) SetCookie(w http.ResponseWriter, session *Session) {
+	sameSite := http.SameSiteStrictMode
+	if sm.cookieDomain != "" {
+		sameSite = http.SameSiteLaxMode
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sm.cookieName,
 		Value:    session.ID,
 		Path:     "/",
+		Domain:   sm.cookieDomain,
 		Expires:  session.ExpiresAt,
 		HttpOnly: true,
 		Secure:   sm.secure,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: sameSite,
 	})
 }
 
 // ClearCookie clears the session cookie.
-// Uses SameSite=Strict as required by the constitution for security.
 func (sm *SessionManager) ClearCookie(w http.ResponseWriter) {
+	sameSite := http.SameSiteStrictMode
+	if sm.cookieDomain != "" {
+		sameSite = http.SameSiteLaxMode
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sm.cookieName,
 		Value:    "",
 		Path:     "/",
+		Domain:   sm.cookieDomain,
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
 		Secure:   sm.secure,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: sameSite,
 	})
 }
 
