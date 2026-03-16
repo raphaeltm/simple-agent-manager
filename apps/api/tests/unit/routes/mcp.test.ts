@@ -866,6 +866,213 @@ describe('MCP Routes', () => {
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('completed');
     });
+
+    it('should reject dispatch from a failed task', async () => {
+      mockD1Results(mockD1._stmt, [{
+        id: 'task-123',
+        dispatch_depth: 0,
+        output_branch: 'sam/parent',
+        status: 'failed',
+      }]);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Retry the work' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('failed');
+    });
+
+    /**
+     * Helper to set up sequential D1 mocks for dispatch_task happy path.
+     * The handler makes these D1 queries in order:
+     * 1. raw() — current task (id, dispatchDepth, outputBranch, status)
+     * 2. raw() — child count (count(*))
+     * 3. raw() — active dispatched count (count(*))
+     * 4. raw() — credential check (id)
+     * 5. all() — project (full select)
+     * 6. run() — task insert
+     * 7. run() — status event insert
+     * 8. DO — createSession + persistMessage
+     * 9. raw() — user lookup (name, email, githubId)
+     * 10. DO — startTaskRunnerDO
+     * 11. run() — (possible further inserts)
+     */
+    // Project data used across dispatch tests
+    const mockProject = {
+      id: 'proj-456',
+      name: 'Test Project',
+      repository: 'user/repo',
+      defaultBranch: 'main',
+      installationId: 'inst-1',
+      defaultVmSize: null,
+      defaultWorkspaceProfile: null,
+      defaultProvider: null,
+      defaultAgentType: null,
+    };
+
+    function setupHappyPathMocks() {
+      // The handler makes many sequential D1 queries. Drizzle may use
+      // either .raw() or .all() depending on query shape. We set a
+      // persistent .all() default for the project query and chain
+      // .raw() mocks for positional-result queries.
+      mockD1._stmt.all.mockResolvedValue({ results: [mockProject] });
+
+      // Sequential .raw() calls
+      mockD1._stmt.raw
+        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
+        .mockResolvedValueOnce([[0]])  // child count
+        .mockResolvedValueOnce([[0]])  // active dispatched count
+        .mockResolvedValueOnce([['cred-1']])  // credential
+        // project query may also use .raw() — add extra entries
+        .mockResolvedValueOnce([Object.values(mockProject)]) // project (if raw)
+        .mockResolvedValueOnce([['User', 'user@test.com', '12345']]);  // user lookup
+
+      // .run() for inserts (task + status event + possible failure recovery)
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+
+      // DO mocks — createSession returns a session ID
+      mockDoStub.createSession = vi.fn().mockResolvedValue('sess-new-1');
+      mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-new-1');
+    }
+
+    it('should dispatch task successfully (happy path)', async () => {
+      setupHappyPathMocks();
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: {
+          description: 'Build the notification system',
+          vmSize: 'medium',
+          priority: 2,
+          references: ['specs/014-notifications/spec.md', 'apps/api/src/routes/notifications.ts'],
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(body.result).toBeDefined();
+
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.taskId).toBeDefined();
+      expect(data.sessionId).toBe('sess-new-1');
+      expect(data.branchName).toBeDefined();
+      expect(data.status).toBe('queued');
+      expect(data.dispatchDepth).toBe(1);
+      expect(data.url).toContain('app.example.com');
+      expect(data.url).toContain('proj-456');
+      expect(data.message).toContain('dispatched successfully');
+    });
+
+    it('should reject when per-task dispatch limit is reached', async () => {
+      // Current task query
+      mockD1._stmt.raw
+        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
+        .mockResolvedValueOnce([[5]]);  // child count = 5 (at default limit)
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'One more task' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('Per-task dispatch limit');
+    });
+
+    it('should reject when per-project active limit is reached', async () => {
+      mockD1._stmt.raw
+        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
+        .mockResolvedValueOnce([[2]])   // child count = 2 (under limit)
+        .mockResolvedValueOnce([[10]]); // active dispatched = 10 (at default limit)
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Another dispatched task' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('active agent-dispatched tasks');
+    });
+
+    it('should reject when cloud credentials are missing', async () => {
+      mockD1._stmt.raw
+        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
+        .mockResolvedValueOnce([[0]])   // child count
+        .mockResolvedValueOnce([[0]])   // active dispatched count
+        .mockResolvedValueOnce([]);     // no credential
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Build feature Y' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Cloud provider credentials required');
+    });
+
+    it('should handle session creation failure gracefully', async () => {
+      const sessionProject = {
+        id: 'proj-456', name: 'Test', repository: 'user/repo',
+        defaultBranch: 'main', installationId: 'inst-1',
+        defaultVmSize: null, defaultWorkspaceProfile: null,
+        defaultProvider: null, defaultAgentType: null,
+      };
+
+      // Use persistent defaults for .all() and .run() (same pattern as setupHappyPathMocks)
+      mockD1._stmt.all.mockResolvedValue({ results: [sessionProject] });
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+
+      mockD1._stmt.raw
+        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
+        .mockResolvedValueOnce([[0]])   // child count
+        .mockResolvedValueOnce([[0]])   // active dispatched count
+        .mockResolvedValueOnce([['cred-1']])  // credential
+        .mockResolvedValueOnce([Object.values(sessionProject)]); // project (if raw path)
+
+      // Session creation fails
+      mockDoStub.createSession = vi.fn().mockRejectedValue(new Error('DO unavailable'));
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Build feature Z' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32603); // INTERNAL_ERROR
+      expect(body.error.message).toContain('Failed to create chat session');
+    });
+
+    it('should handle TaskRunner DO failure gracefully', async () => {
+      setupHappyPathMocks();
+
+      // Override TaskRunner to fail
+      mockTaskRunnerStub.start.mockRejectedValueOnce(new Error('DO crashed'));
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Build feature W' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32603); // INTERNAL_ERROR
+      expect(body.error.message).toContain('Failed to start task runner');
+    });
   });
 
   // ─── Token lifecycle across task completion ──────────────────────────
