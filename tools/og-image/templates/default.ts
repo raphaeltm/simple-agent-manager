@@ -56,19 +56,19 @@ export function render(opts?: {
         overflow: 'hidden',
       },
       children: [
-        // Background glow effect
+        // Large central glow
         {
           type: 'div',
           props: {
             style: {
               position: 'absolute',
-              top: '-100px',
+              top: '-50px',
               left: '50%',
               transform: 'translateX(-50%)',
-              width: '800px',
-              height: '400px',
+              width: '1000px',
+              height: '500px',
               background:
-                'radial-gradient(ellipse at center, rgba(22, 163, 74, 0.12) 0%, transparent 70%)',
+                'radial-gradient(ellipse at center, rgba(22, 163, 74, 0.25) 0%, rgba(22, 163, 74, 0.08) 40%, transparent 70%)',
             },
           },
         },
@@ -78,13 +78,45 @@ export function render(opts?: {
           props: {
             style: {
               position: 'absolute',
-              bottom: '-150px',
+              bottom: '-100px',
               left: '50%',
               transform: 'translateX(-50%)',
-              width: '600px',
-              height: '300px',
+              width: '800px',
+              height: '400px',
               background:
-                'radial-gradient(ellipse at center, rgba(22, 163, 74, 0.08) 0%, transparent 70%)',
+                'radial-gradient(ellipse at center, rgba(22, 163, 74, 0.18) 0%, rgba(34, 197, 94, 0.06) 40%, transparent 70%)',
+            },
+          },
+        },
+        // Corner accent glow (left)
+        {
+          type: 'div',
+          props: {
+            style: {
+              position: 'absolute',
+              top: '50%',
+              left: '-100px',
+              transform: 'translateY(-50%)',
+              width: '400px',
+              height: '600px',
+              background:
+                'radial-gradient(ellipse at center, rgba(22, 163, 74, 0.1) 0%, transparent 60%)',
+            },
+          },
+        },
+        // Corner accent glow (right)
+        {
+          type: 'div',
+          props: {
+            style: {
+              position: 'absolute',
+              top: '50%',
+              right: '-100px',
+              transform: 'translateY(-50%)',
+              width: '400px',
+              height: '600px',
+              background:
+                'radial-gradient(ellipse at center, rgba(22, 163, 74, 0.1) 0%, transparent 60%)',
             },
           },
         },
