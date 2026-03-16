@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   listRepositories: vi.fn(),
   listBranches: vi.fn(),
   getProviderCatalog: vi.fn(),
+  listProjects: vi.fn(),
+  getProject: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
@@ -20,6 +22,8 @@ vi.mock('../../../src/lib/api', () => ({
   listRepositories: mocks.listRepositories,
   listBranches: mocks.listBranches,
   getProviderCatalog: mocks.getProviderCatalog,
+  listProjects: mocks.listProjects,
+  getProject: mocks.getProject,
 }));
 
 vi.mock('../../../src/components/UserMenu', () => ({
@@ -28,9 +32,13 @@ vi.mock('../../../src/components/UserMenu', () => ({
 
 import { CreateWorkspace } from '../../../src/pages/CreateWorkspace';
 
-function renderCreateWorkspace() {
+const DEFAULT_PROJECT_STATE = {
+  projectId: 'proj-1',
+};
+
+function renderCreateWorkspace(locationState: Record<string, unknown> = DEFAULT_PROJECT_STATE) {
   return render(
-    <MemoryRouter initialEntries={['/create']}>
+    <MemoryRouter initialEntries={[{ pathname: '/create', state: locationState }]}>
       <Routes>
         <Route path="/create" element={<CreateWorkspace />} />
         <Route path="/workspaces/:id" element={<div data-testid="workspace-detail" />} />
@@ -78,6 +86,15 @@ describe('CreateWorkspace', () => {
       { name: 'feature/cool-thing' },
     ]);
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
+    mocks.listProjects.mockResolvedValue({ projects: [{ id: 'proj-1', name: 'My Project' }] });
+    mocks.getProject.mockResolvedValue({
+      id: 'proj-1',
+      name: 'My Project',
+      repository: null,
+      defaultBranch: null,
+      installationId: 'inst-1',
+      defaultVmSize: null,
+    });
   });
 
   it('renders the create workspace form when prerequisites are met', async () => {
@@ -87,62 +104,62 @@ describe('CreateWorkspace', () => {
     expect(screen.getByLabelText('Branch')).toBeInTheDocument();
   });
 
-  it('shows branch dropdown after selecting a repository', async () => {
+  it('shows repository as read-only when linked to a project', async () => {
+    // When workspace is linked to a project, repo comes from the project
+    mocks.getProject.mockResolvedValue({
+      id: 'proj-1',
+      name: 'My Project',
+      repository: 'octo/my-repo',
+      defaultBranch: 'main',
+      installationId: 'inst-1',
+      defaultVmSize: null,
+    });
+
     renderCreateWorkspace();
     await screen.findByLabelText('Workspace Name');
+
+    // Repository should be a read-only input, not a RepoSelector
     await waitFor(() => {
-      expect(mocks.listRepositories).toHaveBeenCalled();
-    });
-
-    const repoInput = screen.getByLabelText('Repository');
-    fireEvent.focus(repoInput);
-
-    // Select the repo from dropdown
-    const repoOption = await screen.findByText('octo/my-repo');
-    fireEvent.click(repoOption);
-
-    // Wait for branches to load (now includes defaultBranch param)
-    await waitFor(() => {
-      expect(mocks.listBranches).toHaveBeenCalledWith('octo/my-repo', 'inst-1', 'main');
-    });
-
-    // The branch field should be a text input (BranchSelector typeahead)
-    await waitFor(() => {
-      const branchInput = screen.getByLabelText('Branch');
-      expect(branchInput.tagName).toBe('INPUT');
+      const repoInput = screen.getByLabelText('Repository') as HTMLInputElement;
+      expect(repoInput.readOnly).toBe(true);
+      expect(repoInput.value).toBe('octo/my-repo');
     });
   });
 
-  it('shows repository dropdown options when the field is focused', async () => {
-    renderCreateWorkspace();
-    await screen.findByLabelText('Workspace Name');
-
-    const repoInput = screen.getByLabelText('Repository');
-    fireEvent.focus(repoInput);
-
-    expect(await screen.findByText('octo/my-repo')).toBeInTheDocument();
-  });
-
-  it('defaults branch to repository default branch when selected', async () => {
-    renderCreateWorkspace();
-    await screen.findByLabelText('Workspace Name');
-    await waitFor(() => {
-      expect(mocks.listRepositories).toHaveBeenCalled();
+  it('pre-fills branch from project default branch', async () => {
+    mocks.getProject.mockResolvedValue({
+      id: 'proj-1',
+      name: 'My Project',
+      repository: 'octo/my-repo',
+      defaultBranch: 'develop',
+      installationId: 'inst-1',
+      defaultVmSize: null,
     });
 
-    const repoInput = screen.getByLabelText('Repository');
-    fireEvent.focus(repoInput);
-
-    const repoOption = await screen.findByText('octo/my-repo');
-    fireEvent.click(repoOption);
-
-    await waitFor(() => {
-      expect(mocks.listBranches).toHaveBeenCalled();
-    });
+    renderCreateWorkspace();
+    await screen.findByLabelText('Workspace Name');
 
     await waitFor(() => {
       const branchInput = screen.getByLabelText('Branch') as HTMLInputElement;
-      expect(branchInput.value).toBe('main');
+      expect(branchInput.value).toBe('develop');
+    });
+  });
+
+  it('fetches branches for the project repository on load', async () => {
+    mocks.getProject.mockResolvedValue({
+      id: 'proj-1',
+      name: 'My Project',
+      repository: 'octo/my-repo',
+      defaultBranch: 'main',
+      installationId: 'inst-1',
+      defaultVmSize: null,
+    });
+
+    renderCreateWorkspace();
+    await screen.findByLabelText('Workspace Name');
+
+    await waitFor(() => {
+      expect(mocks.listBranches).toHaveBeenCalledWith('octo/my-repo', 'inst-1', 'main');
     });
   });
 
@@ -223,84 +240,26 @@ describe('CreateWorkspace', () => {
     expect(screen.queryByText('Checking prerequisites...')).not.toBeInTheDocument();
   });
 
-  it('passes installationId to RepoSelector and re-fetches on switch', async () => {
-    // Two installations: personal + org
-    mocks.listGitHubInstallations.mockResolvedValue([
-      {
-        id: 'inst-1',
-        userId: 'user-1',
-        installationId: '12345',
-        accountType: 'personal',
-        accountName: 'octo',
-        createdAt: '2026-01-01T00:00:00Z',
-        updatedAt: '2026-01-01T00:00:00Z',
-      },
-      {
-        id: 'inst-2',
-        userId: 'user-1',
-        installationId: '67890',
-        accountType: 'organization',
-        accountName: 'my-org',
-        createdAt: '2026-01-01T00:00:00Z',
-        updatedAt: '2026-01-01T00:00:00Z',
-      },
-    ]);
-
-    mocks.listRepositories.mockImplementation((installationId?: string) => {
-      if (installationId === 'inst-2') {
-        return Promise.resolve({
-          repositories: [
-            {
-              id: 10,
-              fullName: 'my-org/org-repo',
-              name: 'org-repo',
-              private: false,
-              defaultBranch: 'main',
-              installationId: 'inst-2',
-            },
-          ],
-        });
-      }
-      return Promise.resolve({
-        repositories: [
-          {
-            id: 1,
-            fullName: 'octo/my-repo',
-            name: 'my-repo',
-            private: false,
-            defaultBranch: 'main',
-            installationId: 'inst-1',
-          },
-        ],
-      });
+  it('loads project details and pre-fills workspace name from project', async () => {
+    mocks.getProject.mockResolvedValue({
+      id: 'proj-1',
+      name: 'My Project',
+      repository: 'octo/my-repo',
+      defaultBranch: 'main',
+      installationId: 'inst-1',
+      defaultVmSize: null,
     });
 
     renderCreateWorkspace();
 
-    // Wait for form to render
-    await screen.findByLabelText('Workspace Name');
-
-    // Initial fetch should be for first installation
+    // Workspace name should be pre-filled from project
     await waitFor(() => {
-      expect(mocks.listRepositories).toHaveBeenCalledWith('inst-1');
+      const nameInput = screen.getByLabelText('Workspace Name') as HTMLInputElement;
+      expect(nameInput.value).toBe('My Project Workspace');
     });
 
-    // The GitHub Account selector should appear (2 installations)
-    const installSelect = screen.getByLabelText('GitHub Account');
-    expect(installSelect).toBeInTheDocument();
-
-    // Switch to org installation
-    fireEvent.change(installSelect, { target: { value: 'inst-2' } });
-
-    // Should re-fetch for the org installation
-    await waitFor(() => {
-      expect(mocks.listRepositories).toHaveBeenCalledWith('inst-2');
-    });
-
-    // Org repos should now appear in dropdown
-    fireEvent.focus(screen.getByLabelText('Repository'));
-    expect(await screen.findByText('my-org/org-repo')).toBeInTheDocument();
-    expect(screen.queryByText('octo/my-repo')).not.toBeInTheDocument();
+    // getProject should have been called with the project ID from location state
+    expect(mocks.getProject).toHaveBeenCalledWith('proj-1');
   });
 
 });
