@@ -33,7 +33,7 @@ import type { SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Env } from '../index';
 import type { VMSize, VMLocation, WorkspaceProfile, CredentialProvider } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, MAX_HUMAN_INPUT_CONTEXT_LENGTH, HUMAN_INPUT_CATEGORIES } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, MAX_HUMAN_INPUT_CONTEXT_LENGTH, MAX_HUMAN_INPUT_OPTIONS_COUNT, MAX_HUMAN_INPUT_OPTION_LENGTH, MAX_NOTIFICATION_BODY_LENGTH, HUMAN_INPUT_CATEGORIES } from '@simple-agent-manager/shared';
 import type { HumanInputCategory } from '@simple-agent-manager/shared';
 import * as schema from '../db/schema';
 import { validateMcpToken, type McpTokenData } from '../services/mcp-token';
@@ -652,7 +652,7 @@ async function handleUpdateTaskStatus(
         projectId: tokenData.projectId,
         taskId: tokenData.taskId,
         taskTitle: task.title,
-        message: message.trim().slice(0, 500),
+        message: message.trim().slice(0, MAX_NOTIFICATION_BODY_LENGTH),
       });
     } catch (err) {
       log.warn('mcp.update_task_status.notification_failed', {
@@ -891,8 +891,8 @@ async function handleRequestHumanInput(
     }
     options = params.options
       .filter((o): o is string => typeof o === 'string')
-      .slice(0, 10)
-      .map((o) => o.slice(0, 200));
+      .slice(0, MAX_HUMAN_INPUT_OPTIONS_COUNT)
+      .map((o) => o.slice(0, MAX_HUMAN_INPUT_OPTION_LENGTH));
     if (options.length === 0) options = null;
   }
 

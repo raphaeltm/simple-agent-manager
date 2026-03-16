@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { MAX_NOTIFICATION_BODY_LENGTH } from '@simple-agent-manager/shared';
 import {
   sendNotification,
   notifyTaskComplete,
@@ -236,7 +237,7 @@ describe('Notification Service', () => {
       });
 
       const call = createNotificationMock.mock.calls[0]![1];
-      expect(call.body!.length).toBeLessThanOrEqual(500);
+      expect(call.body!.length).toBeLessThanOrEqual(MAX_NOTIFICATION_BODY_LENGTH);
     });
   });
 
@@ -270,7 +271,7 @@ describe('Notification Service', () => {
       });
 
       const call = createNotificationMock.mock.calls[0]![1];
-      expect(call.body!.length).toBeLessThanOrEqual(500);
+      expect(call.body!.length).toBeLessThanOrEqual(MAX_NOTIFICATION_BODY_LENGTH);
     });
   });
 });

@@ -264,6 +264,8 @@ export interface Env {
   MAX_NOTIFICATIONS_PER_USER?: string;
   NOTIFICATION_AUTO_DELETE_AGE_MS?: string;
   NOTIFICATION_PAGE_SIZE?: string;
+  NOTIFICATION_PROGRESS_BATCH_WINDOW_MS?: string;
+  NOTIFICATION_DEDUP_WINDOW_MS?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();

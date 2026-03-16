@@ -8,7 +8,7 @@
  */
 
 import type { CreateNotificationRequest } from '@simple-agent-manager/shared';
-import { NOTIFICATION_TYPE_URGENCY, type HumanInputCategory } from '@simple-agent-manager/shared';
+import { NOTIFICATION_TYPE_URGENCY, MAX_NOTIFICATION_BODY_LENGTH, type HumanInputCategory } from '@simple-agent-manager/shared';
 import type { NotificationService } from '../durable-objects/notification';
 
 interface NotificationEnv {
@@ -182,7 +182,7 @@ export async function notifyNeedsInput(
     type: 'needs_input',
     urgency: NOTIFICATION_TYPE_URGENCY.needs_input ?? 'high',
     title: `${categoryLabel} needed: ${truncate(opts.taskTitle, 70)}`,
-    body: truncate(opts.context, 500),
+    body: truncate(opts.context, MAX_NOTIFICATION_BODY_LENGTH),
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
@@ -212,7 +212,7 @@ export async function notifyProgress(
     type: 'progress',
     urgency: NOTIFICATION_TYPE_URGENCY.progress ?? 'low',
     title: `Progress: ${truncate(opts.taskTitle, 80)}`,
-    body: truncate(opts.message, 500),
+    body: truncate(opts.message, MAX_NOTIFICATION_BODY_LENGTH),
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
