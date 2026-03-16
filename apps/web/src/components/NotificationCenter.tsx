@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import {
   Bell,
@@ -147,8 +148,8 @@ export function NotificationCenter() {
         )}
       </button>
 
-      {/* Notification Panel */}
-      {isOpen && (
+      {/* Notification Panel — portaled to body to escape sidebar stacking context */}
+      {isOpen && createPortal(
         <div
           ref={panelRef}
           role="dialog"
@@ -251,7 +252,8 @@ export function NotificationCenter() {
               </>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
