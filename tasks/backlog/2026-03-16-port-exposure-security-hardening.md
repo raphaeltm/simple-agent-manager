@@ -40,6 +40,11 @@ The auth gap predates the port exposure feature (the standard workspace proxy ha
 - [ ] Call `stopAllPortScanners()` from `StopAllWorkspacesAndSessions` (Go specialist MEDIUM)
 - [ ] Fix CORS wildcard suffix check to use URL parsing (Go specialist MEDIUM — pre-existing)
 - [ ] Log warning when multiple containers match discovery label (Go specialist LOW)
+- [ ] Fix dual `ml-auto` layout conflict on port rows when `(local)` badge is present (UI specialist)
+  - Only first element should have `ml-auto`; ExternalLink should follow naturally
+- [ ] Add `minHeight: isMobile ? 44 : undefined` to port `<a>` rows for mobile touch targets (UI specialist)
+- [ ] Add `aria-hidden="true"` to Globe and ExternalLink decorative icons in port rows (UI specialist)
+- [ ] Remove redundant `mountedRef` initializer effect in `useWorkspacePorts` hook (UI specialist)
 
 ## Acceptance Criteria
 
