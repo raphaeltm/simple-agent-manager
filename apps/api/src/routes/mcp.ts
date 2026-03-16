@@ -10,6 +10,9 @@
  * - update_task_status: Report incremental progress on task checklist items
  * - complete_task: Mark the task as completed with an optional summary
  *
+ * Task dispatch (agent-to-agent):
+ * - dispatch_task: Spawn a new task in the current project (with recursion depth + rate limiting)
+ *
  * Project awareness (read-only):
  * - list_tasks: List other tasks in the same project
  * - get_task_details: Get full details of a specific task
@@ -22,15 +25,21 @@
  */
 
 import { Hono } from 'hono';
-import { and, eq, like, or, desc } from 'drizzle-orm';
+import { and, eq, like, or, desc, sql, inArray } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Env } from '../index';
+import type { VMSize, VMLocation, WorkspaceProfile, CredentialProvider } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import * as schema from '../db/schema';
 import { validateMcpToken, type McpTokenData } from '../services/mcp-token';
 import * as projectDataService from '../services/project-data';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { ulid } from '../lib/ulid';
+import { generateBranchName } from '../services/branch-name';
+import { startTaskRunnerDO } from '../services/task-runner-do';
+import { generateTaskTitle, getTaskTitleConfig } from '../services/task-title';
 
 export const mcpRoutes = new Hono<{ Bindings: Env }>();
 
@@ -77,6 +86,12 @@ const DEFAULT_LOG_MESSAGE_MAX_LENGTH = 1000;
 /** Default max length for task output summary stored in D1. Override via MAX_OUTPUT_SUMMARY_LENGTH env var. */
 const DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH = 10000;
 
+/** Default dispatch limits for agent-to-agent task spawning. */
+const DEFAULT_MCP_DISPATCH_MAX_DEPTH = 3;
+const DEFAULT_MCP_DISPATCH_MAX_PER_TASK = 5;
+const DEFAULT_MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT = 10;
+const DEFAULT_MCP_DISPATCH_DESCRIPTION_MAX_LENGTH = 32_000;
+
 /** Default page sizes for project awareness tools. Override via MCP_* env vars. */
 const DEFAULT_MCP_TASK_LIST_LIMIT = 10;
 const DEFAULT_MCP_TASK_LIST_MAX = 50;
@@ -106,6 +121,10 @@ function getMcpLimits(env: Env) {
       env.MCP_TASK_DESCRIPTION_SNIPPET_LENGTH as string,
       DEFAULT_MCP_TASK_DESCRIPTION_SNIPPET_LENGTH,
     ),
+    dispatchMaxDepth: parsePositiveInt(env.MCP_DISPATCH_MAX_DEPTH as string, DEFAULT_MCP_DISPATCH_MAX_DEPTH),
+    dispatchMaxPerTask: parsePositiveInt(env.MCP_DISPATCH_MAX_PER_TASK as string, DEFAULT_MCP_DISPATCH_MAX_PER_TASK),
+    dispatchMaxActivePerProject: parsePositiveInt(env.MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT as string, DEFAULT_MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT),
+    dispatchDescriptionMaxLength: parsePositiveInt(env.MCP_DISPATCH_DESCRIPTION_MAX_LENGTH as string, DEFAULT_MCP_DISPATCH_DESCRIPTION_MAX_LENGTH),
   };
 }
 
@@ -158,6 +177,37 @@ const MCP_TOOLS = [
           description: 'Brief summary of what was accomplished',
         },
       },
+      additionalProperties: false,
+    },
+  },
+  // ─── Task dispatch (agent-to-agent) ────────────────────────────────────
+  {
+    name: 'dispatch_task',
+    description:
+      'Dispatch a new task to another agent in the current project. Use this to spawn parallel work, delegate sub-tasks, or follow up on findings. The dispatched task runs independently in a new workspace. Rate-limited: max dispatch depth, per-task limit, and per-project active limit apply.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        description: {
+          type: 'string',
+          description: 'Task description — synthesize context from your conversation into a clear, actionable brief. Do NOT dump raw conversation history.',
+        },
+        vmSize: {
+          type: 'string',
+          description: 'VM size for the dispatched task (small, medium, large). Defaults to project default.',
+          enum: ['small', 'medium', 'large'],
+        },
+        priority: {
+          type: 'number',
+          description: 'Task priority (0 = default). Higher values = higher priority.',
+        },
+        references: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'File paths, spec references, or URLs to include as context for the dispatched agent.',
+        },
+      },
+      required: ['description'],
       additionalProperties: false,
     },
   },
@@ -532,6 +582,385 @@ async function handleCompleteTask(
 
   return jsonRpcSuccess(requestId, {
     content: [{ type: 'text', text: 'Task marked as completed.' }],
+  });
+}
+
+// ─── Task dispatch handler ───────────────────────────────────────────────────
+
+async function handleDispatchTask(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const limits = getMcpLimits(env);
+  const db = drizzle(env.DATABASE, { schema });
+
+  // ── Validate description ────────────────────────────────────────────────
+  const description = typeof params.description === 'string' ? params.description.trim() : '';
+  if (!description) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'description is required and must be a non-empty string');
+  }
+  if (description.length > limits.dispatchDescriptionMaxLength) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `description exceeds maximum length of ${limits.dispatchDescriptionMaxLength} characters`,
+    );
+  }
+
+  const vmSize = typeof params.vmSize === 'string' ? params.vmSize as VMSize : undefined;
+  if (vmSize && !['small', 'medium', 'large'].includes(vmSize)) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'vmSize must be small, medium, or large');
+  }
+
+  const priority = typeof params.priority === 'number' ? Math.round(params.priority) : 0;
+  const references = Array.isArray(params.references)
+    ? params.references.filter((r): r is string => typeof r === 'string').slice(0, 20)
+    : [];
+
+  // ── Look up current task to get dispatch depth ──────────────────────────
+  const [currentTask] = await db
+    .select({
+      id: schema.tasks.id,
+      dispatchDepth: schema.tasks.dispatchDepth,
+      outputBranch: schema.tasks.outputBranch,
+      status: schema.tasks.status,
+    })
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.id, tokenData.taskId),
+        eq(schema.tasks.projectId, tokenData.projectId),
+      ),
+    )
+    .limit(1);
+
+  if (!currentTask) {
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Current task not found');
+  }
+
+  if (!ACTIVE_STATUSES.includes(currentTask.status)) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Cannot dispatch from a task in '${currentTask.status}' status`,
+    );
+  }
+
+  // ── Enforce dispatch depth limit ────────────────────────────────────────
+  const newDepth = currentTask.dispatchDepth + 1;
+  if (newDepth > limits.dispatchMaxDepth) {
+    log.warn('mcp.dispatch_task.depth_exceeded', {
+      taskId: tokenData.taskId,
+      projectId: tokenData.projectId,
+      currentDepth: currentTask.dispatchDepth,
+      maxDepth: limits.dispatchMaxDepth,
+    });
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Dispatch depth limit exceeded. Current depth: ${currentTask.dispatchDepth}, max allowed: ${limits.dispatchMaxDepth}. ` +
+      'Agent-dispatched tasks have a depth limit to prevent runaway recursive spawning.',
+    );
+  }
+
+  // ── Enforce per-task dispatch limit ─────────────────────────────────────
+  const [childCountResult] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.parentTaskId, tokenData.taskId),
+        eq(schema.tasks.projectId, tokenData.projectId),
+      ),
+    );
+
+  const childCount = childCountResult?.count ?? 0;
+  if (childCount >= limits.dispatchMaxPerTask) {
+    log.warn('mcp.dispatch_task.per_task_limit', {
+      taskId: tokenData.taskId,
+      projectId: tokenData.projectId,
+      childCount,
+      maxPerTask: limits.dispatchMaxPerTask,
+    });
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Per-task dispatch limit reached (${childCount}/${limits.dispatchMaxPerTask}). ` +
+      'A single agent can only dispatch a limited number of tasks to prevent resource exhaustion.',
+    );
+  }
+
+  // ── Enforce per-project active dispatched task limit ────────────────────
+  const [activeDispatchedResult] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.projectId, tokenData.projectId),
+        inArray(schema.tasks.status, ACTIVE_STATUSES),
+        sql`${schema.tasks.dispatchDepth} > 0`,
+      ),
+    );
+
+  const activeDispatched = activeDispatchedResult?.count ?? 0;
+  if (activeDispatched >= limits.dispatchMaxActivePerProject) {
+    log.warn('mcp.dispatch_task.project_active_limit', {
+      projectId: tokenData.projectId,
+      activeDispatched,
+      maxActive: limits.dispatchMaxActivePerProject,
+    });
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Project has ${activeDispatched} active agent-dispatched tasks (limit: ${limits.dispatchMaxActivePerProject}). ` +
+      'Wait for existing tasks to complete before dispatching more.',
+    );
+  }
+
+  // ── Verify cloud credentials exist for the user ─────────────────────────
+  const [credential] = await db
+    .select({ id: schema.credentials.id })
+    .from(schema.credentials)
+    .where(
+      and(
+        eq(schema.credentials.userId, tokenData.userId),
+        eq(schema.credentials.credentialType, 'cloud-provider'),
+      ),
+    )
+    .limit(1);
+
+  if (!credential) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Cloud provider credentials required. The user must connect a cloud provider in Settings.',
+    );
+  }
+
+  // ── Fetch project for defaults ──────────────────────────────────────────
+  const [project] = await db
+    .select()
+    .from(schema.projects)
+    .where(eq(schema.projects.id, tokenData.projectId))
+    .limit(1);
+
+  if (!project) {
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Project not found');
+  }
+
+  // ── Build the task description with references ──────────────────────────
+  let fullDescription = description;
+  if (references.length > 0) {
+    fullDescription += '\n\n## References\n' + references.map((r) => `- ${r}`).join('\n');
+  }
+
+  // ── Create the task ─────────────────────────────────────────────────────
+  const taskId = ulid();
+  const now = new Date().toISOString();
+
+  // Generate branch name and AI title
+  const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
+  const branchMaxLength = parseInt(env.BRANCH_NAME_MAX_LENGTH || '60', 10);
+  const branchName = generateBranchName(description, taskId, {
+    prefix: branchPrefix,
+    maxLength: branchMaxLength,
+  });
+
+  const titleConfig = getTaskTitleConfig(env);
+  const taskTitle = await generateTaskTitle(env.AI, description, titleConfig);
+
+  // Determine VM config (explicit > project default > platform default)
+  const resolvedVmSize: VMSize = vmSize
+    ?? (project.defaultVmSize as VMSize | null)
+    ?? DEFAULT_VM_SIZE;
+  const resolvedVmLocation: VMLocation = DEFAULT_VM_LOCATION;
+  const resolvedWorkspaceProfile: WorkspaceProfile = (project.defaultWorkspaceProfile as WorkspaceProfile | null)
+    ?? DEFAULT_WORKSPACE_PROFILE;
+  const resolvedProvider: CredentialProvider | null = (project.defaultProvider as CredentialProvider | null) ?? null;
+
+  // Use parent task's output branch as checkout branch if available
+  const checkoutBranch = currentTask.outputBranch || project.defaultBranch;
+
+  await db.insert(schema.tasks).values({
+    id: taskId,
+    projectId: tokenData.projectId,
+    userId: tokenData.userId,
+    parentTaskId: tokenData.taskId,
+    title: taskTitle,
+    description: fullDescription,
+    status: 'queued',
+    executionStep: 'node_selection',
+    priority,
+    dispatchDepth: newDepth,
+    outputBranch: branchName,
+    createdBy: tokenData.userId,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  // Record status event: null -> queued
+  await db.insert(schema.taskStatusEvents).values({
+    id: ulid(),
+    taskId,
+    fromStatus: null,
+    toStatus: 'queued',
+    actorType: 'agent',
+    actorId: tokenData.workspaceId,
+    reason: `Dispatched by agent (depth ${newDepth}, parent task ${tokenData.taskId})`,
+    createdAt: now,
+  });
+
+  // ── Create chat session and persist initial message ─────────────────────
+  let sessionId: string;
+  try {
+    sessionId = await projectDataService.createSession(
+      env,
+      tokenData.projectId,
+      null, // workspaceId — linked later by TaskRunner DO
+      taskTitle,
+      taskId,
+    );
+
+    // Persist the description as the initial user message
+    await projectDataService.persistMessage(
+      env,
+      tokenData.projectId,
+      sessionId,
+      'user',
+      fullDescription,
+      null,
+    );
+  } catch (err) {
+    // Session creation failed — mark task as failed
+    const failedAt = new Date().toISOString();
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    await db.update(schema.tasks)
+      .set({ status: 'failed', errorMessage: `Session creation failed: ${errorMsg}`, updatedAt: failedAt })
+      .where(eq(schema.tasks.id, taskId));
+    await db.insert(schema.taskStatusEvents).values({
+      id: ulid(),
+      taskId,
+      fromStatus: 'queued',
+      toStatus: 'failed',
+      actorType: 'system',
+      actorId: null,
+      reason: `Session creation failed: ${errorMsg}`,
+      createdAt: failedAt,
+    });
+    log.error('mcp.dispatch_task.session_failed', { taskId, projectId: tokenData.projectId, error: errorMsg });
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to create chat session: ${errorMsg}`);
+  }
+
+  // ── Start TaskRunner DO ─────────────────────────────────────────────────
+  // Look up user's githubId for noreply email fallback
+  const [userRow] = await db
+    .select({ name: schema.users.name, email: schema.users.email, githubId: schema.users.githubId })
+    .from(schema.users)
+    .where(eq(schema.users.id, tokenData.userId))
+    .limit(1);
+
+  try {
+    await startTaskRunnerDO(env, {
+      taskId,
+      projectId: tokenData.projectId,
+      userId: tokenData.userId,
+      vmSize: resolvedVmSize,
+      vmLocation: resolvedVmLocation,
+      branch: checkoutBranch,
+      userName: userRow?.name ?? null,
+      userEmail: userRow?.email ?? null,
+      githubId: userRow?.githubId ?? null,
+      taskTitle,
+      taskDescription: fullDescription,
+      repository: project.repository,
+      installationId: project.installationId,
+      outputBranch: branchName,
+      projectDefaultVmSize: project.defaultVmSize as VMSize | null,
+      chatSessionId: sessionId,
+      agentType: project.defaultAgentType ?? null,
+      workspaceProfile: resolvedWorkspaceProfile,
+      cloudProvider: resolvedProvider,
+    });
+  } catch (err) {
+    // TaskRunner DO startup failed — mark task as failed
+    const failedAt = new Date().toISOString();
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    await db.update(schema.tasks)
+      .set({ status: 'failed', errorMessage: `Task runner startup failed: ${errorMsg}`, updatedAt: failedAt })
+      .where(eq(schema.tasks.id, taskId));
+    await db.insert(schema.taskStatusEvents).values({
+      id: ulid(),
+      taskId,
+      fromStatus: 'queued',
+      toStatus: 'failed',
+      actorType: 'system',
+      actorId: null,
+      reason: `Task runner startup failed: ${errorMsg}`,
+      createdAt: failedAt,
+    });
+    log.error('mcp.dispatch_task.do_startup_failed', { taskId, projectId: tokenData.projectId, error: errorMsg });
+    await projectDataService.stopSession(env, tokenData.projectId, sessionId).catch((e) => {
+      log.error('mcp.dispatch_task.orphaned_session_stop_failed', { projectId: tokenData.projectId, sessionId, error: String(e) });
+    });
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to start task runner: ${errorMsg}`);
+  }
+
+  // ── Record activity event (best-effort) ─────────────────────────────────
+  try {
+    const doId = env.PROJECT_DATA.idFromName(tokenData.projectId);
+    const doStub = env.PROJECT_DATA.get(doId);
+    await doStub.fetch(new Request('https://do/activity', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'task.dispatched',
+        actorType: 'agent',
+        actorId: tokenData.workspaceId,
+        metadata: {
+          taskId,
+          parentTaskId: tokenData.taskId,
+          dispatchDepth: newDepth,
+          title: taskTitle,
+          branchName,
+        },
+      }),
+    }));
+  } catch (err) {
+    log.warn('mcp.dispatch_task.activity_event_failed', {
+      taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  log.info('mcp.dispatch_task.created', {
+    taskId,
+    sessionId,
+    branchName,
+    parentTaskId: tokenData.taskId,
+    projectId: tokenData.projectId,
+    dispatchDepth: newDepth,
+    vmSize: resolvedVmSize,
+  });
+
+  const appDomain = `app.${env.BASE_DOMAIN}`;
+  const taskUrl = `https://${appDomain}/projects/${tokenData.projectId}?task=${taskId}`;
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        taskId,
+        sessionId,
+        branchName,
+        title: taskTitle,
+        status: 'queued',
+        dispatchDepth: newDepth,
+        url: taskUrl,
+        message: `Task dispatched successfully. The agent will start working independently. Track progress at: ${taskUrl}`,
+      }, null, 2),
+    }],
   });
 }
 
@@ -935,6 +1364,8 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleUpdateTaskStatus(requestId, toolArgs, tokenData, c.env));
         case 'complete_task':
           return c.json(await handleCompleteTask(requestId, toolArgs, tokenData, c.env));
+        case 'dispatch_task':
+          return c.json(await handleDispatchTask(requestId, toolArgs, tokenData, c.env));
         case 'list_tasks':
           return c.json(await handleListTasks(requestId, toolArgs, tokenData, c.env));
         case 'get_task_details':

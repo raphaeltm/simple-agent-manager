@@ -53,11 +53,27 @@ const mockProjectData = {
   get: vi.fn().mockReturnValue(mockDoStub),
 };
 
+// Mock TaskRunner DO namespace
+const mockTaskRunnerStub = {
+  start: vi.fn().mockResolvedValue(undefined),
+};
+const mockTaskRunner = {
+  idFromName: vi.fn().mockReturnValue('task-runner-do-id'),
+  get: vi.fn().mockReturnValue(mockTaskRunnerStub),
+};
+
+// Mock Workers AI
+const mockAI = {
+  run: vi.fn().mockResolvedValue({ response: 'Generated title' }),
+};
+
 let mockD1 = createMockD1();
 const mockEnv = {
   KV: mockKV,
   DATABASE: mockD1 as unknown,
   PROJECT_DATA: mockProjectData,
+  TASK_RUNNER: mockTaskRunner,
+  AI: mockAI,
   BASE_DOMAIN: 'example.com',
 };
 
@@ -243,7 +259,8 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('list_sessions');
       expect(toolNames).toContain('get_session_messages');
       expect(toolNames).toContain('search_messages');
-      expect(body.result.tools).toHaveLength(9);
+      expect(toolNames).toContain('dispatch_task');
+      expect(body.result.tools).toHaveLength(10);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
@@ -719,6 +736,135 @@ describe('MCP Routes', () => {
         ['user', 'assistant'],
         expect.any(Number),
       );
+    });
+  });
+
+  // ─── dispatch_task ──────────────────────────────────────────────────
+
+  describe('dispatch_task', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should reject empty description', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: '' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('description is required');
+    });
+
+    it('should reject missing description', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+    });
+
+    it('should reject description exceeding max length', async () => {
+      const longDescription = 'a'.repeat(33_000);
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: longDescription },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('maximum length');
+    });
+
+    it('should reject invalid vmSize', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Build feature X', vmSize: 'gigantic' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('vmSize');
+    });
+
+    it('should reject when current task not found', async () => {
+      // Current task query returns empty
+      mockD1Results(mockD1._stmt, []);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Build feature X' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Current task not found');
+    });
+
+    it('should reject when dispatch depth would exceed limit', async () => {
+      // Current task with dispatch_depth = 3 (at the limit)
+      mockD1Results(mockD1._stmt, [{
+        id: 'task-123',
+        dispatch_depth: 3,
+        output_branch: 'sam/parent',
+        status: 'in_progress',
+      }]);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Build feature X' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('Dispatch depth limit exceeded');
+    });
+
+    it('should include dispatch_task in tools/list with required description', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/list'));
+
+      const body = await res.json();
+      const dispatchTool = body.result.tools.find(
+        (t: { name: string }) => t.name === 'dispatch_task',
+      );
+      expect(dispatchTool).toBeDefined();
+      expect(dispatchTool.inputSchema.required).toContain('description');
+      expect(dispatchTool.description).toContain('Dispatch a new task');
+      expect(dispatchTool.description).toContain('Rate-limited');
+    });
+
+    it('should reject dispatch from a task in terminal status', async () => {
+      // Current task is completed
+      mockD1Results(mockD1._stmt, [{
+        id: 'task-123',
+        dispatch_depth: 0,
+        output_branch: 'sam/parent',
+        status: 'completed',
+      }]);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Follow up work' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('completed');
     });
   });
 
