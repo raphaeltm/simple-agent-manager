@@ -407,6 +407,19 @@ export async function updateTerminalActivity(
   await stub.updateTerminalActivity(workspaceId, sessionId);
 }
 
+/**
+ * Clean up workspace activity tracking for a workspace. Called when a workspace
+ * is stopped or deleted to prevent phantom idle checks.
+ */
+export async function cleanupWorkspaceActivity(
+  env: Env,
+  projectId: string,
+  workspaceId: string
+): Promise<void> {
+  const stub = await getStub(env, projectId);
+  await stub.cleanupWorkspaceActivity(workspaceId);
+}
+
 // =========================================================================
 // WebSocket
 // =========================================================================

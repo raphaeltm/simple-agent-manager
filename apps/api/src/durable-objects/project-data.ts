@@ -429,6 +429,24 @@ export class ProjectData extends DurableObject<Env> {
       sessionId
     );
 
+    // Initialize workspace activity tracking for idle detection.
+    // For task-driven workspaces, the session is created before the workspace
+    // (with workspaceId=null), so workspace_activity is not created at session
+    // creation time. We must create it here when the workspace is linked.
+    this.sql.exec(
+      `INSERT OR IGNORE INTO workspace_activity (workspace_id, session_id, last_message_at, created_at)
+       VALUES (?, ?, ?, ?)`,
+      workspaceId,
+      sessionId,
+      now,
+      now
+    );
+
+    // Schedule alarm so idle checks run for this workspace
+    this.recalculateAlarm().catch((err) => {
+      console.warn('Failed to schedule workspace idle alarm after link', workspaceId, err);
+    });
+
     this.broadcastEvent('session.updated', { sessionId, workspaceId }, sessionId);
   }
 
@@ -1065,6 +1083,14 @@ export class ProjectData extends DurableObject<Env> {
       now,
       sessionId
     );
+  }
+
+  /**
+   * Clean up workspace activity tracking for a workspace. Called when a workspace
+   * is stopped or deleted to prevent phantom idle checks on a dead workspace.
+   */
+  cleanupWorkspaceActivity(workspaceId: string): void {
+    this.sql.exec('DELETE FROM workspace_activity WHERE workspace_id = ?', workspaceId);
   }
 
   /**

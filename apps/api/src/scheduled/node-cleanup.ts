@@ -24,10 +24,13 @@ import { drizzle } from 'drizzle-orm/d1';
 import {
   DEFAULT_NODE_WARM_GRACE_PERIOD_MS,
   DEFAULT_MAX_AUTO_NODE_LIFETIME_MS,
+  DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS,
 } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import * as schema from '../db/schema';
 import { deleteNodeResources } from '../services/nodes';
+import { stopWorkspaceOnNode } from '../services/node-agent';
+import * as projectDataService from '../services/project-data';
 import { log } from '../lib/logger';
 import { persistError } from '../services/observability';
 
@@ -64,6 +67,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
 
   const gracePeriodMs = parseMs(env.NODE_WARM_GRACE_PERIOD_MS, DEFAULT_NODE_WARM_GRACE_PERIOD_MS);
   const maxLifetimeMs = parseMs(env.MAX_AUTO_NODE_LIFETIME_MS, DEFAULT_MAX_AUTO_NODE_LIFETIME_MS);
+  const orphanGracePeriodMs = parseMs(env.ORPHANED_WORKSPACE_GRACE_PERIOD_MS, DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS);
 
   // 1. Find stale warm nodes with running workspace counts in a single query
   //    to avoid N+1 per-node workspace count lookups.
@@ -236,12 +240,12 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     }
   }
 
-  // 3. Orphan detection: task-created workspaces still running after task ended (TDF-7)
+  // 3. Orphan cleanup: task-created workspaces still running after task ended (TDF-7)
   //    Only checks workspaces that were EVER associated with a task (via tasks.workspace_id).
   //    User-created workspaces (never referenced by any task) are excluded — they are
   //    intentionally long-lived and not orphans.
   const orphanedWorkspaces = await env.DATABASE.prepare(
-    `SELECT w.id, w.node_id, w.user_id, w.status, w.created_at
+    `SELECT w.id, w.node_id, w.user_id, w.status, w.created_at, w.project_id, w.chat_session_id
      FROM workspaces w
      WHERE w.status = 'running'
        AND EXISTS (
@@ -255,38 +259,68 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
            AND t.status IN ('queued', 'delegated', 'in_progress')
        )
        AND w.created_at < ?`
-  ).bind(new Date(now.getTime() - gracePeriodMs).toISOString()).all<{
+  ).bind(new Date(now.getTime() - orphanGracePeriodMs).toISOString()).all<{
     id: string;
     node_id: string | null;
     user_id: string;
     status: string;
     created_at: string;
+    project_id: string | null;
+    chat_session_id: string | null;
   }>();
 
   for (const ws of orphanedWorkspaces.results) {
-    log.warn('node_cleanup.orphaned_workspace_detected', {
+    log.warn('node_cleanup.orphaned_workspace_stopping', {
       workspaceId: ws.id,
       nodeId: ws.node_id,
       userId: ws.user_id,
       createdAt: ws.created_at,
     });
 
-    await persistError(env.OBSERVABILITY_DATABASE, {
-      source: 'api',
-      level: 'warn',
-      message: `Orphaned workspace detected: running with no active task`,
-      context: {
-        recoveryType: 'orphaned_workspace',
-        workspaceId: ws.id,
-        nodeId: ws.node_id,
-        createdAt: ws.created_at,
-      },
-      userId: ws.user_id,
-      nodeId: ws.node_id,
-      workspaceId: ws.id,
-    });
+    try {
+      // Stop workspace on VM agent (best-effort)
+      if (ws.node_id) {
+        await stopWorkspaceOnNode(ws.node_id, ws.id, env, ws.user_id).catch((e) => {
+          log.warn('node_cleanup.orphan_stop_on_node_failed', { workspaceId: ws.id, error: String(e) });
+        });
+      }
 
-    result.orphanedWorkspacesFlagged++;
+      // Mark workspace as stopped in D1
+      await db
+        .update(schema.workspaces)
+        .set({ status: 'stopped', updatedAt: new Date().toISOString() })
+        .where(eq(schema.workspaces.id, ws.id));
+
+      // Stop the chat session and clean up activity tracking
+      if (ws.project_id && ws.chat_session_id) {
+        await projectDataService.stopSession(env, ws.project_id, ws.chat_session_id).catch((e) => {
+          log.warn('node_cleanup.orphan_session_stop_failed', { workspaceId: ws.id, error: String(e) });
+        });
+        await projectDataService.cleanupWorkspaceActivity(env, ws.project_id, ws.id).catch((e) => {
+          log.warn('node_cleanup.orphan_activity_cleanup_failed', { workspaceId: ws.id, error: String(e) });
+        });
+      }
+
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'warn',
+        message: `Orphaned workspace stopped: was running with no active task`,
+        context: {
+          recoveryType: 'orphaned_workspace',
+          workspaceId: ws.id,
+          nodeId: ws.node_id,
+          createdAt: ws.created_at,
+        },
+        userId: ws.user_id,
+        nodeId: ws.node_id,
+        workspaceId: ws.id,
+      });
+
+      result.orphanedWorkspacesFlagged++;
+    } catch (e) {
+      log.error('node_cleanup.orphan_workspace_stop_failed', { workspaceId: ws.id, error: String(e) });
+      result.errors++;
+    }
   }
 
   // 4. Orphan detection: running nodes with no workspaces past warm timeout (TDF-7)
@@ -303,7 +337,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
          WHERE w.node_id = n.id
            AND w.status IN ('running', 'creating', 'recovery')
        )`
-  ).bind(new Date(now.getTime() - gracePeriodMs).toISOString()).all<{
+  ).bind(new Date(now.getTime() - orphanGracePeriodMs).toISOString()).all<{
     id: string;
     user_id: string;
     status: string;

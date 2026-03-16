@@ -377,6 +377,18 @@ crudRoutes.delete('/:id', requireAuth(), requireApproved(), async (c) => {
     }
   }
 
+  // Stop the chat session and clean up activity tracking before deleting (best-effort)
+  if (workspace.projectId && workspace.chatSessionId) {
+    c.executionCtx.waitUntil(
+      projectDataService.stopSession(c.env, workspace.projectId, workspace.chatSessionId)
+        .catch((e) => { log.warn('workspace.delete_stop_session_failed', { workspaceId: workspace.id, sessionId: workspace.chatSessionId, error: String(e) }); })
+    );
+    c.executionCtx.waitUntil(
+      projectDataService.cleanupWorkspaceActivity(c.env, workspace.projectId, workspace.id)
+        .catch((e) => { log.warn('workspace.delete_cleanup_activity_failed', { workspaceId: workspace.id, error: String(e) }); })
+    );
+  }
+
   await db.delete(schema.agentSessions).where(eq(schema.agentSessions.workspaceId, workspace.id));
 
   await db
