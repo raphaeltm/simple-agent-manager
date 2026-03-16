@@ -217,7 +217,7 @@ export class NotificationService extends DurableObject<Env> {
 
     return rows.map((row) => ({
       notificationType: row.notification_type as string,
-      projectId: (row.project_id as string) ?? null,
+      projectId: (row.project_id as string) || null,
       channel: row.channel as string,
       enabled: (row.enabled as number) === 1,
     }));
@@ -231,11 +231,11 @@ export class NotificationService extends DurableObject<Env> {
     enabled: boolean,
     projectId?: string | null
   ): Promise<void> {
-    const projId = projectId ?? null;
+    const projId = projectId || '';
     this.sql.exec(
       `INSERT INTO notification_preferences (user_id, notification_type, project_id, channel, enabled)
        VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT (user_id, notification_type, COALESCE(project_id, ''), channel)
+       ON CONFLICT (user_id, notification_type, project_id, channel)
        DO UPDATE SET enabled = excluded.enabled`,
       userId,
       notificationType,
@@ -271,7 +271,7 @@ export class NotificationService extends DurableObject<Env> {
     const typeRows = this.sql
       .exec(
         `SELECT enabled FROM notification_preferences
-         WHERE user_id = ? AND notification_type = ? AND project_id IS NULL AND channel = 'in_app'`,
+         WHERE user_id = ? AND notification_type = ? AND project_id = '' AND channel = 'in_app'`,
         userId,
         notificationType
       )
@@ -284,7 +284,7 @@ export class NotificationService extends DurableObject<Env> {
     const globalRows = this.sql
       .exec(
         `SELECT enabled FROM notification_preferences
-         WHERE user_id = ? AND notification_type = '*' AND project_id IS NULL AND channel = 'in_app'`,
+         WHERE user_id = ? AND notification_type = '*' AND project_id = '' AND channel = 'in_app'`,
         userId
       )
       .toArray();
@@ -415,7 +415,7 @@ export class NotificationService extends DurableObject<Env> {
   private rowToNotification(row: Record<string, unknown>): NotificationResponse {
     return {
       id: row.id as string,
-      projectId: (row.project_id as string) ?? null,
+      projectId: (row.project_id as string) || null,
       taskId: (row.task_id as string) ?? null,
       sessionId: (row.session_id as string) ?? null,
       type: row.type as NotificationType,

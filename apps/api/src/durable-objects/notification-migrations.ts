@@ -48,15 +48,16 @@ export const NOTIFICATION_MIGRATIONS: NotificationMigration[] = [
       );
 
       // User notification preferences
-      // The COALESCE in the unique index treats NULL project_id as '' for uniqueness
+      // Use empty string '' instead of NULL for global (no project) preferences
+      // to allow a simple UNIQUE constraint without expressions
       sql.exec(`
         CREATE TABLE notification_preferences (
           user_id TEXT NOT NULL,
           notification_type TEXT NOT NULL,
-          project_id TEXT,
+          project_id TEXT NOT NULL DEFAULT '',
           channel TEXT NOT NULL DEFAULT 'in_app',
           enabled INTEGER NOT NULL DEFAULT 1,
-          UNIQUE (user_id, notification_type, COALESCE(project_id, ''), channel)
+          UNIQUE (user_id, notification_type, project_id, channel)
         )
       `);
     },
