@@ -402,7 +402,14 @@ function getMcpRateLimitWindow(env: Env): number {
 
 /**
  * Check MCP endpoint rate limit using KV. Keyed by taskId to limit per-agent throughput.
- * Returns null if allowed, or a JSON-RPC error response if rate limited.
+ *
+ * NOTE: KV does not support atomic read-modify-write. Under high concurrency from
+ * the same taskId, two requests may read the same count and both increment to the
+ * same value, allowing limit+1 requests through. This is a known limitation shared
+ * with all KV-based rate limiters in the codebase (see middleware/rate-limit.ts).
+ * For the MCP use case this is acceptable — each agent has a unique taskId, so
+ * concurrency is bounded by agent parallelism (typically 1). A Durable Object-based
+ * rate limiter would provide true atomicity if stricter enforcement is needed.
  */
 async function checkMcpRateLimit(
   kv: KVNamespace,
@@ -884,37 +891,63 @@ async function handleDispatchTask(
   // Use parent task's output branch as checkout branch if available
   const checkoutBranch = currentTask.outputBranch || project.defaultBranch;
 
-  // ── Atomic rate-limit check + insert via D1 batch (implicit transaction) ─
-  // This prevents TOCTOU races where concurrent dispatch calls both pass the
-  // advisory COUNT checks above and then both INSERT, bypassing the limit.
-  // D1 batch wraps all statements in an implicit transaction — the re-checked
-  // COUNTs and the INSERT see a consistent snapshot.
-  const activeStatusList = ACTIVE_STATUSES.map((s) => `'${s}'`).join(', ');
-  const childCountStmt = env.DATABASE.prepare(
-    `SELECT count(*) AS cnt FROM tasks
-     WHERE parent_task_id = ? AND project_id = ?
-     AND status IN (${activeStatusList})`,
-  ).bind(tokenData.taskId, tokenData.projectId);
-
-  const activeDispatchedStmt = env.DATABASE.prepare(
-    `SELECT count(*) AS cnt FROM tasks
-     WHERE project_id = ? AND status IN (${activeStatusList})
-     AND dispatch_depth > 0`,
-  ).bind(tokenData.projectId);
-
-  const statusEventId = ulid();
-  const insertTaskStmt = env.DATABASE.prepare(
+  // ── Atomic conditional INSERT (prevents TOCTOU race) ─────────────────
+  // Uses INSERT ... SELECT ... WHERE to embed the rate-limit check as a
+  // subquery within a single SQL statement. SQLite evaluates the WHERE
+  // clause atomically — if a concurrent request inserts a task between
+  // our advisory pre-check and this statement, the subquery count will
+  // reflect it and the INSERT will produce zero rows. No phantom rows,
+  // no compensating cancellation needed.
+  const statusPlaceholders = ACTIVE_STATUSES.map(() => '?').join(', ');
+  const conditionalInsertResult = await env.DATABASE.prepare(
     `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
      created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?, ?, ?)`,
+     SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?, ?, ?
+     WHERE (
+       SELECT count(*) FROM tasks
+       WHERE parent_task_id = ? AND project_id = ?
+       AND status IN (${statusPlaceholders})
+     ) < ?
+     AND (
+       SELECT count(*) FROM tasks
+       WHERE project_id = ? AND status IN (${statusPlaceholders})
+       AND dispatch_depth > 0
+     ) < ?`,
   ).bind(
+    // INSERT values
     taskId, tokenData.projectId, tokenData.userId, tokenData.taskId,
     taskTitle, fullDescription, priority, newDepth, branchName,
     tokenData.userId, now, now,
-  );
+    // Per-task child count subquery
+    tokenData.taskId, tokenData.projectId,
+    ...ACTIVE_STATUSES,
+    limits.dispatchMaxPerTask,
+    // Per-project active count subquery
+    tokenData.projectId,
+    ...ACTIVE_STATUSES,
+    limits.dispatchMaxActivePerProject,
+  ).run();
 
-  const insertEventStmt = env.DATABASE.prepare(
+  if (!conditionalInsertResult.meta.changes || conditionalInsertResult.meta.changes === 0) {
+    // The conditional INSERT produced zero rows — a concurrent dispatch
+    // pushed the count over the limit between our advisory check and now.
+    log.warn('mcp.dispatch_task.atomic_limit_breach', {
+      taskId,
+      projectId: tokenData.projectId,
+      maxPerTask: limits.dispatchMaxPerTask,
+      maxActive: limits.dispatchMaxActivePerProject,
+    });
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Dispatch rate limit exceeded (concurrent dispatch detected). Please retry.',
+    );
+  }
+
+  // Record status event: null -> queued
+  const statusEventId = ulid();
+  await env.DATABASE.prepare(
     `INSERT INTO task_status_events (id, task_id, from_status, to_status,
      actor_type, actor_id, reason, created_at)
      VALUES (?, ?, NULL, 'queued', 'agent', ?, ?, ?)`,
@@ -922,49 +955,7 @@ async function handleDispatchTask(
     statusEventId, taskId, tokenData.workspaceId,
     `Dispatched by agent (depth ${newDepth}, parent task ${tokenData.taskId})`,
     now,
-  );
-
-  const batchResults = await env.DATABASE.batch([
-    childCountStmt,
-    activeDispatchedStmt,
-    insertTaskStmt,
-    insertEventStmt,
-  ]);
-
-  // Check the atomic COUNT results — if limits were exceeded between advisory
-  // check and batch execution, the INSERT already happened but we detect it here
-  // and fail the task. In practice this window is tiny since the batch is atomic.
-  const atomicChildCount = (batchResults[0]?.results?.[0] as { cnt: number } | undefined)?.cnt ?? 0;
-  const atomicActiveCount = (batchResults[1]?.results?.[0] as { cnt: number } | undefined)?.cnt ?? 0;
-
-  // The INSERT already executed in the batch, but if limits were breached we
-  // immediately mark the task as failed and return an error. This is a safety net
-  // — the pre-flight checks above should catch most cases.
-  if (atomicChildCount > limits.dispatchMaxPerTask || atomicActiveCount > limits.dispatchMaxActivePerProject) {
-    log.warn('mcp.dispatch_task.atomic_limit_breach', {
-      taskId,
-      projectId: tokenData.projectId,
-      atomicChildCount,
-      atomicActiveCount,
-      maxPerTask: limits.dispatchMaxPerTask,
-      maxActive: limits.dispatchMaxActivePerProject,
-    });
-    // Mark the just-inserted task as cancelled to prevent it from executing
-    await env.DATABASE.prepare(
-      `UPDATE tasks SET status = 'cancelled', error_message = 'Rate limit exceeded (concurrent dispatch race)', updated_at = ? WHERE id = ?`,
-    ).bind(now, taskId).run();
-    await env.DATABASE.prepare(
-      `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
-       VALUES (?, ?, 'queued', 'cancelled', 'system', NULL, 'Atomic rate limit check failed — concurrent dispatch race detected', ?)`,
-    ).bind(ulid(), taskId, now).run();
-
-    const limitType = atomicChildCount > limits.dispatchMaxPerTask ? 'per-task' : 'per-project';
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      `Dispatch ${limitType} limit exceeded (concurrent race detected). Please retry.`,
-    );
-  }
+  ).run();
 
   // ── Create chat session and persist initial message ─────────────────────
   let sessionId: string;

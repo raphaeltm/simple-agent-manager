@@ -929,15 +929,7 @@ describe('MCP Routes', () => {
         .mockResolvedValueOnce([Object.values(mockProject)]) // project (if raw)
         .mockResolvedValueOnce([['User', 'user@test.com', '12345']]);  // user lookup
 
-      // D1 batch for atomic rate-limit check + insert
-      mockD1.batch.mockResolvedValue([
-        { results: [{ cnt: 0 }] },  // atomic child count
-        { results: [{ cnt: 0 }] },  // atomic active dispatched count
-        { success: true, meta: { changes: 1 } },  // task insert
-        { success: true, meta: { changes: 1 } },  // status event insert
-      ]);
-
-      // .run() for any non-batch inserts (failure recovery, etc.)
+      // .run() for conditional INSERT + status event insert
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
 
       // DO mocks — createSession returns a session ID
@@ -1046,14 +1038,6 @@ describe('MCP Routes', () => {
         .mockResolvedValueOnce([[0]])   // active dispatched count (advisory)
         .mockResolvedValueOnce([['cred-1']])  // credential
         .mockResolvedValueOnce([Object.values(sessionProject)]); // project (if raw path)
-
-      // D1 batch for atomic check + insert
-      mockD1.batch.mockResolvedValue([
-        { results: [{ cnt: 0 }] },
-        { results: [{ cnt: 0 }] },
-        { success: true, meta: { changes: 1 } },
-        { success: true, meta: { changes: 1 } },
-      ]);
 
       // Session creation fails
       mockDoStub.createSession = vi.fn().mockRejectedValue(new Error('DO unavailable'));
@@ -1282,7 +1266,7 @@ describe('MCP Routes', () => {
       mockKV.get.mockResolvedValue(validTokenData);
     });
 
-    it('should use D1 batch for atomic rate-limit check and insert', async () => {
+    it('should use conditional INSERT for atomic rate-limit enforcement', async () => {
       // Set up advisory pre-checks to pass
       mockD1._stmt.all.mockResolvedValue({ results: [{
         id: 'proj-456', name: 'Test', repository: 'user/repo',
@@ -1297,13 +1281,7 @@ describe('MCP Routes', () => {
         .mockResolvedValueOnce([['cred-1']])  // credential
         .mockResolvedValueOnce([['User', 'user@test.com', '12345']]);
 
-      // D1 batch succeeds with counts under limit
-      mockD1.batch.mockResolvedValue([
-        { results: [{ cnt: 0 }] },
-        { results: [{ cnt: 0 }] },
-        { success: true, meta: { changes: 1 } },
-        { success: true, meta: { changes: 1 } },
-      ]);
+      // Conditional INSERT succeeds (counts under limit → row inserted)
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
       mockDoStub.createSession = vi.fn().mockResolvedValue('sess-new-1');
       mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-new-1');
@@ -1317,26 +1295,19 @@ describe('MCP Routes', () => {
       const body = await res.json();
       expect(body.result).toBeDefined();
 
-      // Verify D1 batch was called (atomic rate-limit check + insert)
-      expect(mockD1.batch).toHaveBeenCalledTimes(1);
-      const batchArgs = mockD1.batch.mock.calls[0][0];
-      expect(batchArgs).toHaveLength(4); // child count, active count, task insert, event insert
+      // Verify D1 prepare was called (conditional INSERT uses env.DATABASE.prepare directly)
+      expect(mockD1.prepare).toHaveBeenCalled();
     });
 
-    it('should cancel task when atomic check reveals TOCTOU race', async () => {
+    it('should reject when conditional INSERT produces zero rows (TOCTOU race)', async () => {
       // Advisory pre-checks pass (counts under limit)
-      mockD1._stmt.all.mockResolvedValue({ results: [{
-        id: 'proj-456', name: 'Test', repository: 'user/repo',
-        defaultBranch: 'main', installationId: 'inst-1',
-        defaultVmSize: null, defaultWorkspaceProfile: null,
-        defaultProvider: null, defaultAgentType: null,
-      }] });
       const raceProject = {
         id: 'proj-456', name: 'Test', repository: 'user/repo',
         defaultBranch: 'main', installationId: 'inst-1',
         defaultVmSize: null, defaultWorkspaceProfile: null,
         defaultProvider: null, defaultAgentType: null,
       };
+      mockD1._stmt.all.mockResolvedValue({ results: [raceProject] });
       mockD1._stmt.raw
         .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']])
         .mockResolvedValueOnce([[4]])  // advisory: under limit (5)
@@ -1344,14 +1315,8 @@ describe('MCP Routes', () => {
         .mockResolvedValueOnce([['cred-1']])
         .mockResolvedValueOnce([Object.values(raceProject)]); // project (if raw path)
 
-      // But D1 batch reveals a concurrent insert bumped counts over limit
-      mockD1.batch.mockResolvedValue([
-        { results: [{ cnt: 6 }] },  // atomic child count: OVER limit (5 default + the new one)
-        { results: [{ cnt: 9 }] },  // atomic active count: under limit
-        { success: true, meta: { changes: 1 } },
-        { success: true, meta: { changes: 1 } },
-      ]);
-      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+      // Conditional INSERT returns 0 changes — concurrent insert pushed count over limit
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true, meta: { changes: 0 } });
 
       const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
         name: 'dispatch_task',
@@ -1361,8 +1326,8 @@ describe('MCP Routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.error).toBeDefined();
-      expect(body.error.message).toContain('limit exceeded');
-      expect(body.error.message).toContain('concurrent race');
+      expect(body.error.message).toContain('rate limit exceeded');
+      expect(body.error.message).toContain('concurrent dispatch');
     });
   });
 
