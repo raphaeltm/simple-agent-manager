@@ -79,11 +79,12 @@ Staging deployment is manual — triggered via `gh workflow run deploy-staging.y
 
 The root domain does NOT serve any application. Always use subdomains:
 
-| Destination   | URL Pattern                       |
-| ------------- | --------------------------------- |
-| **Web UI**    | `https://app.${BASE_DOMAIN}/...`  |
-| **API**       | `https://api.${BASE_DOMAIN}/...`  |
-| **Workspace** | `https://ws-${id}.${BASE_DOMAIN}` |
+| Destination        | URL Pattern                                |
+| ------------------ | ------------------------------------------ |
+| **Web UI**         | `https://app.${BASE_DOMAIN}/...`           |
+| **API**            | `https://api.${BASE_DOMAIN}/...`           |
+| **Workspace**      | `https://ws-${id}.${BASE_DOMAIN}`          |
+| **Workspace Port** | `https://ws-${id}--${port}.${BASE_DOMAIN}` |
 
 - User-facing redirects -> `app.${BASE_DOMAIN}` (NEVER bare `${BASE_DOMAIN}`)
 - API-to-API references -> `api.${BASE_DOMAIN}`
