@@ -139,8 +139,8 @@ export function render(opts?: {
                       type: 'img',
                       props: {
                         src: opts.iconDataUri,
-                        width: 160,
-                        height: 160,
+                        width: 180,
+                        height: 143,
                         style: {
                           borderRadius: '32px',
                         },
