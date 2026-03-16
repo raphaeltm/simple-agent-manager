@@ -1817,12 +1817,7 @@ describe('MCP Routes', () => {
       }
     });
 
-    it('should strip non-string values from options array', async () => {
-      mockD1._stmt.first.mockResolvedValueOnce({
-        user_id: 'user-789',
-        title: 'Fix the bug',
-      });
-
+    it('should reject options array with non-string elements', async () => {
       const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
         name: 'request_human_input',
         arguments: {
@@ -1833,14 +1828,8 @@ describe('MCP Routes', () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.result).toBeDefined();
-      // Numeric and null entries should be silently dropped; handler still succeeds
-      expect(mockNotificationStub.createNotification).toHaveBeenCalledWith(
-        'user-789',
-        expect.objectContaining({
-          metadata: expect.objectContaining({ options: ['Option A', 'Option B'] }),
-        }),
-      );
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('options must contain only strings');
     });
   });
 

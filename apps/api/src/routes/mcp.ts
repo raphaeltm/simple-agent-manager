@@ -147,6 +147,12 @@ function getMcpLimits(env: Env) {
   };
 }
 
+/** Strip null bytes, Unicode bidi overrides, and C0/C1 control chars (except \n, \t) from user/agent input. */
+function sanitizeUserInput(str: string): string {
+  // eslint-disable-next-line no-control-regex
+  return str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, '');
+}
+
 // MCP protocol constants
 const MCP_PROTOCOL_VERSION = '2025-03-26';
 const MCP_SERVER_NAME = 'sam-mcp';
@@ -645,10 +651,10 @@ async function handleUpdateTaskStatus(
     });
   }
 
-  // Emit progress notification (best-effort)
-  if (env.NOTIFICATION && task.userId) {
+  // Emit progress notification (best-effort) — use tokenData.userId as authoritative target
+  if (env.NOTIFICATION && tokenData.userId) {
     try {
-      await notificationService.notifyProgress(env as any, task.userId, {
+      await notificationService.notifyProgress(env as any, tokenData.userId, {
         projectId: tokenData.projectId,
         taskId: tokenData.taskId,
         taskTitle: task.title,
@@ -749,9 +755,10 @@ async function handleCompleteTask(
     }
 
     // Emit session_ended notification for conversation-mode remap (agent finished turn)
-    if (env.NOTIFICATION && taskRow?.user_id) {
+    // Use tokenData.userId as authoritative target
+    if (env.NOTIFICATION && tokenData.userId) {
       try {
-        await notificationService.notifySessionEnded(env as any, taskRow.user_id, {
+        await notificationService.notifySessionEnded(env as any, tokenData.userId, {
           projectId: tokenData.projectId,
           sessionId: tokenData.taskId, // use taskId as session context
           taskId: tokenData.taskId,
@@ -874,6 +881,9 @@ async function handleRequestHumanInput(
     );
   }
 
+  // Sanitize context: strip null bytes, Unicode bidi overrides, and C0/C1 control chars (except \n, \t)
+  const sanitizedContext = sanitizeUserInput(context.trim());
+
   // Validate category if provided
   let category: HumanInputCategory | null = null;
   if (params.category !== undefined) {
@@ -889,14 +899,16 @@ async function handleRequestHumanInput(
     if (!Array.isArray(params.options)) {
       return jsonRpcError(requestId, INVALID_PARAMS, 'options must be an array of strings');
     }
-    options = params.options
-      .filter((o): o is string => typeof o === 'string')
+    if (params.options.some((o: unknown) => typeof o !== 'string')) {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'options must contain only strings');
+    }
+    options = (params.options as string[])
       .slice(0, MAX_HUMAN_INPUT_OPTIONS_COUNT)
-      .map((o) => o.slice(0, MAX_HUMAN_INPUT_OPTION_LENGTH));
+      .map((o) => sanitizeUserInput(o).slice(0, MAX_HUMAN_INPUT_OPTION_LENGTH));
     if (options.length === 0) options = null;
   }
 
-  // Fetch task for user_id and title
+  // Fetch task title (user_id verified against token below)
   const taskRow = await env.DATABASE.prepare(
     `SELECT user_id, title FROM tasks WHERE id = ? AND project_id = ?`,
   ).bind(tokenData.taskId, tokenData.projectId).first<{
@@ -908,14 +920,24 @@ async function handleRequestHumanInput(
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Task not found');
   }
 
+  // Verify task ownership matches token — use tokenData.userId as authoritative target
+  if (taskRow.user_id !== tokenData.userId) {
+    log.error('mcp.request_human_input.user_id_mismatch', {
+      tokenUserId: tokenData.userId,
+      taskUserId: taskRow.user_id,
+      taskId: tokenData.taskId,
+    });
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Task ownership mismatch');
+  }
+
   // Emit high-urgency notification (best-effort)
-  if (env.NOTIFICATION && taskRow.user_id) {
+  if (env.NOTIFICATION) {
     try {
-      await notificationService.notifyNeedsInput(env as any, taskRow.user_id, {
+      await notificationService.notifyNeedsInput(env as any, tokenData.userId, {
         projectId: tokenData.projectId,
         taskId: tokenData.taskId,
         taskTitle: taskRow.title,
-        context: context.trim(),
+        context: sanitizedContext,
         category,
         options,
       });

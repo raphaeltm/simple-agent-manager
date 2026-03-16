@@ -106,6 +106,35 @@ export class NotificationService extends DurableObject<Env> {
       }
     }
 
+    // Suppression: deduplicate needs_input notifications for the same task (prevent notification spam)
+    if (request.type === 'needs_input' && request.taskId) {
+      const dedupWindow = parseInt(this.env.NOTIFICATION_DEDUP_WINDOW_MS || '') || DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS;
+      const cutoff = now - dedupWindow;
+      const existing = this.sql
+        .exec(
+          `SELECT id FROM notifications WHERE user_id = ? AND type = 'needs_input' AND task_id = ? AND created_at > ? AND read_at IS NULL AND dismissed_at IS NULL`,
+          userId,
+          request.taskId,
+          cutoff
+        )
+        .toArray();
+      if (existing.length > 0) {
+        // Update the existing unread needs_input notification instead of creating a new one
+        const existingId = existing[0]!.id as string;
+        this.sql.exec(
+          `UPDATE notifications SET body = ?, title = ?, read_at = NULL WHERE id = ?`,
+          request.body ?? null,
+          request.title,
+          existingId
+        );
+        const updated = this.getNotificationById(existingId);
+        if (updated) {
+          this.broadcast({ type: 'notification.updated', notification: updated });
+        }
+        return updated ?? this.stubResponse(request, now);
+      }
+    }
+
     // Suppression: deduplicate task_complete notifications for the same task
     if (request.type === 'task_complete' && request.taskId) {
       const dedupWindow = parseInt(this.env.NOTIFICATION_DEDUP_WINDOW_MS || '') || DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS;
