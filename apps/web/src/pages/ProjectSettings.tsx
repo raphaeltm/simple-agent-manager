@@ -421,7 +421,7 @@ export function ProjectSettings() {
                 type="range"
                 min={MIN_WORKSPACE_IDLE_TIMEOUT_MS}
                 max={MAX_WORKSPACE_IDLE_TIMEOUT_MS}
-                step={30 * 60 * 1000}
+                step={MIN_WORKSPACE_IDLE_TIMEOUT_MS}
                 value={workspaceIdleTimeoutMs}
                 onChange={(e) => setWorkspaceIdleTimeoutMs(Number(e.target.value))}
                 className="flex-1"
@@ -446,7 +446,7 @@ export function ProjectSettings() {
                 type="range"
                 min={MIN_NODE_IDLE_TIMEOUT_MS}
                 max={MAX_NODE_IDLE_TIMEOUT_MS}
-                step={5 * 60 * 1000}
+                step={MIN_NODE_IDLE_TIMEOUT_MS}
                 value={nodeIdleTimeoutMs}
                 onChange={(e) => setNodeIdleTimeoutMs(Number(e.target.value))}
                 className="flex-1"
