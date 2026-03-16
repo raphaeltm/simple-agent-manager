@@ -10,8 +10,12 @@
 /** KV key prefix for MCP tokens */
 const MCP_TOKEN_PREFIX = 'mcp:';
 
-/** Default MCP token TTL in seconds (2 hours) */
-const DEFAULT_MCP_TOKEN_TTL_SECONDS = 7200;
+/**
+ * Default MCP token TTL in seconds (30 minutes).
+ * Reduced from 2 hours to limit the post-completion attack window.
+ * Override via MCP_TOKEN_TTL_SECONDS env var for longer-running tasks.
+ */
+const DEFAULT_MCP_TOKEN_TTL_SECONDS = 1800;
 
 /** Data stored alongside each MCP token in KV */
 export interface McpTokenData {

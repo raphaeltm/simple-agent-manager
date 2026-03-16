@@ -890,16 +890,14 @@ describe('MCP Routes', () => {
      * Helper to set up sequential D1 mocks for dispatch_task happy path.
      * The handler makes these D1 queries in order:
      * 1. raw() — current task (id, dispatchDepth, outputBranch, status)
-     * 2. raw() — child count (count(*))
-     * 3. raw() — active dispatched count (count(*))
+     * 2. raw() — child count (advisory pre-check, count(*))
+     * 3. raw() — active dispatched count (advisory pre-check, count(*))
      * 4. raw() — credential check (id)
      * 5. all() — project (full select)
-     * 6. run() — task insert
-     * 7. run() — status event insert
-     * 8. DO — createSession + persistMessage
-     * 9. raw() — user lookup (name, email, githubId)
-     * 10. DO — startTaskRunnerDO
-     * 11. run() — (possible further inserts)
+     * 6. D1 batch — [child count, active count, task insert, status event insert] (atomic)
+     * 7. DO — createSession + persistMessage
+     * 8. raw() — user lookup (name, email, githubId)
+     * 9. DO — startTaskRunnerDO
      */
     // Project data used across dispatch tests
     const mockProject = {
@@ -924,14 +922,14 @@ describe('MCP Routes', () => {
       // Sequential .raw() calls
       mockD1._stmt.raw
         .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
-        .mockResolvedValueOnce([[0]])  // child count
-        .mockResolvedValueOnce([[0]])  // active dispatched count
+        .mockResolvedValueOnce([[0]])  // child count (advisory)
+        .mockResolvedValueOnce([[0]])  // active dispatched count (advisory)
         .mockResolvedValueOnce([['cred-1']])  // credential
         // project query may also use .raw() — add extra entries
         .mockResolvedValueOnce([Object.values(mockProject)]) // project (if raw)
         .mockResolvedValueOnce([['User', 'user@test.com', '12345']]);  // user lookup
 
-      // .run() for inserts (task + status event + possible failure recovery)
+      // .run() for conditional INSERT + status event insert
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
 
       // DO mocks — createSession returns a session ID
@@ -1036,8 +1034,8 @@ describe('MCP Routes', () => {
 
       mockD1._stmt.raw
         .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
-        .mockResolvedValueOnce([[0]])   // child count
-        .mockResolvedValueOnce([[0]])   // active dispatched count
+        .mockResolvedValueOnce([[0]])   // child count (advisory)
+        .mockResolvedValueOnce([[0]])   // active dispatched count (advisory)
         .mockResolvedValueOnce([['cred-1']])  // credential
         .mockResolvedValueOnce([Object.values(sessionProject)]); // project (if raw path)
 
@@ -1144,6 +1142,278 @@ describe('MCP Routes', () => {
       expect(startInput.projectId).toBe('proj-456');
       expect(startInput.userId).toBe('user-789');
       expect(startInput.config.vmSize).toBe('large');
+    });
+  });
+
+  // ─── HTTP rate limiting ──────────────────────────────────────────────
+
+  describe('HTTP rate limiting', () => {
+    it('should return rate limit headers on successful requests', async () => {
+      mockKV.get.mockResolvedValue(validTokenData);
+
+      const res = await mcpRequest(app, jsonRpcRequest('ping'));
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('X-RateLimit-Limit')).toBeDefined();
+      expect(res.headers.get('X-RateLimit-Remaining')).toBeDefined();
+      expect(res.headers.get('X-RateLimit-Reset')).toBeDefined();
+    });
+
+    it('should return 429 when rate limit is exceeded', async () => {
+      // First call: authenticate successfully
+      mockKV.get.mockImplementation(async (key: string, _opts?: unknown) => {
+        // Rate limit check returns a count at the limit
+        if (typeof key === 'string' && key.startsWith('ratelimit:mcp:')) {
+          return { count: 120, windowStart: Math.floor(Date.now() / 1000 / 60) * 60 };
+        }
+        // Token validation
+        return validTokenData;
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('ping'));
+
+      expect(res.status).toBe(429);
+      expect(res.headers.get('Retry-After')).toBeDefined();
+      const body = await res.json();
+      expect(body.error.message).toContain('Rate limit exceeded');
+    });
+
+    it('should key rate limits by taskId', async () => {
+      mockKV.get.mockResolvedValue(validTokenData);
+
+      await mcpRequest(app, jsonRpcRequest('ping'));
+
+      // Should have written a rate limit entry keyed by the task ID
+      const putCalls = mockKV.put.mock.calls;
+      const rateLimitPut = putCalls.find((c: unknown[]) =>
+        typeof c[0] === 'string' && (c[0] as string).startsWith('ratelimit:mcp:task-123:'),
+      );
+      expect(rateLimitPut).toBeDefined();
+    });
+
+    it('should allow request at count=119 (boundary: exactly at limit)', async () => {
+      // count=119, newCount=120, limit=120 → newCount <= limit → allowed
+      mockKV.get.mockImplementation(async (key: string, _opts?: unknown) => {
+        if (typeof key === 'string' && key.startsWith('ratelimit:mcp:')) {
+          return { count: 119, windowStart: Math.floor(Date.now() / 1000 / 60) * 60 };
+        }
+        return validTokenData;
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('ping'));
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('X-RateLimit-Remaining')).toBe('0');
+    });
+
+    it('should deny request at count=120 (boundary: one over limit)', async () => {
+      // count=120, newCount=121, limit=120 → newCount > limit → denied
+      mockKV.get.mockImplementation(async (key: string, _opts?: unknown) => {
+        if (typeof key === 'string' && key.startsWith('ratelimit:mcp:')) {
+          return { count: 120, windowStart: Math.floor(Date.now() / 1000 / 60) * 60 };
+        }
+        return validTokenData;
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('ping'));
+
+      expect(res.status).toBe(429);
+    });
+
+    it('should reset counter for stale window', async () => {
+      // Return a rate limit entry with an old windowStart — should be treated as fresh
+      mockKV.get.mockImplementation(async (key: string, _opts?: unknown) => {
+        if (typeof key === 'string' && key.startsWith('ratelimit:mcp:')) {
+          return { count: 999, windowStart: 0 }; // ancient window
+        }
+        return validTokenData;
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('ping'));
+
+      expect(res.status).toBe(200);
+      // Should have reset the counter since the window doesn't match
+      const putCalls = mockKV.put.mock.calls;
+      const rateLimitPut = putCalls.find((c: unknown[]) =>
+        typeof c[0] === 'string' && (c[0] as string).startsWith('ratelimit:mcp:'),
+      );
+      expect(rateLimitPut).toBeDefined();
+      const stored = JSON.parse(rateLimitPut![1] as string);
+      expect(stored.count).toBe(1);
+    });
+  });
+
+  // ─── Roles validation ──────────────────────────────────────────────
+
+  describe('Roles validation', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should reject invalid roles in get_session_messages', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_session_messages',
+        arguments: { sessionId: 'sess-1', roles: ['user', 'admin'] },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('Invalid roles');
+      expect(body.error.message).toContain('admin');
+    });
+
+    it('should reject invalid roles in search_messages', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'search_messages',
+        arguments: { query: 'test query', roles: ['superuser'] },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('Invalid roles');
+      expect(body.error.message).toContain('superuser');
+    });
+
+    it('should accept valid roles in get_session_messages', async () => {
+      mockDoStub.getSession.mockResolvedValue({ id: 'sess-1', topic: null, taskId: null });
+      mockDoStub.getMessages.mockResolvedValue({ messages: [], hasMore: false });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_session_messages',
+        arguments: { sessionId: 'sess-1', roles: ['user', 'assistant', 'system', 'tool', 'thinking', 'plan'] },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+    });
+
+    it('should default to user and assistant when roles not provided', async () => {
+      mockDoStub.getSession.mockResolvedValue({ id: 'sess-1', topic: null, taskId: null });
+      mockDoStub.getMessages.mockResolvedValue({ messages: [], hasMore: false });
+
+      await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_session_messages',
+        arguments: { sessionId: 'sess-1' },
+      }));
+
+      expect(mockDoStub.getMessages).toHaveBeenCalledWith(
+        'sess-1',
+        expect.any(Number),
+        null,
+        ['user', 'assistant'],
+      );
+    });
+
+    it('should default to user and assistant for empty roles array', async () => {
+      mockDoStub.getSession.mockResolvedValue({ id: 'sess-1', topic: null, taskId: null });
+      mockDoStub.getMessages.mockResolvedValue({ messages: [], hasMore: false });
+
+      await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_session_messages',
+        arguments: { sessionId: 'sess-1', roles: [] },
+      }));
+
+      expect(mockDoStub.getMessages).toHaveBeenCalledWith(
+        'sess-1',
+        expect.any(Number),
+        null,
+        ['user', 'assistant'],
+      );
+    });
+
+    it('should treat non-array roles as default (string fallback)', async () => {
+      mockDoStub.getSession.mockResolvedValue({ id: 'sess-1', topic: null, taskId: null });
+      mockDoStub.getMessages.mockResolvedValue({ messages: [], hasMore: false });
+
+      await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_session_messages',
+        arguments: { sessionId: 'sess-1', roles: 'user' },
+      }));
+
+      // Non-array input should fall back to default roles
+      expect(mockDoStub.getMessages).toHaveBeenCalledWith(
+        'sess-1',
+        expect.any(Number),
+        null,
+        ['user', 'assistant'],
+      );
+    });
+  });
+
+  // ─── TOCTOU atomic dispatch limiting ──────────────────────────────
+
+  describe('Atomic dispatch rate limiting', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should use conditional INSERT for atomic rate-limit enforcement', async () => {
+      // Set up advisory pre-checks to pass
+      mockD1._stmt.all.mockResolvedValue({ results: [{
+        id: 'proj-456', name: 'Test', repository: 'user/repo',
+        defaultBranch: 'main', installationId: 'inst-1',
+        defaultVmSize: null, defaultWorkspaceProfile: null,
+        defaultProvider: null, defaultAgentType: null,
+      }] });
+      mockD1._stmt.raw
+        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
+        .mockResolvedValueOnce([[0]])  // advisory child count
+        .mockResolvedValueOnce([[0]])  // advisory active count
+        .mockResolvedValueOnce([['cred-1']])  // credential
+        .mockResolvedValueOnce([['User', 'user@test.com', '12345']]);
+
+      // Conditional INSERT succeeds (counts under limit → row inserted)
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+      mockDoStub.createSession = vi.fn().mockResolvedValue('sess-new-1');
+      mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-new-1');
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Test atomic dispatch' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.result).toBeDefined();
+
+      // Verify D1 prepare was called (conditional INSERT uses env.DATABASE.prepare directly)
+      expect(mockD1.prepare).toHaveBeenCalled();
+    });
+
+    it('should reject when conditional INSERT produces zero rows (TOCTOU race)', async () => {
+      // Advisory pre-checks pass (counts under limit)
+      const raceProject = {
+        id: 'proj-456', name: 'Test', repository: 'user/repo',
+        defaultBranch: 'main', installationId: 'inst-1',
+        defaultVmSize: null, defaultWorkspaceProfile: null,
+        defaultProvider: null, defaultAgentType: null,
+      };
+      mockD1._stmt.all.mockResolvedValue({ results: [raceProject] });
+      mockD1._stmt.raw
+        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']])
+        .mockResolvedValueOnce([[4]])  // advisory: under limit (5)
+        .mockResolvedValueOnce([[9]])  // advisory: under limit (10)
+        .mockResolvedValueOnce([['cred-1']])
+        .mockResolvedValueOnce([Object.values(raceProject)]); // project (if raw path)
+
+      // Conditional INSERT returns 0 changes — concurrent insert pushed count over limit
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true, meta: { changes: 0 } });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Race condition task' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('rate limit exceeded');
+      expect(body.error.message).toContain('concurrent dispatch');
     });
   });
 

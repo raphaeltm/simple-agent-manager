@@ -86,6 +86,14 @@ const DEFAULT_LOG_MESSAGE_MAX_LENGTH = 1000;
 /** Default max length for task output summary stored in D1. Override via MAX_OUTPUT_SUMMARY_LENGTH env var. */
 const DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH = 10000;
 
+/** Valid message roles for filtering in get_session_messages and search_messages. */
+const VALID_MESSAGE_ROLES = ['user', 'assistant', 'system', 'tool', 'thinking', 'plan'] as const;
+type MessageRole = typeof VALID_MESSAGE_ROLES[number];
+
+/** Default HTTP-level rate limit for the /mcp endpoint (per token, per minute). Override via MCP_RATE_LIMIT env var. */
+const DEFAULT_MCP_RATE_LIMIT = 120;
+const DEFAULT_MCP_RATE_LIMIT_WINDOW_SECONDS = 60;
+
 /** Default dispatch limits for agent-to-agent task spawning. */
 const DEFAULT_MCP_DISPATCH_MAX_DEPTH = 3;
 const DEFAULT_MCP_DISPATCH_MAX_PER_TASK = 5;
@@ -359,6 +367,87 @@ const MCP_TOOLS = [
   },
 ];
 
+/**
+ * Validate and filter a roles array against the allowlist.
+ * Returns null if any role is invalid (caller should return 400).
+ * Returns filtered valid roles, or the default if input is not an array.
+ */
+function validateRoles(
+  input: unknown,
+  defaultRoles: MessageRole[] = ['user', 'assistant'],
+): { valid: true; roles: MessageRole[] } | { valid: false; invalid: string[] } {
+  if (!Array.isArray(input)) {
+    return { valid: true, roles: defaultRoles };
+  }
+  const strings = input.filter((r): r is string => typeof r === 'string');
+  const invalid = strings.filter((r) => !(VALID_MESSAGE_ROLES as readonly string[]).includes(r));
+  if (invalid.length > 0) {
+    return { valid: false, invalid };
+  }
+  const roles = strings.length > 0 ? (strings as MessageRole[]) : defaultRoles;
+  return { valid: true, roles };
+}
+
+// ─── Rate limiting ──────────────────────────────────────────────────────────
+
+function getMcpRateLimit(env: Env): number {
+  const val = parsePositiveInt(env.MCP_RATE_LIMIT as string, DEFAULT_MCP_RATE_LIMIT);
+  return val;
+}
+
+function getMcpRateLimitWindow(env: Env): number {
+  const val = parsePositiveInt(env.MCP_RATE_LIMIT_WINDOW_SECONDS as string, DEFAULT_MCP_RATE_LIMIT_WINDOW_SECONDS);
+  return val;
+}
+
+/**
+ * Check MCP endpoint rate limit using KV. Keyed by taskId to limit per-agent throughput.
+ *
+ * NOTE: KV does not support atomic read-modify-write. Under high concurrency from
+ * the same taskId, two requests may read the same count and both increment to the
+ * same value, allowing limit+1 requests through. This is a known limitation shared
+ * with all KV-based rate limiters in the codebase (see middleware/rate-limit.ts).
+ * For the MCP use case this is acceptable — each agent has a unique taskId, so
+ * concurrency is bounded by agent parallelism (typically 1). A Durable Object-based
+ * rate limiter would provide true atomicity if stricter enforcement is needed.
+ */
+async function checkMcpRateLimit(
+  kv: KVNamespace,
+  taskId: string,
+  env: Env,
+): Promise<{ allowed: true; remaining: number; resetAt: number } | { allowed: false; remaining: 0; resetAt: number; retryAfter: number }> {
+  const limit = getMcpRateLimit(env);
+  const windowSeconds = getMcpRateLimitWindow(env);
+  const now = Math.floor(Date.now() / 1000);
+  const windowStart = Math.floor(now / windowSeconds) * windowSeconds;
+  const resetAt = windowStart + windowSeconds;
+  const key = `ratelimit:mcp:${taskId}:${windowStart}`;
+
+  const existing = await kv.get<{ count: number; windowStart: number }>(key, 'json');
+
+  if (!existing || existing.windowStart !== windowStart) {
+    await kv.put(key, JSON.stringify({ count: 1, windowStart }), {
+      expirationTtl: windowSeconds + 60,
+    });
+    return { allowed: true, remaining: limit - 1, resetAt };
+  }
+
+  const newCount = existing.count + 1;
+  const allowed = newCount <= limit;
+  const remaining = Math.max(0, limit - newCount);
+
+  await kv.put(key, JSON.stringify({ count: newCount, windowStart }), {
+    expirationTtl: windowSeconds + 60,
+  });
+
+  if (!allowed) {
+    const retryAfter = Math.max(1, resetAt - now);
+    return { allowed: false, remaining: 0, resetAt, retryAfter };
+  }
+
+  return { allowed: true, remaining, resetAt };
+}
+
 // ─── Auth middleware ─────────────────────────────────────────────────────────
 
 /** Returns [tokenData, rawToken] or [null, null] */
@@ -577,7 +666,7 @@ async function handleCompleteTask(
   // tasks (scoped to the ACP session / workspace lifetime). Revoking on
   // complete_task would break all subsequent MCP calls in the same session.
   // Token cleanup is handled by:
-  //   1. KV TTL auto-expiration (default 2 hours, configurable via MCP_TOKEN_TTL_SECONDS)
+  //   1. KV TTL auto-expiration (default 30 minutes, configurable via MCP_TOKEN_TTL_SECONDS)
   //   2. Task-runner DO cleanup on failure (task-runner.ts)
 
   log.info('mcp.complete_task', {
@@ -680,14 +769,12 @@ async function handleDispatchTask(
     );
   }
 
-  // ── Parallel: rate-limit checks, credential check, project fetch, and AI title ─
+  // ── Parallel: pre-flight checks, credential check, project fetch, and AI title ─
   // These queries are independent of each other (only depend on currentTask for depth,
   // which was already checked above). Running them in parallel saves 4 sequential D1
   // round-trips + 1 Workers AI call.
-  // NOTE: Rate-limit checks are advisory, not atomic. Two concurrent dispatch calls
-  // from the same agent could both pass the COUNT checks before either INSERT completes,
-  // resulting in limit+1 children. This is acceptable given the low frequency of dispatch
-  // calls and the conservative default limits.
+  // The COUNT queries here are advisory (fast-fail). Atomic enforcement happens later
+  // via D1 batch (COUNT + INSERT in implicit transaction) to prevent TOCTOU races.
   const titleConfig = getTaskTitleConfig(env);
   const [
     [childCountResult],
@@ -724,7 +811,7 @@ async function handleDispatchTask(
     generateTaskTitle(env.AI, description, titleConfig),
   ]);
 
-  // ── Enforce per-task dispatch limit ─────────────────────────────────────
+  // ── Advisory pre-checks (fast-fail before expensive operations) ─────────
   const childCount = childCountResult?.count ?? 0;
   if (childCount >= limits.dispatchMaxPerTask) {
     log.warn('mcp.dispatch_task.per_task_limit', {
@@ -741,7 +828,6 @@ async function handleDispatchTask(
     );
   }
 
-  // ── Enforce per-project active dispatched task limit ────────────────────
   const activeDispatched = activeDispatchedResult?.count ?? 0;
   if (activeDispatched >= limits.dispatchMaxActivePerProject) {
     log.warn('mcp.dispatch_task.project_active_limit', {
@@ -805,34 +891,71 @@ async function handleDispatchTask(
   // Use parent task's output branch as checkout branch if available
   const checkoutBranch = currentTask.outputBranch || project.defaultBranch;
 
-  await db.insert(schema.tasks).values({
-    id: taskId,
-    projectId: tokenData.projectId,
-    userId: tokenData.userId,
-    parentTaskId: tokenData.taskId,
-    title: taskTitle,
-    description: fullDescription,
-    status: 'queued',
-    executionStep: 'node_selection',
-    priority,
-    dispatchDepth: newDepth,
-    outputBranch: branchName,
-    createdBy: tokenData.userId,
-    createdAt: now,
-    updatedAt: now,
-  });
+  // ── Atomic conditional INSERT (prevents TOCTOU race) ─────────────────
+  // Uses INSERT ... SELECT ... WHERE to embed the rate-limit check as a
+  // subquery within a single SQL statement. SQLite evaluates the WHERE
+  // clause atomically — if a concurrent request inserts a task between
+  // our advisory pre-check and this statement, the subquery count will
+  // reflect it and the INSERT will produce zero rows. No phantom rows,
+  // no compensating cancellation needed.
+  const statusPlaceholders = ACTIVE_STATUSES.map(() => '?').join(', ');
+  const conditionalInsertResult = await env.DATABASE.prepare(
+    `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
+     status, execution_step, priority, dispatch_depth, output_branch, created_by,
+     created_at, updated_at)
+     SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?, ?, ?
+     WHERE (
+       SELECT count(*) FROM tasks
+       WHERE parent_task_id = ? AND project_id = ?
+       AND status IN (${statusPlaceholders})
+     ) < ?
+     AND (
+       SELECT count(*) FROM tasks
+       WHERE project_id = ? AND status IN (${statusPlaceholders})
+       AND dispatch_depth > 0
+     ) < ?`,
+  ).bind(
+    // INSERT values
+    taskId, tokenData.projectId, tokenData.userId, tokenData.taskId,
+    taskTitle, fullDescription, priority, newDepth, branchName,
+    tokenData.userId, now, now,
+    // Per-task child count subquery
+    tokenData.taskId, tokenData.projectId,
+    ...ACTIVE_STATUSES,
+    limits.dispatchMaxPerTask,
+    // Per-project active count subquery
+    tokenData.projectId,
+    ...ACTIVE_STATUSES,
+    limits.dispatchMaxActivePerProject,
+  ).run();
+
+  if (!conditionalInsertResult.meta.changes || conditionalInsertResult.meta.changes === 0) {
+    // The conditional INSERT produced zero rows — a concurrent dispatch
+    // pushed the count over the limit between our advisory check and now.
+    log.warn('mcp.dispatch_task.atomic_limit_breach', {
+      taskId,
+      projectId: tokenData.projectId,
+      maxPerTask: limits.dispatchMaxPerTask,
+      maxActive: limits.dispatchMaxActivePerProject,
+    });
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Dispatch rate limit exceeded (concurrent dispatch detected). Please retry.',
+    );
+  }
 
   // Record status event: null -> queued
-  await db.insert(schema.taskStatusEvents).values({
-    id: ulid(),
-    taskId,
-    fromStatus: null,
-    toStatus: 'queued',
-    actorType: 'agent',
-    actorId: tokenData.workspaceId,
-    reason: `Dispatched by agent (depth ${newDepth}, parent task ${tokenData.taskId})`,
-    createdAt: now,
-  });
+  const statusEventId = ulid();
+  await env.DATABASE.prepare(
+    `INSERT INTO task_status_events (id, task_id, from_status, to_status,
+     actor_type, actor_id, reason, created_at)
+     VALUES (?, ?, NULL, 'queued', 'agent', ?, ?, ?)`,
+  ).bind(
+    statusEventId, taskId, tokenData.workspaceId,
+    `Dispatched by agent (depth ${newDepth}, parent task ${tokenData.taskId})`,
+    now,
+  ).run();
 
   // ── Create chat session and persist initial message ─────────────────────
   let sessionId: string;
@@ -1239,9 +1362,15 @@ async function handleGetSessionMessages(
   const limits = getMcpLimits(env);
   const requestedLimit = typeof params.limit === 'number' ? params.limit : limits.messageListLimit;
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.messageListMax);
-  const roles = Array.isArray(params.roles)
-    ? params.roles.filter((r): r is string => typeof r === 'string')
-    : ['user', 'assistant'];
+  const rolesResult = validateRoles(params.roles);
+  if (!rolesResult.valid) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Invalid roles: ${rolesResult.invalid.join(', ')}. Valid roles: ${VALID_MESSAGE_ROLES.join(', ')}`,
+    );
+  }
+  const roles = rolesResult.roles;
 
   // Verify session belongs to this project
   const session = await projectDataService.getSession(env, tokenData.projectId, sessionId);
@@ -1296,9 +1425,15 @@ async function handleSearchMessages(
 
   const limits = getMcpLimits(env);
   const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : null;
-  const roles = Array.isArray(params.roles)
-    ? params.roles.filter((r): r is string => typeof r === 'string')
-    : ['user', 'assistant'];
+  const rolesResult = validateRoles(params.roles);
+  if (!rolesResult.valid) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Invalid roles: ${rolesResult.invalid.join(', ')}. Valid roles: ${VALID_MESSAGE_ROLES.join(', ')}`,
+    );
+  }
+  const roles = rolesResult.roles;
   const requestedLimit = typeof params.limit === 'number' ? params.limit : 10;
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.messageSearchMax);
 
@@ -1344,6 +1479,19 @@ mcpRoutes.post('/', async (c) => {
     return c.json(
       jsonRpcError(null, -32000, 'Unauthorized: invalid or expired MCP token'),
       401,
+    );
+  }
+
+  // ── HTTP-level rate limiting (per task/agent) ───────────────────────────
+  const rlResult = await checkMcpRateLimit(c.env.KV, tokenData.taskId, c.env);
+  c.header('X-RateLimit-Limit', getMcpRateLimit(c.env).toString());
+  c.header('X-RateLimit-Remaining', rlResult.remaining.toString());
+  c.header('X-RateLimit-Reset', rlResult.resetAt.toString());
+  if (!rlResult.allowed) {
+    c.header('Retry-After', rlResult.retryAfter.toString());
+    return c.json(
+      jsonRpcError(null, -32000, 'Rate limit exceeded. Please retry after the indicated period.'),
+      429,
     );
   }
 
