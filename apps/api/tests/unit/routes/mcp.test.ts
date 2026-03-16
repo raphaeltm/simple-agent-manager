@@ -890,16 +890,14 @@ describe('MCP Routes', () => {
      * Helper to set up sequential D1 mocks for dispatch_task happy path.
      * The handler makes these D1 queries in order:
      * 1. raw() — current task (id, dispatchDepth, outputBranch, status)
-     * 2. raw() — child count (count(*))
-     * 3. raw() — active dispatched count (count(*))
+     * 2. raw() — child count (advisory pre-check, count(*))
+     * 3. raw() — active dispatched count (advisory pre-check, count(*))
      * 4. raw() — credential check (id)
      * 5. all() — project (full select)
-     * 6. run() — task insert
-     * 7. run() — status event insert
-     * 8. DO — createSession + persistMessage
-     * 9. raw() — user lookup (name, email, githubId)
-     * 10. DO — startTaskRunnerDO
-     * 11. run() — (possible further inserts)
+     * 6. D1 batch — [child count, active count, task insert, status event insert] (atomic)
+     * 7. DO — createSession + persistMessage
+     * 8. raw() — user lookup (name, email, githubId)
+     * 9. DO — startTaskRunnerDO
      */
     // Project data used across dispatch tests
     const mockProject = {
@@ -924,14 +922,22 @@ describe('MCP Routes', () => {
       // Sequential .raw() calls
       mockD1._stmt.raw
         .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
-        .mockResolvedValueOnce([[0]])  // child count
-        .mockResolvedValueOnce([[0]])  // active dispatched count
+        .mockResolvedValueOnce([[0]])  // child count (advisory)
+        .mockResolvedValueOnce([[0]])  // active dispatched count (advisory)
         .mockResolvedValueOnce([['cred-1']])  // credential
         // project query may also use .raw() — add extra entries
         .mockResolvedValueOnce([Object.values(mockProject)]) // project (if raw)
         .mockResolvedValueOnce([['User', 'user@test.com', '12345']]);  // user lookup
 
-      // .run() for inserts (task + status event + possible failure recovery)
+      // D1 batch for atomic rate-limit check + insert
+      mockD1.batch.mockResolvedValue([
+        { results: [{ cnt: 0 }] },  // atomic child count
+        { results: [{ cnt: 0 }] },  // atomic active dispatched count
+        { success: true, meta: { changes: 1 } },  // task insert
+        { success: true, meta: { changes: 1 } },  // status event insert
+      ]);
+
+      // .run() for any non-batch inserts (failure recovery, etc.)
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
 
       // DO mocks — createSession returns a session ID
@@ -1036,10 +1042,18 @@ describe('MCP Routes', () => {
 
       mockD1._stmt.raw
         .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
-        .mockResolvedValueOnce([[0]])   // child count
-        .mockResolvedValueOnce([[0]])   // active dispatched count
+        .mockResolvedValueOnce([[0]])   // child count (advisory)
+        .mockResolvedValueOnce([[0]])   // active dispatched count (advisory)
         .mockResolvedValueOnce([['cred-1']])  // credential
         .mockResolvedValueOnce([Object.values(sessionProject)]); // project (if raw path)
+
+      // D1 batch for atomic check + insert
+      mockD1.batch.mockResolvedValue([
+        { results: [{ cnt: 0 }] },
+        { results: [{ cnt: 0 }] },
+        { success: true, meta: { changes: 1 } },
+        { success: true, meta: { changes: 1 } },
+      ]);
 
       // Session creation fails
       mockDoStub.createSession = vi.fn().mockRejectedValue(new Error('DO unavailable'));
@@ -1144,6 +1158,211 @@ describe('MCP Routes', () => {
       expect(startInput.projectId).toBe('proj-456');
       expect(startInput.userId).toBe('user-789');
       expect(startInput.config.vmSize).toBe('large');
+    });
+  });
+
+  // ─── HTTP rate limiting ──────────────────────────────────────────────
+
+  describe('HTTP rate limiting', () => {
+    it('should return rate limit headers on successful requests', async () => {
+      mockKV.get.mockResolvedValue(validTokenData);
+
+      const res = await mcpRequest(app, jsonRpcRequest('ping'));
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('X-RateLimit-Limit')).toBeDefined();
+      expect(res.headers.get('X-RateLimit-Remaining')).toBeDefined();
+      expect(res.headers.get('X-RateLimit-Reset')).toBeDefined();
+    });
+
+    it('should return 429 when rate limit is exceeded', async () => {
+      // First call: authenticate successfully
+      mockKV.get.mockImplementation(async (key: string, opts?: unknown) => {
+        // Rate limit check returns a count at the limit
+        if (typeof key === 'string' && key.startsWith('ratelimit:mcp:')) {
+          return { count: 120, windowStart: Math.floor(Date.now() / 1000 / 60) * 60 };
+        }
+        // Token validation
+        return validTokenData;
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('ping'));
+
+      expect(res.status).toBe(429);
+      expect(res.headers.get('Retry-After')).toBeDefined();
+      const body = await res.json();
+      expect(body.error.message).toContain('Rate limit exceeded');
+    });
+
+    it('should key rate limits by taskId', async () => {
+      mockKV.get.mockResolvedValue(validTokenData);
+
+      await mcpRequest(app, jsonRpcRequest('ping'));
+
+      // Should have written a rate limit entry keyed by the task ID
+      const putCalls = mockKV.put.mock.calls;
+      const rateLimitPut = putCalls.find((c: unknown[]) =>
+        typeof c[0] === 'string' && (c[0] as string).startsWith('ratelimit:mcp:task-123:'),
+      );
+      expect(rateLimitPut).toBeDefined();
+    });
+  });
+
+  // ─── Roles validation ──────────────────────────────────────────────
+
+  describe('Roles validation', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should reject invalid roles in get_session_messages', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_session_messages',
+        arguments: { sessionId: 'sess-1', roles: ['user', 'admin'] },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('Invalid roles');
+      expect(body.error.message).toContain('admin');
+    });
+
+    it('should reject invalid roles in search_messages', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'search_messages',
+        arguments: { query: 'test query', roles: ['superuser'] },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('Invalid roles');
+      expect(body.error.message).toContain('superuser');
+    });
+
+    it('should accept valid roles in get_session_messages', async () => {
+      mockDoStub.getSession.mockResolvedValue({ id: 'sess-1', topic: null, taskId: null });
+      mockDoStub.getMessages.mockResolvedValue({ messages: [], hasMore: false });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_session_messages',
+        arguments: { sessionId: 'sess-1', roles: ['user', 'assistant', 'system', 'tool', 'thinking', 'plan'] },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+    });
+
+    it('should default to user and assistant when roles not provided', async () => {
+      mockDoStub.getSession.mockResolvedValue({ id: 'sess-1', topic: null, taskId: null });
+      mockDoStub.getMessages.mockResolvedValue({ messages: [], hasMore: false });
+
+      await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_session_messages',
+        arguments: { sessionId: 'sess-1' },
+      }));
+
+      expect(mockDoStub.getMessages).toHaveBeenCalledWith(
+        'sess-1',
+        expect.any(Number),
+        null,
+        ['user', 'assistant'],
+      );
+    });
+  });
+
+  // ─── TOCTOU atomic dispatch limiting ──────────────────────────────
+
+  describe('Atomic dispatch rate limiting', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should use D1 batch for atomic rate-limit check and insert', async () => {
+      // Set up advisory pre-checks to pass
+      mockD1._stmt.all.mockResolvedValue({ results: [{
+        id: 'proj-456', name: 'Test', repository: 'user/repo',
+        defaultBranch: 'main', installationId: 'inst-1',
+        defaultVmSize: null, defaultWorkspaceProfile: null,
+        defaultProvider: null, defaultAgentType: null,
+      }] });
+      mockD1._stmt.raw
+        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
+        .mockResolvedValueOnce([[0]])  // advisory child count
+        .mockResolvedValueOnce([[0]])  // advisory active count
+        .mockResolvedValueOnce([['cred-1']])  // credential
+        .mockResolvedValueOnce([['User', 'user@test.com', '12345']]);
+
+      // D1 batch succeeds with counts under limit
+      mockD1.batch.mockResolvedValue([
+        { results: [{ cnt: 0 }] },
+        { results: [{ cnt: 0 }] },
+        { success: true, meta: { changes: 1 } },
+        { success: true, meta: { changes: 1 } },
+      ]);
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+      mockDoStub.createSession = vi.fn().mockResolvedValue('sess-new-1');
+      mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-new-1');
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Test atomic dispatch' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.result).toBeDefined();
+
+      // Verify D1 batch was called (atomic rate-limit check + insert)
+      expect(mockD1.batch).toHaveBeenCalledTimes(1);
+      const batchArgs = mockD1.batch.mock.calls[0][0];
+      expect(batchArgs).toHaveLength(4); // child count, active count, task insert, event insert
+    });
+
+    it('should cancel task when atomic check reveals TOCTOU race', async () => {
+      // Advisory pre-checks pass (counts under limit)
+      mockD1._stmt.all.mockResolvedValue({ results: [{
+        id: 'proj-456', name: 'Test', repository: 'user/repo',
+        defaultBranch: 'main', installationId: 'inst-1',
+        defaultVmSize: null, defaultWorkspaceProfile: null,
+        defaultProvider: null, defaultAgentType: null,
+      }] });
+      const raceProject = {
+        id: 'proj-456', name: 'Test', repository: 'user/repo',
+        defaultBranch: 'main', installationId: 'inst-1',
+        defaultVmSize: null, defaultWorkspaceProfile: null,
+        defaultProvider: null, defaultAgentType: null,
+      };
+      mockD1._stmt.raw
+        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']])
+        .mockResolvedValueOnce([[4]])  // advisory: under limit (5)
+        .mockResolvedValueOnce([[9]])  // advisory: under limit (10)
+        .mockResolvedValueOnce([['cred-1']])
+        .mockResolvedValueOnce([Object.values(raceProject)]); // project (if raw path)
+
+      // But D1 batch reveals a concurrent insert bumped counts over limit
+      mockD1.batch.mockResolvedValue([
+        { results: [{ cnt: 6 }] },  // atomic child count: OVER limit (5 default + the new one)
+        { results: [{ cnt: 9 }] },  // atomic active count: under limit
+        { success: true, meta: { changes: 1 } },
+        { success: true, meta: { changes: 1 } },
+      ]);
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Race condition task' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('limit exceeded');
+      expect(body.error.message).toContain('concurrent race');
     });
   });
 

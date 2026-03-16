@@ -28,9 +28,9 @@ describe('MCP Token Service', () => {
   });
 
   describe('getMcpTokenTTL', () => {
-    it('should return default TTL (7200) when no env provided', async () => {
+    it('should return default TTL (1800) when no env provided', async () => {
       const { getMcpTokenTTL } = await import('../../../src/services/mcp-token');
-      expect(getMcpTokenTTL()).toBe(7200);
+      expect(getMcpTokenTTL()).toBe(1800);
     });
 
     it('should return configured TTL from env', async () => {
@@ -40,12 +40,12 @@ describe('MCP Token Service', () => {
 
     it('should return default for invalid env value', async () => {
       const { getMcpTokenTTL } = await import('../../../src/services/mcp-token');
-      expect(getMcpTokenTTL({ MCP_TOKEN_TTL_SECONDS: 'invalid' })).toBe(7200);
+      expect(getMcpTokenTTL({ MCP_TOKEN_TTL_SECONDS: 'invalid' })).toBe(1800);
     });
 
     it('should return default for negative value', async () => {
       const { getMcpTokenTTL } = await import('../../../src/services/mcp-token');
-      expect(getMcpTokenTTL({ MCP_TOKEN_TTL_SECONDS: '-1' })).toBe(7200);
+      expect(getMcpTokenTTL({ MCP_TOKEN_TTL_SECONDS: '-1' })).toBe(1800);
     });
   });
 
@@ -67,7 +67,7 @@ describe('MCP Token Service', () => {
       expect(mockKV.put).toHaveBeenCalledWith(
         'mcp:test-mcp-token',
         JSON.stringify(data),
-        { expirationTtl: 7200 },
+        { expirationTtl: 1800 },
       );
     });
 
