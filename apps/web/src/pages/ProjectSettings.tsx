@@ -284,7 +284,7 @@ export function ProjectSettings() {
             Used when launching new workspaces from this project. Click again to clear.
           </p>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {vmSizes.map((size) => {
             const isSelected = defaultVmSize === size.value;
             return (
@@ -329,7 +329,7 @@ export function ProjectSettings() {
             Which AI coding agent to use for tasks in this project. Click again to clear.
           </p>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {AGENT_CATALOG.map((agent) => {
             const isSelected = defaultAgentType === agent.id;
             return (
@@ -424,9 +424,18 @@ export function ProjectSettings() {
                 step={MIN_WORKSPACE_IDLE_TIMEOUT_MS}
                 value={workspaceIdleTimeoutMs}
                 onChange={(e) => setWorkspaceIdleTimeoutMs(Number(e.target.value))}
-                className="flex-1"
+                aria-valuetext={
+                  workspaceIdleTimeoutMs >= 60 * 60 * 1000
+                    ? `${(workspaceIdleTimeoutMs / (60 * 60 * 1000)).toFixed(1)} hours`
+                    : `${(workspaceIdleTimeoutMs / (60 * 1000)).toFixed(0)} minutes`
+                }
+                className="flex-1 accent-[var(--sam-color-accent-primary)] h-2 cursor-pointer"
               />
-              <span className="text-sm text-fg-primary font-medium min-w-[4rem] text-right">
+              <span
+                aria-live="polite"
+                aria-atomic="true"
+                className="text-sm text-fg-primary font-medium min-w-[4rem] text-right tabular-nums"
+              >
                 {workspaceIdleTimeoutMs >= 60 * 60 * 1000
                   ? `${(workspaceIdleTimeoutMs / (60 * 60 * 1000)).toFixed(1)}h`
                   : `${(workspaceIdleTimeoutMs / (60 * 1000)).toFixed(0)}m`}
@@ -449,9 +458,18 @@ export function ProjectSettings() {
                 step={MIN_NODE_IDLE_TIMEOUT_MS}
                 value={nodeIdleTimeoutMs}
                 onChange={(e) => setNodeIdleTimeoutMs(Number(e.target.value))}
-                className="flex-1"
+                aria-valuetext={
+                  nodeIdleTimeoutMs >= 60 * 60 * 1000
+                    ? `${(nodeIdleTimeoutMs / (60 * 60 * 1000)).toFixed(1)} hours`
+                    : `${(nodeIdleTimeoutMs / (60 * 1000)).toFixed(0)} minutes`
+                }
+                className="flex-1 accent-[var(--sam-color-accent-primary)] h-2 cursor-pointer"
               />
-              <span className="text-sm text-fg-primary font-medium min-w-[4rem] text-right">
+              <span
+                aria-live="polite"
+                aria-atomic="true"
+                className="text-sm text-fg-primary font-medium min-w-[4rem] text-right tabular-nums"
+              >
                 {nodeIdleTimeoutMs >= 60 * 60 * 1000
                   ? `${(nodeIdleTimeoutMs / (60 * 60 * 1000)).toFixed(1)}h`
                   : `${(nodeIdleTimeoutMs / (60 * 1000)).toFixed(0)}m`}
@@ -466,7 +484,11 @@ export function ProjectSettings() {
           <Button
             size="sm"
             loading={savingTimeouts}
-            disabled={savingTimeouts}
+            disabled={
+              savingTimeouts ||
+              (workspaceIdleTimeoutMs === (project?.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS) &&
+               nodeIdleTimeoutMs === (project?.nodeIdleTimeoutMs ?? DEFAULT_NODE_WARM_TIMEOUT_MS))
+            }
             onClick={() => void handleSaveTimeouts()}
           >
             Save Timeouts

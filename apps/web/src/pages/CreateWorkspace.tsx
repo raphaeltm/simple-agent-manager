@@ -486,13 +486,37 @@ export function CreateWorkspace() {
               Repository
             </label>
             {isProjectLinked ? (
-              <Input
-                id="repository"
-                type="text"
-                value={repository}
-                readOnly
-                style={{ opacity: 0.7, cursor: 'not-allowed' }}
-              />
+              <div className="relative">
+                <Input
+                  id="repository"
+                  type="text"
+                  value={repository}
+                  readOnly
+                  aria-readonly="true"
+                  style={{
+                    backgroundColor: 'var(--sam-color-bg-inset)',
+                    color: 'var(--sam-color-fg-muted)',
+                    cursor: 'not-allowed',
+                    paddingRight: '2.5rem',
+                  }}
+                />
+                <svg
+                  aria-hidden="true"
+                  focusable={false}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-fg-muted pointer-events-none"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+              </div>
             ) : (
               <RepoSelector
                 id="repository"
@@ -584,7 +608,7 @@ export function CreateWorkspace() {
                   </span>
                 )}
               </label>
-              <div className={`grid grid-cols-3 gap-3${catalogLoading ? ' opacity-60 pointer-events-none' : ''}`}>
+              <div className={`grid grid-cols-1 sm:grid-cols-3 gap-3${catalogLoading ? ' opacity-60 pointer-events-none' : ''}`}>
                 {vmSizeOptions.map((size) => (
                   <button
                     key={size.value}
