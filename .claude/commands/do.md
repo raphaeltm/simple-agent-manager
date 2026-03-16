@@ -146,9 +146,13 @@ Address every bug or correctness issue raised. Push fixes and re-run quality che
 
 **STOP: Wait for all review agents to complete before proceeding.** If you launched reviewers in background, you MUST wait for their results and address findings before moving to Phase 6. Do NOT use idle time to jump ahead to PR creation.
 
+**Update todo list and `.do-state.md`**: When dispatching reviewers, immediately add each one to the "Phase 5: Review Tracker" section with status `DISPATCHED`. Update each reviewer's status as results arrive. **Phase 5 CANNOT be marked complete until every dispatched reviewer shows `PASS` or `ADDRESSED`.** If any reviewer is still `DISPATCHED`, you are NOT done with Phase 5 — wait for it.
+
 ---
 
 ## Phase 6: Staging Verification (BLOCKING — DO NOT SKIP)
+
+> **Checkpoint**: Before entering Phase 6, verify the "Phase 5: Review Tracker" in `.do-state.md` has ZERO reviewers with status `DISPATCHED`. Every reviewer must show `PASS` or `ADDRESSED`. If any reviewer is still outstanding, STOP — go back to Phase 5 and wait for it.
 
 If this PR includes **any code changes** (not just docs/tasks), deploy to staging and verify before creating the PR.
 
