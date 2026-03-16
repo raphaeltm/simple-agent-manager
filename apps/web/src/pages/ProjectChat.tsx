@@ -238,10 +238,13 @@ export function ProjectChat() {
   // Project-wide WebSocket for realtime sidebar updates — receives session
   // lifecycle events (created, stopped, updated, agent_completed) and refreshes
   // the session list when any arrive.
-  useProjectWebSocket({
+  const { connectionState } = useProjectWebSocket({
     projectId,
     onSessionChange: loadSessions,
   });
+
+  // True when realtime updates are permanently degraded (exhausted retries).
+  const realtimeDegraded = connectionState === 'disconnected';
 
   // Initial load — auto-select the most recent session when navigating to the
   // project without a specific sessionId (e.g., from the dashboard). This
@@ -459,6 +462,22 @@ export function ProjectChat() {
             <span className="text-sm font-semibold text-fg-primary truncate flex-1">
               {project?.name || 'Project'}
             </span>
+            {realtimeDegraded && (
+              <button
+                type="button"
+                onClick={() => void loadSessions()}
+                title="Realtime updates paused. Click to refresh."
+                aria-label="Realtime updates paused. Click to refresh session list."
+                className="shrink-0 p-1 bg-transparent border-none cursor-pointer rounded-sm transition-colors"
+                style={{ color: 'var(--sam-color-warning, #f59e0b)' }}
+              >
+                <span
+                  aria-hidden="true"
+                  className="inline-block w-2 h-2 rounded-full"
+                  style={{ backgroundColor: 'var(--sam-color-warning, #f59e0b)' }}
+                />
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setInfoPanelOpen(!infoPanelOpen)}
@@ -677,6 +696,8 @@ export function ProjectChat() {
           onFork={(session) => { setSidebarOpen(false); setForkSession(session); }}
           onNewChat={() => { setSidebarOpen(false); handleNewChat(); }}
           onClose={() => setSidebarOpen(false)}
+          realtimeDegraded={realtimeDegraded}
+          onRefresh={() => void loadSessions()}
         />
       )}
 
@@ -768,6 +789,8 @@ function MobileSessionDrawer({
   onFork,
   onNewChat,
   onClose,
+  realtimeDegraded = false,
+  onRefresh,
 }: {
   sessions: ChatSessionResponse[];
   selectedSessionId: string | null;
@@ -775,6 +798,8 @@ function MobileSessionDrawer({
   onFork: (session: ChatSessionResponse) => void;
   onNewChat: () => void;
   onClose: () => void;
+  realtimeDegraded?: boolean;
+  onRefresh?: () => void;
 }) {
   const [mobileSearch, setMobileSearch] = useState('');
   const [mobileShowStale, setMobileShowStale] = useState(false);
@@ -843,8 +868,25 @@ function MobileSessionDrawer({
         }}
       >
         {/* Drawer header */}
-        <div className="shrink-0 p-3 border-b border-border-default flex items-center justify-between">
-          <span className="text-sm font-semibold text-fg-primary">Chats</span>
+        <div className="shrink-0 p-3 border-b border-border-default flex items-center gap-2">
+          <span className="text-sm font-semibold text-fg-primary flex-1">Chats</span>
+          {realtimeDegraded && onRefresh && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              title="Realtime updates paused. Tap to refresh."
+              aria-label="Realtime updates paused. Tap to refresh session list."
+              className="flex items-center gap-1 bg-transparent border-none cursor-pointer text-xs px-1.5 py-0.5 rounded-sm"
+              style={{ color: 'var(--sam-color-warning, #f59e0b)' }}
+            >
+              <span
+                aria-hidden="true"
+                className="inline-block w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: 'var(--sam-color-warning, #f59e0b)' }}
+              />
+              <span>Refresh</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={onNewChat}
