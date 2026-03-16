@@ -429,6 +429,8 @@ export type TaskStatus =
   | 'failed'
   | 'cancelled';
 
+export type TaskMode = 'task' | 'conversation';
+
 /**
  * Tracks where the task runner is during async execution.
  * Persisted to the task record so stuck-task recovery knows WHERE execution stalled.
@@ -482,6 +484,7 @@ export interface Task {
   status: TaskStatus;
   executionStep: TaskExecutionStep | null;
   priority: number;
+  taskMode: TaskMode;
   dispatchDepth: number;
   agentProfileHint: string | null;
   blocked?: boolean;
@@ -571,6 +574,9 @@ export interface SubmitTaskRequest {
   /** Context summary from the parent session. Persisted as the first system message in the new
    * chat session to give the agent context about prior work. Max 64KB. */
   contextSummary?: string;
+  /** Task execution mode. 'task' (default): agent pushes, creates PR, calls complete_task.
+   * 'conversation': agent responds conversationally, human controls lifecycle. */
+  taskMode?: TaskMode;
 }
 
 /** Response from the session summarize endpoint. */

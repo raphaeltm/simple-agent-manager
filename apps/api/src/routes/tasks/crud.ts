@@ -783,4 +783,70 @@ crudRoutes.get('/:taskId/events', async (c) => {
   return c.json(response);
 });
 
+// ─── Close conversation endpoint ──────────────────────────────────────────────
+// Human-initiated completion for conversation-mode tasks.
+// POST /api/projects/:projectId/tasks/:taskId/close
+crudRoutes.post('/:taskId/close', async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const taskId = requireRouteParam(c, 'taskId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireOwnedProject(db, projectId, userId);
+  const task = await requireOwnedTaskById(db, taskId, userId);
+
+  // Only conversation-mode tasks can be closed via this endpoint
+  if (task.taskMode !== 'conversation') {
+    throw errors.badRequest('Only conversation-mode tasks can be closed via this endpoint. Use complete_task for task-mode tasks.');
+  }
+
+  // Only active tasks can be closed
+  const closableStatuses: TaskStatus[] = ['in_progress', 'delegated'];
+  if (!closableStatuses.includes(task.status as TaskStatus)) {
+    throw errors.badRequest(`Task cannot be closed from status '${task.status}'. Must be in_progress or delegated.`);
+  }
+
+  const now = new Date().toISOString();
+
+  await db.update(schema.tasks)
+    .set({ status: 'completed', completedAt: now, updatedAt: now })
+    .where(eq(schema.tasks.id, taskId));
+
+  await appendStatusEvent(db, taskId, task.status as TaskStatus, 'completed', 'user', userId, 'Conversation closed by user');
+
+  // Record activity event (best-effort)
+  c.executionCtx.waitUntil(
+    projectDataService.recordActivityEvent(
+      c.env,
+      projectId,
+      'task.completed',
+      'user',
+      userId,
+      null,
+      null,
+      taskId,
+      { reason: 'Conversation closed by user' }
+    ).catch(() => { /* best-effort */ })
+  );
+
+  // Stop the DO session if the task has a workspace with a chat session (best-effort)
+  if (task.workspaceId) {
+    c.executionCtx.waitUntil(
+      (async () => {
+        const [ws] = await db.select({ chatSessionId: schema.workspaces.chatSessionId })
+          .from(schema.workspaces)
+          .where(eq(schema.workspaces.id, task.workspaceId!))
+          .limit(1);
+        if (ws?.chatSessionId) {
+          await projectDataService.stopSession(c.env, projectId, ws.chatSessionId);
+        }
+      })().catch((e) => { log.error('task.close_session_stop_failed', { taskId, projectId, error: String(e) }); })
+    );
+  }
+
+  log.info('task.conversation_closed', { taskId, projectId, userId });
+
+  return c.json({ status: 'completed', closedAt: now });
+});
+
 export { crudRoutes };

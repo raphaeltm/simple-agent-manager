@@ -776,11 +776,14 @@ func (s *Server) makeTaskCompletionCallback(
 		}
 
 		// On success, push changes and report awaiting_followup.
-		pushResult := s.gitPushWorkspaceChanges(workspaceID)
+		// In conversation mode, skip PR creation — the human controls lifecycle.
+		skipPR := s.config.TaskMode == config.TaskModeConversation
+		pushResult := s.gitPushWorkspaceChanges(workspaceID, skipPR)
 
 		slog.Info("Agent completion git push result",
 			"taskId", taskID,
 			"workspaceId", workspaceID,
+			"taskMode", s.config.TaskMode,
 			"pushed", pushResult.Pushed,
 			"commitSha", pushResult.CommitSha,
 			"prUrl", pushResult.PrURL,
@@ -856,8 +859,9 @@ type gitPushResult struct {
 }
 
 // gitPushWorkspaceChanges runs git status/add/commit/push inside the workspace
-// container and optionally creates a PR. Returns the result for callback reporting.
-func (s *Server) gitPushWorkspaceChanges(workspaceID string) gitPushResult {
+// container and optionally creates a PR. When skipPR is true (conversation mode),
+// the PR creation step is skipped — the human controls when to create PRs.
+func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPushResult {
 	result := gitPushResult{}
 
 	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
@@ -929,10 +933,12 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string) gitPushResult {
 
 	slog.Info("Git push succeeded", "workspaceId", workspaceID, "branch", result.BranchName, "sha", result.CommitSha)
 
-	// Try to create a PR via gh (best-effort)
-	prURL, prNumber := s.tryCreatePR(containerID, workDir, user)
-	result.PrURL = prURL
-	result.PrNumber = prNumber
+	// Try to create a PR via gh (best-effort) — skip in conversation mode
+	if !skipPR {
+		prURL, prNumber := s.tryCreatePR(containerID, workDir, user)
+		result.PrURL = prURL
+		result.PrNumber = prNumber
+	}
 
 	return result
 }

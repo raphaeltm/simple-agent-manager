@@ -6,7 +6,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../index';
 import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
 import { createProvider, ProviderError } from '@simple-agent-manager/providers';
-import type { CredentialProvider } from '@simple-agent-manager/shared';
+import type { CredentialProvider, TaskMode } from '@simple-agent-manager/shared';
 import { signCallbackToken } from './jwt';
 import { getUserCloudProviderConfig } from './provider-credentials';
 import { persistError } from './observability';
@@ -79,6 +79,7 @@ export interface ProvisionTaskContext {
   projectId: string;
   chatSessionId: string;
   taskId: string;
+  taskMode?: TaskMode;
 }
 
 export async function provisionNode(
@@ -125,6 +126,7 @@ export async function provisionNode(
       projectId: taskContext?.projectId,
       chatSessionId: taskContext?.chatSessionId,
       taskId: taskContext?.taskId,
+      taskMode: taskContext?.taskMode,
       dockerDnsServers: env.DOCKER_DNS_SERVERS,
       originCaCert: env.ORIGIN_CA_CERT,
       originCaKey: env.ORIGIN_CA_KEY,

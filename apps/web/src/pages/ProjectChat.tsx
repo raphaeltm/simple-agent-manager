@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { List, Settings, LayoutGrid, GitFork, Search, ChevronDown, ChevronRight, X } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
 import { VoiceButton } from '@simple-agent-manager/acp-client';
-import type { AgentInfo, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type { AgentInfo, WorkspaceProfile, TaskMode } from '@simple-agent-manager/shared';
 import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { ProjectMessageView } from '../components/chat/ProjectMessageView';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -20,6 +20,7 @@ import {
   submitTask,
   getProjectTask,
   getTranscribeApiUrl,
+  closeConversationTask,
 } from '../lib/api';
 import type { ChatSessionResponse } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
@@ -138,6 +139,14 @@ export function ProjectChat() {
     (project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE,
   );
 
+  // Task mode selection — defaults based on workspace profile
+  const [selectedTaskMode, setSelectedTaskMode] = useState<TaskMode>(
+    ((project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE) === 'lightweight'
+      ? 'conversation'
+      : 'task',
+  );
+  const userSetTaskModeRef = useRef(false);
+
   // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
   const sessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -186,6 +195,13 @@ export function ProjectChat() {
   // ---------------------------------------------------------------------------
   // Effects (all preserved from original)
   // ---------------------------------------------------------------------------
+
+  // Sync task mode default when workspace profile changes (only if user hasn't explicitly set mode)
+  useEffect(() => {
+    if (!userSetTaskModeRef.current) {
+      setSelectedTaskMode(selectedWorkspaceProfile === 'lightweight' ? 'conversation' : 'task');
+    }
+  }, [selectedWorkspaceProfile]);
 
   // Check for cloud provider credentials
   useEffect(() => {
@@ -338,6 +354,7 @@ export function ProjectChat() {
         message: trimmed,
         ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
         workspaceProfile: selectedWorkspaceProfile,
+        taskMode: selectedTaskMode,
       });
       setMessage('');
       setProvisioning({
@@ -384,6 +401,7 @@ export function ProjectChat() {
         contextSummary,
         ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
         workspaceProfile: selectedWorkspaceProfile,
+        taskMode: selectedTaskMode,
       });
       setProvisioning({
         taskId: result.taskId,
@@ -403,6 +421,25 @@ export function ProjectChat() {
       setSubmitting(false);
     }
   };
+
+  const [closingConversation, setClosingConversation] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
+
+  const handleCloseConversation = useCallback(async () => {
+    const selectedSession = sessions.find((s) => s.id === sessionId);
+    if (!selectedSession?.taskId) return;
+    setClosingConversation(true);
+    setCloseError(null);
+    try {
+      await closeConversationTask(projectId, selectedSession.taskId);
+      void loadSessions();
+    } catch (err) {
+      console.warn('Failed to close conversation:', err);
+      setCloseError(err instanceof Error ? err.message : 'Failed to close conversation');
+    } finally {
+      setClosingConversation(false);
+    }
+  }, [projectId, sessionId, sessions, loadSessions]);
 
   // ---------------------------------------------------------------------------
   // Derived state
@@ -606,6 +643,8 @@ export function ProjectChat() {
               onAgentTypeChange={setSelectedAgentType}
               selectedWorkspaceProfile={selectedWorkspaceProfile}
               onWorkspaceProfileChange={setSelectedWorkspaceProfile}
+              selectedTaskMode={selectedTaskMode}
+              onTaskModeChange={(mode: TaskMode) => { userSetTaskModeRef.current = true; setSelectedTaskMode(mode); }}
             />
           </div>
         ) : (
@@ -620,6 +659,26 @@ export function ProjectChat() {
               sessionId={sessionId!}
               isProvisioning={!!(provisioning && sessionId === provisioning.sessionId && !isTerminal(provisioning.status))}
             />
+            {/* Close conversation button — shown for idle sessions with a task */}
+            {(() => {
+              const selectedSession = sessions.find((s) => s.id === sessionId);
+              if (!selectedSession?.taskId) return null;
+              const state = getSessionState(selectedSession);
+              if (state !== 'idle') return null;
+              return (
+                <div className="shrink-0 border-t border-border-default px-4 py-2 bg-surface flex flex-col items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={handleCloseConversation}
+                    disabled={closingConversation}
+                    className="px-4 py-2.5 min-h-[44px] text-xs rounded-md border border-border-default bg-page text-fg-muted hover:text-fg-primary hover:border-fg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {closingConversation ? 'Closing...' : 'Close conversation'}
+                  </button>
+                  {closeError && <p className="text-xs text-red-500">{closeError}</p>}
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
@@ -965,6 +1024,8 @@ function ChatInput({
   onAgentTypeChange,
   selectedWorkspaceProfile,
   onWorkspaceProfileChange,
+  selectedTaskMode,
+  onTaskModeChange,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -978,6 +1039,8 @@ function ChatInput({
   onAgentTypeChange: (agentType: string) => void;
   selectedWorkspaceProfile: WorkspaceProfile;
   onWorkspaceProfileChange: (profile: WorkspaceProfile) => void;
+  selectedTaskMode: TaskMode;
+  onTaskModeChange: (mode: TaskMode) => void;
 }) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -1040,6 +1103,25 @@ function ChatInput({
             <option value="full">Full</option>
             <option value="lightweight">Lightweight</option>
           </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <label htmlFor="task-mode-select" className="text-xs text-fg-muted whitespace-nowrap">Run mode:</label>
+          <select
+            id="task-mode-select"
+            value={selectedTaskMode}
+            onChange={(e) => onTaskModeChange(e.target.value as TaskMode)}
+            disabled={submitting}
+            className="px-2 py-1 border border-border-default rounded-md bg-page text-fg-primary text-xs outline-none cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+            aria-describedby="task-mode-desc"
+          >
+            <option value="task">Task</option>
+            <option value="conversation">Conversation</option>
+          </select>
+          <span id="task-mode-desc" className="sr-only">
+            {selectedTaskMode === 'task'
+              ? 'Agent will do the work, push changes, and create a PR'
+              : 'Chat with an agent. You decide when it\'s done.'}
+          </span>
         </div>
       </div>
       <div className="flex gap-2 items-end">

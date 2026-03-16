@@ -21,6 +21,12 @@ import (
 // ENV vars (e.g. NPM_CONFIG_PREFIX). See hasDevcontainerConfig() in bootstrap.go.
 const DefaultAdditionalFeatures = `{"ghcr.io/devcontainers/features/node:1":{"version":"22"}}`
 
+// TaskMode constants for discriminating task vs conversation mode.
+const (
+	TaskModeTask         = "task"
+	TaskModeConversation = "conversation"
+)
+
 // DefaultDevcontainerImage is the default container image used when a repo has no devcontainer config.
 // Uses a lighter base image so fallback workspaces bootstrap quickly on modest nodes.
 // Override via DEFAULT_DEVCONTAINER_IMAGE env var.
@@ -128,6 +134,7 @@ type Config struct {
 	ProjectID     string // Linked project ID (env: PROJECT_ID)
 	ChatSessionID string // Chat session created during workspace provisioning (env: CHAT_SESSION_ID)
 	TaskID        string // Task ID for task-driven workspaces (env: TASK_ID)
+	TaskMode      string // Task execution mode: "task" or "conversation" (env: TASK_MODE, default: "task")
 
 	// Persistence settings - configurable per constitution principle XI
 	PersistenceDBPath string // SQLite database path for session state persistence
@@ -285,6 +292,7 @@ func Load() (*Config, error) {
 		ProjectID:     getEnv("PROJECT_ID", ""),
 		ChatSessionID: getEnv("CHAT_SESSION_ID", ""),
 		TaskID:        getEnv("TASK_ID", ""),
+		TaskMode:      getEnv("TASK_MODE", "task"),
 
 		// Persistence settings
 		PersistenceDBPath: getEnv("PERSISTENCE_DB_PATH", "/var/lib/vm-agent/state.db"),
@@ -362,6 +370,14 @@ func Load() (*Config, error) {
 		// Extract base domain from control plane URL to allow workspace subdomains
 		// e.g., https://api.example.com -> allow *.example.com
 		cfg.AllowedOrigins = deriveAllowedOrigins(cfg.ControlPlaneURL)
+	}
+
+	// Validate TaskMode enum
+	switch cfg.TaskMode {
+	case TaskModeTask, TaskModeConversation:
+		// valid
+	default:
+		return nil, fmt.Errorf("TASK_MODE must be %q or %q, got %q", TaskModeTask, TaskModeConversation, cfg.TaskMode)
 	}
 
 	if cfg.NodeID == "" {
@@ -486,6 +502,7 @@ func (c *Config) BuildSAMEnvFallback() []string {
 		{"SAM_PROJECT_ID", c.ProjectID},
 		{"SAM_CHAT_SESSION_ID", c.ChatSessionID},
 		{"SAM_TASK_ID", c.TaskID},
+		{"SAM_TASK_MODE", c.TaskMode},
 		{"SAM_REPOSITORY", c.Repository},
 		{"SAM_WORKSPACE_ID", c.WorkspaceID},
 	}

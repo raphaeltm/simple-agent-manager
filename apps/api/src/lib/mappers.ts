@@ -14,6 +14,7 @@ import type {
   ProjectSummary,
   Task,
   TaskDependency,
+  TaskMode,
   TaskStatus,
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
@@ -113,6 +114,7 @@ export function toTaskResponse(task: schema.Task, blocked = false): Task {
     status: task.status as TaskStatus,
     executionStep: isTaskExecutionStep(task.executionStep) ? task.executionStep : null,
     priority: task.priority,
+    taskMode: (task.taskMode as TaskMode) || 'task',
     dispatchDepth: task.dispatchDepth,
     agentProfileHint: task.agentProfileHint,
     blocked,
