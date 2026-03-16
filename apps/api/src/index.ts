@@ -217,6 +217,14 @@ export interface Env {
   CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO?: string;
   // MCP token TTL in seconds (default 7200 = 2 hours)
   MCP_TOKEN_TTL_SECONDS?: string;
+  // MCP dispatch_task limits (agent-to-agent task spawning)
+  MCP_DISPATCH_MAX_DEPTH?: string;                // Max dispatch chain depth (default: 3)
+  MCP_DISPATCH_MAX_PER_TASK?: string;             // Max tasks a single agent can dispatch (default: 5)
+  MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT?: string;   // Max concurrent agent-dispatched tasks per project (default: 10)
+  MCP_DISPATCH_DESCRIPTION_MAX_LENGTH?: string;   // Max description length for dispatched tasks (default: 32000)
+  MCP_DISPATCH_MAX_REFERENCES?: string;            // Max reference URLs per dispatch (default: 20)
+  MCP_DISPATCH_MAX_REFERENCE_LENGTH?: string;      // Max length per reference string (default: 500)
+  MCP_DISPATCH_MAX_PRIORITY?: string;              // Max priority for agent-dispatched tasks (default: 100)
   // Configurable content limits
   MAX_TASK_MESSAGE_LENGTH?: string;
   MAX_ACTIVITY_MESSAGE_LENGTH?: string;

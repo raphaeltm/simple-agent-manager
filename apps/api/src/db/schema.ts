@@ -310,6 +310,8 @@ export const tasks = sqliteTable(
     outputBranch: text('output_branch'),
     outputPrUrl: text('output_pr_url'),
     finalizedAt: text('finalized_at'),
+    /** Dispatch depth for agent-spawned tasks. 0 = user-created, N = Nth generation agent dispatch. */
+    dispatchDepth: integer('dispatch_depth').notNull().default(0),
     autoProvisionedNodeId: text('auto_provisioned_node_id').references(() => nodes.id, {
       onDelete: 'set null',
     }),

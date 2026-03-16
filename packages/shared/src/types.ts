@@ -482,6 +482,7 @@ export interface Task {
   status: TaskStatus;
   executionStep: TaskExecutionStep | null;
   priority: number;
+  dispatchDepth: number;
   agentProfileHint: string | null;
   blocked?: boolean;
   startedAt: string | null;
