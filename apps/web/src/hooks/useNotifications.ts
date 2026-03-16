@@ -150,6 +150,24 @@ export function useNotifications(): UseNotificationsReturn {
                 setUnreadCount((prev) => prev + 1);
                 break;
 
+              case 'notification.updated': {
+                // Reconcile unreadCount if readAt status changed
+                setNotifications((prev) => {
+                  const existing = prev.find((n) => n.id === msg.notification.id);
+                  if (existing) {
+                    if (!existing.readAt && msg.notification.readAt) {
+                      setUnreadCount((c) => Math.max(0, c - 1));
+                    } else if (existing.readAt && !msg.notification.readAt) {
+                      setUnreadCount((c) => c + 1);
+                    }
+                  }
+                  return prev.map((n) =>
+                    n.id === msg.notification.id ? msg.notification : n
+                  );
+                });
+                break;
+              }
+
               case 'notification.read':
                 setNotifications((prev) =>
                   prev.map((n) =>

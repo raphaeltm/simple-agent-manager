@@ -1,10 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { MAX_NOTIFICATION_BODY_LENGTH } from '@simple-agent-manager/shared';
 import {
   sendNotification,
   notifyTaskComplete,
   notifyTaskFailed,
   notifySessionEnded,
   notifyPrCreated,
+  notifyNeedsInput,
+  notifyProgress,
 } from '../../../src/services/notification';
 
 function createMockEnv() {
@@ -181,6 +184,94 @@ describe('Notification Service', () => {
           branchName: 'sam/add-tests',
         },
       }));
+    });
+  });
+
+  describe('notifyNeedsInput', () => {
+    it('should create needs_input notification with high urgency', async () => {
+      await notifyNeedsInput(env, 'user-123', {
+        projectId: 'proj-1',
+        taskId: 'task-1',
+        taskTitle: 'Deploy to prod',
+        context: 'I need approval to proceed with the database migration',
+        category: 'approval',
+        options: ['Approve', 'Reject', 'Defer'],
+      });
+
+      expect(createNotificationMock).toHaveBeenCalledWith('user-123', expect.objectContaining({
+        type: 'needs_input',
+        urgency: 'high',
+        title: 'Approval needed: Deploy to prod',
+        body: 'I need approval to proceed with the database migration',
+        projectId: 'proj-1',
+        taskId: 'task-1',
+        actionUrl: '/projects/proj-1?task=task-1',
+        metadata: {
+          category: 'approval',
+          options: ['Approve', 'Reject', 'Defer'],
+        },
+      }));
+    });
+
+    it('should use generic label when no category provided', async () => {
+      await notifyNeedsInput(env, 'user-123', {
+        projectId: 'proj-1',
+        taskId: 'task-1',
+        taskTitle: 'Fix bug',
+        context: 'I found multiple approaches, which do you prefer?',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.title).toContain('Input needed');
+      expect(call.metadata.category).toBeNull();
+      expect(call.metadata.options).toBeNull();
+    });
+
+    it('should truncate long context in body', async () => {
+      const longContext = 'A'.repeat(1000);
+      await notifyNeedsInput(env, 'user-123', {
+        projectId: 'proj-1',
+        taskId: 'task-1',
+        taskTitle: 'Task',
+        context: longContext,
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.body!.length).toBeLessThanOrEqual(MAX_NOTIFICATION_BODY_LENGTH);
+    });
+  });
+
+  describe('notifyProgress', () => {
+    it('should create progress notification with low urgency', async () => {
+      await notifyProgress(env, 'user-123', {
+        projectId: 'proj-1',
+        taskId: 'task-1',
+        taskTitle: 'Implement feature',
+        message: 'Completed step 3 of 5: database schema migration',
+      });
+
+      expect(createNotificationMock).toHaveBeenCalledWith('user-123', expect.objectContaining({
+        type: 'progress',
+        urgency: 'low',
+        title: 'Progress: Implement feature',
+        body: 'Completed step 3 of 5: database schema migration',
+        projectId: 'proj-1',
+        taskId: 'task-1',
+        actionUrl: '/projects/proj-1',
+      }));
+    });
+
+    it('should truncate long messages in body', async () => {
+      const longMessage = 'B'.repeat(1000);
+      await notifyProgress(env, 'user-123', {
+        projectId: 'proj-1',
+        taskId: 'task-1',
+        taskTitle: 'Task',
+        message: longMessage,
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.body!.length).toBeLessThanOrEqual(MAX_NOTIFICATION_BODY_LENGTH);
     });
   });
 });

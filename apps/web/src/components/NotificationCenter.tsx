@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Bell,
@@ -12,6 +12,9 @@ import {
   Activity,
   HelpCircle,
   Loader2,
+  ChevronDown,
+  ChevronRight,
+  Folder,
 } from 'lucide-react';
 import type { NotificationResponse, NotificationType } from '@simple-agent-manager/shared';
 import { useNotifications } from '../hooks/useNotifications';
@@ -94,6 +97,26 @@ export function NotificationCenter() {
     ? notifications.filter((n) => !n.readAt)
     : notifications;
 
+  // Group notifications by project when multiple projects exist
+  const { groups, shouldGroup } = useMemo(() => {
+    const projectIds = new Set(filteredNotifications.map((n) => n.projectId ?? 'none'));
+    if (projectIds.size <= 1) {
+      return { groups: [], shouldGroup: false };
+    }
+
+    const groupMap = new Map<string, { projectId: string | null; projectName: string; notifications: NotificationResponse[] }>();
+    for (const n of filteredNotifications) {
+      const key = n.projectId ?? 'none';
+      if (!groupMap.has(key)) {
+        const projectName = (n.metadata as Record<string, unknown> | null)?.projectName as string | undefined
+          ?? (n.projectId ? `Project ${n.projectId.slice(0, 8)}` : 'General');
+        groupMap.set(key, { projectId: n.projectId, projectName, notifications: [] });
+      }
+      groupMap.get(key)!.notifications.push(n);
+    }
+    return { groups: Array.from(groupMap.values()), shouldGroup: true };
+  }, [filteredNotifications]);
+
   return (
     <div className="relative">
       {/* Bell Button */}
@@ -165,6 +188,27 @@ export function NotificationCenter() {
                 <Bell size={24} className="mb-2 opacity-40" />
                 <span>{activeTab === 'unread' ? 'No unread notifications' : 'No notifications yet'}</span>
               </div>
+            ) : shouldGroup ? (
+              <>
+                {groups.map((group) => (
+                  <NotificationGroup
+                    key={group.projectId ?? 'none'}
+                    projectName={group.projectName}
+                    notifications={group.notifications}
+                    onNotificationClick={handleNotificationClick}
+                    onDismiss={dismiss}
+                    onMarkRead={markRead}
+                  />
+                ))}
+                {hasMore && (
+                  <button
+                    onClick={() => loadMore()}
+                    className="w-full py-2 text-xs text-fg-muted bg-transparent border-none cursor-pointer hover:text-fg-primary hover:bg-surface-hover transition-colors"
+                  >
+                    Load more
+                  </button>
+                )}
+              </>
             ) : (
               <>
                 {filteredNotifications.map((notification) => (
@@ -275,6 +319,61 @@ function NotificationItem({
           <X size={12} />
         </button>
       </div>
+    </div>
+  );
+}
+
+function NotificationGroup({
+  projectName,
+  notifications,
+  onNotificationClick,
+  onDismiss,
+  onMarkRead,
+}: {
+  projectName: string;
+  notifications: NotificationResponse[];
+  onNotificationClick: (notification: NotificationResponse) => void;
+  onDismiss: (id: string) => Promise<void>;
+  onMarkRead: (id: string) => Promise<void>;
+}) {
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const unreadInGroup = notifications.filter((n) => !n.readAt).length;
+
+  return (
+    <div>
+      <button
+        onClick={() => setIsCollapsed(!isCollapsed)}
+        aria-expanded={!isCollapsed}
+        aria-label={`${projectName} — ${notifications.length} notifications${unreadInGroup > 0 ? `, ${unreadInGroup} unread` : ''}`}
+        className="w-full flex items-center gap-2 px-4 py-2.5 min-h-[44px] bg-surface border-none cursor-pointer border-b border-border-default hover:bg-surface-hover transition-colors"
+      >
+        {isCollapsed ? <ChevronRight size={14} className="text-fg-muted" /> : <ChevronDown size={14} className="text-fg-muted" />}
+        <Folder size={14} className="text-fg-muted" />
+        <span className="text-xs font-medium text-fg-secondary flex-1 text-left">{projectName}</span>
+        <span className="text-[10px] text-fg-muted">
+          {notifications.length}
+          {unreadInGroup > 0 && (
+            <span className="ml-1 inline-flex items-center justify-center min-w-[14px] h-[14px] px-0.5 rounded-full bg-accent text-fg-on-accent text-[9px] font-bold leading-none">
+              {unreadInGroup}
+            </span>
+          )}
+        </span>
+      </button>
+      {!isCollapsed && notifications.map((notification) => (
+        <NotificationItem
+          key={notification.id}
+          notification={notification}
+          onClick={() => onNotificationClick(notification)}
+          onDismiss={(e) => {
+            e.stopPropagation();
+            onDismiss(notification.id);
+          }}
+          onMarkRead={(e) => {
+            e.stopPropagation();
+            onMarkRead(notification.id);
+          }}
+        />
+      ))}
     </div>
   );
 }

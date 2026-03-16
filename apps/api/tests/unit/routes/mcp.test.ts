@@ -67,6 +67,15 @@ const mockAI = {
   run: vi.fn().mockResolvedValue({ response: 'Generated title' }),
 };
 
+// Mock Notification DO namespace
+const mockNotificationStub = {
+  createNotification: vi.fn().mockResolvedValue({ id: 'notif-1', type: 'needs_input' }),
+};
+const mockNotification = {
+  idFromName: vi.fn().mockReturnValue('notif-do-id'),
+  get: vi.fn().mockReturnValue(mockNotificationStub),
+};
+
 let mockD1 = createMockD1();
 const mockEnv = {
   KV: mockKV,
@@ -74,6 +83,7 @@ const mockEnv = {
   PROJECT_DATA: mockProjectData,
   TASK_RUNNER: mockTaskRunner,
   AI: mockAI,
+  NOTIFICATION: mockNotification,
   BASE_DOMAIN: 'example.com',
 };
 
@@ -260,7 +270,9 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('get_session_messages');
       expect(toolNames).toContain('search_messages');
       expect(toolNames).toContain('dispatch_task');
-      expect(body.result.tools).toHaveLength(10);
+      // Agent-initiated notifications
+      expect(toolNames).toContain('request_human_input');
+      expect(body.result.tools).toHaveLength(11);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
@@ -1636,6 +1648,261 @@ describe('MCP Routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.result.content[0].text).toContain('completed');
+    });
+  });
+
+  // ─── request_human_input ─────────────────────────────────────────────
+
+  describe('request_human_input', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+      vi.clearAllMocks();
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should send notification and return success', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        user_id: 'user-789',
+        title: 'Fix the bug',
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'request_human_input',
+        arguments: {
+          context: 'Should I use approach A or B for the database migration?',
+          category: 'decision',
+          options: ['Approach A', 'Approach B'],
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.result.content[0].text).toContain('Human input request sent');
+    });
+
+    it('should reject empty context', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'request_human_input',
+        arguments: { context: '' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('context is required');
+    });
+
+    it('should reject context exceeding max length', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'request_human_input',
+        arguments: { context: 'A'.repeat(5000) },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('exceeds maximum length');
+    });
+
+    it('should reject invalid category', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'request_human_input',
+        arguments: { context: 'Need help', category: 'invalid' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('category must be one of');
+    });
+
+    it('should work without optional category and options', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        user_id: 'user-789',
+        title: 'My task',
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'request_human_input',
+        arguments: { context: 'I need help with this' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.result).toBeDefined();
+      expect(body.result.content[0].text).toContain('Human input request sent');
+    });
+
+    it('should return error when task not found', async () => {
+      // D1 first() returns null — task not in DB
+      mockD1._stmt.first.mockResolvedValueOnce(null);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'request_human_input',
+        arguments: { context: 'Need approval to continue' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Task not found');
+    });
+
+    it('should reject non-array options', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'request_human_input',
+        arguments: { context: 'Pick one', options: 'not-an-array' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('options must be an array');
+    });
+
+    it('should silently succeed even when notification DO throws', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        user_id: 'user-789',
+        title: 'Fix the bug',
+      });
+      // Make the notification DO throw to exercise the best-effort catch branch
+      mockNotificationStub.createNotification.mockRejectedValueOnce(new Error('DO unavailable'));
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'request_human_input',
+        arguments: { context: 'I need a decision' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      // Handler must still return success — notification is best-effort
+      expect(body.result.content[0].text).toContain('Human input request sent');
+    });
+
+    it('should reject context that is only whitespace', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'request_human_input',
+        arguments: { context: '   ' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('context is required');
+    });
+
+    it('should call notifyNeedsInput with correct payload for all four categories', async () => {
+      const categories = ['decision', 'clarification', 'approval', 'error_help'] as const;
+
+      for (const category of categories) {
+        vi.clearAllMocks();
+        mockKV.get.mockResolvedValue(validTokenData);
+        mockD1._stmt.first.mockResolvedValueOnce({
+          user_id: 'user-789',
+          title: 'My task',
+        });
+
+        const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+          name: 'request_human_input',
+          arguments: { context: 'Need help', category },
+        }));
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.result).toBeDefined();
+        expect(mockNotificationStub.createNotification).toHaveBeenCalledWith(
+          'user-789',
+          expect.objectContaining({ type: 'needs_input' }),
+        );
+      }
+    });
+
+    it('should reject options array with non-string elements', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'request_human_input',
+        arguments: {
+          context: 'Pick an approach',
+          options: ['Option A', 42, null, 'Option B'],
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('options must contain only strings');
+    });
+  });
+
+  // ─── Notification side-effects in update_task_status / complete_task ────────
+
+  describe('notification side-effects', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('update_task_status should call notifyProgress when task is found', async () => {
+      // Drizzle partial select({id, status, userId, title}) uses .raw() with positional
+      // values in column-select order: id, status, user_id(userId), title.
+      // mockD1Results sets both .all() and .raw() so Drizzle can find rows either way.
+      // Status must be in ACTIVE_STATUSES: ['queued','in_progress','delegated','awaiting_followup']
+      mockD1Results(mockD1._stmt, [{ id: 'task-123', status: 'in_progress', user_id: 'user-789', title: 'Implement feature' }]);
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_task_status',
+        arguments: { message: 'Completed step 2 of 5' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.result).toBeDefined();
+      expect(mockNotificationStub.createNotification).toHaveBeenCalledWith(
+        'user-789',
+        expect.objectContaining({ type: 'progress' }),
+      );
+    });
+
+    it('update_task_status should remain successful when notification DO throws', async () => {
+      mockD1Results(mockD1._stmt, [{ id: 'task-123', status: 'in_progress', user_id: 'user-789', title: 'Implement feature' }]);
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+      mockNotificationStub.createNotification.mockRejectedValueOnce(new Error('DO unavailable'));
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_task_status',
+        arguments: { message: 'Step done' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      // Core operation must succeed even when notification is best-effort
+      expect(body.result).toBeDefined();
+      expect(body.error).toBeUndefined();
+    });
+
+    it('complete_task in conversation mode should call notifySessionEnded', async () => {
+      // complete_task calls .first() once to get task_mode + user_id + title in one query.
+      // Then it calls .run() for the UPDATE. Both queries use raw D1 (prepare/bind pattern).
+      mockD1._stmt.first.mockResolvedValueOnce({
+        task_mode: 'conversation',
+        user_id: 'user-789',
+        title: 'Review code',
+        output_pr_url: null,
+        output_branch: null,
+      });
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'complete_task',
+        arguments: { summary: 'Done exploring' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.result.content[0].text).toContain('Conversation remains open');
+      expect(mockNotificationStub.createNotification).toHaveBeenCalledWith(
+        'user-789',
+        expect.objectContaining({ type: 'session_ended' }),
+      );
     });
   });
 });
