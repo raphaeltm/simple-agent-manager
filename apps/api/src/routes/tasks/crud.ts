@@ -45,6 +45,7 @@ import * as projectDataService from '../../services/project-data';
 import { log } from '../../lib/logger';
 import { toTaskResponse, toDependencyResponse } from '../../lib/mappers';
 import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
+import * as notificationService from '../../services/notification';
 import {
   parseTaskSortOrder,
   requireOwnedTaskById,
@@ -508,6 +509,27 @@ crudRoutes.post('/:taskId/status/callback', async (c) => {
               prUrl: body.gitPushResult?.prUrl ?? null,
             }
           );
+
+          // Emit session-ended notification (best-effort)
+          if (c.env.NOTIFICATION) {
+            await notificationService.notifySessionEnded(c.env as any, task.userId, {
+              projectId,
+              sessionId: ws?.chatSessionId ?? '',
+              taskId,
+              taskTitle: task.title,
+            });
+
+            // If a PR was created, emit a separate pr_created notification
+            if (body.gitPushResult?.prUrl) {
+              await notificationService.notifyPrCreated(c.env as any, task.userId, {
+                projectId,
+                taskId,
+                taskTitle: task.title,
+                prUrl: body.gitPushResult.prUrl,
+                branchName: body.gitPushResult.branchName,
+              });
+            }
+          }
         })().catch((err) => {
           console.error('Failed to schedule idle cleanup for task', taskId, err);
         })
@@ -575,6 +597,39 @@ crudRoutes.post('/:taskId/status/callback', async (c) => {
     if (body.toStatus === 'completed') {
       c.executionCtx.waitUntil(
         cleanupTaskRun(taskId, c.env).catch((e) => { log.error('task.cleanup_failed', { taskId, error: String(e) }); })
+      );
+    }
+
+    // Emit notifications for terminal task states (best-effort)
+    if (c.env.NOTIFICATION) {
+      c.executionCtx.waitUntil(
+        (async () => {
+          const [ws] = await db
+            .select({ chatSessionId: schema.workspaces.chatSessionId })
+            .from(schema.workspaces)
+            .where(eq(schema.workspaces.id, updatedTask.workspaceId!))
+            .limit(1);
+          const sessionId = ws?.chatSessionId ?? null;
+
+          if (body.toStatus === 'completed') {
+            await notificationService.notifyTaskComplete(c.env as any, task.userId, {
+              projectId,
+              taskId,
+              taskTitle: task.title,
+              sessionId,
+              outputPrUrl: updatedTask.outputPrUrl,
+              outputBranch: updatedTask.outputBranch,
+            });
+          } else if (body.toStatus === 'failed') {
+            await notificationService.notifyTaskFailed(c.env as any, task.userId, {
+              projectId,
+              taskId,
+              taskTitle: task.title,
+              errorMessage: body.errorMessage,
+              sessionId,
+            });
+          }
+        })().catch((e) => { log.warn('task.notification_failed', { taskId, error: String(e) }); })
       );
     }
   }

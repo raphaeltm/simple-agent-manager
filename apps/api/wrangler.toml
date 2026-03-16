@@ -73,6 +73,11 @@ class_name = "AdminLogs"
 name = "TASK_RUNNER"
 class_name = "TaskRunner"
 
+# Durable Object for per-user notification storage and real-time delivery
+[[durable_objects.bindings]]
+name = "NOTIFICATION"
+class_name = "NotificationService"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ProjectData"]
@@ -88,6 +93,10 @@ new_classes = ["AdminLogs"]
 [[migrations]]
 tag = "v4"
 new_classes = ["TaskRunner"]
+
+[[migrations]]
+tag = "v5"
+new_sqlite_classes = ["NotificationService"]
 
 # Workers AI for speech-to-text transcription
 [ai]
