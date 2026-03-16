@@ -182,6 +182,44 @@ const formattedDate = date.toLocaleDateString('en-US', {
     border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   }
 
+  .post-body :global(table) {
+    width: 100%;
+    margin: 24px 0;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    display: block;
+    overflow-x: auto;
+  }
+
+  .post-body :global(thead) {
+    border-bottom: 2px solid var(--color-border);
+  }
+
+  .post-body :global(th) {
+    padding: 10px 16px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--color-fg-primary);
+    font-size: 0.8125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .post-body :global(td) {
+    padding: 10px 16px;
+    color: var(--color-fg-muted);
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+
+  .post-body :global(tbody tr:hover) {
+    background: var(--color-bg-surface);
+  }
+
+  .post-body :global(td strong) {
+    color: var(--color-fg-primary);
+  }
+
   .post-body :global(pre) {
     margin: 24px 0;
     padding: 20px;
