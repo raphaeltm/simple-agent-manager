@@ -263,7 +263,7 @@ describe('node-cleanup orphan detection (TDF-7)', () => {
 
   it('records orphaned workspaces in OBSERVABILITY_DATABASE', () => {
     expect(nodeCleanupSource).toContain("recoveryType: 'orphaned_workspace'");
-    expect(nodeCleanupSource).toContain('orphaned_workspace_detected');
+    expect(nodeCleanupSource).toContain('orphaned_workspace_stopping');
   });
 
   it('detects orphaned nodes (running with no workspaces, not warm)', () => {
@@ -292,7 +292,7 @@ describe('node-cleanup orphan detection (TDF-7)', () => {
   it('uses grace period to avoid flagging recently created resources', () => {
     // Both orphan queries filter by created_at/updated_at to avoid false positives
     const orphanSection = nodeCleanupSource.slice(
-      nodeCleanupSource.indexOf('// 3. Orphan detection:'),
+      nodeCleanupSource.indexOf('// 3. Orphan cleanup:'),
     );
     // Orphan workspace query uses gracePeriodMs cutoff on created_at
     expect(orphanSection).toContain('w.created_at < ?');
