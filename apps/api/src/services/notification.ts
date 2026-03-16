@@ -8,7 +8,7 @@
  */
 
 import type { CreateNotificationRequest } from '@simple-agent-manager/shared';
-import { NOTIFICATION_TYPE_URGENCY } from '@simple-agent-manager/shared';
+import { NOTIFICATION_TYPE_URGENCY, type HumanInputCategory } from '@simple-agent-manager/shared';
 import type { NotificationService } from '../durable-objects/notification';
 
 interface NotificationEnv {
@@ -155,6 +155,68 @@ export async function notifyPrCreated(
       prUrl: opts.prUrl,
       branchName: opts.branchName ?? null,
     },
+  });
+}
+
+/**
+ * Emit a "needs_input" notification when an agent requests human input.
+ */
+export async function notifyNeedsInput(
+  env: NotificationEnv,
+  userId: string,
+  opts: {
+    projectId: string;
+    taskId: string;
+    taskTitle: string;
+    context: string;
+    category?: HumanInputCategory | null;
+    options?: string[] | null;
+    sessionId?: string | null;
+  }
+): Promise<void> {
+  const categoryLabel = opts.category
+    ? opts.category.charAt(0).toUpperCase() + opts.category.slice(1).replace('_', ' ')
+    : 'Input';
+
+  await sendNotification(env, userId, {
+    type: 'needs_input',
+    urgency: NOTIFICATION_TYPE_URGENCY.needs_input ?? 'high',
+    title: `${categoryLabel} needed: ${truncate(opts.taskTitle, 70)}`,
+    body: truncate(opts.context, 500),
+    projectId: opts.projectId,
+    taskId: opts.taskId,
+    sessionId: opts.sessionId,
+    actionUrl: `/projects/${opts.projectId}?task=${opts.taskId}`,
+    metadata: {
+      category: opts.category ?? null,
+      options: opts.options ?? null,
+    },
+  });
+}
+
+/**
+ * Emit a "progress" notification when an agent reports a status update.
+ */
+export async function notifyProgress(
+  env: NotificationEnv,
+  userId: string,
+  opts: {
+    projectId: string;
+    taskId: string;
+    taskTitle: string;
+    message: string;
+    sessionId?: string | null;
+  }
+): Promise<void> {
+  await sendNotification(env, userId, {
+    type: 'progress',
+    urgency: NOTIFICATION_TYPE_URGENCY.progress ?? 'low',
+    title: `Progress: ${truncate(opts.taskTitle, 80)}`,
+    body: truncate(opts.message, 500),
+    projectId: opts.projectId,
+    taskId: opts.taskId,
+    sessionId: opts.sessionId,
+    actionUrl: `/projects/${opts.projectId}`,
   });
 }
 

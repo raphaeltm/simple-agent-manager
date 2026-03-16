@@ -22,12 +22,16 @@ import {
   DEFAULT_NOTIFICATION_AUTO_DELETE_AGE_MS,
   DEFAULT_NOTIFICATION_PAGE_SIZE,
   MAX_NOTIFICATION_PAGE_SIZE,
+  DEFAULT_NOTIFICATION_PROGRESS_BATCH_WINDOW_MS,
+  DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS,
 } from '@simple-agent-manager/shared';
 
 type Env = {
   MAX_NOTIFICATIONS_PER_USER?: string;
   NOTIFICATION_AUTO_DELETE_AGE_MS?: string;
   NOTIFICATION_PAGE_SIZE?: string;
+  NOTIFICATION_PROGRESS_BATCH_WINDOW_MS?: string;
+  NOTIFICATION_DEDUP_WINDOW_MS?: string;
 };
 
 function generateId(): string {
@@ -62,22 +66,7 @@ export class NotificationService extends DurableObject<Env> {
       request.projectId
     );
     if (!enabled) {
-      // Return a stub response without persisting
-      return {
-        id: 'suppressed',
-        projectId: request.projectId ?? null,
-        taskId: request.taskId ?? null,
-        sessionId: request.sessionId ?? null,
-        type: request.type,
-        urgency: request.urgency,
-        title: request.title,
-        body: request.body ?? null,
-        actionUrl: request.actionUrl ?? null,
-        metadata: request.metadata ?? null,
-        readAt: null,
-        dismissedAt: null,
-        createdAt: new Date().toISOString(),
-      };
+      return this.stubResponse(request, Date.now());
     }
 
     // Validate actionUrl is a safe relative path
@@ -85,8 +74,56 @@ export class NotificationService extends DurableObject<Env> {
       request = { ...request, actionUrl: null };
     }
 
-    const id = generateId();
     const now = Date.now();
+
+    // Suppression: batch progress notifications — update existing instead of creating new
+    if (request.type === 'progress' && request.taskId) {
+      const batchWindow = parseInt(this.env.NOTIFICATION_PROGRESS_BATCH_WINDOW_MS || '') || DEFAULT_NOTIFICATION_PROGRESS_BATCH_WINDOW_MS;
+      const cutoff = now - batchWindow;
+      const existing = this.sql
+        .exec(
+          `SELECT id FROM notifications WHERE user_id = ? AND type = 'progress' AND task_id = ? AND created_at > ? AND dismissed_at IS NULL ORDER BY created_at DESC LIMIT 1`,
+          userId,
+          request.taskId,
+          cutoff
+        )
+        .toArray();
+
+      if (existing.length > 0) {
+        const existingId = existing[0]!.id as string;
+        this.sql.exec(
+          `UPDATE notifications SET body = ?, title = ?, read_at = NULL WHERE id = ?`,
+          request.body ?? null,
+          request.title,
+          existingId
+        );
+        const updated = this.getNotificationById(existingId);
+        if (updated) {
+          this.broadcast({ type: 'notification.updated', notification: updated });
+          this.broadcast({ type: 'notification.unread_count', count: this.getUnreadCount(userId) });
+        }
+        return updated ?? this.stubResponse(request, now);
+      }
+    }
+
+    // Suppression: deduplicate task_complete notifications for the same task
+    if (request.type === 'task_complete' && request.taskId) {
+      const dedupWindow = parseInt(this.env.NOTIFICATION_DEDUP_WINDOW_MS || '') || DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS;
+      const cutoff = now - dedupWindow;
+      const existing = this.sql
+        .exec(
+          `SELECT id FROM notifications WHERE user_id = ? AND type = 'task_complete' AND task_id = ? AND created_at > ?`,
+          userId,
+          request.taskId,
+          cutoff
+        )
+        .toArray();
+      if (existing.length > 0) {
+        return this.stubResponse(request, now);
+      }
+    }
+
+    const id = generateId();
 
     this.sql.exec(
       `INSERT INTO notifications (id, user_id, project_id, task_id, session_id, type, urgency, title, body, action_url, metadata, created_at)
@@ -379,6 +416,24 @@ export class NotificationService extends DurableObject<Env> {
   // ---------------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------------
+
+  private stubResponse(request: CreateNotificationRequest, now: number): NotificationResponse {
+    return {
+      id: 'suppressed',
+      projectId: request.projectId ?? null,
+      taskId: request.taskId ?? null,
+      sessionId: request.sessionId ?? null,
+      type: request.type,
+      urgency: request.urgency,
+      title: request.title,
+      body: request.body ?? null,
+      actionUrl: request.actionUrl ?? null,
+      metadata: request.metadata ?? null,
+      readAt: null,
+      dismissedAt: null,
+      createdAt: new Date(now).toISOString(),
+    };
+  }
 
   private getNotificationById(id: string): NotificationResponse | null {
     const rows = this.sql

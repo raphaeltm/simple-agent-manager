@@ -415,3 +415,22 @@ export const NOTIFICATION_TYPE_URGENCY: Record<string, 'high' | 'medium' | 'low'
   session_ended: 'medium',
   pr_created: 'medium',
 };
+
+/** Batch window for progress notifications — only one per task within this window. Default: 5 minutes.
+ * Override via NOTIFICATION_PROGRESS_BATCH_WINDOW_MS env var. */
+export const DEFAULT_NOTIFICATION_PROGRESS_BATCH_WINDOW_MS = 5 * 60 * 1000;
+
+/** Minimum session duration before emitting session_ended notification. Default: 5 seconds.
+ * Override via NOTIFICATION_MIN_SESSION_DURATION_MS env var. */
+export const DEFAULT_NOTIFICATION_MIN_SESSION_DURATION_MS = 5_000;
+
+/** Deduplication window for task_complete notifications. Default: 60 seconds.
+ * Override via NOTIFICATION_DEDUP_WINDOW_MS env var. */
+export const DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS = 60_000;
+
+/** Maximum length for request_human_input context field */
+export const MAX_HUMAN_INPUT_CONTEXT_LENGTH = 4000;
+
+/** Valid categories for request_human_input MCP tool */
+export const HUMAN_INPUT_CATEGORIES = ['decision', 'clarification', 'approval', 'error_help'] as const;
+export type HumanInputCategory = (typeof HUMAN_INPUT_CATEGORIES)[number];

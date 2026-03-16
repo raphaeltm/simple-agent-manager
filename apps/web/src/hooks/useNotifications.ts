@@ -150,6 +150,14 @@ export function useNotifications(): UseNotificationsReturn {
                 setUnreadCount((prev) => prev + 1);
                 break;
 
+              case 'notification.updated':
+                setNotifications((prev) =>
+                  prev.map((n) =>
+                    n.id === msg.notification.id ? msg.notification : n
+                  )
+                );
+                break;
+
               case 'notification.read':
                 setNotifications((prev) =>
                   prev.map((n) =>

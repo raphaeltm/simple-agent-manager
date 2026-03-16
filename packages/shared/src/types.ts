@@ -1479,6 +1479,7 @@ export interface CreateNotificationRequest {
 /** WebSocket message types for real-time notification delivery */
 export type NotificationWsMessage =
   | { type: 'notification.new'; notification: NotificationResponse }
+  | { type: 'notification.updated'; notification: NotificationResponse }
   | { type: 'notification.read'; notificationId: string }
   | { type: 'notification.dismissed'; notificationId: string }
   | { type: 'notification.all_read' }

@@ -10,6 +10,9 @@
  * - update_task_status: Report incremental progress on task checklist items
  * - complete_task: Mark the task as completed with an optional summary
  *
+ * Agent-initiated notifications:
+ * - request_human_input: Request human input when blocked/need a decision (sends high-urgency notification)
+ *
  * Task dispatch (agent-to-agent):
  * - dispatch_task: Spawn a new task in the current project (with recursion depth + rate limiting)
  *
@@ -30,7 +33,8 @@ import type { SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Env } from '../index';
 import type { VMSize, VMLocation, WorkspaceProfile, CredentialProvider } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE, DEFAULT_VM_LOCATION, DEFAULT_WORKSPACE_PROFILE, MAX_HUMAN_INPUT_CONTEXT_LENGTH, HUMAN_INPUT_CATEGORIES } from '@simple-agent-manager/shared';
+import type { HumanInputCategory } from '@simple-agent-manager/shared';
 import * as schema from '../db/schema';
 import { validateMcpToken, type McpTokenData } from '../services/mcp-token';
 import * as projectDataService from '../services/project-data';
@@ -227,6 +231,34 @@ const MCP_TOOLS = [
         },
       },
       required: ['description'],
+      additionalProperties: false,
+    },
+  },
+  // ─── Agent-initiated notifications ──────────────────────────────────────
+  {
+    name: 'request_human_input',
+    description:
+      'Request human input when you are blocked, need a decision, need clarification, or need approval. ' +
+      'This sends a high-urgency notification to the user and returns immediately — you can continue working or end your turn.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        context: {
+          type: 'string',
+          description: 'Explain what you need from the human — be specific about the decision, question, or blocker.',
+        },
+        category: {
+          type: 'string',
+          description: 'Category of input needed.',
+          enum: ['decision', 'clarification', 'approval', 'error_help'],
+        },
+        options: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional list of choices for the human to pick from (e.g., ["Option A", "Option B"]).',
+        },
+      },
+      required: ['context'],
       additionalProperties: false,
     },
   },
@@ -560,7 +592,12 @@ async function handleUpdateTaskStatus(
 
   // Verify task exists, belongs to this project, and is in an active state
   const taskRows = await db
-    .select({ id: schema.tasks.id, status: schema.tasks.status })
+    .select({
+      id: schema.tasks.id,
+      status: schema.tasks.status,
+      userId: schema.tasks.userId,
+      title: schema.tasks.title,
+    })
     .from(schema.tasks)
     .where(
       and(
@@ -606,6 +643,23 @@ async function handleUpdateTaskStatus(
       taskId: tokenData.taskId,
       error: err instanceof Error ? err.message : String(err),
     });
+  }
+
+  // Emit progress notification (best-effort)
+  if (env.NOTIFICATION && task.userId) {
+    try {
+      await notificationService.notifyProgress(env as any, task.userId, {
+        projectId: tokenData.projectId,
+        taskId: tokenData.taskId,
+        taskTitle: task.title,
+        message: message.trim().slice(0, 500),
+      });
+    } catch (err) {
+      log.warn('mcp.update_task_status.notification_failed', {
+        taskId: tokenData.taskId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   log.info('mcp.update_task_status', {
@@ -694,6 +748,23 @@ async function handleCompleteTask(
       });
     }
 
+    // Emit session_ended notification for conversation-mode remap (agent finished turn)
+    if (env.NOTIFICATION && taskRow?.user_id) {
+      try {
+        await notificationService.notifySessionEnded(env as any, taskRow.user_id, {
+          projectId: tokenData.projectId,
+          sessionId: tokenData.taskId, // use taskId as session context
+          taskId: tokenData.taskId,
+          taskTitle: taskRow.title,
+        });
+      } catch (err) {
+        log.warn('mcp.complete_task.conversation_notification_failed', {
+          taskId: tokenData.taskId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     return jsonRpcSuccess(requestId, {
       content: [{ type: 'text', text: 'Acknowledged. Conversation remains open for follow-up.' }],
     });
@@ -779,6 +850,92 @@ async function handleCompleteTask(
 
   return jsonRpcSuccess(requestId, {
     content: [{ type: 'text', text: 'Task marked as completed.' }],
+  });
+}
+
+// ─── Agent-initiated notification handlers ──────────────────────────────────
+
+async function handleRequestHumanInput(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const context = params.context;
+  if (typeof context !== 'string' || !context.trim()) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'context is required and must be a non-empty string');
+  }
+
+  if (context.length > MAX_HUMAN_INPUT_CONTEXT_LENGTH) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `context exceeds maximum length of ${MAX_HUMAN_INPUT_CONTEXT_LENGTH} characters`,
+    );
+  }
+
+  // Validate category if provided
+  let category: HumanInputCategory | null = null;
+  if (params.category !== undefined) {
+    if (typeof params.category !== 'string' || !(HUMAN_INPUT_CATEGORIES as readonly string[]).includes(params.category)) {
+      return jsonRpcError(requestId, INVALID_PARAMS, `category must be one of: ${HUMAN_INPUT_CATEGORIES.join(', ')}`);
+    }
+    category = params.category as HumanInputCategory;
+  }
+
+  // Validate options if provided
+  let options: string[] | null = null;
+  if (params.options !== undefined) {
+    if (!Array.isArray(params.options)) {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'options must be an array of strings');
+    }
+    options = params.options
+      .filter((o): o is string => typeof o === 'string')
+      .slice(0, 10)
+      .map((o) => o.slice(0, 200));
+    if (options.length === 0) options = null;
+  }
+
+  // Fetch task for user_id and title
+  const taskRow = await env.DATABASE.prepare(
+    `SELECT user_id, title FROM tasks WHERE id = ? AND project_id = ?`,
+  ).bind(tokenData.taskId, tokenData.projectId).first<{
+    user_id: string;
+    title: string;
+  }>();
+
+  if (!taskRow) {
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Task not found');
+  }
+
+  // Emit high-urgency notification (best-effort)
+  if (env.NOTIFICATION && taskRow.user_id) {
+    try {
+      await notificationService.notifyNeedsInput(env as any, taskRow.user_id, {
+        projectId: tokenData.projectId,
+        taskId: tokenData.taskId,
+        taskTitle: taskRow.title,
+        context: context.trim(),
+        category,
+        options,
+      });
+    } catch (err) {
+      log.warn('mcp.request_human_input.notification_failed', {
+        taskId: tokenData.taskId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  log.info('mcp.request_human_input', {
+    taskId: tokenData.taskId,
+    projectId: tokenData.projectId,
+    category,
+    hasOptions: options !== null,
+  });
+
+  return jsonRpcSuccess(requestId, {
+    content: [{ type: 'text', text: 'Human input request sent. The user has been notified. You may continue working or end your turn.' }],
   });
 }
 
@@ -1645,6 +1802,8 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleUpdateTaskStatus(requestId, toolArgs, tokenData, c.env));
         case 'complete_task':
           return c.json(await handleCompleteTask(requestId, toolArgs, tokenData, c.env));
+        case 'request_human_input':
+          return c.json(await handleRequestHumanInput(requestId, toolArgs, tokenData, c.env));
         case 'dispatch_task':
           return c.json(await handleDispatchTask(requestId, toolArgs, tokenData, c.env));
         case 'list_tasks':
