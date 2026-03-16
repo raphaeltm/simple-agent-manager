@@ -413,7 +413,8 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                     href={p.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-fg-default hover:bg-surface-alt transition-colors"
+                    aria-label={`Open port ${p.port} (${p.label})`}
+                    className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-fg-primary hover:bg-surface-hover transition-colors"
                     style={{ fontSize: 'var(--sam-type-caption-size)' }}
                   >
                     <Globe className="w-3.5 h-3.5 text-fg-muted flex-shrink-0" />
