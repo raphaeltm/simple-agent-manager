@@ -1073,6 +1073,78 @@ describe('MCP Routes', () => {
       expect(body.error.code).toBe(-32603); // INTERNAL_ERROR
       expect(body.error.message).toContain('Failed to start task runner');
     });
+
+    it('should reject dispatching from a cancelled task', async () => {
+      mockD1._stmt.raw
+        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'cancelled']]);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Build something' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain("'cancelled' status");
+    });
+
+    it('should clamp priority to max allowed value', async () => {
+      setupHappyPathMocks();
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'High priority task', priority: 99999 },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      // Should succeed (priority clamped, not rejected)
+      expect(body.result).toBeDefined();
+      expect(body.result.content[0].text).toContain('dispatched');
+    });
+
+    it('should return error when project is not found', async () => {
+      // All checks pass but project query returns empty
+      mockD1._stmt.all.mockResolvedValue({ results: [] }); // no project
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+
+      mockD1._stmt.raw
+        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
+        .mockResolvedValueOnce([[0]])   // child count
+        .mockResolvedValueOnce([[0]])   // active dispatched count
+        .mockResolvedValueOnce([['cred-1']]); // credential exists
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Build feature X' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Project not found');
+    });
+
+    it('should verify TaskRunner DO receives correct config', async () => {
+      setupHappyPathMocks();
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Build notification system', vmSize: 'large' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.result).toBeDefined();
+
+      // Verify TaskRunner DO was called with correct arguments
+      expect(mockTaskRunnerStub.start).toHaveBeenCalledTimes(1);
+      const startInput = mockTaskRunnerStub.start.mock.calls[0][0];
+      expect(startInput.projectId).toBe('proj-456');
+      expect(startInput.userId).toBe('user-789');
+      expect(startInput.config.vmSize).toBe('large');
+    });
   });
 
   // ─── Token lifecycle across task completion ──────────────────────────
