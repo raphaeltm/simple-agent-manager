@@ -140,7 +140,7 @@ export function NotificationCenter() {
           ref={panelRef}
           role="dialog"
           aria-label="Notifications"
-          className="absolute right-0 top-full mt-2 w-[calc(100vw-2rem)] sm:w-[380px] max-h-[520px] bg-surface border border-border-default rounded-lg shadow-lg flex flex-col z-50 overflow-hidden"
+          className="fixed inset-x-4 top-14 sm:absolute sm:inset-x-auto sm:left-0 sm:top-full sm:mt-2 sm:w-[380px] max-h-[calc(100vh-5rem)] sm:max-h-[520px] bg-surface border border-border-default rounded-lg shadow-lg flex flex-col z-50 overflow-hidden"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
