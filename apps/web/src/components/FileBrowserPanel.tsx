@@ -204,7 +204,7 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
 
       {/* Content */}
       <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? '4px 0' : '4px 0' }}>
-        {loading && (
+        {loading && entries.length === 0 && (
           <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
             <Spinner size="md" />
           </div>
@@ -225,7 +225,7 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
           </div>
         )}
 
-        {!loading && !error && entries.length === 0 && (
+        {!error && entries.length === 0 && !loading && (
           <div
             style={{
               display: 'flex',
@@ -239,8 +239,8 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
           </div>
         )}
 
-        {!loading && !error && entries.length > 0 && (
-          <div>
+        {entries.length > 0 && (
+          <div style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 0.15s' }}>
             {entries.map((entry) => (
               <FileRow
                 key={entry.name}

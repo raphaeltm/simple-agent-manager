@@ -226,7 +226,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
 
       {/* Content */}
       <div className="flex-1 overflow-auto">
-        {loading && (
+        {loading && diff === '' && (
           <div className="flex justify-center p-8">
             <Spinner size="md" />
           </div>
@@ -241,7 +241,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
           </div>
         )}
 
-        {!loading && !error && diff === '' && (
+        {!error && diff === '' && !loading && (
           <div
             className="flex justify-center p-12 text-fg-muted"
             style={{ fontSize: 'var(--sam-type-secondary-size)' }}
@@ -250,23 +250,28 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
           </div>
         )}
 
-        {!loading && !error && diff !== '' && viewMode === 'diff' && <DiffRenderer diff={diff} />}
+        {!error && diff !== '' && viewMode === 'diff' && (
+          <div style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 0.15s' }}>
+            <DiffRenderer diff={diff} />
+          </div>
+        )}
 
-        {!loading &&
-          !error &&
+        {!error &&
           viewMode === 'full' &&
-          (fullLoading ? (
+          (fullLoading && fullContent === null ? (
             <div className="flex justify-center p-8">
               <Spinner size="md" />
             </div>
           ) : fullContent !== null ? (
-            markdownFile && markdownMode === 'rendered' ? (
-              <RenderedMarkdown content={fullContent} />
-            ) : (
-              <FullFileRenderer content={fullContent} addedLines={addedLines} />
-            )
+            <div style={{ opacity: fullLoading ? 0.6 : 1, transition: 'opacity 0.15s' }}>
+              {markdownFile && markdownMode === 'rendered' ? (
+                <RenderedMarkdown content={fullContent} />
+              ) : (
+                <FullFileRenderer content={fullContent} addedLines={addedLines} />
+              )}
+            </div>
           ) : (
-            <DiffRenderer diff={diff} />
+            diff !== '' && <DiffRenderer diff={diff} />
           ))}
       </div>
     </div>

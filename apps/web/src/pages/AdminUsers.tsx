@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Button, Card, Spinner, StatusBadge, Body } from '@simple-agent-manager/ui';
 import { useAuth } from '../components/AuthProvider';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -12,25 +12,34 @@ export function AdminUsers() {
   const isMobile = useIsMobile();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<StatusFilter>('all');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const hasLoadedRef = useRef(false);
 
   const fetchUsers = useCallback(async () => {
+    if (hasLoadedRef.current) {
+      setIsRefreshing(true);
+    }
     try {
       setError(null);
       const statusParam = filter === 'all' ? undefined : filter;
       const res = await listAdminUsers(statusParam);
       setUsers(res.users);
+      hasLoadedRef.current = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load users');
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   }, [filter]);
 
   useEffect(() => {
-    setLoading(true);
+    if (!hasLoadedRef.current) {
+      setLoading(true);
+    }
     fetchUsers();
   }, [fetchUsers]);
 
@@ -76,7 +85,7 @@ export function AdminUsers() {
       )}
 
       {/* Filter tabs */}
-      <div className="flex gap-2 mb-4">
+      <div className="flex gap-2 mb-4 items-center">
         {filters.map((f) => (
           <button
             key={f.value}
@@ -95,6 +104,7 @@ export function AdminUsers() {
             )}
           </button>
         ))}
+        {isRefreshing && <Spinner size="sm" />}
       </div>
 
       {loading && users.length === 0 ? (
