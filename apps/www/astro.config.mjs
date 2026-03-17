@@ -4,6 +4,9 @@ import starlight from '@astrojs/starlight';
 
 export default defineConfig({
   site: process.env.SITE_URL || 'https://www.simple-agent-manager.org',
+  server: {
+    allowedHosts: true,
+  },
   integrations: [
     starlight({
       title: 'SAM Docs',
