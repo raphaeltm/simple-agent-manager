@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Self-hosted cloud environments for AI coding agents.</strong>
+  <strong>Describe what you want built. SAM provisions a cloud workspace, runs an AI coding agent, and streams the results back to you.</strong>
 </p>
 
 <p align="center">
@@ -19,28 +19,44 @@
 
 ---
 
-SAM gives you on-demand cloud workspaces with [Claude Code](https://www.anthropic.com/claude-code) pre-installed. Point it at a GitHub repo, get a fully configured dev environment in your browser — running on your own infrastructure at a fraction of the cost of managed alternatives.
+## What You Get
 
-**Self-hosted on Cloudflare (free tier) + Hetzner Cloud VMs. Deploy in under 15 minutes.**
+**Project chat that executes code.** Link a GitHub repo, describe a task in natural language, and SAM handles the rest — provisioning a VM, cloning your repo into a devcontainer, starting [Claude Code](https://www.anthropic.com/claude-code), and streaming output back to the chat. When the agent finishes, it pushes to a branch and opens a PR.
 
-## Why SAM?
+**Chat history that outlives workspaces.** Conversations persist at the project level. Stop a workspace, spin up a new one weeks later, and your full history is still there.
 
-|                       | GitHub Codespaces    | SAM                                        |
-| --------------------- | -------------------- | ------------------------------------------ |
-| **Cost**              | $0.18–0.36/hr        | ~$0.007–0.03/hr (Hetzner VMs)              |
-| **AI agent**          | Manual setup         | Claude Code pre-installed                  |
-| **Control plane**     | Managed (vendor)     | Self-hosted (Cloudflare free tier)         |
-| **Lifecycle control** | Auto-timeout         | Explicit stop / restart / delete           |
-| **Private repos**     | GitHub-native        | GitHub App integration                     |
+**Your infrastructure, your costs.** Self-hosted on Cloudflare (free tier) + Hetzner Cloud VMs. A workspace costs ~$0.007–0.03/hr compared to $0.18–0.36/hr on GitHub Codespaces.
 
-## Features
+## How It Works
 
-- **Instant workspaces** — create a cloud dev environment from any GitHub repo in minutes, with Claude Code ready to go
-- **Chat-driven task execution** — describe what you want built, SAM provisions infrastructure and runs an AI agent autonomously
-- **Project-first organization** — chat history, tasks, and activity persist beyond workspace lifecycle
-- **Multi-workspace nodes** — run multiple workspaces on a single VM to maximize utilization
-- **Bring-your-own-cloud** — users provide their own Hetzner API tokens; no shared cloud credentials
-- **Web terminal + PWA** — browser-based terminal with session persistence, installable as a mobile app
+```
+You: "Add rate limiting to the /api/upload endpoint"
+         ↓
+    Project Chat (app.{domain})
+         ↓
+    Cloudflare Worker API
+         ↓
+    TaskRunner — alarm-driven orchestrator that:
+      1. Claims a warm node or provisions a new Hetzner VM
+      2. Creates a Docker workspace with your repo
+      3. Starts Claude Code with your task description
+      4. Streams agent output back to project chat
+         ↓
+    Agent pushes branch + opens PR when done
+```
+
+### Architecture
+
+| Layer | What | How |
+|-------|------|-----|
+| **Control plane** | API, auth, orchestration | Cloudflare Workers + D1 + KV + R2 |
+| **Real-time data** | Chat messages, activity, sessions | Durable Objects with embedded SQLite (per project) |
+| **Compute** | Workspaces running Claude Code | Hetzner VMs with a Go agent managing Docker containers, WebSocket terminal, and auth |
+| **Warm pool** | Fast workspace starts | Completed VMs stay warm for 30 min for instant reuse |
+
+The control plane is serverless — no servers to manage, no databases to back up. Compute scales to zero when you're not using it.
+
+For the full architecture with Mermaid diagrams, see the **[Architecture Walkthrough](docs/architecture/walkthrough.md)**.
 
 ## Quick Deploy
 
@@ -86,26 +102,7 @@ SAM deploys automatically via GitHub Actions. Fork, configure, push.
 
 Your instance is live at `app.{your-domain}`. Users sign in with GitHub and provide their own Hetzner API token to create workspaces.
 
-For detailed setup instructions, troubleshooting, and manual deployment options, see the **[Self-Hosting Guide](docs/guides/self-hosting.md)**.
-
-## How It Works
-
-```
-Browser (app.{domain})
-    ↕ HTTPS
-Cloudflare Worker (API + reverse proxy)
-    ├── D1 (database)
-    ├── KV (tokens + boot logs)
-    ├── R2 (binaries)
-    ↕ HTTP proxy
-Hetzner VM (node)
-    ├── VM Agent (Go) — terminal multiplexing, WebSocket, JWT auth
-    └── Workspaces (Docker containers + Claude Code)
-```
-
-The control plane runs entirely on Cloudflare's edge network (Workers, D1, KV, R2, Pages). Compute happens on Hetzner Cloud VMs provisioned on demand. Each push to `main` triggers an automated deployment via Pulumi.
-
-For the full architecture with Mermaid diagrams, see the **[Architecture Walkthrough](docs/architecture/walkthrough.md)**.
+For detailed setup, troubleshooting, and manual deployment: **[Self-Hosting Guide](docs/guides/self-hosting.md)**.
 
 ## Development
 
@@ -123,18 +120,6 @@ pnpm build          # Build all packages
 
 Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-## Related Projects
-
-- [Coder](https://github.com/coder/coder) — Self-hosted cloud development environments
-- [Daytona](https://github.com/daytonaio/daytona) — Open-source dev environment manager
-- [DevPod](https://github.com/loft-sh/devpod) — Client-only devcontainer management
-
 ## License
 
 [MIT](LICENSE)
-
----
-
-<p align="center">
-  Built with <a href="https://hono.dev/">Hono</a> on <a href="https://cloudflare.com/">Cloudflare</a>
-</p>
