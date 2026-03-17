@@ -246,7 +246,7 @@ To be recognized as a valid OIDC identity provider by cloud platforms, SAM must 
 
 #### 2. JWKS Endpoint — `GET /.well-known/jwks.json`
 
-SAM already serves this endpoint (`apps/api/src/services/jwt.ts`). It publishes the RS256 public key used to sign all JWTs.
+SAM already exposes this endpoint (route registered in `apps/api/src/index.ts`, backed by `getJWKS()` in `apps/api/src/services/jwt.ts`). It publishes the RS256 public key used to sign all JWTs.
 
 #### 3. Token Issuance — `POST /api/workspaces/:id/identity-token`
 
@@ -302,9 +302,12 @@ This is the simpler path and works with Defang today:
 4. Defang CLI picks them up from the environment (standard AWS SDK credential chain)
 
 ```bash
-# Helper script: /usr/local/bin/sam-cloud-auth
+# Helper script: /usr/local/bin/sam-cloud-auth (pseudocode — proposed flow)
 #!/bin/bash
-SAM_TOKEN=$(curl -s -H "Authorization: Bearer $WORKSPACE_CALLBACK_TOKEN" \
+# NOTE: $SAM_WORKSPACE_TOKEN is a proposed new token type that would be
+# injected into workspaces. It does not exist today. The identity-token
+# endpoint is also proposed (see "What Needs to Be Built").
+SAM_TOKEN=$(curl -s -H "Authorization: Bearer $SAM_WORKSPACE_TOKEN" \
   https://api.$BASE_DOMAIN/api/workspaces/$WORKSPACE_ID/identity-token?audience=aws:deploy)
 
 eval $(aws sts assume-role-with-web-identity \
@@ -392,12 +395,12 @@ However, SPIFFE/SPIRE adds significant operational complexity. For SAM's use cas
 | RS256 key pair (JWT_PRIVATE_KEY, JWT_PUBLIC_KEY) | Exists | `apps/api/src/services/jwt.ts` |
 | JWT signing with `jose` library | Exists | `apps/api/src/services/jwt.ts` |
 | Monthly rotating key IDs (`key-YYYY-MM`) | Exists | `apps/api/src/services/jwt.ts` |
-| JWKS endpoint (`/.well-known/jwks.json`) | Exists | `apps/api/src/services/jwt.ts` |
+| JWKS endpoint (`/.well-known/jwks.json`) | Exists | `apps/api/src/index.ts` (route) + `apps/api/src/services/jwt.ts:getJWKS()` |
 | Workspace identity (ID, projectId, userId, repository, branch) | Exists | `apps/api/src/db/schema.ts` |
 | Authenticated API endpoints with ownership validation | Exists | `apps/api/src/middleware/auth.ts` |
-| Callback token (workspace-scoped JWT) | Exists | `apps/api/src/services/jwt.ts:signCallbackToken()` |
+| Callback token (VM agent auth JWT for node heartbeats) | Exists | `apps/api/src/services/jwt.ts:signCallbackToken()` |
 | Issuer derived from `BASE_DOMAIN` | Exists | `apps/api/src/services/jwt.ts` |
-| BYOC credential management | Exists | `apps/api/src/services/credentials.ts` |
+| BYOC credential management | Exists | `apps/api/src/services/provider-credentials.ts` |
 
 **Bottom line:** SAM has ~80% of the OIDC provider infrastructure already. The JWKS endpoint and RS256 signing are the hardest parts, and they're done.
 
