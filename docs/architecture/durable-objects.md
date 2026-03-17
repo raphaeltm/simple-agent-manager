@@ -89,7 +89,7 @@ All DO implementations live in `apps/api/src/durable-objects/`. Each has a corre
 | Table | Purpose |
 |-------|---------|
 | `chat_sessions` | Session metadata, lifecycle status, message counts |
-| `chat_messages` | Append-only message log (role, content, tool metadata) |
+| `chat_messages` | Append-only streaming token log — each row is one streaming chunk from Claude Code, not a logical message. Consecutive same-role tokens (assistant, tool, thinking) are grouped into logical messages at the API and UI layers. The `sequence` field orders tokens within the same millisecond. |
 | `activity_events` | Audit trail (workspace created, session stopped, etc.) |
 | `task_status_events` | Task lifecycle transitions with actor tracking |
 | `acp_sessions` | ACP session state machine with fork lineage |

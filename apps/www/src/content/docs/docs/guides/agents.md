@@ -136,8 +136,8 @@ Running agents have access to project-aware MCP tools:
 | `get_task_details` | Read task details |
 | `search_tasks` | Search by keyword |
 | `list_sessions` | View chat sessions |
-| `get_session_messages` | Read conversation history |
-| `search_messages` | Search messages |
+| `get_session_messages` | Read conversation history (consecutive streaming tokens are concatenated into logical messages) |
+| `search_messages` | Search messages by keyword (searches individual tokens — terms spanning token boundaries may not match) |
 | `update_task_status` | Report progress |
 | `complete_task` | Mark task as done |
 | `request_human_input` | Ask for user decision (blocks until answered) |

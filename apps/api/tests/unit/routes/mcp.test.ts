@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Hono } from 'hono';
+import { groupTokensIntoMessages } from '../../../src/routes/mcp';
 
 // Mock KV namespace
 const mockKV = {
@@ -630,6 +631,44 @@ describe('MCP Routes', () => {
       expect(data.sessionId).toBe('sess-1');
       expect(data.topic).toBe('Fix bug');
       expect(data.hasMore).toBe(false);
+    });
+
+    it('should concatenate consecutive assistant tokens into logical messages', async () => {
+      mockDoStub.getSession.mockResolvedValue({
+        id: 'sess-1',
+        topic: 'Test',
+        taskId: null,
+      });
+      mockDoStub.getMessages.mockResolvedValue({
+        messages: [
+          { id: 'tok-1', role: 'user', content: 'Fix the bug', createdAt: 1710000000000 },
+          { id: 'tok-2', role: 'assistant', content: 'Let me', createdAt: 1710000001000 },
+          { id: 'tok-3', role: 'assistant', content: ' look at', createdAt: 1710000001001 },
+          { id: 'tok-4', role: 'assistant', content: ' that file.', createdAt: 1710000001002 },
+          { id: 'tok-5', role: 'user', content: 'Thanks', createdAt: 1710000002000 },
+        ],
+        hasMore: false,
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_session_messages',
+        arguments: { sessionId: 'sess-1' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.messages).toHaveLength(3);
+      expect(data.messages[0]).toEqual({
+        id: 'tok-1', role: 'user', content: 'Fix the bug', createdAt: 1710000000000,
+      });
+      expect(data.messages[1]).toEqual({
+        id: 'tok-2', role: 'assistant', content: 'Let me look at that file.', createdAt: 1710000001000,
+      });
+      expect(data.messages[2]).toEqual({
+        id: 'tok-5', role: 'user', content: 'Thanks', createdAt: 1710000002000,
+      });
+      expect(data.messageCount).toBe(3);
     });
 
     it('should return error for non-existent session', async () => {
@@ -1904,5 +1943,122 @@ describe('MCP Routes', () => {
         expect.objectContaining({ type: 'session_ended' }),
       );
     });
+  });
+});
+
+// ─── groupTokensIntoMessages (pure function) ──────────────────────────
+
+describe('groupTokensIntoMessages', () => {
+  it('should concatenate consecutive assistant tokens', () => {
+    const tokens = [
+      { id: 'tok-1', role: 'assistant', content: 'Let me', createdAt: 1000 },
+      { id: 'tok-2', role: 'assistant', content: ' look at', createdAt: 1001 },
+      { id: 'tok-3', role: 'assistant', content: ' that file.', createdAt: 1002 },
+    ];
+    const result = groupTokensIntoMessages(tokens);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('tok-1');
+    expect(result[0].content).toBe('Let me look at that file.');
+    expect(result[0].createdAt).toBe(1000);
+  });
+
+  it('should concatenate consecutive tool tokens', () => {
+    const tokens = [
+      { id: 'tok-1', role: 'tool', content: 'Reading file...', createdAt: 1000 },
+      { id: 'tok-2', role: 'tool', content: ' Done.', createdAt: 1001 },
+    ];
+    const result = groupTokensIntoMessages(tokens);
+    expect(result).toHaveLength(1);
+    expect(result[0].content).toBe('Reading file... Done.');
+  });
+
+  it('should concatenate consecutive thinking tokens', () => {
+    const tokens = [
+      { id: 'tok-1', role: 'thinking', content: 'I need to', createdAt: 1000 },
+      { id: 'tok-2', role: 'thinking', content: ' consider this.', createdAt: 1001 },
+    ];
+    const result = groupTokensIntoMessages(tokens);
+    expect(result).toHaveLength(1);
+    expect(result[0].content).toBe('I need to consider this.');
+  });
+
+  it('should NOT concatenate consecutive user messages', () => {
+    const tokens = [
+      { id: 'tok-1', role: 'user', content: 'First question', createdAt: 1000 },
+      { id: 'tok-2', role: 'user', content: 'Second question', createdAt: 2000 },
+    ];
+    const result = groupTokensIntoMessages(tokens);
+    expect(result).toHaveLength(2);
+  });
+
+  it('should NOT concatenate consecutive system messages', () => {
+    const tokens = [
+      { id: 'tok-1', role: 'system', content: 'System A', createdAt: 1000 },
+      { id: 'tok-2', role: 'system', content: 'System B', createdAt: 2000 },
+    ];
+    const result = groupTokensIntoMessages(tokens);
+    expect(result).toHaveLength(2);
+  });
+
+  it('should NOT concatenate consecutive plan messages', () => {
+    const tokens = [
+      { id: 'tok-1', role: 'plan', content: 'Plan A', createdAt: 1000 },
+      { id: 'tok-2', role: 'plan', content: 'Plan B', createdAt: 2000 },
+    ];
+    const result = groupTokensIntoMessages(tokens);
+    expect(result).toHaveLength(2);
+  });
+
+  it('should separate different roles', () => {
+    const tokens = [
+      { id: 'tok-1', role: 'user', content: 'Fix the bug', createdAt: 1000 },
+      { id: 'tok-2', role: 'assistant', content: 'I will', createdAt: 2000 },
+      { id: 'tok-3', role: 'assistant', content: ' fix it now.', createdAt: 2001 },
+    ];
+    const result = groupTokensIntoMessages(tokens);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual({ id: 'tok-1', role: 'user', content: 'Fix the bug', createdAt: 1000 });
+    expect(result[1]).toEqual({ id: 'tok-2', role: 'assistant', content: 'I will fix it now.', createdAt: 2000 });
+  });
+
+  it('should handle mixed sequence correctly', () => {
+    const tokens = [
+      { id: 'tok-1', role: 'user', content: 'Hello', createdAt: 1000 },
+      { id: 'tok-2', role: 'assistant', content: 'Hi', createdAt: 2000 },
+      { id: 'tok-3', role: 'assistant', content: ' there!', createdAt: 2001 },
+      { id: 'tok-4', role: 'assistant', content: ' How can I help?', createdAt: 2002 },
+      { id: 'tok-5', role: 'tool', content: 'Reading...', createdAt: 3000 },
+      { id: 'tok-6', role: 'tool', content: ' Done', createdAt: 3001 },
+      { id: 'tok-7', role: 'user', content: 'Thanks', createdAt: 4000 },
+    ];
+    const result = groupTokensIntoMessages(tokens);
+    expect(result).toHaveLength(4);
+    expect(result[0].content).toBe('Hello');
+    expect(result[1].content).toBe('Hi there! How can I help?');
+    expect(result[2].content).toBe('Reading... Done');
+    expect(result[3].content).toBe('Thanks');
+  });
+
+  it('should return empty array for empty input', () => {
+    expect(groupTokensIntoMessages([])).toEqual([]);
+  });
+
+  it('should pass through single messages unchanged', () => {
+    const tokens = [
+      { id: 'tok-1', role: 'user', content: 'Hello', createdAt: 1000 },
+    ];
+    const result = groupTokensIntoMessages(tokens);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual(tokens[0]);
+  });
+
+  it('should not mutate the input array', () => {
+    const tokens = [
+      { id: 'tok-1', role: 'assistant', content: 'A', createdAt: 1000 },
+      { id: 'tok-2', role: 'assistant', content: 'B', createdAt: 1001 },
+    ];
+    const originalContent = tokens[0].content;
+    groupTokensIntoMessages(tokens);
+    expect(tokens[0].content).toBe(originalContent);
   });
 });

@@ -357,7 +357,7 @@ const MCP_TOOLS = [
   {
     name: 'get_session_messages',
     description:
-      'Read messages from a specific chat session. Returns messages in chronological order. By default only returns user and assistant messages (skips tool calls and system messages).',
+      'Read messages from a specific chat session. Returns logical messages in chronological order (consecutive streaming tokens from the same role are concatenated into single messages). By default only returns user and assistant messages (skips tool calls and system messages).',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -382,7 +382,7 @@ const MCP_TOOLS = [
   {
     name: 'search_messages',
     description:
-      'Search messages across all chat sessions in your project by keyword. Returns matching message snippets with session context. Useful for finding past discussions about specific topics, decisions, or code.',
+      'Search messages across all chat sessions in your project by keyword. Returns matching message snippets with session context. Useful for finding past discussions about specific topics, decisions, or code. Note: searches individual streaming tokens stored in the database — search terms that span token boundaries may not match.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -1646,6 +1646,37 @@ async function handleListSessions(
   });
 }
 
+// Roles whose consecutive tokens should be concatenated into a single logical message.
+// Mirrors the frontend groupMessages() in ProjectMessageView.tsx.
+const GROUPABLE_ROLES = new Set(['assistant', 'tool', 'thinking']);
+
+interface TokenRow {
+  id: string;
+  role: string;
+  content: string;
+  createdAt: number;
+}
+
+/**
+ * Groups consecutive same-role streaming tokens into logical messages.
+ * Each row in chat_messages is an individual streaming chunk ("token").
+ * This function concatenates consecutive tokens with the same groupable role
+ * (assistant, tool, thinking) into a single message, using the first token's
+ * id and createdAt. Non-groupable roles (user, system, plan) pass through as-is.
+ */
+export function groupTokensIntoMessages(tokens: TokenRow[]): TokenRow[] {
+  const grouped: TokenRow[] = [];
+  for (const token of tokens) {
+    const last = grouped[grouped.length - 1];
+    if (last && last.role === token.role && GROUPABLE_ROLES.has(token.role)) {
+      last.content += token.content;
+    } else {
+      grouped.push({ ...token });
+    }
+  }
+  return grouped;
+}
+
 async function handleGetSessionMessages(
   requestId: string | number | null,
   params: Record<string, unknown>,
@@ -1685,12 +1716,15 @@ async function handleGetSessionMessages(
     roles,
   );
 
-  const result = messages.map((m: Record<string, unknown>) => ({
-    id: m.id,
-    role: m.role,
-    content: m.content,
-    createdAt: m.createdAt,
+  // Each row in chat_messages is a streaming token (chunk). Group consecutive
+  // same-role tokens into logical messages before returning to agents.
+  const tokens = messages.map((m: Record<string, unknown>) => ({
+    id: m.id as string,
+    role: m.role as string,
+    content: m.content as string,
+    createdAt: m.createdAt as number,
   }));
+  const result = groupTokensIntoMessages(tokens);
 
   return jsonRpcSuccess(requestId, {
     content: [{
