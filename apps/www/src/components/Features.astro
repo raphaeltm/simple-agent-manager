@@ -3,7 +3,7 @@ const features = [
   {
     icon: 'agents',
     title: 'Multi-Agent Orchestration',
-    description: 'Assign tasks to Claude Code, OpenAI Codex, or Gemini CLI — running in parallel across isolated workspaces. Warm node pooling means sequential tasks start in seconds. Bring your own API keys, stored encrypted.',
+    description: 'Assign tasks to Claude Code, OpenAI Codex, Gemini CLI, or Mistral Vibe — running in parallel across isolated workspaces. Warm node pooling means sequential tasks start in seconds. Bring your own API keys, stored encrypted.',
   },
   {
     icon: 'eye',
@@ -29,6 +29,51 @@ const features = [
     icon: 'code',
     title: 'Open Source & Self-Hostable',
     description: 'MIT licensed. Self-host the control plane on Cloudflare\'s free tier. No vendor lock-in to any cloud provider or AI model.',
+  },
+  {
+    icon: 'chat',
+    title: 'Chat-Driven Tasks',
+    description: 'Describe what you need in natural language. SAM provisions infrastructure and runs the agent for you — no manual workspace setup required.',
+  },
+  {
+    icon: 'bell',
+    title: 'Real-Time Notifications',
+    description: 'Get alerted when agents need input, complete tasks, or hit blockers. Grouped by project with smart batching and deduplication.',
+  },
+  {
+    icon: 'mic',
+    title: 'Voice Input & TTS',
+    description: 'Speak your tasks instead of typing. Listen to agent responses with text-to-speech playback.',
+  },
+  {
+    icon: 'fork',
+    title: 'Conversation Forking',
+    description: 'Branch off any completed session with AI-generated context summaries to continue where you left off.',
+  },
+  {
+    icon: 'globe',
+    title: 'Port Exposure',
+    description: 'Dev servers running in workspaces are automatically detected and accessible via unique subdomains — no port forwarding needed.',
+  },
+  {
+    icon: 'command',
+    title: 'Global Command Palette',
+    description: 'Jump to any project, workspace, or action instantly with Cmd+K. Fast keyboard-driven navigation across the entire platform.',
+  },
+  {
+    icon: 'zap',
+    title: 'Warm Node Pooling',
+    description: 'Recently used VMs stay warm for 30 minutes so your next task starts in seconds, not minutes. Three-layer defense against orphans.',
+  },
+  {
+    icon: 'sparkle',
+    title: 'AI Task Titles',
+    description: 'Task titles are generated automatically from your message using on-device AI. No manual naming needed.',
+  },
+  {
+    icon: 'pause',
+    title: 'Session Suspend & Resume',
+    description: 'Pause agent sessions and pick them up later without losing context or progress.',
   },
 ];
 
@@ -57,6 +102,46 @@ const iconPaths: Record<string, string[]> = {
   code: [
     'M16 18l6-6-6-6',
     'M8 6l-6 6 6 6',
+  ],
+  chat: [
+    'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+  ],
+  bell: [
+    'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9',
+    'M13.73 21a2 2 0 0 1-3.46 0',
+  ],
+  mic: [
+    'M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z',
+    'M19 10v2a7 7 0 0 1-14 0v-2',
+    'M12 19v4',
+    'M8 23h8',
+  ],
+  fork: [
+    'M18 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+    'M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+    'M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+    'M6 9v12',
+    'M18 9v6',
+    'M6 9a9 9 0 0 0 9 9',
+  ],
+  globe: [
+    'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z',
+    'M2 12h20',
+    'M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z',
+  ],
+  command: [
+    'M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z',
+  ],
+  zap: [
+    'M13 2L3 14h9l-1 10 10-12h-9l1-10z',
+  ],
+  sparkle: [
+    'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+  ],
+  pause: [
+    'M10 9v6',
+    'M14 9v6',
+    'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z',
   ],
 };
 ---
