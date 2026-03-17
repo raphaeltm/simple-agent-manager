@@ -85,12 +85,32 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Extract the remainder path after /workspaces/{id}/ports/{port}.
+	// The {path...} wildcard captures everything after the port segment.
+	// If there's no remainder (route matched without {path...}), default to "/".
+	forwardPath := r.PathValue("path")
+	if forwardPath == "" {
+		forwardPath = "/"
+	} else if forwardPath[0] != '/' {
+		forwardPath = "/" + forwardPath
+	}
+
 	slog.Info("Port proxy forwarding",
 		"workspaceId", workspaceID,
 		"port", port,
-		"target", targetURL.String())
+		"target", targetURL.String(),
+		"forwardPath", forwardPath)
 
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	// Rewrite the request path to strip the /workspaces/{id}/ports/{port} prefix.
+	// Without this, the container receives the full VM agent path instead of just
+	// the intended path (e.g., "/" or "/api/data").
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.URL.Path = forwardPath
+		req.URL.RawPath = ""
+	}
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
 		slog.Error("Port proxy upstream error",
 			"workspaceId", workspaceID,
