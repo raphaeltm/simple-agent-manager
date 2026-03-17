@@ -44,9 +44,21 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 	// Resolve the container bridge IP for workspace isolation.
 	// In container mode, the bridge IP is required — we cannot fall back to 127.0.0.1
 	// because the service runs inside the container, not on the host.
+	//
+	// Use per-workspace discovery (portDiscoveries) when available, because the
+	// server-level containerDiscovery may have a stale label value (e.g., "/workspace"
+	// when REPOSITORY was empty at startup). Per-workspace discoveries are created
+	// in StartPortScanner with the correct label for the workspace's repository.
 	targetHost := "127.0.0.1"
-	if s.containerDiscovery != nil {
-		bridgeIP, bridgeErr := s.containerDiscovery.GetBridgeIP()
+	discovery := s.containerDiscovery // fallback
+	s.portScannerMu.RLock()
+	if wsDisc, ok := s.portDiscoveries[workspaceID]; ok {
+		discovery = wsDisc
+	}
+	s.portScannerMu.RUnlock()
+
+	if discovery != nil {
+		bridgeIP, bridgeErr := discovery.GetBridgeIP()
 		if bridgeErr == nil {
 			targetHost = bridgeIP
 			slog.Debug("Port proxy resolved bridge IP",
