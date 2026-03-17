@@ -130,8 +130,8 @@ function getMcpLimits(env: Env) {
     taskSearchMax: DEFAULT_MCP_TASK_SEARCH_MAX,
     sessionListLimit: DEFAULT_MCP_SESSION_LIST_LIMIT,
     sessionListMax: DEFAULT_MCP_SESSION_LIST_MAX,
-    messageListLimit: DEFAULT_MCP_MESSAGE_LIST_LIMIT,
-    messageListMax: DEFAULT_MCP_MESSAGE_LIST_MAX,
+    messageListLimit: parsePositiveInt(env.MCP_MESSAGE_LIST_LIMIT as string, DEFAULT_MCP_MESSAGE_LIST_LIMIT),
+    messageListMax: parsePositiveInt(env.MCP_MESSAGE_LIST_MAX as string, DEFAULT_MCP_MESSAGE_LIST_MAX),
     messageSearchMax: DEFAULT_MCP_MESSAGE_SEARCH_MAX,
     taskDescriptionSnippetLength: parsePositiveInt(
       env.MCP_TASK_DESCRIPTION_SNIPPET_LENGTH as string,
@@ -357,7 +357,7 @@ const MCP_TOOLS = [
   {
     name: 'get_session_messages',
     description:
-      'Read messages from a specific chat session. Returns logical messages in chronological order (consecutive streaming tokens from the same role are concatenated into single messages). By default only returns user and assistant messages (skips tool calls and system messages).',
+      'Read messages from a specific chat session. Returns logical messages in chronological order (consecutive streaming tokens from the same role are concatenated into single messages). The `limit` parameter controls how many raw tokens are fetched before grouping, so the returned message count may be fewer than `limit`. `hasMore` indicates whether additional raw tokens exist beyond the fetched window. By default only returns user and assistant messages (skips tool calls and system messages).',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -1650,7 +1650,7 @@ async function handleListSessions(
 // Mirrors the frontend groupMessages() in ProjectMessageView.tsx.
 const GROUPABLE_ROLES = new Set(['assistant', 'tool', 'thinking']);
 
-interface TokenRow {
+export interface TokenRow {
   id: string;
   role: string;
   content: string;
