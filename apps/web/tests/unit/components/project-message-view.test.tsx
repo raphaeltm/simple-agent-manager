@@ -581,7 +581,7 @@ describe('ProjectMessageView — DO + ACP message merge', () => {
     });
   });
 
-  it('merges ACP items newer than latest DO message', async () => {
+  it('shows only DO messages after grace period (no ACP merge)', async () => {
     const doTimestamp = 1000;
     const acpTimestamp = 2000;
 
@@ -616,11 +616,11 @@ describe('ProjectMessageView — DO + ACP message merge', () => {
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
 
-    // Both DO and ACP messages should appear
+    // Only DO messages should appear — ACP items are not merged after grace period
     await waitFor(() => {
       expect(screen.getByText('DO message')).toBeTruthy();
-      expect(screen.getByText('ACP response')).toBeTruthy();
     });
+    expect(screen.queryByText('ACP response')).toBeNull();
   });
 
   it('does not duplicate ACP items older than latest DO message', async () => {
