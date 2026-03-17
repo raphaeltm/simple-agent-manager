@@ -832,7 +832,7 @@ async function handleCompleteTask(
   // tasks (scoped to the ACP session / workspace lifetime). Revoking on
   // complete_task would break all subsequent MCP calls in the same session.
   // Token cleanup is handled by:
-  //   1. KV TTL auto-expiration (default 30 minutes, configurable via MCP_TOKEN_TTL_SECONDS)
+  //   1. KV TTL auto-expiration (default 4 hours, configurable via MCP_TOKEN_TTL_SECONDS)
   //   2. Task-runner DO cleanup on failure (task-runner.ts)
 
   // Emit task completion notification (best-effort)
