@@ -73,6 +73,19 @@ describe('mergeMessages', () => {
       const result = mergeMessages(prev, incoming, 'append');
       expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c']);
     });
+
+    it('reconciles optimistic AND appends new message in a single incoming batch', () => {
+      const prev = [
+        msg({ id: 'optimistic-abc', role: 'user', content: 'Hello', createdAt: 1 }),
+      ];
+      const incoming = [
+        msg({ id: 'server-123', role: 'user', content: 'Hello', createdAt: 1 }),
+        msg({ id: 'server-456', role: 'assistant', content: 'Response', createdAt: 2 }),
+      ];
+      const result = mergeMessages(prev, incoming, 'append');
+      expect(result).toHaveLength(2);
+      expect(result.map((m) => m.id)).toEqual(['server-123', 'server-456']);
+    });
   });
 
   describe('replace strategy', () => {
@@ -105,6 +118,22 @@ describe('mergeMessages', () => {
       const result = mergeMessages(prev, incoming, 'replace');
       expect(result).toHaveLength(1);
       expect(result[0]!.id).toBe('server-456');
+    });
+
+    it('preserves only unconfirmed optimistic when two optimistics exist and one is confirmed', () => {
+      const prev = [
+        msg({ id: 'optimistic-1', role: 'user', content: 'First', createdAt: 1 }),
+        msg({ id: 'optimistic-2', role: 'user', content: 'Second', createdAt: 2 }),
+      ];
+      const incoming = [
+        msg({ id: 'server-1', role: 'user', content: 'First', createdAt: 1 }),
+      ];
+      const result = mergeMessages(prev, incoming, 'replace');
+      expect(result).toHaveLength(2);
+      const ids = result.map((m) => m.id);
+      expect(ids).toContain('server-1');
+      expect(ids).toContain('optimistic-2');
+      expect(ids).not.toContain('optimistic-1');
     });
 
     it('returns sorted result', () => {
@@ -156,6 +185,16 @@ describe('mergeMessages', () => {
       const incoming = [
         msg({ id: 'z', createdAt: 1, sequence: 1 }),
         msg({ id: 'a', createdAt: 1, sequence: 1 }),
+      ];
+      const result = mergeMessages(prev, incoming, 'replace');
+      expect(result.map((m) => m.id)).toEqual(['a', 'z']);
+    });
+
+    it('falls back to ID sort when one message has sequence and the other does not', () => {
+      const prev: ChatMessageResponse[] = [];
+      const incoming = [
+        msg({ id: 'z', createdAt: 1, sequence: 5 }),
+        msg({ id: 'a', createdAt: 1, sequence: null }),
       ];
       const result = mergeMessages(prev, incoming, 'replace');
       expect(result.map((m) => m.id)).toEqual(['a', 'z']);

@@ -76,8 +76,11 @@ describe('ProjectMessageView', () => {
     expect(source).toContain('ACTIVE_POLL_MS');
   });
 
-  it('deduplicates messages via mergeMessages utility', () => {
-    expect(source).toContain('mergeMessages');
+  it('deduplicates messages via mergeMessages utility at all update paths', () => {
+    expect(source).toContain("mergeMessages(prev, [msg], 'append')");
+    expect(source).toContain("mergeMessages(prev, catchUpMessages, 'replace')");
+    expect(source).toContain("mergeMessages(prev, data.messages, 'replace')");
+    expect(source).toContain("mergeMessages(prev, data.messages, 'prepend')");
   });
 
   it('supports loading earlier messages (pagination)', () => {

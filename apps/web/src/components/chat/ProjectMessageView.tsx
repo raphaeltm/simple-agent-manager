@@ -33,6 +33,14 @@ interface ProjectMessageViewProps {
 /** Default idle timeout in ms — matches the server-side default (NODE_WARM_TIMEOUT_MS). */
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
+/**
+ * Grace period (ms) after agent stops prompting before switching from full ACP
+ * view to merged DO+ACP view. Matches ~2s VM agent batch delay + 1s buffer.
+ * Configurable via VITE_ACP_GRACE_MS environment variable.
+ */
+const DEFAULT_ACP_GRACE_MS = 3_000;
+const ACP_GRACE_MS = parseInt(import.meta.env.VITE_ACP_GRACE_MS || String(DEFAULT_ACP_GRACE_MS), 10);
+
 /** True for placeholder content that adds no user value. */
 function isPlaceholderContent(content: string): boolean {
   const trimmed = content.trim();
@@ -417,12 +425,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       // Just stopped prompting — start grace period for DO to catch up
       wasPromptingRef.current = false;
       setAcpGrace(true);
-      // Grace period of 3s matches the ~2s VM agent batch delay + 1s buffer.
-      // Previously 10s, which caused unnecessary time in full-ACP view.
       acpGraceTimerRef.current = setTimeout(() => {
         setAcpGrace(false);
         acpGraceTimerRef.current = null;
-      }, 3_000);
+      }, ACP_GRACE_MS);
     }
     return () => {
       if (acpGraceTimerRef.current) {
