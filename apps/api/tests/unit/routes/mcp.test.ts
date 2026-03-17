@@ -2052,13 +2052,30 @@ describe('groupTokensIntoMessages', () => {
     expect(result[0]).toEqual(tokens[0]);
   });
 
-  it('should not mutate the input array', () => {
+  it('should not group alternating groupable roles (assistant → tool → assistant)', () => {
+    const tokens = [
+      { id: 'tok-1', role: 'assistant', content: 'Calling tool', createdAt: 1000 },
+      { id: 'tok-2', role: 'tool',      content: 'Tool output', createdAt: 2000 },
+      { id: 'tok-3', role: 'assistant', content: 'Got the result.', createdAt: 3000 },
+    ];
+    const result = groupTokensIntoMessages(tokens);
+    expect(result).toHaveLength(3);
+    expect(result[0].content).toBe('Calling tool');
+    expect(result[1].content).toBe('Tool output');
+    expect(result[2].content).toBe('Got the result.');
+  });
+
+  it('should not mutate input token objects', () => {
     const tokens = [
       { id: 'tok-1', role: 'assistant', content: 'A', createdAt: 1000 },
       { id: 'tok-2', role: 'assistant', content: 'B', createdAt: 1001 },
     ];
-    const originalContent = tokens[0].content;
-    groupTokensIntoMessages(tokens);
-    expect(tokens[0].content).toBe(originalContent);
+    const result = groupTokensIntoMessages(tokens);
+    // Grouped output is 'AB' but original objects must be unmodified
+    expect(tokens[0].content).toBe('A');
+    expect(tokens[1].content).toBe('B');
+    // The result element must be a distinct object, not the same reference
+    expect(result[0]).not.toBe(tokens[0]);
+    expect(result[0].content).toBe('AB');
   });
 });
