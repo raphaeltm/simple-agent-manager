@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/images/logo.png" alt="Simple Agent Manager" width="400" />
+  <img src="assets/images/sam-banner.png" alt="Simple Agent Manager" width="400" />
 </p>
 
 <p align="center">
