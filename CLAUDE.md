@@ -160,6 +160,8 @@ When you discover bugs or errors during testing — even if unrelated to your cu
 
 Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks/README.md` for conventions.
 
+**Dispatching tasks**: When dispatching tasks to other agents, always instruct them to use the `/do` skill. This ensures the receiving agent follows the full end-to-end workflow (research, implement, review, staging verify, PR). See `.claude/rules/09-task-tracking.md`.
+
 ## Strategy Planning
 
 Strategic planning artifacts live in `strategy/` — see `strategy/README.md` for full structure.

@@ -57,6 +57,30 @@ When writing acceptance criteria, each criterion must be verifiable by at least 
 
 Criteria like "User with both providers can select which provider to use" require **multi-variant test data** — testing with only one provider present does not verify selection logic.
 
+## Dispatching Tasks to Other Agents
+
+When dispatching a task to another agent (via `dispatch_task` or any other mechanism), the task description MUST instruct the receiving agent to execute the work using the `/do` skill. The `/do` skill is the standard end-to-end workflow for implementing tasks — it handles research, planning, implementation, review, staging verification, and PR creation.
+
+### How to Write Dispatch Descriptions
+
+Include an explicit instruction to use `/do` in the task description. Example:
+
+```
+Fix the race condition in workspace cleanup.
+
+Execute this task using the /do skill.
+```
+
+The receiving agent will then follow the full `/do` workflow: research, task file creation, worktree setup, implementation, quality checks, specialist review, staging deployment, and PR merge.
+
+### Verify Dispatch Succeeded
+
+After calling `dispatch_task`, wait a few seconds and then check the task status (via `get_task_details` or `list_tasks`) to confirm it was properly dispatched and picked up. The dispatch system can occasionally fail silently — catching this early avoids wasted time waiting for work that never started.
+
+### Why This Matters
+
+Without the `/do` instruction, a dispatched agent may skip critical phases like staging verification, specialist review, or proper PR creation. The `/do` workflow enforces all quality gates defined in this project's rules.
+
 ## Integration with Other Systems
 
 - Tasks are for smaller work items; larger features use speckit (`/speckit.*` commands)
