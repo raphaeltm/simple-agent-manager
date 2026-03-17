@@ -115,7 +115,7 @@ GitHub secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`) because GitHub reserves 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MCP_TOKEN_TTL_SECONDS` | `1800` (30 min) | Token lifetime for agent MCP access |
+| `MCP_TOKEN_TTL_SECONDS` | `14400` (4 hours) | Token lifetime for agent MCP access (must be >= task max execution time) |
 | `MCP_RATE_LIMIT` | `120` | Max MCP requests per window |
 | `MCP_RATE_LIMIT_WINDOW_SECONDS` | `60` | Rate limit window |
 | `MCP_DISPATCH_MAX_DEPTH` | `3` | Max recursion depth for dispatch_task |
