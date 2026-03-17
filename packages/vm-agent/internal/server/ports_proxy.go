@@ -84,11 +84,7 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	targetURL, err := url.Parse(fmt.Sprintf("http://%s:%d", targetHost, port))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to build proxy target")
-		return
-	}
+	targetURLStr := fmt.Sprintf("http://%s:%d", targetHost, port)
 
 	// Extract the remainder path after /workspaces/{id}/ports/{port}.
 	// The {path...} wildcard captures everything after the port segment.
@@ -103,16 +99,34 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 	slog.Info("Port proxy forwarding",
 		"workspaceId", workspaceID,
 		"port", port,
-		"target", targetURL.String(),
+		"target", targetURLStr,
 		"forwardPath", forwardPath)
 
+	s.servePortProxy(w, r, workspaceID, port, targetURLStr, forwardPath)
+}
+
+// servePortProxy builds a reverse proxy for a workspace port and serves the request.
+// It sets the Host header to the original client-facing hostname (from X-Forwarded-Host)
+// so that dev servers (Vite, Next.js, etc.) see the correct origin. Falls back to a
+// hostname derived from ControlPlaneURL config if X-Forwarded-Host is absent.
+func (s *Server) servePortProxy(w http.ResponseWriter, r *http.Request, workspaceID string, port int, targetURLStr string, forwardPath string) {
+	targetURL, err := url.Parse(targetURLStr)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build proxy target")
+		return
+	}
+
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
-	// Rewrite the request path to strip the /workspaces/{id}/ports/{port} prefix
-	// and set the Host header to the correct public-facing URL for this port.
-	// Dev servers (Vite, Next.js, Astro) see this Host, which lets them handle
-	// cookies, CORS, and allowedHosts correctly for the real origin.
-	baseDomain := config.DeriveBaseDomain(s.config.ControlPlaneURL)
-	publicHost := fmt.Sprintf("ws-%s--%d.%s", strings.ToLower(workspaceID), port, baseDomain)
+	// Prefer X-Forwarded-Host from the API Worker — it carries the original
+	// client-facing hostname (e.g., ws-{id}--{port}.{domain}) which is lost
+	// when Cloudflare edge re-routes the fetch to the VM hostname.
+	// Fall back to a derived value from ControlPlaneURL config if the header
+	// is absent (e.g., direct VM agent requests).
+	publicHost := r.Header.Get("X-Forwarded-Host")
+	if publicHost == "" {
+		baseDomain := config.DeriveBaseDomain(s.config.ControlPlaneURL)
+		publicHost = fmt.Sprintf("ws-%s--%d.%s", strings.ToLower(workspaceID), port, baseDomain)
+	}
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
@@ -129,7 +143,7 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 		slog.Error("Port proxy upstream error",
 			"workspaceId", workspaceID,
 			"port", port,
-			"target", targetURL.String(),
+			"target", targetURLStr,
 			"error", proxyErr)
 		writeError(rw, http.StatusBadGateway, fmt.Sprintf("port proxy error: %v", proxyErr))
 	}

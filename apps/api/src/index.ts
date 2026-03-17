@@ -428,6 +428,11 @@ app.use('*', async (c, next) => {
   headers.set('X-SAM-Node-Id', (workspace.nodeId || workspaceId));
   headers.set('X-SAM-Workspace-Id', workspaceId);
 
+  // Preserve the original client-facing Host so the VM agent can forward it
+  // to container services. The fetch() to the VM agent rewrites the Host header
+  // to the VM hostname for Cloudflare edge routing, losing the original.
+  headers.set('X-Forwarded-Host', hostname);
+
   return fetch(vmUrl.toString(), {
     method: c.req.raw.method,
     headers,
