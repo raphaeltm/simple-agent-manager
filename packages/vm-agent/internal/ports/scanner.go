@@ -41,19 +41,21 @@ type ScannerConfig struct {
 
 // Default scanner configuration values.
 const (
-	DefaultScanInterval  = 5 * time.Second
-	DefaultEphemeralMin  = 32768
+	DefaultScanInterval = 5 * time.Second
+	DefaultEphemeralMin = 32768
 )
 
 // Scanner polls /proc/net/tcp inside a container to detect listening ports.
 type Scanner struct {
-	cfg         ScannerConfig
-	mu          sync.RWMutex
-	ports       map[int]DetectedPort
-	containerID string
-	stop        chan struct{}
-	stopped     chan struct{}
-	closeOnce   sync.Once
+	cfg                 ScannerConfig
+	mu                  sync.RWMutex
+	ports               map[int]DetectedPort
+	containerID         string
+	stop                chan struct{}
+	stopped             chan struct{}
+	closeOnce           sync.Once
+	consecutiveFailures int
+	containerResolved   bool // tracks whether container was ever successfully resolved
 }
 
 // NewScanner creates a new port scanner for a workspace container.
@@ -65,11 +67,12 @@ func NewScanner(cfg ScannerConfig) *Scanner {
 		cfg.EphemeralMin = DefaultEphemeralMin
 	}
 	return &Scanner{
-		cfg:         cfg,
-		ports:       make(map[int]DetectedPort),
-		containerID: cfg.ContainerID,
-		stop:        make(chan struct{}),
-		stopped:     make(chan struct{}),
+		cfg:               cfg,
+		ports:             make(map[int]DetectedPort),
+		containerID:       cfg.ContainerID,
+		stop:              make(chan struct{}),
+		stopped:           make(chan struct{}),
+		containerResolved: cfg.ContainerID != "",
 	}
 }
 
@@ -136,11 +139,41 @@ func (s *Scanner) scan() {
 			if id, err := s.cfg.ContainerResolver(); err == nil && id != "" {
 				s.SetContainerID(id)
 				containerID = id
+				s.containerResolved = true
+				s.consecutiveFailures = 0
 				slog.Info("Port scanner: resolved container ID lazily",
 					"workspaceId", s.cfg.WorkspaceID, "containerID", id)
+				// Emit event so the UI knows the scanner is now active.
+				if s.cfg.EventEmitter != nil {
+					s.cfg.EventEmitter("port.scanner_ready",
+						"Port scanner: container discovered, scanning for open ports",
+						map[string]interface{}{
+							"containerID": id,
+						})
+				}
 			} else {
-				slog.Debug("Port scanner: container not yet available",
-					"workspaceId", s.cfg.WorkspaceID, "error", err)
+				s.consecutiveFailures++
+				// Log at WARN level so these are visible in node logs.
+				// First failure gets INFO, subsequent get WARN with failure count.
+				if s.consecutiveFailures == 1 {
+					slog.Info("Port scanner: container not yet available, will retry",
+						"workspaceId", s.cfg.WorkspaceID, "error", err)
+				} else {
+					slog.Warn("Port scanner: container still not available",
+						"workspaceId", s.cfg.WorkspaceID,
+						"consecutiveFailures", s.consecutiveFailures,
+						"error", err)
+				}
+				// Emit node event every 6 failures (~30s at 5s interval) so the UI
+				// shows diagnostics without flooding events.
+				if s.consecutiveFailures%6 == 0 && s.cfg.EventEmitter != nil {
+					s.cfg.EventEmitter("port.scanner_waiting",
+						fmt.Sprintf("Port scanner: waiting for container (attempt %d)", s.consecutiveFailures),
+						map[string]interface{}{
+							"consecutiveFailures": s.consecutiveFailures,
+							"error":               fmt.Sprintf("%v", err),
+						})
+				}
 				return
 			}
 		} else {
@@ -150,13 +183,24 @@ func (s *Scanner) scan() {
 
 	content, err := readProcNetTCP(containerID)
 	if err != nil {
-		slog.Debug("Port scan failed", "containerID", containerID, "error", err)
+		s.consecutiveFailures++
+		// Log scan failures at WARN level so they're visible.
+		slog.Warn("Port scan failed",
+			"workspaceId", s.cfg.WorkspaceID,
+			"containerID", containerID,
+			"consecutiveFailures", s.consecutiveFailures,
+			"error", err)
 		return
 	}
 
+	// Reset failure counter on successful scan.
+	s.consecutiveFailures = 0
+
 	entries, err := ParseProcNetTCP(content)
 	if err != nil {
-		slog.Debug("Parse /proc/net/tcp failed", "error", err)
+		slog.Warn("Parse /proc/net/tcp failed",
+			"workspaceId", s.cfg.WorkspaceID,
+			"error", err)
 		return
 	}
 

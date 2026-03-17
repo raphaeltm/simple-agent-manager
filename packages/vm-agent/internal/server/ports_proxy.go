@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -19,7 +20,17 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	slog.Info("Port proxy request received",
+		"workspaceId", workspaceID,
+		"port", r.PathValue("port"),
+		"method", r.Method,
+		"path", r.URL.Path,
+		"remoteAddr", r.RemoteAddr)
+
 	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
+		slog.Warn("Port proxy auth failed",
+			"workspaceId", workspaceID,
+			"port", r.PathValue("port"))
 		return
 	}
 
@@ -31,11 +42,28 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 	}
 
 	// Resolve the container bridge IP for workspace isolation.
-	// Falls back to 127.0.0.1 if bridge IP resolution fails (e.g., non-container mode).
+	// In container mode, the bridge IP is required — we cannot fall back to 127.0.0.1
+	// because the service runs inside the container, not on the host.
 	targetHost := "127.0.0.1"
 	if s.containerDiscovery != nil {
-		if bridgeIP, err := s.containerDiscovery.GetBridgeIP(); err == nil {
+		bridgeIP, bridgeErr := s.containerDiscovery.GetBridgeIP()
+		if bridgeErr == nil {
 			targetHost = bridgeIP
+			slog.Debug("Port proxy resolved bridge IP",
+				"workspaceId", workspaceID,
+				"port", port,
+				"bridgeIP", bridgeIP)
+		} else {
+			slog.Error("Port proxy: failed to resolve container bridge IP",
+				"workspaceId", workspaceID,
+				"port", port,
+				"error", bridgeErr)
+			// In container mode, falling back to 127.0.0.1 is wrong — the service
+			// runs inside the container at the bridge IP, not on the host.
+			// Return 503 so the client can retry after the container is ready.
+			writeError(w, http.StatusServiceUnavailable,
+				fmt.Sprintf("Container bridge IP not available yet (try again in a few seconds): %v", bridgeErr))
+			return
 		}
 	}
 
@@ -45,8 +73,18 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	slog.Info("Port proxy forwarding",
+		"workspaceId", workspaceID,
+		"port", port,
+		"target", targetURL.String())
+
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
+		slog.Error("Port proxy upstream error",
+			"workspaceId", workspaceID,
+			"port", port,
+			"target", targetURL.String(),
+			"error", proxyErr)
 		writeError(rw, http.StatusBadGateway, fmt.Sprintf("port proxy error: %v", proxyErr))
 	}
 	proxy.ServeHTTP(w, r)
