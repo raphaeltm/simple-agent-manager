@@ -107,11 +107,14 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 	// Rewrite the request path to strip the /workspaces/{id}/ports/{port} prefix.
 	// Without this, the container receives the full VM agent path instead of just
 	// the intended path (e.g., "/" or "/api/data").
+	// Also set Host to localhost so dev servers (Vite, Next.js, etc.) accept the
+	// request without needing to configure allowedHosts for the SAM subdomain.
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
 		req.URL.Path = forwardPath
 		req.URL.RawPath = ""
+		req.Host = fmt.Sprintf("localhost:%d", port)
 	}
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
 		slog.Error("Port proxy upstream error",
