@@ -357,7 +357,7 @@ const MCP_TOOLS = [
   {
     name: 'get_session_messages',
     description:
-      'Read messages from a specific chat session. Returns logical messages in chronological order (consecutive streaming tokens from the same role are concatenated into single messages). The `limit` parameter controls how many raw tokens are fetched before grouping, so the returned message count may be fewer than `limit`. `hasMore` indicates whether additional raw tokens exist beyond the fetched window. By default only returns user and assistant messages (skips tool calls and system messages).',
+      'Read messages from a specific chat session. Returns logical messages in chronological order (consecutive streaming tokens with the same role are concatenated for assistant, tool, and thinking roles; user/system/plan messages pass through as-is). The `limit` parameter controls how many raw tokens are fetched before grouping, so the returned message count may be fewer than `limit`. `hasMore` indicates whether additional raw tokens exist beyond the fetched window. By default only returns user and assistant messages (skips tool calls and system messages).',
     inputSchema: {
       type: 'object' as const,
       properties: {
