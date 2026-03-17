@@ -1,12 +1,12 @@
 {
   "name": "Simple Agent Manager",
   "short_name": "SAM",
-  "description": "Manage ephemeral AI coding workspaces from your phone or desktop.",
+  "description": "Manage multiple AI coding agents from your phone or desktop.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#0b1110",
-  "theme_color": "#13201d",
+  "theme_color": "#22c55e",
   "icons": [
     {
       "src": "/icons/icon-192.png",
@@ -21,7 +21,7 @@
       "purpose": "any"
     },
     {
-      "src": "/icons/maskable-512.png",
+      "src": "/icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
