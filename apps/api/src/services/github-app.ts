@@ -368,3 +368,42 @@ export async function verifyWebhookSignature(
 
   return signature === expectedSignature;
 }
+
+/**
+ * Check whether a specific branch exists in a remote repository.
+ * Uses the single-branch GitHub API endpoint (lightweight, no pagination).
+ * Returns true if the branch exists, false if it doesn't (404).
+ * Throws on unexpected errors (auth failures, rate limits, etc.).
+ */
+export async function branchExistsOnRemote(
+  installationId: string,
+  repository: string,
+  branchName: string,
+  env: Env,
+): Promise<boolean> {
+  const { token } = await getInstallationToken(installationId, env);
+  const parts = repository.split('/');
+  const owner = parts[0] ?? '';
+  const repo = parts[1] ?? '';
+
+  const response = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${encodeURIComponent(branchName)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'Simple-Agent-Manager',
+      },
+    },
+  );
+
+  if (response.ok) return true;
+  if (response.status === 404) return false;
+
+  // Unexpected error — don't silently swallow
+  const error = await response.json().catch(() => ({})) as { message?: string };
+  throw new Error(
+    `Failed to check branch '${branchName}' on ${repository}: ${response.status} ${error.message || ''}`,
+  );
+}

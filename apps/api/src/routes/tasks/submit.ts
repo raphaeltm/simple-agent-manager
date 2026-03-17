@@ -29,6 +29,7 @@ import { getAuth, requireAuth, requireApproved } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { generateBranchName } from '../../services/branch-name';
+import { branchExistsOnRemote } from '../../services/github-app';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import * as projectDataService from '../../services/project-data';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
@@ -182,8 +183,36 @@ submitRoutes.post('/submit', async (c) => {
   // Determine task mode: explicit override > inferred from workspace profile > default 'task'
   const taskMode = body.taskMode ?? (workspaceProfile === 'lightweight' ? 'conversation' : 'task');
 
-  // Use parent task's output branch if forking, otherwise use project default
-  const branch = parentBranch || project.defaultBranch;
+  // Use parent task's output branch if forking, but verify it exists remotely first.
+  // The parent may never have pushed (e.g., conversational tasks with no code changes).
+  let branch = project.defaultBranch;
+  if (parentBranch) {
+    try {
+      const exists = await branchExistsOnRemote(
+        project.installationId,
+        project.repository,
+        parentBranch,
+        c.env,
+      );
+      if (exists) {
+        branch = parentBranch;
+      } else {
+        log.warn('task_submit.parent_branch_missing', {
+          parentTaskId: body.parentTaskId,
+          parentBranch,
+          fallbackBranch: project.defaultBranch,
+          reason: 'Parent output branch not found on remote; falling back to project default branch',
+        });
+      }
+    } catch (err) {
+      log.warn('task_submit.branch_check_failed', {
+        parentTaskId: body.parentTaskId,
+        parentBranch,
+        fallbackBranch: project.defaultBranch,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   // Generate concise task title via AI (falls back to truncation on failure)
   const titleConfig = getTaskTitleConfig(c.env);

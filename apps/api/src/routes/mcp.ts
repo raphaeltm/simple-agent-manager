@@ -45,6 +45,7 @@ import { generateBranchName } from '../services/branch-name';
 import { startTaskRunnerDO } from '../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../services/task-title';
 import * as notificationService from '../services/notification';
+import { branchExistsOnRemote } from '../services/github-app';
 
 export const mcpRoutes = new Hono<{ Bindings: Env }>();
 
@@ -1178,8 +1179,45 @@ async function handleDispatchTask(
     ?? DEFAULT_WORKSPACE_PROFILE;
   const resolvedProvider: CredentialProvider | null = (project.defaultProvider as CredentialProvider | null) ?? null;
 
-  // Explicit branch > parent task's output branch > project default branch
-  const checkoutBranch = explicitBranch || currentTask.outputBranch || project.defaultBranch;
+  // Explicit branch > parent task's output branch (if it exists remotely) > project default branch
+  let checkoutBranch: string;
+  if (explicitBranch) {
+    // Caller explicitly chose a branch — use it as-is (fail later if missing, that's a real error)
+    checkoutBranch = explicitBranch;
+  } else if (currentTask.outputBranch) {
+    // Inherit parent's output branch, but only if it actually exists on the remote.
+    // The parent may never have pushed (e.g., conversational tasks with no code changes).
+    try {
+      const exists = await branchExistsOnRemote(
+        project.installationId,
+        project.repository,
+        currentTask.outputBranch,
+        env,
+      );
+      if (exists) {
+        checkoutBranch = currentTask.outputBranch;
+      } else {
+        log.warn('mcp.dispatch_task.parent_branch_missing', {
+          parentTaskId: tokenData.taskId,
+          parentBranch: currentTask.outputBranch,
+          fallbackBranch: project.defaultBranch,
+          reason: 'Parent output branch not found on remote; falling back to project default branch',
+        });
+        checkoutBranch = project.defaultBranch;
+      }
+    } catch (err) {
+      // Branch check failed (e.g., auth issue, rate limit) — fall back safely
+      log.warn('mcp.dispatch_task.branch_check_failed', {
+        parentTaskId: tokenData.taskId,
+        parentBranch: currentTask.outputBranch,
+        fallbackBranch: project.defaultBranch,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      checkoutBranch = project.defaultBranch;
+    }
+  } else {
+    checkoutBranch = project.defaultBranch;
+  }
 
   // ── Atomic conditional INSERT (prevents TOCTOU race) ─────────────────
   // Uses INSERT ... SELECT ... WHERE to embed the rate-limit check as a
