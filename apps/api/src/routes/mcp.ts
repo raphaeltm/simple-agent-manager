@@ -233,7 +233,7 @@ const MCP_TOOLS = [
         },
         branch: {
           type: 'string',
-          description: 'Git branch for the new workspace to check out. Defaults to the parent task\'s output branch (if it exists remotely) or the project\'s default branch.',
+          description: 'Git branch for the new workspace to check out. Defaults to the project\'s default branch (usually main). Only set this if you have already pushed the branch to the remote.',
         },
       },
       required: ['description'],
@@ -1026,7 +1026,6 @@ async function handleDispatchTask(
     .select({
       id: schema.tasks.id,
       dispatchDepth: schema.tasks.dispatchDepth,
-      outputBranch: schema.tasks.outputBranch,
       status: schema.tasks.status,
     })
     .from(schema.tasks)
@@ -1186,8 +1185,12 @@ async function handleDispatchTask(
     ?? DEFAULT_WORKSPACE_PROFILE;
   const resolvedProvider: CredentialProvider | null = (project.defaultProvider as CredentialProvider | null) ?? null;
 
-  // Explicit branch > parent task's output branch > project default branch
-  const checkoutBranch = explicitBranch || currentTask.outputBranch || project.defaultBranch;
+  // Explicit branch > project default branch.
+  // We intentionally do NOT fall back to the parent task's outputBranch because
+  // that branch may never have been pushed to the remote (it's generated at task
+  // creation time, not on push). If an agent wants a child task on its branch,
+  // it must pass `branch` explicitly — which implies it has already pushed.
+  const checkoutBranch = explicitBranch || project.defaultBranch;
 
   // ── Atomic conditional INSERT (prevents TOCTOU race) ─────────────────
   // Uses INSERT ... SELECT ... WHERE to embed the rate-limit check as a

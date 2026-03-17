@@ -830,7 +830,6 @@ describe('MCP Routes', () => {
       mockD1Results(mockD1._stmt, [{
         id: 'task-123',
         dispatch_depth: 3,
-        output_branch: 'sam/parent',
         status: 'in_progress',
       }]);
 
@@ -866,7 +865,6 @@ describe('MCP Routes', () => {
       mockD1Results(mockD1._stmt, [{
         id: 'task-123',
         dispatch_depth: 0,
-        output_branch: 'sam/parent',
         status: 'completed',
       }]);
 
@@ -885,7 +883,6 @@ describe('MCP Routes', () => {
       mockD1Results(mockD1._stmt, [{
         id: 'task-123',
         dispatch_depth: 0,
-        output_branch: 'sam/parent',
         status: 'failed',
       }]);
 
@@ -903,7 +900,7 @@ describe('MCP Routes', () => {
     /**
      * Helper to set up sequential D1 mocks for dispatch_task happy path.
      * The handler makes these D1 queries in order:
-     * 1. raw() — current task (id, dispatchDepth, outputBranch, status)
+     * 1. raw() — current task (id, dispatchDepth, status)
      * 2. raw() — child count (advisory pre-check, count(*))
      * 3. raw() — active dispatched count (advisory pre-check, count(*))
      * 4. raw() — credential check (id)
@@ -935,7 +932,7 @@ describe('MCP Routes', () => {
 
       // Sequential .raw() calls
       mockD1._stmt.raw
-        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
+        .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
         .mockResolvedValueOnce([[0]])  // child count (advisory)
         .mockResolvedValueOnce([[0]])  // active dispatched count (advisory)
         .mockResolvedValueOnce([['cred-1']])  // credential
@@ -980,7 +977,7 @@ describe('MCP Routes', () => {
       expect(data.message).toContain('dispatched successfully');
     });
 
-    it('should use explicit branch parameter over parent outputBranch', async () => {
+    it('should use explicit branch parameter when provided', async () => {
       setupHappyPathMocks();
 
       const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
@@ -1005,7 +1002,6 @@ describe('MCP Routes', () => {
       mockD1Results(mockD1._stmt, [{
         id: 'task-123',
         dispatch_depth: 0,
-        output_branch: 'sam/parent',
         status: 'in_progress',
       }]);
 
@@ -1024,7 +1020,6 @@ describe('MCP Routes', () => {
       mockD1Results(mockD1._stmt, [{
         id: 'task-123',
         dispatch_depth: 0,
-        output_branch: 'sam/parent',
         status: 'in_progress',
       }]);
 
@@ -1042,7 +1037,7 @@ describe('MCP Routes', () => {
     it('should reject when per-task dispatch limit is reached', async () => {
       // Current task query
       mockD1._stmt.raw
-        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
+        .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
         .mockResolvedValueOnce([[5]]);  // child count = 5 (at default limit)
 
       const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
@@ -1059,7 +1054,7 @@ describe('MCP Routes', () => {
 
     it('should reject when per-project active limit is reached', async () => {
       mockD1._stmt.raw
-        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
+        .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
         .mockResolvedValueOnce([[2]])   // child count = 2 (under limit)
         .mockResolvedValueOnce([[10]]); // active dispatched = 10 (at default limit)
 
@@ -1077,7 +1072,7 @@ describe('MCP Routes', () => {
 
     it('should reject when cloud credentials are missing', async () => {
       mockD1._stmt.raw
-        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
+        .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
         .mockResolvedValueOnce([[0]])   // child count
         .mockResolvedValueOnce([[0]])   // active dispatched count
         .mockResolvedValueOnce([]);     // no credential
@@ -1106,7 +1101,7 @@ describe('MCP Routes', () => {
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
 
       mockD1._stmt.raw
-        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
+        .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
         .mockResolvedValueOnce([[0]])   // child count (advisory)
         .mockResolvedValueOnce([[0]])   // active dispatched count (advisory)
         .mockResolvedValueOnce([['cred-1']])  // credential
@@ -1147,7 +1142,7 @@ describe('MCP Routes', () => {
 
     it('should reject dispatching from a cancelled task', async () => {
       mockD1._stmt.raw
-        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'cancelled']]);
+        .mockResolvedValueOnce([['task-123', 0, 'cancelled']]);
 
       const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
         name: 'dispatch_task',
@@ -1181,7 +1176,7 @@ describe('MCP Routes', () => {
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
 
       mockD1._stmt.raw
-        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
+        .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
         .mockResolvedValueOnce([[0]])   // child count
         .mockResolvedValueOnce([[0]])   // active dispatched count
         .mockResolvedValueOnce([['cred-1']]); // credential exists
@@ -1434,7 +1429,7 @@ describe('MCP Routes', () => {
         defaultProvider: null, defaultAgentType: null,
       }] });
       mockD1._stmt.raw
-        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']]) // current task
+        .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
         .mockResolvedValueOnce([[0]])  // advisory child count
         .mockResolvedValueOnce([[0]])  // advisory active count
         .mockResolvedValueOnce([['cred-1']])  // credential
@@ -1468,7 +1463,7 @@ describe('MCP Routes', () => {
       };
       mockD1._stmt.all.mockResolvedValue({ results: [raceProject] });
       mockD1._stmt.raw
-        .mockResolvedValueOnce([['task-123', 0, 'sam/parent', 'in_progress']])
+        .mockResolvedValueOnce([['task-123', 0, 'in_progress']])
         .mockResolvedValueOnce([[4]])  // advisory: under limit (5)
         .mockResolvedValueOnce([[9]])  // advisory: under limit (10)
         .mockResolvedValueOnce([['cred-1']])
