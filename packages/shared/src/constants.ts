@@ -199,6 +199,14 @@ export const WORKSPACE_IDLE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 export const TERMINAL_ACTIVITY_THROTTLE_MS = 60 * 1000; // 1 minute
 
 // =============================================================================
+// MCP Token Configuration
+// =============================================================================
+
+/** Default MCP token TTL in seconds. Must be >= DEFAULT_TASK_RUN_MAX_EXECUTION_MS / 1000
+ * so tokens remain valid for the full duration of a task. Override via MCP_TOKEN_TTL_SECONDS env var. */
+export const DEFAULT_MCP_TOKEN_TTL_SECONDS = 4 * 60 * 60; // 4 hours (aligned with task max execution time)
+
+// =============================================================================
 // Task Execution Timeout (Stuck Task Recovery)
 // =============================================================================
 

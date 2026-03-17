@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { DEFAULT_MCP_TOKEN_TTL_SECONDS, DEFAULT_TASK_RUN_MAX_EXECUTION_MS } from '@simple-agent-manager/shared';
 
 const mockKV = {
   put: vi.fn(),
@@ -28,9 +29,9 @@ describe('MCP Token Service', () => {
   });
 
   describe('getMcpTokenTTL', () => {
-    it('should return default TTL (1800) when no env provided', async () => {
+    it('should return default TTL matching task max execution time when no env provided', async () => {
       const { getMcpTokenTTL } = await import('../../../src/services/mcp-token');
-      expect(getMcpTokenTTL()).toBe(1800);
+      expect(getMcpTokenTTL()).toBe(DEFAULT_MCP_TOKEN_TTL_SECONDS);
     });
 
     it('should return configured TTL from env', async () => {
@@ -40,12 +41,39 @@ describe('MCP Token Service', () => {
 
     it('should return default for invalid env value', async () => {
       const { getMcpTokenTTL } = await import('../../../src/services/mcp-token');
-      expect(getMcpTokenTTL({ MCP_TOKEN_TTL_SECONDS: 'invalid' })).toBe(1800);
+      expect(getMcpTokenTTL({ MCP_TOKEN_TTL_SECONDS: 'invalid' })).toBe(DEFAULT_MCP_TOKEN_TTL_SECONDS);
     });
 
     it('should return default for negative value', async () => {
       const { getMcpTokenTTL } = await import('../../../src/services/mcp-token');
-      expect(getMcpTokenTTL({ MCP_TOKEN_TTL_SECONDS: '-1' })).toBe(1800);
+      expect(getMcpTokenTTL({ MCP_TOKEN_TTL_SECONDS: '-1' })).toBe(DEFAULT_MCP_TOKEN_TTL_SECONDS);
+    });
+
+    it('should return default for zero value', async () => {
+      const { getMcpTokenTTL } = await import('../../../src/services/mcp-token');
+      expect(getMcpTokenTTL({ MCP_TOKEN_TTL_SECONDS: '0' })).toBe(DEFAULT_MCP_TOKEN_TTL_SECONDS);
+    });
+  });
+
+  // Regression guard: MCP token TTL must be >= task max execution time.
+  // PR #410 reduced the TTL to 30 minutes while tasks can run for 4 hours,
+  // which caused all MCP tool calls to fail after 30 minutes (token expired in KV).
+  describe('TTL alignment with task execution time', () => {
+    it('should have default constant >= task max execution time in seconds', () => {
+      const taskMaxExecutionSeconds = DEFAULT_TASK_RUN_MAX_EXECUTION_MS / 1000;
+      expect(DEFAULT_MCP_TOKEN_TTL_SECONDS).toBeGreaterThanOrEqual(taskMaxExecutionSeconds);
+    });
+
+    it('should store token with TTL that covers full task execution time', async () => {
+      const { storeMcpToken } = await import('../../../src/services/mcp-token');
+      const taskMaxExecutionSeconds = DEFAULT_TASK_RUN_MAX_EXECUTION_MS / 1000;
+
+      await storeMcpToken(mockKV as unknown as KVNamespace, 'token', {
+        taskId: 't', projectId: 'p', userId: 'u', workspaceId: 'w', createdAt: '2026-01-01T00:00:00Z',
+      });
+
+      const [, , opts] = mockKV.put.mock.calls[0] as [string, string, { expirationTtl: number }];
+      expect(opts.expirationTtl).toBeGreaterThanOrEqual(taskMaxExecutionSeconds);
     });
   });
 
@@ -67,7 +95,7 @@ describe('MCP Token Service', () => {
       expect(mockKV.put).toHaveBeenCalledWith(
         'mcp:test-mcp-token',
         JSON.stringify(data),
-        { expirationTtl: 1800 },
+        { expirationTtl: DEFAULT_MCP_TOKEN_TTL_SECONDS },
       );
     });
 
@@ -88,8 +116,8 @@ describe('MCP Token Service', () => {
       });
 
       expect(mockKV.put).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.any(String),
+        'mcp:test-token',
+        JSON.stringify(data),
         { expirationTtl: 3600 },
       );
     });

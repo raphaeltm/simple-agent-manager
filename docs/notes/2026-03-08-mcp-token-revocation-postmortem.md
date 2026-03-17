@@ -38,7 +38,7 @@ Added rule to `.claude/rules/06-technical-patterns.md`: when implementing creden
 ## Resolution
 
 Removed the explicit token revocation from `handleCompleteTask()`. Token cleanup is now handled by:
-1. KV TTL auto-expiration (default 2 hours, configurable via `MCP_TOKEN_TTL_SECONDS`)
+1. KV TTL auto-expiration (default 4 hours, configurable via `MCP_TOKEN_TTL_SECONDS`)
 2. Task-runner DO cleanup on failure path (`task-runner.ts:1129-1139`)
 
 The tool handlers already validate task state independently (rejecting updates on completed tasks, rejecting duplicate completions), so a lingering token provides no meaningful privilege escalation.
