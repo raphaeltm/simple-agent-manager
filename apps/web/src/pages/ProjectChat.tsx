@@ -114,6 +114,8 @@ export function ProjectChat() {
 
   const [sessions, setSessions] = useState<ChatSessionResponse[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const hasLoadedRef = useRef(false);
   const [hasCloudCredentials, setHasCloudCredentials] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -226,12 +228,18 @@ export function ProjectChat() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadSessions = useCallback(async () => {
+    if (hasLoadedRef.current) {
+      setIsRefreshing(true);
+    }
     try {
       const result = await listChatSessions(projectId, { limit: 100 });
       setSessions(result.sessions);
+      hasLoadedRef.current = true;
       return result.sessions;
     } catch {
       return [];
+    } finally {
+      setIsRefreshing(false);
     }
   }, [projectId]);
 
@@ -503,6 +511,11 @@ export function ProjectChat() {
             </button>
           </div>
 
+          {/* Subtle refresh indicator */}
+          {isRefreshing && (
+            <div className="h-0.5 bg-accent animate-pulse" role="status" aria-label="Refreshing sessions" />
+          )}
+
           {/* Search */}
           {hasSessions && (
             <div className="shrink-0 px-2 py-1.5 border-b border-border-default">
@@ -691,6 +704,7 @@ export function ProjectChat() {
           onNewChat={() => { setSidebarOpen(false); handleNewChat(); }}
           onClose={() => setSidebarOpen(false)}
           realtimeDegraded={realtimeDegraded}
+          isRefreshing={isRefreshing}
           onRefresh={() => void loadSessions()}
         />
       )}
@@ -784,6 +798,7 @@ function MobileSessionDrawer({
   onNewChat,
   onClose,
   realtimeDegraded = false,
+  isRefreshing = false,
   onRefresh,
 }: {
   sessions: ChatSessionResponse[];
@@ -793,6 +808,7 @@ function MobileSessionDrawer({
   onNewChat: () => void;
   onClose: () => void;
   realtimeDegraded?: boolean;
+  isRefreshing?: boolean;
   onRefresh?: () => void;
 }) {
   const [mobileSearch, setMobileSearch] = useState('');
@@ -913,6 +929,11 @@ function MobileSessionDrawer({
             )}
           </div>
         </div>
+
+        {/* Subtle refresh indicator */}
+        {isRefreshing && (
+          <div className="h-0.5 bg-accent animate-pulse" role="status" aria-label="Refreshing sessions" />
+        )}
 
         {/* Session list */}
         <nav className="flex-1 overflow-y-auto min-h-0">
