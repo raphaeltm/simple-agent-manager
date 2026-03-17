@@ -9,6 +9,7 @@ import {
   notifyNeedsInput,
   notifyProgress,
   getProjectName,
+  buildActionUrl,
 } from '../../../src/services/notification';
 
 function createMockEnv() {
@@ -303,7 +304,7 @@ describe('Notification Service', () => {
         body: 'I need approval to proceed with the database migration',
         projectId: 'proj-1',
         taskId: 'task-1',
-        actionUrl: '/projects/proj-1?task=task-1',
+        actionUrl: '/projects/proj-1',
         metadata: {
           projectName: 'My Project',
           category: 'approval',
@@ -388,6 +389,175 @@ describe('Notification Service', () => {
 
       const call = createNotificationMock.mock.calls[0]![1];
       expect(call.body!.length).toBeLessThanOrEqual(MAX_NOTIFICATION_BODY_LENGTH);
+    });
+  });
+
+  describe('buildActionUrl', () => {
+    it('should include sessionId in URL when provided', () => {
+      expect(buildActionUrl('proj-1', 'session-42')).toBe('/projects/proj-1/chat/session-42');
+    });
+
+    it('should fall back to project URL when sessionId is null', () => {
+      expect(buildActionUrl('proj-1', null)).toBe('/projects/proj-1');
+    });
+
+    it('should fall back to project URL when sessionId is undefined', () => {
+      expect(buildActionUrl('proj-1', undefined)).toBe('/projects/proj-1');
+    });
+
+    it('should fall back to project URL when sessionId is empty string', () => {
+      expect(buildActionUrl('proj-1', '')).toBe('/projects/proj-1');
+    });
+  });
+
+  describe('actionUrl deep-links to chat session — regression guard', () => {
+    it('notifyTaskComplete includes sessionId in actionUrl and payload', async () => {
+      await notifyTaskComplete(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        taskId: 'task-1',
+        taskTitle: 'Fix bug',
+        sessionId: 'sess-abc',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.actionUrl).toBe('/projects/proj-1/chat/sess-abc');
+      expect(call.sessionId).toBe('sess-abc');
+    });
+
+    it('notifyTaskFailed includes sessionId in actionUrl and payload', async () => {
+      await notifyTaskFailed(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        taskId: 'task-1',
+        taskTitle: 'Deploy',
+        sessionId: 'sess-abc',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.actionUrl).toBe('/projects/proj-1/chat/sess-abc');
+      expect(call.sessionId).toBe('sess-abc');
+    });
+
+    it('notifySessionEnded includes sessionId in actionUrl and payload', async () => {
+      await notifySessionEnded(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        sessionId: 'sess-abc',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.actionUrl).toBe('/projects/proj-1/chat/sess-abc');
+      expect(call.sessionId).toBe('sess-abc');
+    });
+
+    it('notifyNeedsInput includes sessionId in actionUrl and payload', async () => {
+      await notifyNeedsInput(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        taskId: 'task-1',
+        taskTitle: 'Deploy',
+        context: 'Need approval',
+        sessionId: 'sess-abc',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.actionUrl).toBe('/projects/proj-1/chat/sess-abc');
+      expect(call.sessionId).toBe('sess-abc');
+    });
+
+    it('notifyProgress includes sessionId in actionUrl and payload', async () => {
+      await notifyProgress(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        taskId: 'task-1',
+        taskTitle: 'Feature',
+        message: 'Step done',
+        sessionId: 'sess-abc',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.actionUrl).toBe('/projects/proj-1/chat/sess-abc');
+      expect(call.sessionId).toBe('sess-abc');
+    });
+
+    it('notifyTaskComplete falls back to project URL when sessionId absent', async () => {
+      await notifyTaskComplete(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        taskId: 'task-1',
+        taskTitle: 'Fix bug',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.actionUrl).toBe('/projects/proj-1');
+      expect(call.sessionId).toBeUndefined();
+    });
+
+    it('notifyTaskFailed falls back to project URL when sessionId absent', async () => {
+      await notifyTaskFailed(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        taskId: 'task-1',
+        taskTitle: 'Deploy',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.actionUrl).toBe('/projects/proj-1');
+      expect(call.sessionId).toBeUndefined();
+    });
+
+    it('notifySessionEnded falls back to project URL when sessionId absent', async () => {
+      await notifySessionEnded(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.actionUrl).toBe('/projects/proj-1');
+      expect(call.sessionId).toBeUndefined();
+    });
+
+    it('notifyNeedsInput falls back to project URL when sessionId absent', async () => {
+      await notifyNeedsInput(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        taskId: 'task-1',
+        taskTitle: 'Deploy',
+        context: 'Need approval',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.actionUrl).toBe('/projects/proj-1');
+      expect(call.sessionId).toBeUndefined();
+    });
+
+    it('notifyProgress falls back to project URL when sessionId absent', async () => {
+      await notifyProgress(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        taskId: 'task-1',
+        taskTitle: 'Feature',
+        message: 'Step done',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.actionUrl).toBe('/projects/proj-1');
+      expect(call.sessionId).toBeUndefined();
+    });
+
+    it('notifyPrCreated always uses project URL and has no sessionId', async () => {
+      await notifyPrCreated(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        taskId: 'task-1',
+        taskTitle: 'Add tests',
+        prUrl: 'https://github.com/org/repo/pull/99',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.actionUrl).toBe('/projects/proj-1');
+      expect(call.sessionId).toBeUndefined();
     });
   });
 

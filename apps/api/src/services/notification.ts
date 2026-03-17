@@ -53,6 +53,25 @@ function getStub(env: NotificationEnv, userId: string): DurableObjectStub<Notifi
 }
 
 /**
+ * Build the actionUrl for a notification, deep-linking to the chat session
+ * when a sessionId is available.
+ *
+ * Returns a frontend-relative path consumed exclusively by the React app
+ * via `navigate(notification.actionUrl)` in NotificationCenter. MUST NOT
+ * be used for server-side redirects, web push click_action, or external
+ * integrations — those require absolute `https://app.${BASE_DOMAIN}/...` URLs.
+ *
+ * sessionId is always an internal UUID from the ProjectData DO. Empty strings
+ * are treated as absent (falls back to the project URL).
+ */
+export function buildActionUrl(projectId: string, sessionId?: string | null): string {
+  if (sessionId) {
+    return `/projects/${projectId}/chat/${sessionId}`;
+  }
+  return `/projects/${projectId}`;
+}
+
+/**
  * Send a notification to a specific user via their Notification DO.
  *
  * This is a fire-and-forget operation — callers should use waitUntil()
@@ -81,7 +100,7 @@ export async function notifyTaskComplete(
     outputBranch?: string | null;
   }
 ): Promise<void> {
-  const actionUrl = `/projects/${opts.projectId}`;
+  const actionUrl = buildActionUrl(opts.projectId, opts.sessionId);
   const body = opts.outputPrUrl
     ? `PR ready for review: ${opts.outputPrUrl}`
     : opts.outputBranch
@@ -126,7 +145,7 @@ export async function notifyTaskFailed(
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
-    actionUrl: `/projects/${opts.projectId}`,
+    actionUrl: buildActionUrl(opts.projectId, opts.sessionId),
     metadata: {
       projectName: opts.projectName,
     },
@@ -157,7 +176,7 @@ export async function notifySessionEnded(
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
-    actionUrl: `/projects/${opts.projectId}`,
+    actionUrl: buildActionUrl(opts.projectId, opts.sessionId),
     metadata: {
       projectName: opts.projectName,
     },
@@ -184,7 +203,7 @@ export async function notifyPrCreated(
     body: `Pull request is ready for review`,
     projectId: opts.projectId,
     taskId: opts.taskId,
-    actionUrl: `/projects/${opts.projectId}`,
+    actionUrl: buildActionUrl(opts.projectId),
     metadata: {
       projectName: opts.projectName,
       prUrl: opts.prUrl,
@@ -220,7 +239,7 @@ export async function notifyNeedsInput(
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
-    actionUrl: `/projects/${opts.projectId}?task=${opts.taskId}`,
+    actionUrl: buildActionUrl(opts.projectId, opts.sessionId),
     metadata: {
       projectName: opts.projectName,
       category: opts.category ?? null,
@@ -250,7 +269,7 @@ export async function notifyProgress(
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
-    actionUrl: `/projects/${opts.projectId}`,
+    actionUrl: buildActionUrl(opts.projectId, opts.sessionId),
     metadata: {
       projectName: opts.projectName,
     },
