@@ -1,15 +1,61 @@
 ---
 const rows = [
-  { label: 'Your code runs on', sam: 'Your cloud VMs', other: 'Their infrastructure', samWins: true },
-  { label: 'Agent choice', sam: 'Claude Code, Codex, Gemini CLI, Mistral Vibe', other: 'Devin only', samWins: true },
-  { label: 'Cloud providers', sam: 'Hetzner & Scaleway (more coming)', other: 'Their infrastructure', samWins: true },
-  { label: 'Environment', sam: 'Your repo\'s devcontainer', other: 'Devin\'s sandbox', samWins: true },
-  { label: 'Monthly cost', sam: '~$4-15 (Hetzner/Scaleway direct)', other: '$500 flat', samWins: true },
-  { label: 'Open source', sam: 'MIT licensed', other: 'Proprietary', samWins: true },
-  { label: 'Self-hostable', sam: 'Full platform', other: 'No', samWins: true },
-  { label: 'Control plane cost', sam: 'Free (Cloudflare)', other: 'Included', samWins: true },
-  { label: 'Multi-workspace nodes', sam: 'Multiple agents per VM', other: 'Not applicable', samWins: true },
-  { label: 'Setup effort', sam: 'Self-hosted', other: 'Zero config', samWins: false },
+  {
+    label: 'Your code runs on',
+    sam: 'Your cloud (Hetzner, Scaleway)',
+    managed: 'Their infrastructure',
+    selfHosted: 'Your infra (AWS, GCP, K8s)',
+    samWins: true,
+  },
+  {
+    label: 'Agent choice',
+    sam: 'Claude Code, Codex, Gemini CLI, Mistral',
+    managed: 'Their proprietary agent',
+    selfHosted: 'Varies (Claude, Gemini, OpenAI)',
+    samWins: true,
+  },
+  {
+    label: 'Open source',
+    sam: 'MIT license',
+    managed: 'Proprietary',
+    selfHosted: 'Open-source core',
+    samWins: true,
+  },
+  {
+    label: 'Control plane',
+    sam: 'Free (Cloudflare Workers)',
+    managed: 'Bundled into pricing',
+    selfHosted: 'You host it (K8s / Docker)',
+    samWins: true,
+  },
+  {
+    label: 'Infrastructure cost',
+    sam: '~$4–15/mo (direct to provider)',
+    managed: 'From $20/mo (compute + inference)',
+    selfHosted: 'Your cloud bill + license fees',
+    samWins: true,
+  },
+  {
+    label: 'Self-hostable',
+    sam: 'Fully — control plane + VMs',
+    managed: 'No',
+    selfHosted: 'Yes — Terraform + K8s required',
+    samWins: true,
+  },
+  {
+    label: 'Setup effort',
+    sam: 'Deploy to Cloudflare + connect cloud',
+    managed: 'Zero config',
+    selfHosted: 'Terraform + cluster management',
+    samWins: false,
+  },
+  {
+    label: 'Data sovereignty',
+    sam: 'Full — your cloud, your data',
+    managed: 'Vendor-managed',
+    selfHosted: 'Full — your infrastructure',
+    samWins: true,
+  },
 ];
 ---
 
@@ -19,7 +65,7 @@ const rows = [
       <span class="section-label">Comparison</span>
       <h2 class="section-title">How SAM stacks up</h2>
       <p class="section-subtitle">
-        Full infrastructure ownership, agent choice, and dramatically lower costs. The trade-off: you host it yourself.
+        Own your infrastructure. Choose your agent. Pay cloud prices.
       </p>
     </div>
 
@@ -40,8 +86,15 @@ const rows = [
               </div>
             </th>
             <th class="col-other">
-              <div class="col-header-content">
-                Devin
+              <div class="col-header-content col-header-managed">
+                Managed AI Platforms
+                <span class="col-examples">Devin, Ona</span>
+              </div>
+            </th>
+            <th class="col-other">
+              <div class="col-header-content col-header-selfhosted">
+                Self-Hosted CDEs
+                <span class="col-examples">Coder</span>
               </div>
             </th>
           </tr>
@@ -51,12 +104,18 @@ const rows = [
             <tr>
               <td class="col-label">{row.label}</td>
               <td class={`col-sam ${row.samWins ? 'highlight' : ''}`}>{row.sam}</td>
-              <td class="col-other">{row.other}</td>
+              <td class="col-other">{row.managed}</td>
+              <td class="col-other">{row.selfHosted}</td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+
+    <p class="comparison-footnote animate-on-scroll">
+      SAM infrastructure costs are compute only — bring your own API keys for AI providers.
+      Managed platform pricing bundles compute and model inference.
+    </p>
   </div>
 </section>
 
@@ -78,7 +137,7 @@ const rows = [
 
   .comparison-table {
     width: 100%;
-    max-width: 720px;
+    max-width: 900px;
     margin: 0 auto;
     border-collapse: collapse;
     font-size: 0.9375rem;
@@ -106,6 +165,19 @@ const rows = [
     gap: 8px;
   }
 
+  .col-header-managed,
+  .col-header-selfhosted {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .col-examples {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--color-fg-dim);
+  }
+
   .col-label {
     color: var(--color-fg-muted);
     font-weight: 500;
@@ -123,5 +195,16 @@ const rows = [
 
   .col-other {
     color: var(--color-fg-dim);
+  }
+
+  .comparison-footnote {
+    text-align: center;
+    font-size: 0.8125rem;
+    color: var(--color-fg-dim);
+    margin-top: 24px;
+    max-width: 640px;
+    margin-left: auto;
+    margin-right: auto;
+    line-height: 1.5;
   }
 </style>
