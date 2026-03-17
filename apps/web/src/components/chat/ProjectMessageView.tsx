@@ -13,6 +13,7 @@ import { mapToolCallContent, getErrorMeta } from '@simple-agent-manager/acp-clie
 import type { AcpSessionHandle } from '@simple-agent-manager/acp-client';
 import { ChevronDown, ChevronUp, Server, Box, Cpu, MapPin, Cloud, GitBranch, CheckCircle2 } from 'lucide-react';
 import { TruncatedSummary } from './TruncatedSummary';
+import { mergeMessages, getLastMessageId } from '../../lib/merge-messages';
 import { stripMarkdown } from '../../lib/text-utils';
 import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode, updateProjectTaskStatus, deleteWorkspace } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
@@ -113,14 +114,22 @@ function AcpConversationItemView({ item }: { item: ConversationItem }) {
 
 /** Converts DO-persisted ChatMessageResponse[] into ConversationItem[] for unified rendering. */
 export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): ConversationItem[] {
-  // Deduplicate by message ID — the same message can arrive through multiple
-  // channels (initial REST load, WebSocket onMessage, onCatchUp, polling).
+  // Safety-net deduplication by message ID. Primary dedup now happens at the
+  // state level via mergeMessages(). If this catches duplicates, it indicates
+  // a gap in state-level dedup that should be investigated.
   const seenIds = new Set<string>();
+  let renderDupCount = 0;
   const dedupedMsgs = msgs.filter((msg) => {
-    if (seenIds.has(msg.id)) return false;
+    if (seenIds.has(msg.id)) {
+      renderDupCount++;
+      return false;
+    }
     seenIds.add(msg.id);
     return true;
   });
+  if (renderDupCount > 0 && typeof globalThis !== 'undefined' && globalThis.process?.env?.NODE_ENV !== 'production') {
+    console.warn(`[chatMessagesToConversationItems] Safety-net caught ${renderDupCount} duplicate(s) — investigate state-level dedup gap`);
+  }
 
   // First pass: build items, tracking tool calls by toolCallId for deduplication
   const toolCallMap = new Map<string, number>(); // toolCallId → index in acc
@@ -347,28 +356,14 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     sessionId,
     enabled: session?.status === 'active',
     onMessage: useCallback((msg: ChatMessageResponse) => {
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === msg.id)) return prev;
-        // Replace optimistic message if this is a server-confirmed user message with matching content
-        if (msg.role === 'user') {
-          const optimisticIdx = prev.findIndex(
-            (m) => m.id.startsWith('optimistic-') && m.role === 'user' && m.content === msg.content
-          );
-          if (optimisticIdx !== -1) {
-            const updated = [...prev];
-            updated[optimisticIdx] = msg;
-            return updated;
-          }
-        }
-        return [...prev, msg];
-      });
+      setMessages((prev) => mergeMessages(prev, [msg], 'append'));
     }, []),
     onSessionStopped: useCallback(() => {
       setSession((prev) => prev ? { ...prev, status: 'stopped' } : prev);
     }, []),
     onCatchUp: useCallback((catchUpMessages: ChatMessageResponse[], catchUpSession: ChatSessionResponse, catchUpHasMore: boolean) => {
       setSession(catchUpSession);
-      setMessages(catchUpMessages);
+      setMessages((prev) => mergeMessages(prev, catchUpMessages, 'replace'));
       setHasMore(catchUpHasMore);
     }, []),
     onAgentCompleted: useCallback((agentCompletedAt: number) => {
@@ -422,10 +417,12 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       // Just stopped prompting — start grace period for DO to catch up
       wasPromptingRef.current = false;
       setAcpGrace(true);
+      // Grace period of 3s matches the ~2s VM agent batch delay + 1s buffer.
+      // Previously 10s, which caused unnecessary time in full-ACP view.
       acpGraceTimerRef.current = setTimeout(() => {
         setAcpGrace(false);
         acpGraceTimerRef.current = null;
-      }, 10_000);
+      }, 3_000);
     }
     return () => {
       if (acpGraceTimerRef.current) {
@@ -434,6 +431,31 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       }
     };
   }, [agentSession.isPrompting]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Preserve scroll position when ACP→DO view transition occurs (grace period ends).
+  // Without this, the switch from full ACP view to merged DO+ACP view causes a
+  // visible content jump because the two views may have different item heights.
+  const prevAcpGraceRef = useRef(acpGrace);
+  useEffect(() => {
+    const wasGrace = prevAcpGraceRef.current;
+    prevAcpGraceRef.current = acpGrace;
+
+    // Only act on the transition from grace=true to grace=false
+    if (wasGrace && !acpGrace) {
+      const container = messagesContainerRef.current;
+      if (!container) return;
+      const prevScrollHeight = container.scrollHeight;
+      const prevScrollTop = container.scrollTop;
+      // After React renders the DO view, restore relative scroll position
+      requestAnimationFrame(() => {
+        const newScrollHeight = container.scrollHeight;
+        const delta = newScrollHeight - prevScrollHeight;
+        if (delta !== 0) {
+          container.scrollTop = prevScrollTop + delta;
+        }
+      });
+    }
+  }, [acpGrace]);
 
   const loadSession = useCallback(async () => {
     try {
@@ -501,22 +523,25 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   }, [loading]);
 
   // Auto-scroll to bottom on initial load, session switch, and new messages.
+  // Uses last message ID (not messages.length) to detect genuinely new messages,
+  // avoiding spurious scrolls from dedup/merge artifacts that change array length.
   // Skip when older messages were prepended via "Load earlier messages".
   // Skip when user has manually scrolled up (not stuck to bottom).
-  const prevMessageCountRef = useRef(0);
+  const prevLastMessageIdRef = useRef<string | null>(null);
   const prevSessionIdRef = useRef(sessionId);
+  const lastMessageId = getLastMessageId(messages);
   useEffect(() => {
     if (loading) return;
 
     // Skip auto-scroll when messages were prepended via "load more"
     if (isLoadingMoreRef.current) {
-      prevMessageCountRef.current = messages.length;
+      prevLastMessageIdRef.current = lastMessageId;
       return;
     }
 
     const isNewSession = prevSessionIdRef.current !== sessionId;
-    const hasNewMessages = messages.length > prevMessageCountRef.current;
-    const isInitialLoad = prevMessageCountRef.current === 0 && messages.length > 0;
+    const hasNewMessages = lastMessageId !== null && lastMessageId !== prevLastMessageIdRef.current;
+    const isInitialLoad = prevLastMessageIdRef.current === null && lastMessageId !== null;
 
     // Always scroll on new session or initial load; only scroll for new messages
     // if the user hasn't manually scrolled up.
@@ -529,9 +554,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       isStuckToBottomRef.current = true;
     }
 
-    prevMessageCountRef.current = messages.length;
+    prevLastMessageIdRef.current = lastMessageId;
     prevSessionIdRef.current = sessionId;
-  }, [messages.length, loading, sessionId]);
+  }, [lastMessageId, loading, sessionId]);
 
   // Polling fallback — keeps running alongside WebSocket for reliability.
   // Only updates state when the server has new data (fingerprint-based).
@@ -558,7 +583,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           lastPollFingerprint = fingerprint;
           setSession(data.session);
           setHasMore(data.hasMore);
-          setMessages(data.messages);
+          setMessages((prev) => mergeMessages(prev, data.messages, 'replace'));
           if (data.session.task) {
             setTaskEmbed(data.session.task);
           }
@@ -680,7 +705,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       const data = await getChatSession(projectId, sessionId, {
         before: firstMessage.createdAt,
       });
-      setMessages((prev) => [...data.messages, ...prev]);
+      setMessages((prev) => mergeMessages(prev, data.messages, 'prepend'));
       setHasMore(data.hasMore);
 
       // Restore scroll position after prepending older messages.

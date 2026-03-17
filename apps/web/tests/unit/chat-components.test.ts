@@ -76,8 +76,8 @@ describe('ProjectMessageView', () => {
     expect(source).toContain('ACTIVE_POLL_MS');
   });
 
-  it('deduplicates messages by id', () => {
-    expect(source).toContain('prev.some((m) => m.id === msg.id)');
+  it('deduplicates messages via mergeMessages utility', () => {
+    expect(source).toContain('mergeMessages');
   });
 
   it('supports loading earlier messages (pagination)', () => {
