@@ -22,16 +22,21 @@ type DetectedPort struct {
 // EventEmitter is called when ports are detected or closed.
 type EventEmitter func(eventType, message string, detail map[string]interface{})
 
+// ContainerResolver is called when the scanner has no container ID.
+// It allows lazy resolution when the container isn't ready at scanner creation time.
+type ContainerResolver func() (string, error)
+
 // ScannerConfig holds configuration for the port scanner.
 type ScannerConfig struct {
-	Enabled      bool
-	Interval     time.Duration
-	ExcludePorts map[int]bool
-	EphemeralMin int
-	BaseDomain   string
-	WorkspaceID  string
-	ContainerID  string // Resolved container ID for docker exec
-	EventEmitter EventEmitter
+	Enabled           bool
+	Interval          time.Duration
+	ExcludePorts      map[int]bool
+	EphemeralMin      int
+	BaseDomain        string
+	WorkspaceID       string
+	ContainerID       string // Resolved container ID for docker exec
+	ContainerResolver ContainerResolver
+	EventEmitter      EventEmitter
 }
 
 // Default scanner configuration values.
@@ -126,7 +131,21 @@ func (s *Scanner) scan() {
 	s.mu.RUnlock()
 
 	if containerID == "" {
-		return
+		// Attempt lazy resolution if a resolver is configured.
+		if s.cfg.ContainerResolver != nil {
+			if id, err := s.cfg.ContainerResolver(); err == nil && id != "" {
+				s.SetContainerID(id)
+				containerID = id
+				slog.Info("Port scanner: resolved container ID lazily",
+					"workspaceId", s.cfg.WorkspaceID, "containerID", id)
+			} else {
+				slog.Debug("Port scanner: container not yet available",
+					"workspaceId", s.cfg.WorkspaceID, "error", err)
+				return
+			}
+		} else {
+			return
+		}
 	}
 
 	content, err := readProcNetTCP(containerID)
