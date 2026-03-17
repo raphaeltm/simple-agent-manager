@@ -432,14 +432,14 @@ func (s *Server) StartPortScanner(workspaceID string) {
 		return
 	}
 
-	// Resolve container ID for scanning
+	// Resolve container ID for scanning — if not available yet, the scanner
+	// will lazily resolve it on each tick via the ContainerResolver callback.
 	var containerID string
 	if s.containerDiscovery != nil {
 		if id, err := s.containerDiscovery.GetContainerID(); err == nil {
 			containerID = id
 		} else {
-			slog.Warn("Port scanner: cannot resolve container ID", "workspaceId", workspaceID, "error", err)
-			return
+			slog.Info("Port scanner: container not yet available, will resolve lazily", "workspaceId", workspaceID, "error", err)
 		}
 	}
 
@@ -450,14 +450,23 @@ func (s *Server) StartPortScanner(workspaceID string) {
 		excludePorts[port] = true
 	}
 
+	// Build a container resolver for lazy resolution when container isn't ready yet.
+	var containerResolver ports.ContainerResolver
+	if s.containerDiscovery != nil {
+		containerResolver = func() (string, error) {
+			return s.containerDiscovery.GetContainerID()
+		}
+	}
+
 	scanner := ports.NewScanner(ports.ScannerConfig{
-		Enabled:      true,
-		Interval:     s.config.PortScanInterval,
-		ExcludePorts: excludePorts,
-		EphemeralMin: s.config.PortScanEphemeralMin,
-		BaseDomain:   baseDomain,
-		WorkspaceID:  workspaceID,
-		ContainerID:  containerID,
+		Enabled:           true,
+		Interval:          s.config.PortScanInterval,
+		ExcludePorts:      excludePorts,
+		EphemeralMin:      s.config.PortScanEphemeralMin,
+		BaseDomain:        baseDomain,
+		WorkspaceID:       workspaceID,
+		ContainerID:       containerID,
+		ContainerResolver: containerResolver,
 		EventEmitter: func(eventType, message string, detail map[string]interface{}) {
 			s.appendNodeEvent(workspaceID, "info", eventType, message, detail)
 		},
