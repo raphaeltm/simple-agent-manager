@@ -229,6 +229,11 @@ func (s *Server) startWorkspaceProvision(
 		}
 
 		s.appendNodeEvent(runtime.ID, "info", successType, successMessage, successDetail)
+
+		// Start port scanner for the newly provisioned workspace.
+		// This is the dynamic-workspace counterpart to the boot-time scanner
+		// started in OnBootstrapComplete (server.go).
+		s.StartPortScanner(runtime.ID)
 	}()
 }
 
@@ -336,6 +341,9 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 		s.stopSessionHost(workspaceID, session.ID)
 	}
 
+	// Stop port scanner for this workspace.
+	s.stopPortScanner(workspaceID)
+
 	// Shut down per-workspace message reporter (final flush before cleanup).
 	s.shutdownReporter(workspaceID)
 
@@ -439,6 +447,9 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.stopSessionHostsForWorkspace(workspaceID)
+
+	// Stop port scanner for this workspace.
+	s.stopPortScanner(workspaceID)
 
 	// Shut down per-workspace message reporter (final flush before cleanup).
 	s.shutdownReporter(workspaceID)
