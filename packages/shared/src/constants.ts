@@ -439,6 +439,16 @@ export const MAX_HUMAN_INPUT_OPTION_LENGTH = 200;
 /** Maximum length for notification body text */
 export const MAX_NOTIFICATION_BODY_LENGTH = 500;
 
+/** Maximum length for notification title text (after prefix) */
+export const MAX_NOTIFICATION_TITLE_LENGTH = 80;
+
+/**
+ * Maximum length for notification title text in needs_input notifications.
+ * Shorter than the default because the category prefix (e.g., "Approval needed: ")
+ * consumes more space.
+ */
+export const MAX_NOTIFICATION_TITLE_LENGTH_NEEDS_INPUT = 70;
+
 /** Valid categories for request_human_input MCP tool */
 export const HUMAN_INPUT_CATEGORIES = ['decision', 'clarification', 'approval', 'error_help'] as const;
 export type HumanInputCategory = (typeof HUMAN_INPUT_CATEGORIES)[number];

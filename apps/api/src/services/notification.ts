@@ -8,11 +8,42 @@
  */
 
 import type { CreateNotificationRequest } from '@simple-agent-manager/shared';
-import { NOTIFICATION_TYPE_URGENCY, MAX_NOTIFICATION_BODY_LENGTH, type HumanInputCategory } from '@simple-agent-manager/shared';
+import { NOTIFICATION_TYPE_URGENCY, MAX_NOTIFICATION_BODY_LENGTH, MAX_NOTIFICATION_TITLE_LENGTH, MAX_NOTIFICATION_TITLE_LENGTH_NEEDS_INPUT, type HumanInputCategory } from '@simple-agent-manager/shared';
 import type { NotificationService } from '../durable-objects/notification';
 
 interface NotificationEnv {
   NOTIFICATION: DurableObjectNamespace;
+  DATABASE: D1Database;
+}
+
+/**
+ * Look up a project's name from D1 by its ID.
+ * Returns a fallback string if the project is not found (defensive — notification
+ * creation should never fail because of a missing project name).
+ */
+export async function getProjectName(env: { DATABASE: D1Database }, projectId: string): Promise<string> {
+  try {
+    const row = await env.DATABASE.prepare('SELECT name FROM projects WHERE id = ?')
+      .bind(projectId)
+      .first<{ name: string }>();
+    return row?.name ?? projectId;
+  } catch (err) {
+    console.warn('getProjectName: D1 query failed, falling back to projectId', {
+      projectId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return projectId;
+  }
+}
+
+/**
+ * Common opts shared by all notification helper functions.
+ * `projectName` is required alongside `projectId` so the frontend can
+ * display human-readable group headers without a fallback to truncated IDs.
+ */
+interface ProjectNotificationOpts {
+  projectId: string;
+  projectName: string;
 }
 
 function getStub(env: NotificationEnv, userId: string): DurableObjectStub<NotificationService> {
@@ -42,8 +73,7 @@ export async function sendNotification(
 export async function notifyTaskComplete(
   env: NotificationEnv,
   userId: string,
-  opts: {
-    projectId: string;
+  opts: ProjectNotificationOpts & {
     taskId: string;
     taskTitle: string;
     sessionId?: string | null;
@@ -61,13 +91,14 @@ export async function notifyTaskComplete(
   await sendNotification(env, userId, {
     type: 'task_complete',
     urgency: NOTIFICATION_TYPE_URGENCY.task_complete ?? 'medium',
-    title: `Task completed: ${truncate(opts.taskTitle, 80)}`,
+    title: `Task completed: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH)}`,
     body,
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
     actionUrl,
     metadata: {
+      projectName: opts.projectName,
       outputPrUrl: opts.outputPrUrl ?? null,
       outputBranch: opts.outputBranch ?? null,
     },
@@ -80,8 +111,7 @@ export async function notifyTaskComplete(
 export async function notifyTaskFailed(
   env: NotificationEnv,
   userId: string,
-  opts: {
-    projectId: string;
+  opts: ProjectNotificationOpts & {
     taskId: string;
     taskTitle: string;
     errorMessage?: string | null;
@@ -91,12 +121,15 @@ export async function notifyTaskFailed(
   await sendNotification(env, userId, {
     type: 'error',
     urgency: NOTIFICATION_TYPE_URGENCY.error ?? 'high',
-    title: `Task failed: ${truncate(opts.taskTitle, 80)}`,
+    title: `Task failed: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH)}`,
     body: opts.errorMessage ?? 'Task encountered an error',
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
     actionUrl: `/projects/${opts.projectId}`,
+    metadata: {
+      projectName: opts.projectName,
+    },
   });
 }
 
@@ -106,15 +139,14 @@ export async function notifyTaskFailed(
 export async function notifySessionEnded(
   env: NotificationEnv,
   userId: string,
-  opts: {
-    projectId: string;
+  opts: ProjectNotificationOpts & {
     sessionId?: string | null;
     taskId?: string | null;
     taskTitle?: string | null;
   }
 ): Promise<void> {
   const title = opts.taskTitle
-    ? `Agent finished: ${truncate(opts.taskTitle, 80)}`
+    ? `Agent finished: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH)}`
     : 'Agent finished — your turn';
 
   await sendNotification(env, userId, {
@@ -126,6 +158,9 @@ export async function notifySessionEnded(
     taskId: opts.taskId,
     sessionId: opts.sessionId,
     actionUrl: `/projects/${opts.projectId}`,
+    metadata: {
+      projectName: opts.projectName,
+    },
   });
 }
 
@@ -135,8 +170,7 @@ export async function notifySessionEnded(
 export async function notifyPrCreated(
   env: NotificationEnv,
   userId: string,
-  opts: {
-    projectId: string;
+  opts: ProjectNotificationOpts & {
     taskId: string;
     taskTitle: string;
     prUrl: string;
@@ -146,12 +180,13 @@ export async function notifyPrCreated(
   await sendNotification(env, userId, {
     type: 'pr_created',
     urgency: NOTIFICATION_TYPE_URGENCY.pr_created ?? 'medium',
-    title: `PR created: ${truncate(opts.taskTitle, 80)}`,
+    title: `PR created: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH)}`,
     body: `Pull request is ready for review`,
     projectId: opts.projectId,
     taskId: opts.taskId,
     actionUrl: `/projects/${opts.projectId}`,
     metadata: {
+      projectName: opts.projectName,
       prUrl: opts.prUrl,
       branchName: opts.branchName ?? null,
     },
@@ -164,8 +199,7 @@ export async function notifyPrCreated(
 export async function notifyNeedsInput(
   env: NotificationEnv,
   userId: string,
-  opts: {
-    projectId: string;
+  opts: ProjectNotificationOpts & {
     taskId: string;
     taskTitle: string;
     context: string;
@@ -181,13 +215,14 @@ export async function notifyNeedsInput(
   await sendNotification(env, userId, {
     type: 'needs_input',
     urgency: NOTIFICATION_TYPE_URGENCY.needs_input ?? 'high',
-    title: `${categoryLabel} needed: ${truncate(opts.taskTitle, 70)}`,
+    title: `${categoryLabel} needed: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH_NEEDS_INPUT)}`,
     body: truncate(opts.context, MAX_NOTIFICATION_BODY_LENGTH),
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
     actionUrl: `/projects/${opts.projectId}?task=${opts.taskId}`,
     metadata: {
+      projectName: opts.projectName,
       category: opts.category ?? null,
       options: opts.options ?? null,
     },
@@ -200,8 +235,7 @@ export async function notifyNeedsInput(
 export async function notifyProgress(
   env: NotificationEnv,
   userId: string,
-  opts: {
-    projectId: string;
+  opts: ProjectNotificationOpts & {
     taskId: string;
     taskTitle: string;
     message: string;
@@ -211,12 +245,15 @@ export async function notifyProgress(
   await sendNotification(env, userId, {
     type: 'progress',
     urgency: NOTIFICATION_TYPE_URGENCY.progress ?? 'low',
-    title: `Progress: ${truncate(opts.taskTitle, 80)}`,
+    title: `Progress: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH)}`,
     body: truncate(opts.message, MAX_NOTIFICATION_BODY_LENGTH),
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
     actionUrl: `/projects/${opts.projectId}`,
+    metadata: {
+      projectName: opts.projectName,
+    },
   });
 }
 
