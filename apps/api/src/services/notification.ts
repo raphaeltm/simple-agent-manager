@@ -13,6 +13,33 @@ import type { NotificationService } from '../durable-objects/notification';
 
 interface NotificationEnv {
   NOTIFICATION: DurableObjectNamespace;
+  DATABASE: D1Database;
+}
+
+/**
+ * Look up a project's name from D1 by its ID.
+ * Returns a fallback string if the project is not found (defensive — notification
+ * creation should never fail because of a missing project name).
+ */
+export async function getProjectName(env: { DATABASE: D1Database }, projectId: string): Promise<string> {
+  try {
+    const row = await env.DATABASE.prepare('SELECT name FROM projects WHERE id = ?')
+      .bind(projectId)
+      .first<{ name: string }>();
+    return row?.name ?? projectId;
+  } catch {
+    return projectId;
+  }
+}
+
+/**
+ * Common opts shared by all notification helper functions.
+ * `projectName` is required alongside `projectId` so the frontend can
+ * display human-readable group headers without a fallback to truncated IDs.
+ */
+interface ProjectNotificationOpts {
+  projectId: string;
+  projectName: string;
 }
 
 function getStub(env: NotificationEnv, userId: string): DurableObjectStub<NotificationService> {
@@ -42,8 +69,7 @@ export async function sendNotification(
 export async function notifyTaskComplete(
   env: NotificationEnv,
   userId: string,
-  opts: {
-    projectId: string;
+  opts: ProjectNotificationOpts & {
     taskId: string;
     taskTitle: string;
     sessionId?: string | null;
@@ -68,6 +94,7 @@ export async function notifyTaskComplete(
     sessionId: opts.sessionId,
     actionUrl,
     metadata: {
+      projectName: opts.projectName,
       outputPrUrl: opts.outputPrUrl ?? null,
       outputBranch: opts.outputBranch ?? null,
     },
@@ -80,8 +107,7 @@ export async function notifyTaskComplete(
 export async function notifyTaskFailed(
   env: NotificationEnv,
   userId: string,
-  opts: {
-    projectId: string;
+  opts: ProjectNotificationOpts & {
     taskId: string;
     taskTitle: string;
     errorMessage?: string | null;
@@ -97,6 +123,9 @@ export async function notifyTaskFailed(
     taskId: opts.taskId,
     sessionId: opts.sessionId,
     actionUrl: `/projects/${opts.projectId}`,
+    metadata: {
+      projectName: opts.projectName,
+    },
   });
 }
 
@@ -106,8 +135,7 @@ export async function notifyTaskFailed(
 export async function notifySessionEnded(
   env: NotificationEnv,
   userId: string,
-  opts: {
-    projectId: string;
+  opts: ProjectNotificationOpts & {
     sessionId?: string | null;
     taskId?: string | null;
     taskTitle?: string | null;
@@ -126,6 +154,9 @@ export async function notifySessionEnded(
     taskId: opts.taskId,
     sessionId: opts.sessionId,
     actionUrl: `/projects/${opts.projectId}`,
+    metadata: {
+      projectName: opts.projectName,
+    },
   });
 }
 
@@ -135,8 +166,7 @@ export async function notifySessionEnded(
 export async function notifyPrCreated(
   env: NotificationEnv,
   userId: string,
-  opts: {
-    projectId: string;
+  opts: ProjectNotificationOpts & {
     taskId: string;
     taskTitle: string;
     prUrl: string;
@@ -152,6 +182,7 @@ export async function notifyPrCreated(
     taskId: opts.taskId,
     actionUrl: `/projects/${opts.projectId}`,
     metadata: {
+      projectName: opts.projectName,
       prUrl: opts.prUrl,
       branchName: opts.branchName ?? null,
     },
@@ -164,8 +195,7 @@ export async function notifyPrCreated(
 export async function notifyNeedsInput(
   env: NotificationEnv,
   userId: string,
-  opts: {
-    projectId: string;
+  opts: ProjectNotificationOpts & {
     taskId: string;
     taskTitle: string;
     context: string;
@@ -188,6 +218,7 @@ export async function notifyNeedsInput(
     sessionId: opts.sessionId,
     actionUrl: `/projects/${opts.projectId}?task=${opts.taskId}`,
     metadata: {
+      projectName: opts.projectName,
       category: opts.category ?? null,
       options: opts.options ?? null,
     },
@@ -200,8 +231,7 @@ export async function notifyNeedsInput(
 export async function notifyProgress(
   env: NotificationEnv,
   userId: string,
-  opts: {
-    projectId: string;
+  opts: ProjectNotificationOpts & {
     taskId: string;
     taskTitle: string;
     message: string;
@@ -217,6 +247,9 @@ export async function notifyProgress(
     taskId: opts.taskId,
     sessionId: opts.sessionId,
     actionUrl: `/projects/${opts.projectId}`,
+    metadata: {
+      projectName: opts.projectName,
+    },
   });
 }
 

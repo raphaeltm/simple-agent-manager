@@ -512,8 +512,10 @@ crudRoutes.post('/:taskId/status/callback', async (c) => {
 
           // Emit session-ended notification (best-effort)
           if (c.env.NOTIFICATION) {
+            const projectName = await notificationService.getProjectName(c.env, projectId);
             await notificationService.notifySessionEnded(c.env as any, task.userId, {
               projectId,
+              projectName,
               sessionId: ws?.chatSessionId ?? '',
               taskId,
               taskTitle: task.title,
@@ -523,6 +525,7 @@ crudRoutes.post('/:taskId/status/callback', async (c) => {
             if (body.gitPushResult?.prUrl) {
               await notificationService.notifyPrCreated(c.env as any, task.userId, {
                 projectId,
+                projectName,
                 taskId,
                 taskTitle: task.title,
                 prUrl: body.gitPushResult.prUrl,
@@ -611,9 +614,11 @@ crudRoutes.post('/:taskId/status/callback', async (c) => {
             .limit(1);
           const sessionId = ws?.chatSessionId ?? null;
 
+          const projectName = await notificationService.getProjectName(c.env, projectId);
           if (body.toStatus === 'completed') {
             await notificationService.notifyTaskComplete(c.env as any, task.userId, {
               projectId,
+              projectName,
               taskId,
               taskTitle: task.title,
               sessionId,
@@ -623,6 +628,7 @@ crudRoutes.post('/:taskId/status/callback', async (c) => {
           } else if (body.toStatus === 'failed') {
             await notificationService.notifyTaskFailed(c.env as any, task.userId, {
               projectId,
+              projectName,
               taskId,
               taskTitle: task.title,
               errorMessage: body.errorMessage,
