@@ -1,6 +1,6 @@
 ---
 title: SAM Documentation
-description: Documentation for Simple Agent Manager — ephemeral AI coding environments on Cloudflare Workers + Hetzner Cloud.
+description: Documentation for Simple Agent Manager — ephemeral AI coding environments on Cloudflare Workers + multi-cloud VMs.
 template: splash
 hero:
   tagline: Everything you need to deploy and use SAM — the open-source platform for ephemeral AI coding agent environments.
@@ -21,13 +21,13 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
     Get SAM running in minutes — either on the hosted instance or self-hosted on your own infrastructure.
   </Card>
   <Card title="Core Concepts" icon="open-book">
-    Understand workspaces, nodes, providers, projects, and how they fit together.
+    Understand workspaces, nodes, providers, projects, tasks, agents, and how they fit together.
   </Card>
   <Card title="Self-Hosting Guide" icon="setting">
     Fork, configure, deploy. Full walkthrough for running SAM on your own Cloudflare account.
   </Card>
   <Card title="Architecture" icon="document">
-    Deep dive into the system design — Workers, Durable Objects, VM agents, and security model.
+    Deep dive into the system design — Workers, Durable Objects, VM agents, hybrid storage, and security model.
   </Card>
 </CardGrid>
 
@@ -36,8 +36,12 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 <CardGrid>
   <LinkCard title="What is SAM?" href="/docs/overview/" description="Platform overview and how it works." />
   <LinkCard title="Quickstart" href="/docs/quickstart/" description="Get up and running in minutes." />
-  <LinkCard title="Core Concepts" href="/docs/concepts/" description="Workspaces, nodes, projects, and more." />
+  <LinkCard title="Core Concepts" href="/docs/concepts/" description="Workspaces, nodes, providers, projects, tasks, and more." />
+  <LinkCard title="AI Agents" href="/docs/guides/agents/" description="Configure Claude Code, Codex, Gemini, and Mistral Vibe." />
+  <LinkCard title="Task Execution" href="/docs/guides/task-execution/" description="Submit tasks, warm node pooling, agent-to-agent dispatch." />
+  <LinkCard title="Chat Features" href="/docs/guides/chat-features/" description="Forking, voice input, TTS, command palette." />
+  <LinkCard title="Notifications" href="/docs/guides/notifications/" description="In-app alerts, agent requests, progress updates." />
   <LinkCard title="Self-Hosting" href="/docs/guides/self-hosting/" description="Deploy SAM on your own infrastructure." />
-  <LinkCard title="API Reference" href="/docs/reference/api/" description="REST API endpoints and authentication." />
-  <LinkCard title="Configuration" href="/docs/reference/configuration/" description="Environment variables and secrets." />
+  <LinkCard title="Architecture" href="/docs/architecture/overview/" description="System design, Durable Objects, hybrid storage." />
+  <LinkCard title="Configuration" href="/docs/reference/configuration/" description="Environment variables, secrets, and limits." />
 </CardGrid>
