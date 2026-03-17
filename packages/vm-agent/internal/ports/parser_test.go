@@ -142,3 +142,86 @@ func TestHexToIPv4(t *testing.T) {
 		}
 	}
 }
+
+func TestHexToIPv6(t *testing.T) {
+	tests := []struct {
+		hex  string
+		want string
+	}{
+		// :: (all zeros)
+		{"00000000000000000000000000000000", "::"},
+		// ::1 (loopback) — stored as 00000000 00000000 00000000 01000000 in /proc/net/tcp6
+		{"00000000000000000000000001000000", "::1"},
+	}
+
+	for _, tt := range tests {
+		got, err := hexToIPv6(tt.hex)
+		if err != nil {
+			t.Errorf("hexToIPv6(%q): unexpected error: %v", tt.hex, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("hexToIPv6(%q) = %q, want %q", tt.hex, got, tt.want)
+		}
+	}
+}
+
+// Realistic /proc/net/tcp6 content — Node.js servers default to IPv6 dual-stack.
+const realisticProcNetTCP6 = `  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 00000000000000000000000000000000:0BB8 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 30001 1 0000000000000000 100 0 0 10 0
+   1: 00000000000000000000000001000000:1F90 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 30002 1 0000000000000000 100 0 0 10 0`
+
+func TestParseProcNetTCP6(t *testing.T) {
+	entries, err := ParseProcNetTCP(realisticProcNetTCP6)
+	if err != nil {
+		t.Fatalf("ParseProcNetTCP error for tcp6 content: %v", err)
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	// Entry 0: :: listening on port 3000
+	if entries[0].LocalAddress != "::" {
+		t.Errorf("entry[0] address: got %q, want %q", entries[0].LocalAddress, "::")
+	}
+	if entries[0].LocalPort != 3000 {
+		t.Errorf("entry[0] port: got %d, want %d", entries[0].LocalPort, 3000)
+	}
+	if entries[0].State != StateListen {
+		t.Errorf("entry[0] state: got %d, want %d", entries[0].State, StateListen)
+	}
+
+	// Entry 1: ::1 listening on port 8080
+	if entries[1].LocalAddress != "::1" {
+		t.Errorf("entry[1] address: got %q, want %q", entries[1].LocalAddress, "::1")
+	}
+	if entries[1].LocalPort != 8080 {
+		t.Errorf("entry[1] port: got %d, want %d", entries[1].LocalPort, 8080)
+	}
+}
+
+func TestParseProcNetTCP_CombinedIPv4AndIPv6(t *testing.T) {
+	// Simulate what readProcNetTCP produces: IPv4 content + IPv6 content (without header).
+	combined := realisticProcNetTCP + "\n" +
+		"   0: 00000000000000000000000000000000:0BB8 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 30001 1 0000000000000000 100 0 0 10 0\n"
+
+	entries, err := ParseProcNetTCP(combined)
+	if err != nil {
+		t.Fatalf("ParseProcNetTCP error: %v", err)
+	}
+
+	// 8 IPv4 entries + 1 IPv6 entry
+	if len(entries) != 9 {
+		t.Fatalf("expected 9 entries, got %d", len(entries))
+	}
+
+	// Last entry should be the IPv6 one
+	last := entries[8]
+	if last.LocalAddress != "::" {
+		t.Errorf("last entry address: got %q, want %q", last.LocalAddress, "::")
+	}
+	if last.LocalPort != 3000 {
+		t.Errorf("last entry port: got %d, want %d", last.LocalPort, 3000)
+	}
+}

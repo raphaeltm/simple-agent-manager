@@ -286,14 +286,30 @@ func (s *Scanner) scan() {
 	}
 }
 
-// readProcNetTCP reads /proc/net/tcp from inside a container via docker exec.
+// readProcNetTCP reads /proc/net/tcp and /proc/net/tcp6 from inside a container
+// via docker exec. Many applications (Node.js, Go) default to IPv6 dual-stack
+// listening, so ports only appear in /proc/net/tcp6.
 func readProcNetTCP(containerID string) (string, error) {
 	cmd := exec.Command("docker", "exec", containerID, "cat", "/proc/net/tcp")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("docker exec cat /proc/net/tcp: %w", err)
 	}
-	return string(output), nil
+	result := string(output)
+
+	// Also read tcp6 — many servers bind to :: (IPv6 any) by default.
+	cmd6 := exec.Command("docker", "exec", containerID, "cat", "/proc/net/tcp6")
+	output6, err6 := cmd6.Output()
+	if err6 == nil {
+		// Append tcp6 content, skipping its header line since we already have one.
+		lines := strings.SplitN(string(output6), "\n", 2)
+		if len(lines) > 1 {
+			result += lines[1]
+		}
+	}
+	// Ignore tcp6 errors — the file may not exist on some minimal containers.
+
+	return result, nil
 }
 
 func buildPortURL(baseDomain, workspaceID string, port int) string {
