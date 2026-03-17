@@ -104,7 +104,7 @@ export function AdminUsers() {
             )}
           </button>
         ))}
-        {isRefreshing && <Spinner size="sm" />}
+        {isRefreshing && <span role="status" aria-label="Refreshing users"><Spinner size="sm" /></span>}
       </div>
 
       {loading && users.length === 0 ? (

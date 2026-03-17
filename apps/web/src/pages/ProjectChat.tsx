@@ -513,7 +513,7 @@ export function ProjectChat() {
 
           {/* Subtle refresh indicator */}
           {isRefreshing && (
-            <div className="h-0.5 bg-accent animate-pulse" />
+            <div className="h-0.5 bg-accent animate-pulse" role="status" aria-label="Refreshing sessions" />
           )}
 
           {/* Search */}
@@ -932,7 +932,7 @@ function MobileSessionDrawer({
 
         {/* Subtle refresh indicator */}
         {isRefreshing && (
-          <div className="h-0.5 bg-accent animate-pulse" />
+          <div className="h-0.5 bg-accent animate-pulse" role="status" aria-label="Refreshing sessions" />
         )}
 
         {/* Session list */}

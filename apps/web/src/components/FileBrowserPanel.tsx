@@ -202,6 +202,16 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
         ))}
       </div>
 
+      {/* Subtle refresh indicator for directory navigation */}
+      {loading && entries.length > 0 && (
+        <div
+          style={{ height: 2, backgroundColor: 'var(--sam-color-accent-primary)', flexShrink: 0 }}
+          className="animate-pulse"
+          role="status"
+          aria-label="Loading directory"
+        />
+      )}
+
       {/* Content */}
       <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? '4px 0' : '4px 0' }}>
         {loading && entries.length === 0 && (
@@ -240,7 +250,7 @@ export const FileBrowserPanel: FC<FileBrowserPanelProps> = ({
         )}
 
         {entries.length > 0 && (
-          <div style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 0.15s' }}>
+          <div style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 0.15s' }} aria-busy={loading}>
             {entries.map((entry) => (
               <FileRow
                 key={entry.name}

@@ -251,7 +251,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
         )}
 
         {!error && diff !== '' && viewMode === 'diff' && (
-          <div style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 0.15s' }}>
+          <div style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 0.15s' }} aria-busy={loading}>
             <DiffRenderer diff={diff} />
           </div>
         )}
@@ -263,7 +263,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
               <Spinner size="md" />
             </div>
           ) : fullContent !== null ? (
-            <div style={{ opacity: fullLoading ? 0.6 : 1, transition: 'opacity 0.15s' }}>
+            <div style={{ opacity: fullLoading ? 0.6 : 1, transition: 'opacity 0.15s' }} aria-busy={fullLoading}>
               {markdownFile && markdownMode === 'rendered' ? (
                 <RenderedMarkdown content={fullContent} />
               ) : (
