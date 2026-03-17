@@ -8,6 +8,9 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strconv"
+	"strings"
+
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 // handleWorkspacePortProxy proxies workspace port traffic through the node agent.
@@ -104,14 +107,18 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 		"forwardPath", forwardPath)
 
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
-	// Rewrite the request path to strip the /workspaces/{id}/ports/{port} prefix.
-	// Without this, the container receives the full VM agent path instead of just
-	// the intended path (e.g., "/" or "/api/data").
+	// Rewrite the request path to strip the /workspaces/{id}/ports/{port} prefix
+	// and set the Host header to the correct public-facing URL for this port.
+	// Dev servers (Vite, Next.js, Astro) see this Host, which lets them handle
+	// cookies, CORS, and allowedHosts correctly for the real origin.
+	baseDomain := config.DeriveBaseDomain(s.config.ControlPlaneURL)
+	publicHost := fmt.Sprintf("ws-%s--%d.%s", strings.ToLower(workspaceID), port, baseDomain)
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
 		req.URL.Path = forwardPath
 		req.URL.RawPath = ""
+		req.Host = publicHost
 	}
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
 		slog.Error("Port proxy upstream error",

@@ -520,8 +520,11 @@ func (c *Config) BuildSAMEnvFallback() []string {
 		{"SAM_REPOSITORY", c.Repository},
 		{"SAM_WORKSPACE_ID", c.WorkspaceID},
 	}
-	if baseDomain != "" && c.WorkspaceID != "" {
-		entries = append(entries, entry{"SAM_WORKSPACE_URL", fmt.Sprintf("https://ws-%s.%s", c.WorkspaceID, baseDomain)})
+	if baseDomain != "" {
+		entries = append(entries, entry{"SAM_BASE_DOMAIN", baseDomain})
+		if c.WorkspaceID != "" {
+			entries = append(entries, entry{"SAM_WORKSPACE_URL", fmt.Sprintf("https://ws-%s.%s", c.WorkspaceID, baseDomain)})
+		}
 	}
 
 	var result []string
