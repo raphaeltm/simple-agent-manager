@@ -425,13 +425,16 @@ app.use('*', async (c, next) => {
   const headers = new Headers(c.req.raw.headers);
   headers.delete('x-sam-node-id');
   headers.delete('x-sam-workspace-id');
+  headers.delete('x-forwarded-host');
   headers.set('X-SAM-Node-Id', (workspace.nodeId || workspaceId));
   headers.set('X-SAM-Workspace-Id', workspaceId);
 
-  // Preserve the original client-facing Host so the VM agent can forward it
-  // to container services. The fetch() to the VM agent rewrites the Host header
-  // to the VM hostname for Cloudflare edge routing, losing the original.
+  // Preserve the original client-facing hostname (e.g., ws-abc123--3000.example.com)
+  // so the VM agent can forward it to container services. The fetch() to the VM agent
+  // rewrites the Host header to the VM hostname for Cloudflare edge routing, losing
+  // the original. X-Forwarded-Proto is always https since clients connect via CF edge.
   headers.set('X-Forwarded-Host', hostname);
+  headers.set('X-Forwarded-Proto', 'https');
 
   return fetch(vmUrl.toString(), {
     method: c.req.raw.method,

@@ -26,7 +26,9 @@ describe('ws proxy source contract', () => {
     expect(file).toContain("workspace.status !== 'running' && workspace.status !== 'recovery'");
   });
 
-  it('forwards original hostname via X-Forwarded-Host header', () => {
+  it('strips client-supplied X-Forwarded-Host and sets trusted value', () => {
+    expect(file).toContain("headers.delete('x-forwarded-host')");
     expect(file).toContain("headers.set('X-Forwarded-Host', hostname)");
+    expect(file).toContain("headers.set('X-Forwarded-Proto', 'https')");
   });
 });
