@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SAM — Demo Day</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/monokai.css">
+  <style>
+    :root {
+      --r-background-color: #0d1117;
+      --r-main-color: #e6edf3;
+      --r-heading-color: #58a6ff;
+      --r-link-color: #58a6ff;
+    }
+    .reveal { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .reveal h1, .reveal h2, .reveal h3 { font-weight: 700; text-transform: none; }
+    .reveal h1 { font-size: 2.2em; }
+    .reveal h2 { font-size: 1.6em; }
+    .reveal h3 { font-size: 1.2em; color: #8b949e; }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.2em;
+      margin-top: 0.8em;
+    }
+    .stat-box {
+      background: rgba(88, 166, 255, 0.08);
+      border: 1px solid rgba(88, 166, 255, 0.25);
+      border-radius: 12px;
+      padding: 1em;
+      text-align: center;
+    }
+    .stat-box .number {
+      font-size: 2.2em;
+      font-weight: 800;
+      color: #58a6ff;
+      line-height: 1.1;
+    }
+    .stat-box .label {
+      font-size: 0.65em;
+      color: #8b949e;
+      margin-top: 0.3em;
+    }
+
+    .commit-saga {
+      text-align: left;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 0.48em;
+      line-height: 1.7;
+      background: rgba(255,255,255,0.04);
+      border-radius: 10px;
+      padding: 0.8em 1em;
+      margin-top: 0.6em;
+    }
+    .commit-saga .time { color: #8b949e; }
+    .commit-saga .fix { color: #f97583; }
+    .commit-saga .feat { color: #56d364; }
+    .commit-saga .chore { color: #d2a8ff; }
+
+    .arch-layer {
+      display: flex;
+      justify-content: center;
+      gap: 0.5em;
+      margin: 0.4em 0;
+    }
+    .arch-box {
+      background: rgba(88, 166, 255, 0.1);
+      border: 1px solid rgba(88, 166, 255, 0.3);
+      border-radius: 8px;
+      padding: 0.5em 1em;
+      font-size: 0.6em;
+      min-width: 120px;
+      text-align: center;
+    }
+    .arch-box.highlight {
+      background: rgba(86, 211, 100, 0.12);
+      border-color: rgba(86, 211, 100, 0.4);
+    }
+    .arch-box.vm {
+      background: rgba(249, 117, 131, 0.1);
+      border-color: rgba(249, 117, 131, 0.3);
+    }
+    .arch-label {
+      font-size: 0.5em;
+      color: #8b949e;
+      text-align: left;
+      margin: 0.3em 0;
+    }
+
+    .loop-diagram {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6em;
+      margin: 0.8em 0;
+      flex-wrap: wrap;
+    }
+    .loop-item {
+      background: rgba(88, 166, 255, 0.08);
+      border: 1px solid rgba(88, 166, 255, 0.25);
+      border-radius: 10px;
+      padding: 0.6em 0.8em;
+      font-size: 0.55em;
+      text-align: center;
+      max-width: 150px;
+    }
+    .loop-arrow { font-size: 1.5em; color: #58a6ff; }
+
+    .timeline {
+      text-align: left;
+      font-size: 0.55em;
+      line-height: 1.8;
+    }
+    .timeline .date { color: #58a6ff; font-weight: 600; }
+    .timeline .event { color: #e6edf3; }
+
+    .postmortem-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.6em;
+      margin-top: 0.6em;
+    }
+    .pm-card {
+      background: rgba(249, 117, 131, 0.06);
+      border: 1px solid rgba(249, 117, 131, 0.2);
+      border-radius: 8px;
+      padding: 0.6em;
+      text-align: left;
+      font-size: 0.5em;
+    }
+    .pm-card .pm-title { color: #f97583; font-weight: 600; margin-bottom: 0.3em; }
+    .pm-card .pm-desc { color: #8b949e; }
+
+    .agent-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 0.8em;
+      margin-top: 0.6em;
+    }
+    .agent-card {
+      background: rgba(210, 168, 255, 0.08);
+      border: 1px solid rgba(210, 168, 255, 0.25);
+      border-radius: 10px;
+      padding: 0.8em;
+      text-align: center;
+    }
+    .agent-card .agent-name { font-size: 0.7em; font-weight: 700; color: #d2a8ff; }
+    .agent-card .agent-desc { font-size: 0.5em; color: #8b949e; margin-top: 0.3em; }
+
+    .provider-row {
+      display: flex;
+      justify-content: center;
+      gap: 1.5em;
+      margin-top: 0.6em;
+    }
+    .provider-card {
+      background: rgba(86, 211, 100, 0.08);
+      border: 1px solid rgba(86, 211, 100, 0.25);
+      border-radius: 10px;
+      padding: 0.8em 1.5em;
+      text-align: center;
+    }
+    .provider-card .p-name { font-size: 0.75em; font-weight: 700; color: #56d364; }
+    .provider-card .p-desc { font-size: 0.5em; color: #8b949e; margin-top: 0.3em; }
+
+    .fragment.highlight-blue.visible { color: #58a6ff; }
+    .small { font-size: 0.6em; color: #8b949e; }
+    .accent { color: #58a6ff; }
+    .green { color: #56d364; }
+    .red { color: #f97583; }
+    .purple { color: #d2a8ff; }
+    blockquote { border-left: 4px solid #58a6ff; padding-left: 1em; font-style: italic; }
+    em { color: #8b949e; }
+  </style>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+<!-- SLIDE 1: TITLE -->
+<section>
+  <h1>SAM</h1>
+  <h3>Simple Agent Manager</h3>
+  <p style="font-size: 0.7em; margin-top: 1.5em;">
+    An orchestration platform for AI coding agents<br>
+    <span class="small">built by one human and a swarm of AI agents</span>
+  </p>
+  <p class="small" style="margin-top: 2em;">
+    Rapha&euml;l Titsworth-Morin &middot; Demo Day &middot; March 19, 2026
+  </p>
+</section>
+
+<!-- SLIDE 2: WHAT IS SAM? -->
+<section>
+  <h2>What is SAM?</h2>
+  <p style="font-size: 0.75em; margin-top: 1em;">
+    A platform that provisions <span class="accent">ephemeral cloud VMs</span>,<br>
+    drops in a <span class="accent">devcontainer</span> with your repo,<br>
+    and lets <span class="accent">AI coding agents</span> work autonomously.
+  </p>
+  <div style="margin-top: 1.2em;">
+    <p style="font-size: 0.65em;">
+      <span class="green">Bring Your Own Cloud</span> &mdash; you provide Hetzner or Scaleway tokens<br>
+      <span class="green">Bring Your Own Agent</span> &mdash; Claude Code, Codex, or Mistral Vibe<br>
+      <span class="green">Chat-first UX</span> &mdash; talk to agents, fork conversations, dispatch sub-tasks
+    </p>
+  </div>
+  <p class="small" style="margin-top: 1.2em;">
+    Think "Devin-style autonomous coding" but self-hosted, multi-cloud, multi-agent, and open.
+  </p>
+</section>
+
+<!-- SLIDE 3: ARCHITECTURE -->
+<section>
+  <h2>Architecture</h2>
+  <div class="arch-label">Browser</div>
+  <div class="arch-layer">
+    <div class="arch-box">React + Vite PWA</div>
+    <div class="arch-box">ACP Client (WebSocket)</div>
+  </div>
+
+  <div class="arch-label">Cloudflare Edge</div>
+  <div class="arch-layer">
+    <div class="arch-box highlight">Hono API Worker</div>
+    <div class="arch-box highlight">Durable Objects</div>
+    <div class="arch-box highlight">D1 + KV + R2</div>
+  </div>
+
+  <div class="arch-label">Cloud VMs (Hetzner / Scaleway)</div>
+  <div class="arch-layer">
+    <div class="arch-box vm">Go VM Agent</div>
+    <div class="arch-box vm">Devcontainer + Repo</div>
+    <div class="arch-box vm">Claude / Codex / Vibe</div>
+  </div>
+
+  <p class="small" style="margin-top: 0.8em;">
+    Cloud-init bootstraps VMs &rarr; Go agent manages PTY sessions + ACP protocol &rarr; Workers proxy everything through Cloudflare's edge
+  </p>
+</section>
+
+<!-- SLIDE 4: THE NUMBERS -->
+<section>
+  <h2>The Numbers</h2>
+  <h3>50 days &middot; 1 human &middot; many agents</h3>
+
+  <div class="stat-grid">
+    <div class="stat-box">
+      <div class="number">991</div>
+      <div class="label">commits (20/day avg)</div>
+    </div>
+    <div class="stat-box">
+      <div class="number">115K</div>
+      <div class="label">lines of code (TS + Go)</div>
+    </div>
+    <div class="stat-box">
+      <div class="number">444</div>
+      <div class="label">pull requests</div>
+    </div>
+    <div class="stat-box">
+      <div class="number">32</div>
+      <div class="label">feature specs written</div>
+    </div>
+    <div class="stat-box">
+      <div class="number">~30%</div>
+      <div class="label">commits by AI agents</div>
+    </div>
+    <div class="stat-box">
+      <div class="number">16</div>
+      <div class="label">post-mortems filed</div>
+    </div>
+  </div>
+
+  <p class="small" style="margin-top: 0.8em;">
+    Jan 27 &rarr; Mar 17, 2026 &middot; Peak: 48 commits on Feb 28
+  </p>
+</section>
+
+<!-- SLIDE 5: DOGFOODING -->
+<section>
+  <h2>SAM Builds SAM</h2>
+  <h3>The self-referential development loop</h3>
+
+  <div class="loop-diagram">
+    <div class="loop-item">I need a feature<br>to build SAM faster</div>
+    <div class="loop-arrow">&rarr;</div>
+    <div class="loop-item">I build that feature<br><em>using SAM</em></div>
+    <div class="loop-arrow">&rarr;</div>
+    <div class="loop-item">Feature ships to SAM<br>making it better</div>
+    <div class="loop-arrow">&rarr;</div>
+    <div class="loop-item">I use improved SAM<br>to build the next thing</div>
+  </div>
+
+  <div style="font-size: 0.55em; text-align: left; margin-top: 0.8em; line-height: 1.8;">
+    <span class="accent">/do workflow</span> &mdash; end-to-end autonomous task execution, built because I wanted agents to ship PRs independently<br>
+    <span class="accent">dispatch_task</span> &mdash; agent-to-agent delegation, built because one agent couldn't handle a big task alone<br>
+    <span class="accent">Notifications</span> &mdash; built because I kept missing when agents finished or got stuck<br>
+    <span class="accent">MCP tools</span> &mdash; built so agents could discover project context, manage tasks, ask me questions<br>
+    <span class="accent">Conversation forking</span> &mdash; built because I wanted to try different approaches without losing context<br>
+    <span class="accent">Voice input</span> &mdash; built because I wanted to give instructions from my phone on the couch
+  </div>
+</section>
+
+<!-- SLIDE 6: WAR STORY — BETTERAUTH -->
+<section>
+  <h2>War Story: The Auth Saga</h2>
+  <h3>February 7, 2026 &mdash; 30 minutes of pain</h3>
+
+  <div class="commit-saga">
+    <span class="time">15:00</span> <span class="fix">fix:</span> add trustedOrigins to BetterAuth for cross-subdomain OAuth<br>
+    <span class="time">15:06</span> <span class="fix">fix:</span> add BetterAuth required database tables<br>
+    <span class="time">15:11</span> <span class="fix">fix:</span> add error logging to BetterAuth route handler<br>
+    <span class="time">15:15</span> <span class="fix">fix:</span> surface BetterAuth empty 500 responses for debugging<br>
+    <span class="time">15:24</span> <span class="fix">fix:</span> add BetterAuth debug tracing with basePath and onAPIError<br>
+    <span class="time">15:29</span> <span class="fix">fix:</span> use timestamp_ms mode for BetterAuth D1 compatibility<br>
+    <span class="time" style="margin-top: 0.3em; display: inline-block;">15:43</span> <span class="chore">chore:</span> remove DEBUG_AUTH tracing now that auth flow works
+  </div>
+
+  <p style="font-size: 0.6em; margin-top: 0.8em;">
+    <span class="red">Root cause:</span> Cloudflare D1 stores timestamps as integers, not ISO strings.<br>
+    BetterAuth expected strings. Silent 500. No error message. Just... empty responses.
+  </p>
+  <p class="small" style="margin-top: 0.4em;">
+    The last commit &mdash; removing the debug code &mdash; is the most satisfying commit in the repo.
+  </p>
+</section>
+
+<!-- SLIDE 7: 828 TESTS PASSING -->
+<section>
+  <h2>828 Tests Passing</h2>
+  <h2 style="margin-top: 0;">Core Feature Broken</h2>
+
+  <p style="font-size: 0.65em; margin-top: 0.8em;">
+    February 28. All CI green. <span class="green">828 tests passing.</span><br>
+    Task execution &mdash; the <em>entire point of the platform</em> &mdash; didn't work.
+  </p>
+
+  <div style="font-size: 0.55em; text-align: left; margin-top: 0.8em; line-height: 1.8;">
+    <span class="red">What happened:</span> 8 tasks and 7 PRs built on the assumption that<br>
+    "the VM agent sends the initial prompt to Claude" &mdash; because a flow diagram said so.<br>
+    <em>Nobody checked if the code actually existed.</em> It didn't.<br><br>
+    <span class="accent">What we learned:</span><br>
+    &bull; Component tests prove components work. Only <strong>capability tests</strong> prove the system works.<br>
+    &bull; Documentation that says "X happens" without citing a code path is aspirational fiction.<br>
+    &bull; "I read the code and it looks right" is not verification.
+  </p>
+
+  <p class="small" style="margin-top: 0.8em;">
+    This incident created 3 new permanent rules in our agent instructions.<br>
+    Now every feature requires a data flow trace citing specific code paths.
+  </p>
+</section>
+
+<!-- SLIDE 8: THE LEARNING MACHINE -->
+<section>
+  <h2>The Learning Machine</h2>
+  <h3>16 post-mortems &rarr; 16 permanent rules</h3>
+
+  <div class="postmortem-grid">
+    <div class="pm-card">
+      <div class="pm-title">TLS YAML Indentation</div>
+      <div class="pm-desc">One space broke all VM provisioning. Unit tests passed because they used 3-line PEM stubs. Now: parse output, don't grep it.</div>
+    </div>
+    <div class="pm-card">
+      <div class="pm-title">CORS Origin Fallthrough</div>
+      <div class="pm-desc">Unknown origins got reflected back. Any website could make credentialed requests. Now: origin callbacks must default-deny.</div>
+    </div>
+    <div class="pm-card">
+      <div class="pm-title">MCP Token Revocation</div>
+      <div class="pm-desc">Revoking a task-scoped token killed the session-scoped MCP connection. Now: verify credential lifecycle matches connection lifecycle.</div>
+    </div>
+    <div class="pm-card">
+      <div class="pm-title">Scaleway Node Creation</div>
+      <div class="pm-desc">Provider dropdown looked perfect. Submit handler never sent the provider field. Now: trace every UI input to the API call.</div>
+    </div>
+  </div>
+
+  <p style="font-size: 0.55em; margin-top: 0.8em;">
+    Every bug fix requires a post-mortem + a process change.<br>
+    The rules are the <span class="accent">institutional memory</span> &mdash; agents read them on every task.
+  </p>
+</section>
+
+<!-- SLIDE 9: MULTI-CLOUD, MULTI-AGENT -->
+<section>
+  <h2>Multi-Cloud, Multi-Agent</h2>
+
+  <div class="provider-row">
+    <div class="provider-card">
+      <div class="p-name">Hetzner</div>
+      <div class="p-desc">EU &amp; US regions<br>~$0.007/hr for CX22</div>
+    </div>
+    <div class="provider-card">
+      <div class="p-name">Scaleway</div>
+      <div class="p-desc">Paris, Amsterdam, Warsaw<br>ARM &amp; x86 instances</div>
+    </div>
+    <div class="provider-card" style="border-color: rgba(139,148,158,0.3); background: rgba(139,148,158,0.06);">
+      <div class="p-name" style="color: #8b949e;">Your Cloud?</div>
+      <div class="p-desc">Provider interface is<br>~100 lines to implement</div>
+    </div>
+  </div>
+
+  <div class="agent-grid" style="margin-top: 1em;">
+    <div class="agent-card">
+      <div class="agent-name">Claude Code</div>
+      <div class="agent-desc">Anthropic's coding agent<br>API key or OAuth</div>
+    </div>
+    <div class="agent-card">
+      <div class="agent-name">OpenAI Codex</div>
+      <div class="agent-desc">OpenAI's coding agent<br>OAuth token injection</div>
+    </div>
+    <div class="agent-card">
+      <div class="agent-name">Mistral Vibe</div>
+      <div class="agent-desc">Mistral's coding agent<br>Python + uv install</div>
+    </div>
+  </div>
+
+  <p class="small" style="margin-top: 0.8em;">
+    BYOC + BYOA &mdash; no vendor lock-in on compute or intelligence
+  </p>
+</section>
+
+<!-- SLIDE 10: WHAT'S NEXT / DEMO -->
+<section>
+  <h2>What's Next</h2>
+
+  <div style="font-size: 0.65em; text-align: left; margin-top: 1em; line-height: 2;">
+    <span class="green">&check;</span> Shipped: Chat-first UX, task orchestration, multi-cloud, multi-agent, notifications, MCP tools, conversation forking, port forwarding, TTS, voice input, PWA<br><br>
+    <span class="accent">&rarr;</span> Now: Devcontainer prebuilds for faster startup<br>
+    <span class="accent">&rarr;</span> Now: OIDC federation for zero-credential cloud auth<br>
+    <span class="accent">&rarr;</span> Next: Agent profiles and workflow templates<br>
+    <span class="accent">&rarr;</span> Next: Push notifications for mobile<br>
+    <span class="accent">&rarr;</span> Next: Open-source release
+  </div>
+
+  <div style="margin-top: 1.5em;">
+    <p style="font-size: 0.8em;">
+      <span class="accent">github.com/raphaeltm/simple-agent-manager</span>
+    </p>
+    <p class="small">
+      Built with Cloudflare Workers &middot; Hetzner &middot; Go &middot; TypeScript &middot; and a lot of AI agents
+    </p>
+  </div>
+</section>
+
+</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
+<script>
+  Reveal.initialize({
+    hash: true,
+    slideNumber: true,
+    transition: 'fade',
+    transitionSpeed: 'fast',
+    plugins: [RevealHighlight],
+    width: 1280,
+    height: 720,
+  });
+</script>
+</body>
+</html>

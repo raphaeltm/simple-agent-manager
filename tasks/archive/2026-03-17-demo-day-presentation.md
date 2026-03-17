@@ -33,22 +33,22 @@ Need a 10-slide presentation for demo day (March 19, 2026) targeting geeks and b
 
 ## Implementation Checklist
 
-- [ ] Create reveal.js HTML presentation in `docs/presentations/`
-- [ ] Slide 1: Title — SAM: Simple Agent Manager
-- [ ] Slide 2: What is SAM? (elevator pitch)
-- [ ] Slide 3: Architecture (Cloudflare Workers + VMs + DOs diagram)
-- [ ] Slide 4: The Numbers (991 commits, 50 days, solo + AI)
-- [ ] Slide 5: Dogfooding — SAM Builds SAM
-- [ ] Slide 6: War Story — The BetterAuth Saga
-- [ ] Slide 7: War Story — 828 Tests Passing, Core Feature Broken
-- [ ] Slide 8: The Learning Machine (16 post-mortems, evolving rules)
-- [ ] Slide 9: Multi-Cloud, Multi-Agent
-- [ ] Slide 10: Live Demo / What's Next
+- [x] Create reveal.js HTML presentation in `docs/presentations/`
+- [x] Slide 1: Title — SAM: Simple Agent Manager
+- [x] Slide 2: What is SAM? (elevator pitch)
+- [x] Slide 3: Architecture (Cloudflare Workers + VMs + DOs diagram)
+- [x] Slide 4: The Numbers (991 commits, 50 days, solo + AI)
+- [x] Slide 5: Dogfooding — SAM Builds SAM
+- [x] Slide 6: War Story — The BetterAuth Saga
+- [x] Slide 7: War Story — 828 Tests Passing, Core Feature Broken
+- [x] Slide 8: The Learning Machine (16 post-mortems, evolving rules)
+- [x] Slide 9: Multi-Cloud, Multi-Agent
+- [x] Slide 10: Live Demo / What's Next
 
 ## Acceptance Criteria
 
-- [ ] 10-slide HTML presentation using reveal.js
-- [ ] Focused on technical audience (geeks and builders)
-- [ ] Includes real git history nuggets and stats
-- [ ] Highlights the self-referential development process
-- [ ] Presentable in a browser with no build step required
+- [x] 10-slide HTML presentation using reveal.js
+- [x] Focused on technical audience (geeks and builders)
+- [x] Includes real git history nuggets and stats
+- [x] Highlights the self-referential development process
+- [x] Presentable in a browser with no build step required
