@@ -581,7 +581,10 @@ describe('ProjectMessageView — DO + ACP message merge', () => {
     });
   });
 
-  it('merges ACP items newer than latest DO message', async () => {
+  it('shows only DO messages after grace period (no ACP merge)', async () => {
+    // After grace period, with both DO and ACP items present, only DO messages
+    // should render. ACP items use client-generated IDs that can't be deduped
+    // against DO ULIDs, so merging them would cause duplicates.
     const doTimestamp = 1000;
     const acpTimestamp = 2000;
 
@@ -616,22 +619,26 @@ describe('ProjectMessageView — DO + ACP message merge', () => {
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
 
-    // Both DO and ACP messages should appear
+    // Only DO message should appear — ACP items are not merged after grace period
     await waitFor(() => {
       expect(screen.getByText('DO message')).toBeTruthy();
-      expect(screen.getByText('ACP response')).toBeTruthy();
     });
+    expect(screen.queryByText('ACP response')).toBeNull();
   });
 
-  it('does not duplicate ACP items older than latest DO message', async () => {
-    const doTimestamp = 2000;
-    const acpTimestamp = 1000; // older
+  it('does not duplicate messages when ACP and DO both have the same conversation', async () => {
+    // Regression test: ACP replays produce client-generated IDs (item-N-timestamp)
+    // that never match DO ULIDs, so the old dedup logic always passed everything
+    // through, resulting in the full conversation appearing twice.
+    const doTimestamp = 1000;
 
     mocks.useProjectAgentSession.mockReturnValue({
       ...defaultAgentSession(),
+      // ACP has a replayed copy of the same conversation with different IDs/timestamps
       messages: {
         items: [
-          { kind: 'agent_message', id: 'acp-old', text: 'Old ACP item', streaming: false, timestamp: acpTimestamp },
+          { kind: 'user_message', id: 'item-0-1710000000', text: 'Hello', timestamp: Date.now() - 100 },
+          { kind: 'agent_message', id: 'item-1-1710000001', text: 'Hi there', streaming: false, timestamp: Date.now() },
         ],
         processMessage: vi.fn(),
         addUserMessage: vi.fn(),
@@ -644,26 +651,39 @@ describe('ProjectMessageView — DO + ACP message merge', () => {
 
     mocks.getChatSession.mockResolvedValue({
       session: makeSession('session-1'),
-      messages: [{
-        id: 'do-1',
-        sessionId: 'session-1',
-        role: 'user' as const,
-        content: 'DO message',
-        toolMetadata: null,
-        createdAt: doTimestamp,
-        sequence: null,
-      }],
+      messages: [
+        {
+          id: 'do-1',
+          sessionId: 'session-1',
+          role: 'user' as const,
+          content: 'Hello',
+          toolMetadata: null,
+          createdAt: doTimestamp,
+          sequence: null,
+        },
+        {
+          id: 'do-2',
+          sessionId: 'session-1',
+          role: 'assistant' as const,
+          content: 'Hi there',
+          toolMetadata: null,
+          createdAt: doTimestamp + 1,
+          sequence: null,
+        },
+      ],
       hasMore: false,
     });
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
 
     await waitFor(() => {
-      expect(screen.getByText('DO message')).toBeTruthy();
+      expect(screen.getByText('Hello')).toBeTruthy();
+      expect(screen.getByText('Hi there')).toBeTruthy();
     });
 
-    // Old ACP item should NOT appear since it's older than latest DO
-    expect(screen.queryByText('Old ACP item')).toBeNull();
+    // Each message should appear exactly once (DO only), not twice
+    expect(screen.getAllByText('Hello')).toHaveLength(1);
+    expect(screen.getAllByText('Hi there')).toHaveLength(1);
   });
 });
 

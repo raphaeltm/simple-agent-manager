@@ -46,6 +46,8 @@ Result: `mergedItems = [...convertedItems, ...acpOnlyItems]` contains the full c
 
 - [x] Replace broken merge logic with `const mergedItems = convertedItems` after `useFullAcpView` check
 - [x] Update comment block to describe two-source rendering strategy accurately
+- [x] Update existing merge tests to match new DO-only behavior after grace period
+- [x] Add regression test: duplicate messages when ACP and DO have same conversation
 - [ ] Verify lint passes (`pnpm --filter @simple-agent-manager/web lint`)
 - [ ] Verify typecheck passes (`pnpm --filter @simple-agent-manager/web typecheck`)
 - [ ] Verify build passes (`pnpm build`)
