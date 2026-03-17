@@ -117,15 +117,16 @@ func (s *Server) servePortProxy(w http.ResponseWriter, r *http.Request, workspac
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
-	// Prefer X-Forwarded-Host from the API Worker — it carries the original
-	// client-facing hostname (e.g., ws-{id}--{port}.{domain}) which is lost
-	// when Cloudflare edge re-routes the fetch to the VM hostname.
-	// Fall back to a derived value from ControlPlaneURL config if the header
-	// is absent (e.g., direct VM agent requests).
-	publicHost := r.Header.Get("X-Forwarded-Host")
-	if publicHost == "" {
-		baseDomain := config.DeriveBaseDomain(s.config.ControlPlaneURL)
-		publicHost = fmt.Sprintf("ws-%s--%d.%s", strings.ToLower(workspaceID), port, baseDomain)
+	// Derive the expected public-facing hostname from config as the trusted value.
+	// If X-Forwarded-Host from the API Worker matches this expected value, use it
+	// (preserving the exact original hostname). Otherwise fall back to the derived
+	// value. This validation prevents Host header injection if the VM agent is
+	// accessed directly (bypassing the API Worker).
+	baseDomain := config.DeriveBaseDomain(s.config.ControlPlaneURL)
+	expectedHost := fmt.Sprintf("ws-%s--%d.%s", strings.ToLower(workspaceID), port, baseDomain)
+	publicHost := expectedHost
+	if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" && fwdHost == expectedHost {
+		publicHost = fwdHost
 	}
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {

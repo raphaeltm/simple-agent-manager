@@ -21,7 +21,7 @@ func TestPortProxyForwardsHostHeader(t *testing.T) {
 		wantHost        string
 	}{
 		{
-			name:            "uses X-Forwarded-Host when present",
+			name:            "uses X-Forwarded-Host when it matches expected pattern",
 			forwardedHost:   "ws-abc123--5173.simple-agent-manager.org",
 			controlPlaneURL: "https://api.simple-agent-manager.org",
 			workspaceID:     "ABC123",
@@ -37,12 +37,20 @@ func TestPortProxyForwardsHostHeader(t *testing.T) {
 			wantHost:        "ws-ws001--3000.example.com",
 		},
 		{
-			name:            "preserves exact X-Forwarded-Host value",
-			forwardedHost:   "ws-myid--8080.staging.example.com",
+			name:            "rejects spoofed X-Forwarded-Host that does not match expected pattern",
+			forwardedHost:   "evil.attacker.com",
 			controlPlaneURL: "https://api.example.com",
-			workspaceID:     "MYID",
-			port:            8080,
-			wantHost:        "ws-myid--8080.staging.example.com",
+			workspaceID:     "WS001",
+			port:            3000,
+			wantHost:        "ws-ws001--3000.example.com",
+		},
+		{
+			name:            "rejects X-Forwarded-Host with wrong domain",
+			forwardedHost:   "ws-ws001--3000.wrong-domain.com",
+			controlPlaneURL: "https://api.example.com",
+			workspaceID:     "WS001",
+			port:            3000,
+			wantHost:        "ws-ws001--3000.example.com",
 		},
 	}
 
