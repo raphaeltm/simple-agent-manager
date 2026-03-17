@@ -227,6 +227,7 @@ func TestBuildSAMEnvFallback(t *testing.T) {
 
 	want := map[string]string{
 		"SAM_API_URL":         "https://api.example.com",
+		"SAM_BASE_DOMAIN":     "example.com",
 		"SAM_BRANCH":          "main",
 		"SAM_NODE_ID":         "node-456",
 		"SAM_PROJECT_ID":      "proj-789",

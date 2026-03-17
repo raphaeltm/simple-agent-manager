@@ -44,6 +44,7 @@ import { runObservabilityPurge } from './scheduled/observability-purge';
 import { getRuntimeLimits } from './services/limits';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { parseWorkspaceSubdomain } from './lib/workspace-subdomain';
+import { signTerminalToken } from './services/jwt';
 
 // Cloudflare bindings type
 export interface Env {
@@ -402,6 +403,22 @@ app.use('*', async (c, next) => {
   if (targetPort !== null) {
     const subPath = url.pathname === '/' ? '' : url.pathname;
     vmUrl.pathname = `/workspaces/${workspaceId}/ports/${targetPort}${subPath}`;
+
+    // Inject a workspace-scoped JWT so the VM agent can authenticate this request.
+    // Port-forwarded URLs are accessed directly by browsers which have no pre-existing
+    // workspace session cookie or token. The Worker is a trusted intermediary that has
+    // already validated the workspace exists and is running.
+    try {
+      const { token } = await signTerminalToken('port-proxy', workspaceId, c.env);
+      vmUrl.searchParams.set('token', token);
+    } catch (err) {
+      console.error(JSON.stringify({
+        event: 'port_proxy_token_error',
+        workspaceId,
+        error: err instanceof Error ? err.message : String(err),
+      }));
+      return c.json({ error: 'TOKEN_ERROR', message: 'Failed to generate port proxy token' }, 500);
+    }
   }
 
   // Strip client-supplied routing headers and inject trusted routing context.
