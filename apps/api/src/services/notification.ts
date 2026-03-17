@@ -53,6 +53,17 @@ function getStub(env: NotificationEnv, userId: string): DurableObjectStub<Notifi
 }
 
 /**
+ * Build the actionUrl for a notification, deep-linking to the chat session
+ * when a sessionId is available.
+ */
+export function buildActionUrl(projectId: string, sessionId?: string | null): string {
+  if (sessionId) {
+    return `/projects/${projectId}/chat/${sessionId}`;
+  }
+  return `/projects/${projectId}`;
+}
+
+/**
  * Send a notification to a specific user via their Notification DO.
  *
  * This is a fire-and-forget operation — callers should use waitUntil()
@@ -81,7 +92,7 @@ export async function notifyTaskComplete(
     outputBranch?: string | null;
   }
 ): Promise<void> {
-  const actionUrl = `/projects/${opts.projectId}`;
+  const actionUrl = buildActionUrl(opts.projectId, opts.sessionId);
   const body = opts.outputPrUrl
     ? `PR ready for review: ${opts.outputPrUrl}`
     : opts.outputBranch
@@ -126,7 +137,7 @@ export async function notifyTaskFailed(
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
-    actionUrl: `/projects/${opts.projectId}`,
+    actionUrl: buildActionUrl(opts.projectId, opts.sessionId),
     metadata: {
       projectName: opts.projectName,
     },
@@ -157,7 +168,7 @@ export async function notifySessionEnded(
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
-    actionUrl: `/projects/${opts.projectId}`,
+    actionUrl: buildActionUrl(opts.projectId, opts.sessionId),
     metadata: {
       projectName: opts.projectName,
     },
@@ -220,7 +231,7 @@ export async function notifyNeedsInput(
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
-    actionUrl: `/projects/${opts.projectId}?task=${opts.taskId}`,
+    actionUrl: buildActionUrl(opts.projectId, opts.sessionId),
     metadata: {
       projectName: opts.projectName,
       category: opts.category ?? null,
@@ -250,7 +261,7 @@ export async function notifyProgress(
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
-    actionUrl: `/projects/${opts.projectId}`,
+    actionUrl: buildActionUrl(opts.projectId, opts.sessionId),
     metadata: {
       projectName: opts.projectName,
     },
