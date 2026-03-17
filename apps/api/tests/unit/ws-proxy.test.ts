@@ -25,4 +25,10 @@ describe('ws proxy source contract', () => {
   it('allows recovery workspaces to proxy traffic', () => {
     expect(file).toContain("workspace.status !== 'running' && workspace.status !== 'recovery'");
   });
+
+  it('strips client-supplied X-Forwarded-Host and sets trusted value', () => {
+    expect(file).toContain("headers.delete('x-forwarded-host')");
+    expect(file).toContain("headers.set('X-Forwarded-Host', hostname)");
+    expect(file).toContain("headers.set('X-Forwarded-Proto', 'https')");
+  });
 });
