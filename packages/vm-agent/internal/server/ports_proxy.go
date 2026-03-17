@@ -20,12 +20,14 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	slog.Info("Port proxy request received",
+	slog.Info("Port proxy request received (v2-pathrw)",
 		"workspaceId", workspaceID,
 		"port", r.PathValue("port"),
 		"method", r.Method,
 		"path", r.URL.Path,
 		"remoteAddr", r.RemoteAddr)
+	// Debug header to verify which binary version is running.
+	w.Header().Set("X-SAM-Port-Proxy", "v2-pathrw")
 
 	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
 		slog.Warn("Port proxy auth failed",
@@ -136,17 +138,59 @@ func (s *Server) handleListWorkspacePorts(w http.ResponseWriter, r *http.Request
 
 	s.portScannerMu.RLock()
 	scanner := s.portScanners[workspaceID]
+	wsDiscovery := s.portDiscoveries[workspaceID]
 	s.portScannerMu.RUnlock()
 
-	var ports interface{}
+	var detectedPorts interface{}
 	if scanner != nil {
-		ports = scanner.Ports()
+		detectedPorts = scanner.Ports()
 	} else {
-		ports = []interface{}{}
+		detectedPorts = []interface{}{}
+	}
+
+	// Build diagnostic info to help debug port scanning issues.
+	diag := map[string]interface{}{
+		"scannerActive":    scanner != nil,
+		"discoveryActive":  wsDiscovery != nil,
+		"portScanEnabled":  s.config.PortScanEnabled,
+		"containerMode":    s.config.ContainerMode,
+		"version":          "v2-pathrw",
+	}
+	if wsDiscovery != nil {
+		if containerID, err := wsDiscovery.GetContainerID(); err == nil {
+			diag["containerID"] = containerID
+		} else {
+			diag["containerIDError"] = err.Error()
+		}
+		if bridgeIP, err := wsDiscovery.GetBridgeIP(); err == nil {
+			diag["bridgeIP"] = bridgeIP
+		} else {
+			diag["bridgeIPError"] = err.Error()
+		}
+	} else if s.containerDiscovery != nil {
+		diag["fallbackDiscovery"] = true
+		if containerID, err := s.containerDiscovery.GetContainerID(); err == nil {
+			diag["containerID"] = containerID
+		} else {
+			diag["containerIDError"] = err.Error()
+		}
+	}
+	// Include workspace runtime info
+	s.workspaceMu.RLock()
+	if runtime, ok := s.workspaces[workspaceID]; ok {
+		diag["containerLabelValue"] = runtime.ContainerLabelValue
+		diag["workspaceDir"] = runtime.WorkspaceDir
+	}
+	s.workspaceMu.RUnlock()
+
+	if scanner != nil {
+		diag["consecutiveFailures"] = scanner.ConsecutiveFailures()
+		diag["containerResolved"] = scanner.ContainerResolved()
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"ports": ports,
+		"ports":       detectedPorts,
+		"diagnostics": diag,
 	})
 }

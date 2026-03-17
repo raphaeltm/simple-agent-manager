@@ -101,6 +101,16 @@ func (s *Scanner) Ports() []DetectedPort {
 	return result
 }
 
+// ConsecutiveFailures returns the current consecutive failure count.
+func (s *Scanner) ConsecutiveFailures() int {
+	return s.consecutiveFailures
+}
+
+// ContainerResolved returns whether the container was ever successfully resolved.
+func (s *Scanner) ContainerResolved() bool {
+	return s.containerResolved
+}
+
 // SetContainerID updates the container ID for scanning.
 // Called when the container is discovered or changes.
 func (s *Scanner) SetContainerID(id string) {
