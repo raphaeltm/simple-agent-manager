@@ -195,7 +195,7 @@ export async function notifyPrCreated(
     body: `Pull request is ready for review`,
     projectId: opts.projectId,
     taskId: opts.taskId,
-    actionUrl: `/projects/${opts.projectId}`,
+    actionUrl: buildActionUrl(opts.projectId),
     metadata: {
       projectName: opts.projectName,
       prUrl: opts.prUrl,
