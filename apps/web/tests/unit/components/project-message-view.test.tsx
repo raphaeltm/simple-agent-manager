@@ -623,6 +623,39 @@ describe('ProjectMessageView — DO + ACP message merge', () => {
     expect(screen.queryByText('ACP response')).toBeNull();
   });
 
+  it('shows ACP-only view when agent is prompting, even with DO messages', async () => {
+    mocks.useProjectAgentSession.mockReturnValue({
+      ...defaultAgentSession(),
+      isPrompting: true,
+      isAgentActive: true,
+      messages: {
+        items: [
+          { kind: 'agent_message', id: 'acp-streaming', text: 'Streaming response', streaming: true, timestamp: Date.now() },
+        ],
+        processMessage: vi.fn(),
+        addUserMessage: vi.fn(),
+        prepareForReplay: vi.fn(),
+        clear: vi.fn(),
+        availableCommands: [],
+        usage: { totalTokens: 0 },
+      },
+    });
+
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        makeMessage('do-1', 'session-1', 'Earlier persisted message'),
+      ]),
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Streaming response')).toBeTruthy();
+    });
+    // DO messages must NOT appear while ACP is streaming
+    expect(screen.queryByText('Earlier persisted message')).toBeNull();
+  });
+
   it('does not duplicate ACP items older than latest DO message', async () => {
     const doTimestamp = 2000;
     const acpTimestamp = 1000; // older
