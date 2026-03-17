@@ -127,7 +127,7 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
     seenIds.add(msg.id);
     return true;
   });
-  if (renderDupCount > 0 && typeof globalThis !== 'undefined' && globalThis.process?.env?.NODE_ENV !== 'production') {
+  if (renderDupCount > 0 && !import.meta.env.PROD) {
     console.warn(`[chatMessagesToConversationItems] Safety-net caught ${renderDupCount} duplicate(s) — investigate state-level dedup gap`);
   }
 
