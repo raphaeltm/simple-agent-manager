@@ -201,6 +201,80 @@ func TestParseProcNetTCP6(t *testing.T) {
 	}
 }
 
+func TestParseSSOutput(t *testing.T) {
+	// Realistic ss -tlnH output from a devcontainer with multiple services
+	ssOutput := `LISTEN 0      511          0.0.0.0:3003       0.0.0.0:*
+LISTEN 0      128          0.0.0.0:22         0.0.0.0:*
+LISTEN 0      511             [::]:3003          [::]:*
+LISTEN 0      128             [::]:22            [::]:*
+LISTEN 0      128                *:8080             *:*`
+
+	entries, err := ParseSSOutput(ssOutput)
+	if err != nil {
+		t.Fatalf("ParseSSOutput error: %v", err)
+	}
+
+	if len(entries) != 5 {
+		t.Fatalf("expected 5 entries, got %d", len(entries))
+	}
+
+	tests := []struct {
+		idx  int
+		addr string
+		port int
+	}{
+		{0, "0.0.0.0", 3003},
+		{1, "0.0.0.0", 22},
+		{2, "::", 3003},
+		{3, "::", 22},
+		{4, "0.0.0.0", 8080}, // *:port → 0.0.0.0
+	}
+
+	for _, tt := range tests {
+		e := entries[tt.idx]
+		if e.LocalAddress != tt.addr {
+			t.Errorf("entry[%d] address: got %q, want %q", tt.idx, e.LocalAddress, tt.addr)
+		}
+		if e.LocalPort != tt.port {
+			t.Errorf("entry[%d] port: got %d, want %d", tt.idx, e.LocalPort, tt.port)
+		}
+		if e.State != StateListen {
+			t.Errorf("entry[%d] state: got %d, want %d", tt.idx, e.State, StateListen)
+		}
+	}
+}
+
+func TestParseSSOutput_Empty(t *testing.T) {
+	entries, err := ParseSSOutput("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries, got %d", len(entries))
+	}
+}
+
+func TestParseSSOutput_WithFilter(t *testing.T) {
+	ssOutput := `LISTEN 0      511          0.0.0.0:3003       0.0.0.0:*
+LISTEN 0      128          0.0.0.0:22         0.0.0.0:*
+LISTEN 0      128          0.0.0.0:8443       0.0.0.0:*`
+
+	entries, err := ParseSSOutput(ssOutput)
+	if err != nil {
+		t.Fatalf("ParseSSOutput error: %v", err)
+	}
+
+	excludePorts := map[int]bool{22: true, 8443: true}
+	filtered := FilterListening(entries, excludePorts, DefaultEphemeralMin)
+
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 filtered entry, got %d", len(filtered))
+	}
+	if filtered[0].LocalPort != 3003 {
+		t.Errorf("expected port 3003, got %d", filtered[0].LocalPort)
+	}
+}
+
 func TestParseProcNetTCP_CombinedIPv4AndIPv6(t *testing.T) {
 	// Simulate what readProcNetTCP produces: IPv4 content + IPv6 content (without header).
 	combined := realisticProcNetTCP + "\n" +

@@ -216,6 +216,20 @@ func (s *Scanner) scan() {
 
 	listening := FilterListening(entries, s.cfg.ExcludePorts, s.cfg.EphemeralMin)
 
+	// Fallback: if /proc/net/tcp returned no listening ports, try `ss -tlnH`
+	// which is more reliable in some container runtimes (e.g., devcontainers
+	// where /proc may not reflect the container's full network namespace).
+	if len(listening) == 0 {
+		if ssEntries, ssErr := readSSListening(containerID); ssErr == nil && len(ssEntries) > 0 {
+			listening = FilterListening(ssEntries, s.cfg.ExcludePorts, s.cfg.EphemeralMin)
+			if len(listening) > 0 {
+				slog.Info("Port scanner: detected ports via ss fallback",
+					"workspaceId", s.cfg.WorkspaceID,
+					"count", len(listening))
+			}
+		}
+	}
+
 	// Build set of currently listening ports
 	current := make(map[int]TCPEntry, len(listening))
 	for _, e := range listening {
@@ -284,6 +298,94 @@ func (s *Scanner) scan() {
 	for _, e := range events {
 		s.cfg.EventEmitter(e.eventType, e.message, e.detail)
 	}
+}
+
+// readSSListening runs `ss -tlnH` inside the container and parses the output
+// into TCPEntry structs. This is a fallback when /proc/net/tcp parsing returns
+// empty (which can happen in some devcontainer configurations).
+// The -H flag suppresses the header line; -t = TCP, -l = listening, -n = numeric.
+func readSSListening(containerID string) ([]TCPEntry, error) {
+	cmd := exec.Command("docker", "exec", containerID, "ss", "-tlnH")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("docker exec ss -tlnH: %w", err)
+	}
+	return ParseSSOutput(string(output))
+}
+
+// ParseSSOutput parses the output of `ss -tlnH` into TCPEntry structs.
+// Each line looks like:
+//
+//	LISTEN  0  511  0.0.0.0:3003  0.0.0.0:*
+//	LISTEN  0  511  [::]:3003     [::]:*
+//	LISTEN  0  128  *:3003        *:*
+func ParseSSOutput(content string) ([]TCPEntry, error) {
+	var entries []TCPEntry
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		// ss output: State Recv-Q Send-Q Local-Address:Port Peer-Address:Port [Process]
+		if len(fields) < 5 {
+			continue
+		}
+		if fields[0] != "LISTEN" {
+			continue
+		}
+		addr, port, err := parseSSAddress(fields[3])
+		if err != nil {
+			continue
+		}
+		entries = append(entries, TCPEntry{
+			LocalAddress: addr,
+			LocalPort:    port,
+			State:        StateListen,
+		})
+	}
+	return entries, nil
+}
+
+// parseSSAddress parses ss local address format: "addr:port", "[::]:port", or "*:port".
+func parseSSAddress(s string) (string, int, error) {
+	// Handle [::]:port format
+	if strings.HasPrefix(s, "[") {
+		closeBracket := strings.LastIndex(s, "]")
+		if closeBracket < 0 || closeBracket+2 >= len(s) || s[closeBracket+1] != ':' {
+			return "", 0, fmt.Errorf("invalid bracketed address: %s", s)
+		}
+		addr := s[1:closeBracket]
+		portStr := s[closeBracket+2:]
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			return "", 0, fmt.Errorf("invalid port: %s", portStr)
+		}
+		return addr, port, nil
+	}
+
+	// Handle *:port format
+	if strings.HasPrefix(s, "*:") {
+		portStr := s[2:]
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			return "", 0, fmt.Errorf("invalid port: %s", portStr)
+		}
+		return "0.0.0.0", port, nil
+	}
+
+	// Handle addr:port — find the last colon (port separator)
+	lastColon := strings.LastIndex(s, ":")
+	if lastColon < 0 {
+		return "", 0, fmt.Errorf("no colon in address: %s", s)
+	}
+	addr := s[:lastColon]
+	portStr := s[lastColon+1:]
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return "", 0, fmt.Errorf("invalid port: %s", portStr)
+	}
+	return addr, port, nil
 }
 
 // readProcNetTCP reads /proc/net/tcp and /proc/net/tcp6 from inside a container
