@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Hono } from 'hono';
-import { groupTokensIntoMessages, type TokenRow } from '../../../src/routes/mcp';
+import { groupTokensIntoMessages } from '../../../src/routes/mcp';
 
 // Mock KV namespace
 const mockKV = {
