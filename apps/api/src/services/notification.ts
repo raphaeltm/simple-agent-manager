@@ -55,6 +55,14 @@ function getStub(env: NotificationEnv, userId: string): DurableObjectStub<Notifi
 /**
  * Build the actionUrl for a notification, deep-linking to the chat session
  * when a sessionId is available.
+ *
+ * Returns a frontend-relative path consumed exclusively by the React app
+ * via `navigate(notification.actionUrl)` in NotificationCenter. MUST NOT
+ * be used for server-side redirects, web push click_action, or external
+ * integrations — those require absolute `https://app.${BASE_DOMAIN}/...` URLs.
+ *
+ * sessionId is always an internal UUID from the ProjectData DO. Empty strings
+ * are treated as absent (falls back to the project URL).
  */
 export function buildActionUrl(projectId: string, sessionId?: string | null): string {
   if (sessionId) {
