@@ -141,8 +141,6 @@ SAM uses session-based authentication via BetterAuth with GitHub OAuth. Key endp
 | `/api/workspaces/:id/restart` | `POST` | Restart a workspace |
 | `/api/workspaces/:id` | `DELETE` | Delete a workspace |
 
-See the [README API Reference](../../README.md#api-reference) for the complete endpoint list.
-
 ## Deploying to Production
 
 SAM uses **continuous deployment** — merging to `main` automatically deploys to production via GitHub Actions.

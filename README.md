@@ -51,7 +51,7 @@ You: "Add rate limiting to the /api/upload endpoint"
 |-------|------|-----|
 | **Control plane** | API, auth, orchestration | Cloudflare Workers + D1 + KV + R2 |
 | **Real-time data** | Chat messages, activity, sessions | Durable Objects with embedded SQLite (per project) |
-| **Compute** | Workspaces running Claude Code | Hetzner VMs with a Go agent managing Docker containers |
+| **Compute** | Workspaces running Claude Code | Hetzner VMs with a Go agent managing Docker containers, WebSocket terminal, and auth |
 | **Warm pool** | Fast workspace starts | Completed VMs stay warm for 30 min for instant reuse |
 
 The control plane is serverless — no servers to manage, no databases to back up. Compute scales to zero when you're not using it.
