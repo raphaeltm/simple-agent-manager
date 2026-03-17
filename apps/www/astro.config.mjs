@@ -8,7 +8,7 @@ export default defineConfig({
     starlight({
       title: 'SAM Docs',
       description:
-        'Documentation for Simple Agent Manager — ephemeral AI coding environments on Cloudflare Workers + Hetzner Cloud.',
+        'Documentation for Simple Agent Manager — ephemeral AI coding environments on Cloudflare Workers + multi-cloud VMs.',
       logo: {
         src: './src/assets/logo.svg',
         replacesTitle: false,
@@ -36,9 +36,13 @@ export default defineConfig({
         {
           label: 'Guides',
           items: [
+            { slug: 'docs/guides/agents' },
+            { slug: 'docs/guides/task-execution' },
+            { slug: 'docs/guides/chat-features' },
+            { slug: 'docs/guides/notifications' },
+            { slug: 'docs/guides/creating-workspaces' },
             { slug: 'docs/guides/self-hosting' },
             { slug: 'docs/guides/local-development' },
-            { slug: 'docs/guides/creating-workspaces' },
           ],
         },
         {

@@ -1,6 +1,6 @@
 ---
 title: Core Concepts
-description: Key concepts in SAM — workspaces, nodes, providers, and projects.
+description: Key concepts in SAM — workspaces, nodes, providers, projects, tasks, and agent sessions.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -12,66 +12,170 @@ A **workspace** is an AI coding environment: a Docker container running inside a
 Each workspace has:
 - A unique subdomain (`ws-{id}.example.com`)
 - A browser-based terminal (xterm.js over WebSocket)
-- An agent chat interface (Claude Code via ACP)
+- An agent chat interface (via ACP — Agent Communication Protocol)
+- Automatic port detection and exposure for dev servers
 - Its own lifecycle: `pending` → `creating` → `running` → `stopping` → `stopped`
 
 Workspaces are **ephemeral** — they're meant to be created for a task and deleted when done.
 
+### Workspace Profiles
+
+SAM supports two workspace profiles:
+
+| Profile | Startup Time | Description |
+|---------|-------------|-------------|
+| **Full** (default) | 2-3 minutes | Standard devcontainer build from your project's `.devcontainer` config |
+| **Lightweight** | 30-120 seconds faster | Skips devcontainer build, uses a minimal base image |
+
+Lightweight workspaces are ideal for quick conversations or tasks that don't need custom build steps. You can select the profile when submitting a task or creating a workspace.
+
+### Port Exposure
+
+When a service starts listening on a port inside a workspace container, SAM automatically detects it and makes it accessible via a unique URL:
+
+```
+https://ws-{workspaceId}--{port}.{baseDomain}
+```
+
+For example, if your dev server starts on port 3000 in workspace `abc123`:
+```
+https://ws-abc123--3000.example.com
+```
+
+The port scanner polls `/proc/net/tcp` inside the container every 5 seconds and recognizes common development ports (3000, 5173, 8080, etc.) with friendly labels.
+
 ## Nodes
 
-A **node** is a Hetzner Cloud VM that hosts one or more workspaces. When you create a workspace, SAM either assigns it to an existing healthy node or provisions a new one.
+A **node** is a cloud VM that hosts one or more workspaces. When you create a workspace, SAM either assigns it to an existing healthy node or provisions a new one.
 
 Nodes have their own lifecycle:
 - `pending` → `creating` → `running` → `stopping` → `stopped`
 - Health is tracked via heartbeats from the VM Agent
 
-### VM Sizes
+### Warm Node Pooling
 
-| Size | Hetzner Type | Specs | Hourly Cost |
-|------|-------------|-------|-------------|
-| Small | CX22 | 2 vCPU, 4GB RAM | ~$0.007 |
-| Medium | CX32 | 4 vCPU, 8GB RAM | ~$0.012 |
-| Large | CX42 | 8 vCPU, 16GB RAM | ~$0.030 |
+After a task completes, the node doesn't shut down immediately. Instead, it enters a **warm** state for 30 minutes (configurable via `NODE_WARM_TIMEOUT_MS`). If a new task arrives during this window, SAM reuses the warm node instead of provisioning a new one — reducing startup time from minutes to seconds.
+
+SAM uses a three-layer defense against orphaned warm nodes:
+
+1. **Durable Object alarm** — schedules cleanup when the warm timeout expires
+2. **Cron sweep** — catches nodes that miss their alarm (runs every 5 minutes)
+3. **Max lifetime** — absolute limit of 4 hours (configurable via `MAX_AUTO_NODE_LIFETIME_MS`) for auto-provisioned nodes
 
 <Aside type="tip">
-VMs are billed hourly until explicitly stopped or deleted. Remember to clean up workspaces you're done with.
+Warm node pooling only applies to nodes that were auto-provisioned by the task runner. Manually created nodes are not affected.
 </Aside>
 
 ## Providers
 
-A **provider** is a cloud infrastructure abstraction. Currently, SAM supports **Hetzner Cloud** as the only provider.
+A **provider** is a cloud infrastructure abstraction. SAM currently supports two providers:
 
-SAM follows a **Bring Your Own Cloud (BYOC)** model: users provide their own Hetzner API tokens through the Settings UI. The platform never has cloud provider credentials — all VM costs are billed directly to the user's Hetzner account.
+### Hetzner Cloud
+
+| Size | Server Type | Specs | Monthly Cost |
+|------|------------|-------|-------------|
+| Small | CX23 | 2 vCPU, 4GB RAM, 40GB disk | ~$4/mo |
+| Medium | CX33 | 4 vCPU, 8GB RAM, 80GB disk | ~$7.50/mo |
+| Large | CX43 | 8 vCPU, 16GB RAM, 160GB disk | ~$14.50/mo |
+
+**Locations**: Falkenstein (DE), Nuremberg (DE), Helsinki (FI), Ashburn (US), Hillsboro (US)
+
+### Scaleway
+
+| Size | Server Type | Specs | Hourly Cost |
+|------|------------|-------|-------------|
+| Small | DEV1-M | 3 vCPU, 4GB RAM, 40GB disk | ~$0.024/hr |
+| Medium | DEV1-XL | 4 vCPU, 12GB RAM, 120GB disk | ~$0.048/hr |
+| Large | GP1-S | 8 vCPU, 32GB RAM, 600GB disk | ~$0.084/hr |
+
+**Locations**: Paris (3 zones), Amsterdam (3 zones), Warsaw (2 zones)
+
+### Provider Selection
+
+SAM follows a **Bring Your Own Cloud (BYOC)** model: you provide your own cloud provider API tokens through the Settings UI. The platform never stores cloud credentials as environment variables — all VM costs are billed directly to your account.
+
+You can set a **default provider** per project. When submitting tasks, the provider is selected in this order:
+1. Explicit override on the task submission
+2. Project default provider
+3. First available credential
 
 ## Projects
 
 A **project** links a GitHub repository to its workspaces, chat sessions, tasks, and activity. Projects are the primary organizational unit in SAM.
 
 Each project has:
-- A **Durable Object** with embedded SQLite for chat sessions, messages, and activity events
-- A **default VM size** for new workspaces
-- **Runtime configuration** (environment variables and files injected into workspaces)
+- A **ProjectData Durable Object** with embedded SQLite for chat sessions, messages, activity events, and ACP sessions
+- A **default VM size** and **default provider** for new workspaces
+- A **default agent type** for task execution
+- **Runtime configuration** — environment variables and files injected into workspaces
+
+<Aside type="note">
+Every ACP (agent) session must belong to a project. Workspaces without a project can only use PTY terminal sessions, not agent chat.
+</Aside>
 
 ## Tasks
 
-A **task** is a unit of work assigned to an AI agent. When you submit a task:
-1. SAM provisions (or reuses) a workspace
-2. Claude Code runs autonomously with your task description
-3. The agent commits, pushes, and creates a PR when done
-4. The workspace enters a warm pool for potential reuse
+A **task** is a unit of work assigned to an AI agent. Tasks are the primary way to use SAM for autonomous coding work.
 
-### Warm Node Pooling
+When you submit a task:
+1. SAM generates an AI-powered title from your message (via Workers AI)
+2. A descriptive branch name is created (`sam/...`)
+3. The task runner selects or provisions a node (reusing warm nodes when available)
+4. A workspace is created with your repository cloned
+5. The selected agent runs autonomously with your task description
+6. When done, the agent commits, pushes, and creates a PR
+7. The workspace enters a warm pool for potential reuse
 
-After a task completes, the node enters a **warm** state for 30 minutes (configurable via `NODE_WARM_TIMEOUT_MS`). If a new task arrives during this window, SAM reuses the warm node instead of provisioning a new one — reducing startup time from minutes to seconds.
+### Task Lifecycle
+
+Tasks progress through these statuses:
+
+```
+draft → ready → queued → delegated → in_progress → completed/failed/cancelled
+```
+
+### Agent-to-Agent Dispatch
+
+Running agents can spawn follow-up tasks within the same project using the `dispatch_task` MCP tool. This enables multi-step workflows where one agent delegates subtasks to others.
+
+See the [Task Execution guide](/docs/guides/task-execution/) for full details.
 
 ## Agent Sessions
 
-An **agent session** is a Claude Code conversation running inside a workspace container. Sessions use the **Agent Communication Protocol (ACP)** to communicate between the browser and the Claude Code process.
+An **agent session** is an AI coding agent conversation running inside a workspace container. Sessions use the **Agent Communication Protocol (ACP)** to communicate between the browser and the agent process.
+
+SAM supports four AI coding agents:
+
+| Agent | Provider | API Key Variable |
+|-------|----------|-----------------|
+| **Claude Code** | Anthropic | `ANTHROPIC_API_KEY` |
+| **OpenAI Codex** | OpenAI | `OPENAI_API_KEY` |
+| **Google Gemini** | Google | `GEMINI_API_KEY` |
+| **Mistral Vibe** | Mistral | `MISTRAL_API_KEY` |
 
 Sessions support:
-- Streaming responses (real-time output as Claude works)
+- Streaming responses (real-time output as the agent works)
 - Multiple concurrent sessions per workspace (each in its own terminal tab)
 - Persistence across page refreshes (tabs restored from VM Agent SQLite)
+- **Conversation forking** — branch off from any point to explore alternatives
+- **Voice input** and **text-to-speech playback**
+
+See the [AI Agents guide](/docs/guides/agents/) and [Chat Features guide](/docs/guides/chat-features/) for full details.
+
+## Notifications
+
+SAM includes an in-app notification system with real-time delivery via WebSocket:
+
+| Type | Urgency | Trigger |
+|------|---------|---------|
+| `task_complete` | Medium | Task finishes successfully |
+| `needs_input` | High | Agent is blocked and needs your decision |
+| `error` | High | Task fails |
+| `progress` | Low | Agent reports incremental progress |
+| `session_ended` | Medium | Agent conversation turn completes |
+| `pr_created` | Medium | Agent creates a pull request |
+
+See the [Notifications guide](/docs/guides/notifications/) for full details.
 
 ## Authentication
 
@@ -81,5 +185,5 @@ SAM uses a **GitHub App** for both OAuth login and repository access. The app ne
 - **Email addresses: Read-only** — for user profile information
 
 <Aside type="caution">
-User credentials (Hetzner tokens, agent API keys) are encrypted at rest using AES-256-GCM. The encryption key is a platform secret managed by Pulumi — never share it or store it in source control.
+User credentials (cloud provider tokens, agent API keys) are encrypted at rest using AES-256-GCM. The encryption key is a platform secret managed by Pulumi — never share it or store it in source control.
 </Aside>
