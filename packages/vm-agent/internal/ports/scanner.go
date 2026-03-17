@@ -41,19 +41,21 @@ type ScannerConfig struct {
 
 // Default scanner configuration values.
 const (
-	DefaultScanInterval  = 5 * time.Second
-	DefaultEphemeralMin  = 32768
+	DefaultScanInterval = 5 * time.Second
+	DefaultEphemeralMin = 32768
 )
 
 // Scanner polls /proc/net/tcp inside a container to detect listening ports.
 type Scanner struct {
-	cfg         ScannerConfig
-	mu          sync.RWMutex
-	ports       map[int]DetectedPort
-	containerID string
-	stop        chan struct{}
-	stopped     chan struct{}
-	closeOnce   sync.Once
+	cfg                 ScannerConfig
+	mu                  sync.RWMutex
+	ports               map[int]DetectedPort
+	containerID         string
+	stop                chan struct{}
+	stopped             chan struct{}
+	closeOnce           sync.Once
+	consecutiveFailures int
+	containerResolved   bool // tracks whether container was ever successfully resolved
 }
 
 // NewScanner creates a new port scanner for a workspace container.
@@ -65,11 +67,12 @@ func NewScanner(cfg ScannerConfig) *Scanner {
 		cfg.EphemeralMin = DefaultEphemeralMin
 	}
 	return &Scanner{
-		cfg:         cfg,
-		ports:       make(map[int]DetectedPort),
-		containerID: cfg.ContainerID,
-		stop:        make(chan struct{}),
-		stopped:     make(chan struct{}),
+		cfg:               cfg,
+		ports:             make(map[int]DetectedPort),
+		containerID:       cfg.ContainerID,
+		stop:              make(chan struct{}),
+		stopped:           make(chan struct{}),
+		containerResolved: cfg.ContainerID != "",
 	}
 }
 
@@ -96,6 +99,16 @@ func (s *Scanner) Ports() []DetectedPort {
 		result = append(result, p)
 	}
 	return result
+}
+
+// ConsecutiveFailures returns the current consecutive failure count.
+func (s *Scanner) ConsecutiveFailures() int {
+	return s.consecutiveFailures
+}
+
+// ContainerResolved returns whether the container was ever successfully resolved.
+func (s *Scanner) ContainerResolved() bool {
+	return s.containerResolved
 }
 
 // SetContainerID updates the container ID for scanning.
@@ -136,11 +149,41 @@ func (s *Scanner) scan() {
 			if id, err := s.cfg.ContainerResolver(); err == nil && id != "" {
 				s.SetContainerID(id)
 				containerID = id
+				s.containerResolved = true
+				s.consecutiveFailures = 0
 				slog.Info("Port scanner: resolved container ID lazily",
 					"workspaceId", s.cfg.WorkspaceID, "containerID", id)
+				// Emit event so the UI knows the scanner is now active.
+				if s.cfg.EventEmitter != nil {
+					s.cfg.EventEmitter("port.scanner_ready",
+						"Port scanner: container discovered, scanning for open ports",
+						map[string]interface{}{
+							"containerID": id,
+						})
+				}
 			} else {
-				slog.Debug("Port scanner: container not yet available",
-					"workspaceId", s.cfg.WorkspaceID, "error", err)
+				s.consecutiveFailures++
+				// Log at WARN level so these are visible in node logs.
+				// First failure gets INFO, subsequent get WARN with failure count.
+				if s.consecutiveFailures == 1 {
+					slog.Info("Port scanner: container not yet available, will retry",
+						"workspaceId", s.cfg.WorkspaceID, "error", err)
+				} else {
+					slog.Warn("Port scanner: container still not available",
+						"workspaceId", s.cfg.WorkspaceID,
+						"consecutiveFailures", s.consecutiveFailures,
+						"error", err)
+				}
+				// Emit node event every 6 failures (~30s at 5s interval) so the UI
+				// shows diagnostics without flooding events.
+				if s.consecutiveFailures%6 == 0 && s.cfg.EventEmitter != nil {
+					s.cfg.EventEmitter("port.scanner_waiting",
+						fmt.Sprintf("Port scanner: waiting for container (attempt %d)", s.consecutiveFailures),
+						map[string]interface{}{
+							"consecutiveFailures": s.consecutiveFailures,
+							"error":               fmt.Sprintf("%v", err),
+						})
+				}
 				return
 			}
 		} else {
@@ -150,17 +193,42 @@ func (s *Scanner) scan() {
 
 	content, err := readProcNetTCP(containerID)
 	if err != nil {
-		slog.Debug("Port scan failed", "containerID", containerID, "error", err)
+		s.consecutiveFailures++
+		// Log scan failures at WARN level so they're visible.
+		slog.Warn("Port scan failed",
+			"workspaceId", s.cfg.WorkspaceID,
+			"containerID", containerID,
+			"consecutiveFailures", s.consecutiveFailures,
+			"error", err)
 		return
 	}
 
+	// Reset failure counter on successful scan.
+	s.consecutiveFailures = 0
+
 	entries, err := ParseProcNetTCP(content)
 	if err != nil {
-		slog.Debug("Parse /proc/net/tcp failed", "error", err)
+		slog.Warn("Parse /proc/net/tcp failed",
+			"workspaceId", s.cfg.WorkspaceID,
+			"error", err)
 		return
 	}
 
 	listening := FilterListening(entries, s.cfg.ExcludePorts, s.cfg.EphemeralMin)
+
+	// Fallback: if /proc/net/tcp returned no listening ports, try `ss -tlnH`
+	// which is more reliable in some container runtimes (e.g., devcontainers
+	// where /proc may not reflect the container's full network namespace).
+	if len(listening) == 0 {
+		if ssEntries, ssErr := readSSListening(containerID); ssErr == nil && len(ssEntries) > 0 {
+			listening = FilterListening(ssEntries, s.cfg.ExcludePorts, s.cfg.EphemeralMin)
+			if len(listening) > 0 {
+				slog.Info("Port scanner: detected ports via ss fallback",
+					"workspaceId", s.cfg.WorkspaceID,
+					"count", len(listening))
+			}
+		}
+	}
 
 	// Build set of currently listening ports
 	current := make(map[int]TCPEntry, len(listening))
@@ -232,14 +300,118 @@ func (s *Scanner) scan() {
 	}
 }
 
-// readProcNetTCP reads /proc/net/tcp from inside a container via docker exec.
+// readSSListening runs `ss -tlnH` inside the container and parses the output
+// into TCPEntry structs. This is a fallback when /proc/net/tcp parsing returns
+// empty (which can happen in some devcontainer configurations).
+// The -H flag suppresses the header line; -t = TCP, -l = listening, -n = numeric.
+func readSSListening(containerID string) ([]TCPEntry, error) {
+	cmd := exec.Command("docker", "exec", containerID, "ss", "-tlnH")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("docker exec ss -tlnH: %w", err)
+	}
+	return ParseSSOutput(string(output))
+}
+
+// ParseSSOutput parses the output of `ss -tlnH` into TCPEntry structs.
+// Each line looks like:
+//
+//	LISTEN  0  511  0.0.0.0:3003  0.0.0.0:*
+//	LISTEN  0  511  [::]:3003     [::]:*
+//	LISTEN  0  128  *:3003        *:*
+func ParseSSOutput(content string) ([]TCPEntry, error) {
+	var entries []TCPEntry
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		// ss output: State Recv-Q Send-Q Local-Address:Port Peer-Address:Port [Process]
+		if len(fields) < 5 {
+			continue
+		}
+		if fields[0] != "LISTEN" {
+			continue
+		}
+		addr, port, err := parseSSAddress(fields[3])
+		if err != nil {
+			continue
+		}
+		entries = append(entries, TCPEntry{
+			LocalAddress: addr,
+			LocalPort:    port,
+			State:        StateListen,
+		})
+	}
+	return entries, nil
+}
+
+// parseSSAddress parses ss local address format: "addr:port", "[::]:port", or "*:port".
+func parseSSAddress(s string) (string, int, error) {
+	// Handle [::]:port format
+	if strings.HasPrefix(s, "[") {
+		closeBracket := strings.LastIndex(s, "]")
+		if closeBracket < 0 || closeBracket+2 >= len(s) || s[closeBracket+1] != ':' {
+			return "", 0, fmt.Errorf("invalid bracketed address: %s", s)
+		}
+		addr := s[1:closeBracket]
+		portStr := s[closeBracket+2:]
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			return "", 0, fmt.Errorf("invalid port: %s", portStr)
+		}
+		return addr, port, nil
+	}
+
+	// Handle *:port format
+	if strings.HasPrefix(s, "*:") {
+		portStr := s[2:]
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			return "", 0, fmt.Errorf("invalid port: %s", portStr)
+		}
+		return "0.0.0.0", port, nil
+	}
+
+	// Handle addr:port — find the last colon (port separator)
+	lastColon := strings.LastIndex(s, ":")
+	if lastColon < 0 {
+		return "", 0, fmt.Errorf("no colon in address: %s", s)
+	}
+	addr := s[:lastColon]
+	portStr := s[lastColon+1:]
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return "", 0, fmt.Errorf("invalid port: %s", portStr)
+	}
+	return addr, port, nil
+}
+
+// readProcNetTCP reads /proc/net/tcp and /proc/net/tcp6 from inside a container
+// via docker exec. Many applications (Node.js, Go) default to IPv6 dual-stack
+// listening, so ports only appear in /proc/net/tcp6.
 func readProcNetTCP(containerID string) (string, error) {
 	cmd := exec.Command("docker", "exec", containerID, "cat", "/proc/net/tcp")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("docker exec cat /proc/net/tcp: %w", err)
 	}
-	return string(output), nil
+	result := string(output)
+
+	// Also read tcp6 — many servers bind to :: (IPv6 any) by default.
+	cmd6 := exec.Command("docker", "exec", containerID, "cat", "/proc/net/tcp6")
+	output6, err6 := cmd6.Output()
+	if err6 == nil {
+		// Append tcp6 content, skipping its header line since we already have one.
+		lines := strings.SplitN(string(output6), "\n", 2)
+		if len(lines) > 1 {
+			result += lines[1]
+		}
+	}
+	// Ignore tcp6 errors — the file may not exist on some minimal containers.
+
+	return result, nil
 }
 
 func buildPortURL(baseDomain, workspaceID string, port int) string {

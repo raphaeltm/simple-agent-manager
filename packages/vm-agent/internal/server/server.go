@@ -65,6 +65,7 @@ type Server struct {
 	containerDiscovery   *container.Discovery
 	portScannerMu        sync.RWMutex
 	portScanners         map[string]*ports.Scanner
+	portDiscoveries      map[string]*container.Discovery // per-workspace container discovery
 	bootstrapComplete    bool
 	callbackTokenMu      sync.RWMutex
 	callbackToken        string
@@ -432,11 +433,36 @@ func (s *Server) StartPortScanner(workspaceID string) {
 		return
 	}
 
+	// Create a per-workspace container discovery using the workspace's actual
+	// ContainerLabelValue. The server-level s.containerDiscovery may have a stale
+	// label value (e.g., "/workspace" when REPOSITORY was empty at startup), while
+	// the workspace runtime has the correct value (e.g., "/workspace/repo-name")
+	// derived from the repository passed during workspace creation.
+	var wsDiscovery *container.Discovery
+	s.workspaceMu.RLock()
+	if runtime, ok := s.workspaces[workspaceID]; ok && runtime.ContainerLabelValue != "" {
+		wsDiscovery = container.NewDiscovery(container.Config{
+			LabelKey:    s.config.ContainerLabelKey,
+			LabelValue:  runtime.ContainerLabelValue,
+			CacheTTL:    s.config.ContainerCacheTTL,
+			BridgeIPTTL: s.config.PortProxyCacheTTL,
+		})
+		slog.Info("Port scanner: using workspace-specific container label",
+			"workspaceId", workspaceID,
+			"labelValue", runtime.ContainerLabelValue)
+	}
+	s.workspaceMu.RUnlock()
+
+	// Fall back to server-level discovery if no workspace-specific one is available.
+	if wsDiscovery == nil {
+		wsDiscovery = s.containerDiscovery
+	}
+
 	// Resolve container ID for scanning — if not available yet, the scanner
 	// will lazily resolve it on each tick via the ContainerResolver callback.
 	var containerID string
-	if s.containerDiscovery != nil {
-		if id, err := s.containerDiscovery.GetContainerID(); err == nil {
+	if wsDiscovery != nil {
+		if id, err := wsDiscovery.GetContainerID(); err == nil {
 			containerID = id
 		} else {
 			slog.Info("Port scanner: container not yet available, will resolve lazily", "workspaceId", workspaceID, "error", err)
@@ -452,9 +478,9 @@ func (s *Server) StartPortScanner(workspaceID string) {
 
 	// Build a container resolver for lazy resolution when container isn't ready yet.
 	var containerResolver ports.ContainerResolver
-	if s.containerDiscovery != nil {
+	if wsDiscovery != nil {
 		containerResolver = func() (string, error) {
-			return s.containerDiscovery.GetContainerID()
+			return wsDiscovery.GetContainerID()
 		}
 	}
 
@@ -477,7 +503,17 @@ func (s *Server) StartPortScanner(workspaceID string) {
 	if existing, ok := s.portScanners[workspaceID]; ok {
 		existing.Stop()
 	}
+	if s.portScanners == nil {
+		s.portScanners = make(map[string]*ports.Scanner)
+	}
 	s.portScanners[workspaceID] = scanner
+	// Store per-workspace discovery so port proxy can resolve the correct bridge IP.
+	if wsDiscovery != nil {
+		if s.portDiscoveries == nil {
+			s.portDiscoveries = make(map[string]*container.Discovery)
+		}
+		s.portDiscoveries[workspaceID] = wsDiscovery
+	}
 	s.portScannerMu.Unlock()
 
 	scanner.Start()
@@ -491,6 +527,7 @@ func (s *Server) stopPortScanner(workspaceID string) {
 	if ok {
 		delete(s.portScanners, workspaceID)
 	}
+	delete(s.portDiscoveries, workspaceID)
 	s.portScannerMu.Unlock()
 
 	if scanner != nil {
@@ -507,6 +544,7 @@ func (s *Server) stopAllPortScanners() {
 		scanners[k] = v
 	}
 	s.portScanners = make(map[string]*ports.Scanner)
+	s.portDiscoveries = make(map[string]*container.Discovery)
 	s.portScannerMu.Unlock()
 
 	for wsID, scanner := range scanners {

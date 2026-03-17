@@ -11,13 +11,14 @@ import {
 import type { ConversationItem } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent, getErrorMeta } from '@simple-agent-manager/acp-client';
 import type { AcpSessionHandle } from '@simple-agent-manager/acp-client';
-import { ChevronDown, ChevronUp, Server, Box, Cpu, MapPin, Cloud, GitBranch, CheckCircle2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Server, Box, Cpu, MapPin, Cloud, GitBranch, CheckCircle2, Globe, ExternalLink } from 'lucide-react';
 import { TruncatedSummary } from './TruncatedSummary';
 import { mergeMessages, getLastMessageId } from '../../lib/merge-messages';
 import { stripMarkdown } from '../../lib/text-utils';
-import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode, updateProjectTaskStatus, deleteWorkspace } from '../../lib/api';
+import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode, updateProjectTaskStatus, deleteWorkspace, getTerminalToken } from '../../lib/api';
+import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import type { ChatMessageResponse, ChatSessionResponse, ChatSessionDetailResponse } from '../../lib/api';
-import type { WorkspaceResponse, NodeResponse, VMSize } from '@simple-agent-manager/shared';
+import type { WorkspaceResponse, NodeResponse, VMSize, DetectedPort } from '@simple-agent-manager/shared';
 import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
@@ -342,6 +343,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [node, setNode] = useState<NodeResponse | null>(null);
 
+  // Terminal token for direct VM agent API calls (port scanning)
+  const [terminalToken, setTerminalToken] = useState<string | null>(null);
+
   // Follow-up input state
   const [followUp, setFollowUp] = useState('');
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
@@ -509,6 +513,34 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     })();
     return () => { cancelled = true; };
   }, [session?.workspaceId, workspace?.id]);
+
+  // Fetch terminal token for direct VM agent calls (port scanning).
+  const isWorkspaceRunning = workspace?.status === 'running';
+  useEffect(() => {
+    const wsId = session?.workspaceId;
+    if (!wsId || !isWorkspaceRunning) {
+      setTerminalToken(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { token } = await getTerminalToken(wsId);
+        if (!cancelled) setTerminalToken(token);
+      } catch {
+        // Best-effort — ports are supplementary UX
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [session?.workspaceId, isWorkspaceRunning]);
+
+  // Poll detected ports from VM agent
+  const { ports: detectedPorts } = useWorkspacePorts(
+    workspace?.url ?? undefined,
+    session?.workspaceId ?? undefined,
+    terminalToken ?? undefined,
+    isWorkspaceRunning
+  );
 
   // Track scroll position to pause autoscroll when user scrolls up.
   // Re-enable when user scrolls back to the bottom (within threshold).
@@ -780,6 +812,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           taskEmbed={taskEmbed}
           workspace={workspace}
           node={node}
+          detectedPorts={detectedPorts}
         />
       )}
 
@@ -965,6 +998,7 @@ function SessionHeader({
   taskEmbed,
   workspace,
   node,
+  detectedPorts,
 }: {
   projectId: string;
   session: ChatSessionResponse;
@@ -974,6 +1008,7 @@ function SessionHeader({
   taskEmbed: ChatSessionResponse['task'] | null;
   workspace: WorkspaceResponse | null;
   node: NodeResponse | null;
+  detectedPorts: DetectedPort[];
 }) {
   const [expanded, setExpanded] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -984,6 +1019,7 @@ function SessionHeader({
     taskEmbed?.outputBranch ||
     taskEmbed?.outputPrUrl ||
     session.workspaceId ||
+    detectedPorts.length > 0 ||
     (sessionState === 'idle' && idleCountdownMs !== null)
   );
 
@@ -1036,6 +1072,36 @@ function SessionHeader({
             }}
           >
             {workspace.workspaceProfile === 'lightweight' ? 'Lightweight' : 'Full'}
+          </span>
+        )}
+
+        {/* Active port badges — shown inline in compact row */}
+        {detectedPorts.length > 0 && (
+          <span className="inline-flex items-center gap-1 shrink-0">
+            {detectedPorts
+              .slice()
+              .sort((a, b) => a.port - b.port)
+              .slice(0, 3) // Show up to 3 port badges inline
+              .map((p) => (
+                <a
+                  key={p.port}
+                  href={p.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-0.5 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded no-underline shrink-0"
+                  style={{
+                    backgroundColor: 'var(--sam-color-accent-tint, rgba(59, 130, 246, 0.1))',
+                    color: 'var(--sam-color-accent-primary)',
+                  }}
+                  title={`${p.label} — ${p.url}`}
+                >
+                  <Globe size={10} />
+                  {p.port}
+                </a>
+              ))}
+            {detectedPorts.length > 3 && (
+              <span className="text-[10px] text-fg-muted">+{detectedPorts.length - 3}</span>
+            )}
           </span>
         )}
 
@@ -1212,6 +1278,57 @@ function SessionHeader({
                   </span>
                 </ContextItem>
               )}
+              {detectedPorts.length > 0 && (
+                <ContextItem icon={<Globe size={12} />} label="Ports">
+                  <span className="inline-flex flex-wrap gap-1.5">
+                    {detectedPorts
+                      .slice()
+                      .sort((a, b) => a.port - b.port)
+                      .map((p) => (
+                        <a
+                          key={p.port}
+                          href={p.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 font-mono text-[11px] no-underline hover:underline"
+                          style={{ color: 'var(--sam-color-accent-primary)' }}
+                          title={p.label}
+                        >
+                          {p.port}
+                          {p.address === '127.0.0.1' || p.address === '::1' ? ' (local)' : ''}
+                          <ExternalLink size={10} />
+                        </a>
+                      ))}
+                  </span>
+                </ContextItem>
+              )}
+            </div>
+          )}
+          {/* Active ports section — shown when ports are detected and no infrastructure section is shown */}
+          {detectedPorts.length > 0 && !(session.workspaceId && (workspace || node)) && (
+            <div className="flex flex-col gap-1.5 pt-1 border-t border-border-default">
+              <ContextItem icon={<Globe size={12} />} label="Ports">
+                <span className="inline-flex flex-wrap gap-1.5">
+                  {detectedPorts
+                    .slice()
+                    .sort((a, b) => a.port - b.port)
+                    .map((p) => (
+                      <a
+                        key={p.port}
+                        href={p.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 font-mono text-[11px] no-underline hover:underline"
+                        style={{ color: 'var(--sam-color-accent-primary)' }}
+                        title={p.label}
+                      >
+                        {p.port}
+                        {p.address === '127.0.0.1' || p.address === '::1' ? ' (local)' : ''}
+                        <ExternalLink size={10} />
+                      </a>
+                    ))}
+                </span>
+              </ContextItem>
             </div>
           )}
           {/* Fallback when workspace data is still loading or failed */}
