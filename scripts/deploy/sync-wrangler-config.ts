@@ -150,7 +150,7 @@ function generateApiWorkerEnv(
       enabled: true,
       logs: {
         invocation_logs: true,
-        head_sampling_rate: 1,
+        head_sampling_rate: 0.01,
       },
     },
 
