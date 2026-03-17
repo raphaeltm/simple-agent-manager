@@ -837,16 +837,15 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           const acpItems = agentSession.messages.items;
           const convertedItems = chatMessagesToConversationItems(messages);
 
-          // Merge strategy: DO messages are the persistent base. ACP items
-          // that are newer than the latest DO message are appended. This
-          // handles two cases:
-          // 1. During/after prompting, agent responses not yet persisted to DO
-          // 2. ACP-created sessions where MessageReporter isn't configured
+          // Two-source rendering strategy:
+          // - ACP (streaming): live tokens from the agent via WebSocket
+          // - DO (persistent): batched messages persisted by the VM agent (~2s delay)
           //
-          // During active prompting or the grace period after prompting ends
-          // (gives DO time to receive batched messages from VM agent ~2s delay),
-          // show the full ACP view since it has the most up-to-date content.
-          // When DO has no messages yet (initial provisioning), show ACP only.
+          // During active prompting or the grace period after prompting ends,
+          // show the full ACP view since it has the most up-to-date streaming content.
+          // When DO has no messages yet (initial provisioning), also show ACP only.
+          // Once prompting stops and the grace period (3s) elapses, switch to
+          // DO-only view — by then all messages should be persisted.
           const useFullAcpView = acpItems.length > 0 && (
             convertedItems.length === 0 || agentSession.isPrompting || acpGrace
           );
@@ -855,23 +854,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             return <AcpMessages items={acpItems} />;
           }
 
-          // Find ACP items newer than the latest DO message timestamp
-          const latestDoTimestamp = convertedItems.length > 0
-            ? Math.max(...convertedItems.map((item) => item.timestamp || 0))
-            : 0;
-
-          // Collect ACP-only items: items with timestamps after the latest DO
-          // message. Includes agent responses not yet persisted to DO.
-          // Also deduplicate by ID to prevent overlap when ACP and DO timestamps
-          // are identical (same message persisted to DO while ACP still holds it).
-          const doIds = new Set(convertedItems.map((item) => item.id));
-          const acpOnlyItems = latestDoTimestamp > 0
-            ? acpItems.filter((item) => item.timestamp > latestDoTimestamp && !doIds.has(item.id))
-            : [];
-
-          const mergedItems = acpOnlyItems.length > 0
-            ? [...convertedItems, ...acpOnlyItems]
-            : convertedItems;
+          // After the grace period, DO has all persisted messages.
+          // No merge needed — ACP dedup was broken (mismatched ID formats
+          // and replayed timestamps) causing full conversation duplication.
+          const mergedItems = convertedItems;
 
           return (
             <>
