@@ -119,6 +119,11 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 		req.URL.Path = forwardPath
 		req.URL.RawPath = ""
 		req.Host = publicHost
+		// Strip the auth token — it is consumed by the VM agent for authentication
+		// and must not leak to the container app running on the forwarded port.
+		q := req.URL.Query()
+		q.Del("token")
+		req.URL.RawQuery = q.Encode()
 	}
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
 		slog.Error("Port proxy upstream error",
