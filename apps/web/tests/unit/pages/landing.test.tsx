@@ -11,7 +11,7 @@ describe('Landing page source contract', () => {
   it('does not advertise idle-based zero-cost behavior', () => {
     expect(file).not.toContain('Zero Cost');
     expect(file).not.toContain('When idle');
-    expect(file).toContain('Pay as you go');
-    expect(file).toContain('Stop when done');
+    expect(file).toContain('Pay As You Go');
+    expect(file).toContain('Your cloud, your costs');
   });
 });
