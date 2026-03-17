@@ -8,7 +8,7 @@
  */
 
 import type { CreateNotificationRequest } from '@simple-agent-manager/shared';
-import { NOTIFICATION_TYPE_URGENCY, MAX_NOTIFICATION_BODY_LENGTH, type HumanInputCategory } from '@simple-agent-manager/shared';
+import { NOTIFICATION_TYPE_URGENCY, MAX_NOTIFICATION_BODY_LENGTH, MAX_NOTIFICATION_TITLE_LENGTH, MAX_NOTIFICATION_TITLE_LENGTH_NEEDS_INPUT, type HumanInputCategory } from '@simple-agent-manager/shared';
 import type { NotificationService } from '../durable-objects/notification';
 
 interface NotificationEnv {
@@ -27,7 +27,11 @@ export async function getProjectName(env: { DATABASE: D1Database }, projectId: s
       .bind(projectId)
       .first<{ name: string }>();
     return row?.name ?? projectId;
-  } catch {
+  } catch (err) {
+    console.warn('getProjectName: D1 query failed, falling back to projectId', {
+      projectId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return projectId;
   }
 }
@@ -87,7 +91,7 @@ export async function notifyTaskComplete(
   await sendNotification(env, userId, {
     type: 'task_complete',
     urgency: NOTIFICATION_TYPE_URGENCY.task_complete ?? 'medium',
-    title: `Task completed: ${truncate(opts.taskTitle, 80)}`,
+    title: `Task completed: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH)}`,
     body,
     projectId: opts.projectId,
     taskId: opts.taskId,
@@ -117,7 +121,7 @@ export async function notifyTaskFailed(
   await sendNotification(env, userId, {
     type: 'error',
     urgency: NOTIFICATION_TYPE_URGENCY.error ?? 'high',
-    title: `Task failed: ${truncate(opts.taskTitle, 80)}`,
+    title: `Task failed: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH)}`,
     body: opts.errorMessage ?? 'Task encountered an error',
     projectId: opts.projectId,
     taskId: opts.taskId,
@@ -142,7 +146,7 @@ export async function notifySessionEnded(
   }
 ): Promise<void> {
   const title = opts.taskTitle
-    ? `Agent finished: ${truncate(opts.taskTitle, 80)}`
+    ? `Agent finished: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH)}`
     : 'Agent finished — your turn';
 
   await sendNotification(env, userId, {
@@ -176,7 +180,7 @@ export async function notifyPrCreated(
   await sendNotification(env, userId, {
     type: 'pr_created',
     urgency: NOTIFICATION_TYPE_URGENCY.pr_created ?? 'medium',
-    title: `PR created: ${truncate(opts.taskTitle, 80)}`,
+    title: `PR created: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH)}`,
     body: `Pull request is ready for review`,
     projectId: opts.projectId,
     taskId: opts.taskId,
@@ -211,7 +215,7 @@ export async function notifyNeedsInput(
   await sendNotification(env, userId, {
     type: 'needs_input',
     urgency: NOTIFICATION_TYPE_URGENCY.needs_input ?? 'high',
-    title: `${categoryLabel} needed: ${truncate(opts.taskTitle, 70)}`,
+    title: `${categoryLabel} needed: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH_NEEDS_INPUT)}`,
     body: truncate(opts.context, MAX_NOTIFICATION_BODY_LENGTH),
     projectId: opts.projectId,
     taskId: opts.taskId,
@@ -241,7 +245,7 @@ export async function notifyProgress(
   await sendNotification(env, userId, {
     type: 'progress',
     urgency: NOTIFICATION_TYPE_URGENCY.progress ?? 'low',
-    title: `Progress: ${truncate(opts.taskTitle, 80)}`,
+    title: `Progress: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH)}`,
     body: truncate(opts.message, MAX_NOTIFICATION_BODY_LENGTH),
     projectId: opts.projectId,
     taskId: opts.taskId,
