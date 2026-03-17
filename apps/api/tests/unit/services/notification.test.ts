@@ -70,10 +70,15 @@ describe('Notification Service', () => {
   });
 
   describe('getProjectName', () => {
-    it('should return the project name from D1', async () => {
-      const name = await getProjectName(env, 'proj-1');
+    it('should return the project name from D1 and bind the correct projectId', async () => {
+      const firstMock = vi.fn().mockResolvedValue({ name: 'Test Project' });
+      const bindMock = vi.fn(() => ({ first: firstMock }));
+      env.DATABASE.prepare = vi.fn(() => ({ bind: bindMock }));
+
+      const name = await getProjectName(env, 'proj-42');
       expect(name).toBe('Test Project');
       expect(env.DATABASE.prepare).toHaveBeenCalledWith('SELECT name FROM projects WHERE id = ?');
+      expect(bindMock).toHaveBeenCalledWith('proj-42');
     });
 
     it('should return the projectId as fallback when project is not found', async () => {
@@ -144,6 +149,18 @@ describe('Notification Service', () => {
 
       const call = createNotificationMock.mock.calls[0]![1];
       expect(call.body).toContain('Output on branch');
+    });
+
+    it('should use generic body when neither PR URL nor branch provided', async () => {
+      await notifyTaskComplete(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        taskId: 'task-1',
+        taskTitle: 'Clean up code',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.body).toBe('Task finished successfully');
     });
 
     it('should truncate long task titles', async () => {
@@ -375,6 +392,9 @@ describe('Notification Service', () => {
   });
 
   describe('projectName in metadata — regression guard', () => {
+    // MAINTENANCE: If you add a new notifyX helper to notification.ts,
+    // you MUST add it to the array below. This guard ensures every helper
+    // includes projectName in metadata so the frontend can display project names.
     it('every notification helper includes projectName in metadata', async () => {
       const helpers = [
         () => notifyTaskComplete(env, 'u', { projectId: 'p', projectName: 'PN', taskId: 't', taskTitle: 'T' }),
