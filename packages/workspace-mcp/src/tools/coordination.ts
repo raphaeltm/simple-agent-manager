@@ -13,6 +13,13 @@ import type { ApiClient } from '../api-client.js';
 
 const execAsync = promisify(exec);
 
+/** Default timeout for shell exec commands (ms). Override via SAM_EXEC_TIMEOUT_MS. */
+const DEFAULT_EXEC_TIMEOUT_MS = 5000;
+const EXEC_TIMEOUT_MS = parseInt(
+  process.env['SAM_EXEC_TIMEOUT_MS'] ?? String(DEFAULT_EXEC_TIMEOUT_MS),
+  10,
+);
+
 interface TaskInfo {
   id: string;
   title: string;
@@ -87,7 +94,7 @@ export async function getFileLocks(
   try {
     const { stdout } = await execAsync(
       'git diff --name-only HEAD 2>/dev/null && git diff --cached --name-only 2>/dev/null',
-      { timeout: 5000 },
+      { timeout: EXEC_TIMEOUT_MS },
     );
     myChangedFiles = [
       ...new Set(stdout.split('\n').filter((f) => f.trim())),

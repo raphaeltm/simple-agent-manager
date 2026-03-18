@@ -12,6 +12,27 @@ import type { ApiClient } from '../api-client.js';
 
 const execAsync = promisify(exec);
 
+/** Default timeout for shell exec commands (ms). Override via SAM_EXEC_TIMEOUT_MS. */
+const DEFAULT_EXEC_TIMEOUT_MS = 5000;
+const EXEC_TIMEOUT_MS = parseInt(
+  process.env['SAM_EXEC_TIMEOUT_MS'] ?? String(DEFAULT_EXEC_TIMEOUT_MS),
+  10,
+);
+
+/** Default timeout for git fetch (ms). Override via SAM_GIT_FETCH_TIMEOUT_MS. */
+const DEFAULT_GIT_FETCH_TIMEOUT_MS = 15000;
+const GIT_FETCH_TIMEOUT_MS = parseInt(
+  process.env['SAM_GIT_FETCH_TIMEOUT_MS'] ?? String(DEFAULT_GIT_FETCH_TIMEOUT_MS),
+  10,
+);
+
+/** Default timeout for git diff/stat commands (ms). Override via SAM_GIT_DIFF_TIMEOUT_MS. */
+const DEFAULT_GIT_DIFF_TIMEOUT_MS = 10000;
+const GIT_DIFF_TIMEOUT_MS = parseInt(
+  process.env['SAM_GIT_DIFF_TIMEOUT_MS'] ?? String(DEFAULT_GIT_DIFF_TIMEOUT_MS),
+  10,
+);
+
 export async function reportEnvironmentIssue(
   config: WorkspaceMcpConfig,
   apiClient: ApiClient,
@@ -111,13 +132,13 @@ export async function getWorkspaceDiffSummary(
     // Get current branch
     const { stdout: branchOut } = await execAsync(
       'git rev-parse --abbrev-ref HEAD 2>/dev/null',
-      { timeout: 5000 },
+      { timeout: EXEC_TIMEOUT_MS },
     );
     results.branch = branchOut.trim();
 
     // Fetch to ensure we have latest refs
     await execAsync('git fetch origin main 2>/dev/null', {
-      timeout: 15000,
+      timeout: GIT_FETCH_TIMEOUT_MS,
     }).catch(() => {
       // May fail if no network — continue with local refs
     });
@@ -126,7 +147,7 @@ export async function getWorkspaceDiffSummary(
     try {
       const { stdout: statOut } = await execAsync(
         'git diff --stat origin/main...HEAD 2>/dev/null',
-        { timeout: 10000 },
+        { timeout: GIT_DIFF_TIMEOUT_MS },
       );
       results.diffSummary = statOut.trim() || null;
     } catch {
@@ -137,7 +158,7 @@ export async function getWorkspaceDiffSummary(
     try {
       const { stdout: diffOut } = await execAsync(
         'git diff --name-status origin/main...HEAD 2>/dev/null',
-        { timeout: 10000 },
+        { timeout: GIT_DIFF_TIMEOUT_MS },
       );
       for (const line of diffOut.split('\n').filter((l) => l.trim())) {
         const [status, ...fileParts] = line.split('\t');
@@ -165,7 +186,7 @@ export async function getWorkspaceDiffSummary(
     try {
       const { stdout: shortStat } = await execAsync(
         'git diff --shortstat origin/main...HEAD 2>/dev/null',
-        { timeout: 5000 },
+        { timeout: EXEC_TIMEOUT_MS },
       );
       const filesMatch = shortStat.match(/(\d+) files? changed/);
       const insertMatch = shortStat.match(/(\d+) insertions?/);
@@ -183,7 +204,7 @@ export async function getWorkspaceDiffSummary(
     try {
       const { stdout: countOut } = await execAsync(
         'git rev-list --count origin/main...HEAD 2>/dev/null',
-        { timeout: 5000 },
+        { timeout: EXEC_TIMEOUT_MS },
       );
       results.commitsSinceBase = parseInt(countOut.trim(), 10) || 0;
     } catch {
@@ -194,7 +215,7 @@ export async function getWorkspaceDiffSummary(
     try {
       const { stdout: untrackedOut } = await execAsync(
         'git ls-files --others --exclude-standard 2>/dev/null',
-        { timeout: 5000 },
+        { timeout: EXEC_TIMEOUT_MS },
       );
       results.untrackedFiles = untrackedOut
         .split('\n')

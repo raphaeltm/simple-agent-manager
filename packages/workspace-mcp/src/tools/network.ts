@@ -13,6 +13,27 @@ import * as dns from 'node:dns';
 import type { WorkspaceMcpConfig } from '../config.js';
 import type { ApiClient } from '../api-client.js';
 
+/** Default timeout for shell exec commands (ms). Override via SAM_EXEC_TIMEOUT_MS. */
+const DEFAULT_EXEC_TIMEOUT_MS = 5000;
+const EXEC_TIMEOUT_MS = parseInt(
+  process.env['SAM_EXEC_TIMEOUT_MS'] ?? String(DEFAULT_EXEC_TIMEOUT_MS),
+  10,
+);
+
+/** Default timeout for port-check commands (ms). Override via SAM_PORT_CHECK_TIMEOUT_MS. */
+const DEFAULT_PORT_CHECK_TIMEOUT_MS = 3000;
+const PORT_CHECK_TIMEOUT_MS = parseInt(
+  process.env['SAM_PORT_CHECK_TIMEOUT_MS'] ?? String(DEFAULT_PORT_CHECK_TIMEOUT_MS),
+  10,
+);
+
+/** Default timeout for TLS certificate checks (ms). Override via SAM_TLS_CHECK_TIMEOUT_MS. */
+const DEFAULT_TLS_CHECK_TIMEOUT_MS = 5000;
+const TLS_CHECK_TIMEOUT_MS = parseInt(
+  process.env['SAM_TLS_CHECK_TIMEOUT_MS'] ?? String(DEFAULT_TLS_CHECK_TIMEOUT_MS),
+  10,
+);
+
 const execAsync = promisify(exec);
 const dnsResolve4 = promisify(dns.resolve4);
 
@@ -33,7 +54,7 @@ async function discoverListeningPorts(
     // Use ss to find listening TCP ports (works in most containers)
     const { stdout } = await execAsync(
       'ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || echo ""',
-      { timeout: 5000 },
+      { timeout: EXEC_TIMEOUT_MS },
     );
     if (!stdout.trim()) return [];
 
@@ -117,7 +138,7 @@ export async function exposePort(
   try {
     const { stdout } = await execAsync(
       `ss -tlnp sport = :${port} 2>/dev/null || echo ""`,
-      { timeout: 3000 },
+      { timeout: PORT_CHECK_TIMEOUT_MS },
     );
     isListening = stdout.includes(`:${port}`);
   } catch {
@@ -180,7 +201,7 @@ export async function checkDnsStatus(
             host: hostname,
             port: 443,
             servername: hostname,
-            timeout: 5000,
+            timeout: TLS_CHECK_TIMEOUT_MS,
           },
           () => {
             const cert = socket.getPeerCertificate();
@@ -201,7 +222,7 @@ export async function checkDnsStatus(
             error: err.message,
           });
         });
-        socket.setTimeout(5000, () => {
+        socket.setTimeout(TLS_CHECK_TIMEOUT_MS, () => {
           socket.destroy();
           resolve({
             valid: false,

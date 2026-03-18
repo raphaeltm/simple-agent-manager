@@ -12,6 +12,35 @@ import type { ApiClient } from '../api-client.js';
 
 const execAsync = promisify(exec);
 
+/** Default timeout for shell exec commands (ms). Override via SAM_EXEC_TIMEOUT_MS. */
+const DEFAULT_EXEC_TIMEOUT_MS = 5000;
+const EXEC_TIMEOUT_MS = parseInt(
+  process.env['SAM_EXEC_TIMEOUT_MS'] ?? String(DEFAULT_EXEC_TIMEOUT_MS),
+  10,
+);
+
+/** Default number of CI workflow runs to fetch. Override via SAM_CI_RUNS_LIMIT. */
+const DEFAULT_CI_RUNS_LIMIT = 10;
+const CI_RUNS_LIMIT = parseInt(
+  process.env['SAM_CI_RUNS_LIMIT'] ?? String(DEFAULT_CI_RUNS_LIMIT),
+  10,
+);
+
+/** Default number of deployment runs to fetch. Override via SAM_DEPLOY_RUNS_LIMIT. */
+const DEFAULT_DEPLOY_RUNS_LIMIT = 5;
+const DEPLOY_RUNS_LIMIT = parseInt(
+  process.env['SAM_DEPLOY_RUNS_LIMIT'] ?? String(DEFAULT_DEPLOY_RUNS_LIMIT),
+  10,
+);
+
+/** Staging workflow filename. Override via SAM_STAGING_WORKFLOW_FILE. */
+const STAGING_WORKFLOW_FILE =
+  process.env['SAM_STAGING_WORKFLOW_FILE'] ?? 'deploy-staging.yml';
+
+/** Production workflow filename. Override via SAM_PROD_WORKFLOW_FILE. */
+const PROD_WORKFLOW_FILE =
+  process.env['SAM_PROD_WORKFLOW_FILE'] ?? 'deploy.yml';
+
 interface WorkflowRun {
   id: number;
   name: string;
@@ -37,7 +66,7 @@ export async function getCiStatus(
     try {
       const { stdout } = await execAsync(
         'git rev-parse --abbrev-ref HEAD 2>/dev/null',
-        { timeout: 3000 },
+        { timeout: EXEC_TIMEOUT_MS },
       );
       branch = stdout.trim();
     } catch {
@@ -60,7 +89,7 @@ export async function getCiStatus(
 
   try {
     const runs = await apiClient.callGitHub<WorkflowRunsResponse>(
-      `/repos/${config.repository}/actions/runs?branch=${encodeURIComponent(branch)}&per_page=10`,
+      `/repos/${config.repository}/actions/runs?branch=${encodeURIComponent(branch)}&per_page=${CI_RUNS_LIMIT}`,
     );
 
     const workflows = runs.workflow_runs.map((run: WorkflowRun) => ({
@@ -132,12 +161,12 @@ export async function getDeploymentStatus(
   try {
     // Check staging deployment workflow
     const stagingRuns = await apiClient.callGitHub<WorkflowRunsResponse>(
-      `/repos/${config.repository}/actions/workflows/deploy-staging.yml/runs?per_page=5`,
+      `/repos/${config.repository}/actions/workflows/${STAGING_WORKFLOW_FILE}/runs?per_page=${DEPLOY_RUNS_LIMIT}`,
     );
 
     // Check production deployment workflow
     const prodRuns = await apiClient.callGitHub<WorkflowRunsResponse>(
-      `/repos/${config.repository}/actions/workflows/deploy.yml/runs?per_page=5`,
+      `/repos/${config.repository}/actions/workflows/${PROD_WORKFLOW_FILE}/runs?per_page=${DEPLOY_RUNS_LIMIT}`,
     );
 
     const formatRun = (run: WorkflowRun) => ({
