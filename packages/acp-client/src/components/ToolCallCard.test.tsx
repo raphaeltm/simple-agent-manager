@@ -71,4 +71,53 @@ describe('ToolCallCard', () => {
 
     expect(screen.getByText('/workspaces/hono')).toBeTruthy();
   });
+
+  describe('overflow protection', () => {
+    it('header uses min-w-0 on flex children to allow truncation', () => {
+      const toolCall = createToolCall({
+        locations: [{ path: '/very/long/deeply/nested/path/to/some/file/that/is/really/long.tsx', line: 42 }],
+      });
+
+      const { container } = render(<ToolCallCard toolCall={toolCall} />);
+
+      const header = container.querySelector('button');
+      expect(header).not.toBeNull();
+
+      // The inner flex container should have min-w-0 to allow truncation
+      const innerFlex = header!.querySelector('.min-w-0');
+      expect(innerFlex).not.toBeNull();
+    });
+
+    it('status icon and chevron have shrink-0 to prevent squishing', () => {
+      const toolCall = createToolCall({
+        content: [{ type: 'content', text: 'output', data: null }],
+        locations: [{ path: '/a/very/long/path.ts' }],
+      });
+
+      const { container } = render(<ToolCallCard toolCall={toolCall} />);
+      const header = container.querySelector('button');
+
+      // Status icon wrapper should have shrink-0
+      const statusWrapper = header!.querySelector('.shrink-0');
+      expect(statusWrapper).not.toBeNull();
+
+      // Chevron SVG should have shrink-0
+      const chevron = header!.querySelector('svg.shrink-0');
+      expect(chevron).not.toBeNull();
+    });
+
+    it('tool content text area has break-words and overflow-hidden', () => {
+      const longContent = 'a'.repeat(500) + '/very/long/unbreakable-file-path-that-goes-on-and-on.ts';
+      const toolCall = createToolCall({
+        content: [{ type: 'content', text: longContent, data: null }],
+      });
+
+      const { container } = render(<ToolCallCard toolCall={toolCall} />);
+      fireEvent.click(screen.getByRole('button'));
+
+      const contentDiv = container.querySelector('.break-words.overflow-hidden');
+      expect(contentDiv).not.toBeNull();
+      expect(contentDiv!.textContent).toContain(longContent);
+    });
+  });
 });

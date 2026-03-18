@@ -46,25 +46,25 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall }: ToolC
       {/* Header */}
       <button
         onClick={() => hasContent && setExpanded(!expanded)}
-        className={`w-full flex items-center justify-between px-3 py-2 bg-gray-50 text-left ${hasContent ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'}`}
+        className={`w-full flex items-center gap-2 px-3 py-2 bg-gray-50 text-left ${hasContent ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'}`}
       >
-        <div className="flex items-center space-x-2">
-          <StatusIcon status={toolCall.status} />
-          <span className="text-sm font-medium text-gray-700">{toolCall.title}</span>
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <span className="shrink-0"><StatusIcon status={toolCall.status} /></span>
+          <span className="text-sm font-medium text-gray-700 truncate">{toolCall.title}</span>
           {toolCall.toolKind && (
-            <span className="text-xs text-gray-400 bg-gray-200 px-1.5 py-0.5 rounded">
+            <span className="text-xs text-gray-400 bg-gray-200 px-1.5 py-0.5 rounded shrink-0">
               {toolCall.toolKind}
             </span>
           )}
+          {toolCall.locations.length > 0 && (
+            <span className="text-xs text-gray-500 font-mono truncate min-w-0">
+              {toolCall.locations[0]?.path}{toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}
+            </span>
+          )}
         </div>
-        {toolCall.locations.length > 0 && (
-          <span className="text-xs text-gray-500 font-mono truncate ml-2">
-            {toolCall.locations[0]?.path}{toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}
-          </span>
-        )}
         {hasContent && (
           <svg
-            className={`h-4 w-4 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+            className={`h-4 w-4 text-gray-400 transition-transform shrink-0 ${expanded ? 'rotate-180' : ''}`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -101,7 +101,7 @@ function ToolCallContentView({ content }: { content: ToolCallContentItem }) {
     case 'content':
     default:
       return content.text?.trim() ? (
-        <div className="p-3 text-sm text-gray-700 whitespace-pre-wrap font-mono text-xs">
+        <div className="p-3 text-gray-700 whitespace-pre-wrap font-mono text-xs break-words overflow-hidden">
           {content.text}
         </div>
       ) : fallbackJson;

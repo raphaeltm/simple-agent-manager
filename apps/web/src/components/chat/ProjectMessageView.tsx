@@ -275,7 +275,7 @@ function SystemMessageBubble({ text }: { text: string }) {
       <div
         role="region"
         aria-label="System message"
-        className="max-w-[90%] rounded-lg px-4 py-3 border"
+        className="max-w-[90%] min-w-0 rounded-lg px-4 py-3 border overflow-hidden"
         style={{
           backgroundColor: 'var(--sam-color-bg-inset)',
           borderColor: 'var(--sam-color-border-default)',
@@ -832,7 +832,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       )}
 
       {/* Messages area — merged DO (persistent) + ACP (streaming/unpersisted) */}
-      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto min-h-0 p-4">
+      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto min-h-0 min-w-0 p-4">
         {(() => {
           const acpItems = agentSession.messages.items;
           const convertedItems = chatMessagesToConversationItems(messages);
