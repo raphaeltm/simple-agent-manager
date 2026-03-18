@@ -101,6 +101,10 @@ gcpRoutes.post('/setup', async (c) => {
     const { ciphertext, iv } = await encrypt(tokenToEncrypt, c.env.ENCRYPTION_KEY);
     const now = new Date().toISOString();
 
+    // Invalidate any cached GCP access token for this user+project
+    // to prevent stale tokens from being used after re-setup
+    await c.env.KV.delete(`gcp-token:${userId}:${credential.gcpProjectId}`);
+
     // Check if GCP credential already exists for this user
     const existing = await db
       .select()
