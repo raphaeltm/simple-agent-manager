@@ -90,7 +90,14 @@ All configuration lives in a **GitHub Environment** named `production`. This mak
 | `GH_APP_PRIVATE_KEY` | GitHub App private key (raw PEM or base64 encoded — both work) |
 | `GH_APP_SLUG` | GitHub App slug (URL name) |
 
-> **Naming Convention**: GitHub secrets use `GH_*` prefix (not `GITHUB_*`) because GitHub reserves `GITHUB_*` for its own variables. The deployment workflow automatically maps `GH_*` → `GITHUB_*` when setting Cloudflare Worker secrets.
+**Optional secrets** (for GCP OIDC integration):
+
+| Secret | Description |
+|--------|-------------|
+| `GOOGLE_CLIENT_ID` | Google Cloud Console OAuth 2.0 client ID (enables "Connect Google Cloud" in Settings) |
+| `GOOGLE_CLIENT_SECRET` | Google Cloud Console OAuth 2.0 client secret |
+
+> **Naming Convention**: GitHub secrets use `GH_*` prefix (not `GITHUB_*`) because GitHub reserves `GITHUB_*` for its own variables. The deployment workflow automatically maps `GH_*` → `GITHUB_*` when setting Cloudflare Worker secrets. Google OAuth secrets use `GOOGLE_*` directly (no prefix mapping needed).
 
 > **Note**: Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`) and TLS certificates (`ORIGIN_CA_CERT`, `ORIGIN_CA_KEY`) are **automatically generated and persisted** via Pulumi state in R2. No manual intervention required—keys are created on first deployment and reused automatically on subsequent deployments.
 

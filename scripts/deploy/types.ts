@@ -338,7 +338,10 @@ export const REQUIRED_SECRETS = [
 // Note: HETZNER_TOKEN is NOT a platform secret.
 // Users provide their own tokens via Settings UI, stored encrypted per-user.
 // See docs/architecture/credential-security.md
-export const OPTIONAL_SECRETS = [] as const;
+export const OPTIONAL_SECRETS = [
+  'GOOGLE_CLIENT_ID',
+  'GOOGLE_CLIENT_SECRET',
+] as const;
 
 export const DNS_RECORDS = ['api', 'app', '*'] as const;
 
