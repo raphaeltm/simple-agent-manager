@@ -52,20 +52,25 @@ export async function getGcpAccessToken(
     : DEFAULT_GCP_API_TIMEOUT_MS;
 
   // Step 1: Sign a SAM identity token
-  const audience = `//iam.googleapis.com/projects/${credential.gcpProjectNumber}/locations/global/workloadIdentityPools/${credential.wifPoolId}/providers/${credential.wifProviderId}`;
+  // GCP requires different audience formats for the JWT vs the STS request:
+  // - JWT aud claim: https://iam.googleapis.com/... (full HTTPS scheme)
+  // - STS audience field: //iam.googleapis.com/... (protocol-relative)
+  const wifResourcePath = `projects/${credential.gcpProjectNumber}/locations/global/workloadIdentityPools/${credential.wifPoolId}/providers/${credential.wifProviderId}`;
+  const jwtAudience = `https://iam.googleapis.com/${wifResourcePath}`;
+  const stsAudience = `//iam.googleapis.com/${wifResourcePath}`;
 
   const identityToken = await signIdentityToken(
     {
       userId,
       projectId,
-      audience,
+      audience: jwtAudience,
     },
     env,
   );
 
   // Step 2: Exchange SAM JWT for GCP STS federated token
   const stsBody = {
-    audience,
+    audience: stsAudience,
     grantType: 'urn:ietf:params:oauth:grant-type:token-exchange',
     requestedTokenType: 'urn:ietf:params:oauth:token-type:access_token',
     scope: 'https://www.googleapis.com/auth/cloud-platform',

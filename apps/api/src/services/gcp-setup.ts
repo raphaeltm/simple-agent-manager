@@ -176,8 +176,9 @@ async function createOidcProvider(
   issuerUri: string,
   timeoutMs: number,
 ): Promise<void> {
-  // The STS token exchange uses the WIF provider resource path as the audience
-  const wifAudience = `//iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
+  // The OIDC provider's allowedAudiences must match the JWT aud claim (https:// scheme).
+  // GCP STS uses the protocol-relative format (//iam.googleapis.com/...) separately in gcp-sts.ts.
+  const wifAudience = `https://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
 
   const url = `${IAM_URL}/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers?workloadIdentityPoolProviderId=${providerId}`;
   const res = await fetchWithTimeout(url, {
@@ -230,7 +231,7 @@ async function updateOidcProvider(
   issuerUri: string,
   timeoutMs: number,
 ): Promise<void> {
-  const wifAudience = `//iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
+  const wifAudience = `https://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
 
   const name = `projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
   const url = `${IAM_URL}/${name}?updateMask=attributeMapping,attributeCondition,oidc`;
