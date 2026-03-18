@@ -50,17 +50,24 @@ func (s *Server) requireWorkspaceRequestAuth(w http.ResponseWriter, r *http.Requ
 		return false
 	}
 
-	session := s.sessionManager.GetSessionFromRequest(r)
+	// Try workspace-scoped cookie first, then fall back to legacy cookie.
+	session := s.sessionManager.GetSessionForWorkspace(r, workspaceID)
 	if session != nil {
 		if session.Claims == nil {
-			writeError(w, http.StatusUnauthorized, "invalid session claims")
-			return false
+			// Invalid session — fall through to token auth instead of hard-failing.
+			slog.Warn("session has nil claims, falling through to token auth",
+				"workspaceID", workspaceID)
+		} else if session.Claims.Workspace != "" && session.Claims.Workspace != workspaceID {
+			// Cookie belongs to a different workspace — skip it and try token auth.
+			// This happens when multiple workspaces share a node and the browser
+			// sends the legacy (unscoped) cookie for a different workspace.
+			slog.Debug("session cookie workspace mismatch, falling through to token auth",
+				"workspaceID", workspaceID,
+				"cookieWorkspace", session.Claims.Workspace)
+		} else {
+			// Valid session for this workspace
+			return true
 		}
-		if session.Claims.Workspace == "" || session.Claims.Workspace != workspaceID {
-			writeError(w, http.StatusForbidden, "workspace claim mismatch")
-			return false
-		}
-		return true
 	}
 
 	token := strings.TrimSpace(r.URL.Query().Get("token"))
@@ -80,7 +87,7 @@ func (s *Server) requireWorkspaceRequestAuth(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed to create session")
 		return false
 	}
-	s.sessionManager.SetCookie(w, createdSession)
+	s.sessionManager.SetCookieForWorkspace(w, createdSession, workspaceID)
 	return true
 }
 

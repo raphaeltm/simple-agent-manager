@@ -73,7 +73,7 @@ func (s *Server) handleTokenAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.sessionManager.SetCookie(w, session)
+	s.sessionManager.SetCookieForWorkspace(w, session, workspaceID)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":   true,
@@ -86,7 +86,7 @@ func (s *Server) handleTokenAuth(w http.ResponseWriter, r *http.Request) {
 // handleSessionCheck handles session validation.
 func (s *Server) handleSessionCheck(w http.ResponseWriter, r *http.Request) {
 	workspaceID := s.routedWorkspaceID(r)
-	session := s.sessionManager.GetSessionFromRequest(r)
+	session := s.sessionManager.GetSessionForWorkspace(r, workspaceID)
 	if session == nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"authenticated": false,
@@ -112,12 +112,13 @@ func (s *Server) handleSessionCheck(w http.ResponseWriter, r *http.Request) {
 
 // handleLogout handles session logout.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	session := s.sessionManager.GetSessionFromRequest(r)
+	workspaceID := s.routedWorkspaceID(r)
+	session := s.sessionManager.GetSessionForWorkspace(r, workspaceID)
 	if session != nil {
 		s.sessionManager.DeleteSession(session.ID)
 	}
 
-	s.sessionManager.ClearCookie(w)
+	s.sessionManager.ClearCookieForWorkspace(w, workspaceID)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -126,13 +127,18 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 // handleTerminalResize handles terminal resize requests.
 func (s *Server) handleTerminalResize(w http.ResponseWriter, r *http.Request) {
-	session := s.sessionManager.GetSessionFromRequest(r)
+	workspaceID := s.routedWorkspaceID(r)
+	session := s.sessionManager.GetSessionForWorkspace(r, workspaceID)
 	if session == nil {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
 
-	workspaceID := session.Claims.Workspace
+	if session.Claims == nil || session.Claims.Workspace == "" {
+		writeError(w, http.StatusUnauthorized, "invalid session claims")
+		return
+	}
+	workspaceID = session.Claims.Workspace
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
 	if !ok {
 		writeError(w, http.StatusNotFound, "workspace not found")
