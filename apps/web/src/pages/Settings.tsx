@@ -42,7 +42,7 @@ export function Settings() {
     <PageLayout title="Settings" maxWidth="xl" headerRight={<UserMenu />}>
       <Breadcrumb
         segments={[
-          { label: 'Dashboard', path: '/dashboard' },
+          { label: 'Home', path: '/dashboard' },
           { label: 'Settings' },
         ]}
       />

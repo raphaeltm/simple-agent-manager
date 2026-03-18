@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Outlet, useLocation, useParams } from 'react-router-dom';
 import type { GitHubInstallation, ProjectDetailResponse } from '@simple-agent-manager/shared';
-import { Alert, Breadcrumb, PageLayout, Spinner } from '@simple-agent-manager/ui';
+import { Alert, PageLayout, Spinner } from '@simple-agent-manager/ui';
 import { UserMenu } from '../components/UserMenu';
 import { SettingsDrawer } from '../components/project/SettingsDrawer';
 import { ProjectInfoPanel } from '../components/project/ProjectInfoPanel';
@@ -95,7 +95,7 @@ export function Project() {
   }
 
   // ---------------------------------------------------------------------------
-  // Non-chat routes: existing PageLayout wrapper (unchanged)
+  // Non-chat routes: PageLayout with project header
   // ---------------------------------------------------------------------------
   return (
     <PageLayout
@@ -104,14 +104,6 @@ export function Project() {
       headerRight={<UserMenu />}
       compact={isMobile}
     >
-      {/* Breadcrumb */}
-      <Breadcrumb
-        segments={[
-          { label: 'Dashboard', path: '/dashboard' },
-          { label: project?.name || 'Project' },
-        ]}
-      />
-
       {error && (
         <div className="mt-3">
           <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>

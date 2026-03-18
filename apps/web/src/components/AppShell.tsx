@@ -3,7 +3,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, Search } from 'lucide-react';
 import { useAuth } from './AuthProvider';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { NavSidebar, NAV_ITEMS } from './NavSidebar';
+import { NavSidebar, GLOBAL_NAV_ITEMS, PROJECT_NAV_ITEMS } from './NavSidebar';
 import { MobileNavDrawer } from './MobileNavDrawer';
 import { GlobalCommandPalette } from './GlobalCommandPalette';
 import { useGlobalCommandPalette } from '../hooks/useGlobalCommandPalette';
@@ -23,13 +23,26 @@ export function AppShell({ children }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const commandPalette = useGlobalCommandPalette();
 
+  // Detect project context from URL
+  const projectMatch = location.pathname.match(/^\/projects\/([^/]+)/);
+  const projectId = projectMatch?.[1];
+
   const mobileNavItems = useMemo(() => {
-    const items = NAV_ITEMS.map((item) => ({ label: item.label, path: item.path }));
+    if (projectId) {
+      return [
+        { label: '\u2190 Back to Projects', path: '/projects' },
+        ...PROJECT_NAV_ITEMS.map((item) => ({
+          label: item.label,
+          path: `/projects/${projectId}/${item.path}`,
+        })),
+      ];
+    }
+    const items = GLOBAL_NAV_ITEMS.map((item) => ({ label: item.label, path: item.path }));
     if (isSuperadmin) {
       items.push({ label: 'Admin', path: '/admin' });
     }
     return items;
-  }, [isSuperadmin]);
+  }, [isSuperadmin, projectId]);
 
   // Close drawer on route change
   useEffect(() => {

@@ -118,14 +118,14 @@ function BreadcrumbShowcase() {
           <div>
             <span className="block text-xs font-medium text-fg-muted mb-1">Simple breadcrumb</span>
             <Breadcrumb segments={[
-              { label: 'Dashboard', path: '/dashboard' },
+              { label: 'Home', path: '/dashboard' },
               { label: 'Projects' },
             ]} />
           </div>
           <div>
             <span className="block text-xs font-medium text-fg-muted mb-1">Deep breadcrumb</span>
             <Breadcrumb segments={[
-              { label: 'Dashboard', path: '/dashboard' },
+              { label: 'Home', path: '/dashboard' },
               { label: 'Projects', path: '/projects' },
               { label: 'My App', path: '/projects/123' },
               { label: 'Tasks', path: '/projects/123/tasks' },

@@ -130,7 +130,7 @@ export function ChatSessionView() {
       {/* Breadcrumb */}
       <Breadcrumb
         segments={[
-          { label: 'Dashboard', path: '/dashboard' },
+          { label: 'Home', path: '/dashboard' },
           { label: 'Projects', path: '/projects' },
           { label: project?.name ?? '...', path: `/projects/${projectId}` },
           { label: 'Sessions', path: `/projects/${projectId}/sessions` },
