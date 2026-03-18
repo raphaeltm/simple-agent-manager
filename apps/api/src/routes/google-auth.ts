@@ -54,7 +54,7 @@ googleAuthRoutes.get('/callback', async (c) => {
 
   if (error) {
     // User denied consent or other OAuth error
-    const appUrl = `https://app.${c.env.BASE_DOMAIN}/settings/cloud-providers?gcp_error=${encodeURIComponent(error)}`;
+    const appUrl = `https://app.${c.env.BASE_DOMAIN}/settings/cloud-provider?gcp_error=${encodeURIComponent(error)}`;
     return c.redirect(appUrl);
   }
 
@@ -87,7 +87,7 @@ googleAuthRoutes.get('/callback', async (c) => {
   if (!tokenResponse.ok) {
     const errorBody = await tokenResponse.text();
     console.error('Google token exchange failed:', errorBody);
-    const appUrl = `https://app.${c.env.BASE_DOMAIN}/settings/cloud-providers?gcp_error=token_exchange_failed`;
+    const appUrl = `https://app.${c.env.BASE_DOMAIN}/settings/cloud-provider?gcp_error=token_exchange_failed`;
     return c.redirect(appUrl);
   }
 
@@ -106,7 +106,7 @@ googleAuthRoutes.get('/callback', async (c) => {
     expirationTtl: 300, // 5 minutes — enough time for the setup wizard
   });
 
-  const appUrl = `https://app.${c.env.BASE_DOMAIN}/settings/cloud-providers?gcp_setup=${encodeURIComponent(handle)}`;
+  const appUrl = `https://app.${c.env.BASE_DOMAIN}/settings/cloud-provider?gcp_setup=${encodeURIComponent(handle)}`;
   return c.redirect(appUrl);
 });
 
