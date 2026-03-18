@@ -97,7 +97,7 @@ export class ApiClient {
     if (!response.ok) {
       const text = await response.text().catch(() => '');
       throw new Error(
-        `API call ${path} failed: ${response.status} ${response.statusText} — ${text}`,
+        `API call ${path} failed: ${response.status} ${response.statusText} — ${text.slice(0, 200)}`,
       );
     }
 
@@ -124,7 +124,7 @@ export class ApiClient {
     if (!response.ok) {
       const text = await response.text().catch(() => '');
       throw new Error(
-        `GitHub API ${path} failed: ${response.status} ${response.statusText} — ${text}`,
+        `GitHub API ${path} failed: ${response.status} ${response.statusText} — ${text.slice(0, 200)}`,
       );
     }
 

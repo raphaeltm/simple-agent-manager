@@ -82,9 +82,12 @@ func writeWorkspaceMcpConfig(ctx context.Context, containerID, user, workDir, bi
 	// as a project-level MCP config.
 	targetPath := workDir + "/.mcp.json"
 
+	// Write .mcp.json and add it to .gitignore to prevent accidental commits.
+	// Also schedule cleanup note: the session teardown should rm this file.
+	gitignorePath := workDir + "/.gitignore"
 	script := fmt.Sprintf(
-		`set -e; cat > %q && chmod 600 %q`,
-		targetPath, targetPath,
+		`set -e; cat > %q && chmod 600 %q && grep -qxF '.mcp.json' %q 2>/dev/null || echo '.mcp.json' >> %q`,
+		targetPath, targetPath, gitignorePath, gitignorePath,
 	)
 
 	dockerArgs := []string{"exec", "-i"}

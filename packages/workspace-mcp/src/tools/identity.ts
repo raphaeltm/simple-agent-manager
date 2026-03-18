@@ -87,7 +87,7 @@ export async function getCredentialStatus(
     type: 'github-pat',
     available: ghToken.length > 0,
     hint: ghToken.length > 0
-      ? `Token present (${ghToken.length} chars, prefix: ${ghToken.slice(0, 4)}...)`
+      ? 'Token present — GitHub API calls available'
       : 'Not set — GitHub API calls will fail',
   });
 
