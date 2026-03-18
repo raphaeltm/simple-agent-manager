@@ -176,6 +176,9 @@ async function createOidcProvider(
   issuerUri: string,
   timeoutMs: number,
 ): Promise<void> {
+  // The STS token exchange uses the WIF provider resource path as the audience
+  const wifAudience = `//iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
+
   const url = `${IAM_URL}/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers?workloadIdentityPoolProviderId=${providerId}`;
   const res = await fetchWithTimeout(url, {
     method: 'POST',
@@ -194,7 +197,7 @@ async function createOidcProvider(
       attributeCondition: `assertion.iss == '${issuerUri}'`,
       oidc: {
         issuerUri,
-        allowedAudiences: [issuerUri],
+        allowedAudiences: [wifAudience],
       },
     }),
   }, timeoutMs);
@@ -227,6 +230,8 @@ async function updateOidcProvider(
   issuerUri: string,
   timeoutMs: number,
 ): Promise<void> {
+  const wifAudience = `//iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
+
   const name = `projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
   const url = `${IAM_URL}/${name}?updateMask=attributeMapping,attributeCondition,oidc`;
   const res = await fetchWithTimeout(url, {
@@ -244,7 +249,7 @@ async function updateOidcProvider(
       attributeCondition: `assertion.iss == '${issuerUri}'`,
       oidc: {
         issuerUri,
-        allowedAudiences: [issuerUri],
+        allowedAudiences: [wifAudience],
       },
     }),
   }, timeoutMs);
