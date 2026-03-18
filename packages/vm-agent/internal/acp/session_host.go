@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -881,6 +882,29 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 			envVars = append(envVars, fmt.Sprintf("%s=%s", modelEnv, settings.Model))
 			slog.Info("Agent model override", "envVar", modelEnv, "model", settings.Model)
 		}
+	}
+
+	// For Claude Code: inject workspace-aware MCP server (.mcp.json) if the
+	// binary is available in the container. This gives agents platform-level
+	// awareness (network info, cost, coordination, CI/CD, etc.).
+	if agentType == "claude-code" {
+		binaryPath := DefaultWorkspaceMcpBinaryPath
+		if v := os.Getenv("WORKSPACE_MCP_BINARY_PATH"); v != "" {
+			binaryPath = v
+		}
+		// Extract MCP token from the existing HTTP MCP server config (first match).
+		var mcpToken, apiURL string
+		for _, srv := range h.config.McpServers {
+			if srv.Token != "" && mcpToken == "" {
+				mcpToken = srv.Token
+			}
+			if srv.URL != "" && apiURL == "" {
+				apiURL = srv.URL
+			}
+		}
+		injected := injectWorkspaceMcpIfAvailable(ctx, containerID, h.config.ContainerUser,
+			h.config.ContainerWorkDir, binaryPath, mcpToken, apiURL, h.config.McpServers)
+		slog.Info("Workspace MCP injection result", "injected", injected, "agentType", agentType)
 	}
 
 	// Inject agent-specific extra env vars (e.g., workarounds for upstream bugs).
