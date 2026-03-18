@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { getWorkspaceInfo, getCredentialStatus } from '../../src/tools/identity.js';
 import type { WorkspaceMcpConfig } from '../../src/config.js';
 import type { ApiClient } from '../../src/api-client.js';

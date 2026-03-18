@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ApiClient } from '../../src/api-client.js';
 import type { WorkspaceMcpConfig } from '../../src/config.js';
 

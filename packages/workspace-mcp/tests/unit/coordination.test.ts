@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   listProjectAgents,
-  getFileLocks,
   getPeerAgentOutput,
 } from '../../src/tools/coordination.js';
 import type { WorkspaceMcpConfig } from '../../src/config.js';
