@@ -7,9 +7,8 @@ const defaultProps = {
   onClose: vi.fn(),
   user: { name: 'Dev User', email: 'dev@example.com', image: null },
   navItems: [
-    { label: 'Dashboard', path: '/dashboard' },
+    { label: 'Home', path: '/dashboard' },
     { label: 'Projects', path: '/projects' },
-    { label: 'Nodes', path: '/nodes' },
     { label: 'Settings', path: '/settings' },
   ],
   currentPath: '/dashboard',
@@ -26,9 +25,8 @@ describe('MobileNavDrawer', () => {
     render(<MobileNavDrawer {...defaultProps} />);
 
     expect(screen.getByRole('dialog', { name: 'Navigation menu' })).toBeInTheDocument();
-    expect(screen.getByText('Dashboard')).toBeInTheDocument();
+    expect(screen.getByText('Home')).toBeInTheDocument();
     expect(screen.getByText('Projects')).toBeInTheDocument();
-    expect(screen.getByText('Nodes')).toBeInTheDocument();
     expect(screen.getByText('Settings')).toBeInTheDocument();
   });
 
@@ -60,8 +58,8 @@ describe('MobileNavDrawer', () => {
   it('highlights the active navigation item', () => {
     render(<MobileNavDrawer {...defaultProps} currentPath="/dashboard" />);
 
-    const dashboardButton = screen.getByText('Dashboard');
-    expect(dashboardButton.className).toContain('text-accent');
+    const homeButton = screen.getByText('Home');
+    expect(homeButton.className).toContain('text-accent');
 
     const projectsButton = screen.getByText('Projects');
     expect(projectsButton.className).not.toContain('text-accent');
@@ -113,8 +111,8 @@ describe('MobileNavDrawer', () => {
     const projectsButton = screen.getByText('Projects');
     expect(projectsButton.className).toContain('text-accent');
 
-    const dashboardButton = screen.getByText('Dashboard');
-    expect(dashboardButton.className).not.toContain('text-accent');
+    const homeButton = screen.getByText('Home');
+    expect(homeButton.className).not.toContain('text-accent');
   });
 
 
