@@ -146,7 +146,7 @@ export async function provisionNode(
       location: node.vmLocation,
       userData: cloudInit,
       labels: {
-        node: node.id,
+        node: node.id.toLowerCase(),
         managed: 'simple-agent-manager',
       },
     });
