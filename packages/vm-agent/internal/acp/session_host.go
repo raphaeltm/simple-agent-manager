@@ -892,18 +892,19 @@ func (h *SessionHost) startAgent(ctx context.Context, agentType string, cred *ag
 		if v := os.Getenv("WORKSPACE_MCP_BINARY_PATH"); v != "" {
 			binaryPath = v
 		}
-		// Extract MCP token from the existing HTTP MCP server config.
+		// Extract MCP token from the existing HTTP MCP server config (first match).
 		var mcpToken, apiURL string
 		for _, srv := range h.config.McpServers {
-			if srv.Token != "" {
+			if srv.Token != "" && mcpToken == "" {
 				mcpToken = srv.Token
 			}
-			if srv.URL != "" {
+			if srv.URL != "" && apiURL == "" {
 				apiURL = srv.URL
 			}
 		}
-		injectWorkspaceMcpIfAvailable(ctx, containerID, h.config.ContainerUser,
+		injected := injectWorkspaceMcpIfAvailable(ctx, containerID, h.config.ContainerUser,
 			h.config.ContainerWorkDir, binaryPath, mcpToken, apiURL, h.config.McpServers)
+		slog.Info("Workspace MCP injection result", "injected", injected, "agentType", agentType)
 	}
 
 	// Inject agent-specific extra env vars (e.g., workarounds for upstream bugs).

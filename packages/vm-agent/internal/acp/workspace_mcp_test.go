@@ -7,12 +7,15 @@ import (
 )
 
 func TestGenerateWorkspaceMcpJson_Basic(t *testing.T) {
-	result := generateWorkspaceMcpJson(
+	result, err := generateWorkspaceMcpJson(
 		"/usr/local/lib/workspace-mcp/index.js",
 		"token-abc",
 		"https://api.example.com",
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 
 	var config workspaceMcpJsonConfig
 	if err := json.Unmarshal([]byte(result), &config); err != nil {
@@ -43,12 +46,15 @@ func TestGenerateWorkspaceMcpJson_FallbackFromMcpServers(t *testing.T) {
 		{URL: "https://api.example.com/mcp", Token: "fallback-token"},
 	}
 
-	result := generateWorkspaceMcpJson(
+	result, err := generateWorkspaceMcpJson(
 		"/usr/local/lib/workspace-mcp/index.js",
 		"", // no direct token
 		"", // no direct API URL
 		servers,
 	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 
 	var config workspaceMcpJsonConfig
 	if err := json.Unmarshal([]byte(result), &config); err != nil {
@@ -69,12 +75,15 @@ func TestGenerateWorkspaceMcpJson_DirectTokenTakesPrecedence(t *testing.T) {
 		{URL: "https://api.example.com/mcp", Token: "server-token"},
 	}
 
-	result := generateWorkspaceMcpJson(
+	result, err := generateWorkspaceMcpJson(
 		"/path/to/index.js",
 		"direct-token",
 		"https://api.direct.com",
 		servers,
 	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 
 	var config workspaceMcpJsonConfig
 	if err := json.Unmarshal([]byte(result), &config); err != nil {
@@ -91,7 +100,10 @@ func TestGenerateWorkspaceMcpJson_DirectTokenTakesPrecedence(t *testing.T) {
 }
 
 func TestGenerateWorkspaceMcpJson_NoTokens(t *testing.T) {
-	result := generateWorkspaceMcpJson("/path/to/index.js", "", "", nil)
+	result, err := generateWorkspaceMcpJson("/path/to/index.js", "", "", nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 
 	var config workspaceMcpJsonConfig
 	if err := json.Unmarshal([]byte(result), &config); err != nil {
@@ -105,12 +117,15 @@ func TestGenerateWorkspaceMcpJson_NoTokens(t *testing.T) {
 }
 
 func TestGenerateWorkspaceMcpJson_ValidJSON(t *testing.T) {
-	result := generateWorkspaceMcpJson(
+	result, err := generateWorkspaceMcpJson(
 		"/usr/local/lib/workspace-mcp/index.js",
 		"token-with-special-chars!@#$%",
 		"https://api.example.com",
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 
 	// Verify it's valid JSON
 	if !json.Valid([]byte(result)) {
@@ -128,12 +143,15 @@ func TestGenerateWorkspaceMcpJson_ValidJSON(t *testing.T) {
 }
 
 func TestGenerateWorkspaceMcpJson_NoTokenLeakInArgs(t *testing.T) {
-	result := generateWorkspaceMcpJson(
+	result, err := generateWorkspaceMcpJson(
 		"/path/to/index.js",
 		"secret-token-123",
 		"https://api.example.com",
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 
 	var config workspaceMcpJsonConfig
 	if err := json.Unmarshal([]byte(result), &config); err != nil {
@@ -147,7 +165,7 @@ func TestGenerateWorkspaceMcpJson_NoTokenLeakInArgs(t *testing.T) {
 			t.Error("Token leaked into args — should only be in env")
 		}
 	}
-	if !strings.Contains(entry.Command, "node") {
+	if entry.Command != "node" {
 		t.Error("Command should be 'node'")
 	}
 }

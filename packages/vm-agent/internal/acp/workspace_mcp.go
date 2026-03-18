@@ -30,7 +30,7 @@ type workspaceMcpServerEntry struct {
 // workspace-aware MCP server into Claude Code sessions. The MCP server is
 // a stdio process that gives agents platform-level awareness (network info,
 // cost estimates, multi-agent coordination, CI/CD status, etc.).
-func generateWorkspaceMcpJson(binaryPath, mcpToken, apiURL string, existingMcpServers []McpServerEntry) string {
+func generateWorkspaceMcpJson(binaryPath, mcpToken, apiURL string, existingMcpServers []McpServerEntry) (string, error) {
 	env := map[string]string{}
 
 	if mcpToken != "" {
@@ -41,13 +41,18 @@ func generateWorkspaceMcpJson(binaryPath, mcpToken, apiURL string, existingMcpSe
 	}
 
 	// If there's an existing SAM MCP server, pass its token so the workspace
-	// MCP server can proxy calls through it.
+	// MCP server can proxy calls through it. Use first-match semantics to be
+	// consistent with the extraction logic in session_host.go.
 	for _, srv := range existingMcpServers {
 		if srv.Token != "" && mcpToken == "" {
 			env["SAM_MCP_TOKEN"] = srv.Token
+			break
 		}
+	}
+	for _, srv := range existingMcpServers {
 		if srv.URL != "" && apiURL == "" {
 			env["SAM_API_URL"] = srv.URL
+			break
 		}
 	}
 
@@ -63,9 +68,9 @@ func generateWorkspaceMcpJson(binaryPath, mcpToken, apiURL string, existingMcpSe
 
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
-		return "{}"
+		return "", fmt.Errorf("marshal workspace MCP config: %w", err)
 	}
-	return string(data)
+	return string(data), nil
 }
 
 // writeWorkspaceMcpConfig writes .mcp.json into the container's workspace
@@ -76,7 +81,14 @@ func generateWorkspaceMcpJson(binaryPath, mcpToken, apiURL string, existingMcpSe
 // This is non-fatal: if writing fails, the agent session continues without
 // the workspace MCP server (agents still have the HTTP SAM MCP server).
 func writeWorkspaceMcpConfig(ctx context.Context, containerID, user, workDir, binaryPath, mcpToken, apiURL string, mcpServers []McpServerEntry) error {
-	config := generateWorkspaceMcpJson(binaryPath, mcpToken, apiURL, mcpServers)
+	if workDir == "" {
+		return fmt.Errorf("workDir is empty, cannot write .mcp.json")
+	}
+
+	config, err := generateWorkspaceMcpJson(binaryPath, mcpToken, apiURL, mcpServers)
+	if err != nil {
+		return err
+	}
 
 	// Write to workspace directory (not home dir) so Claude Code picks it up
 	// as a project-level MCP config.
@@ -101,7 +113,12 @@ func writeWorkspaceMcpConfig(ctx context.Context, containerID, user, workDir, bi
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("docker exec failed writing .mcp.json: %w: %s", err, strings.TrimSpace(string(output)))
+		// Truncate output to avoid leaking sensitive data in error messages.
+		outStr := strings.TrimSpace(string(output))
+		if len(outStr) > 200 {
+			outStr = outStr[:200] + "..."
+		}
+		return fmt.Errorf("docker exec failed writing .mcp.json: %w: %s", err, outStr)
 	}
 	return nil
 }
