@@ -86,7 +86,7 @@ const USER_MARKDOWN_COMPONENTS: Components = {
     if (isInline) {
       return (
         <code
-          className="bg-blue-500 text-blue-50 px-1 py-0.5 rounded text-xs font-mono"
+          className="bg-blue-500 text-blue-50 px-1 py-0.5 rounded text-xs font-mono break-all"
           {...props}
         >
           {children}
@@ -115,7 +115,7 @@ const AGENT_MARKDOWN_COMPONENTS: Components = {
     if (isInline) {
       return (
         <code
-          className="bg-gray-100 text-gray-800 px-1 py-0.5 rounded text-xs font-mono"
+          className="bg-gray-100 text-gray-800 px-1 py-0.5 rounded text-xs font-mono break-all"
           {...props}
         >
           {children}
@@ -151,13 +151,13 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       <div
-        className={`max-w-[80%] rounded-lg px-4 py-3 ${
+        className={`max-w-[80%] min-w-0 rounded-lg px-4 py-3 overflow-hidden ${
           isUser
             ? 'bg-blue-600 text-white'
             : 'bg-white border border-gray-200 text-gray-900'
         }`}
       >
-        <div className="prose prose-sm max-w-none overflow-y-visible">
+        <div className="prose prose-sm max-w-none overflow-x-auto break-words">
           <Markdown
             remarkPlugins={REMARK_PLUGINS}
             components={components}

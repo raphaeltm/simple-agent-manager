@@ -247,4 +247,59 @@ describe('MessageBubble', () => {
       expect(screen.queryByLabelText('Message info')).toBeNull();
     });
   });
+
+  describe('overflow protection', () => {
+    it('bubble container has overflow-hidden and min-w-0', () => {
+      const { container } = render(
+        <MessageBubble text="Hello" role="agent" />
+      );
+
+      const bubble = container.querySelector('.max-w-\\[80\\%\\]');
+      expect(bubble).not.toBeNull();
+      expect(bubble!.className).toContain('overflow-hidden');
+      expect(bubble!.className).toContain('min-w-0');
+    });
+
+    it('prose wrapper has overflow-x-auto for horizontal scroll', () => {
+      const { container } = render(
+        <MessageBubble text="Hello" role="agent" />
+      );
+
+      const proseDiv = container.querySelector('.prose');
+      expect(proseDiv).not.toBeNull();
+      expect(proseDiv!.className).toContain('overflow-x-auto');
+    });
+
+    it('inline code has break-all for long file paths (agent)', () => {
+      const longPath = '`/very/long/deeply/nested/path/to/some/file.tsx`';
+      const { container } = render(
+        <MessageBubble text={longPath} role="agent" />
+      );
+
+      const code = container.querySelector('code');
+      expect(code).not.toBeNull();
+      expect(code!.className).toContain('break-all');
+    });
+
+    it('inline code has break-all for long file paths (user)', () => {
+      const longPath = '`/very/long/deeply/nested/path/to/some/file.tsx`';
+      const { container } = render(
+        <MessageBubble text={longPath} role="user" />
+      );
+
+      const code = container.querySelector('code');
+      expect(code).not.toBeNull();
+      expect(code!.className).toContain('break-all');
+    });
+
+    it('prose wrapper has break-words for general text overflow', () => {
+      const { container } = render(
+        <MessageBubble text="Hello" role="agent" />
+      );
+
+      const proseDiv = container.querySelector('.prose');
+      expect(proseDiv).not.toBeNull();
+      expect(proseDiv!.className).toContain('break-words');
+    });
+  });
 });
