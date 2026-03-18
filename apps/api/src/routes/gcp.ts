@@ -6,7 +6,7 @@ import type { Env } from '../index';
 import { requireAuth, requireApproved, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { encrypt } from '../services/encryption';
-import { listGcpProjects, runGcpSetup } from '../services/gcp-setup';
+import { ensureResourceManagerApi, listGcpProjects, runGcpSetup } from '../services/gcp-setup';
 import { verifyGcpOidcSetup } from '../services/gcp-sts';
 import { serializeCredentialToken } from '../services/provider-credentials';
 import * as schema from '../db/schema';
@@ -45,6 +45,10 @@ gcpRoutes.get('/projects', async (c) => {
     : DEFAULT_GCP_API_TIMEOUT_MS;
 
   try {
+    // Enable the Resource Manager API on the OAuth client's project if needed
+    if (c.env.GOOGLE_CLIENT_ID) {
+      await ensureResourceManagerApi(oauthToken, c.env.GOOGLE_CLIENT_ID, timeoutMs);
+    }
     const projects = await listGcpProjects(oauthToken, timeoutMs);
     return c.json({ projects });
   } catch (err) {

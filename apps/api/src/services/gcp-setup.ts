@@ -27,6 +27,57 @@ interface GcpProjectListResponse {
 export type SetupProgressCallback = (step: string, status: 'pending' | 'in_progress' | 'done' | 'error') => void;
 
 /**
+ * Enable the Cloud Resource Manager API on the OAuth client's project.
+ * This is required before we can list the user's GCP projects.
+ * The project number is extracted from the OAuth client ID (prefix before '-').
+ */
+export async function ensureResourceManagerApi(
+  oauthToken: string,
+  googleClientId: string,
+  timeoutMs: number,
+): Promise<void> {
+  // Extract the OAuth client's project number from the client ID
+  // Format: <project-number>-<random>.apps.googleusercontent.com
+  const projectNumber = googleClientId.split('-')[0];
+  if (!projectNumber || !/^\d+$/.test(projectNumber)) {
+    throw new Error('Cannot extract project number from GOOGLE_CLIENT_ID');
+  }
+
+  const url = `${SERVICE_USAGE_URL}/projects/${projectNumber}/services/cloudresourcemanager.googleapis.com`;
+  const checkRes = await fetchWithTimeout(url, {
+    headers: { Authorization: `Bearer ${oauthToken}` },
+  }, timeoutMs);
+
+  if (checkRes.ok) {
+    const data = (await checkRes.json()) as { state?: string };
+    if (data.state === 'ENABLED') {
+      return; // Already enabled
+    }
+  }
+
+  // Enable the API
+  const enableUrl = `${SERVICE_USAGE_URL}/projects/${projectNumber}/services/cloudresourcemanager.googleapis.com:enable`;
+  const enableRes = await fetchWithTimeout(enableUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${oauthToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: '{}',
+  }, timeoutMs);
+
+  if (!enableRes.ok) {
+    const body = await enableRes.text();
+    throw new Error(`Failed to enable Cloud Resource Manager API (${enableRes.status}): ${body}`);
+  }
+
+  const op = (await enableRes.json()) as { name: string; done?: boolean };
+  if (!op.done) {
+    await pollOperation(oauthToken, op.name, timeoutMs);
+  }
+}
+
+/**
  * List the user's GCP projects using their OAuth access token.
  */
 export async function listGcpProjects(
@@ -102,6 +153,7 @@ async function enableApis(
     },
     body: JSON.stringify({
       serviceIds: [
+        'cloudresourcemanager.googleapis.com',
         'iam.googleapis.com',
         'iamcredentials.googleapis.com',
         'sts.googleapis.com',
