@@ -13,9 +13,9 @@ const SAM_AGENT_PORTS = ['8080', '8443'];
 
 /** GCP machine type mappings for SAM VM sizes */
 const SIZE_MAP: Record<VMSize, SizeConfig> = {
-  small: { type: 'e2-standard-2', price: '~$49/mo', vcpu: 2, ramGb: 8, storageGb: 50 },
-  medium: { type: 'e2-standard-4', price: '~$97/mo', vcpu: 4, ramGb: 16, storageGb: 50 },
-  large: { type: 'e2-standard-8', price: '~$194/mo', vcpu: 8, ramGb: 32, storageGb: 50 },
+  small: { type: 'e2-medium', price: '~$25/mo', vcpu: 1, ramGb: 4, storageGb: 50 },
+  medium: { type: 'e2-standard-2', price: '~$49/mo', vcpu: 2, ramGb: 8, storageGb: 50 },
+  large: { type: 'e2-standard-4', price: '~$97/mo', vcpu: 4, ramGb: 16, storageGb: 50 },
 };
 
 /** Available GCP zones */
@@ -236,7 +236,7 @@ export class GcpProvider implements Provider {
 
   async createVM(config: VMConfig): Promise<VMInstance> {
     const zone = config.location || this.defaultLocation;
-    const machineType = SIZE_MAP[config.size]?.type || 'e2-standard-4';
+    const machineType = SIZE_MAP[config.size]?.type || 'e2-medium';
     const headers = await this.authHeaders();
 
     // Ensure firewall rule exists before creating VM

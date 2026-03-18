@@ -66,22 +66,22 @@ describe('GcpProvider', () => {
   });
 
   describe('sizes', () => {
-    it('should map small to e2-standard-2', () => {
-      expect(provider.sizes.small.type).toBe('e2-standard-2');
-      expect(provider.sizes.small.vcpu).toBe(2);
-      expect(provider.sizes.small.ramGb).toBe(8);
+    it('should map small to e2-medium', () => {
+      expect(provider.sizes.small.type).toBe('e2-medium');
+      expect(provider.sizes.small.vcpu).toBe(1);
+      expect(provider.sizes.small.ramGb).toBe(4);
     });
 
-    it('should map medium to e2-standard-4', () => {
-      expect(provider.sizes.medium.type).toBe('e2-standard-4');
-      expect(provider.sizes.medium.vcpu).toBe(4);
-      expect(provider.sizes.medium.ramGb).toBe(16);
+    it('should map medium to e2-standard-2', () => {
+      expect(provider.sizes.medium.type).toBe('e2-standard-2');
+      expect(provider.sizes.medium.vcpu).toBe(2);
+      expect(provider.sizes.medium.ramGb).toBe(8);
     });
 
-    it('should map large to e2-standard-8', () => {
-      expect(provider.sizes.large.type).toBe('e2-standard-8');
-      expect(provider.sizes.large.vcpu).toBe(8);
-      expect(provider.sizes.large.ramGb).toBe(32);
+    it('should map large to e2-standard-4', () => {
+      expect(provider.sizes.large.type).toBe('e2-standard-4');
+      expect(provider.sizes.large.vcpu).toBe(4);
+      expect(provider.sizes.large.ramGb).toBe(16);
     });
   });
 
@@ -91,7 +91,7 @@ describe('GcpProvider', () => {
         id: '12345',
         name: 'node-abc',
         status: 'RUNNING',
-        machineType: 'zones/us-central1-a/machineTypes/e2-standard-4',
+        machineType: 'zones/us-central1-a/machineTypes/e2-standard-2',
         creationTimestamp: '2026-03-18T00:00:00Z',
         networkInterfaces: [{ accessConfigs: [{ natIP: '35.1.2.3' }] }],
         labels: { 'sam-managed': 'true' },
@@ -99,6 +99,10 @@ describe('GcpProvider', () => {
 
       let capturedBody: string | undefined;
       globalThis.fetch = vi.fn()
+        .mockImplementationOnce(async () => {
+          // ensureFirewallRule — 409 already exists
+          return new Response(JSON.stringify({ error: { code: 409 } }), { status: 409 });
+        })
         .mockImplementationOnce(async (url: string, init: RequestInit) => {
           capturedBody = init.body as string;
           return new Response(JSON.stringify({ name: 'op-123', status: 'DONE' }));
@@ -129,7 +133,7 @@ describe('GcpProvider', () => {
       // Verify request body structure
       const body = JSON.parse(capturedBody!);
       expect(body.name).toBe('node-abc');
-      expect(body.machineType).toContain('e2-standard-4');
+      expect(body.machineType).toContain('e2-standard-2');
       expect(body.labels).toHaveProperty('sam-managed', 'true');
       expect(body.labels).toHaveProperty('node', 'test-node-id');
       expect(body.metadata.items[0].key).toBe('user-data');
@@ -139,6 +143,10 @@ describe('GcpProvider', () => {
     it('should use Authorization header with token from tokenProvider', async () => {
       let capturedHeaders: HeadersInit | undefined;
       globalThis.fetch = vi.fn()
+        .mockImplementationOnce(async () => {
+          // ensureFirewallRule — 409 already exists
+          return new Response(JSON.stringify({ error: { code: 409 } }), { status: 409 });
+        })
         .mockImplementationOnce(async (_url: string, init: RequestInit) => {
           capturedHeaders = init.headers;
           return new Response(JSON.stringify({ name: 'op-1', status: 'DONE' }));
@@ -146,7 +154,7 @@ describe('GcpProvider', () => {
         .mockImplementationOnce(async () => new Response(JSON.stringify({ status: 'DONE' })))
         .mockImplementationOnce(async () => new Response(JSON.stringify({
           id: '1', name: 'vm', status: 'RUNNING',
-          machineType: 'zones/us-central1-a/machineTypes/e2-standard-2',
+          machineType: 'zones/us-central1-a/machineTypes/e2-medium',
           creationTimestamp: '2026-03-18T00:00:00Z',
           networkInterfaces: [{ accessConfigs: [{ natIP: '1.2.3.4' }] }],
         })));
