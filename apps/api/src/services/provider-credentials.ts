@@ -1,7 +1,8 @@
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type { ProviderConfig } from '@simple-agent-manager/providers';
-import type { CredentialProvider } from '@simple-agent-manager/shared';
+import type { Provider, ProviderConfig } from '@simple-agent-manager/providers';
+import { createProvider, GcpProvider } from '@simple-agent-manager/providers';
+import type { CredentialProvider, GcpOidcCredential } from '@simple-agent-manager/shared';
 import * as schema from '../db/schema';
 import { decrypt } from './encryption';
 
@@ -18,6 +19,15 @@ export function serializeCredentialToken(
       return fields.token ?? '';
     case 'scaleway':
       return JSON.stringify({ secretKey: fields.secretKey, projectId: fields.projectId });
+    case 'gcp':
+      return JSON.stringify({
+        gcpProjectId: fields.gcpProjectId,
+        gcpProjectNumber: fields.gcpProjectNumber,
+        serviceAccountEmail: fields.serviceAccountEmail,
+        wifPoolId: fields.wifPoolId,
+        wifProviderId: fields.wifProviderId,
+        defaultZone: fields.defaultZone,
+      });
     default: {
       const _exhaustive: never = provider;
       throw new Error(`Unsupported provider: ${_exhaustive}`);
@@ -49,15 +59,54 @@ export function buildProviderConfig(
       }
       return { provider: 'scaleway', secretKey: obj.secretKey, projectId: obj.projectId };
     }
+    case 'gcp':
+      // GCP credentials are metadata (not secrets). The tokenProvider must be injected
+      // at a higher layer via buildGcpProviderConfig() since it depends on the env/JWT context.
+      throw new Error('GCP credentials require buildGcpProviderConfig() — cannot use buildProviderConfig() directly');
     default:
       throw new Error(`Unsupported provider: ${provider}`);
   }
 }
 
 /**
+ * Parse a decrypted GCP credential token into structured GcpOidcCredential fields.
+ */
+export function parseGcpCredential(decryptedToken: string): GcpOidcCredential {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decryptedToken);
+  } catch {
+    throw new Error('Invalid GCP credential format: malformed stored data');
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (
+    typeof obj?.gcpProjectId !== 'string' || !obj.gcpProjectId ||
+    typeof obj?.gcpProjectNumber !== 'string' || !obj.gcpProjectNumber ||
+    typeof obj?.serviceAccountEmail !== 'string' || !obj.serviceAccountEmail ||
+    typeof obj?.wifPoolId !== 'string' || !obj.wifPoolId ||
+    typeof obj?.wifProviderId !== 'string' || !obj.wifProviderId ||
+    typeof obj?.defaultZone !== 'string' || !obj.defaultZone
+  ) {
+    throw new Error('Invalid GCP credential format: missing required fields');
+  }
+  return {
+    provider: 'gcp',
+    gcpProjectId: obj.gcpProjectId,
+    gcpProjectNumber: obj.gcpProjectNumber,
+    serviceAccountEmail: obj.serviceAccountEmail,
+    wifPoolId: obj.wifPoolId,
+    wifProviderId: obj.wifProviderId,
+    defaultZone: obj.defaultZone,
+  };
+}
+
+/**
  * Look up a user's cloud-provider credential, decrypt it, and return a ProviderConfig.
  * When `targetProvider` is specified, only returns credentials for that specific provider.
  * Returns null if no credential is found.
+ *
+ * Note: GCP credentials cannot produce a ProviderConfig directly (they need a runtime
+ * token provider). Use `createProviderForUser()` instead for GCP-compatible provider creation.
  */
 export async function getUserCloudProviderConfig(
   db: ReturnType<typeof drizzle>,
@@ -86,7 +135,63 @@ export async function getUserCloudProviderConfig(
 
   const provider = cred.provider as CredentialProvider;
   const decryptedToken = await decrypt(cred.encryptedToken, cred.iv, encryptionKey);
-  const config = buildProviderConfig(provider, decryptedToken);
 
+  // GCP uses OIDC token exchange — cannot produce a static ProviderConfig
+  if (provider === 'gcp') {
+    throw new Error('GCP credentials require createProviderForUser() — cannot use getUserCloudProviderConfig()');
+  }
+
+  const config = buildProviderConfig(provider, decryptedToken);
   return { config, provider };
+}
+
+/**
+ * Create a Provider instance for a user, handling all provider types including GCP.
+ * For GCP, injects the STS token exchange as the token provider.
+ */
+export async function createProviderForUser(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  encryptionKey: string,
+  env: { KV: KVNamespace; BASE_DOMAIN: string; JWT_PRIVATE_KEY: string; JWT_PUBLIC_KEY: string; GCP_IDENTITY_TOKEN_EXPIRY_SECONDS?: string; GCP_TOKEN_CACHE_TTL_SECONDS?: string; GCP_API_TIMEOUT_MS?: string; GCP_OPERATION_POLL_TIMEOUT_MS?: string },
+  targetProvider?: CredentialProvider,
+): Promise<{ provider: Provider; providerName: CredentialProvider } | null> {
+  const conditions = [
+    eq(schema.credentials.userId, userId),
+    eq(schema.credentials.credentialType, 'cloud-provider'),
+  ];
+  if (targetProvider) {
+    conditions.push(eq(schema.credentials.provider, targetProvider));
+  }
+
+  const creds = await db
+    .select()
+    .from(schema.credentials)
+    .where(and(...conditions))
+    .limit(1);
+
+  const cred = creds[0];
+  if (!cred) {
+    return null;
+  }
+
+  const providerName = cred.provider as CredentialProvider;
+  const decryptedToken = await decrypt(cred.encryptedToken, cred.iv, encryptionKey);
+
+  if (providerName === 'gcp') {
+    const gcpCred = parseGcpCredential(decryptedToken);
+    // Lazy-import to avoid circular dependency
+    const { getGcpAccessToken } = await import('./gcp-sts');
+    const tokenProvider = () => getGcpAccessToken(userId, gcpCred.gcpProjectId, gcpCred, env as any);
+
+    const provider = new GcpProvider(
+      gcpCred.gcpProjectId,
+      tokenProvider,
+      gcpCred.defaultZone,
+    );
+    return { provider, providerName };
+  }
+
+  const config = buildProviderConfig(providerName, decryptedToken);
+  return { provider: createProvider(config), providerName };
 }

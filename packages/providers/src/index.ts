@@ -2,6 +2,7 @@ import type { Provider, ProviderConfig } from './types';
 import { ProviderError } from './types';
 import { HetznerProvider } from './hetzner';
 import { ScalewayProvider } from './scaleway';
+import { GcpProvider } from './gcp';
 
 // Re-export types
 export type {
@@ -10,6 +11,7 @@ export type {
   HetznerProviderConfig,
   UpCloudProviderConfig,
   ScalewayProviderConfig,
+  GcpProviderConfig,
   LocationMeta,
   SizeConfig,
   VMConfig,
@@ -24,6 +26,8 @@ export { providerFetch, getTimeoutMs } from './provider-fetch';
 // Re-export providers
 export { HetznerProvider, DEFAULT_PLACEMENT_RETRY_DELAY_MS } from './hetzner';
 export { ScalewayProvider, SCALEWAY_LOCATIONS } from './scaleway';
+export { GcpProvider, GCP_LOCATIONS } from './gcp';
+export type { GcpTokenProvider } from './gcp';
 
 /**
  * Create a provider instance from explicit configuration.
@@ -43,6 +47,17 @@ export function createProvider(config: ProviderConfig): Provider {
         config.secretKey,
         config.projectId,
         config.zone,
+      );
+    case 'gcp':
+      return new GcpProvider(
+        config.projectId,
+        config.tokenProvider,
+        config.defaultZone,
+        config.imageFamily,
+        config.imageProject,
+        config.diskSizeGb,
+        config.timeoutMs,
+        config.operationPollTimeoutMs,
       );
     default:
       throw new ProviderError(

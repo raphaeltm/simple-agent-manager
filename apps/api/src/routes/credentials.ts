@@ -82,6 +82,21 @@ credentialsRoutes.post('/', async (c) => {
       throw errors.badRequest('secretKey and projectId are required for Scaleway');
     }
     credentialFields = { secretKey: scalewayBody.secretKey, projectId: scalewayBody.projectId };
+  } else if (providerName === 'gcp') {
+    // GCP credentials are created via the /api/gcp/setup flow, not directly via POST /api/credentials.
+    // This branch handles programmatic credential creation (e.g., for testing or migration).
+    const gcpBody = body as { provider: 'gcp'; gcpProjectId: string; gcpProjectNumber: string; serviceAccountEmail: string; wifPoolId: string; wifProviderId: string; defaultZone: string };
+    if (!gcpBody.gcpProjectId || !gcpBody.gcpProjectNumber || !gcpBody.serviceAccountEmail || !gcpBody.wifPoolId || !gcpBody.wifProviderId || !gcpBody.defaultZone) {
+      throw errors.badRequest('gcpProjectId, gcpProjectNumber, serviceAccountEmail, wifPoolId, wifProviderId, and defaultZone are required for GCP');
+    }
+    credentialFields = {
+      gcpProjectId: gcpBody.gcpProjectId,
+      gcpProjectNumber: gcpBody.gcpProjectNumber,
+      serviceAccountEmail: gcpBody.serviceAccountEmail,
+      wifPoolId: gcpBody.wifPoolId,
+      wifProviderId: gcpBody.wifProviderId,
+      defaultZone: gcpBody.defaultZone,
+    };
   } else {
     throw errors.badRequest(`Unsupported provider: ${providerName}`);
   }
@@ -89,15 +104,18 @@ credentialsRoutes.post('/', async (c) => {
   const tokenToEncrypt = serializeCredentialToken(providerName, credentialFields);
 
   // Validate the credentials by building a ProviderConfig and calling validateToken().
+  // GCP credentials are metadata (not API tokens) — validation is done during /api/gcp/setup.
   // Note: buildProviderConfig accepts the pre-encryption serialized token here — this is
   // safe because serialize → build is a documented round-trip (see provider-credentials tests).
-  try {
-    const providerConfig = buildProviderConfig(providerName, tokenToEncrypt);
-    const provider = createProvider(providerConfig);
-    await provider.validateToken();
-  } catch (err) {
-    console.error(`${providerName} credential validation failed:`, err instanceof Error ? err.message : err);
-    throw errors.badRequest(`Invalid or unauthorized ${providerName} credentials`);
+  if (providerName !== 'gcp') {
+    try {
+      const providerConfig = buildProviderConfig(providerName, tokenToEncrypt);
+      const provider = createProvider(providerConfig);
+      await provider.validateToken();
+    } catch (err) {
+      console.error(`${providerName} credential validation failed:`, err instanceof Error ? err.message : err);
+      throw errors.badRequest(`Invalid or unauthorized ${providerName} credentials`);
+    }
   }
 
   // Encrypt the serialized credential token
