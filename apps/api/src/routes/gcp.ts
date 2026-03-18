@@ -18,14 +18,27 @@ const gcpRoutes = new Hono<{ Bindings: Env }>();
 gcpRoutes.use('*', requireAuth(), requireApproved());
 
 /**
+ * Resolve a GCP OAuth token from a KV handle.
+ * The handle is a short-lived opaque key created during the OAuth callback.
+ */
+async function resolveOAuthToken(handle: string, kv: KVNamespace): Promise<string> {
+  const token = await kv.get(`gcp-oauth-token:${handle}`);
+  if (!token) {
+    throw errors.badRequest('OAuth handle expired or invalid — please re-authenticate with Google');
+  }
+  return token;
+}
+
+/**
  * GET /api/gcp/projects - List user's GCP projects
- * Requires an ephemeral Google OAuth token passed as query parameter.
+ * Requires a KV handle from the OAuth callback (passed as ?handle=...).
  */
 gcpRoutes.get('/projects', async (c) => {
-  const oauthToken = c.req.query('token');
-  if (!oauthToken) {
-    throw errors.badRequest('Google OAuth token is required (pass as ?token=...)');
+  const handle = c.req.query('handle');
+  if (!handle) {
+    throw errors.badRequest('OAuth handle is required (pass as ?handle=...)');
   }
+  const oauthToken = await resolveOAuthToken(handle, c.env.KV);
 
   const timeoutMs = c.env.GCP_API_TIMEOUT_MS
     ? parseInt(c.env.GCP_API_TIMEOUT_MS, 10)
@@ -48,12 +61,12 @@ gcpRoutes.get('/projects', async (c) => {
 gcpRoutes.post('/setup', async (c) => {
   const userId = getUserId(c);
   const body = await c.req.json<{
-    oauthToken: string;
+    oauthHandle: string;
     gcpProjectId: string;
     defaultZone: string;
   }>();
 
-  if (!body.oauthToken) throw errors.badRequest('oauthToken is required');
+  if (!body.oauthHandle) throw errors.badRequest('oauthHandle is required');
   if (!body.gcpProjectId) throw errors.badRequest('gcpProjectId is required');
   if (!body.defaultZone) throw errors.badRequest('defaultZone is required');
 
@@ -62,10 +75,13 @@ gcpRoutes.post('/setup', async (c) => {
     throw errors.badRequest('Google OAuth is not configured on this SAM instance');
   }
 
+  // Resolve the actual OAuth token from the KV handle
+  const oauthToken = await resolveOAuthToken(body.oauthHandle, c.env.KV);
+
   try {
     // Run the full setup orchestration
     const credential = await runGcpSetup(
-      body.oauthToken,
+      oauthToken,
       body.gcpProjectId,
       body.defaultZone,
       c.env,

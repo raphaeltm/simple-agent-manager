@@ -156,12 +156,12 @@ export interface GcpProject {
   projectNumber: string;
 }
 
-export async function listGcpProjects(oauthToken: string): Promise<{ projects: GcpProject[] }> {
-  return request<{ projects: GcpProject[] }>(`/api/gcp/projects?token=${encodeURIComponent(oauthToken)}`);
+export async function listGcpProjects(oauthHandle: string): Promise<{ projects: GcpProject[] }> {
+  return request<{ projects: GcpProject[] }>(`/api/gcp/projects?handle=${encodeURIComponent(oauthHandle)}`);
 }
 
 export interface GcpSetupRequest {
-  oauthToken: string;
+  oauthHandle: string;
   gcpProjectId: string;
   defaultZone: string;
 }

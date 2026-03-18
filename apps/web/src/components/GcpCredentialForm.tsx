@@ -39,8 +39,8 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<SetupPhase>('idle');
 
-  // OAuth token from callback
-  const [oauthToken, setOauthToken] = useState<string | null>(null);
+  // OAuth handle from callback (opaque KV key, not the raw token)
+  const [oauthHandle, setOauthHandle] = useState<string | null>(null);
 
   // Project selection
   const [projects, setProjects] = useState<GcpProject[]>([]);
@@ -49,18 +49,18 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
   // Zone selection
   const [selectedZone, setSelectedZone] = useState('us-central1-a');
 
-  // Check for OAuth callback token in URL
+  // Check for OAuth callback handle in URL
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const token = params.get('gcp_token');
+    const handle = params.get('gcp_setup');
     const gcpError = params.get('gcp_error');
 
-    if (token) {
-      setOauthToken(token);
+    if (handle) {
+      setOauthHandle(handle);
       setPhase('project-select');
       // Clean up URL
       const url = new URL(window.location.href);
-      url.searchParams.delete('gcp_token');
+      url.searchParams.delete('gcp_setup');
       window.history.replaceState({}, '', url.toString());
     }
 
@@ -72,13 +72,13 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
     }
   }, []);
 
-  // Fetch projects when we have a token
+  // Fetch projects when we have a handle
   const fetchProjects = useCallback(async () => {
-    if (!oauthToken) return;
+    if (!oauthHandle) return;
     setLoading(true);
     setError(null);
     try {
-      const result = await listGcpProjects(oauthToken);
+      const result = await listGcpProjects(oauthHandle);
       setProjects(result.projects);
       if (result.projects.length === 1 && result.projects[0]) {
         setSelectedProject(result.projects[0].projectId);
@@ -88,13 +88,13 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
     } finally {
       setLoading(false);
     }
-  }, [oauthToken]);
+  }, [oauthHandle]);
 
   useEffect(() => {
-    if (phase === 'project-select' && oauthToken) {
+    if (phase === 'project-select' && oauthHandle) {
       fetchProjects();
     }
-  }, [phase, oauthToken, fetchProjects]);
+  }, [phase, oauthHandle, fetchProjects]);
 
   const handleConnectClick = () => {
     // Redirect to Google OAuth via our API
@@ -108,7 +108,7 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
   };
 
   const handleSetup = async () => {
-    if (!oauthToken || !selectedProject) return;
+    if (!oauthHandle || !selectedProject) return;
 
     setPhase('setting-up');
     setLoading(true);
@@ -116,7 +116,7 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
 
     try {
       const result = await runGcpSetup({
-        oauthToken,
+        oauthHandle,
         gcpProjectId: selectedProject,
         defaultZone: selectedZone,
       });
@@ -209,7 +209,7 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
               <Button onClick={handleProjectSelect} disabled={!selectedProject}>
                 Next
               </Button>
-              <Button variant="secondary" onClick={() => { setPhase('idle'); setOauthToken(null); }}>
+              <Button variant="secondary" onClick={() => { setPhase('idle'); setOauthHandle(null); }}>
                 Cancel
               </Button>
             </div>

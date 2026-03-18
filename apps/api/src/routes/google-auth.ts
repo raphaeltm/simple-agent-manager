@@ -98,11 +98,15 @@ googleAuthRoutes.get('/callback', async (c) => {
     scope: string;
   };
 
-  // Redirect back to frontend with the access token.
-  // The token is passed as a URL fragment (#) so it's not sent to the server
-  // in subsequent requests and is only accessible to client-side JavaScript.
-  // The frontend will use this token to call /api/gcp/projects and /api/gcp/setup.
-  const appUrl = `https://app.${c.env.BASE_DOMAIN}/settings/cloud-providers?gcp_token=${encodeURIComponent(tokenData.access_token)}`;
+  // Store the OAuth token server-side in KV with a short-lived opaque handle.
+  // This avoids exposing the full cloud-platform-scoped token in URL params
+  // (which would leak to browser history, server logs, and Referer headers).
+  const handle = crypto.randomUUID();
+  await c.env.KV.put(`gcp-oauth-token:${handle}`, tokenData.access_token, {
+    expirationTtl: 300, // 5 minutes — enough time for the setup wizard
+  });
+
+  const appUrl = `https://app.${c.env.BASE_DOMAIN}/settings/cloud-providers?gcp_setup=${encodeURIComponent(handle)}`;
   return c.redirect(appUrl);
 });
 

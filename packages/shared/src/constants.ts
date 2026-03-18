@@ -322,6 +322,9 @@ export const DEFAULT_GCP_OPERATION_POLL_TIMEOUT_MS = 5 * 60 * 1000;
 /** Default GCP API timeout in ms (30 seconds). Override via GCP_API_TIMEOUT_MS env var. */
 export const DEFAULT_GCP_API_TIMEOUT_MS = 30_000;
 
+/** Default GCP SA access token lifetime in seconds (1 hour). Override via GCP_SA_TOKEN_LIFETIME_SECONDS env var. */
+export const DEFAULT_GCP_SA_TOKEN_LIFETIME_SECONDS = 3600;
+
 
 // Note: GitHub App install URL is NOT provided as a constant.
 // It must be derived from the actual GitHub App configuration at runtime.

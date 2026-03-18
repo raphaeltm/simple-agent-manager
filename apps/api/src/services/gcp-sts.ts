@@ -3,6 +3,7 @@ import type { GcpOidcCredential } from '@simple-agent-manager/shared';
 import {
   DEFAULT_GCP_TOKEN_CACHE_TTL_SECONDS,
   DEFAULT_GCP_API_TIMEOUT_MS,
+  DEFAULT_GCP_SA_TOKEN_LIFETIME_SECONDS,
 } from '@simple-agent-manager/shared';
 import { signIdentityToken } from './jwt';
 
@@ -96,7 +97,7 @@ export async function getGcpAccessToken(
     },
     body: JSON.stringify({
       scope: ['https://www.googleapis.com/auth/compute'],
-      lifetime: '3600s',
+      lifetime: `${DEFAULT_GCP_SA_TOKEN_LIFETIME_SECONDS}s`,
     }),
   }, timeoutMs);
 

@@ -1,4 +1,5 @@
 import { SignJWT, jwtVerify, decodeJwt, importPKCS8, exportJWK, importSPKI } from 'jose';
+import { DEFAULT_GCP_IDENTITY_TOKEN_EXPIRY_SECONDS } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 
 // Key ID format: key-YYYY-MM (rotates monthly)
@@ -223,7 +224,7 @@ export async function getJWKS(env: Env) {
  */
 function getIdentityTokenExpiry(env: Env): number {
   const envValue = env.GCP_IDENTITY_TOKEN_EXPIRY_SECONDS;
-  return envValue ? parseInt(envValue, 10) : 600;
+  return envValue ? parseInt(envValue, 10) : DEFAULT_GCP_IDENTITY_TOKEN_EXPIRY_SECONDS;
 }
 
 /**
