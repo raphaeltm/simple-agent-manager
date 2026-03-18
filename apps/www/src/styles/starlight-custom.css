@@ -1,5 +1,5 @@
 /* SAM Starlight Theme Customization
-   Matches the dark green design system from the marketing site */
+   Green design system for both dark and light modes */
 
 @font-face {
   font-family: 'Chillax';
@@ -33,6 +33,22 @@
 
   /* Use Chillax for headings */
   --sl-font-heading: 'Chillax', var(--sl-font);
+}
+
+/* Light theme colors — SAM brand (inverted gray scale, green accents) */
+:root[data-theme='light'] {
+  --sl-color-accent-low: #dcfce7;
+  --sl-color-accent: #16a34a;
+  --sl-color-accent-high: #14532d;
+
+  --sl-color-white: #1a2e29;
+  --sl-color-gray-1: #29423b;
+  --sl-color-gray-2: #3d5a52;
+  --sl-color-gray-3: #4f6e63;
+  --sl-color-gray-4: #9fb7ae;
+  --sl-color-gray-5: #d4e4de;
+  --sl-color-gray-6: #eef5f2;
+  --sl-color-black: #f8fbfa;
 }
 
 /* Subtle refinements */
