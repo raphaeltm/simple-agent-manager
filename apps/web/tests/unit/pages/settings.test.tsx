@@ -22,6 +22,12 @@ vi.mock('../../../src/components/ScalewayCredentialForm', () => ({
   ),
 }));
 
+vi.mock('../../../src/components/GcpCredentialForm', () => ({
+  GcpCredentialForm: ({ credential }: { credential: unknown }) => (
+    <div data-testid="gcp-credential-form">{credential ? 'connected' : 'not-connected'}</div>
+  ),
+}));
+
 vi.mock('../../../src/components/GitHubAppSection', () => ({
   GitHubAppSection: () => <div data-testid="github-app-section">github-app</div>,
 }));
