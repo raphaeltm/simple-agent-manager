@@ -45,14 +45,14 @@ Per the frontend: `assistant`, `tool`, `thinking` are groupable. `user`, `system
 
 ### A) Server-side token concatenation
 
-- [ ] Add `groupTokensIntoMessages()` function in `mcp.ts` that groups consecutive same-role tokens
+- [x] Add `groupTokensIntoMessages()` function in `mcp.ts` that groups consecutive same-role tokens
   - Groupable roles: `assistant`, `tool`, `thinking`
   - Use first token's `id` and `createdAt` as the group's values
   - Concatenate `content` fields of grouped tokens
   - Non-groupable roles (`user`, `system`, `plan`) pass through as-is
-- [ ] Apply grouping in `handleGetSessionMessages()` after fetching messages, before building response
-- [ ] Update `messageCount` to reflect grouped count (not raw token count)
-- [ ] Add unit tests for the grouping function:
+- [x]Apply grouping in `handleGetSessionMessages()` after fetching messages, before building response
+- [x]Update `messageCount` to reflect grouped count (not raw token count)
+- [x]Add unit tests for the grouping function:
   - Consecutive same-role assistant tokens are merged
   - Different roles create separate messages
   - Non-groupable roles (user, system) are not merged
@@ -62,23 +62,23 @@ Per the frontend: `assistant`, `tool`, `thinking` are groupable. `user`, `system
 
 ### B) Documentation updates
 
-- [ ] Update `get_session_messages` tool description in MCP tool schema (`mcp.ts:358-380`) to mention concatenation behavior
-- [ ] Update `search_messages` tool description to note cross-token search limitation
-- [ ] Update `docs/architecture/durable-objects.md:92` to clarify token-per-row storage
-- [ ] Update `apps/www/src/content/docs/docs/guides/agents.md:139` MCP tools table to clarify behavior
-- [ ] Add inline code comment in `handleGetSessionMessages()` explaining the grouping
+- [x]Update `get_session_messages` tool description in MCP tool schema (`mcp.ts:358-380`) to mention concatenation behavior
+- [x]Update `search_messages` tool description to note cross-token search limitation
+- [x]Update `docs/architecture/durable-objects.md:92` to clarify token-per-row storage
+- [x]Update `apps/www/src/content/docs/docs/guides/agents.md:139` MCP tools table to clarify behavior
+- [x]Add inline code comment in `handleGetSessionMessages()` explaining the grouping
 
 ## Acceptance Criteria
 
-- [ ] `get_session_messages` returns concatenated logical messages, not individual tokens
-- [ ] Consecutive assistant/tool/thinking tokens are merged into single messages
-- [ ] User and system messages are not merged
-- [ ] First token's `id` and `createdAt` are used for the grouped message
-- [ ] `messageCount` reflects the number of logical messages
-- [ ] Token storage is unchanged — only the MCP return value changes
-- [ ] Unit tests cover all grouping scenarios
-- [ ] MCP tool descriptions updated to clarify behavior
-- [ ] Architecture docs updated with token-vs-message distinction
+- [x]`get_session_messages` returns concatenated logical messages, not individual tokens
+- [x]Consecutive assistant/tool/thinking tokens are merged into single messages
+- [x]User and system messages are not merged
+- [x]First token's `id` and `createdAt` are used for the grouped message
+- [x]`messageCount` reflects the number of logical messages
+- [x]Token storage is unchanged — only the MCP return value changes
+- [x]Unit tests cover all grouping scenarios
+- [x]MCP tool descriptions updated to clarify behavior
+- [x]Architecture docs updated with token-vs-message distinction
 
 ## References
 

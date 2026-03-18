@@ -151,7 +151,7 @@ Each project gets one `ProjectData` Durable Object instance, accessed via `env.P
 
 **Embedded SQLite tables:**
 - `chat_sessions` — session metadata, lifecycle status, message counts
-- `chat_messages` — append-only message log with role, content, tool metadata
+- `chat_messages` — append-only streaming token log; each row is one streaming chunk from Claude Code, not a logical message. Consecutive same-role tokens (assistant, tool, thinking) are grouped into logical messages at the API and UI layers.
 - `activity_events` — audit trail (workspace created, session stopped, etc.)
 - `task_status_events` — task lifecycle transitions with actor tracking
 - `acp_sessions` — ACP session state machine with fork lineage
