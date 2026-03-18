@@ -4,7 +4,9 @@ package auth
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -131,6 +133,82 @@ func (sm *SessionManager) GetSessionFromRequest(r *http.Request) *Session {
 		return nil
 	}
 	return sm.GetSession(cookie.Value)
+}
+
+// workspaceCookieName returns the workspace-scoped cookie name.
+func (sm *SessionManager) workspaceCookieName(workspaceID string) string {
+	safe := strings.ReplaceAll(workspaceID, "/", "_")
+	safe = strings.ReplaceAll(safe, "\\", "_")
+	return fmt.Sprintf("%s_%s", sm.cookieName, safe)
+}
+
+// GetSessionForWorkspace retrieves a session from a workspace-scoped cookie.
+// Falls back to the legacy (unscoped) cookie for backward compatibility.
+func (sm *SessionManager) GetSessionForWorkspace(r *http.Request, workspaceID string) *Session {
+	// Try workspace-scoped cookie first
+	if workspaceID != "" {
+		if cookie, err := r.Cookie(sm.workspaceCookieName(workspaceID)); err == nil {
+			if session := sm.GetSession(cookie.Value); session != nil {
+				return session
+			}
+		}
+	}
+	// Fall back to legacy unscoped cookie
+	return sm.GetSessionFromRequest(r)
+}
+
+// SetCookieForWorkspace sets a workspace-scoped session cookie on the response.
+// Also sets the legacy cookie for backward compatibility.
+func (sm *SessionManager) SetCookieForWorkspace(w http.ResponseWriter, session *Session, workspaceID string) {
+	// Set workspace-scoped cookie
+	if workspaceID != "" {
+		sm.setCookieWithName(w, sm.workspaceCookieName(workspaceID), session)
+	}
+	// Also set legacy cookie for backward compat
+	sm.SetCookie(w, session)
+}
+
+// ClearCookieForWorkspace clears the workspace-scoped session cookie.
+// Also clears the legacy cookie.
+func (sm *SessionManager) ClearCookieForWorkspace(w http.ResponseWriter, workspaceID string) {
+	if workspaceID != "" {
+		sm.clearCookieWithName(w, sm.workspaceCookieName(workspaceID))
+	}
+	sm.ClearCookie(w)
+}
+
+func (sm *SessionManager) setCookieWithName(w http.ResponseWriter, name string, session *Session) {
+	sameSite := http.SameSiteStrictMode
+	if sm.cookieDomain != "" {
+		sameSite = http.SameSiteLaxMode
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     name,
+		Value:    session.ID,
+		Path:     "/",
+		Domain:   sm.cookieDomain,
+		Expires:  session.ExpiresAt,
+		HttpOnly: true,
+		Secure:   sm.secure,
+		SameSite: sameSite,
+	})
+}
+
+func (sm *SessionManager) clearCookieWithName(w http.ResponseWriter, name string) {
+	sameSite := http.SameSiteStrictMode
+	if sm.cookieDomain != "" {
+		sameSite = http.SameSiteLaxMode
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     name,
+		Value:    "",
+		Path:     "/",
+		Domain:   sm.cookieDomain,
+		Expires:  time.Unix(0, 0),
+		HttpOnly: true,
+		Secure:   sm.secure,
+		SameSite: sameSite,
+	})
 }
 
 // DeleteSession removes a session.
