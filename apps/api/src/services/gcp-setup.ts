@@ -106,6 +106,7 @@ async function enableApis(
         'iamcredentials.googleapis.com',
         'sts.googleapis.com',
         'compute.googleapis.com',
+        'aiplatform.googleapis.com',
       ],
     }),
   }, timeoutMs);
@@ -369,7 +370,13 @@ async function grantWifUserOnSa(
 /**
  * Grant Compute Instance Admin to the service account on the project (read-modify-write).
  */
-async function grantComputeAdminOnProject(
+/** Roles granted to the SAM service account on the user's GCP project. */
+const SA_PROJECT_ROLES = [
+  'roles/compute.instanceAdmin.v1', // VM lifecycle management
+  'roles/aiplatform.user',          // Vertex AI access (e.g. Gemini CLI)
+];
+
+async function grantProjectRoles(
   oauthToken: string,
   projectId: string,
   saEmail: string,
@@ -398,20 +405,24 @@ async function grantComputeAdminOnProject(
   };
 
   const member = `serviceAccount:${saEmail}`;
-  const role = 'roles/compute.instanceAdmin.v1';
+  const bindings = [...(policy.bindings || [])];
+  let changed = false;
 
-  // Check if binding already exists
-  const existingBinding = (policy.bindings || []).find((b) => b.role === role);
-  if (existingBinding?.members?.includes(member)) {
-    return; // Already granted
+  for (const role of SA_PROJECT_ROLES) {
+    const existingBinding = bindings.find((b) => b.role === role);
+    if (existingBinding?.members?.includes(member)) {
+      continue; // Already granted
+    }
+    if (existingBinding) {
+      existingBinding.members.push(member);
+    } else {
+      bindings.push({ role, members: [member] });
+    }
+    changed = true;
   }
 
-  // Add our binding
-  const bindings = [...(policy.bindings || [])];
-  if (existingBinding) {
-    existingBinding.members.push(member);
-  } else {
-    bindings.push({ role, members: [member] });
+  if (!changed) {
+    return; // All roles already granted
   }
 
   // Write updated policy with version 3 for conditional bindings support
@@ -482,10 +493,10 @@ export async function runGcpSetup(
   await grantWifUserOnSa(oauthToken, gcpProjectId, projectNumber, saEmail, poolId, timeoutMs);
   onProgress?.('grant_wif_user', 'done');
 
-  // Step 7: Grant compute admin on project
-  onProgress?.('grant_compute_admin', 'in_progress');
-  await grantComputeAdminOnProject(oauthToken, gcpProjectId, saEmail, timeoutMs);
-  onProgress?.('grant_compute_admin', 'done');
+  // Step 7: Grant project roles (compute admin + Vertex AI)
+  onProgress?.('grant_project_roles', 'in_progress');
+  await grantProjectRoles(oauthToken, gcpProjectId, saEmail, timeoutMs);
+  onProgress?.('grant_project_roles', 'done');
 
   return {
     provider: 'gcp',

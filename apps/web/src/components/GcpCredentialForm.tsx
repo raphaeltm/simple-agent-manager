@@ -23,7 +23,7 @@ const SETUP_STEPS = [
   { key: 'create_oidc_provider', label: 'Configuring OIDC provider' },
   { key: 'create_service_account', label: 'Creating service account' },
   { key: 'grant_wif_user', label: 'Setting permissions' },
-  { key: 'grant_compute_admin', label: 'Granting compute access' },
+  { key: 'grant_project_roles', label: 'Granting compute & AI access' },
 ];
 
 interface GcpCredentialFormProps {
