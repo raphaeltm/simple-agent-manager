@@ -1,0 +1,131 @@
+---
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+import CtaFooter from '../../components/CtaFooter.astro';
+
+interface Presentation {
+  title: string;
+  date: string;
+  description: string;
+  href: string;
+}
+
+const presentations: Presentation[] = [
+  {
+    title: 'SAM — Demo Day',
+    date: '2026-03-19',
+    description:
+      'An overview of SAM: architecture, the numbers (991 commits in 50 days), war stories, the self-referential development loop, and multi-cloud multi-agent support.',
+    href: '/presentations/demo-day-2026-03-19.html',
+  },
+];
+---
+
+<Base
+  title="Presentations | Simple Agent Manager"
+  description="Slide decks and presentations about SAM."
+>
+  <Header />
+  <main class="presentations-index">
+    <div class="container">
+      <div class="page-header animate-on-scroll">
+        <p class="section-label">Presentations</p>
+        <h1 class="section-title">Slide decks &amp; talks</h1>
+      </div>
+
+      {presentations.length === 0 && (
+        <p class="empty">No presentations yet. Check back soon!</p>
+      )}
+
+      <div class="presentation-grid">
+        {presentations.map((p) => (
+          <a href={p.href} class="presentation-card animate-on-scroll" target="_blank" rel="noopener">
+            <div class="card-meta">
+              <time datetime={p.date}>
+                {new Date(p.date + 'T00:00:00').toLocaleDateString('en-US', {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric',
+                })}
+              </time>
+            </div>
+            <h2 class="card-title">{p.title}</h2>
+            <p class="card-description">{p.description}</p>
+            <span class="card-action">View slides &rarr;</span>
+          </a>
+        ))}
+      </div>
+    </div>
+  </main>
+  <CtaFooter />
+</Base>
+
+<style>
+  .presentations-index {
+    padding-top: calc(var(--header-height) + 48px);
+    padding-bottom: 80px;
+  }
+
+  .page-header {
+    margin-bottom: 48px;
+  }
+
+  .empty {
+    text-align: center;
+    color: var(--color-fg-muted);
+    padding: 80px 0;
+  }
+
+  .presentation-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 24px;
+  }
+
+  .presentation-card {
+    display: block;
+    padding: 24px;
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    transition: border-color 0.2s, transform 0.2s;
+    color: inherit;
+  }
+
+  .presentation-card:hover {
+    border-color: var(--color-fg-dim);
+    transform: translateY(-2px);
+    color: inherit;
+  }
+
+  .card-meta {
+    font-size: 0.8125rem;
+    margin-bottom: 12px;
+  }
+
+  time {
+    color: var(--color-fg-muted);
+  }
+
+  .card-title {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--color-fg-primary);
+    margin-bottom: 8px;
+  }
+
+  .card-description {
+    font-size: 0.9375rem;
+    color: var(--color-fg-muted);
+    line-height: 1.5;
+    margin-bottom: 16px;
+  }
+
+  .card-action {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-accent);
+  }
+</style>
