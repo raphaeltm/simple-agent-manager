@@ -5,6 +5,12 @@ import { providerFetch } from './provider-fetch';
 
 const COMPUTE_API_BASE = 'https://compute.googleapis.com/compute/v1';
 
+/** Firewall rule name and config for SAM VM agent inbound access */
+const SAM_FIREWALL_RULE_NAME = 'sam-allow-agent';
+const SAM_NETWORK_TAG = 'sam-agent';
+/** Ports the VM agent may listen on (8443 with TLS, 8080 without) */
+const SAM_AGENT_PORTS = ['8080', '8443'];
+
 /** GCP machine type mappings for SAM VM sizes */
 const SIZE_MAP: Record<VMSize, SizeConfig> = {
   small: { type: 'e2-standard-2', price: '~$49/mo', vcpu: 2, ramGb: 8, storageGb: 50 },
@@ -159,10 +165,82 @@ export class GcpProvider implements Provider {
     throw new ProviderError('gcp', undefined, `GCP operation timed out after ${this.operationPollTimeoutMs}ms`);
   }
 
+  /**
+   * Ensure a firewall rule exists allowing inbound TCP on SAM agent ports.
+   * Idempotent — skips creation if the rule already exists (409).
+   */
+  private async ensureFirewallRule(): Promise<void> {
+    const headers = await this.authHeaders();
+    const url = `${this.projectUrl()}/global/firewalls`;
+
+    const body = {
+      name: SAM_FIREWALL_RULE_NAME,
+      network: `${this.projectUrl()}/global/networks/default`,
+      direction: 'INGRESS',
+      priority: 1000,
+      targetTags: [SAM_NETWORK_TAG],
+      allowed: [
+        {
+          IPProtocol: 'tcp',
+          ports: SAM_AGENT_PORTS,
+        },
+      ],
+      sourceRanges: ['0.0.0.0/0'],
+      description: 'Allow inbound access to SAM VM agent (managed by Simple Agent Manager)',
+    };
+
+    try {
+      const res = await providerFetch('gcp', url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      }, this.timeoutMs);
+      const op = (await res.json()) as GcpOperation;
+      // Firewall operations are global, poll via global operations endpoint
+      await this.pollGlobalOperation(op.name);
+    } catch (err) {
+      // 409 = already exists — that's fine
+      if (err instanceof ProviderError && err.statusCode === 409) return;
+      throw err;
+    }
+  }
+
+  /**
+   * Poll a global operation (used for firewall rules which are not zone-scoped).
+   */
+  private async pollGlobalOperation(operationName: string): Promise<void> {
+    const deadline = Date.now() + this.operationPollTimeoutMs;
+    let delayMs = 1000;
+    const maxDelayMs = 30_000;
+
+    while (Date.now() < deadline) {
+      const headers = await this.authHeaders();
+      const url = `${this.projectUrl()}/global/operations/${operationName}`;
+      const res = await providerFetch('gcp', url, { headers }, this.timeoutMs);
+      const op = (await res.json()) as GcpOperation;
+
+      if (op.status === 'DONE') {
+        if (op.error?.errors?.length) {
+          const errMsg = op.error.errors.map((e) => `${e.code}: ${e.message}`).join('; ');
+          throw new ProviderError('gcp', undefined, `GCP operation failed: ${errMsg}`);
+        }
+        return;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      delayMs = Math.min(delayMs * 2, maxDelayMs);
+    }
+
+    throw new ProviderError('gcp', undefined, `GCP global operation timed out after ${this.operationPollTimeoutMs}ms`);
+  }
+
   async createVM(config: VMConfig): Promise<VMInstance> {
     const zone = config.location || this.defaultLocation;
     const machineType = SIZE_MAP[config.size]?.type || 'e2-standard-4';
     const headers = await this.authHeaders();
+
+    // Ensure firewall rule exists before creating VM
+    await this.ensureFirewallRule();
 
     const body = {
       name: config.name,
@@ -170,6 +248,9 @@ export class GcpProvider implements Provider {
       labels: {
         'sam-managed': 'true',
         ...(config.labels || {}),
+      },
+      tags: {
+        items: [SAM_NETWORK_TAG],
       },
       disks: [
         {
