@@ -380,6 +380,7 @@ async function grantWifUserOnSa(
 /** Roles granted to the SAM service account on the user's GCP project. */
 const SA_PROJECT_ROLES = [
   'roles/compute.instanceAdmin.v1', // VM lifecycle management
+  'roles/compute.securityAdmin',    // Firewall rule management (not included in instanceAdmin)
   'roles/aiplatform.user',          // Vertex AI access (e.g. Gemini CLI)
 ];
 
