@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { AppShell } from '../../src/components/AppShell';
 
@@ -122,23 +122,9 @@ describe('AppShell (global context)', () => {
   });
 });
 
-function renderAppShellWithProjectRoute(path: string) {
-  return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/projects/:id/*" element={
-          <AppShell>
-            <div data-testid="page-content">Page content</div>
-          </AppShell>
-        } />
-      </Routes>
-    </MemoryRouter>,
-  );
-}
-
 describe('AppShell (project context)', () => {
   it('shows project navigation when inside a project route', () => {
-    renderAppShellWithProjectRoute('/projects/proj-123/chat');
+    renderAppShell('/projects/proj-123/chat');
     expect(screen.getByRole('navigation', { name: 'Project navigation' })).toBeInTheDocument();
     expect(screen.getByText('Chat')).toBeInTheDocument();
     expect(screen.getByText('Tasks')).toBeInTheDocument();
@@ -148,14 +134,20 @@ describe('AppShell (project context)', () => {
   });
 
   it('shows Back to Projects link when inside a project', () => {
-    renderAppShellWithProjectRoute('/projects/proj-123/chat');
+    renderAppShell('/projects/proj-123/chat');
     expect(screen.getByText('Back to Projects')).toBeInTheDocument();
   });
 
   it('does not show global nav items when inside a project', () => {
-    renderAppShellWithProjectRoute('/projects/proj-123/tasks');
+    renderAppShell('/projects/proj-123/tasks');
     expect(screen.queryByText('Home')).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'Primary navigation' })).not.toBeInTheDocument();
+  });
+
+  it('shows global nav on /projects/new (not treated as project context)', () => {
+    renderAppShell('/projects/new');
+    expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument();
+    expect(screen.getByText('Home')).toBeInTheDocument();
   });
 });
 

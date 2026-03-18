@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useLocation, useParams } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import {
   Home,
   FolderKanban,
@@ -41,6 +41,17 @@ export const PROJECT_NAV_ITEMS: NavItem[] = [
   { label: 'Settings', path: 'settings', icon: <Settings size={18} /> },
 ];
 
+/** Reserved path segments under /projects/ that are NOT project IDs */
+const RESERVED_PROJECT_PATHS = new Set(['new']);
+
+/** Extract a real project ID from the current URL, excluding reserved paths */
+export function extractProjectId(pathname: string): string | undefined {
+  const match = pathname.match(/^\/projects\/([^/]+)/);
+  const id = match?.[1];
+  if (!id) return undefined;
+  return RESERVED_PROJECT_PATHS.has(id) ? undefined : id;
+}
+
 function isActive(itemPath: string, pathname: string): boolean {
   if (itemPath === '/dashboard') return pathname === '/dashboard';
   return pathname === itemPath || pathname.startsWith(`${itemPath}/`);
@@ -51,6 +62,8 @@ function isProjectSubActive(subPath: string, projectId: string, pathname: string
   return pathname === fullPath || pathname.startsWith(`${fullPath}/`);
 }
 
+const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
+
 interface NavSidebarProps {
   className?: string;
   projectName?: string;
@@ -58,11 +71,11 @@ interface NavSidebarProps {
 
 export function NavSidebar({ className, projectName }: NavSidebarProps) {
   const location = useLocation();
-  const { id: projectId } = useParams<{ id: string }>();
   const { isSuperadmin } = useAuth();
   const [infraOpen, setInfraOpen] = useState(false);
 
-  const insideProject = Boolean(projectId) && location.pathname.startsWith(`/projects/${projectId}`);
+  const projectId = extractProjectId(location.pathname);
+  const insideProject = Boolean(projectId);
 
   // ── Project-scoped sidebar ──
   if (insideProject && projectId) {
@@ -71,7 +84,7 @@ export function NavSidebar({ className, projectName }: NavSidebarProps) {
         {/* Back to Projects */}
         <Link
           to="/projects"
-          className="flex items-center gap-2 px-3 py-2 rounded-sm no-underline text-sm text-fg-muted hover:text-fg-primary hover:bg-surface-hover transition-all duration-150"
+          className={`flex items-center gap-2 px-3 py-2 rounded-sm no-underline text-sm text-fg-muted hover:text-fg-primary hover:bg-surface-hover transition-all duration-150 ${FOCUS_RING}`}
         >
           <ArrowLeft size={16} />
           <span>Back to Projects</span>
@@ -90,7 +103,7 @@ export function NavSidebar({ className, projectName }: NavSidebarProps) {
               key={item.path}
               to={`/projects/${projectId}/${item.path}`}
               aria-current={active ? 'page' : undefined}
-              className={`flex items-center gap-3 px-3 py-2 rounded-sm no-underline text-sm font-medium transition-all duration-150 ${
+              className={`flex items-center gap-3 px-3 py-2 rounded-sm no-underline text-sm font-medium transition-all duration-150 ${FOCUS_RING} ${
                 active
                   ? 'text-accent bg-surface-hover'
                   : 'text-fg-muted hover:text-fg-primary hover:bg-surface-hover'
@@ -119,7 +132,7 @@ export function NavSidebar({ className, projectName }: NavSidebarProps) {
             key={item.path}
             to={item.path}
             aria-current={active ? 'page' : undefined}
-            className={`flex items-center gap-3 px-3 py-2 rounded-sm no-underline text-sm font-medium transition-all duration-150 ${
+            className={`flex items-center gap-3 px-3 py-2 rounded-sm no-underline text-sm font-medium transition-all duration-150 ${FOCUS_RING} ${
               active
                 ? 'text-accent bg-surface-hover'
                 : 'text-fg-muted hover:text-fg-primary hover:bg-surface-hover'
@@ -136,14 +149,15 @@ export function NavSidebar({ className, projectName }: NavSidebarProps) {
         <div className="mt-2">
           <button
             onClick={() => setInfraOpen(!infraOpen)}
-            className="flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-surface-hover transition-all duration-150"
+            className={`flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-surface-hover transition-all duration-150 ${FOCUS_RING}`}
             aria-expanded={infraOpen}
+            aria-controls="infra-nav-panel"
           >
             {infraOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             Infrastructure
           </button>
           {infraOpen && (
-            <div className="flex flex-col gap-1">
+            <div id="infra-nav-panel" className="flex flex-col gap-1">
               {[
                 { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
                 { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
@@ -154,7 +168,7 @@ export function NavSidebar({ className, projectName }: NavSidebarProps) {
                     key={item.path}
                     to={item.path}
                     aria-current={active ? 'page' : undefined}
-                    className={`flex items-center gap-3 px-3 py-2 ml-2 rounded-sm no-underline text-sm font-medium transition-all duration-150 ${
+                    className={`flex items-center gap-3 px-3 py-2 ml-2 rounded-sm no-underline text-sm font-medium transition-all duration-150 ${FOCUS_RING} ${
                       active
                         ? 'text-accent bg-surface-hover'
                         : 'text-fg-muted hover:text-fg-primary hover:bg-surface-hover'

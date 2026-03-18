@@ -3,7 +3,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, Search } from 'lucide-react';
 import { useAuth } from './AuthProvider';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { NavSidebar, GLOBAL_NAV_ITEMS, PROJECT_NAV_ITEMS } from './NavSidebar';
+import { NavSidebar, GLOBAL_NAV_ITEMS, PROJECT_NAV_ITEMS, extractProjectId } from './NavSidebar';
 import { MobileNavDrawer } from './MobileNavDrawer';
 import { GlobalCommandPalette } from './GlobalCommandPalette';
 import { useGlobalCommandPalette } from '../hooks/useGlobalCommandPalette';
@@ -23,14 +23,13 @@ export function AppShell({ children }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const commandPalette = useGlobalCommandPalette();
 
-  // Detect project context from URL
-  const projectMatch = location.pathname.match(/^\/projects\/([^/]+)/);
-  const projectId = projectMatch?.[1];
+  // Detect project context from URL (excludes reserved paths like /projects/new)
+  const projectId = extractProjectId(location.pathname);
 
   const mobileNavItems = useMemo(() => {
     if (projectId) {
       return [
-        { label: '\u2190 Back to Projects', path: '/projects' },
+        { label: 'Back to Projects', path: '/projects' },
         ...PROJECT_NAV_ITEMS.map((item) => ({
           label: item.label,
           path: `/projects/${projectId}/${item.path}`,
