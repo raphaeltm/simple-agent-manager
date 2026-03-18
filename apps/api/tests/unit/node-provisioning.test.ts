@@ -441,12 +441,12 @@ describe('provider-aware node provisioning', () => {
     expect(section).toContain('targetProvider');
   });
 
-  it('provisionNode passes targetProvider to getUserCloudProviderConfig', () => {
+  it('provisionNode passes targetProvider to createProviderForUser', () => {
     const section = nodesSource.slice(
       nodesSource.indexOf('async function provisionNode'),
       nodesSource.indexOf('async function stopNodeResources')
     );
-    expect(section).toContain('getUserCloudProviderConfig(db, node.userId, env.ENCRYPTION_KEY, targetProvider)');
+    expect(section).toContain('createProviderForUser(db, node.userId, env.ENCRYPTION_KEY, env, targetProvider)');
   });
 
   it('provisionNode persists error to observability database on failure', () => {
@@ -484,7 +484,7 @@ describe('provider-aware node provisioning', () => {
       nodesSource.indexOf('async function deleteNodeResources')
     );
     expect(section).toContain('node.cloudProvider as CredentialProvider');
-    expect(section).toContain('getUserCloudProviderConfig(db, userId, env.ENCRYPTION_KEY, targetProvider)');
+    expect(section).toContain('createProviderForUser(db, userId, env.ENCRYPTION_KEY, env, targetProvider)');
   });
 
   it('deleteNodeResources uses node cloudProvider for credential lookup', () => {
@@ -492,7 +492,7 @@ describe('provider-aware node provisioning', () => {
       nodesSource.indexOf('async function deleteNodeResources')
     );
     expect(section).toContain('node.cloudProvider as CredentialProvider');
-    expect(section).toContain('getUserCloudProviderConfig(db, userId, env.ENCRYPTION_KEY, targetProvider)');
+    expect(section).toContain('createProviderForUser(db, userId, env.ENCRYPTION_KEY, env, targetProvider)');
   });
 });
 

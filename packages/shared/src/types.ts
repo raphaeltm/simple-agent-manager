@@ -44,7 +44,7 @@ export interface AdminUserRoleRequest {
 // =============================================================================
 // Credential
 // =============================================================================
-export const CREDENTIAL_PROVIDERS = ['hetzner', 'scaleway'] as const;
+export const CREDENTIAL_PROVIDERS = ['hetzner', 'scaleway', 'gcp'] as const;
 export type CredentialProvider = (typeof CREDENTIAL_PROVIDERS)[number];
 
 export interface Credential {
@@ -71,7 +71,23 @@ export interface CredentialResponse {
  */
 export type CreateCredentialRequest =
   | { provider: 'hetzner'; token: string }
-  | { provider: 'scaleway'; secretKey: string; projectId: string };
+  | { provider: 'scaleway'; secretKey: string; projectId: string }
+  | { provider: 'gcp'; gcpProjectId: string; gcpProjectNumber: string; serviceAccountEmail: string; wifPoolId: string; wifProviderId: string; defaultZone: string };
+
+// =============================================================================
+// GCP OIDC Credential (stored after Connect GCP flow)
+// =============================================================================
+
+/** GCP OIDC credential — public identifiers, not secrets. Stored encrypted for consistency. */
+export interface GcpOidcCredential {
+  provider: 'gcp';
+  gcpProjectId: string;
+  gcpProjectNumber: string;
+  serviceAccountEmail: string;
+  wifPoolId: string;
+  wifProviderId: string;
+  defaultZone: string;
+}
 
 // =============================================================================
 // Provider Catalog (dynamic instance types & locations)

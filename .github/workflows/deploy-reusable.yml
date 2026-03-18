@@ -415,6 +415,8 @@ jobs:
           SECRET_ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
           SECRET_JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
           SECRET_JWT_PUBLIC_KEY: ${{ secrets.JWT_PUBLIC_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
 
       # ========================================
       # Phase 4: VM Agent

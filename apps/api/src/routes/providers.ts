@@ -1,13 +1,13 @@
 import { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { createProvider } from '@simple-agent-manager/providers';
+import { createProvider, GcpProvider } from '@simple-agent-manager/providers';
 import type { CredentialProvider, ProviderCatalog, ProviderCatalogResponse, SizeInfo, VMSize } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 import { requireAuth, requireApproved, getUserId } from '../middleware/auth';
 import * as schema from '../db/schema';
 import { decrypt } from '../services/encryption';
-import { buildProviderConfig } from '../services/provider-credentials';
+import { buildProviderConfig, parseGcpCredential } from '../services/provider-credentials';
 import { log } from '../lib/logger';
 
 const providersRoutes = new Hono<{ Bindings: Env }>();
@@ -43,8 +43,22 @@ providersRoutes.get('/catalog', async (c) => {
     creds.map(async (cred) => {
       const providerName = cred.provider as CredentialProvider;
       const decryptedToken = await decrypt(cred.encryptedToken, cred.iv, c.env.ENCRYPTION_KEY);
-      const config = buildProviderConfig(providerName, decryptedToken);
-      const provider = createProvider(config);
+
+      // GCP uses OIDC token exchange, not static API tokens — construct its provider differently
+      let provider;
+      if (providerName === 'gcp') {
+        const gcpCred = parseGcpCredential(decryptedToken);
+        // For catalog purposes we only need static metadata (locations, sizes, default zone)
+        // — no actual API calls, so a no-op token provider is fine
+        provider = new GcpProvider(
+          gcpCred.gcpProjectId,
+          async () => { throw new Error('Token provider not available for catalog'); },
+          gcpCred.defaultZone,
+        );
+      } else {
+        const config = buildProviderConfig(providerName, decryptedToken);
+        provider = createProvider(config);
+      }
 
       return {
         provider: providerName,

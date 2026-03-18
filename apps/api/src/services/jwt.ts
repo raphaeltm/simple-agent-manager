@@ -1,4 +1,5 @@
 import { SignJWT, jwtVerify, decodeJwt, importPKCS8, exportJWK, importSPKI } from 'jose';
+import { DEFAULT_GCP_IDENTITY_TOKEN_EXPIRY_SECONDS } from '@simple-agent-manager/shared';
 import type { Env } from '../index';
 
 // Key ID format: key-YYYY-MM (rotates monthly)
@@ -8,6 +9,7 @@ const KEY_ID = `key-${new Date().getFullYear()}-${String(new Date().getMonth() +
 const TERMINAL_AUDIENCE = 'workspace-terminal';
 const CALLBACK_AUDIENCE = 'workspace-callback';
 const NODE_MANAGEMENT_AUDIENCE = 'node-management';
+const IDENTITY_TOKEN_TYPE = 'identity';
 
 /**
  * Get the JWT issuer URL from environment.
@@ -212,6 +214,84 @@ export async function getJWKS(env: Env) {
         use: 'sig',
         alg: 'RS256',
       },
+    ],
+  };
+}
+
+/**
+ * Get the identity token expiry in seconds.
+ * Default: 600 (10 minutes — only needed for STS exchange).
+ */
+function getIdentityTokenExpiry(env: Env): number {
+  const envValue = env.GCP_IDENTITY_TOKEN_EXPIRY_SECONDS;
+  return envValue ? parseInt(envValue, 10) : DEFAULT_GCP_IDENTITY_TOKEN_EXPIRY_SECONDS;
+}
+
+/**
+ * Claims for OIDC identity tokens used in cloud provider federation.
+ */
+export interface IdentityTokenClaims {
+  /** User ID */
+  userId: string;
+  /** Project ID */
+  projectId: string;
+  /** Optional workspace ID */
+  workspaceId?: string;
+  /** Optional node ID */
+  nodeId?: string;
+  /** Target audience (GCP WIF provider resource URI) */
+  audience: string;
+}
+
+/**
+ * Sign an OIDC identity token for cloud provider federation (e.g., GCP Workload Identity).
+ * This JWT is exchanged via STS for temporary cloud provider credentials.
+ *
+ * Uses the same RS256 key pair as other SAM JWTs. The token includes workspace/project
+ * claims that can be mapped to cloud provider attributes for fine-grained access control.
+ */
+export async function signIdentityToken(
+  claims: IdentityTokenClaims,
+  env: Env
+): Promise<string> {
+  const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
+  const expirySeconds = getIdentityTokenExpiry(env);
+  const issuer = getIssuer(env);
+
+  const token = await new SignJWT({
+    type: IDENTITY_TOKEN_TYPE,
+    user_id: claims.userId,
+    project_id: claims.projectId,
+    ...(claims.workspaceId ? { workspace_id: claims.workspaceId } : {}),
+    ...(claims.nodeId ? { node_id: claims.nodeId } : {}),
+  })
+    .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+    .setIssuer(issuer)
+    .setSubject(`project:${claims.projectId}`)
+    .setAudience(claims.audience)
+    .setExpirationTime(`${expirySeconds}s`)
+    .setIssuedAt()
+    .sign(privateKey);
+
+  return token;
+}
+
+/**
+ * Get the OIDC Discovery document content.
+ * Published at /.well-known/openid-configuration for cloud providers to discover SAM's OIDC endpoints.
+ */
+export function getOidcDiscovery(env: Env) {
+  const issuer = getIssuer(env);
+  return {
+    issuer,
+    jwks_uri: `${issuer}/.well-known/jwks.json`,
+    response_types_supported: ['id_token'],
+    subject_types_supported: ['public'],
+    id_token_signing_alg_values_supported: ['RS256'],
+    claims_supported: [
+      'iss', 'sub', 'aud', 'exp', 'iat',
+      'workspace_id', 'project_id', 'user_id',
+      'node_id',
     ],
   };
 }

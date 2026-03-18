@@ -124,3 +124,5 @@ crons = ["*/5 * * * *"]
 # - ENCRYPTION_KEY
 # - ORIGIN_CA_CERT (Origin CA certificate for VM agent TLS)
 # - ORIGIN_CA_KEY (Origin CA private key for VM agent TLS)
+# - GOOGLE_CLIENT_ID (optional — Google Cloud Console OAuth client ID, enables GCP OIDC integration)
+# - GOOGLE_CLIENT_SECRET (optional — Google Cloud Console OAuth client secret)

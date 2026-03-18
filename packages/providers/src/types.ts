@@ -129,7 +129,7 @@ export interface Provider {
  * Provider configuration — discriminated union per provider type.
  * Accepts explicit credentials; MUST NOT access process.env.
  */
-export type ProviderConfig = HetznerProviderConfig | UpCloudProviderConfig | ScalewayProviderConfig;
+export type ProviderConfig = HetznerProviderConfig | UpCloudProviderConfig | ScalewayProviderConfig | GcpProviderConfig;
 
 export interface HetznerProviderConfig {
   provider: 'hetzner';
@@ -152,6 +152,19 @@ export interface ScalewayProviderConfig {
   secretKey: string;
   projectId: string;
   zone?: string;
+}
+
+export interface GcpProviderConfig {
+  provider: 'gcp';
+  projectId: string;
+  /** Function that returns a valid GCP access token (via STS exchange) */
+  tokenProvider: () => Promise<string>;
+  defaultZone?: string;
+  imageFamily?: string;
+  imageProject?: string;
+  diskSizeGb?: number;
+  timeoutMs?: number;
+  operationPollTimeoutMs?: number;
 }
 
 /**

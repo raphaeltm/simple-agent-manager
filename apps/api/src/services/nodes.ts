@@ -5,10 +5,10 @@ import { ulid } from '../lib/ulid';
 import * as schema from '../db/schema';
 import type { Env } from '../index';
 import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
-import { createProvider, ProviderError } from '@simple-agent-manager/providers';
+import { ProviderError } from '@simple-agent-manager/providers';
 import type { CredentialProvider, TaskMode } from '@simple-agent-manager/shared';
 import { signCallbackToken } from './jwt';
-import { getUserCloudProviderConfig } from './provider-credentials';
+import { createProviderForUser } from './provider-credentials';
 import { log } from '../lib/logger';
 import { persistError } from './observability';
 
@@ -104,8 +104,8 @@ export async function provisionNode(
   const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
 
   try {
-    const credResult = await getUserCloudProviderConfig(db, node.userId, env.ENCRYPTION_KEY, targetProvider);
-    if (!credResult) {
+    const providerResult = await createProviderForUser(db, node.userId, env.ENCRYPTION_KEY, env, targetProvider);
+    if (!providerResult) {
       throw new Error(
         targetProvider
           ? `Cloud provider "${targetProvider}" not connected`
@@ -138,7 +138,7 @@ export async function provisionNode(
       throw new Error('Cloud-init config exceeds size limit');
     }
 
-    const provider = createProvider(credResult.config);
+    const provider = providerResult.provider;
 
     const vm = await provider.createVM({
       name: `node-${node.id.toLowerCase()}`,
@@ -146,7 +146,7 @@ export async function provisionNode(
       location: node.vmLocation,
       userData: cloudInit,
       labels: {
-        node: node.id,
+        node: node.id.toLowerCase(),
         managed: 'simple-agent-manager',
       },
     });
@@ -263,11 +263,10 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
   // Delete the cloud provider server since stopped nodes cannot be restarted
   if (node.providerInstanceId) {
     const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
-    const credResult = await getUserCloudProviderConfig(db, userId, env.ENCRYPTION_KEY, targetProvider);
-    if (credResult) {
+    const providerResult = await createProviderForUser(db, userId, env.ENCRYPTION_KEY, env, targetProvider);
+    if (providerResult) {
       try {
-        const provider = createProvider(credResult.config);
-        await provider.deleteVM(node.providerInstanceId);
+        await providerResult.provider.deleteVM(node.providerInstanceId);
       } catch (err) {
         console.error('Failed to delete node server:', err);
       }
@@ -333,11 +332,10 @@ export async function deleteNodeResources(nodeId: string, userId: string, env: E
 
   if (node.providerInstanceId) {
     const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
-    const credResult = await getUserCloudProviderConfig(db, userId, env.ENCRYPTION_KEY, targetProvider);
-    if (credResult) {
+    const providerResult2 = await createProviderForUser(db, userId, env.ENCRYPTION_KEY, env, targetProvider);
+    if (providerResult2) {
       try {
-        const provider = createProvider(credResult.config);
-        await provider.deleteVM(node.providerInstanceId);
+        await providerResult2.provider.deleteVM(node.providerInstanceId);
       } catch (err) {
         console.error('Failed to delete node server:', err);
       }

@@ -36,6 +36,8 @@ import { adminRoutes } from './routes/admin';
 import { dashboardRoutes } from './routes/dashboard';
 import { mcpRoutes } from './routes/mcp';
 import { notificationRoutes } from './routes/notifications';
+import { gcpRoutes } from './routes/gcp';
+import { googleAuthRoutes } from './routes/google-auth';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
@@ -272,6 +274,21 @@ export interface Env {
   NOTIFICATION_PAGE_SIZE?: string;
   NOTIFICATION_PROGRESS_BATCH_WINDOW_MS?: string;
   NOTIFICATION_DEDUP_WINDOW_MS?: string;
+  // Google OAuth (for GCP OIDC integration)
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  // GCP OIDC configuration
+  GCP_IDENTITY_TOKEN_EXPIRY_SECONDS?: string;
+  GCP_TOKEN_CACHE_TTL_SECONDS?: string;
+  GCP_API_TIMEOUT_MS?: string;
+  GCP_OPERATION_POLL_TIMEOUT_MS?: string;
+  GCP_WIF_POOL_ID?: string;
+  GCP_WIF_PROVIDER_ID?: string;
+  GCP_SERVICE_ACCOUNT_ID?: string;
+  GCP_DEFAULT_ZONE?: string;
+  GCP_IMAGE_FAMILY?: string;
+  GCP_IMAGE_PROJECT?: string;
+  GCP_DISK_SIZE_GB?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -549,6 +566,15 @@ app.get('/.well-known/jwks.json', async (c) => {
   return c.json(jwks);
 });
 
+// OIDC Discovery endpoint — used by GCP Workload Identity Federation to verify SAM as an IdP
+app.get('/.well-known/openid-configuration', async (c) => {
+  const { getOidcDiscovery } = await import('./services/jwt');
+  const discovery = getOidcDiscovery(c.env);
+  c.header('Cache-Control', 'public, max-age=3600');
+  c.header('X-Content-Type-Options', 'nosniff');
+  return c.json(discovery);
+});
+
 // API routes
 app.route('/api/auth', authRoutes);
 app.route('/api/credentials', credentialsRoutes);
@@ -573,6 +599,8 @@ app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/notifications', notificationRoutes);
+app.route('/api/gcp', gcpRoutes);
+app.route('/auth/google', googleAuthRoutes);
 // MCP endpoint CORS override — MCP uses Bearer token auth (not cookies/sessions),
 // so it needs credentials: false + origin: '*' to allow VM agent requests from any origin.
 // This must run after the global CORS middleware to overwrite its headers.
