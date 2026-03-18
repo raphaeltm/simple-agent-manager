@@ -61,19 +61,30 @@ function renderAppShell(path = '/dashboard') {
   );
 }
 
-describe('AppShell', () => {
+describe('AppShell (global context)', () => {
   it('renders children content', () => {
     renderAppShell();
     expect(screen.getByTestId('page-content')).toBeInTheDocument();
   });
 
-  it('renders primary navigation with all 4 sections', () => {
+  it('renders primary navigation with Home, Projects, Settings', () => {
     renderAppShell();
     expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument();
-    expect(screen.getByText('Dashboard')).toBeInTheDocument();
+    expect(screen.getByText('Home')).toBeInTheDocument();
     expect(screen.getByText('Projects')).toBeInTheDocument();
-    expect(screen.getByText('Nodes')).toBeInTheDocument();
     expect(screen.getByText('Settings')).toBeInTheDocument();
+  });
+
+  it('does not show Nodes or Workspaces in primary nav for non-superadmins', () => {
+    renderAppShell();
+    expect(screen.queryByText('Nodes')).not.toBeInTheDocument();
+    expect(screen.queryByText('Workspaces')).not.toBeInTheDocument();
+  });
+
+  it('shows Infrastructure section for superadmins', () => {
+    mockAuthState = { ...mockAuthState, isSuperadmin: true };
+    renderAppShell();
+    expect(screen.getByText('Infrastructure')).toBeInTheDocument();
   });
 
   it('renders SAM branding', () => {
@@ -98,28 +109,45 @@ describe('AppShell', () => {
     expect(projectsLink?.className).not.toContain('text-accent');
   });
 
-  it('highlights nav item for nested routes', () => {
-    renderAppShell('/projects/123');
-    const projectsLink = screen.getByText('Projects').closest('a');
-    expect(projectsLink?.className).toContain('text-accent');
-  });
-
   it('shows Admin nav item in sidebar for superadmins', () => {
-    mockAuthState = {
-      ...mockAuthState,
-      isSuperadmin: true,
-    };
+    mockAuthState = { ...mockAuthState, isSuperadmin: true };
     renderAppShell();
     expect(screen.getByText('Admin')).toBeInTheDocument();
   });
 
   it('does not show Admin nav item for non-superadmins', () => {
-    mockAuthState = {
-      ...mockAuthState,
-      isSuperadmin: false,
-    };
+    mockAuthState = { ...mockAuthState, isSuperadmin: false };
     renderAppShell();
     expect(screen.queryByText('Admin')).not.toBeInTheDocument();
+  });
+});
+
+describe('AppShell (project context)', () => {
+  it('shows project navigation when inside a project route', () => {
+    renderAppShell('/projects/proj-123/chat');
+    expect(screen.getByRole('navigation', { name: 'Project navigation' })).toBeInTheDocument();
+    expect(screen.getByText('Chat')).toBeInTheDocument();
+    expect(screen.getByText('Tasks')).toBeInTheDocument();
+    expect(screen.getByText('Overview')).toBeInTheDocument();
+    expect(screen.getByText('Activity')).toBeInTheDocument();
+    expect(screen.getByText('Sessions')).toBeInTheDocument();
+  });
+
+  it('shows Back to Projects link when inside a project', () => {
+    renderAppShell('/projects/proj-123/chat');
+    expect(screen.getByText('Back to Projects')).toBeInTheDocument();
+  });
+
+  it('does not show global nav items when inside a project', () => {
+    renderAppShell('/projects/proj-123/tasks');
+    expect(screen.queryByText('Home')).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Primary navigation' })).not.toBeInTheDocument();
+  });
+
+  it('shows global nav on /projects/new (not treated as project context)', () => {
+    renderAppShell('/projects/new');
+    expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument();
+    expect(screen.getByText('Home')).toBeInTheDocument();
   });
 });
 
@@ -152,16 +180,11 @@ describe('AppShell (mobile)', () => {
   });
 
   it('shows Admin in mobile drawer for superadmins', () => {
-    mockAuthState = {
-      ...mockAuthState,
-      isSuperadmin: true,
-    };
+    mockAuthState = { ...mockAuthState, isSuperadmin: true };
     renderAppShell();
 
-    // Open drawer
     fireEvent.click(screen.getByLabelText('Open navigation menu'));
 
-    // Admin should be in the drawer nav
     const drawer = screen.getByRole('dialog', { name: 'Navigation menu' });
     expect(drawer).toBeInTheDocument();
     const adminButton = screen.getByRole('button', { name: 'Admin' });
@@ -169,15 +192,23 @@ describe('AppShell (mobile)', () => {
   });
 
   it('does not show Admin in mobile drawer for non-superadmins', () => {
-    mockAuthState = {
-      ...mockAuthState,
-      isSuperadmin: false,
-    };
+    mockAuthState = { ...mockAuthState, isSuperadmin: false };
     renderAppShell();
 
-    // Open drawer
     fireEvent.click(screen.getByLabelText('Open navigation menu'));
 
     expect(screen.queryByRole('button', { name: 'Admin' })).not.toBeInTheDocument();
+  });
+
+  it('shows project nav items in mobile drawer when inside a project', () => {
+    renderAppShell('/projects/proj-123/chat');
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+
+    const drawer = screen.getByRole('dialog', { name: 'Navigation menu' });
+    expect(drawer).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Chat' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tasks' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Overview' })).toBeInTheDocument();
   });
 });

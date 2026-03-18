@@ -50,6 +50,7 @@ export function MobileNavDrawer({
       {/* Panel */}
       <div
         role="dialog"
+        aria-modal="true"
         aria-label="Navigation menu"
         data-testid="mobile-nav-panel"
         className="fixed top-0 right-0 bottom-0 w-[85vw] max-w-80 bg-surface border-l border-border-default z-drawer flex flex-col overflow-hidden"

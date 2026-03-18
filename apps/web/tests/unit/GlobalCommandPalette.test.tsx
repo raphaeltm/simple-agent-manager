@@ -89,7 +89,7 @@ describe('GlobalCommandPalette', () => {
   it('renders navigation items when query is empty', async () => {
     renderPalette();
     await waitFor(() => {
-      expect(screen.getByText('Dashboard')).toBeInTheDocument();
+      expect(screen.getByText('Home')).toBeInTheDocument();
     });
     // "Projects" and "Nodes" appear as both nav items and category headers,
     // so use getAllByText and verify at least 1 exists as an option
@@ -142,7 +142,7 @@ describe('GlobalCommandPalette', () => {
     const input = screen.getByRole('combobox');
 
     await waitFor(() => {
-      expect(screen.getByText('Dashboard')).toBeInTheDocument();
+      expect(screen.getByText('Home')).toBeInTheDocument();
     });
 
     fireEvent.change(input, { target: { value: 'sett' } });
@@ -150,9 +150,9 @@ describe('GlobalCommandPalette', () => {
     const options = screen.getAllByRole('option');
     const settingsOption = options.find((o) => o.textContent?.includes('Settings'));
     expect(settingsOption).toBeDefined();
-    // Dashboard should be filtered out
-    const dashOption = options.find((o) => o.textContent?.includes('Dashboard'));
-    expect(dashOption).toBeUndefined();
+    // Home should be filtered out
+    const homeOption = options.find((o) => o.textContent?.includes('Home'));
+    expect(homeOption).toBeUndefined();
   });
 
   it('filters projects by name', async () => {
@@ -195,7 +195,7 @@ describe('GlobalCommandPalette', () => {
     const input = screen.getByRole('combobox');
 
     await waitFor(() => {
-      expect(screen.getByText('Dashboard')).toBeInTheDocument();
+      expect(screen.getByText('Home')).toBeInTheDocument();
     });
 
     fireEvent.change(input, { target: { value: 'xyznonexistent99' } });
@@ -274,7 +274,7 @@ describe('GlobalCommandPalette', () => {
     const input = screen.getByRole('combobox');
 
     await waitFor(() => {
-      expect(screen.getByText('Dashboard')).toBeInTheDocument();
+      expect(screen.getByText('Home')).toBeInTheDocument();
     });
 
     // Filter to Settings (not current path) and press Enter
@@ -380,7 +380,7 @@ describe('GlobalCommandPalette', () => {
 
     // Should still show navigation items
     await waitFor(() => {
-      expect(screen.getByText('Dashboard')).toBeInTheDocument();
+      expect(screen.getByText('Home')).toBeInTheDocument();
     });
   });
 
@@ -390,7 +390,7 @@ describe('GlobalCommandPalette', () => {
 
     // Filter to get a small set
     await waitFor(() => {
-      expect(screen.getByText('Dashboard')).toBeInTheDocument();
+      expect(screen.getByText('Home')).toBeInTheDocument();
     });
 
     fireEvent.change(input, { target: { value: 'dashboard' } });
@@ -425,17 +425,17 @@ describe('GlobalCommandPalette', () => {
   // ── Current path skip logic ──
 
   it('does not navigate when selecting current page (closes only)', async () => {
-    // Location is mocked as /dashboard — clicking Dashboard should not navigate
+    // Location is mocked as /dashboard — clicking Home should not navigate
     const onClose = vi.fn();
     renderPalette(onClose);
 
     await waitFor(() => {
-      expect(screen.getByText('Dashboard')).toBeInTheDocument();
+      expect(screen.getByText('Home')).toBeInTheDocument();
     });
 
     const options = screen.getAllByRole('option');
-    const dashOption = options.find((o) => o.textContent?.includes('Dashboard'));
-    fireEvent.click(dashOption!);
+    const homeOption = options.find((o) => o.textContent?.includes('Home'));
+    fireEvent.click(homeOption!);
 
     expect(mockNavigate).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -792,7 +792,7 @@ describe('GlobalCommandPalette', () => {
 
     // Should still show other categories
     await waitFor(() => {
-      expect(screen.getByText('Dashboard')).toBeInTheDocument();
+      expect(screen.getByText('Home')).toBeInTheDocument();
     });
 
     // Chats category should not appear

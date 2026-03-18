@@ -86,14 +86,14 @@ describe('Settings shell', () => {
     expect(screen.getByRole('tab', { name: 'Agent Config' })).toBeInTheDocument();
   });
 
-  it('renders breadcrumb with Dashboard link', async () => {
+  it('renders breadcrumb with Home link', async () => {
     renderSettings();
 
     await waitFor(() => {
       expect(mocks.listCredentials).toHaveBeenCalled();
     });
 
-    expect(screen.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', '/dashboard');
+    expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/dashboard');
     expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
   });
 

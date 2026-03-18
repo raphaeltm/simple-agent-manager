@@ -64,11 +64,10 @@ describe('Project shell (non-chat routes)', () => {
     expect(await screen.findByRole('heading', { name: 'My Project' })).toBeInTheDocument();
   });
 
-  it('renders breadcrumb navigation', async () => {
+  it('does not render breadcrumb (sidebar provides navigation)', async () => {
     renderProject();
     await screen.findByRole('heading', { name: 'My Project' });
-    expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument();
-    expect(screen.getByText('Dashboard')).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).not.toBeInTheDocument();
   });
 
   it('renders repository link', async () => {

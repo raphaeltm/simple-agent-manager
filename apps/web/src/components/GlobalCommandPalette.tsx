@@ -217,7 +217,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   // Build navigation items
   const navigationItems = useMemo(() => {
     const items: Array<{ id: string; label: string; path: string; icon: React.ReactNode }> = [
-      { id: 'nav-dashboard', label: 'Dashboard', path: '/dashboard', icon: <Home size={14} /> },
+      { id: 'nav-dashboard', label: 'Home', path: '/dashboard', icon: <Home size={14} /> },
       { id: 'nav-projects', label: 'Projects', path: '/projects', icon: <FolderKanban size={14} /> },
       { id: 'nav-nodes', label: 'Nodes', path: '/nodes', icon: <Server size={14} /> },
       { id: 'nav-workspaces', label: 'Workspaces', path: '/workspaces', icon: <Monitor size={14} /> },

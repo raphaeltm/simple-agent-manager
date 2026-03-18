@@ -55,7 +55,7 @@ export function ProjectCreate() {
     <PageLayout title="New Project" maxWidth="xl" headerRight={<UserMenu />}>
       <Breadcrumb
         segments={[
-          { label: 'Dashboard', path: '/dashboard' },
+          { label: 'Home', path: '/dashboard' },
           { label: 'Projects', path: '/projects' },
           { label: 'New Project' },
         ]}
