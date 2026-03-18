@@ -48,8 +48,9 @@ gcpRoutes.get('/projects', async (c) => {
     const projects = await listGcpProjects(oauthToken, timeoutMs);
     return c.json({ projects });
   } catch (err) {
-    console.error('Failed to list GCP projects:', err instanceof Error ? err.message : err);
-    throw errors.badRequest('Failed to list GCP projects. Is the OAuth token valid?');
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error('Failed to list GCP projects:', detail);
+    throw errors.badRequest(`Failed to list GCP projects: ${detail}`);
   }
 });
 
