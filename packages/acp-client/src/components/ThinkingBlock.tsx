@@ -19,6 +19,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({ text, active }:
     <div className="my-2">
       <button
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
         className="flex items-center space-x-2 text-xs text-gray-500 hover:text-gray-700"
       >
         {active ? (

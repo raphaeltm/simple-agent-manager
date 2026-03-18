@@ -270,10 +270,21 @@ describe('MessageBubble', () => {
       expect(proseDiv!.className).toContain('overflow-x-auto');
     });
 
-    it('inline code has break-all for long file paths', () => {
+    it('inline code has break-all for long file paths (agent)', () => {
       const longPath = '`/very/long/deeply/nested/path/to/some/file.tsx`';
       const { container } = render(
         <MessageBubble text={longPath} role="agent" />
+      );
+
+      const code = container.querySelector('code');
+      expect(code).not.toBeNull();
+      expect(code!.className).toContain('break-all');
+    });
+
+    it('inline code has break-all for long file paths (user)', () => {
+      const longPath = '`/very/long/deeply/nested/path/to/some/file.tsx`';
+      const { container } = render(
+        <MessageBubble text={longPath} role="user" />
       );
 
       const code = container.querySelector('code');

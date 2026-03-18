@@ -15,7 +15,7 @@ export function FileDiffView({ diff, filePath }: FileDiffViewProps) {
   return (
     <div className="font-mono text-xs overflow-x-auto max-w-full">
       {filePath && (
-        <div className="px-3 py-1.5 bg-gray-100 border-b border-gray-200 text-gray-600 font-medium truncate">
+        <div className="px-3 py-1.5 bg-gray-100 border-b border-gray-200 text-gray-600 font-medium truncate" title={filePath}>
           {filePath}
         </div>
       )}

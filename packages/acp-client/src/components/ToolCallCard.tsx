@@ -46,6 +46,7 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall }: ToolC
       {/* Header */}
       <button
         onClick={() => hasContent && setExpanded(!expanded)}
+        aria-expanded={hasContent ? expanded : undefined}
         className={`w-full flex items-center gap-2 px-3 py-2 bg-gray-50 text-left ${hasContent ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'}`}
       >
         <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -57,7 +58,10 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall }: ToolC
             </span>
           )}
           {toolCall.locations.length > 0 && (
-            <span className="text-xs text-gray-500 font-mono truncate min-w-0">
+            <span
+              className="text-xs text-gray-500 font-mono truncate min-w-0"
+              title={`${toolCall.locations[0]?.path}${toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}`}
+            >
               {toolCall.locations[0]?.path}{toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}
             </span>
           )}
