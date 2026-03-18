@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getNetworkInfo, exposePort } from '../../src/tools/network.js';
+import { getNetworkInfo, exposePort, checkDnsStatus } from '../../src/tools/network.js';
 import type { WorkspaceMcpConfig } from '../../src/config.js';
 import type { ApiClient } from '../../src/api-client.js';
 
@@ -85,5 +85,44 @@ describe('exposePort', () => {
     const config = makeConfig({ workspaceId: '' });
     const result = await exposePort(config, mockApiClient, { port: 3000 });
     expect(result).toHaveProperty('error');
+  });
+});
+
+describe('checkDnsStatus', () => {
+  it('returns error when workspace URL is empty', async () => {
+    const config = makeConfig({ workspaceUrl: '' });
+    const result = await checkDnsStatus(config, mockApiClient);
+    expect(result).toHaveProperty('error');
+    expect(result.error).toContain('not available');
+  });
+
+  it('returns error for invalid workspace URL', async () => {
+    const config = makeConfig({ workspaceUrl: 'not-a-url' });
+    const result = await checkDnsStatus(config, mockApiClient);
+    expect(result).toHaveProperty('error');
+    expect(result.error).toContain('Invalid');
+  });
+
+  it('returns dns_not_resolved for non-existent hostname', async () => {
+    const config = makeConfig({
+      workspaceUrl: 'https://definitely-not-a-real-host-12345.example.invalid',
+    });
+    const result = await checkDnsStatus(config, mockApiClient);
+    expect(result.dnsResolved).toBe(false);
+    expect(result.status).toBe('dns_not_resolved');
+    expect(result.hint).toContain('not propagated');
+  });
+
+  it('returns structured result with all expected fields', async () => {
+    const config = makeConfig({
+      workspaceUrl: 'https://definitely-not-a-real-host-12345.example.invalid',
+    });
+    const result = await checkDnsStatus(config, mockApiClient);
+    expect(result).toHaveProperty('hostname');
+    expect(result).toHaveProperty('dnsResolved');
+    expect(result).toHaveProperty('ipAddresses');
+    expect(result).toHaveProperty('tlsValid');
+    expect(result).toHaveProperty('status');
+    expect(result).toHaveProperty('hint');
   });
 });

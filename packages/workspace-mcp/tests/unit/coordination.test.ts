@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   listProjectAgents,
+  getFileLocks,
   getPeerAgentOutput,
 } from '../../src/tools/coordination.js';
 import type { WorkspaceMcpConfig } from '../../src/config.js';
@@ -75,6 +76,58 @@ describe('listProjectAgents', () => {
     const apiClient = makeMockApiClient();
     const result = await listProjectAgents(config, apiClient);
     expect(result).toHaveProperty('error');
+  });
+});
+
+describe('getFileLocks', () => {
+  it('returns error when credentials missing', async () => {
+    const config = makeConfig({ mcpToken: '' });
+    const apiClient = makeMockApiClient();
+    const result = await getFileLocks(config, apiClient);
+    expect(result).toHaveProperty('error');
+  });
+
+  it('returns other agents with potential conflicts', async () => {
+    const config = makeConfig();
+    const apiClient = makeMockApiClient({
+      list_tasks: {
+        tasks: [
+          { id: 'task-self', title: 'My task', status: 'in_progress' },
+          { id: 'task-other', title: 'Other task', status: 'in_progress', branch: 'feature-x' },
+        ],
+      },
+    });
+
+    const result = await getFileLocks(config, apiClient);
+    expect(result.otherAgents).toHaveLength(1);
+    expect(result.otherAgents[0]).toMatchObject({ taskId: 'task-other' });
+    expect(result.hint).toContain('Other agents are active');
+  });
+
+  it('returns no conflict when no other agents', async () => {
+    const config = makeConfig();
+    const apiClient = makeMockApiClient({
+      list_tasks: {
+        tasks: [{ id: 'task-self', title: 'My task', status: 'in_progress' }],
+      },
+    });
+
+    const result = await getFileLocks(config, apiClient);
+    expect(result.otherAgents).toHaveLength(0);
+    expect(result.hint).toContain('No other agents');
+  });
+
+  it('handles API errors gracefully', async () => {
+    const config = makeConfig();
+    const apiClient = {
+      callMcpTool: vi.fn().mockRejectedValue(new Error('Network error')),
+      callApi: vi.fn(),
+      callGitHub: vi.fn(),
+    } as unknown as ApiClient;
+
+    const result = await getFileLocks(config, apiClient);
+    expect(result).toHaveProperty('error');
+    expect(result.error).toContain('Network error');
   });
 });
 
