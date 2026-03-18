@@ -106,6 +106,16 @@ PULUMI_ORIGIN_CA_KEY="${PULUMI_ORIGIN_CA_KEY:-}"
 set_worker_secret "ORIGIN_CA_CERT" "$PULUMI_ORIGIN_CA_CERT" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "ORIGIN_CA_KEY" "$PULUMI_ORIGIN_CA_KEY" "$ENVIRONMENT" "true" || FAILED=true
 
+# Configure Google OAuth secrets (optional — only needed for GCP OIDC integration)
+GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"
+GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-}"
+if [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_CLIENT_SECRET" ]; then
+  set_worker_secret "GOOGLE_CLIENT_ID" "$GOOGLE_CLIENT_ID" "$ENVIRONMENT" "true" || FAILED=true
+  set_worker_secret "GOOGLE_CLIENT_SECRET" "$GOOGLE_CLIENT_SECRET" "$ENVIRONMENT" "true" || FAILED=true
+else
+  echo -e "${YELLOW}ℹ  Skipping Google OAuth secrets (GOOGLE_CLIENT_ID/SECRET not set — GCP OIDC integration disabled)${NC}"
+fi
+
 # NOTE: Hetzner tokens are NOT platform secrets.
 # Users provide their own tokens through the Settings UI, stored encrypted per-user in the database.
 
