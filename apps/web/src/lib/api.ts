@@ -147,6 +147,51 @@ export async function deleteCredential(provider: string): Promise<void> {
 }
 
 // =============================================================================
+// GCP OIDC
+// =============================================================================
+
+export interface GcpProject {
+  projectId: string;
+  name: string;
+  projectNumber: string;
+}
+
+export async function listGcpProjects(oauthToken: string): Promise<{ projects: GcpProject[] }> {
+  return request<{ projects: GcpProject[] }>(`/api/gcp/projects?token=${encodeURIComponent(oauthToken)}`);
+}
+
+export interface GcpSetupRequest {
+  oauthToken: string;
+  gcpProjectId: string;
+  defaultZone: string;
+}
+
+export interface GcpSetupResponse {
+  success: boolean;
+  verified: boolean;
+  credential?: {
+    gcpProjectId: string;
+    gcpProjectNumber: string;
+    serviceAccountEmail: string;
+    defaultZone: string;
+  };
+  warning?: string;
+}
+
+export async function runGcpSetup(data: GcpSetupRequest): Promise<GcpSetupResponse> {
+  return request<GcpSetupResponse>('/api/gcp/setup', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function verifyGcpSetup(): Promise<{ success: boolean; verified: boolean; error?: string }> {
+  return request<{ success: boolean; verified: boolean; error?: string }>('/api/gcp/verify', {
+    method: 'POST',
+  });
+}
+
+// =============================================================================
 // Providers
 // =============================================================================
 

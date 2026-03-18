@@ -1,12 +1,14 @@
 import { Skeleton } from '@simple-agent-manager/ui';
 import { HetznerTokenForm } from '../components/HetznerTokenForm';
 import { ScalewayCredentialForm } from '../components/ScalewayCredentialForm';
+import { GcpCredentialForm } from '../components/GcpCredentialForm';
 import { useSettingsContext } from './SettingsContext';
 
 export function SettingsCloudProvider() {
   const { credentials, loading, reload } = useSettingsContext();
   const hetznerCredential = credentials.find((c) => c.provider === 'hetzner');
   const scalewayCredential = credentials.find((c) => c.provider === 'scaleway');
+  const gcpCredential = credentials.find((c) => c.provider === 'gcp');
 
   if (loading && credentials.length === 0) {
     return (
@@ -28,6 +30,11 @@ export function SettingsCloudProvider() {
       <section>
         <h3 className="text-base font-semibold text-fg-primary mb-3">Scaleway</h3>
         <ScalewayCredentialForm credential={scalewayCredential} onUpdate={reload} />
+      </section>
+
+      <section>
+        <h3 className="text-base font-semibold text-fg-primary mb-3">Google Cloud</h3>
+        <GcpCredentialForm credential={gcpCredential} onUpdate={reload} />
       </section>
     </div>
   );
