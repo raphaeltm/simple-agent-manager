@@ -1,11 +1,26 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import React from 'react';
 import { AgentPanel, CLIENT_COMMANDS } from './AgentPanel';
 import type { AcpSessionHandle } from '../hooks/useAcpSession';
 import type { AcpMessagesHandle } from '../hooks/useAcpMessages';
 import type { ConversationItem } from '../hooks/useAcpMessages';
 import type { SlashCommand } from '../types';
-import * as autoScrollModule from '../hooks/useAutoScroll';
+
+// Mock react-virtuoso — JSDOM has no layout engine, so Virtuoso can't measure items.
+// This mock renders all items inline so content-based tests work normally.
+vi.mock('react-virtuoso', () => ({
+  Virtuoso: React.forwardRef(function MockVirtuoso(
+    { data, itemContent, style }: { data?: unknown[]; itemContent?: (index: number, item: unknown) => React.ReactNode; style?: React.CSSProperties },
+    _ref: React.Ref<unknown>,
+  ) {
+    return React.createElement('div', { 'data-testid': 'virtuoso-scroller', style },
+      data?.map((item, index) =>
+        React.createElement('div', { key: index }, itemContent?.(index, item))
+      )
+    );
+  }),
+}));
 
 function createMockSession(overrides: Partial<AcpSessionHandle> = {}): AcpSessionHandle {
   return {
@@ -176,46 +191,11 @@ describe('CLIENT_COMMANDS', () => {
 });
 
 // =============================================================================
-// Smart auto-scroll integration tests
+// Virtual scroll message rendering tests
 // =============================================================================
 
-describe('AgentPanel auto-scroll behavior', () => {
-  // Mock ResizeObserver and MutationObserver for jsdom
-  let originalResizeObserver: typeof ResizeObserver;
-  let originalMutationObserver: typeof MutationObserver;
-
-  beforeEach(() => {
-    originalResizeObserver = globalThis.ResizeObserver;
-    originalMutationObserver = globalThis.MutationObserver;
-
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver;
-
-    globalThis.MutationObserver = class {
-      observe() {}
-      disconnect() {}
-      takeRecords() { return []; }
-    } as unknown as typeof MutationObserver;
-
-    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
-      cb(performance.now());
-      return 1;
-    });
-  });
-
-  afterEach(() => {
-    globalThis.ResizeObserver = originalResizeObserver;
-    globalThis.MutationObserver = originalMutationObserver;
-    vi.restoreAllMocks();
-  });
-
-  it('uses useAutoScroll hook (no old useEffect scroll-to-bottom)', () => {
-    // Verify that AgentPanel renders without the old forced-scroll behavior.
-    // The old code had: useEffect(() => { scrollRef.scrollTop = scrollHeight }, [messages.items.length])
-    // With the new hook, scrolling is conditional on being at bottom.
+describe('AgentPanel virtualized message rendering', () => {
+  it('renders messages via Virtuoso', () => {
     const session = createMockSession();
     const items: ConversationItem[] = [
       { kind: 'user_message', id: '1', text: 'Hello', timestamp: Date.now() },
@@ -223,11 +203,12 @@ describe('AgentPanel auto-scroll behavior', () => {
     ];
     const messages = createMockMessages({ items });
 
-    const { container } = render(<AgentPanel session={session} messages={messages} />);
+    render(<AgentPanel session={session} messages={messages} />);
 
-    // The scroll container should exist with overflow-y-auto
-    const scrollContainer = container.querySelector('.overflow-y-auto');
-    expect(scrollContainer).toBeTruthy();
+    // Virtuoso mock renders all items
+    expect(screen.getByTestId('virtuoso-scroller')).toBeTruthy();
+    expect(screen.getByText('Hello')).toBeTruthy();
+    expect(screen.getByText('Hi there')).toBeTruthy();
   });
 
   it('renders messages in the scroll container', () => {
@@ -255,12 +236,7 @@ describe('AgentPanel auto-scroll behavior', () => {
     expect(screen.getByText('Send a message to start the conversation')).toBeTruthy();
   });
 
-  it('does not import or use the old scroll-to-bottom pattern', async () => {
-    // This test verifies at the source level that the old pattern was removed.
-    // We read the component source and check it doesn't contain the old pattern.
-    // Since we can't read files in a unit test, we verify behavior instead:
-    // rendering with messages should not force scrollTop to scrollHeight.
-
+  it('uses Virtuoso for rendering messages', () => {
     const session = createMockSession();
     const items: ConversationItem[] = [
       { kind: 'user_message', id: '1', text: 'Msg 1', timestamp: Date.now() },
@@ -268,15 +244,12 @@ describe('AgentPanel auto-scroll behavior', () => {
     ];
     const messages = createMockMessages({ items });
 
-    const { container } = render(<AgentPanel session={session} messages={messages} />);
-    const scrollContainer = container.querySelector('.overflow-y-auto') as HTMLElement;
+    render(<AgentPanel session={session} messages={messages} />);
 
-    // In jsdom, scrollTop is always 0 and scrollHeight is 0, so we can't
-    // directly test scrolling. But we can verify the container exists and
-    // is the right element.
-    expect(scrollContainer).toBeTruthy();
-    expect(scrollContainer.classList.contains('overflow-y-auto')).toBe(true);
-    expect(scrollContainer.classList.contains('h-full')).toBe(true);
+    // Verify Virtuoso mock is rendered with items
+    expect(screen.getByTestId('virtuoso-scroller')).toBeTruthy();
+    expect(screen.getByText('Msg 1')).toBeTruthy();
+    expect(screen.getByText('Reply')).toBeTruthy();
   });
 
   it('renders streaming messages correctly in scroll container', () => {
@@ -413,29 +386,11 @@ describe('AgentPanel toolbar row', () => {
 });
 
 // =============================================================================
-// Scroll reset on replay / clear tests
+// Scroll reset on replay tests
 // =============================================================================
 
 describe('AgentPanel scroll reset on replay', () => {
-  let resetToBottomSpy: ReturnType<typeof vi.fn>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let autoScrollSpy: any;
-
-  beforeEach(() => {
-    resetToBottomSpy = vi.fn();
-    autoScrollSpy = vi.spyOn(autoScrollModule, 'useAutoScroll').mockReturnValue({
-      scrollRef: vi.fn(),
-      isAtBottom: true,
-      scrollToBottom: vi.fn(),
-      resetToBottom: resetToBottomSpy,
-    });
-  });
-
-  afterEach(() => {
-    autoScrollSpy.mockRestore();
-  });
-
-  it('calls resetToBottom when items transition from >0 to 0 (replay clear)', () => {
+  it('renders empty state when items are cleared (replay)', () => {
     const session = createMockSession();
     const items: ConversationItem[] = [
       { kind: 'user_message', id: '1', text: 'Hello', timestamp: Date.now() },
@@ -443,68 +398,31 @@ describe('AgentPanel scroll reset on replay', () => {
     const messages = createMockMessages({ items });
 
     const { rerender } = render(<AgentPanel session={session} messages={messages} />);
-
-    // Initially resetToBottom should NOT have been called (items didn't go to 0)
-    expect(resetToBottomSpy).not.toHaveBeenCalled();
+    expect(screen.getByText('Hello')).toBeTruthy();
 
     // Simulate prepareForReplay clearing items
     const clearedMessages = createMockMessages({ items: [] });
     rerender(<AgentPanel session={session} messages={clearedMessages} />);
 
-    expect(resetToBottomSpy).toHaveBeenCalledTimes(1);
+    // Should show empty state instead of Virtuoso
+    expect(screen.getByText(/Send a message/i)).toBeTruthy();
+    expect(screen.queryByText('Hello')).toBeNull();
   });
 
-  it('does not call resetToBottom when items go from 0 to 0', () => {
-    const session = createMockSession();
-    const messages = createMockMessages({ items: [] });
-
-    const { rerender } = render(<AgentPanel session={session} messages={messages} />);
-
-    // Rerender with still-empty items
-    rerender(<AgentPanel session={session} messages={createMockMessages({ items: [] })} />);
-
-    expect(resetToBottomSpy).not.toHaveBeenCalled();
-  });
-
-  it('calls resetToBottom when session transitions from replaying to ready', () => {
+  it('re-renders items after replay completes (replaying → ready)', () => {
     const session = createMockSession({ state: 'replaying' as AcpSessionHandle['state'] });
     const messages = createMockMessages();
 
     const { rerender } = render(<AgentPanel session={session} messages={messages} />);
 
-    expect(resetToBottomSpy).not.toHaveBeenCalled();
-
-    // Transition from replaying → ready
+    // Transition replaying → ready with new items
     const readySession = createMockSession({ state: 'ready' });
-    rerender(<AgentPanel session={readySession} messages={messages} />);
+    const newItems: ConversationItem[] = [
+      { kind: 'agent_message', id: '2', text: 'Replayed', streaming: false, timestamp: Date.now() },
+    ];
+    rerender(<AgentPanel session={readySession} messages={createMockMessages({ items: newItems })} />);
 
-    expect(resetToBottomSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it('calls resetToBottom when session transitions from replaying to prompting', () => {
-    const session = createMockSession({ state: 'replaying' as AcpSessionHandle['state'] });
-    const messages = createMockMessages();
-
-    const { rerender } = render(<AgentPanel session={session} messages={messages} />);
-
-    // Transition from replaying → prompting
-    const promptingSession = createMockSession({ state: 'prompting' });
-    rerender(<AgentPanel session={promptingSession} messages={messages} />);
-
-    expect(resetToBottomSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not call resetToBottom for non-replay state transitions', () => {
-    const session = createMockSession({ state: 'ready' });
-    const messages = createMockMessages();
-
-    const { rerender } = render(<AgentPanel session={session} messages={messages} />);
-
-    // Transition from ready → prompting (not a replay transition)
-    const promptingSession = createMockSession({ state: 'prompting' });
-    rerender(<AgentPanel session={promptingSession} messages={messages} />);
-
-    expect(resetToBottomSpy).not.toHaveBeenCalled();
+    expect(screen.getByText('Replayed')).toBeTruthy();
   });
 });
 
@@ -513,26 +431,11 @@ describe('AgentPanel scroll reset on replay', () => {
 // =============================================================================
 
 describe('AgentPanel scroll-to-bottom FAB', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let autoScrollSpy: any;
-  let scrollToBottomSpy: ReturnType<typeof vi.fn>;
+  // Note: With Virtuoso, isAtBottom is managed internally via atBottomStateChange.
+  // In JSDOM the mock Virtuoso never fires atBottomStateChange, so isAtBottom stays true (initial).
+  // We test structural presence — the FAB is hidden by default since isAtBottom starts true.
 
-  function setupMock(isAtBottom: boolean) {
-    scrollToBottomSpy = vi.fn();
-    autoScrollSpy = vi.spyOn(autoScrollModule, 'useAutoScroll').mockReturnValue({
-      scrollRef: vi.fn(),
-      isAtBottom,
-      scrollToBottom: scrollToBottomSpy,
-      resetToBottom: vi.fn(),
-    });
-  }
-
-  afterEach(() => {
-    autoScrollSpy?.mockRestore();
-  });
-
-  it('shows scroll-to-bottom button when not at bottom and messages exist', () => {
-    setupMock(false);
+  it('hides scroll-to-bottom button by default (at bottom)', () => {
     const session = createMockSession();
     const items: ConversationItem[] = [
       { kind: 'user_message', id: '1', text: 'Hello', timestamp: Date.now() },
@@ -541,43 +444,16 @@ describe('AgentPanel scroll-to-bottom FAB', () => {
 
     render(<AgentPanel session={session} messages={messages} />);
 
-    expect(screen.getByLabelText('Scroll to bottom')).toBeTruthy();
-  });
-
-  it('hides scroll-to-bottom button when at bottom', () => {
-    setupMock(true);
-    const session = createMockSession();
-    const items: ConversationItem[] = [
-      { kind: 'user_message', id: '1', text: 'Hello', timestamp: Date.now() },
-    ];
-    const messages = createMockMessages({ items });
-
-    render(<AgentPanel session={session} messages={messages} />);
-
+    // isAtBottom starts true, so FAB should be hidden
     expect(screen.queryByLabelText('Scroll to bottom')).toBeNull();
   });
 
   it('hides scroll-to-bottom button when no messages', () => {
-    setupMock(false);
     const session = createMockSession();
     const messages = createMockMessages({ items: [] });
 
     render(<AgentPanel session={session} messages={messages} />);
 
     expect(screen.queryByLabelText('Scroll to bottom')).toBeNull();
-  });
-
-  it('calls scrollToBottom when FAB is clicked', () => {
-    setupMock(false);
-    const session = createMockSession();
-    const items: ConversationItem[] = [
-      { kind: 'user_message', id: '1', text: 'Hello', timestamp: Date.now() },
-    ];
-    const messages = createMockMessages({ items });
-
-    render(<AgentPanel session={session} messages={messages} />);
-
-    fireEvent.click(screen.getByLabelText('Scroll to bottom'));
-    expect(scrollToBottomSpy).toHaveBeenCalledTimes(1);
   });
 });

@@ -89,9 +89,9 @@ describe('ProjectMessageView', () => {
     expect(source).toContain('hasMore');
   });
 
-  it('auto-scrolls to bottom on new messages', () => {
-    expect(source).toContain('messagesEndRef');
-    expect(source).toContain('scrollIntoView');
+  it('auto-scrolls to bottom via Virtuoso followOutput', () => {
+    expect(source).toContain('Virtuoso');
+    expect(source).toContain('followOutput');
   });
 
   it('renders session header with derived state', () => {

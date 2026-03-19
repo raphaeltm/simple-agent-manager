@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, useImperativeHandle } from 'react';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import type { AcpSessionHandle } from '../hooks/useAcpSession';
 import type { AcpMessagesHandle, ConversationItem, PlanItem } from '../hooks/useAcpMessages';
 import type { SlashCommand } from '../types';
 import { getErrorMeta } from '../errors';
-import { useAutoScroll } from '../hooks/useAutoScroll';
 import { MessageBubble } from './MessageBubble';
 import { ToolCallCard } from './ToolCallCard';
 import { ThinkingBlock } from './ThinkingBlock';
@@ -86,7 +86,8 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
   const [showPalette, setShowPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showPlanModal, setShowPlanModal] = useState(false);
-  const { scrollRef, isAtBottom, scrollToBottom, resetToBottom } = useAutoScroll();
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const paletteRef = useRef<SlashCommandPaletteHandle>(null);
 
@@ -96,30 +97,15 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
     [messages.items]
   );
 
-  // Reset scroll to bottom when items are cleared (replay or /clear).
-  // When prepareForReplay() sets items to [], isAtBottomRef in the scroll
-  // hook is stale from the user's previous scroll position. This resets it
-  // so replay messages auto-scroll correctly.
-  const prevItemCountRef = useRef(messages.items.length);
-  useEffect(() => {
-    const prev = prevItemCountRef.current;
-    prevItemCountRef.current = messages.items.length;
-    if (prev > 0 && messages.items.length === 0) {
-      resetToBottom();
-    }
-  }, [messages.items.length, resetToBottom]);
-
-  // Safety net: after replay completes (replaying → ready/prompting),
-  // force scroll to bottom. Covers the case where items are never empty
-  // because replay messages arrive in the same React batch as the clear.
+  // After replay completes (replaying → ready/prompting), scroll to bottom.
   const prevSessionStateRef = useRef(session.state);
   useEffect(() => {
     const prev = prevSessionStateRef.current;
     prevSessionStateRef.current = session.state;
     if (prev === 'replaying' && (session.state === 'ready' || session.state === 'prompting')) {
-      resetToBottom();
+      virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'auto' });
     }
-  }, [session.state, resetToBottom]);
+  }, [session.state]);
 
   useImperativeHandle(ref, () => ({
     focusInput: () => inputRef.current?.focus(),
@@ -286,23 +272,35 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
         </div>
       )}
 
-      {/* Message area */}
+      {/* Message area — virtualized for performance */}
       <div className="relative flex-1 min-h-0">
-        <div ref={scrollRef} className="h-full overflow-y-auto p-4 space-y-1">
-          {messages.items.length === 0 && !isReconnecting && (
-            <div className="flex items-center justify-center h-full text-gray-400 text-sm">
-              Send a message to start the conversation
-            </div>
-          )}
-          {messages.items.map((item) => (
-            <ConversationItemView key={item.id} item={item} ttsApiUrl={ttsApiUrl} />
-          ))}
-        </div>
-        {/* Scroll-to-bottom FAB — z-10 required because overflow-y-auto creates a stacking context */}
+        {messages.items.length === 0 && !isReconnecting ? (
+          <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+            Send a message to start the conversation
+          </div>
+        ) : (
+          <Virtuoso
+            ref={virtuosoRef}
+            style={{ height: '100%' }}
+            data={messages.items}
+            initialTopMostItemIndex={messages.items.length - 1}
+            followOutput={(atBottom: boolean) => atBottom ? 'smooth' : false}
+            alignToBottom
+            atBottomThreshold={50}
+            atBottomStateChange={setIsAtBottom}
+            overscan={200}
+            itemContent={(_index, item) => (
+              <div className="px-4 py-0.5">
+                <ConversationItemView item={item} ttsApiUrl={ttsApiUrl} />
+              </div>
+            )}
+          />
+        )}
+        {/* Scroll-to-bottom FAB */}
         {!isAtBottom && messages.items.length > 0 && (
           <button
             type="button"
-            onClick={scrollToBottom}
+            onClick={() => virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth' })}
             className="absolute bottom-3 right-5 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-white border border-gray-300 shadow-md text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
             aria-label="Scroll to bottom"
             title="Scroll to bottom"
