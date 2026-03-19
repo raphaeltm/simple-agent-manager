@@ -424,6 +424,22 @@ describe('AgentPanel scroll reset on replay', () => {
 
     expect(screen.getByText('Replayed')).toBeTruthy();
   });
+
+  it('re-renders items after replay completes (replaying → prompting)', () => {
+    const session = createMockSession({ state: 'replaying' as AcpSessionHandle['state'] });
+    const messages = createMockMessages();
+
+    const { rerender } = render(<AgentPanel session={session} messages={messages} />);
+
+    // Transition replaying → prompting with new items
+    const promptingSession = createMockSession({ state: 'prompting' });
+    const newItems: ConversationItem[] = [
+      { kind: 'agent_message', id: '2', text: 'Replayed prompting', streaming: false, timestamp: Date.now() },
+    ];
+    rerender(<AgentPanel session={promptingSession} messages={createMockMessages({ items: newItems })} />);
+
+    expect(screen.getByText('Replayed prompting')).toBeTruthy();
+  });
 });
 
 // =============================================================================

@@ -1543,6 +1543,72 @@ describe('ProjectMessageView — virtual scroll', () => {
     expect(screen.getByTestId('virtuoso-scroller').textContent).toContain('WS message');
   });
 
+  it('renders "Load earlier messages" button when hasMore is true', async () => {
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession('session-1'),
+      messages: [makeMessage('msg-1', 'session-1', 'Recent message')],
+      hasMore: true,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Recent message')).toBeTruthy();
+    });
+
+    // The Virtuoso mock renders components.Header which contains the load-more button
+    expect(screen.getByText('Load earlier messages')).toBeTruthy();
+  });
+
+  it('does not render "Load earlier messages" button when hasMore is false', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        makeMessage('msg-1', 'session-1', 'Only message'),
+      ]),
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Only message')).toBeTruthy();
+    });
+
+    expect(screen.queryByText('Load earlier messages')).toBeNull();
+  });
+
+  it('clicking "Load earlier messages" prepends older messages', async () => {
+    mocks.getChatSession
+      .mockResolvedValueOnce({
+        session: makeSession('session-1'),
+        messages: [makeMessage('msg-2', 'session-1', 'Recent message')],
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        session: makeSession('session-1'),
+        messages: [makeMessage('msg-1', 'session-1', 'Older message')],
+        hasMore: false,
+      });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Recent message')).toBeTruthy();
+    });
+
+    // Click the load-more button
+    const loadMoreBtn = screen.getByText('Load earlier messages');
+    await act(async () => {
+      fireEvent.click(loadMoreBtn);
+    });
+
+    // Second call should use 'before' pagination
+    await waitFor(() => {
+      expect(mocks.getChatSession).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId('virtuoso-scroller').textContent).toContain('Older message');
+      expect(screen.getByTestId('virtuoso-scroller').textContent).toContain('Recent message');
+    });
+  });
+
   it('renders messages from new session after session switch', async () => {
     mocks.getChatSession.mockResolvedValue(
       makeSessionResponse('session-A', [
