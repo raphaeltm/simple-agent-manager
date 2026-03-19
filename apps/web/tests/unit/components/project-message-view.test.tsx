@@ -1651,3 +1651,83 @@ describe('ProjectMessageView — autoscroll pause', () => {
     expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
   });
 });
+
+describe('ProjectMessageView — scroll position stability on follow-up send', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.clearAllMocks();
+    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
+    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('keeps DO view after grace period even when isPrompting flips true (follow-up send)', async () => {
+    // Phase 1: Initial load with DO messages + agent prompting (simulates mid-task)
+    const session1 = {
+      ...makeSession('session-1'),
+      workspaceId: 'ws-1',
+      agentSessionId: 'agent-session-1',
+    };
+    const msgs = [
+      makeMessage('msg-1', 'session-1', 'Initial response from agent'),
+    ];
+    mocks.getChatSession.mockResolvedValue({ session: session1, messages: msgs, hasMore: false });
+
+    const agentSess = defaultAgentSession();
+    agentSess.isAgentActive = true;
+    agentSess.isPrompting = true;
+    agentSess.messages.items = [
+      { kind: 'agent_message' as const, id: 'acp-1', text: 'Streaming content', streaming: true, timestamp: Date.now() },
+    ];
+    mocks.useProjectAgentSession.mockReturnValue(agentSess);
+
+    const { rerender } = render(
+      <ProjectMessageView projectId="proj-1" sessionId="session-1" />,
+    );
+
+    await waitFor(() => {
+      // During initial prompting with ACP items, ACP view should be shown
+      expect(document.body.textContent).toContain('Streaming content');
+    });
+
+    // Phase 2: Agent stops prompting → grace period starts
+    mocks.useProjectAgentSession.mockReturnValue({
+      ...agentSess,
+      isPrompting: false,
+    });
+    rerender(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    // Phase 3: Grace period ends → committed to DO view
+    await act(async () => {
+      vi.advanceTimersByTime(3100); // ACP_GRACE_MS default = 3000
+    });
+
+    // After grace, DO messages should be visible (committed to DO view)
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('Initial response from agent');
+    });
+
+    // Phase 4: User sends follow-up → isPrompting flips true again
+    mocks.useProjectAgentSession.mockReturnValue({
+      ...agentSess,
+      isPrompting: true,
+      isAgentActive: true,
+      messages: {
+        ...agentSess.messages,
+        items: [
+          { kind: 'user_message' as const, id: 'acp-user-1', text: 'Follow-up question', timestamp: Date.now() },
+        ],
+      },
+    });
+    rerender(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    // CRITICAL ASSERTION: DO view should be maintained (not switch to ACP)
+    // The DO message should still be visible
+    expect(document.body.textContent).toContain('Initial response from agent');
+    // ACP-only content should NOT be visible (view is committed to DO)
+    expect(document.body.textContent).not.toContain('Follow-up question');
+  });
+});

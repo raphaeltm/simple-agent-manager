@@ -1,4 +1,4 @@
-import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type FC, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
 import {
   VoiceButton,
@@ -356,6 +356,16 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const acpGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasPromptingRef = useRef(false);
 
+  // Once the initial ACP→DO transition has occurred (after the first grace period
+  // ends and DO has messages), lock the view to DO mode.  Prevents the disruptive
+  // DO→ACP view switch that causes the scroll-jump-on-send bug: when a follow-up
+  // is sent, isPrompting flips true and the entire message list was replaced with
+  // the (much shorter) ACP stream, destroying the user's scroll position.
+  const committedToDoViewRef = useRef(false);
+  // Scroll snapshot captured just before the grace-period-end state change so
+  // useLayoutEffect can restore scroll position synchronously before paint.
+  const scrollSnapshotRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
+
   // Idle timer state (TDF-8)
   const [idleCountdownMs, setIdleCountdownMs] = useState<number | null>(null);
 
@@ -408,6 +418,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   useEffect(() => {
     setAcpGrace(false);
     wasPromptingRef.current = false;
+    committedToDoViewRef.current = false;
+    scrollSnapshotRef.current = null;
     if (acpGraceTimerRef.current) {
       clearTimeout(acpGraceTimerRef.current);
       acpGraceTimerRef.current = null;
@@ -430,6 +442,17 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       wasPromptingRef.current = false;
       setAcpGrace(true);
       acpGraceTimerRef.current = setTimeout(() => {
+        // Capture scroll geometry BEFORE the state change triggers a re-render.
+        // The setTimeout callback runs synchronously before React processes the
+        // batched setState, so DOM reads here reflect the pre-transition layout.
+        const container = messagesContainerRef.current;
+        if (container) {
+          scrollSnapshotRef.current = {
+            scrollTop: container.scrollTop,
+            scrollHeight: container.scrollHeight,
+          };
+        }
+        committedToDoViewRef.current = true;
         setAcpGrace(false);
         acpGraceTimerRef.current = null;
       }, ACP_GRACE_MS);
@@ -443,27 +466,24 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   }, [agentSession.isPrompting]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Preserve scroll position when ACP→DO view transition occurs (grace period ends).
-  // Without this, the switch from full ACP view to merged DO+ACP view causes a
-  // visible content jump because the two views may have different item heights.
-  const prevAcpGraceRef = useRef(acpGrace);
-  useEffect(() => {
-    const wasGrace = prevAcpGraceRef.current;
-    prevAcpGraceRef.current = acpGrace;
+  // Uses useLayoutEffect (fires after DOM mutation, before paint) so the scroll
+  // adjustment is invisible to the user — no flicker.  The scroll snapshot was
+  // captured in the setTimeout callback above, before React processed the state change.
+  useLayoutEffect(() => {
+    const snapshot = scrollSnapshotRef.current;
+    if (!snapshot) return;
+    scrollSnapshotRef.current = null;
 
-    // Only act on the transition from grace=true to grace=false
-    if (wasGrace && !acpGrace) {
-      const container = messagesContainerRef.current;
-      if (!container) return;
-      const prevScrollHeight = container.scrollHeight;
-      const prevScrollTop = container.scrollTop;
-      // After React renders the DO view, restore relative scroll position
-      requestAnimationFrame(() => {
-        const newScrollHeight = container.scrollHeight;
-        const delta = newScrollHeight - prevScrollHeight;
-        if (delta !== 0) {
-          container.scrollTop = prevScrollTop + delta;
-        }
-      });
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    if (isStuckToBottomRef.current) {
+      // User was at bottom — keep them there
+      container.scrollTop = container.scrollHeight;
+    } else {
+      // User had scrolled up — preserve relative position
+      const delta = container.scrollHeight - snapshot.scrollHeight;
+      container.scrollTop = snapshot.scrollTop + delta;
     }
   }, [acpGrace]);
 
@@ -841,12 +861,16 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           // - ACP (streaming): live tokens from the agent via WebSocket
           // - DO (persistent): batched messages persisted by the VM agent (~2s delay)
           //
-          // During active prompting or the grace period after prompting ends,
-          // show the full ACP view since it has the most up-to-date streaming content.
-          // When DO has no messages yet (initial provisioning), also show ACP only.
-          // Once prompting stops and the grace period (3s) elapses, switch to
-          // DO-only view — by then all messages should be persisted.
-          const useFullAcpView = acpItems.length > 0 && (
+          // During the INITIAL task (before DO has any messages), show the full
+          // ACP view for real-time streaming.  Once DO messages arrive and the
+          // first grace period completes, lock to DO view permanently for this
+          // session (committedToDoViewRef).  This prevents the scroll-jump-on-send
+          // bug: when a follow-up is sent, isPrompting flips true but the view
+          // no longer switches from DO→ACP, so the message list stays stable.
+          //
+          // During the initial ACP phase (before commit), allow ACP view when
+          // prompting or in grace period so streaming tokens are visible.
+          const useFullAcpView = acpItems.length > 0 && !committedToDoViewRef.current && (
             convertedItems.length === 0 || agentSession.isPrompting || acpGrace
           );
 
