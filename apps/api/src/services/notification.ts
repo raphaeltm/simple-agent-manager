@@ -194,6 +194,7 @@ export async function notifyPrCreated(
     taskTitle: string;
     prUrl: string;
     branchName?: string | null;
+    sessionId?: string | null;
   }
 ): Promise<void> {
   await sendNotification(env, userId, {
@@ -203,7 +204,8 @@ export async function notifyPrCreated(
     body: `Pull request is ready for review`,
     projectId: opts.projectId,
     taskId: opts.taskId,
-    actionUrl: buildActionUrl(opts.projectId),
+    sessionId: opts.sessionId,
+    actionUrl: buildActionUrl(opts.projectId, opts.sessionId),
     metadata: {
       projectName: opts.projectName,
       prUrl: opts.prUrl,
@@ -274,6 +276,25 @@ export async function notifyProgress(
       projectName: opts.projectName,
     },
   });
+}
+
+/**
+ * Look up a workspace's chat session ID from D1 by its workspace ID.
+ * Returns null if the workspace is not found or has no linked session.
+ */
+export async function getChatSessionId(env: { DATABASE: D1Database }, workspaceId: string): Promise<string | null> {
+  try {
+    const row = await env.DATABASE.prepare('SELECT chat_session_id FROM workspaces WHERE id = ?')
+      .bind(workspaceId)
+      .first<{ chat_session_id: string | null }>();
+    return row?.chat_session_id ?? null;
+  } catch (err) {
+    console.warn('getChatSessionId: D1 query failed', {
+      workspaceId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
 }
 
 function truncate(str: string, maxLength: number): string {

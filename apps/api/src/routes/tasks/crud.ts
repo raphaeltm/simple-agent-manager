@@ -530,6 +530,7 @@ crudRoutes.post('/:taskId/status/callback', async (c) => {
                 taskTitle: task.title,
                 prUrl: body.gitPushResult.prUrl,
                 branchName: body.gitPushResult.branchName,
+                sessionId: ws?.chatSessionId,
               });
             }
           }
