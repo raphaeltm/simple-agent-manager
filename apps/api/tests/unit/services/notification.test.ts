@@ -9,6 +9,7 @@ import {
   notifyNeedsInput,
   notifyProgress,
   getProjectName,
+  getChatSessionId,
   buildActionUrl,
 } from '../../../src/services/notification';
 
@@ -262,7 +263,7 @@ describe('Notification Service', () => {
   });
 
   describe('notifyPrCreated', () => {
-    it('should create pr_created notification with metadata including projectName', async () => {
+    it('should create pr_created notification with correct actionUrl, body, and metadata', async () => {
       await notifyPrCreated(env, 'user-123', {
         projectId: 'proj-1',
         projectName: 'My Project',
@@ -276,12 +277,16 @@ describe('Notification Service', () => {
         type: 'pr_created',
         urgency: 'medium',
         title: 'PR created: Add tests',
+        body: 'Pull request is ready for review',
+        actionUrl: '/projects/proj-1',
         metadata: {
           projectName: 'My Project',
           prUrl: 'https://github.com/org/repo/pull/99',
           branchName: 'sam/add-tests',
         },
       }));
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.sessionId).toBeUndefined();
     });
   });
 
@@ -546,7 +551,22 @@ describe('Notification Service', () => {
       expect(call.sessionId).toBeUndefined();
     });
 
-    it('notifyPrCreated always uses project URL and has no sessionId', async () => {
+    it('notifyPrCreated includes sessionId in actionUrl and payload', async () => {
+      await notifyPrCreated(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        taskId: 'task-1',
+        taskTitle: 'Add tests',
+        prUrl: 'https://github.com/org/repo/pull/99',
+        sessionId: 'sess-abc',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.actionUrl).toBe('/projects/proj-1/chat/sess-abc');
+      expect(call.sessionId).toBe('sess-abc');
+    });
+
+    it('notifyPrCreated falls back to project URL when sessionId absent', async () => {
       await notifyPrCreated(env, 'user-123', {
         projectId: 'proj-1',
         projectName: 'My Project',
@@ -558,6 +578,59 @@ describe('Notification Service', () => {
       const call = createNotificationMock.mock.calls[0]![1];
       expect(call.actionUrl).toBe('/projects/proj-1');
       expect(call.sessionId).toBeUndefined();
+    });
+  });
+
+  describe('getChatSessionId', () => {
+    it('should return chatSessionId from the workspace', async () => {
+      const firstMock = vi.fn().mockResolvedValue({ chat_session_id: 'sess-42' });
+      const bindMock = vi.fn(() => ({ first: firstMock }));
+      env.DATABASE.prepare = vi.fn(() => ({ bind: bindMock }));
+
+      const sessionId = await getChatSessionId(env, 'ws-1');
+      expect(sessionId).toBe('sess-42');
+      expect(env.DATABASE.prepare).toHaveBeenCalledWith('SELECT chat_session_id FROM workspaces WHERE id = ?');
+      expect(bindMock).toHaveBeenCalledWith('ws-1');
+    });
+
+    it('should return null when workspace not found', async () => {
+      env.DATABASE.prepare = vi.fn(() => ({
+        bind: vi.fn(() => ({
+          first: vi.fn().mockResolvedValue(null),
+        })),
+      }));
+      const sessionId = await getChatSessionId(env, 'ws-unknown');
+      expect(sessionId).toBeNull();
+    });
+
+    it('should return null when workspace has no chatSessionId', async () => {
+      env.DATABASE.prepare = vi.fn(() => ({
+        bind: vi.fn(() => ({
+          first: vi.fn().mockResolvedValue({ chat_session_id: null }),
+        })),
+      }));
+      const sessionId = await getChatSessionId(env, 'ws-no-session');
+      expect(sessionId).toBeNull();
+    });
+
+    it('should return null when D1 query fails', async () => {
+      env.DATABASE.prepare = vi.fn(() => ({
+        bind: vi.fn(() => ({
+          first: vi.fn().mockRejectedValue(new Error('D1 error')),
+        })),
+      }));
+      const sessionId = await getChatSessionId(env, 'ws-error');
+      expect(sessionId).toBeNull();
+    });
+
+    it('should return empty string as-is when chat_session_id is empty string', async () => {
+      env.DATABASE.prepare = vi.fn(() => ({
+        bind: vi.fn(() => ({
+          first: vi.fn().mockResolvedValue({ chat_session_id: '' }),
+        })),
+      }));
+      const sessionId = await getChatSessionId(env, 'ws-empty');
+      expect(sessionId).toBe('');
     });
   });
 

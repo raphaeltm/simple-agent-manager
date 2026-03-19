@@ -654,13 +654,17 @@ async function handleUpdateTaskStatus(
   // Emit progress notification (best-effort) — use tokenData.userId as authoritative target
   if (env.NOTIFICATION && tokenData.userId) {
     try {
-      const projectName = await notificationService.getProjectName(env, tokenData.projectId);
+      const [projectName, sessionId] = await Promise.all([
+        notificationService.getProjectName(env, tokenData.projectId),
+        notificationService.getChatSessionId(env, tokenData.workspaceId),
+      ]);
       await notificationService.notifyProgress(env as any, tokenData.userId, {
         projectId: tokenData.projectId,
         projectName,
         taskId: tokenData.taskId,
         taskTitle: task.title,
         message: message.trim().slice(0, MAX_NOTIFICATION_BODY_LENGTH),
+        sessionId,
       });
     } catch (err) {
       log.warn('mcp.update_task_status.notification_failed', {
@@ -760,11 +764,14 @@ async function handleCompleteTask(
     // Use tokenData.userId as authoritative target
     if (env.NOTIFICATION && tokenData.userId) {
       try {
-        const projectName = await notificationService.getProjectName(env, tokenData.projectId);
+        const [projectName, sessionId] = await Promise.all([
+          notificationService.getProjectName(env, tokenData.projectId),
+          notificationService.getChatSessionId(env, tokenData.workspaceId),
+        ]);
         await notificationService.notifySessionEnded(env as any, tokenData.userId, {
           projectId: tokenData.projectId,
           projectName,
-          sessionId: null, // MCP token does not carry session ID
+          sessionId,
           taskId: tokenData.taskId,
           taskTitle: taskRow.title,
         });
@@ -838,7 +845,10 @@ async function handleCompleteTask(
   // Emit task completion notification (best-effort)
   if (env.NOTIFICATION && taskRow?.user_id) {
     try {
-      const projectName = await notificationService.getProjectName(env, tokenData.projectId);
+      const [projectName, sessionId] = await Promise.all([
+        notificationService.getProjectName(env, tokenData.projectId),
+        notificationService.getChatSessionId(env, tokenData.workspaceId),
+      ]);
       await notificationService.notifyTaskComplete(env as any, taskRow.user_id, {
         projectId: tokenData.projectId,
         projectName,
@@ -846,6 +856,7 @@ async function handleCompleteTask(
         taskTitle: taskRow.title,
         outputPrUrl: taskRow.output_pr_url,
         outputBranch: taskRow.output_branch,
+        sessionId,
       });
     } catch (err) {
       log.warn('mcp.complete_task.notification_failed', {
@@ -939,7 +950,10 @@ async function handleRequestHumanInput(
   // Emit high-urgency notification (best-effort)
   if (env.NOTIFICATION) {
     try {
-      const projectName = await notificationService.getProjectName(env, tokenData.projectId);
+      const [projectName, sessionId] = await Promise.all([
+        notificationService.getProjectName(env, tokenData.projectId),
+        notificationService.getChatSessionId(env, tokenData.workspaceId),
+      ]);
       await notificationService.notifyNeedsInput(env as any, tokenData.userId, {
         projectId: tokenData.projectId,
         projectName,
@@ -948,6 +962,7 @@ async function handleRequestHumanInput(
         context: sanitizedContext,
         category,
         options,
+        sessionId,
       });
     } catch (err) {
       log.warn('mcp.request_human_input.notification_failed', {
