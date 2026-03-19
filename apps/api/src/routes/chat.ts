@@ -401,6 +401,97 @@ chatRoutes.post('/:sessionId/summarize', async (c) => {
   return c.json(result);
 });
 
+// ─── Session–Idea linking endpoints ───────────────────────────────────────────
+
+/**
+ * GET /api/projects/:projectId/sessions/:sessionId/ideas
+ * List all ideas linked to a session.
+ */
+chatRoutes.get('/:sessionId/ideas', requireAuth(), requireApproved(), async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const sessionId = requireRouteParam(c, 'sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireOwnedProject(db, projectId, userId);
+
+  const links = await projectDataService.getIdeasForSession(c.env, projectId, sessionId);
+
+  // Enrich with task details from D1
+  const ideas = [];
+  for (const link of links) {
+    const [task] = await db
+      .select({ id: schema.tasks.id, title: schema.tasks.title, status: schema.tasks.status })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.id, link.taskId))
+      .limit(1);
+
+    ideas.push({
+      taskId: link.taskId,
+      title: task?.title ?? null,
+      status: task?.status ?? null,
+      context: link.context,
+      linkedAt: link.createdAt,
+    });
+  }
+
+  return c.json({ ideas, count: ideas.length });
+});
+
+/**
+ * POST /api/projects/:projectId/sessions/:sessionId/ideas
+ * Link an idea to a session.
+ */
+chatRoutes.post('/:sessionId/ideas', requireAuth(), requireApproved(), async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const sessionId = requireRouteParam(c, 'sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireOwnedProject(db, projectId, userId);
+
+  const body = await c.req.json<{ taskId?: string; context?: string }>().catch(
+    (): { taskId?: string; context?: string } => ({})
+  );
+  const taskId = body.taskId?.trim();
+  if (!taskId) {
+    throw errors.badRequest('taskId is required');
+  }
+
+  // Verify task exists in this project
+  const [task] = await db
+    .select({ id: schema.tasks.id })
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, projectId)))
+    .limit(1);
+
+  if (!task) {
+    throw errors.notFound('Task not found in this project');
+  }
+
+  await projectDataService.linkSessionIdea(c.env, projectId, sessionId, taskId, body.context?.trim() ?? null);
+
+  return c.json({ linked: true }, 201);
+});
+
+/**
+ * DELETE /api/projects/:projectId/sessions/:sessionId/ideas/:taskId
+ * Unlink an idea from a session.
+ */
+chatRoutes.delete('/:sessionId/ideas/:taskId', requireAuth(), requireApproved(), async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const sessionId = requireRouteParam(c, 'sessionId');
+  const taskId = requireRouteParam(c, 'taskId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireOwnedProject(db, projectId, userId);
+
+  await projectDataService.unlinkSessionIdea(c.env, projectId, sessionId, taskId);
+
+  return c.json({ unlinked: true });
+});
+
 // Browser-side POST /:sessionId/messages route removed — messages are now
 // persisted exclusively by the VM agent via POST /api/workspaces/:id/messages.
 // See: specs/021-task-chat-architecture (US1 — Agent-Side Chat Persistence).

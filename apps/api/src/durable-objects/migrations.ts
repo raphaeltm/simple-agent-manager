@@ -276,6 +276,24 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    name: '012-chat-session-ideas',
+    run: (sql) => {
+      // Many-to-many junction between chat sessions and ideas (tasks).
+      // Enables linking multiple ideas to a session and tracking which
+      // sessions discussed a given idea.
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS chat_session_ideas (
+          session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          task_id TEXT NOT NULL,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+          context TEXT,
+          PRIMARY KEY (session_id, task_id)
+        )
+      `);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_csi_task ON chat_session_ideas(task_id)`);
+    },
+  },
 ];
 
 /**

@@ -408,6 +408,78 @@ const MCP_TOOLS = [
       additionalProperties: false,
     },
   },
+  // ─── Session–Idea linking tools ──────────────────────────────────────
+  {
+    name: 'link_idea',
+    description:
+      'Associate the current chat session with an idea (task). Use this when the conversation touches on an existing idea. Linking is idempotent — linking the same idea twice is a no-op.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'The idea (task) ID to link to the current session',
+        },
+        context: {
+          type: 'string',
+          description: 'Optional reasoning for why this session relates to the idea',
+        },
+      },
+      required: ['taskId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'unlink_idea',
+    description:
+      'Remove the association between the current chat session and an idea (task). No-op if the link does not exist.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'The idea (task) ID to unlink from the current session',
+        },
+      },
+      required: ['taskId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_linked_ideas',
+    description:
+      'List all ideas (tasks) linked to the current chat session. Returns each idea with its title, status, link context, and when it was linked.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'find_related_ideas',
+    description:
+      'Search existing ideas (tasks) in your project by keyword. Use this to find ideas that might relate to the current conversation before creating a new one.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search keyword to find in idea titles and descriptions',
+        },
+        status: {
+          type: 'string',
+          description: 'Filter by idea status. Omit for all statuses.',
+          enum: ['draft', 'queued', 'in_progress', 'delegated', 'awaiting_followup', 'completed', 'failed', 'cancelled'],
+        },
+        limit: {
+          type: 'number',
+          description: 'Max results to return (default: 10, max: 20)',
+        },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    },
+  },
 ];
 
 /**
@@ -1816,6 +1888,209 @@ async function handleSearchMessages(
   });
 }
 
+// ─── Session–Idea linking handlers ────────────────────────────────────────────
+
+/**
+ * Resolve the current chat session ID from the workspace ID in the MCP token.
+ * Returns null if the workspace has no linked session.
+ */
+async function resolveSessionId(env: Env, workspaceId: string): Promise<string | null> {
+  try {
+    const row = await env.DATABASE.prepare('SELECT chat_session_id FROM workspaces WHERE id = ?')
+      .bind(workspaceId)
+      .first<{ chat_session_id: string | null }>();
+    return row?.chat_session_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function handleLinkIdea(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const taskId = typeof params.taskId === 'string' ? params.taskId.trim() : '';
+  if (!taskId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'taskId is required');
+  }
+
+  const context = typeof params.context === 'string' ? sanitizeUserInput(params.context.trim()).slice(0, 500) : null;
+
+  // Resolve session ID from workspace
+  const sessionId = await resolveSessionId(env, tokenData.workspaceId);
+  if (!sessionId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'No chat session found for the current workspace');
+  }
+
+  // Verify the task exists in this project
+  const task = await env.DATABASE.prepare(
+    'SELECT id, title FROM tasks WHERE id = ? AND project_id = ?',
+  ).bind(taskId, tokenData.projectId).first<{ id: string; title: string }>();
+
+  if (!task) {
+    return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found in this project: ${taskId}`);
+  }
+
+  await projectDataService.linkSessionIdea(env, tokenData.projectId, sessionId, taskId, context);
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        linked: true,
+        sessionId,
+        taskId,
+        taskTitle: task.title,
+        context,
+      }, null, 2),
+    }],
+  });
+}
+
+async function handleUnlinkIdea(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const taskId = typeof params.taskId === 'string' ? params.taskId.trim() : '';
+  if (!taskId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'taskId is required');
+  }
+
+  const sessionId = await resolveSessionId(env, tokenData.workspaceId);
+  if (!sessionId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'No chat session found for the current workspace');
+  }
+
+  await projectDataService.unlinkSessionIdea(env, tokenData.projectId, sessionId, taskId);
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({ unlinked: true, sessionId, taskId }, null, 2),
+    }],
+  });
+}
+
+async function handleListLinkedIdeas(
+  requestId: string | number | null,
+  _params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const sessionId = await resolveSessionId(env, tokenData.workspaceId);
+  if (!sessionId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'No chat session found for the current workspace');
+  }
+
+  const links = await projectDataService.getIdeasForSession(env, tokenData.projectId, sessionId);
+
+  // Enrich with task details from D1
+  const enriched: Array<{
+    taskId: string;
+    title: string | null;
+    status: string | null;
+    context: string | null;
+    linkedAt: number;
+  }> = [];
+
+  if (links.length > 0) {
+    // Batch-fetch task details — use individual queries since D1 doesn't support array binding
+    for (const link of links) {
+      const task = await env.DATABASE.prepare(
+        'SELECT title, status FROM tasks WHERE id = ? AND project_id = ?',
+      ).bind(link.taskId, tokenData.projectId).first<{ title: string; status: string }>();
+
+      enriched.push({
+        taskId: link.taskId,
+        title: task?.title ?? null,
+        status: task?.status ?? null,
+        context: link.context,
+        linkedAt: link.createdAt,
+      });
+    }
+  }
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        sessionId,
+        ideas: enriched,
+        count: enriched.length,
+      }, null, 2),
+    }],
+  });
+}
+
+async function handleFindRelatedIdeas(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const query = typeof params.query === 'string' ? params.query.trim() : '';
+  if (!query) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'query is required');
+  }
+  if (query.length < 2) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'query must be at least 2 characters');
+  }
+
+  const limits = getMcpLimits(env);
+  const requestedLimit = typeof params.limit === 'number' ? params.limit : 10;
+  const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.taskSearchMax);
+  const statusFilter = typeof params.status === 'string' ? params.status.trim() : null;
+
+  const searchPattern = `%${query}%`;
+
+  let sql = `SELECT id, title, description, status, priority, updated_at FROM tasks WHERE project_id = ? AND (title LIKE ? OR description LIKE ?)`;
+  const bindParams: unknown[] = [tokenData.projectId, searchPattern, searchPattern];
+
+  if (statusFilter) {
+    sql += ' AND status = ?';
+    bindParams.push(statusFilter);
+  }
+
+  sql += ' ORDER BY updated_at DESC LIMIT ?';
+  bindParams.push(limit);
+
+  const stmt = env.DATABASE.prepare(sql);
+  const results = await stmt.bind(...bindParams).all<{
+    id: string;
+    title: string;
+    description: string | null;
+    status: string;
+    priority: number;
+    updated_at: string;
+  }>();
+
+  const snippetLength = limits.taskDescriptionSnippetLength;
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        ideas: (results.results ?? []).map((t) => ({
+          taskId: t.id,
+          title: t.title,
+          status: t.status,
+          priority: t.priority,
+          description: t.description
+            ? t.description.slice(0, snippetLength) + (t.description.length > snippetLength ? '...' : '')
+            : null,
+          updatedAt: t.updated_at,
+        })),
+        count: results.results?.length ?? 0,
+        query,
+      }, null, 2),
+    }],
+  });
+}
+
 // ─── MCP endpoint ────────────────────────────────────────────────────────────
 
 mcpRoutes.post('/', async (c) => {
@@ -1900,6 +2175,14 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleGetSessionMessages(requestId, toolArgs, tokenData, c.env));
         case 'search_messages':
           return c.json(await handleSearchMessages(requestId, toolArgs, tokenData, c.env));
+        case 'link_idea':
+          return c.json(await handleLinkIdea(requestId, toolArgs, tokenData, c.env));
+        case 'unlink_idea':
+          return c.json(await handleUnlinkIdea(requestId, toolArgs, tokenData, c.env));
+        case 'list_linked_ideas':
+          return c.json(await handleListLinkedIdeas(requestId, toolArgs, tokenData, c.env));
+        case 'find_related_ideas':
+          return c.json(await handleFindRelatedIdeas(requestId, toolArgs, tokenData, c.env));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
       }

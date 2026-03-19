@@ -298,6 +298,14 @@ export interface ChatMessage {
   createdAt: number;
 }
 
+/** Many-to-many link between a chat session and an idea (task). */
+export interface SessionIdeaLink {
+  sessionId: string;
+  taskId: string;
+  context: string | null;
+  createdAt: number;
+}
+
 export type ActivityEventType =
   | 'workspace.created'
   | 'workspace.stopped'
