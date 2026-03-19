@@ -1498,5 +1498,37 @@ describe('ProjectData Durable Object', () => {
       // Links should still exist since session is stopped, not deleted
       expect(stub.getIdeasForSession(sessionId)).toHaveLength(1);
     });
+
+    it('returns empty ideas for a session with no links', async () => {
+      const stub = getStub('project-idea-empty-session');
+      const sessionId = await stub.createSession(null, 'No links');
+
+      const ideas = stub.getIdeasForSession(sessionId);
+      expect(ideas).toHaveLength(0);
+      expect(ideas).toEqual([]);
+    });
+
+    it('round-trips null context correctly', async () => {
+      const stub = getStub('project-idea-null-ctx');
+      const sessionId = await stub.createSession(null, 'Null context');
+
+      stub.linkSessionIdea(sessionId, 'task-null', null);
+
+      const ideas = stub.getIdeasForSession(sessionId);
+      expect(ideas).toHaveLength(1);
+      expect(ideas[0]!.context).toBeNull();
+    });
+
+    it('getSessionsForIdea returns linkedAt as a positive number', async () => {
+      const stub = getStub('project-idea-linked-at');
+      const sessionId = await stub.createSession(null, 'LinkedAt test');
+
+      stub.linkSessionIdea(sessionId, 'task-la', 'test');
+
+      const sessions = stub.getSessionsForIdea('task-la');
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]!.linkedAt).toBeGreaterThan(0);
+      expect(typeof sessions[0]!.linkedAt).toBe('number');
+    });
   });
 });

@@ -48,6 +48,10 @@ const mockDoStub = {
   getSession: vi.fn().mockResolvedValue(null),
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
   searchMessages: vi.fn().mockReturnValue([]),
+  linkSessionIdea: vi.fn(),
+  unlinkSessionIdea: vi.fn(),
+  getIdeasForSession: vi.fn().mockReturnValue([]),
+  getSessionsForIdea: vi.fn().mockReturnValue([]),
 };
 const mockProjectData = {
   idFromName: vi.fn().mockReturnValue('do-id'),
@@ -1942,6 +1946,228 @@ describe('MCP Routes', () => {
         'user-789',
         expect.objectContaining({ type: 'session_ended' }),
       );
+    });
+  });
+
+  // ─── Session–Idea linking tools ──────────────────────────────────────
+
+  describe('link_idea', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should reject missing taskId', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'link_idea',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+    });
+
+    it('should return error when no session found for workspace', async () => {
+      // resolveSessionId returns null when workspace has no chat_session_id
+      mockD1._stmt.first.mockResolvedValue(null);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'link_idea',
+        arguments: { taskId: 'task-1' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('No chat session found');
+    });
+
+    it('should return error when task not found in project', async () => {
+      // First call: resolveSessionId returns a session
+      // Second call: task lookup returns null
+      mockD1._stmt.first
+        .mockResolvedValueOnce({ chat_session_id: 'sess-1' })
+        .mockResolvedValueOnce(null);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'link_idea',
+        arguments: { taskId: 'nonexistent-task' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Idea not found');
+    });
+
+    it('should link idea successfully', async () => {
+      mockD1._stmt.first
+        .mockResolvedValueOnce({ chat_session_id: 'sess-1' })
+        .mockResolvedValueOnce({ id: 'task-1', title: 'Fix auth bug' });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'link_idea',
+        arguments: { taskId: 'task-1', context: 'discussing auth' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.linked).toBe(true);
+      expect(data.taskTitle).toBe('Fix auth bug');
+      expect(data.context).toBe('discussing auth');
+      expect(mockDoStub.linkSessionIdea).toHaveBeenCalledWith('sess-1', 'task-1', 'discussing auth');
+    });
+  });
+
+  describe('unlink_idea', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should reject missing taskId', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'unlink_idea',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+    });
+
+    it('should unlink idea successfully', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'sess-1' });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'unlink_idea',
+        arguments: { taskId: 'task-1' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.unlinked).toBe(true);
+      expect(mockDoStub.unlinkSessionIdea).toHaveBeenCalledWith('sess-1', 'task-1');
+    });
+  });
+
+  describe('list_linked_ideas', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should return error when no session found', async () => {
+      mockD1._stmt.first.mockResolvedValue(null);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'list_linked_ideas',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('No chat session found');
+    });
+
+    it('should return empty list when no ideas linked', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'sess-1' });
+      mockDoStub.getIdeasForSession.mockReturnValue([]);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'list_linked_ideas',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.ideas).toEqual([]);
+      expect(data.count).toBe(0);
+    });
+
+    it('should return enriched ideas with task details', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'sess-1' });
+      mockDoStub.getIdeasForSession.mockReturnValue([
+        { taskId: 'task-1', context: 'auth discussion', createdAt: 1000 },
+      ]);
+      // D1 batch query for task details
+      mockD1._stmt.all.mockResolvedValueOnce({
+        results: [{ id: 'task-1', title: 'Fix auth', status: 'in_progress' }],
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'list_linked_ideas',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.ideas).toHaveLength(1);
+      expect(data.ideas[0].taskId).toBe('task-1');
+      expect(data.ideas[0].title).toBe('Fix auth');
+      expect(data.ideas[0].status).toBe('in_progress');
+      expect(data.ideas[0].context).toBe('auth discussion');
+    });
+  });
+
+  describe('find_related_ideas', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should reject empty query', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'find_related_ideas',
+        arguments: { query: '' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+    });
+
+    it('should reject query shorter than 2 characters', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'find_related_ideas',
+        arguments: { query: 'a' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+    });
+
+    it('should search ideas by keyword', async () => {
+      mockD1._stmt.all.mockResolvedValueOnce({
+        results: [{
+          id: 'task-found',
+          title: 'Improve authentication',
+          description: 'Rework the auth flow',
+          status: 'draft',
+          priority: 1,
+          updated_at: '2026-03-19T00:00:00Z',
+        }],
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'find_related_ideas',
+        arguments: { query: 'authentication' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.ideas).toHaveLength(1);
+      expect(data.ideas[0].taskId).toBe('task-found');
+      expect(data.ideas[0].title).toBe('Improve authentication');
+      expect(data.query).toBe('authentication');
     });
   });
 });
