@@ -407,7 +407,7 @@ chatRoutes.post('/:sessionId/summarize', async (c) => {
  * GET /api/projects/:projectId/sessions/:sessionId/ideas
  * List all ideas linked to a session.
  */
-chatRoutes.get('/:sessionId/ideas', requireAuth(), requireApproved(), async (c) => {
+chatRoutes.get('/:sessionId/ideas', async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const sessionId = requireRouteParam(c, 'sessionId');
@@ -417,21 +417,25 @@ chatRoutes.get('/:sessionId/ideas', requireAuth(), requireApproved(), async (c) 
 
   const links = await projectDataService.getIdeasForSession(c.env, projectId, sessionId);
 
-  // Enrich with task details from D1
-  const ideas = [];
-  for (const link of links) {
-    const [task] = await db
+  // Enrich with task details from D1 in a single query
+  let ideas: Array<{ taskId: string; title: string | null; status: string | null; context: string | null; linkedAt: number }> = [];
+  if (links.length > 0) {
+    const taskRows = await db
       .select({ id: schema.tasks.id, title: schema.tasks.title, status: schema.tasks.status })
       .from(schema.tasks)
-      .where(eq(schema.tasks.id, link.taskId))
-      .limit(1);
+      .where(inArray(schema.tasks.id, links.map((l) => l.taskId)));
 
-    ideas.push({
-      taskId: link.taskId,
-      title: task?.title ?? null,
-      status: task?.status ?? null,
-      context: link.context,
-      linkedAt: link.createdAt,
+    const taskMap = new Map(taskRows.map((t) => [t.id, t]));
+
+    ideas = links.map((link) => {
+      const task = taskMap.get(link.taskId);
+      return {
+        taskId: link.taskId,
+        title: task?.title ?? null,
+        status: task?.status ?? null,
+        context: link.context,
+        linkedAt: link.createdAt,
+      };
     });
   }
 
@@ -442,7 +446,7 @@ chatRoutes.get('/:sessionId/ideas', requireAuth(), requireApproved(), async (c) 
  * POST /api/projects/:projectId/sessions/:sessionId/ideas
  * Link an idea to a session.
  */
-chatRoutes.post('/:sessionId/ideas', requireAuth(), requireApproved(), async (c) => {
+chatRoutes.post('/:sessionId/ideas', async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const sessionId = requireRouteParam(c, 'sessionId');
@@ -469,7 +473,8 @@ chatRoutes.post('/:sessionId/ideas', requireAuth(), requireApproved(), async (c)
     throw errors.notFound('Task not found in this project');
   }
 
-  await projectDataService.linkSessionIdea(c.env, projectId, sessionId, taskId, body.context?.trim() ?? null);
+  const context = body.context?.trim().slice(0, 500) ?? null;
+  await projectDataService.linkSessionIdea(c.env, projectId, sessionId, taskId, context);
 
   return c.json({ linked: true }, 201);
 });
@@ -478,7 +483,7 @@ chatRoutes.post('/:sessionId/ideas', requireAuth(), requireApproved(), async (c)
  * DELETE /api/projects/:projectId/sessions/:sessionId/ideas/:taskId
  * Unlink an idea from a session.
  */
-chatRoutes.delete('/:sessionId/ideas/:taskId', requireAuth(), requireApproved(), async (c) => {
+chatRoutes.delete('/:sessionId/ideas/:taskId', async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const sessionId = requireRouteParam(c, 'sessionId');

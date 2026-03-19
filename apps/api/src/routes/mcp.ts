@@ -119,6 +119,8 @@ const DEFAULT_MCP_MESSAGE_LIST_MAX = 200;
 const DEFAULT_MCP_MESSAGE_SEARCH_MAX = 20;
 /** Max length for task description in list/search results. Override via MCP_TASK_DESCRIPTION_SNIPPET_LENGTH env var. */
 const DEFAULT_MCP_TASK_DESCRIPTION_SNIPPET_LENGTH = 200;
+/** Max length for idea link context string. Override via MCP_IDEA_CONTEXT_MAX_LENGTH env var. */
+const DEFAULT_MCP_IDEA_CONTEXT_MAX_LENGTH = 500;
 
 function getMcpLimits(env: Env) {
   return {
@@ -144,6 +146,7 @@ function getMcpLimits(env: Env) {
     dispatchMaxReferences: parsePositiveInt(env.MCP_DISPATCH_MAX_REFERENCES as string, DEFAULT_MCP_DISPATCH_MAX_REFERENCES),
     dispatchMaxReferenceLength: parsePositiveInt(env.MCP_DISPATCH_MAX_REFERENCE_LENGTH as string, DEFAULT_MCP_DISPATCH_MAX_REFERENCE_LENGTH),
     dispatchMaxPriority: parsePositiveInt(env.MCP_DISPATCH_MAX_PRIORITY as string, DEFAULT_MCP_DISPATCH_MAX_PRIORITY),
+    ideaContextMaxLength: parsePositiveInt(env.MCP_IDEA_CONTEXT_MAX_LENGTH as string, DEFAULT_MCP_IDEA_CONTEXT_MAX_LENGTH),
   };
 }
 
@@ -1916,7 +1919,8 @@ async function handleLinkIdea(
     return jsonRpcError(requestId, INVALID_PARAMS, 'taskId is required');
   }
 
-  const context = typeof params.context === 'string' ? sanitizeUserInput(params.context.trim()).slice(0, 500) : null;
+  const limits = getMcpLimits(env);
+  const context = typeof params.context === 'string' ? sanitizeUserInput(params.context.trim()).slice(0, limits.ideaContextMaxLength) : null;
 
   // Resolve session ID from workspace
   const sessionId = await resolveSessionId(env, tokenData.workspaceId);
@@ -1998,12 +2002,16 @@ async function handleListLinkedIdeas(
   }> = [];
 
   if (links.length > 0) {
-    // Batch-fetch task details — use individual queries since D1 doesn't support array binding
-    for (const link of links) {
-      const task = await env.DATABASE.prepare(
-        'SELECT title, status FROM tasks WHERE id = ? AND project_id = ?',
-      ).bind(link.taskId, tokenData.projectId).first<{ title: string; status: string }>();
+    // Batch-fetch task details in a single D1 query
+    const placeholders = links.map(() => '?').join(', ');
+    const rows = await env.DATABASE.prepare(
+      `SELECT id, title, status FROM tasks WHERE project_id = ? AND id IN (${placeholders})`,
+    ).bind(tokenData.projectId, ...links.map((l) => l.taskId)).all<{ id: string; title: string; status: string }>();
 
+    const taskMap = new Map((rows.results ?? []).map((t) => [t.id, t]));
+
+    for (const link of links) {
+      const task = taskMap.get(link.taskId);
       enriched.push({
         taskId: link.taskId,
         title: task?.title ?? null,
@@ -2047,18 +2055,18 @@ async function handleFindRelatedIdeas(
 
   const searchPattern = `%${query}%`;
 
-  let sql = `SELECT id, title, description, status, priority, updated_at FROM tasks WHERE project_id = ? AND (title LIKE ? OR description LIKE ?)`;
+  let queryStr = `SELECT id, title, description, status, priority, updated_at FROM tasks WHERE project_id = ? AND (title LIKE ? OR description LIKE ?)`;
   const bindParams: unknown[] = [tokenData.projectId, searchPattern, searchPattern];
 
   if (statusFilter) {
-    sql += ' AND status = ?';
+    queryStr += ' AND status = ?';
     bindParams.push(statusFilter);
   }
 
-  sql += ' ORDER BY updated_at DESC LIMIT ?';
+  queryStr += ' ORDER BY updated_at DESC LIMIT ?';
   bindParams.push(limit);
 
-  const stmt = env.DATABASE.prepare(sql);
+  const stmt = env.DATABASE.prepare(queryStr);
   const results = await stmt.bind(...bindParams).all<{
     id: string;
     title: string;

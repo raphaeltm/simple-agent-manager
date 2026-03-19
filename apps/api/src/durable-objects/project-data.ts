@@ -961,7 +961,7 @@ export class ProjectData extends DurableObject<Env> {
   /**
    * Link a chat session to an idea (task). Idempotent — duplicate links are ignored.
    */
-  linkSessionIdea(sessionId: string, taskId: string, context: string | null): void {
+  async linkSessionIdea(sessionId: string, taskId: string, context: string | null): Promise<void> {
     // Verify session exists in this DO
     const session = this.sql
       .exec('SELECT id FROM chat_sessions WHERE id = ?', sessionId)
@@ -983,7 +983,7 @@ export class ProjectData extends DurableObject<Env> {
   /**
    * Remove a link between a chat session and an idea. No-op if the link doesn't exist.
    */
-  unlinkSessionIdea(sessionId: string, taskId: string): void {
+  async unlinkSessionIdea(sessionId: string, taskId: string): Promise<void> {
     this.sql.exec(
       'DELETE FROM chat_session_ideas WHERE session_id = ? AND task_id = ?',
       sessionId,

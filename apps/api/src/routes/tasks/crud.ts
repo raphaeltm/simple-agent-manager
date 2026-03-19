@@ -915,7 +915,7 @@ crudRoutes.post('/:taskId/close', async (c) => {
  * GET /api/projects/:projectId/tasks/:taskId/sessions
  * List all chat sessions linked to a task (idea). Useful for the Ideas page timeline.
  */
-crudRoutes.get('/:taskId/sessions', requireAuth(), requireApproved(), async (c) => {
+crudRoutes.get('/:taskId/sessions', async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const taskId = requireRouteParam(c, 'taskId');
