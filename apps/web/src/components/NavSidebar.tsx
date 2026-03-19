@@ -9,9 +9,7 @@ import {
   Monitor,
   MessageSquare,
   Lightbulb,
-  LayoutDashboard,
   Activity,
-  Radio,
   ArrowLeft,
   ChevronDown,
   ChevronRight,
@@ -35,9 +33,7 @@ export const GLOBAL_NAV_ITEMS: NavItem[] = [
 export const PROJECT_NAV_ITEMS: NavItem[] = [
   { label: 'Chat', path: 'chat', icon: <MessageSquare size={18} /> },
   { label: 'Ideas', path: 'ideas', icon: <Lightbulb size={18} /> },
-  { label: 'Overview', path: 'overview', icon: <LayoutDashboard size={18} /> },
   { label: 'Activity', path: 'activity', icon: <Activity size={18} /> },
-  { label: 'Sessions', path: 'sessions', icon: <Radio size={18} /> },
   { label: 'Settings', path: 'settings', icon: <Settings size={18} /> },
 ];
 

@@ -20,15 +20,11 @@ import { Node } from './pages/Node';
 import { UiStandards } from './pages/UiStandards';
 import { Projects } from './pages/Projects';
 import { Project } from './pages/Project';
-import { ProjectOverview } from './pages/ProjectOverview';
 import { IdeasPage } from './pages/IdeasPage';
-import { ProjectSessions } from './pages/ProjectSessions';
 import { ProjectSettings } from './pages/ProjectSettings';
 import { ProjectActivity } from './pages/ProjectActivity';
 import { TaskDetail } from './pages/TaskDetail';
-import { ChatSessionView } from './pages/ChatSessionView';
 import { ProjectChat } from './pages/ProjectChat';
-import { ProjectKanban } from './pages/ProjectKanban';
 import { ProjectCreate } from './pages/ProjectCreate';
 import { Admin } from './pages/Admin';
 import { AdminUsers } from './pages/AdminUsers';
@@ -66,16 +62,12 @@ export default function App() {
             {/* Project detail — shell with sub-routes */}
             <Route path="/projects/:id" element={<Project />}>
               <Route index element={<Navigate to="chat" replace />} />
-              <Route path="overview" element={<ProjectOverview />} />
               <Route path="chat" element={<ProjectChat />} />
               <Route path="chat/:sessionId" element={<ProjectChat />} />
               <Route path="ideas" element={<IdeasPage />} />
               <Route path="ideas/:taskId" element={<TaskDetail />} />
-              <Route path="kanban" element={<ProjectKanban />} />
               <Route path="tasks" element={<Navigate to="../ideas" replace />} />
               <Route path="tasks/:taskId" element={<TaskDetail />} />
-              <Route path="sessions" element={<ProjectSessions />} />
-              <Route path="sessions/:sessionId" element={<ChatSessionView />} />
               <Route path="settings" element={<ProjectSettings />} />
               <Route path="activity" element={<ProjectActivity />} />
             </Route>

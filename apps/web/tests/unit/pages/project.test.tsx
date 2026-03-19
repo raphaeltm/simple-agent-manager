@@ -64,19 +64,17 @@ vi.mock('../../../src/components/UserMenu', () => ({
 }));
 
 import { Project } from '../../../src/pages/Project';
-import { ProjectOverview } from '../../../src/pages/ProjectOverview';
 import { ProjectTasks } from '../../../src/pages/ProjectTasks';
 import { ProjectSettings } from '../../../src/pages/ProjectSettings';
 import { ProjectActivity } from '../../../src/pages/ProjectActivity';
 
-function renderProjectPage(path = '/projects/proj-1/overview') {
+function renderProjectPage(path = '/projects/proj-1/tasks') {
   return render(
     <ToastProvider>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/projects/:id" element={<Project />}>
-            <Route index element={<Navigate to="overview" replace />} />
-            <Route path="overview" element={<ProjectOverview />} />
+            <Route index element={<Navigate to="tasks" replace />} />
             <Route path="tasks" element={<ProjectTasks />} />
             <Route path="settings" element={<ProjectSettings />} />
             <Route path="activity" element={<ProjectActivity />} />
@@ -290,18 +288,6 @@ describe('Project page', () => {
     });
   });
 
-  it('launches a workspace from project overview', async () => {
-    renderProjectPage('/projects/proj-1/overview');
-    fireEvent.click(await screen.findByRole('button', { name: 'Launch Workspace' }));
-
-    await waitFor(() => {
-      expect(mocks.createWorkspace).toHaveBeenCalledWith({
-        name: 'Project One Workspace',
-        projectId: 'proj-1',
-      });
-    });
-  });
-
   it('renders chat-first layout without tabs', async () => {
     renderProjectPage();
     await screen.findByRole('heading', { name: 'Project One' });
@@ -343,7 +329,6 @@ describe('Project page', () => {
       expect(screen.getByText('Project Views')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('Overview')).toBeInTheDocument();
     expect(screen.getByText('Tasks')).toBeInTheDocument();
     expect(screen.getByText('Activity')).toBeInTheDocument();
   });
@@ -360,7 +345,7 @@ describe('Project page', () => {
   });
 
   it('navigates when Project Views link is clicked in settings drawer', async () => {
-    renderProjectPage('/projects/proj-1/overview');
+    renderProjectPage('/projects/proj-1/tasks');
     await screen.findByRole('heading', { name: 'Project One' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Project settings' }));

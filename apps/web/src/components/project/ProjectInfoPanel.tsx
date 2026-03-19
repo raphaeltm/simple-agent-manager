@@ -193,13 +193,9 @@ export const ProjectInfoPanel: FC<ProjectInfoPanelProps> = ({ projectId, open, o
                       </div>
                     ))}
                     {workspaces.length > MAX_ITEMS && (
-                      <Link
-                        to={`/projects/${projectId}/overview`}
-                        onClick={onClose}
-                        className="sam-type-caption text-accent no-underline"
-                      >
-                        View all {workspaces.length} workspaces
-                      </Link>
+                      <span className="sam-type-caption text-fg-muted">
+                        +{workspaces.length - MAX_ITEMS} more workspaces
+                      </span>
                     )}
                   </div>
                 )}
