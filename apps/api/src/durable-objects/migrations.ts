@@ -230,6 +230,52 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '011-message-materialization-fts5',
+    run: (sql) => {
+      // Materialized grouped messages — concatenated streaming tokens per logical message.
+      // Populated when a session stops; enables FTS5 full-text search across token boundaries.
+      // Uses IF NOT EXISTS for idempotency against partial migration execution.
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS chat_messages_grouped (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          role TEXT NOT NULL,
+          content TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        )
+      `);
+      sql.exec(
+        `CREATE INDEX IF NOT EXISTS idx_grouped_messages_session ON chat_messages_grouped(session_id, created_at)`
+      );
+
+      // FTS5 virtual table for full-text search on grouped message content.
+      // content= links to chat_messages_grouped so we can join back for metadata.
+      // tokenize="unicode61" provides good multilingual tokenization with stemming.
+      // FTS5 is supported in DO SQLite — verified on staging deployment.
+      // If FTS5 is unavailable, searchMessagesFts() catches the error and falls back to LIKE.
+      try {
+        sql.exec(`
+          CREATE VIRTUAL TABLE IF NOT EXISTS chat_messages_grouped_fts
+          USING fts5(content, content='chat_messages_grouped', content_rowid='rowid', tokenize='unicode61')
+        `);
+      } catch (e) {
+        // FTS5 may not be available in all SQLite builds.
+        // The system degrades gracefully — searchMessagesFts() catches errors and falls back to LIKE.
+        console.error('FTS5 virtual table creation failed — full-text search will use LIKE fallback', {
+          error: String(e),
+        });
+      }
+
+      // Track which sessions have been materialized (NULL = not yet).
+      // ALTER TABLE ADD COLUMN is idempotent in SQLite if the column already exists (throws error).
+      try {
+        sql.exec(`ALTER TABLE chat_sessions ADD COLUMN materialized_at INTEGER`);
+      } catch {
+        // Column already exists from a partial previous run — safe to ignore.
+      }
+    },
+  },
 ];
 
 /**

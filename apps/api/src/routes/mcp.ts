@@ -132,7 +132,7 @@ function getMcpLimits(env: Env) {
     sessionListMax: DEFAULT_MCP_SESSION_LIST_MAX,
     messageListLimit: parsePositiveInt(env.MCP_MESSAGE_LIST_LIMIT as string, DEFAULT_MCP_MESSAGE_LIST_LIMIT),
     messageListMax: parsePositiveInt(env.MCP_MESSAGE_LIST_MAX as string, DEFAULT_MCP_MESSAGE_LIST_MAX),
-    messageSearchMax: DEFAULT_MCP_MESSAGE_SEARCH_MAX,
+    messageSearchMax: parsePositiveInt(env.MCP_MESSAGE_SEARCH_MAX as string, DEFAULT_MCP_MESSAGE_SEARCH_MAX),
     taskDescriptionSnippetLength: parsePositiveInt(
       env.MCP_TASK_DESCRIPTION_SNIPPET_LENGTH as string,
       DEFAULT_MCP_TASK_DESCRIPTION_SNIPPET_LENGTH,
@@ -382,7 +382,7 @@ const MCP_TOOLS = [
   {
     name: 'search_messages',
     description:
-      'Search messages across all chat sessions in your project by keyword. Returns matching message snippets with session context. Useful for finding past discussions about specific topics, decisions, or code. Note: searches individual streaming tokens stored in the database — search terms that span token boundaries may not match.',
+      'Search messages across all chat sessions in your project by keyword using full-text search. Returns matching message snippets with session context. Useful for finding past discussions about specific topics, decisions, or code. Completed sessions use FTS5 indexing (matches messages containing all search words); active sessions fall back to keyword matching.',
     inputSchema: {
       type: 'object' as const,
       properties: {

@@ -188,6 +188,16 @@ export class ProjectData extends DurableObject<Env> {
       );
     }
 
+    // Materialize grouped messages for search indexing (best-effort, non-blocking)
+    try {
+      this.materializeSession(sessionId);
+    } catch (e) {
+      console.error('Failed to materialize session on stop', {
+        sessionId,
+        error: String(e),
+      });
+    }
+
     this.scheduleSummarySync();
     this.broadcastEvent('session.stopped', { sessionId }, sessionId);
   }
@@ -593,14 +603,137 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   /**
-   * Search messages across all sessions by keyword (LIKE match on content).
-   * Returns message snippets with session context for agent discovery.
+   * Search messages across all sessions by keyword.
+   *
+   * Uses FTS5 full-text search on materialized grouped messages for stopped sessions,
+   * falling back to LIKE on raw tokens for active (non-materialized) sessions.
+   * This ensures cross-token-boundary search terms are found in completed sessions.
    */
   searchMessages(
     query: string,
     sessionId: string | null = null,
     roles: string[] | null = null,
     limit: number = 10,
+  ): Array<{
+    id: string;
+    sessionId: string;
+    role: string;
+    snippet: string;
+    createdAt: number;
+    sessionTopic: string | null;
+    sessionTaskId: string | null;
+  }> {
+    type SearchResult = {
+      id: string;
+      sessionId: string;
+      role: string;
+      snippet: string;
+      createdAt: number;
+      sessionTopic: string | null;
+      sessionTaskId: string | null;
+    };
+
+    const results: SearchResult[] = [];
+
+    // --- FTS5 search on materialized grouped messages (stopped sessions) ---
+    results.push(...this.searchMessagesFts(query, sessionId, roles, limit));
+
+    // --- LIKE fallback on raw tokens for non-materialized sessions ---
+    if (results.length < limit) {
+      const fallbackResults = this.searchMessagesLike(
+        query,
+        sessionId,
+        roles,
+        limit - results.length,
+        true, // only non-materialized sessions
+      );
+      results.push(...fallbackResults);
+    }
+
+    // Sort combined results by recency for consistent ordering
+    results.sort((a, b) => b.createdAt - a.createdAt);
+
+    return results.slice(0, limit);
+  }
+
+  /**
+   * FTS5 full-text search on materialized grouped messages.
+   * Searches stopped sessions where tokens have been consolidated.
+   */
+  private searchMessagesFts(
+    query: string,
+    sessionId: string | null,
+    roles: string[] | null,
+    limit: number,
+  ): Array<{
+    id: string;
+    sessionId: string;
+    role: string;
+    snippet: string;
+    createdAt: number;
+    sessionTopic: string | null;
+    sessionTaskId: string | null;
+  }> {
+    // Build FTS5 match expression — escape special FTS5 characters and quote
+    const ftsQuery = this.buildFtsQuery(query);
+    if (!ftsQuery) return [];
+
+    const conditions: string[] = ['f.chat_messages_grouped_fts MATCH ?'];
+    const params: (string | number)[] = [ftsQuery];
+
+    if (sessionId) {
+      conditions.push('m.session_id = ?');
+      params.push(sessionId);
+    }
+
+    if (roles && roles.length > 0) {
+      const placeholders = roles.map(() => '?').join(', ');
+      conditions.push(`m.role IN (${placeholders})`);
+      params.push(...roles);
+    }
+
+    const whereClause = conditions.join(' AND ');
+    const sqlQuery = `
+      SELECT m.id, m.session_id, m.role, m.content, m.created_at,
+             s.topic AS session_topic, s.task_id AS session_task_id
+      FROM chat_messages_grouped_fts f
+      JOIN chat_messages_grouped m ON m.rowid = f.rowid
+      JOIN chat_sessions s ON s.id = m.session_id
+      WHERE ${whereClause}
+      ORDER BY rank
+      LIMIT ?
+    `;
+    params.push(limit);
+
+    try {
+      const rows = this.sql.exec(sqlQuery, ...params).toArray();
+      return rows.map((row) => ({
+        id: row.id as string,
+        sessionId: row.session_id as string,
+        role: row.role as string,
+        snippet: this.extractSnippet(row.content as string, query),
+        createdAt: row.created_at as number,
+        sessionTopic: (row.session_topic as string) ?? null,
+        sessionTaskId: (row.session_task_id as string) ?? null,
+      }));
+    } catch (e) {
+      // FTS5 table may not exist yet in older DOs that haven't run migration 011.
+      // Fall through to LIKE search gracefully.
+      console.error('FTS5 search failed, falling back to LIKE', { error: String(e) });
+      return [];
+    }
+  }
+
+  /**
+   * LIKE-based search on raw chat_messages tokens.
+   * Used as fallback for non-materialized (active) sessions.
+   */
+  private searchMessagesLike(
+    query: string,
+    sessionId: string | null,
+    roles: string[] | null,
+    limit: number,
+    onlyNonMaterialized: boolean = false,
   ): Array<{
     id: string;
     sessionId: string;
@@ -626,8 +759,12 @@ export class ProjectData extends DurableObject<Env> {
       params.push(...roles);
     }
 
+    if (onlyNonMaterialized) {
+      conditions.push('s.materialized_at IS NULL');
+    }
+
     const whereClause = conditions.join(' AND ');
-    const sql = `
+    const sqlQuery = `
       SELECT m.id, m.session_id, m.role, m.content, m.created_at,
              s.topic AS session_topic, s.task_id AS session_task_id
       FROM chat_messages m
@@ -638,32 +775,183 @@ export class ProjectData extends DurableObject<Env> {
     `;
     params.push(limit);
 
-    const rows = this.sql.exec(sql, ...params).toArray();
+    const rows = this.sql.exec(sqlQuery, ...params).toArray();
 
-    return rows.map((row) => {
-      const content = row.content as string;
-      // Extract a snippet around the first match (200 chars window)
-      const lowerContent = content.toLowerCase();
-      const matchIdx = lowerContent.indexOf(query.toLowerCase());
-      let snippet: string;
-      if (matchIdx === -1) {
-        snippet = content.slice(0, 200);
+    return rows.map((row) => ({
+      id: row.id as string,
+      sessionId: row.session_id as string,
+      role: row.role as string,
+      snippet: this.extractSnippet(row.content as string, query),
+      createdAt: row.created_at as number,
+      sessionTopic: (row.session_topic as string) ?? null,
+      sessionTaskId: (row.session_task_id as string) ?? null,
+    }));
+  }
+
+  /**
+   * Build an FTS5 MATCH query string from a user search term.
+   * Quotes each word to avoid FTS5 syntax errors from special characters.
+   */
+  private buildFtsQuery(query: string): string | null {
+    // Split into words and quote each to prevent FTS5 syntax issues
+    const words = query.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return null;
+    // Quote each word and join with spaces (implicit AND in FTS5)
+    return words.map((w) => `"${w.replace(/"/g, '""')}"`).join(' ');
+  }
+
+  /**
+   * Extract a ~200-char snippet around the first match of a query in content.
+   */
+  private extractSnippet(content: string, query: string): string {
+    const lowerContent = content.toLowerCase();
+    const matchIdx = lowerContent.indexOf(query.toLowerCase());
+    if (matchIdx === -1) {
+      return content.slice(0, 200) + (content.length > 200 ? '...' : '');
+    }
+    const start = Math.max(0, matchIdx - 80);
+    const end = Math.min(content.length, matchIdx + query.length + 120);
+    return (start > 0 ? '...' : '') + content.slice(start, end) + (end < content.length ? '...' : '');
+  }
+
+  // =========================================================================
+  // Message Materialization
+  // =========================================================================
+
+  /**
+   * Roles whose consecutive tokens are concatenated into a single grouped message.
+   * Non-groupable roles (user, system, plan) pass through as individual messages.
+   */
+  private static readonly GROUPABLE_ROLES = new Set(['assistant', 'tool', 'thinking']);
+
+  /**
+   * Materialize grouped messages for a stopped session.
+   * Reads raw tokens, groups consecutive same-role tokens (for groupable roles),
+   * and writes the result to chat_messages_grouped + FTS5 index.
+   *
+   * Idempotent — skips sessions that are already materialized.
+   */
+  materializeSession(sessionId: string): void {
+    // Check if already materialized
+    const session = this.sql
+      .exec('SELECT materialized_at, status FROM chat_sessions WHERE id = ?', sessionId)
+      .toArray()[0];
+
+    if (!session) return;
+    if (session.materialized_at !== null) return; // already materialized
+
+    // Read all raw tokens in chronological order
+    const tokens = this.sql
+      .exec(
+        'SELECT id, role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC, sequence ASC',
+        sessionId
+      )
+      .toArray();
+
+    if (tokens.length === 0) {
+      // Mark as materialized even with no messages (no-op idempotency)
+      this.sql.exec(
+        'UPDATE chat_sessions SET materialized_at = ? WHERE id = ?',
+        Date.now(),
+        sessionId
+      );
+      return;
+    }
+
+    // Group consecutive same-role tokens (same logic as groupTokensIntoMessages in mcp.ts)
+    const grouped: Array<{ id: string; role: string; content: string; createdAt: number }> = [];
+    for (const token of tokens) {
+      const last = grouped[grouped.length - 1];
+      if (
+        last &&
+        last.role === (token.role as string) &&
+        ProjectData.GROUPABLE_ROLES.has(token.role as string)
+      ) {
+        last.content += token.content as string;
       } else {
-        const start = Math.max(0, matchIdx - 80);
-        const end = Math.min(content.length, matchIdx + query.length + 120);
-        snippet = (start > 0 ? '...' : '') + content.slice(start, end) + (end < content.length ? '...' : '');
+        grouped.push({
+          id: token.id as string,
+          role: token.role as string,
+          content: token.content as string,
+          createdAt: token.created_at as number,
+        });
       }
+    }
 
-      return {
-        id: row.id as string,
-        sessionId: row.session_id as string,
-        role: row.role as string,
-        snippet,
-        createdAt: row.created_at as number,
-        sessionTopic: (row.session_topic as string) ?? null,
-        sessionTaskId: (row.session_task_id as string) ?? null,
-      };
-    });
+    // Insert grouped messages and sync FTS5 index
+    for (const msg of grouped) {
+      this.sql.exec(
+        'INSERT OR IGNORE INTO chat_messages_grouped (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)',
+        msg.id,
+        sessionId,
+        msg.role,
+        msg.content,
+        msg.createdAt
+      );
+
+      // Sync FTS5 content table — get the rowid of the just-inserted row.
+      // Wrapped in try/catch so FTS5 unavailability doesn't prevent grouped table population.
+      try {
+        const rowResult = this.sql
+          .exec('SELECT rowid FROM chat_messages_grouped WHERE id = ?', msg.id)
+          .toArray()[0];
+        if (rowResult) {
+          this.sql.exec(
+            'INSERT OR IGNORE INTO chat_messages_grouped_fts (rowid, content) VALUES (?, ?)',
+            rowResult.rowid as number,
+            msg.content
+          );
+        }
+      } catch {
+        // FTS5 table may not exist — grouped table still has value for LIKE search
+      }
+    }
+
+    // Mark session as materialized
+    this.sql.exec(
+      'UPDATE chat_sessions SET materialized_at = ? WHERE id = ?',
+      Date.now(),
+      sessionId
+    );
+  }
+
+  /**
+   * Materialize all stopped sessions that haven't been materialized yet.
+   * Used for backfilling existing data after migration 011.
+   *
+   * @param limit Max sessions to process per call (default 50) to stay within CPU time limits.
+   *              Caller should retry until `remaining === 0`.
+   */
+  materializeAllStopped(limit: number = 50): { materialized: number; errors: number; remaining: number } {
+    const sessions = this.sql
+      .exec(
+        `SELECT id FROM chat_sessions WHERE status = 'stopped' AND materialized_at IS NULL LIMIT ?`,
+        limit
+      )
+      .toArray();
+
+    let materialized = 0;
+    let errors = 0;
+    for (const session of sessions) {
+      try {
+        this.materializeSession(session.id as string);
+        materialized++;
+      } catch (e) {
+        console.error('Failed to materialize session', {
+          sessionId: session.id,
+          error: String(e),
+        });
+        errors++;
+      }
+    }
+
+    // Check if more sessions remain
+    const remainingRow = this.sql
+      .exec(`SELECT COUNT(*) as count FROM chat_sessions WHERE status = 'stopped' AND materialized_at IS NULL`)
+      .toArray()[0];
+    const remaining = (remainingRow?.count as number) ?? 0;
+
+    return { materialized, errors, remaining };
   }
 
   // =========================================================================
@@ -987,6 +1275,16 @@ export class ProjectData extends DurableObject<Env> {
       now,
       sessionId
     );
+
+    // Materialize grouped messages for search indexing (best-effort)
+    try {
+      this.materializeSession(sessionId);
+    } catch (e) {
+      console.error('Failed to materialize session on internal stop', {
+        sessionId,
+        error: String(e),
+      });
+    }
   }
 
   /**

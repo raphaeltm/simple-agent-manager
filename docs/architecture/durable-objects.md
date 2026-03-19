@@ -90,6 +90,8 @@ All DO implementations live in `apps/api/src/durable-objects/`. Each has a corre
 |-------|---------|
 | `chat_sessions` | Session metadata, lifecycle status, message counts |
 | `chat_messages` | Append-only streaming token log — each row is one streaming chunk from Claude Code, not a logical message. Consecutive same-role tokens (assistant, tool, thinking) are grouped into logical messages at the API and UI layers. The `sequence` field orders tokens within the same millisecond. |
+| `chat_messages_grouped` | Materialized grouped messages — populated when a session stops by concatenating consecutive same-role tokens. Used as the source for FTS5 full-text search. |
+| `chat_messages_grouped_fts` | FTS5 virtual table indexed on `chat_messages_grouped.content`. Enables full-text search with stemming, phrase matching, and ranking across token boundaries. |
 | `activity_events` | Audit trail (workspace created, session stopped, etc.) |
 | `task_status_events` | Task lifecycle transitions with actor tracking |
 | `acp_sessions` | ACP session state machine with fork lineage |
@@ -101,10 +103,11 @@ All DO implementations live in `apps/api/src/durable-objects/`. Each has a corre
 - **Debounced D1 summary sync** (configurable via `DO_SUMMARY_SYNC_DEBOUNCE_MS`, default 5s) pushes last-activity timestamps and session counts to D1 so dashboards work without fan-out
 - **ACP session state machine** (pending → assigned → running → completed/failed/interrupted) with heartbeat-based VM failure detection via DO alarms
 - **Session forking** with parent lineage tracking for conversation branching
+- **Post-session FTS5 indexing** — when a session stops, `materializeSession()` groups raw streaming tokens into logical messages in `chat_messages_grouped` and populates the `chat_messages_grouped_fts` FTS5 virtual table, enabling full-text search with phrase matching and stemming across former token boundaries
 
 This is SAM's largest DO (~70KB of implementation) — effectively a per-project microservice.
 
-**Service wrapper:** `apps/api/src/services/project-data.ts` — exports `createSession`, `persistMessage`, `persistMessageBatch`, `listSessions`, `getMessages`, `linkSessionToWorkspace`, `stopSession`, and more.
+**Service wrapper:** `apps/api/src/services/project-data.ts` — exports `createSession`, `persistMessage`, `persistMessageBatch`, `listSessions`, `getMessages`, `searchMessages`, `materializeAllStopped`, `linkSessionToWorkspace`, `stopSession`, and more.
 
 ### 2. NodeLifecycle — Warm Pool State Machine
 

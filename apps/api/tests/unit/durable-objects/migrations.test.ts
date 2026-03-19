@@ -148,9 +148,11 @@ describe('DO Migrations', () => {
       runMigrations(sql as unknown as SqlStorage);
 
       const log = sql.getExecLog();
-      const createStatements = log.filter((q) =>
-        q.toUpperCase().includes('CREATE TABLE CHAT_MESSAGES')
-      );
+      const createStatements = log.filter((q) => {
+        const upper = q.toUpperCase();
+        // Match "CREATE TABLE chat_messages" but not "CREATE TABLE chat_messages_grouped"
+        return upper.includes('CREATE TABLE CHAT_MESSAGES') && !upper.includes('CHAT_MESSAGES_GROUPED');
+      });
       expect(createStatements.length).toBe(1);
     });
 
@@ -183,16 +185,17 @@ describe('DO Migrations', () => {
       const log = sql.getExecLog();
       const indexes = log.filter((q) => q.toUpperCase().startsWith('CREATE INDEX'));
 
-      // 17 CREATE INDEX statements total (migration 007 drops session_created
+      // 18 CREATE INDEX statements total (migration 007 drops session_created
       // and creates session_seq, but DROP INDEX doesn't count here):
       // chat_sessions: 3 (status, started_at, workspace) + 1 (task_id from 002) + 1 (updated_at from 009)
       // chat_messages: 1 (session_created from 001) + 1 (session_seq from 007)
+      // chat_messages_grouped: 1 (session from 011)
       // task_status_events: 1 (task)
       // activity_events: 2 (created, type)
       // idle_cleanup_schedule: 1 (cleanup_at from migration 005)
       // acp_sessions: 5 (chat, workspace, node, parent, status) from migration 008
       // acp_session_events: 1 (session+created) from migration 008
-      expect(indexes.length).toBe(17);
+      expect(indexes.length).toBe(18);
     });
   });
 });
