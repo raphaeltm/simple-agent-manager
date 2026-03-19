@@ -1,6 +1,9 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, LogOut } from 'lucide-react';
 
+const FOCUS_RING =
+  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
+
 export interface MobileNavItem {
   label: string;
   path: string;
@@ -92,7 +95,7 @@ export function MobileNavDrawer({
           <button
             onClick={onClose}
             aria-label="Close navigation"
-            className="flex items-center justify-center w-8 h-8 bg-transparent border-none text-fg-muted cursor-pointer shrink-0"
+            className={`flex items-center justify-center w-10 h-10 bg-transparent border-none text-fg-muted cursor-pointer shrink-0 rounded-sm ${FOCUS_RING}`}
           >
             <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -114,7 +117,8 @@ export function MobileNavDrawer({
             return (
               <button
                 key={item.path}
-                className={`flex items-center gap-3 w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${
+                aria-current={active ? 'page' : undefined}
+                className={`flex items-center gap-3 w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${FOCUS_RING} ${
                   active
                     ? 'text-accent border-l-accent bg-accent-tint'
                     : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-surface-hover'
@@ -132,7 +136,7 @@ export function MobileNavDrawer({
             <div className="mt-2">
               <button
                 onClick={() => setInfraOpen(!infraOpen)}
-                className="flex items-center gap-2 w-full px-5 py-2.5 bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-surface-hover transition-all duration-[120ms]"
+                className={`flex items-center gap-2 w-full px-5 py-2.5 bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-surface-hover transition-all duration-[120ms] ${FOCUS_RING}`}
                 aria-expanded={infraOpen}
                 aria-controls="mobile-infra-nav-panel"
               >
@@ -146,7 +150,8 @@ export function MobileNavDrawer({
                     return (
                       <button
                         key={item.path}
-                        className={`flex items-center gap-3 w-full min-h-11 px-5 pl-8 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${
+                        aria-current={active ? 'page' : undefined}
+                        className={`flex items-center gap-3 w-full min-h-11 px-5 pl-8 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${FOCUS_RING} ${
                           active
                             ? 'text-accent border-l-accent bg-accent-tint'
                             : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-surface-hover'
@@ -168,7 +173,7 @@ export function MobileNavDrawer({
         <div className="border-t border-border-default py-2">
           <button
             onClick={onSignOut}
-            className="flex items-center gap-3 w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 border-l-transparent text-danger-fg hover:bg-surface-hover transition-all duration-[120ms]"
+            className={`flex items-center gap-3 w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 border-l-transparent text-danger-fg hover:bg-surface-hover transition-all duration-[120ms] ${FOCUS_RING}`}
           >
             <LogOut size={18} />
             Sign out
