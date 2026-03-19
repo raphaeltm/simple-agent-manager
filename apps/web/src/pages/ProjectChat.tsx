@@ -248,18 +248,23 @@ export function ProjectChat() {
       setIsRefreshing(true);
     }
     try {
-      const [sessionResult, tasksResult] = await Promise.all([
-        listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT }),
-        listProjectTasks(projectId, { limit: CHAT_TASK_LIST_LIMIT }),
-      ]);
+      // Fetch sessions and tasks independently — task fetch failure must never
+      // prevent sessions from loading (see Promise.all coupling bug).
+      const sessionResult = await listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT });
       setSessions(sessionResult.sessions);
-      // Build task title map for session idea tags
-      const titleMap = new Map<string, string>();
-      for (const t of tasksResult.tasks) {
-        titleMap.set(t.id, t.title);
-      }
-      setTaskTitleMap(titleMap);
       hasLoadedRef.current = true;
+
+      // Best-effort task title fetch for idea tags — failures are silently ignored
+      listProjectTasks(projectId, { limit: CHAT_TASK_LIST_LIMIT })
+        .then((tasksResult) => {
+          const titleMap = new Map<string, string>();
+          for (const t of tasksResult.tasks) {
+            titleMap.set(t.id, t.title);
+          }
+          setTaskTitleMap(titleMap);
+        })
+        .catch(() => { /* task titles are cosmetic — don't break sessions */ });
+
       return sessionResult.sessions;
     } catch {
       return [];
