@@ -94,6 +94,20 @@ export async function computeBlockedForTask(
   return isTaskBlocked(taskId, dependencies, statusMap);
 }
 
+/**
+ * D1 limits bound parameters to ~100 per statement. When passing large ID
+ * arrays to inArray(), we must batch into chunks to stay under the limit.
+ */
+const D1_INARRAY_BATCH_SIZE = 80;
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
 export async function computeBlockedSet(
   db: ReturnType<typeof drizzle<typeof schema>>,
   taskIds: string[]
@@ -102,25 +116,33 @@ export async function computeBlockedSet(
     return new Set<string>();
   }
 
-  const dependencies = await db
-    .select({
-      taskId: schema.taskDependencies.taskId,
-      dependsOnTaskId: schema.taskDependencies.dependsOnTaskId,
-    })
-    .from(schema.taskDependencies)
-    .where(inArray(schema.taskDependencies.taskId, taskIds));
+  // Batch the dependency lookup to avoid D1 parameter limit
+  const dependencies: { taskId: string; dependsOnTaskId: string }[] = [];
+  for (const batch of chunk(taskIds, D1_INARRAY_BATCH_SIZE)) {
+    const rows = await db
+      .select({
+        taskId: schema.taskDependencies.taskId,
+        dependsOnTaskId: schema.taskDependencies.dependsOnTaskId,
+      })
+      .from(schema.taskDependencies)
+      .where(inArray(schema.taskDependencies.taskId, batch));
+    dependencies.push(...rows);
+  }
 
   if (dependencies.length === 0) {
     return new Set<string>();
   }
 
-  const dependencyTaskIds = [...new Set(dependencies.map((dependency) => dependency.dependsOnTaskId))];
-  const dependencyTasks = dependencyTaskIds.length === 0
-    ? []
-    : await db
+  // Batch the status lookup for dependency targets
+  const dependencyTaskIds = [...new Set(dependencies.map((d) => d.dependsOnTaskId))];
+  const dependencyTasks: { id: string; status: string }[] = [];
+  for (const batch of chunk(dependencyTaskIds, D1_INARRAY_BATCH_SIZE)) {
+    const rows = await db
       .select({ id: schema.tasks.id, status: schema.tasks.status })
       .from(schema.tasks)
-      .where(inArray(schema.tasks.id, dependencyTaskIds));
+      .where(inArray(schema.tasks.id, batch));
+    dependencyTasks.push(...rows);
+  }
 
   const statusMap: Record<string, TaskStatus> = {};
   for (const dependencyTask of dependencyTasks) {
