@@ -10,7 +10,7 @@
  *
  * Integration tests with real SQLite are in the integration test suite.
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { MIGRATIONS } from '../../../src/durable-objects/migrations';
 
 // ── Grouping logic (mirrors ProjectData.materializeSession and mcp.ts groupTokensIntoMessages) ──
