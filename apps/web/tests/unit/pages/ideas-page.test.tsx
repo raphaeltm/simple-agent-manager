@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { Task, TaskStatus } from '@simple-agent-manager/shared';
@@ -227,7 +227,7 @@ describe('IdeasPage', () => {
     });
 
     renderIdeasPage();
-    const card = await screen.findByText('Brainstorm me');
+    await screen.findByText('Brainstorm me');
 
     // Hover to show actions (simulate by finding the button)
     const brainstormBtn = screen.getByRole('button', { name: 'Brainstorm' });
