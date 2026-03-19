@@ -36,7 +36,7 @@ You MUST:
 | Nav items (project) | Chat, Tasks, Overview, Activity, Sessions, Settings | Same items with same icons |
 | Icons | Lucide icons on every item | Same Lucide icons |
 | Back to Projects | ArrowLeft icon + label | Same |
-| Project name header | Shown when in project context | Same |
+| Project name header | Shown when in project context (falls back to "Project" if name not passed) | Same (currently always "Project" — real name requires AppShell to fetch and pass it) |
 | Infrastructure section | Collapsible, superadmin-only (Nodes, Workspaces) | Same |
 | Active state styling | Highlighted with accent color | Highlighted with accent color + left border |
 
