@@ -662,3 +662,45 @@ describe('ProjectChat realtime sidebar updates (capability test)', () => {
     });
   });
 });
+
+describe('ProjectChat idea tags on sessions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.listCredentials.mockResolvedValue([]);
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+  });
+
+  it('shows idea tag on sessions linked to a task', async () => {
+    const sessionWithTask = {
+      ...SESSION_1,
+      id: 'session-linked',
+      taskId: 'task-abc',
+      topic: 'Linked session',
+    };
+    mocks.listChatSessions.mockResolvedValue({ sessions: [sessionWithTask], total: 1 });
+    mocks.listProjectTasks.mockResolvedValue({
+      tasks: [{ id: 'task-abc', title: 'Improve caching', projectId: PROJECT_ID }],
+      nextCursor: null,
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${sessionWithTask.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Idea: Improve caching')).toBeInTheDocument();
+    });
+  });
+
+  it('does not show idea tag on sessions without a task', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [SESSION_1], total: 1 });
+    mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_1.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByText('First chat')).toBeInTheDocument();
+    });
+
+    // No idea tags should be rendered
+    expect(screen.queryByTitle(/^Idea:/)).not.toBeInTheDocument();
+  });
+});

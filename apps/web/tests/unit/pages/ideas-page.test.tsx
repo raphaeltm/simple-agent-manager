@@ -301,4 +301,88 @@ describe('IdeasPage', () => {
 
     expect(mocks.deleteProjectTask).toHaveBeenCalledWith('proj-test', 'idea-4');
   });
+
+  it('executes a ready-status idea without transitioning status', async () => {
+    const user = userEvent.setup();
+    mocks.listProjectTasks.mockResolvedValue({
+      tasks: [makeTask({ id: 'idea-r', title: 'Ready idea', status: 'ready' })],
+      nextCursor: null,
+    });
+    mocks.runProjectTask.mockResolvedValue({ taskId: 'idea-r', status: 'queued' });
+
+    renderIdeasPage();
+    await screen.findByText('Ready idea');
+
+    const executeBtn = screen.getByRole('button', { name: 'Execute' });
+    await user.click(executeBtn);
+
+    // Should NOT call updateProjectTaskStatus for ready ideas
+    expect(mocks.updateProjectTaskStatus).not.toHaveBeenCalled();
+    expect(mocks.runProjectTask).toHaveBeenCalledWith('proj-test', 'idea-r');
+  });
+
+  it('expands a collapsed group when clicked', async () => {
+    const user = userEvent.setup();
+    mocks.listProjectTasks.mockResolvedValue({
+      tasks: [makeTask({ id: 'done-1', title: 'Completed idea', status: 'completed' })],
+      nextCursor: null,
+    });
+
+    renderIdeasPage();
+
+    // Done group is collapsed by default — idea should not be visible
+    const doneBtn = await screen.findByRole('button', { name: /Done/i });
+    expect(screen.queryByText('Completed idea')).not.toBeInTheDocument();
+
+    // Click group header to expand
+    await user.click(doneBtn);
+
+    // Now the idea should be visible
+    expect(screen.getByText('Completed idea')).toBeInTheDocument();
+  });
+
+  it('shows filtered empty state when search has no matches', async () => {
+    const user = userEvent.setup();
+    mocks.listProjectTasks.mockResolvedValue({
+      tasks: [makeTask({ id: '1', title: 'Some idea', status: 'draft' })],
+      nextCursor: null,
+    });
+
+    renderIdeasPage();
+    await screen.findByText('Some idea');
+
+    const searchInput = screen.getByPlaceholderText('Search ideas...');
+    await user.type(searchInput, 'nonexistent');
+
+    expect(screen.getByText('No ideas match your search.')).toBeInTheDocument();
+  });
+
+  it('cancel button closes the new idea dialog', async () => {
+    const user = userEvent.setup();
+    renderIdeasPage();
+    await screen.findByRole('heading', { name: 'Ideas' });
+
+    // Open dialog
+    await user.click(screen.getByRole('button', { name: /New Idea/i }));
+    expect(screen.getByRole('heading', { name: 'New Idea' })).toBeInTheDocument();
+
+    // Cancel
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    // Dialog should be gone (the form heading disappears)
+    expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
+    expect(mocks.createProjectTask).not.toHaveBeenCalled();
+  });
+
+  it('does not submit when title is empty', async () => {
+    const user = userEvent.setup();
+    renderIdeasPage();
+    await screen.findByRole('heading', { name: 'Ideas' });
+
+    await user.click(screen.getByRole('button', { name: /New Idea/i }));
+
+    // Submit button should be disabled with empty title
+    const submitBtn = screen.getByRole('button', { name: /Create Idea/i });
+    expect(submitBtn).toBeDisabled();
+  });
 });
