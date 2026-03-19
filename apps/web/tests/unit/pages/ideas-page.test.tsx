@@ -277,10 +277,11 @@ describe('IdeasPage', () => {
     });
 
     renderIdeasPage();
-    const card = await screen.findByText('Click me');
+    await screen.findByText('Click me');
 
-    // Click on the card (not the action buttons)
-    await user.click(card);
+    // Click on the card navigation button
+    const cardBtn = screen.getByRole('button', { name: /View idea: Click me/i });
+    await user.click(cardBtn);
 
     expect(mocks.navigate).toHaveBeenCalledWith('/projects/proj-test/ideas/idea-3');
   });
@@ -296,7 +297,7 @@ describe('IdeasPage', () => {
     renderIdeasPage();
     await screen.findByText('Delete me');
 
-    const deleteBtn = screen.getByTitle('Delete idea');
+    const deleteBtn = screen.getByRole('button', { name: 'Delete idea' });
     await user.click(deleteBtn);
 
     expect(mocks.deleteProjectTask).toHaveBeenCalledWith('proj-test', 'idea-4');

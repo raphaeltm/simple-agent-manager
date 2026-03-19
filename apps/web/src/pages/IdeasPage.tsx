@@ -44,9 +44,9 @@ const STATUS_FROM_TASK: Record<TaskStatus, IdeaStatus> = {
 };
 
 const STATUS_CONFIG: Record<IdeaStatus, { label: string; color: string; icon: React.ReactNode }> = {
-  exploring: { label: 'Exploring', color: 'var(--sam-color-accent)', icon: <Lightbulb size={14} /> },
+  exploring: { label: 'Exploring', color: 'var(--sam-color-accent-primary)', icon: <Lightbulb size={14} /> },
   ready: { label: 'Ready', color: 'var(--sam-color-warning)', icon: <Play size={14} /> },
-  executing: { label: 'Executing', color: 'var(--sam-color-info)', icon: <Spinner size="sm" /> },
+  executing: { label: 'Executing', color: 'var(--sam-color-info)', icon: <span aria-hidden="true"><Spinner size="sm" /></span> },
   done: { label: 'Done', color: 'var(--sam-color-success)', icon: <Check size={14} /> },
   parked: { label: 'Parked', color: 'var(--sam-color-fg-muted)', icon: <Archive size={14} /> },
 };
@@ -98,13 +98,16 @@ function IdeaCard({ idea, sessionCount, onBrainstorm, onExecute, onClick, onDele
   return (
     <div
       className="group relative flex flex-col gap-2 p-4 rounded-lg border border-border-default bg-surface hover:border-accent/40 transition-colors cursor-pointer"
-      onClick={onClick}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
     >
+      {/* Clickable overlay for card navigation — sits behind action buttons */}
+      <button
+        className="absolute inset-0 w-full h-full bg-transparent border-none cursor-pointer z-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent rounded-lg"
+        onClick={onClick}
+        aria-label={`View idea: ${idea.title}`}
+      />
+
       {/* Header: title + status */}
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex items-start justify-between gap-2 relative z-[1] pointer-events-none">
         <h3 className="text-sm font-semibold text-fg-primary m-0 line-clamp-2 flex-1">
           {idea.title}
         </h3>
@@ -113,27 +116,28 @@ function IdeaCard({ idea, sessionCount, onBrainstorm, onExecute, onClick, onDele
 
       {/* Description snippet */}
       {idea.description && (
-        <p className="text-xs text-fg-muted m-0 line-clamp-2">
+        <p className="text-xs text-fg-muted m-0 line-clamp-2 relative z-[1] pointer-events-none">
           {idea.description}
         </p>
       )}
 
       {/* Footer: session count + actions */}
-      <div className="flex items-center justify-between mt-1">
-        <div className="flex items-center gap-1 text-xs text-fg-muted">
+      <div className="flex items-center justify-between mt-1 relative z-[1]">
+        <div className="flex items-center gap-1 text-xs text-fg-muted pointer-events-none">
           <MessageSquare size={12} />
           <span>{sessionCount} {sessionCount === 1 ? 'session' : 'sessions'}</span>
         </div>
 
-        {/* Actions — stop propagation so card click doesn't fire */}
+        {/* Actions — elevated z-index so they intercept clicks above the card overlay.
+            On pointer devices actions are revealed on hover; on touch devices
+            (hover:none) they are always visible so they remain tappable. */}
         <div
-          className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
-          onClick={(e) => e.stopPropagation()}
+          className="flex items-center gap-1 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"
         >
           {(ideaStatus === 'exploring' || ideaStatus === 'ready') && (
             <button
               onClick={onBrainstorm}
-              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-transparent border border-border-default text-fg-muted hover:text-fg-primary hover:border-accent cursor-pointer transition-colors"
+              className="inline-flex items-center gap-1 px-2 py-1 min-h-[44px] text-xs font-medium rounded bg-transparent border border-border-default text-fg-muted hover:text-fg-primary hover:border-accent cursor-pointer transition-colors"
               title="Start brainstorming session"
             >
               <MessageSquare size={12} />
@@ -143,7 +147,7 @@ function IdeaCard({ idea, sessionCount, onBrainstorm, onExecute, onClick, onDele
           {(ideaStatus === 'exploring' || ideaStatus === 'ready') && (
             <button
               onClick={onExecute}
-              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-accent text-fg-on-accent border-none cursor-pointer hover:opacity-90 transition-opacity"
+              className="inline-flex items-center gap-1 px-2 py-1 min-h-[44px] text-xs font-medium rounded bg-accent text-fg-on-accent border-none cursor-pointer hover:opacity-90 transition-opacity"
               title="Execute this idea"
             >
               <Play size={12} />
@@ -153,7 +157,8 @@ function IdeaCard({ idea, sessionCount, onBrainstorm, onExecute, onClick, onDele
           {ideaStatus === 'exploring' && (
             <button
               onClick={onDelete}
-              className="inline-flex items-center gap-1 px-1.5 py-1 text-xs rounded bg-transparent border-none text-fg-muted hover:text-danger-fg cursor-pointer transition-colors"
+              className="inline-flex items-center gap-1 px-1.5 py-1 min-h-[44px] text-xs rounded bg-transparent border-none text-fg-muted hover:text-danger-fg cursor-pointer transition-colors"
+              aria-label="Delete idea"
               title="Delete idea"
             >
               <X size={12} />
@@ -196,13 +201,18 @@ function NewIdeaDialog({ open, onClose, onSubmit, submitting }: NewIdeaDialogPro
       {/* Backdrop */}
       <div className="fixed inset-0 bg-overlay z-drawer-backdrop" onClick={onClose} />
       {/* Dialog */}
-      <div className="fixed inset-0 z-drawer flex items-center justify-center p-4">
+      <div
+        className="fixed inset-0 z-drawer flex items-center justify-center p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-idea-dialog-title"
+      >
         <form
           onSubmit={handleSubmit}
           className="w-full max-w-md bg-surface rounded-lg border border-border-default shadow-lg p-6 flex flex-col gap-4"
           onClick={(e) => e.stopPropagation()}
         >
-          <h2 className="text-lg font-semibold text-fg-primary m-0">New Idea</h2>
+          <h2 id="new-idea-dialog-title" className="text-lg font-semibold text-fg-primary m-0">New Idea</h2>
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor="idea-title" className="text-sm font-medium text-fg-secondary">
@@ -459,10 +469,10 @@ export function IdeasPage() {
         <h1 className="text-xl font-semibold text-fg-primary m-0">Ideas</h1>
         <button
           onClick={() => setDialogOpen(true)}
-          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg bg-accent text-fg-on-accent border-none cursor-pointer hover:opacity-90 transition-opacity"
+          className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] text-sm font-medium rounded-lg bg-accent text-fg-on-accent border-none cursor-pointer hover:opacity-90 transition-opacity"
         >
           <Plus size={16} />
-          {!isMobile && 'New Idea'}
+          New Idea
         </button>
       </div>
 
@@ -481,6 +491,7 @@ export function IdeasPage() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as IdeaStatus | 'all')}
+          aria-label="Filter by status"
           className="px-3 py-2 text-sm rounded-lg border border-border-default bg-surface-inset text-fg-primary focus:outline-none focus:border-accent cursor-pointer"
         >
           <option value="all">All statuses</option>
@@ -516,7 +527,8 @@ export function IdeasPage() {
                 {/* Group header */}
                 <button
                   onClick={() => toggleGroup(status)}
-                  className="flex items-center gap-2 px-1 py-1 bg-transparent border-none cursor-pointer text-left"
+                  aria-expanded={!collapsed}
+                  className="flex items-center gap-2 px-1 py-1 bg-transparent border-none cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent rounded"
                 >
                   {collapsed ? (
                     <ChevronRight size={14} className="text-fg-muted" />

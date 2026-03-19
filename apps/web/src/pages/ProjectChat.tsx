@@ -789,8 +789,8 @@ function SessionItem({
             <span
               className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full max-w-full overflow-hidden text-ellipsis whitespace-nowrap"
               style={{
-                color: 'var(--sam-color-accent)',
-                background: 'color-mix(in srgb, var(--sam-color-accent) 12%, transparent)',
+                color: 'var(--sam-color-accent-primary)',
+                background: 'color-mix(in srgb, var(--sam-color-accent-primary) 12%, transparent)',
               }}
               title={`Idea: ${ideaTitle}`}
             >
