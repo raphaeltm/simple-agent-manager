@@ -273,7 +273,12 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('dispatch_task');
       // Agent-initiated notifications
       expect(toolNames).toContain('request_human_input');
-      expect(body.result.tools).toHaveLength(11);
+      // Session–Idea linking tools
+      expect(toolNames).toContain('link_idea');
+      expect(toolNames).toContain('unlink_idea');
+      expect(toolNames).toContain('list_linked_ideas');
+      expect(toolNames).toContain('find_related_ideas');
+      expect(body.result.tools).toHaveLength(15);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
