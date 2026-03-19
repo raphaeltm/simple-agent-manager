@@ -907,7 +907,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
 
-      {/* Scroll to bottom button */}
+      {/* Scroll to bottom button — offset further when status bar is visible to avoid overlap */}
       {showScrollButton && (
         <div className="relative shrink-0">
           <button
@@ -917,7 +917,11 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               isStuckToBottomRef.current = true;
               setShowScrollButton(false);
             }}
-            className="absolute -top-10 right-4 z-10 flex items-center justify-center w-8 h-8 rounded-full border border-border-default bg-surface shadow-md cursor-pointer hover:bg-page transition-colors"
+            className={`absolute right-4 z-10 flex items-center justify-center w-8 h-8 rounded-full border border-border-default bg-surface shadow-md cursor-pointer hover:bg-page transition-all ${
+              agentSession.isPrompting || (agentSession.isConnecting && session?.workspaceId)
+                ? '-top-20'
+                : '-top-10'
+            }`}
             aria-label="Scroll to bottom"
           >
             <ChevronDown size={16} className="text-fg-muted" />
