@@ -650,6 +650,9 @@ export class ProjectData extends DurableObject<Env> {
       results.push(...fallbackResults);
     }
 
+    // Sort combined results by recency for consistent ordering
+    results.sort((a, b) => b.createdAt - a.createdAt);
+
     return results.slice(0, limit);
   }
 
@@ -886,16 +889,21 @@ export class ProjectData extends DurableObject<Env> {
         msg.createdAt
       );
 
-      // Sync FTS5 content table — get the rowid of the just-inserted row
-      const rowResult = this.sql
-        .exec('SELECT rowid FROM chat_messages_grouped WHERE id = ?', msg.id)
-        .toArray()[0];
-      if (rowResult) {
-        this.sql.exec(
-          'INSERT OR IGNORE INTO chat_messages_grouped_fts (rowid, content) VALUES (?, ?)',
-          rowResult.rowid as number,
-          msg.content
-        );
+      // Sync FTS5 content table — get the rowid of the just-inserted row.
+      // Wrapped in try/catch so FTS5 unavailability doesn't prevent grouped table population.
+      try {
+        const rowResult = this.sql
+          .exec('SELECT rowid FROM chat_messages_grouped WHERE id = ?', msg.id)
+          .toArray()[0];
+        if (rowResult) {
+          this.sql.exec(
+            'INSERT OR IGNORE INTO chat_messages_grouped_fts (rowid, content) VALUES (?, ?)',
+            rowResult.rowid as number,
+            msg.content
+          );
+        }
+      } catch {
+        // FTS5 table may not exist — grouped table still has value for LIKE search
       }
     }
 
@@ -910,11 +918,15 @@ export class ProjectData extends DurableObject<Env> {
   /**
    * Materialize all stopped sessions that haven't been materialized yet.
    * Used for backfilling existing data after migration 011.
+   *
+   * @param limit Max sessions to process per call (default 50) to stay within CPU time limits.
+   *              Caller should retry until `remaining === 0`.
    */
-  materializeAllStopped(): { materialized: number; errors: number } {
+  materializeAllStopped(limit: number = 50): { materialized: number; errors: number; remaining: number } {
     const sessions = this.sql
       .exec(
-        `SELECT id FROM chat_sessions WHERE status = 'stopped' AND materialized_at IS NULL`
+        `SELECT id FROM chat_sessions WHERE status = 'stopped' AND materialized_at IS NULL LIMIT ?`,
+        limit
       )
       .toArray();
 
@@ -932,7 +944,14 @@ export class ProjectData extends DurableObject<Env> {
         errors++;
       }
     }
-    return { materialized, errors };
+
+    // Check if more sessions remain
+    const remainingRow = this.sql
+      .exec(`SELECT COUNT(*) as count FROM chat_sessions WHERE status = 'stopped' AND materialized_at IS NULL`)
+      .toArray()[0];
+    const remaining = (remainingRow?.count as number) ?? 0;
+
+    return { materialized, errors, remaining };
   }
 
   // =========================================================================

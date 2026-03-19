@@ -278,10 +278,10 @@ describe('Message Materialization', () => {
 
       MIGRATIONS[10].run(mockSql);
 
-      // Should create chat_messages_grouped table
-      expect(execLog.some((q) => q.includes('CREATE TABLE chat_messages_grouped'))).toBe(true);
+      // Should create chat_messages_grouped table (with IF NOT EXISTS for idempotency)
+      expect(execLog.some((q) => q.includes('chat_messages_grouped') && q.includes('CREATE TABLE'))).toBe(true);
       // Should create FTS5 virtual table
-      expect(execLog.some((q) => q.includes('CREATE VIRTUAL TABLE chat_messages_grouped_fts'))).toBe(true);
+      expect(execLog.some((q) => q.includes('chat_messages_grouped_fts') && q.includes('CREATE VIRTUAL TABLE'))).toBe(true);
       expect(execLog.some((q) => q.includes('fts5'))).toBe(true);
       // Should add materialized_at column
       expect(execLog.some((q) => q.includes('materialized_at'))).toBe(true);

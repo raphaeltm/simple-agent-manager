@@ -382,7 +382,7 @@ const MCP_TOOLS = [
   {
     name: 'search_messages',
     description:
-      'Search messages across all chat sessions in your project by keyword using full-text search. Returns matching message snippets with session context. Useful for finding past discussions about specific topics, decisions, or code. Completed sessions use FTS5 indexing with phrase matching and stemming; active sessions fall back to keyword matching.',
+      'Search messages across all chat sessions in your project by keyword using full-text search. Returns matching message snippets with session context. Useful for finding past discussions about specific topics, decisions, or code. Completed sessions use FTS5 indexing (matches messages containing all search words); active sessions fall back to keyword matching.',
     inputSchema: {
       type: 'object' as const,
       properties: {

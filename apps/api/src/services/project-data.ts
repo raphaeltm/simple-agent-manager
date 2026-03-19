@@ -180,9 +180,10 @@ export async function searchMessages(
 export async function materializeAllStopped(
   env: Env,
   projectId: string,
-): Promise<{ materialized: number; errors: number }> {
+  limit: number = 50,
+): Promise<{ materialized: number; errors: number; remaining: number }> {
   const stub = await getStub(env, projectId);
-  return stub.materializeAllStopped();
+  return stub.materializeAllStopped(limit);
 }
 
 export async function getCleanupAt(
