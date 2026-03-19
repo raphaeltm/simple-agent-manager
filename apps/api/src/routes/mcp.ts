@@ -132,7 +132,7 @@ function getMcpLimits(env: Env) {
     sessionListMax: DEFAULT_MCP_SESSION_LIST_MAX,
     messageListLimit: parsePositiveInt(env.MCP_MESSAGE_LIST_LIMIT as string, DEFAULT_MCP_MESSAGE_LIST_LIMIT),
     messageListMax: parsePositiveInt(env.MCP_MESSAGE_LIST_MAX as string, DEFAULT_MCP_MESSAGE_LIST_MAX),
-    messageSearchMax: DEFAULT_MCP_MESSAGE_SEARCH_MAX,
+    messageSearchMax: parsePositiveInt(env.MCP_MESSAGE_SEARCH_MAX as string, DEFAULT_MCP_MESSAGE_SEARCH_MAX),
     taskDescriptionSnippetLength: parsePositiveInt(
       env.MCP_TASK_DESCRIPTION_SNIPPET_LENGTH as string,
       DEFAULT_MCP_TASK_DESCRIPTION_SNIPPET_LENGTH,

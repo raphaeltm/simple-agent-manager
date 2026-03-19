@@ -239,6 +239,7 @@ export interface Env {
   // MCP get_session_messages limits
   MCP_MESSAGE_LIST_LIMIT?: string;                 // Default raw tokens per request (default: 50)
   MCP_MESSAGE_LIST_MAX?: string;                   // Max raw tokens per request (default: 200)
+  MCP_MESSAGE_SEARCH_MAX?: string;                 // Max search results for search_messages (default: 20)
   // Configurable content limits
   MAX_TASK_MESSAGE_LENGTH?: string;
   MAX_ACTIVITY_MESSAGE_LENGTH?: string;
