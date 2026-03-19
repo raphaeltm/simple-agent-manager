@@ -54,6 +54,18 @@ const STATUS_CONFIG: Record<IdeaStatus, { label: string; color: string; icon: Re
 // Which groups to show and in what order
 const STATUS_ORDER: IdeaStatus[] = ['exploring', 'ready', 'executing', 'done', 'parked'];
 
+/** Max ideas to load per page. Override via VITE_IDEAS_FETCH_LIMIT. */
+const DEFAULT_IDEAS_FETCH_LIMIT = 200;
+const IDEAS_FETCH_LIMIT = parseInt(
+  import.meta.env.VITE_IDEAS_FETCH_LIMIT || String(DEFAULT_IDEAS_FETCH_LIMIT),
+);
+
+/** Max sessions to load for idea session counts. Override via VITE_IDEAS_SESSION_FETCH_LIMIT. */
+const DEFAULT_IDEAS_SESSION_FETCH_LIMIT = 200;
+const IDEAS_SESSION_FETCH_LIMIT = parseInt(
+  import.meta.env.VITE_IDEAS_SESSION_FETCH_LIMIT || String(DEFAULT_IDEAS_SESSION_FETCH_LIMIT),
+);
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -275,8 +287,8 @@ export function IdeasPage() {
   const loadData = useCallback(async () => {
     try {
       const [tasksResult, sessionsResult] = await Promise.all([
-        listProjectTasks(projectId, { limit: 200 }),
-        listChatSessions(projectId, { limit: 200 }),
+        listProjectTasks(projectId, { limit: IDEAS_FETCH_LIMIT }),
+        listChatSessions(projectId, { limit: IDEAS_SESSION_FETCH_LIMIT }),
       ]);
       setIdeas(tasksResult.tasks);
       setSessions(sessionsResult.sessions);

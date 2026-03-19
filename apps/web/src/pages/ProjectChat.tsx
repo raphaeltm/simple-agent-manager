@@ -38,6 +38,18 @@ const TASK_STATUS_POLL_MS = 2000;
 /** Sessions with no activity in this window are considered stale and hidden by default (ms). */
 const STALE_SESSION_THRESHOLD_MS = 3 * 60 * 60 * 1000; // 3 hours
 
+/** Max sessions to load in the sidebar. Override via VITE_CHAT_SESSION_LIST_LIMIT. */
+const DEFAULT_CHAT_SESSION_LIST_LIMIT = 100;
+const CHAT_SESSION_LIST_LIMIT = parseInt(
+  import.meta.env.VITE_CHAT_SESSION_LIST_LIMIT || String(DEFAULT_CHAT_SESSION_LIST_LIMIT),
+);
+
+/** Max tasks to load for idea tagging. Override via VITE_CHAT_TASK_LIST_LIMIT. */
+const DEFAULT_CHAT_TASK_LIST_LIMIT = 200;
+const CHAT_TASK_LIST_LIMIT = parseInt(
+  import.meta.env.VITE_CHAT_TASK_LIST_LIMIT || String(DEFAULT_CHAT_TASK_LIST_LIMIT),
+);
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -237,8 +249,8 @@ export function ProjectChat() {
     }
     try {
       const [sessionResult, tasksResult] = await Promise.all([
-        listChatSessions(projectId, { limit: 100 }),
-        listProjectTasks(projectId, { limit: 200 }),
+        listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT }),
+        listProjectTasks(projectId, { limit: CHAT_TASK_LIST_LIMIT }),
       ]);
       setSessions(sessionResult.sessions);
       // Build task title map for session idea tags
