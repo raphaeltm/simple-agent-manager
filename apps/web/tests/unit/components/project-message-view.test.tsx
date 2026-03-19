@@ -1791,11 +1791,6 @@ describe('ProjectMessageView — scroll position stability on follow-up send', (
 
   it('resets committedToDoView on session switch so new session can show ACP', async () => {
     // Session A: commit to DO view
-    const sessionA = {
-      ...makeSession('session-A'),
-      workspaceId: 'ws-A',
-      agentSessionId: 'agent-session-A',
-    };
     mocks.getChatSession.mockResolvedValue(
       makeSessionResponse('session-A', [makeMessage('do-a', 'session-A', 'Session A response')]),
     );
