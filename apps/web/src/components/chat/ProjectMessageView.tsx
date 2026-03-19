@@ -917,7 +917,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               isStuckToBottomRef.current = true;
               setShowScrollButton(false);
             }}
-            className={`absolute right-4 z-10 flex items-center justify-center w-8 h-8 rounded-full border border-border-default bg-surface shadow-md cursor-pointer hover:bg-page transition-all ${
+            className={`absolute right-4 z-10 flex items-center justify-center w-8 h-8 rounded-full border border-border-default bg-surface shadow-md cursor-pointer hover:bg-page focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 transition-all ${
               agentSession.isPrompting || (agentSession.isConnecting && session?.workspaceId)
                 ? '-top-20'
                 : '-top-10'
