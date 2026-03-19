@@ -127,7 +127,7 @@ describe('AppShell (project context)', () => {
     renderAppShell('/projects/proj-123/chat');
     expect(screen.getByRole('navigation', { name: 'Project navigation' })).toBeInTheDocument();
     expect(screen.getByText('Chat')).toBeInTheDocument();
-    expect(screen.getByText('Tasks')).toBeInTheDocument();
+    expect(screen.getByText('Ideas')).toBeInTheDocument();
     expect(screen.getByText('Overview')).toBeInTheDocument();
     expect(screen.getByText('Activity')).toBeInTheDocument();
     expect(screen.getByText('Sessions')).toBeInTheDocument();
@@ -208,7 +208,7 @@ describe('AppShell (mobile)', () => {
     const drawer = screen.getByRole('dialog', { name: 'Navigation menu' });
     expect(drawer).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Chat' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Tasks' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ideas' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Overview' })).toBeInTheDocument();
   });
 

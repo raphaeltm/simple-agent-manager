@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
   listChatSessions: vi.fn(),
   listCredentials: vi.fn(),
+  listProjectTasks: vi.fn(),
   submitTask: vi.fn(),
   getProjectTask: vi.fn(),
   getTranscribeApiUrl: vi.fn(() => 'https://api.test.com/api/transcribe'),
@@ -18,6 +19,7 @@ vi.mock('../../../src/lib/api', () => ({
   listAgents: mocks.listAgents,
   listChatSessions: mocks.listChatSessions,
   listCredentials: mocks.listCredentials,
+  listProjectTasks: mocks.listProjectTasks,
   submitTask: mocks.submitTask,
   getProjectTask: mocks.getProjectTask,
   getTranscribeApiUrl: mocks.getTranscribeApiUrl,
@@ -125,6 +127,7 @@ describe('ProjectChat new chat button', () => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
   it('shows new chat input when there are no sessions', async () => {
@@ -262,6 +265,7 @@ describe('ProjectChat voice input', () => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
   it('renders voice button in the new chat input', async () => {
@@ -313,6 +317,7 @@ describe('ProjectChat agent type selection', () => {
     mocks.listCredentials.mockResolvedValue([
       { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
     ]);
+    mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
   it('does not show agent selector when only one agent is configured', async () => {
@@ -396,6 +401,7 @@ describe('ProjectChat workspace profile selection', () => {
     ]);
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+    mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
   it('shows workspace profile dropdown with Full selected by default', async () => {
@@ -554,6 +560,7 @@ describe('ProjectChat close conversation button', () => {
     mocks.listCredentials.mockResolvedValue([]);
     mocks.listAgents.mockResolvedValue({ agents: [{ agentType: 'claude-code', label: 'Claude Code' }] });
     mocks.closeConversationTask.mockResolvedValue({});
+    mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
   it('shows close conversation button for idle session with task and calls API on click', async () => {
@@ -602,6 +609,7 @@ describe('ProjectChat realtime sidebar updates (capability test)', () => {
     vi.clearAllMocks();
     mocks.listCredentials.mockResolvedValue([]);
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
   it('refreshes the session list when onSessionChange fires (simulating a WebSocket event)', async () => {
