@@ -426,9 +426,14 @@ export const DEFAULT_TTS_R2_PREFIX = 'tts';
  * Override via TTS_CHUNK_SIZE env var. */
 export const DEFAULT_TTS_CHUNK_SIZE = 4000;
 
+/** Default max number of TTS chunks per request. Prevents CPU time exhaustion
+ * on Workers runtime. Override via TTS_MAX_CHUNKS env var. */
+export const DEFAULT_TTS_MAX_CHUNKS = 8;
+
 /** Default character threshold above which text is summarized instead of read verbatim.
- * Override via TTS_SUMMARY_THRESHOLD env var. */
-export const DEFAULT_TTS_SUMMARY_THRESHOLD = 50000;
+ * Aligned to DEFAULT_TTS_MAX_CHUNKS × DEFAULT_TTS_CHUNK_SIZE to ensure summary mode
+ * engages before the chunk cap fires. Override via TTS_SUMMARY_THRESHOLD env var. */
+export const DEFAULT_TTS_SUMMARY_THRESHOLD = 30000;
 
 // =============================================================================
 // Agent Settings

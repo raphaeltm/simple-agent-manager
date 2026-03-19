@@ -367,7 +367,7 @@ describe('generateSpeechAudio', () => {
     const sentences = Array.from({ length: 10 }, (_, i) => `Sentence ${i + 1} with content.`);
     const text = sentences.join(' ');
 
-    const result = await generateSpeechAudio(text, ai, { chunkSize: 50 });
+    const result = await generateSpeechAudio(text, ai, { chunkSize: 50, maxChunks: 20 });
 
     // Should have made multiple AI calls
     expect(callCount).toBeGreaterThan(1);
@@ -379,6 +379,19 @@ describe('generateSpeechAudio', () => {
     for (let i = 0; i < callCount; i++) {
       expect(resultArray[i]).toBe(i + 1);
     }
+  });
+
+  it('throws when chunk count exceeds maxChunks', async () => {
+    const ai = createMockAi();
+    // Create text that would produce many chunks
+    const text = Array.from({ length: 20 }, (_, i) => `Sentence ${i + 1} here.`).join(' ');
+
+    await expect(
+      generateSpeechAudio(text, ai, { chunkSize: 30, maxChunks: 3 })
+    ).rejects.toThrow(/exceeding limit of 3/);
+
+    // Should not have called AI at all
+    expect(ai.run).not.toHaveBeenCalled();
   });
 });
 
@@ -586,7 +599,8 @@ describe('getTTSConfig', () => {
     expect(config.r2Prefix).toBe('tts');
     expect(config.enabled).toBe(true);
     expect(config.chunkSize).toBe(4000);
-    expect(config.summaryThreshold).toBe(50000);
+    expect(config.maxChunks).toBe(8);
+    expect(config.summaryThreshold).toBe(30000);
   });
 
   it('reads overrides from env vars', () => {
@@ -601,6 +615,7 @@ describe('getTTSConfig', () => {
       TTS_CLEANUP_TIMEOUT_MS: '30000',
       TTS_R2_PREFIX: 'audio-cache',
       TTS_CHUNK_SIZE: '8000',
+      TTS_MAX_CHUNKS: '12',
       TTS_SUMMARY_THRESHOLD: '100000',
     });
     expect(config.model).toBe('@cf/myshell-ai/melotts');
@@ -613,6 +628,7 @@ describe('getTTSConfig', () => {
     expect(config.cleanupTimeoutMs).toBe(30000);
     expect(config.r2Prefix).toBe('audio-cache');
     expect(config.chunkSize).toBe(8000);
+    expect(config.maxChunks).toBe(12);
     expect(config.summaryThreshold).toBe(100000);
   });
 

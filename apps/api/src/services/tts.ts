@@ -31,6 +31,7 @@ import {
   DEFAULT_TTS_CLEANUP_TIMEOUT_MS,
   DEFAULT_TTS_R2_PREFIX,
   DEFAULT_TTS_CHUNK_SIZE,
+  DEFAULT_TTS_MAX_CHUNKS,
   DEFAULT_TTS_SUMMARY_THRESHOLD,
 } from '@simple-agent-manager/shared';
 import { log } from '../lib/logger';
@@ -50,6 +51,7 @@ export interface TTSConfig {
   r2Prefix?: string;
   enabled?: boolean;
   chunkSize?: number;
+  maxChunks?: number;
   summaryThreshold?: number;
 }
 
@@ -65,6 +67,7 @@ export interface TTSEnvVars {
   TTS_R2_PREFIX?: string;
   TTS_ENABLED?: string;
   TTS_CHUNK_SIZE?: string;
+  TTS_MAX_CHUNKS?: string;
   TTS_SUMMARY_THRESHOLD?: string;
 }
 
@@ -81,6 +84,7 @@ export function getTTSConfig(env: TTSEnvVars): TTSConfig {
     r2Prefix: env.TTS_R2_PREFIX || DEFAULT_TTS_R2_PREFIX,
     enabled: env.TTS_ENABLED !== 'false',
     chunkSize: parsePositiveInt(env.TTS_CHUNK_SIZE, DEFAULT_TTS_CHUNK_SIZE),
+    maxChunks: parsePositiveInt(env.TTS_MAX_CHUNKS, DEFAULT_TTS_MAX_CHUNKS),
     summaryThreshold: parsePositiveInt(env.TTS_SUMMARY_THRESHOLD, DEFAULT_TTS_SUMMARY_THRESHOLD),
   };
 }
@@ -206,7 +210,8 @@ export async function summarizeTextForSpeech(
     const summary = result.text?.trim();
     if (!summary) {
       log.warn('tts.summary_empty', { textLength: text.length, cleanupModel });
-      return fallbackStripMarkdown(text.slice(0, DEFAULT_TTS_CHUNK_SIZE));
+      const effectiveChunkSize = config.chunkSize ?? DEFAULT_TTS_CHUNK_SIZE;
+      return fallbackStripMarkdown(text.slice(0, effectiveChunkSize));
     }
 
     log.info('tts.summary_complete', {
@@ -379,10 +384,24 @@ export async function generateSpeechAudio(
   config: TTSConfig = {},
 ): Promise<ArrayBuffer> {
   const chunkSize = config.chunkSize ?? DEFAULT_TTS_CHUNK_SIZE;
+  const maxChunks = config.maxChunks ?? DEFAULT_TTS_MAX_CHUNKS;
   const chunks = splitTextIntoChunks(text, chunkSize);
 
   if (chunks.length === 1) {
     return generateSpeechAudioChunk(chunks[0]!, ai, config);
+  }
+
+  // Guard against CPU time exhaustion on Workers runtime
+  if (chunks.length > maxChunks) {
+    log.warn('tts.chunk_limit_exceeded', {
+      chunkCount: chunks.length,
+      maxChunks,
+      textLength: text.length,
+    });
+    throw new Error(
+      `Text produces ${chunks.length} chunks, exceeding limit of ${maxChunks}. ` +
+      `Use summary mode or reduce text length.`,
+    );
   }
 
   log.info('tts.chunked_generation_start', {
@@ -417,7 +436,16 @@ export async function generateSpeechAudio(
   return concatenated;
 }
 
-/** Concatenate multiple ArrayBuffers into a single ArrayBuffer. */
+/**
+ * Concatenate multiple ArrayBuffers into a single ArrayBuffer.
+ *
+ * For MP3: Each MP3 frame is self-contained with its own sync header.
+ * Most decoders (including browser <audio>) handle concatenated MP3 frames
+ * correctly, treating each frame independently. Duration reporting may be
+ * approximate since it's typically estimated from file size and first frame's
+ * bitrate. This is acceptable for TTS audio where exact seek precision is
+ * not critical.
+ */
 export function concatenateArrayBuffers(buffers: ArrayBuffer[]): ArrayBuffer {
   const totalLength = buffers.reduce((sum, buf) => sum + buf.byteLength, 0);
   const result = new Uint8Array(totalLength);
