@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo, type ReactNode } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Menu, Search } from 'lucide-react';
+import { Menu, Search, ArrowLeft, Shield, Server, Monitor } from 'lucide-react';
 import { useAuth } from './AuthProvider';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { NavSidebar, GLOBAL_NAV_ITEMS, PROJECT_NAV_ITEMS, extractProjectId } from './NavSidebar';
-import { MobileNavDrawer } from './MobileNavDrawer';
+import { MobileNavDrawer, type MobileNavItem } from './MobileNavDrawer';
 import { GlobalCommandPalette } from './GlobalCommandPalette';
 import { useGlobalCommandPalette } from '../hooks/useGlobalCommandPalette';
 import { isMacPlatform } from '../lib/keyboard-shortcuts';
@@ -26,21 +26,36 @@ export function AppShell({ children }: AppShellProps) {
   // Detect project context from URL (excludes reserved paths like /projects/new)
   const projectId = extractProjectId(location.pathname);
 
-  const mobileNavItems = useMemo(() => {
+  const mobileNavItems = useMemo((): MobileNavItem[] => {
     if (projectId) {
       return [
-        { label: 'Back to Projects', path: '/projects' },
+        { label: 'Back to Projects', path: '/projects', icon: <ArrowLeft size={18} /> },
         ...PROJECT_NAV_ITEMS.map((item) => ({
           label: item.label,
           path: `/projects/${projectId}/${item.path}`,
+          icon: item.icon,
         })),
       ];
     }
-    const items = GLOBAL_NAV_ITEMS.map((item) => ({ label: item.label, path: item.path }));
+    const items: MobileNavItem[] = GLOBAL_NAV_ITEMS.map((item) => ({
+      label: item.label,
+      path: item.path,
+      icon: item.icon,
+    }));
     if (isSuperadmin) {
-      items.push({ label: 'Admin', path: '/admin' });
+      items.push({ label: 'Admin', path: '/admin', icon: <Shield size={18} /> });
     }
     return items;
+  }, [isSuperadmin, projectId]);
+
+  const mobileInfraSection = useMemo(() => {
+    if (!isSuperadmin || projectId) return undefined;
+    return {
+      items: [
+        { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
+        { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
+      ],
+    };
   }, [isSuperadmin, projectId]);
 
   // Close drawer on route change
@@ -108,6 +123,8 @@ export function AppShell({ children }: AppShellProps) {
             currentPath={location.pathname}
             onNavigate={(path) => { navigate(path); setDrawerOpen(false); }}
             onSignOut={handleSignOut}
+            projectName={projectId ? 'Project' : undefined}
+            infraSection={mobileInfraSection}
           />
         )}
 

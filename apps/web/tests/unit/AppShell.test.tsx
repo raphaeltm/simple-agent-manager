@@ -211,4 +211,77 @@ describe('AppShell (mobile)', () => {
     expect(screen.getByRole('button', { name: 'Tasks' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Overview' })).toBeInTheDocument();
   });
+
+  it('renders icons alongside labels in mobile drawer nav items', () => {
+    renderAppShell();
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+
+    const drawer = screen.getByRole('dialog', { name: 'Navigation menu' });
+    // Lucide icons render as <svg> elements — each nav item button should contain an SVG icon
+    const navButtons = drawer.querySelectorAll('nav button');
+    for (const btn of navButtons) {
+      expect(btn.querySelector('svg')).toBeTruthy();
+    }
+  });
+
+  it('renders icons in mobile drawer project nav items', () => {
+    renderAppShell('/projects/proj-123/chat');
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+
+    const drawer = screen.getByRole('dialog', { name: 'Navigation menu' });
+    const navButtons = drawer.querySelectorAll('nav button');
+    // Back to Projects + 6 project items = 7 buttons
+    expect(navButtons.length).toBeGreaterThanOrEqual(7);
+    for (const btn of navButtons) {
+      expect(btn.querySelector('svg')).toBeTruthy();
+    }
+  });
+
+  it('shows project name header in mobile drawer when in project context', () => {
+    renderAppShell('/projects/proj-123/chat');
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+
+    expect(screen.getByText('Project')).toBeInTheDocument();
+  });
+
+  it('shows Infrastructure section in mobile drawer for superadmins', () => {
+    mockAuthState = { ...mockAuthState, isSuperadmin: true };
+    renderAppShell();
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+
+    expect(screen.getByText('Infrastructure')).toBeInTheDocument();
+  });
+
+  it('expands Infrastructure to show Nodes and Workspaces in mobile drawer', () => {
+    mockAuthState = { ...mockAuthState, isSuperadmin: true };
+    renderAppShell();
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+    fireEvent.click(screen.getByText('Infrastructure'));
+
+    expect(screen.getByRole('button', { name: 'Nodes' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Workspaces' })).toBeInTheDocument();
+  });
+
+  it('does not show Infrastructure in mobile drawer for non-superadmins', () => {
+    mockAuthState = { ...mockAuthState, isSuperadmin: false };
+    renderAppShell();
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+
+    expect(screen.queryByText('Infrastructure')).not.toBeInTheDocument();
+  });
+
+  it('renders sign out with icon in mobile drawer', () => {
+    renderAppShell();
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+
+    const signOutBtn = screen.getByRole('button', { name: 'Sign out' });
+    expect(signOutBtn.querySelector('svg')).toBeTruthy();
+  });
 });
