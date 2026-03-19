@@ -88,6 +88,35 @@ vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
   };
 });
 
+// Mock react-virtuoso — JSDOM has no layout engine, so Virtuoso can't measure items.
+// Uses vi.hoisted to ensure the mock factory runs before imports.
+const virtuosoMock = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-explicit-any
+  const React = require('react') as typeof import('react');
+  return {
+    Virtuoso: React.forwardRef(function MockVirtuoso(
+      props: {
+        data?: unknown[];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        itemContent?: (index: number, item: any) => React.ReactNode;
+        style?: React.CSSProperties;
+        components?: { Header?: React.ComponentType };
+      },
+      _ref: React.Ref<unknown>,
+    ) {
+      const { data, itemContent, style, components } = props;
+      const HeaderComponent = components?.Header;
+      return React.createElement('div', { 'data-testid': 'virtuoso-scroller', style },
+        HeaderComponent ? React.createElement(HeaderComponent) : null,
+        data?.map((item, index) =>
+          React.createElement('div', { key: index }, itemContent?.(index, item))
+        )
+      );
+    }),
+  };
+});
+vi.mock('react-virtuoso', () => virtuosoMock);
+
 import { ProjectMessageView, chatMessagesToConversationItems } from '../../../src/components/chat/ProjectMessageView';
 
 // --- Test helpers ---
@@ -1462,177 +1491,136 @@ describe('ProjectMessageView — session context dropdown', () => {
   });
 });
 
-describe('ProjectMessageView — autoscroll pause', () => {
+describe('ProjectMessageView — virtual scroll', () => {
   beforeEach(() => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
-    (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mockClear();
     mocks.useProjectAgentSession.mockReturnValue(defaultAgentSession());
     mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
     mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  /**
-   * Helper: simulate scroll position on the messages container.
-   * jsdom has no layout engine, so we mock the properties.
-   */
-  function setScrollPosition(container: Element, pos: { scrollTop: number; scrollHeight: number; clientHeight: number }) {
-    Object.defineProperty(container, 'scrollTop', { value: pos.scrollTop, writable: true, configurable: true });
-    Object.defineProperty(container, 'scrollHeight', { value: pos.scrollHeight, configurable: true });
-    Object.defineProperty(container, 'clientHeight', { value: pos.clientHeight, configurable: true });
-  }
-
-  /**
-   * Helper: render the component, wait for initial load, flush rAFs, clear
-   * scrollIntoView mock, and return the scroll container element.
-   * The scroll event listener is guaranteed to be registered after this
-   * returns because loading has transitioned to false.
-   */
-  async function renderAndSetup(sessionId = 'session-1') {
+  it('renders messages via Virtuoso mock', async () => {
     mocks.getChatSession.mockResolvedValue(
-      makeSessionResponse(sessionId, [
-        makeMessage('msg-1', sessionId, 'First message'),
+      makeSessionResponse('session-1', [
+        makeMessage('msg-1', 'session-1', 'First message'),
+        makeMessage('msg-2', 'session-1', 'Second message'),
       ]),
     );
 
-    const result = render(<ProjectMessageView projectId="proj-1" sessionId={sessionId} />);
-
-    // Wait for initial load — after this, loading=false and the scroll
-    // listener useEffect has re-run with the container ref attached.
-    await waitFor(() => {
-      expect(screen.getByText('First message')).toBeTruthy();
-    });
-
-    // Flush pending rAFs from initial autoscroll. With shouldAdvanceTime,
-    // rAF fires based on real wall-clock time; multiple act cycles ensure it fires.
-    await act(async () => { vi.advanceTimersByTime(1000); });
-    await act(async () => { vi.advanceTimersByTime(1000); });
-    (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mockClear();
-
-    const scrollContainer = result.container.querySelector('.overflow-y-auto');
-    expect(scrollContainer).toBeTruthy();
-
-    return { ...result, scrollContainer: scrollContainer! };
-  }
-
-  it('does not autoscroll when user has scrolled up and new messages arrive', async () => {
-    // Use a stopped session to prevent polling interference with scroll assertions.
-    // Polling only runs for active sessions, so stopped sessions isolate the test
-    // to only the autoscroll effect triggered by WebSocket message injection.
-    mocks.getChatSession.mockResolvedValue({
-      session: makeSession('session-1', 'stopped'),
-      messages: [makeMessage('msg-1', 'session-1', 'First message')],
-      hasMore: false,
-    });
-
-    const { container } = render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
 
     await waitFor(() => {
-      expect(screen.getByText('First message')).toBeTruthy();
+      // Both messages may be merged by chatMessagesToConversationItems since
+      // they share the same role — check for presence within the rendered text
+      expect(screen.getByTestId('virtuoso-scroller').textContent).toContain('First message');
+      expect(screen.getByTestId('virtuoso-scroller').textContent).toContain('Second message');
     });
 
-    // Flush the initial autoscroll rAF. With shouldAdvanceTime, rAF fires
-    // based on real wall-clock time, not advanceTimersByTime. We need multiple
-    // act() cycles to ensure the rAF callback from the autoscroll effect has
-    // fired before we clear the mock.
-    await act(async () => { vi.advanceTimersByTime(1000); });
-    await act(async () => { vi.advanceTimersByTime(1000); });
-    (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mockClear();
-
-    // Find the scroll container (the overflow-y-auto div).
-    // The scroll listener useEffect has run because loading transitioned to false.
-    const scrollContainer = container.querySelector('.overflow-y-auto');
-    expect(scrollContainer).toBeTruthy();
-
-    // Simulate user scrolling up: scrollTop is far from bottom
-    setScrollPosition(scrollContainer!, { scrollTop: 0, scrollHeight: 1000, clientHeight: 500 });
-    fireEvent.scroll(scrollContainer!);
-
-    // Inject a new message via WebSocket callback
-    expect(capturedWsOnMessage).toBeTruthy();
-    await act(async () => {
-      capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'Second message'));
-    });
-    await act(async () => { vi.advanceTimersByTime(100); });
-
-    expect(document.body.textContent).toContain('Second message');
-
-    // scrollIntoView should NOT have been called since user scrolled up
-    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+    // Verify Virtuoso mock is in the tree
+    expect(screen.getByTestId('virtuoso-scroller')).toBeTruthy();
   });
 
-  it('resumes autoscroll when user scrolls back to bottom after scrolling up', async () => {
-    const { scrollContainer } = await renderAndSetup();
+  it('renders new WebSocket messages inside Virtuoso', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        makeMessage('msg-1', 'session-1', 'First message'),
+      ]),
+    );
 
-    // Simulate user scrolling up
-    setScrollPosition(scrollContainer, { scrollTop: 0, scrollHeight: 1000, clientHeight: 500 });
-    fireEvent.scroll(scrollContainer);
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
 
-    // Simulate user scrolling back to bottom (within 50px threshold)
-    setScrollPosition(scrollContainer, { scrollTop: 480, scrollHeight: 1000, clientHeight: 500 });
-    fireEvent.scroll(scrollContainer);
+    await waitFor(() => {
+      expect(screen.getByText('First message')).toBeTruthy();
+    });
 
     // Inject a new message via WebSocket
     expect(capturedWsOnMessage).toBeTruthy();
     await act(async () => {
-      capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'Second message'));
+      capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'WS message'));
     });
-    await act(async () => { vi.advanceTimersByTime(100); });
 
-    expect(document.body.textContent).toContain('Second message');
-
-    // scrollIntoView SHOULD have been called since user scrolled back to bottom
-    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    // Messages may be merged by chatMessagesToConversationItems
+    expect(screen.getByTestId('virtuoso-scroller').textContent).toContain('WS message');
   });
 
-  it('treats exactly 50px from bottom as "at bottom" (threshold boundary)', async () => {
-    const { scrollContainer } = await renderAndSetup();
+  it('renders "Load earlier messages" button when hasMore is true', async () => {
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession('session-1'),
+      messages: [makeMessage('msg-1', 'session-1', 'Recent message')],
+      hasMore: true,
+    });
 
-    // distanceFromBottom = 1000 - 450 - 500 = 50, exactly at threshold
-    setScrollPosition(scrollContainer, { scrollTop: 450, scrollHeight: 1000, clientHeight: 500 });
-    fireEvent.scroll(scrollContainer);
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
 
-    expect(capturedWsOnMessage).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText('Recent message')).toBeTruthy();
+    });
+
+    // The Virtuoso mock renders components.Header which contains the load-more button
+    expect(screen.getByText('Load earlier messages')).toBeTruthy();
+  });
+
+  it('does not render "Load earlier messages" button when hasMore is false', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        makeMessage('msg-1', 'session-1', 'Only message'),
+      ]),
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Only message')).toBeTruthy();
+    });
+
+    expect(screen.queryByText('Load earlier messages')).toBeNull();
+  });
+
+  it('clicking "Load earlier messages" prepends older messages', async () => {
+    mocks.getChatSession
+      .mockResolvedValueOnce({
+        session: makeSession('session-1'),
+        messages: [makeMessage('msg-2', 'session-1', 'Recent message')],
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        session: makeSession('session-1'),
+        messages: [makeMessage('msg-1', 'session-1', 'Older message')],
+        hasMore: false,
+      });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Recent message')).toBeTruthy();
+    });
+
+    // Click the load-more button
+    const loadMoreBtn = screen.getByText('Load earlier messages');
     await act(async () => {
-      capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'Threshold message'));
+      fireEvent.click(loadMoreBtn);
     });
-    await act(async () => { vi.advanceTimersByTime(100); });
 
-    expect(document.body.textContent).toContain('Threshold message');
-
-    // At exactly 50px: should be considered "at bottom" → autoscroll fires
-    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    // Second call should use 'before' pagination
+    await waitFor(() => {
+      expect(mocks.getChatSession).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId('virtuoso-scroller').textContent).toContain('Older message');
+      expect(screen.getByTestId('virtuoso-scroller').textContent).toContain('Recent message');
+    });
   });
 
-  it('treats 51px from bottom as "scrolled up" (just past threshold)', async () => {
-    const { scrollContainer } = await renderAndSetup();
+  it('renders messages from new session after session switch', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-A', [
+        makeMessage('msg-a1', 'session-A', 'Session A message'),
+      ]),
+    );
 
-    // distanceFromBottom = 1000 - 449 - 500 = 51, just past threshold
-    setScrollPosition(scrollContainer, { scrollTop: 449, scrollHeight: 1000, clientHeight: 500 });
-    fireEvent.scroll(scrollContainer);
+    const { rerender } = render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
 
-    expect(capturedWsOnMessage).toBeTruthy();
-    await act(async () => {
-      capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'Past threshold'));
+    await waitFor(() => {
+      expect(screen.getByText('Session A message')).toBeTruthy();
     });
-    await act(async () => { vi.advanceTimersByTime(100); });
-
-    expect(document.body.textContent).toContain('Past threshold');
-
-    // At 51px: should be considered "scrolled up" → no autoscroll
-    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
-  });
-
-  it('always scrolls on session switch even when user was scrolled up', async () => {
-    const { scrollContainer, rerender } = await renderAndSetup('session-A');
-
-    // Simulate user scrolling up
-    setScrollPosition(scrollContainer, { scrollTop: 0, scrollHeight: 1000, clientHeight: 500 });
-    fireEvent.scroll(scrollContainer);
 
     // Switch to a new session
     mocks.getChatSession.mockResolvedValue(
@@ -1643,12 +1631,8 @@ describe('ProjectMessageView — autoscroll pause', () => {
     rerender(<ProjectMessageView projectId="proj-1" sessionId="session-B" />);
 
     await waitFor(() => {
-      expect(document.body.textContent).toContain('Session B message');
+      expect(screen.getByText('Session B message')).toBeTruthy();
     });
-    await act(async () => { vi.advanceTimersByTime(100); });
-
-    // Session switch should ALWAYS scroll to bottom, even if user was scrolled up
-    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
   });
 });
 

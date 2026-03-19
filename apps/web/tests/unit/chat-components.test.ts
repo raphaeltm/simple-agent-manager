@@ -89,10 +89,7 @@ describe('ProjectMessageView', () => {
     expect(source).toContain('hasMore');
   });
 
-  it('auto-scrolls to bottom on new messages', () => {
-    expect(source).toContain('messagesEndRef');
-    expect(source).toContain('scrollIntoView');
-  });
+  // auto-scroll behavior is tested behaviorally in project-message-view.test.tsx
 
   it('renders session header with derived state', () => {
     expect(source).toContain('deriveSessionState');

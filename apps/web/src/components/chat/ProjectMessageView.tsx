@@ -1,4 +1,5 @@
-import { type FC, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
 import {
   VoiceButton,
@@ -13,7 +14,7 @@ import { mapToolCallContent, getErrorMeta } from '@simple-agent-manager/acp-clie
 import type { AcpSessionHandle } from '@simple-agent-manager/acp-client';
 import { ChevronDown, ChevronUp, Server, Box, Cpu, MapPin, Cloud, GitBranch, CheckCircle2, Globe, ExternalLink } from 'lucide-react';
 import { TruncatedSummary } from './TruncatedSummary';
-import { mergeMessages, getLastMessageId } from '../../lib/merge-messages';
+import { mergeMessages } from '../../lib/merge-messages';
 import { stripMarkdown } from '../../lib/text-utils';
 import { getChatSession, getTranscribeApiUrl, getTtsApiUrl, resetIdleTimer, getWorkspace, getNode, updateProjectTaskStatus, deleteWorkspace, getTerminalToken } from '../../lib/api';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
@@ -300,17 +301,10 @@ function SystemMessageBubble({ text }: { text: string }) {
   );
 }
 
-/** Renders ConversationItem array with the ACP-style components. */
-function AcpMessages({ items }: { items: ConversationItem[] }) {
-  return (
-    <div className="grid gap-3">
-      {items.map((item) => (
-        <AcpConversationItemView key={item.id} item={item} />
-      ))}
-    </div>
-  );
-}
+/** Virtual scroll: starting index for prepend-stable pagination */
+const VIRTUAL_START = 100_000;
 
+/** Renders ConversationItem array with the ACP-style components. */
 type SessionState = 'active' | 'idle' | 'terminated';
 
 function deriveSessionState(session: ChatSessionResponse): SessionState {
@@ -325,11 +319,11 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   sessionId,
   isProvisioning = false,
 }) => {
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const isLoadingMoreRef = useRef(false);
-  const isStuckToBottomRef = useRef(true);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+
+  // Virtual scroll: firstItemIndex for prepend-safe scrolling (load-more pagination)
+  const [firstItemIndex, setFirstItemIndex] = useState(VIRTUAL_START);
 
   const [session, setSession] = useState<ChatSessionResponse | null>(null);
   const [taskEmbed, setTaskEmbed] = useState<ChatSessionResponse['task'] | null>(null);
@@ -362,11 +356,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   // is sent, isPrompting flips true and the entire message list was replaced with
   // the (much shorter) ACP stream, destroying the user's scroll position.
   const committedToDoViewRef = useRef(false);
-  // One-shot scroll snapshot: set in the grace-timer setTimeout callback (before
-  // React processes setAcpGrace(false)), consumed and cleared in the useLayoutEffect
-  // that fires after React commits the new DOM but before paint.  Must always be
-  // set and consumed in the same React commit cycle.
-  const scrollSnapshotRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
 
   // Idle timer state (TDF-8)
   const [idleCountdownMs, setIdleCountdownMs] = useState<number | null>(null);
@@ -421,7 +410,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     setAcpGrace(false);
     wasPromptingRef.current = false;
     committedToDoViewRef.current = false;
-    scrollSnapshotRef.current = null;
+    setFirstItemIndex(VIRTUAL_START);
+    setShowScrollButton(false);
     if (acpGraceTimerRef.current) {
       clearTimeout(acpGraceTimerRef.current);
       acpGraceTimerRef.current = null;
@@ -444,16 +434,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       wasPromptingRef.current = false;
       setAcpGrace(true);
       acpGraceTimerRef.current = setTimeout(() => {
-        // Capture scroll geometry BEFORE the state change triggers a re-render.
-        // The setTimeout callback runs synchronously before React processes the
-        // batched setState, so DOM reads here reflect the pre-transition layout.
-        const container = messagesContainerRef.current;
-        if (container) {
-          scrollSnapshotRef.current = {
-            scrollTop: container.scrollTop,
-            scrollHeight: container.scrollHeight,
-          };
-        }
         committedToDoViewRef.current = true;
         setAcpGrace(false);
         acpGraceTimerRef.current = null;
@@ -467,27 +447,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     };
   }, [agentSession.isPrompting]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Preserve scroll position when ACP→DO view transition occurs (grace period ends).
-  // Uses useLayoutEffect (fires after DOM mutation, before paint) so the scroll
-  // adjustment is invisible to the user — no flicker.  The scroll snapshot was
-  // captured in the setTimeout callback above, before React processed the state change.
-  useLayoutEffect(() => {
-    const snapshot = scrollSnapshotRef.current;
-    if (!snapshot) return;
-    scrollSnapshotRef.current = null;
-
-    const container = messagesContainerRef.current;
-    if (!container) return;
-
-    if (isStuckToBottomRef.current) {
-      // User was at bottom — keep them there
-      container.scrollTop = container.scrollHeight;
-    } else {
-      // User had scrolled up — preserve relative position
-      const delta = container.scrollHeight - snapshot.scrollHeight;
-      container.scrollTop = snapshot.scrollTop + delta;
-    }
-  }, [acpGrace]);
+  // ACP→DO scroll preservation handled by Virtuoso's followOutput + key-based remount.
 
   const loadSession = useCallback(async () => {
     try {
@@ -564,59 +524,13 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     isWorkspaceRunning
   );
 
-  // Track scroll position to pause autoscroll when user scrolls up.
-  // Re-enable when user scrolls back to the bottom (within threshold).
-  const SCROLL_BOTTOM_THRESHOLD = 50;
+  // Reset virtual scroll state on session change
   useEffect(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
+    setFirstItemIndex(VIRTUAL_START);
+    setShowScrollButton(false);
+  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-      isStuckToBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD;
-      setShowScrollButton(distanceFromBottom > SCROLL_BOTTOM_THRESHOLD);
-    };
-
-    container.addEventListener('scroll', handleScroll, { passive: true });
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, [loading]);
-
-  // Auto-scroll to bottom on initial load, session switch, and new messages.
-  // Uses last message ID (not messages.length) to detect genuinely new messages,
-  // avoiding spurious scrolls from dedup/merge artifacts that change array length.
-  // Skip when older messages were prepended via "Load earlier messages".
-  // Skip when user has manually scrolled up (not stuck to bottom).
-  const prevLastMessageIdRef = useRef<string | null>(null);
-  const prevSessionIdRef = useRef(sessionId);
-  const lastMessageId = getLastMessageId(messages);
-  useEffect(() => {
-    if (loading) return;
-
-    // Skip auto-scroll when messages were prepended via "load more"
-    if (isLoadingMoreRef.current) {
-      prevLastMessageIdRef.current = lastMessageId;
-      return;
-    }
-
-    const isNewSession = prevSessionIdRef.current !== sessionId;
-    const hasNewMessages = lastMessageId !== null && lastMessageId !== prevLastMessageIdRef.current;
-    const isInitialLoad = prevLastMessageIdRef.current === null && lastMessageId !== null;
-
-    // Always scroll on new session or initial load; only scroll for new messages
-    // if the user hasn't manually scrolled up.
-    const shouldScroll = isNewSession || isInitialLoad || (hasNewMessages && isStuckToBottomRef.current);
-
-    if (shouldScroll) {
-      requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: isNewSession ? 'instant' : 'smooth' });
-      });
-      isStuckToBottomRef.current = true;
-    }
-
-    prevLastMessageIdRef.current = lastMessageId;
-    prevSessionIdRef.current = sessionId;
-  }, [lastMessageId, loading, sessionId]);
+  // Auto-scroll handled by Virtuoso's followOutput prop — no manual scroll tracking needed.
 
   // Polling fallback — keeps running alongside WebSocket for reliability.
   // Only updates state when the server has new data (fingerprint-based).
@@ -755,31 +669,20 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     const firstMessage = messages[0];
     if (!firstMessage) return;
 
-    const container = messagesContainerRef.current;
-    const prevScrollHeight = container?.scrollHeight ?? 0;
-    const prevScrollTop = container?.scrollTop ?? 0;
-
-    isLoadingMoreRef.current = true;
     setLoadingMore(true);
     try {
       const data = await getChatSession(projectId, sessionId, {
         before: firstMessage.createdAt,
       });
-      setMessages((prev) => mergeMessages(prev, data.messages, 'prepend'));
-      setHasMore(data.hasMore);
-
-      // Restore scroll position after prepending older messages.
-      // The new content increases scrollHeight; offset scrollTop to keep
-      // the same messages visible.
-      requestAnimationFrame(() => {
-        if (container) {
-          const newScrollHeight = container.scrollHeight;
-          container.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
-        }
-        isLoadingMoreRef.current = false;
+      setMessages((prev) => {
+        const merged = mergeMessages(prev, data.messages, 'prepend');
+        // Use actual added count (not raw API count) to avoid index drift
+        // when mergeMessages deduplicates overlapping messages.
+        const actualAdded = merged.length - prev.length;
+        setFirstItemIndex((fi) => fi - actualAdded);
+        return merged;
       });
-    } catch {
-      isLoadingMoreRef.current = false;
+      setHasMore(data.hasMore);
     } finally {
       setLoadingMore(false);
     }
@@ -853,61 +756,86 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         <TruncatedSummary summary={taskEmbed.outputSummary} taskId={taskEmbed.id} />
       )}
 
-      {/* Messages area — merged DO (persistent) + ACP (streaming/unpersisted) */}
-      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto min-h-0 min-w-0 p-4">
-        {(() => {
-          const acpItems = agentSession.messages.items;
-          const convertedItems = chatMessagesToConversationItems(messages);
+      {/* Messages area — virtualized for performance with large conversations */}
+      {(() => {
+        const acpItems = agentSession.messages.items;
+        const convertedItems = chatMessagesToConversationItems(messages);
 
-          // Two-source rendering strategy:
-          // - ACP (streaming): live tokens from the agent via WebSocket
-          // - DO (persistent): batched messages persisted by the VM agent (~2s delay)
-          //
-          // During the INITIAL task (before DO has any messages), show the full
-          // ACP view for real-time streaming.  Once DO messages arrive and the
-          // first grace period completes, lock to DO view permanently for this
-          // session (committedToDoViewRef).  This prevents the scroll-jump-on-send
-          // bug: when a follow-up is sent, isPrompting flips true but the view
-          // no longer switches from DO→ACP, so the message list stays stable.
-          //
-          // During the initial ACP phase (before commit), allow ACP view when
-          // prompting or in grace period so streaming tokens are visible.
-          const useFullAcpView = acpItems.length > 0 && !committedToDoViewRef.current && (
-            convertedItems.length === 0 || agentSession.isPrompting || acpGrace
-          );
+        // Two-source rendering strategy:
+        // - ACP (streaming): live tokens from the agent via WebSocket
+        // - DO (persistent): batched messages persisted by the VM agent (~2s delay)
+        //
+        // During the INITIAL task (before DO has any messages), show the full
+        // ACP view for real-time streaming.  Once DO messages arrive and the
+        // first grace period completes, lock to DO view permanently for this
+        // session (committedToDoViewRef).  This prevents the scroll-jump-on-send
+        // bug: when a follow-up is sent, isPrompting flips true but the view
+        // no longer switches from DO→ACP, so the message list stays stable.
+        const useFullAcpView = acpItems.length > 0 && !committedToDoViewRef.current && (
+          convertedItems.length === 0 || agentSession.isPrompting || acpGrace
+        );
 
-          if (useFullAcpView) {
-            return <AcpMessages items={acpItems} />;
-          }
+        const displayItems = useFullAcpView ? acpItems : convertedItems;
 
-          // After the grace period, DO has all persisted messages.
-          // No merge needed — ACP dedup was broken (mismatched ID formats
-          // and replayed timestamps) causing full conversation duplication.
-          const mergedItems = convertedItems;
-
+        if (displayItems.length === 0) {
           return (
-            <>
-              {hasMore && (
-                <div className="text-center mb-3">
-                  <Button variant="ghost" size="sm" onClick={loadMore} loading={loadingMore}>
-                    Load earlier messages
-                  </Button>
-                </div>
-              )}
-
-              {mergedItems.length === 0 ? (
-                <div className="text-fg-muted text-sm text-center p-8">
-                  {sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
-                </div>
-              ) : (
-                <AcpMessages items={mergedItems} />
-              )}
-            </>
+            <div className="flex-1 min-h-0 flex items-center justify-center">
+              <span className="text-fg-muted text-sm">
+                {sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
+              </span>
+            </div>
           );
-        })()}
+        }
 
-        <div ref={messagesEndRef} />
-      </div>
+        return (
+          <div className="flex-1 min-h-0 min-w-0 relative" role="log" aria-live="polite" aria-label="Conversation">
+            <Virtuoso
+              ref={virtuosoRef}
+              key={useFullAcpView ? 'acp' : 'do'}
+              style={{ height: '100%' }}
+              data={displayItems}
+              firstItemIndex={useFullAcpView ? 0 : firstItemIndex}
+              initialTopMostItemIndex={displayItems.length - 1}
+              followOutput={(isAtBottom: boolean) => isAtBottom ? 'smooth' : false}
+              alignToBottom
+              atBottomThreshold={50}
+              atBottomStateChange={(atBottom) => setShowScrollButton(!atBottom)}
+              overscan={200}
+              itemContent={(_index, item) => (
+                <div className="px-4 pb-3">
+                  <AcpConversationItemView item={item} />
+                </div>
+              )}
+              components={{
+                Header: (!useFullAcpView && hasMore) ? () => (
+                  <div className="text-center py-3">
+                    <Button variant="ghost" size="sm" onClick={loadMore} loading={loadingMore}>
+                      Load earlier messages
+                    </Button>
+                  </div>
+                ) : undefined,
+              }}
+            />
+
+            {/* Scroll to bottom button */}
+            {showScrollButton && (
+              <button
+                type="button"
+                onClick={() => {
+                  virtuosoRef.current?.scrollToIndex({
+                    index: 'LAST',
+                    behavior: 'smooth',
+                  });
+                }}
+                className="absolute bottom-3 right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-border-default bg-surface shadow-md cursor-pointer hover:bg-page transition-colors"
+                aria-label="Scroll to bottom"
+              >
+                <ChevronDown size={16} className="text-fg-muted" />
+              </button>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Agent working indicator — driven by ACP session state */}
       {agentSession.isPrompting && (
@@ -930,24 +858,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         <div className="flex items-center gap-2 px-4 py-1 border-t border-border-default bg-surface shrink-0">
           <Spinner size="sm" />
           <span className="text-xs text-fg-muted">Connecting to agent...</span>
-        </div>
-      )}
-
-      {/* Scroll to bottom button */}
-      {showScrollButton && (
-        <div className="relative shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-              isStuckToBottomRef.current = true;
-              setShowScrollButton(false);
-            }}
-            className="absolute -top-10 right-4 z-10 flex items-center justify-center w-8 h-8 rounded-full border border-border-default bg-surface shadow-md cursor-pointer hover:bg-page transition-colors"
-            aria-label="Scroll to bottom"
-          >
-            <ChevronDown size={16} className="text-fg-muted" />
-          </button>
         </div>
       )}
 
