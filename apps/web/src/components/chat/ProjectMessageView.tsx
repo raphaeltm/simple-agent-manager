@@ -362,8 +362,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   // is sent, isPrompting flips true and the entire message list was replaced with
   // the (much shorter) ACP stream, destroying the user's scroll position.
   const committedToDoViewRef = useRef(false);
-  // Scroll snapshot captured just before the grace-period-end state change so
-  // useLayoutEffect can restore scroll position synchronously before paint.
+  // One-shot scroll snapshot: set in the grace-timer setTimeout callback (before
+  // React processes setAcpGrace(false)), consumed and cleared in the useLayoutEffect
+  // that fires after React commits the new DOM but before paint.  Must always be
+  // set and consumed in the same React commit cycle.
   const scrollSnapshotRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
 
   // Idle timer state (TDF-8)
