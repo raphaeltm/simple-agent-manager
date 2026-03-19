@@ -36,11 +36,11 @@ const STATUS_FROM_TASK: Record<TaskStatus, IdeaStatus> = {
 };
 
 const STATUS_CONFIG: Record<IdeaStatus, { label: string; color: string; icon: React.ReactNode }> = {
-  exploring: { label: 'Exploring', color: 'var(--sam-color-accent-primary)', icon: <Lightbulb size={14} /> },
-  ready: { label: 'Ready', color: 'var(--sam-color-warning)', icon: <Play size={14} /> },
+  exploring: { label: 'Exploring', color: 'var(--sam-color-accent-primary)', icon: <Lightbulb size={14} aria-hidden="true" /> },
+  ready: { label: 'Ready', color: 'var(--sam-color-warning)', icon: <Play size={14} aria-hidden="true" /> },
   executing: { label: 'Executing', color: 'var(--sam-color-info)', icon: <span aria-hidden="true"><Spinner size="sm" /></span> },
-  done: { label: 'Done', color: 'var(--sam-color-success)', icon: <Check size={14} /> },
-  parked: { label: 'Parked', color: 'var(--sam-color-fg-muted)', icon: <Archive size={14} /> },
+  done: { label: 'Done', color: 'var(--sam-color-success)', icon: <Check size={14} aria-hidden="true" /> },
+  parked: { label: 'Parked', color: 'var(--sam-color-fg-muted)', icon: <Archive size={14} aria-hidden="true" /> },
 };
 
 const STATUS_ORDER: IdeaStatus[] = ['exploring', 'ready', 'executing', 'done', 'parked'];
@@ -86,7 +86,7 @@ function IdeaCard({ idea, sessionCount, onClick }: IdeaCardProps) {
   return (
     <button
       onClick={onClick}
-      className="flex items-start gap-3 px-3 py-2.5 rounded-lg border border-border-default bg-surface hover:border-accent/40 transition-colors cursor-pointer text-left w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="flex items-start gap-3 px-3 py-2.5 min-h-[56px] rounded-lg border border-border-default bg-surface hover:border-accent/40 transition-colors cursor-pointer text-left w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       aria-label={`View idea: ${idea.title}`}
     >
       {/* Content */}
@@ -291,12 +291,13 @@ export function IdeasPage() {
             const config = STATUS_CONFIG[status];
 
             return (
-              <section key={status} className="flex flex-col gap-1.5">
+              <section key={status} aria-labelledby={`group-header-${status}`} className="flex flex-col gap-1.5">
                 {/* Group header with timeline accent */}
                 <button
                   onClick={() => toggleGroup(status)}
                   aria-expanded={!collapsed}
-                  className="flex items-center gap-2 px-1 py-1.5 bg-transparent border-none cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent rounded"
+                  aria-controls={`group-list-${status}`}
+                  className="flex items-center gap-2 px-1 py-1.5 min-h-[44px] bg-transparent border-none cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent rounded"
                 >
                   <span
                     className="inline-flex items-center justify-center w-5 h-5 rounded-full shrink-0"
@@ -304,15 +305,19 @@ export function IdeasPage() {
                   >
                     {config.icon}
                   </span>
-                  <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: config.color }}>
+                  <span
+                    id={`group-header-${status}`}
+                    className="text-xs font-semibold uppercase tracking-wider"
+                    style={{ color: config.color }}
+                  >
                     {config.label}
                   </span>
                   <span className="text-xs text-fg-muted">({items.length})</span>
                   <span className="ml-auto">
                     {collapsed ? (
-                      <ChevronRight size={14} className="text-fg-muted" />
+                      <ChevronRight size={14} className="text-fg-muted" aria-hidden="true" />
                     ) : (
-                      <ChevronDown size={14} className="text-fg-muted" />
+                      <ChevronDown size={14} className="text-fg-muted" aria-hidden="true" />
                     )}
                   </span>
                 </button>
@@ -320,6 +325,7 @@ export function IdeasPage() {
                 {/* Timeline items — vertical list with left accent */}
                 {!collapsed && (
                   <div
+                    id={`group-list-${status}`}
                     className="flex flex-col gap-1.5 ml-2.5 pl-4 border-l-2"
                     style={{ borderColor: `color-mix(in srgb, ${config.color} 30%, transparent)` }}
                   >
