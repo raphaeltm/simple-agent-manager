@@ -103,10 +103,11 @@ All DO implementations live in `apps/api/src/durable-objects/`. Each has a corre
 - **Debounced D1 summary sync** (configurable via `DO_SUMMARY_SYNC_DEBOUNCE_MS`, default 5s) pushes last-activity timestamps and session counts to D1 so dashboards work without fan-out
 - **ACP session state machine** (pending → assigned → running → completed/failed/interrupted) with heartbeat-based VM failure detection via DO alarms
 - **Session forking** with parent lineage tracking for conversation branching
+- **Post-session FTS5 indexing** — when a session stops, `materializeSession()` groups raw streaming tokens into logical messages in `chat_messages_grouped` and populates the `chat_messages_grouped_fts` FTS5 virtual table, enabling full-text search with phrase matching and stemming across former token boundaries
 
 This is SAM's largest DO (~70KB of implementation) — effectively a per-project microservice.
 
-**Service wrapper:** `apps/api/src/services/project-data.ts` — exports `createSession`, `persistMessage`, `persistMessageBatch`, `listSessions`, `getMessages`, `linkSessionToWorkspace`, `stopSession`, and more.
+**Service wrapper:** `apps/api/src/services/project-data.ts` — exports `createSession`, `persistMessage`, `persistMessageBatch`, `listSessions`, `getMessages`, `searchMessages`, `materializeAllStopped`, `linkSessionToWorkspace`, `stopSession`, and more.
 
 ### 2. NodeLifecycle — Warm Pool State Machine
 
