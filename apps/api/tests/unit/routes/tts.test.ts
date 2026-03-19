@@ -76,6 +76,7 @@ describe('POST /api/tts/synthesize', () => {
       audioBody: new ArrayBuffer(1024),
       contentType: 'audio/mpeg',
       cached: false,
+      summarized: false,
     });
 
     const res = await app.request('/api/tts/synthesize', {
@@ -95,6 +96,7 @@ describe('POST /api/tts/synthesize', () => {
       audioBody: new ReadableStream(),
       contentType: 'audio/mpeg',
       cached: true,
+      summarized: false,
     });
 
     const res = await app.request('/api/tts/synthesize', {
@@ -113,6 +115,7 @@ describe('POST /api/tts/synthesize', () => {
       audioBody: new ArrayBuffer(512),
       contentType: 'audio/mpeg',
       cached: false,
+      summarized: false,
     });
 
     const env = createEnv();
@@ -129,6 +132,7 @@ describe('POST /api/tts/synthesize', () => {
       env.R2,
       expect.any(Object),
       'test-user-id',
+      undefined,
     );
   });
 
@@ -197,6 +201,7 @@ describe('POST /api/tts/synthesize', () => {
       audioBody: new ArrayBuffer(512),
       contentType: 'audio/mpeg',
       cached: false,
+      summarized: false,
     });
 
     const res = await app.request('/api/tts/synthesize', {

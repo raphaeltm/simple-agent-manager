@@ -3,6 +3,7 @@ import type { Env } from '../index';
 import { getAuth, requireAuth, requireApproved } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { synthesizeSpeech, getAudioFromR2, getTTSConfig } from '../services/tts';
+import type { TTSMode } from '../services/tts';
 import { log } from '../lib/logger';
 
 const ttsRoutes = new Hono<{ Bindings: Env }>();
@@ -14,10 +15,13 @@ ttsRoutes.use('*', requireAuth(), requireApproved());
  * POST /api/tts/synthesize
  *
  * Generates TTS audio from text. If audio for this storageId already exists
- * in R2, returns the cached version. Otherwise: LLM markdown cleanup → TTS → R2 store.
+ * in R2, returns the cached version. Otherwise: LLM cleanup → chunk → TTS → R2 store.
  *
- * Request body: { text: string, storageId: string }
- * Response: { audioUrl: string, cached: boolean }
+ * For long text, automatically chunks at sentence boundaries and concatenates audio.
+ * For very long text (above summary threshold), summarizes via LLM first.
+ *
+ * Request body: { text: string, storageId: string, mode?: "full" | "summary" }
+ * Response: { audioUrl: string, cached: boolean, summarized: boolean }
  */
 ttsRoutes.post('/synthesize', async (c) => {
   const auth = getAuth(c);
@@ -28,12 +32,12 @@ ttsRoutes.post('/synthesize', async (c) => {
     throw errors.badRequest('Text-to-speech is disabled');
   }
 
-  const body = await c.req.json<{ text?: string; storageId?: string }>().catch(() => null);
+  const body = await c.req.json<{ text?: string; storageId?: string; mode?: TTSMode }>().catch(() => null);
   if (!body?.text || !body?.storageId) {
     throw errors.badRequest('Missing required fields: text, storageId');
   }
 
-  const { text, storageId } = body;
+  const { text, storageId, mode } = body;
 
   // Validate storageId format (alphanumeric, hyphens, underscores — prevent path traversal)
   if (!/^[a-zA-Z0-9_-]+$/.test(storageId)) {
@@ -44,19 +48,26 @@ ttsRoutes.post('/synthesize', async (c) => {
     throw errors.badRequest('Text cannot be empty');
   }
 
+  // Validate mode if provided
+  if (mode !== undefined && mode !== 'full' && mode !== 'summary') {
+    throw errors.badRequest('Invalid mode: must be "full" or "summary"');
+  }
+
   try {
-    const result = await synthesizeSpeech(text, storageId, c.env.AI, c.env.R2, config, userId);
+    const result = await synthesizeSpeech(text, storageId, c.env.AI, c.env.R2, config, userId, mode);
 
     // Return the audio URL for the client to fetch
     return c.json({
       audioUrl: `/api/tts/audio/${storageId}`,
       cached: result.cached,
+      summarized: result.summarized,
     });
   } catch (err) {
     log.error('tts.synthesize_failed', {
       error: err instanceof Error ? err.message : String(err),
       storageId,
       textLength: text.length,
+      mode,
     });
     throw errors.internal('Failed to generate audio');
   }

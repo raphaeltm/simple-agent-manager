@@ -1,8 +1,12 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
   cleanTextForSpeech,
+  summarizeTextForSpeech,
   fallbackStripMarkdown,
   generateSpeechAudio,
+  generateSpeechAudioChunk,
+  splitTextIntoChunks,
+  concatenateArrayBuffers,
   buildR2Key,
   getAudioFromR2,
   storeAudioInR2,
@@ -163,9 +167,140 @@ describe('cleanTextForSpeech', () => {
   });
 });
 
-// ─── generateSpeechAudio ────────────────────────────────────────────────────
+// ─── summarizeTextForSpeech ──────────────────────────────────────────────────
 
-describe('generateSpeechAudio', () => {
+describe('summarizeTextForSpeech', () => {
+  beforeEach(() => {
+    mockGenerate.mockClear();
+    mockGenerate.mockResolvedValue({ text: 'This is a concise summary of the text.' });
+  });
+
+  it('calls LLM to summarize text', async () => {
+    const ai = createMockAi();
+    const result = await summarizeTextForSpeech('A very long text that needs summarizing.', ai);
+    expect(result).toBe('This is a concise summary of the text.');
+    expect(mockGenerate).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to truncated regex-stripped text when LLM returns empty', async () => {
+    mockGenerate.mockResolvedValue({ text: '' });
+    const ai = createMockAi();
+    const longText = 'A'.repeat(10000);
+    const result = await summarizeTextForSpeech(longText, ai);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.length).toBeLessThanOrEqual(4000);
+  });
+
+  it('falls back to truncated regex-stripped text when LLM throws', async () => {
+    mockGenerate.mockRejectedValue(new Error('AI unavailable'));
+    const ai = createMockAi();
+    const longText = 'B'.repeat(10000);
+    const result = await summarizeTextForSpeech(longText, ai);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.length).toBeLessThanOrEqual(4000);
+  });
+});
+
+// ─── splitTextIntoChunks ────────────────────────────────────────────────────
+
+describe('splitTextIntoChunks', () => {
+  it('returns single chunk for short text', () => {
+    const chunks = splitTextIntoChunks('Hello world.', 100);
+    expect(chunks).toEqual(['Hello world.']);
+  });
+
+  it('splits at sentence boundaries', () => {
+    const text = 'First sentence. Second sentence. Third sentence.';
+    const chunks = splitTextIntoChunks(text, 25);
+    expect(chunks.length).toBeGreaterThan(1);
+    // Each chunk should end at a sentence boundary
+    for (const chunk of chunks.slice(0, -1)) {
+      expect(chunk).toMatch(/[.!?]$/);
+    }
+    // Concatenating should preserve all content
+    const joined = chunks.join(' ');
+    expect(joined).toContain('First sentence.');
+    expect(joined).toContain('Second sentence.');
+    expect(joined).toContain('Third sentence.');
+  });
+
+  it('splits at paragraph boundaries', () => {
+    const text = 'Paragraph one content here.\n\nParagraph two content here.\n\nParagraph three content here.';
+    const chunks = splitTextIntoChunks(text, 40);
+    expect(chunks.length).toBeGreaterThan(1);
+  });
+
+  it('falls back to word boundaries when no sentence boundary found', () => {
+    // Long text with no sentence-ending punctuation
+    const text = 'word '.repeat(100).trim();
+    const chunks = splitTextIntoChunks(text, 30);
+    expect(chunks.length).toBeGreaterThan(1);
+    // No chunk should start or end with a space (trimmed)
+    for (const chunk of chunks) {
+      expect(chunk).not.toMatch(/^\s/);
+      expect(chunk).not.toMatch(/\s$/);
+    }
+  });
+
+  it('handles text with no spaces by force-splitting', () => {
+    const text = 'a'.repeat(100);
+    const chunks = splitTextIntoChunks(text, 30);
+    expect(chunks.length).toBeGreaterThan(1);
+    // Total content should be preserved
+    expect(chunks.join('').length).toBe(100);
+  });
+
+  it('handles empty string', () => {
+    const chunks = splitTextIntoChunks('', 100);
+    expect(chunks).toEqual([]);
+  });
+
+  it('handles exact chunk size text', () => {
+    const text = 'a'.repeat(100);
+    const chunks = splitTextIntoChunks(text, 100);
+    expect(chunks).toEqual([text]);
+  });
+
+  it('preserves all content across chunks', () => {
+    const sentences = Array.from({ length: 20 }, (_, i) => `Sentence number ${i + 1} with some content.`);
+    const text = sentences.join(' ');
+    const chunks = splitTextIntoChunks(text, 200);
+
+    // All original sentences should appear in the chunked output
+    const reassembled = chunks.join(' ');
+    for (const sentence of sentences) {
+      expect(reassembled).toContain(`Sentence number ${sentence.match(/\d+/)![0]}`);
+    }
+  });
+});
+
+// ─── concatenateArrayBuffers ────────────────────────────────────────────────
+
+describe('concatenateArrayBuffers', () => {
+  it('concatenates multiple buffers', () => {
+    const buf1 = new Uint8Array([1, 2, 3]).buffer;
+    const buf2 = new Uint8Array([4, 5]).buffer;
+    const buf3 = new Uint8Array([6]).buffer;
+
+    const result = concatenateArrayBuffers([buf1, buf2, buf3]);
+    expect(new Uint8Array(result)).toEqual(new Uint8Array([1, 2, 3, 4, 5, 6]));
+  });
+
+  it('handles single buffer', () => {
+    const buf = new Uint8Array([1, 2, 3]).buffer;
+    const result = concatenateArrayBuffers([buf]);
+    expect(new Uint8Array(result)).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  it('handles empty array', () => {
+    const result = concatenateArrayBuffers([]);
+    expect(result.byteLength).toBe(0);
+  });
+});
+
+// ─── generateSpeechAudioChunk ────────────────────────────────────────────────
+
+describe('generateSpeechAudioChunk', () => {
   it('calls AI.run with correct parameters and returns audio buffer', async () => {
     const fakeAudio = new ArrayBuffer(1024);
     const ai = createMockAi();
@@ -174,7 +309,7 @@ describe('generateSpeechAudio', () => {
       arrayBuffer: () => Promise.resolve(fakeAudio),
     });
 
-    const result = await generateSpeechAudio('Hello world', ai, {
+    const result = await generateSpeechAudioChunk('Hello world', ai, {
       model: '@cf/deepgram/aura-2-en',
       speaker: 'luna',
       encoding: 'mp3',
@@ -196,7 +331,54 @@ describe('generateSpeechAudio', () => {
       text: () => Promise.resolve('Internal Server Error'),
     });
 
-    await expect(generateSpeechAudio('Hello', ai)).rejects.toThrow('TTS model returned 500');
+    await expect(generateSpeechAudioChunk('Hello', ai)).rejects.toThrow('TTS model returned 500');
+  });
+});
+
+// ─── generateSpeechAudio (with chunking) ────────────────────────────────────
+
+describe('generateSpeechAudio', () => {
+  it('generates single chunk for short text', async () => {
+    const fakeAudio = new ArrayBuffer(1024);
+    const ai = createMockAi();
+    (ai.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(fakeAudio),
+    });
+
+    const result = await generateSpeechAudio('Short text.', ai, { chunkSize: 4000 });
+    expect(ai.run).toHaveBeenCalledTimes(1);
+    expect(result.byteLength).toBe(1024);
+  });
+
+  it('chunks long text and concatenates audio buffers', async () => {
+    const ai = createMockAi();
+    let callCount = 0;
+    (ai.run as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      callCount++;
+      const buf = new Uint8Array([callCount]).buffer;
+      return Promise.resolve({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(buf),
+      });
+    });
+
+    // Create text that will be split into multiple chunks
+    const sentences = Array.from({ length: 10 }, (_, i) => `Sentence ${i + 1} with content.`);
+    const text = sentences.join(' ');
+
+    const result = await generateSpeechAudio(text, ai, { chunkSize: 50 });
+
+    // Should have made multiple AI calls
+    expect(callCount).toBeGreaterThan(1);
+
+    // Result should be concatenation of all chunk buffers
+    const resultArray = new Uint8Array(result);
+    expect(resultArray.length).toBe(callCount);
+    // Each byte should be the sequential call number
+    for (let i = 0; i < callCount; i++) {
+      expect(resultArray[i]).toBe(i + 1);
+    }
   });
 });
 
@@ -271,6 +453,7 @@ describe('synthesizeSpeech', () => {
     expect(result.cached).toBe(true);
     expect(result.audioBody).toBe(fakeBody);
     expect(result.contentType).toBe('audio/mpeg');
+    expect(result.summarized).toBe(false);
     // Should not call AI for generation
     expect(ai.run).not.toHaveBeenCalled();
   });
@@ -288,6 +471,7 @@ describe('synthesizeSpeech', () => {
     const result = await synthesizeSpeech('## Hello **world**', 'new-id', ai, r2, {}, 'user-1');
 
     expect(result.cached).toBe(false);
+    expect(result.summarized).toBe(false);
     expect(result.audioBody).toBe(fakeAudio);
     expect(result.contentType).toBe('audio/mpeg');
     // Should store in R2
@@ -328,6 +512,62 @@ describe('synthesizeSpeech', () => {
     await expect(synthesizeSpeech('Hello', 'empty-id', ai, r2, {}, 'user-1'))
       .rejects.toThrow('TTS model returned empty audio');
   });
+
+  it('uses summary mode when text exceeds summary threshold', async () => {
+    const r2 = createMockR2();
+    const ai = createMockAi();
+    const fakeAudio = new ArrayBuffer(512);
+
+    mockGenerate.mockResolvedValue({ text: 'A brief summary of the content.' });
+
+    (ai.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(fakeAudio),
+    });
+
+    const longText = 'x'.repeat(60000);
+    const result = await synthesizeSpeech(longText, 'summary-id', ai, r2, {
+      summaryThreshold: 50000,
+    }, 'user-1');
+
+    expect(result.summarized).toBe(true);
+    expect(result.cached).toBe(false);
+  });
+
+  it('uses full mode for text below summary threshold', async () => {
+    const r2 = createMockR2();
+    const ai = createMockAi();
+    const fakeAudio = new ArrayBuffer(512);
+
+    (ai.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(fakeAudio),
+    });
+
+    const result = await synthesizeSpeech('Short text.', 'full-id', ai, r2, {
+      summaryThreshold: 50000,
+    }, 'user-1');
+
+    expect(result.summarized).toBe(false);
+  });
+
+  it('respects explicit mode override', async () => {
+    const r2 = createMockR2();
+    const ai = createMockAi();
+    const fakeAudio = new ArrayBuffer(512);
+
+    mockGenerate.mockResolvedValue({ text: 'Summary of short text.' });
+
+    (ai.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(fakeAudio),
+    });
+
+    // Force summary mode even for short text
+    const result = await synthesizeSpeech('Short text.', 'force-summary-id', ai, r2, {}, 'user-1', 'summary');
+
+    expect(result.summarized).toBe(true);
+  });
 });
 
 // ─── getTTSConfig ────────────────────────────────────────────────────────────
@@ -340,11 +580,13 @@ describe('getTTSConfig', () => {
     expect(config.encoding).toBe('mp3');
     expect(config.cleanupModel).toBe('@cf/google/gemma-3-12b-it');
     expect(config.cleanupMaxTokens).toBe(4096);
-    expect(config.maxTextLength).toBe(10000);
+    expect(config.maxTextLength).toBe(100000);
     expect(config.timeoutMs).toBe(60000);
     expect(config.cleanupTimeoutMs).toBe(15000);
     expect(config.r2Prefix).toBe('tts');
     expect(config.enabled).toBe(true);
+    expect(config.chunkSize).toBe(4000);
+    expect(config.summaryThreshold).toBe(50000);
   });
 
   it('reads overrides from env vars', () => {
@@ -354,20 +596,24 @@ describe('getTTSConfig', () => {
       TTS_ENCODING: 'wav',
       TTS_CLEANUP_MODEL: '@cf/meta/llama-3.1-8b-instruct',
       TTS_CLEANUP_MAX_TOKENS: '8192',
-      TTS_MAX_TEXT_LENGTH: '20000',
+      TTS_MAX_TEXT_LENGTH: '200000',
       TTS_TIMEOUT_MS: '90000',
       TTS_CLEANUP_TIMEOUT_MS: '30000',
       TTS_R2_PREFIX: 'audio-cache',
+      TTS_CHUNK_SIZE: '8000',
+      TTS_SUMMARY_THRESHOLD: '100000',
     });
     expect(config.model).toBe('@cf/myshell-ai/melotts');
     expect(config.speaker).toBe('asteria');
     expect(config.encoding).toBe('wav');
     expect(config.cleanupModel).toBe('@cf/meta/llama-3.1-8b-instruct');
     expect(config.cleanupMaxTokens).toBe(8192);
-    expect(config.maxTextLength).toBe(20000);
+    expect(config.maxTextLength).toBe(200000);
     expect(config.timeoutMs).toBe(90000);
     expect(config.cleanupTimeoutMs).toBe(30000);
     expect(config.r2Prefix).toBe('audio-cache');
+    expect(config.chunkSize).toBe(8000);
+    expect(config.summaryThreshold).toBe(100000);
   });
 
   it('disables TTS when TTS_ENABLED is false', () => {
