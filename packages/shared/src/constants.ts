@@ -406,13 +406,14 @@ export const DEFAULT_TTS_ENCODING = 'mp3';
 /** Default Workers AI model for cleaning markdown before TTS. Override via TTS_CLEANUP_MODEL env var. */
 export const DEFAULT_TTS_CLEANUP_MODEL = '@cf/google/gemma-3-12b-it';
 
-/** Default max text length (characters) for TTS input. Override via TTS_MAX_TEXT_LENGTH env var. */
-export const DEFAULT_TTS_MAX_TEXT_LENGTH = 10000;
+/** Default max text length (characters) for TTS input. Override via TTS_MAX_TEXT_LENGTH env var.
+ * With chunking enabled, this is a soft limit — text beyond this is summarized rather than read verbatim. */
+export const DEFAULT_TTS_MAX_TEXT_LENGTH = 100000;
 
 /** Default max output tokens for the markdown cleanup LLM. Override via TTS_CLEANUP_MAX_TOKENS env var. */
 export const DEFAULT_TTS_CLEANUP_MAX_TOKENS = 4096;
 
-/** Default timeout (ms) for TTS audio generation. Override via TTS_TIMEOUT_MS env var. */
+/** Default timeout (ms) for TTS audio generation per chunk. Override via TTS_TIMEOUT_MS env var. */
 export const DEFAULT_TTS_TIMEOUT_MS = 60000;
 
 /** Default timeout (ms) for markdown cleanup LLM call. Override via TTS_CLEANUP_TIMEOUT_MS env var. */
@@ -420,6 +421,19 @@ export const DEFAULT_TTS_CLEANUP_TIMEOUT_MS = 15000;
 
 /** Default R2 key prefix for TTS audio files. Override via TTS_R2_PREFIX env var. */
 export const DEFAULT_TTS_R2_PREFIX = 'tts';
+
+/** Default max characters per TTS chunk. Text is split at sentence boundaries.
+ * Override via TTS_CHUNK_SIZE env var. */
+export const DEFAULT_TTS_CHUNK_SIZE = 4000;
+
+/** Default max number of TTS chunks per request. Prevents CPU time exhaustion
+ * on Workers runtime. Override via TTS_MAX_CHUNKS env var. */
+export const DEFAULT_TTS_MAX_CHUNKS = 8;
+
+/** Default character threshold above which text is summarized instead of read verbatim.
+ * Aligned to DEFAULT_TTS_MAX_CHUNKS × DEFAULT_TTS_CHUNK_SIZE to ensure summary mode
+ * engages before the chunk cap fires. Override via TTS_SUMMARY_THRESHOLD env var. */
+export const DEFAULT_TTS_SUMMARY_THRESHOLD = 30000;
 
 // =============================================================================
 // Agent Settings

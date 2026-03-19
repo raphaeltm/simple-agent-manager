@@ -37,6 +37,8 @@ export interface UseAudioPlaybackReturn {
   skipBackward: (seconds: number) => void;
   /** Whether server TTS is available. */
   hasServerTTS: boolean;
+  /** Whether the audio was generated from a summary (not verbatim text). */
+  summarized: boolean;
 }
 
 /**
@@ -55,6 +57,7 @@ export function useAudioPlayback({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playbackRate, setPlaybackRateState] = useState(1);
+  const [summarized, setSummarized] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const blobUrlRef = useRef<string | null>(null);
@@ -210,7 +213,8 @@ export function useAudioPlayback({
         throw new Error(errData?.message || `Synthesis failed: ${synthesizeRes.status}`);
       }
 
-      const { audioUrl } = await synthesizeRes.json() as { audioUrl: string };
+      const { audioUrl, summarized: wasSummarized } = await synthesizeRes.json() as { audioUrl: string; summarized?: boolean };
+      setSummarized(wasSummarized ?? false);
 
       // Step 2: Fetch the audio blob
       const baseOrigin = new URL(ttsApiUrl).origin;
@@ -413,5 +417,6 @@ export function useAudioPlayback({
     skipForward,
     skipBackward,
     hasServerTTS,
+    summarized,
   };
 }
