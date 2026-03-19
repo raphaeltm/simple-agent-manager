@@ -176,6 +176,15 @@ export async function searchMessages(
   return stub.searchMessages(query, sessionId, roles, limit);
 }
 
+/** Materialize all stopped sessions that haven't been indexed yet. */
+export async function materializeAllStopped(
+  env: Env,
+  projectId: string,
+): Promise<{ materialized: number; errors: number }> {
+  const stub = await getStub(env, projectId);
+  return stub.materializeAllStopped();
+}
+
 export async function getCleanupAt(
   env: Env,
   projectId: string,

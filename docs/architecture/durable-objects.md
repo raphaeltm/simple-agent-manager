@@ -90,6 +90,8 @@ All DO implementations live in `apps/api/src/durable-objects/`. Each has a corre
 |-------|---------|
 | `chat_sessions` | Session metadata, lifecycle status, message counts |
 | `chat_messages` | Append-only streaming token log — each row is one streaming chunk from Claude Code, not a logical message. Consecutive same-role tokens (assistant, tool, thinking) are grouped into logical messages at the API and UI layers. The `sequence` field orders tokens within the same millisecond. |
+| `chat_messages_grouped` | Materialized grouped messages — populated when a session stops by concatenating consecutive same-role tokens. Used as the source for FTS5 full-text search. |
+| `chat_messages_grouped_fts` | FTS5 virtual table indexed on `chat_messages_grouped.content`. Enables full-text search with stemming, phrase matching, and ranking across token boundaries. |
 | `activity_events` | Audit trail (workspace created, session stopped, etc.) |
 | `task_status_events` | Task lifecycle transitions with actor tracking |
 | `acp_sessions` | ACP session state machine with fork lineage |
