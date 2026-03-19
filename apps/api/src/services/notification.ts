@@ -20,6 +20,9 @@ interface NotificationEnv {
  * Look up a project's name from D1 by its ID.
  * Returns a fallback string if the project is not found (defensive — notification
  * creation should never fail because of a missing project name).
+ *
+ * Uses raw D1 queries instead of Drizzle because this service only receives
+ * `{ DATABASE: D1Database }`, not the full Env needed for a Drizzle instance.
  */
 export async function getProjectName(env: { DATABASE: D1Database }, projectId: string): Promise<string> {
   try {
