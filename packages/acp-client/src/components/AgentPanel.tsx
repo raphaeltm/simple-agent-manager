@@ -273,7 +273,7 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
       )}
 
       {/* Message area — virtualized for performance */}
-      <div className="relative flex-1 min-h-0">
+      <div className="relative flex-1 min-h-0" role="log" aria-live="polite" aria-label="Conversation">
         {messages.items.length === 0 && !isReconnecting ? (
           <div className="flex items-center justify-center h-full text-gray-400 text-sm">
             Send a message to start the conversation
@@ -301,7 +301,7 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
           <button
             type="button"
             onClick={() => virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth' })}
-            className="absolute bottom-3 right-5 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-white border border-gray-300 shadow-md text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
+            className="absolute bottom-3 right-5 z-10 w-11 h-11 flex items-center justify-center rounded-full bg-white border border-gray-300 shadow-md text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
             aria-label="Scroll to bottom"
             title="Scroll to bottom"
           >

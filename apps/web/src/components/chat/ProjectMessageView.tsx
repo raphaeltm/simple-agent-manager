@@ -301,6 +301,9 @@ function SystemMessageBubble({ text }: { text: string }) {
   );
 }
 
+/** Virtual scroll: starting index for prepend-stable pagination */
+const VIRTUAL_START = 100_000;
+
 /** Renders ConversationItem array with the ACP-style components. */
 type SessionState = 'active' | 'idle' | 'terminated';
 
@@ -320,7 +323,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [showScrollButton, setShowScrollButton] = useState(false);
 
   // Virtual scroll: firstItemIndex for prepend-safe scrolling (load-more pagination)
-  const VIRTUAL_START = 100_000;
   const [firstItemIndex, setFirstItemIndex] = useState(VIRTUAL_START);
 
   const [session, setSession] = useState<ChatSessionResponse | null>(null);
@@ -672,12 +674,15 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       const data = await getChatSession(projectId, sessionId, {
         before: firstMessage.createdAt,
       });
-      const fetchedCount = data.messages.length;
-      setMessages((prev) => mergeMessages(prev, data.messages, 'prepend'));
+      setMessages((prev) => {
+        const merged = mergeMessages(prev, data.messages, 'prepend');
+        // Use actual added count (not raw API count) to avoid index drift
+        // when mergeMessages deduplicates overlapping messages.
+        const actualAdded = merged.length - prev.length;
+        setFirstItemIndex((fi) => fi - actualAdded);
+        return merged;
+      });
       setHasMore(data.hasMore);
-      // Decrease firstItemIndex by the number of prepended items so Virtuoso
-      // maintains stable virtual indices and preserves scroll position.
-      setFirstItemIndex((prev) => prev - fetchedCount);
     } finally {
       setLoadingMore(false);
     }
@@ -783,7 +788,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         }
 
         return (
-          <div className="flex-1 min-h-0 min-w-0 relative">
+          <div className="flex-1 min-h-0 min-w-0 relative" role="log" aria-live="polite" aria-label="Conversation">
             <Virtuoso
               ref={virtuosoRef}
               key={useFullAcpView ? 'acp' : 'do'}
@@ -822,7 +827,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
                     behavior: 'smooth',
                   });
                 }}
-                className="absolute bottom-3 right-4 z-10 flex items-center justify-center w-8 h-8 rounded-full border border-border-default bg-surface shadow-md cursor-pointer hover:bg-page transition-colors"
+                className="absolute bottom-3 right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-border-default bg-surface shadow-md cursor-pointer hover:bg-page transition-colors"
                 aria-label="Scroll to bottom"
               >
                 <ChevronDown size={16} className="text-fg-muted" />

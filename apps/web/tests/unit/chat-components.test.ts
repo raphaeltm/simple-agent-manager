@@ -89,10 +89,7 @@ describe('ProjectMessageView', () => {
     expect(source).toContain('hasMore');
   });
 
-  it('auto-scrolls to bottom via Virtuoso followOutput', () => {
-    expect(source).toContain('Virtuoso');
-    expect(source).toContain('followOutput');
-  });
+  // auto-scroll behavior is tested behaviorally in project-message-view.test.tsx
 
   it('renders session header with derived state', () => {
     expect(source).toContain('deriveSessionState');
