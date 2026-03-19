@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { List, Settings, LayoutGrid, GitFork, Search, ChevronDown, ChevronRight, X } from 'lucide-react';
+import { List, Settings, LayoutGrid, GitFork, Search, ChevronDown, ChevronRight, X, Lightbulb } from 'lucide-react';
 import { Spinner } from '@simple-agent-manager/ui';
 import { VoiceButton } from '@simple-agent-manager/acp-client';
 import type { AgentInfo, WorkspaceProfile, TaskMode } from '@simple-agent-manager/shared';
@@ -17,6 +17,7 @@ import {
   listAgents,
   listChatSessions,
   listCredentials,
+  listProjectTasks,
   submitTask,
   getProjectTask,
   getTranscribeApiUrl,
@@ -154,6 +155,9 @@ export function ProjectChat() {
   // Fork dialog state
   const [forkSession, setForkSession] = useState<ChatSessionResponse | null>(null);
 
+  // Task/idea title map for session tagging
+  const [taskTitleMap, setTaskTitleMap] = useState<Map<string, string>>(new Map());
+
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
   // ---------------------------------------------------------------------------
@@ -232,10 +236,19 @@ export function ProjectChat() {
       setIsRefreshing(true);
     }
     try {
-      const result = await listChatSessions(projectId, { limit: 100 });
-      setSessions(result.sessions);
+      const [sessionResult, tasksResult] = await Promise.all([
+        listChatSessions(projectId, { limit: 100 }),
+        listProjectTasks(projectId, { limit: 200 }),
+      ]);
+      setSessions(sessionResult.sessions);
+      // Build task title map for session idea tags
+      const titleMap = new Map<string, string>();
+      for (const t of tasksResult.tasks) {
+        titleMap.set(t.id, t.title);
+      }
+      setTaskTitleMap(titleMap);
       hasLoadedRef.current = true;
-      return result.sessions;
+      return sessionResult.sessions;
     } catch {
       return [];
     } finally {
@@ -552,6 +565,7 @@ export function ProjectChat() {
                   isSelected={session.id === sessionId}
                   onSelect={handleSelect}
                   onFork={setForkSession}
+                  ideaTitle={session.taskId ? taskTitleMap.get(session.taskId) : undefined}
                 />
               ))}
               {filteredStale.length > 0 && (
@@ -706,6 +720,7 @@ export function ProjectChat() {
           realtimeDegraded={realtimeDegraded}
           isRefreshing={isRefreshing}
           onRefresh={() => void loadSessions()}
+          taskTitleMap={taskTitleMap}
         />
       )}
 
@@ -730,11 +745,13 @@ function SessionItem({
   isSelected,
   onSelect,
   onFork,
+  ideaTitle,
 }: {
   session: ChatSessionResponse;
   isSelected: boolean;
   onSelect: (id: string) => void;
   onFork?: (session: ChatSessionResponse) => void;
+  ideaTitle?: string;
 }) {
   const state = getSessionState(session);
   const dotColor = STATE_COLORS[state];
@@ -754,6 +771,21 @@ function SessionItem({
         onClick={() => onSelect(session.id)}
         className="block w-full text-left bg-transparent border-none cursor-pointer p-0"
       >
+        {/* Idea tag */}
+        {ideaTitle && (
+          <div className="flex items-center gap-1 mb-1 pl-[calc(6px+8px)]">
+            <span
+              className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full max-w-full overflow-hidden text-ellipsis whitespace-nowrap"
+              style={{
+                color: 'var(--sam-color-accent)',
+                background: 'color-mix(in srgb, var(--sam-color-accent) 12%, transparent)',
+              }}
+              title={`Idea: ${ideaTitle}`}
+            >
+              <Lightbulb size={10} /> {ideaTitle}
+            </span>
+          </div>
+        )}
         <div className="flex items-center gap-2 mb-0.5">
           <span
             className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
@@ -800,6 +832,7 @@ function MobileSessionDrawer({
   realtimeDegraded = false,
   isRefreshing = false,
   onRefresh,
+  taskTitleMap = new Map(),
 }: {
   sessions: ChatSessionResponse[];
   selectedSessionId: string | null;
@@ -810,6 +843,7 @@ function MobileSessionDrawer({
   realtimeDegraded?: boolean;
   isRefreshing?: boolean;
   onRefresh?: () => void;
+  taskTitleMap?: Map<string, string>;
 }) {
   const [mobileSearch, setMobileSearch] = useState('');
   const [mobileShowStale, setMobileShowStale] = useState(false);
@@ -944,6 +978,7 @@ function MobileSessionDrawer({
               isSelected={session.id === selectedSessionId}
               onSelect={onSelect}
               onFork={onFork}
+              ideaTitle={session.taskId ? taskTitleMap.get(session.taskId) : undefined}
             />
           ))}
           {filteredS.length > 0 && (
@@ -963,6 +998,7 @@ function MobileSessionDrawer({
                   isSelected={session.id === selectedSessionId}
                   onSelect={onSelect}
                   onFork={onFork}
+                  ideaTitle={session.taskId ? taskTitleMap.get(session.taskId) : undefined}
                 />
               ))}
             </>
