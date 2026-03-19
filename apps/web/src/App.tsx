@@ -21,7 +21,7 @@ import { UiStandards } from './pages/UiStandards';
 import { Projects } from './pages/Projects';
 import { Project } from './pages/Project';
 import { ProjectOverview } from './pages/ProjectOverview';
-import { ProjectTasks } from './pages/ProjectTasks';
+import { IdeasPage } from './pages/IdeasPage';
 import { ProjectSessions } from './pages/ProjectSessions';
 import { ProjectSettings } from './pages/ProjectSettings';
 import { ProjectActivity } from './pages/ProjectActivity';
@@ -69,8 +69,10 @@ export default function App() {
               <Route path="overview" element={<ProjectOverview />} />
               <Route path="chat" element={<ProjectChat />} />
               <Route path="chat/:sessionId" element={<ProjectChat />} />
+              <Route path="ideas" element={<IdeasPage />} />
+              <Route path="ideas/:taskId" element={<TaskDetail />} />
               <Route path="kanban" element={<ProjectKanban />} />
-              <Route path="tasks" element={<ProjectTasks />} />
+              <Route path="tasks" element={<Navigate to="../ideas" replace />} />
               <Route path="tasks/:taskId" element={<TaskDetail />} />
               <Route path="sessions" element={<ProjectSessions />} />
               <Route path="sessions/:sessionId" element={<ChatSessionView />} />

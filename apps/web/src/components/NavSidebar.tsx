@@ -8,7 +8,7 @@ import {
   Server,
   Monitor,
   MessageSquare,
-  ClipboardList,
+  Lightbulb,
   LayoutDashboard,
   Activity,
   Radio,
@@ -34,7 +34,7 @@ export const GLOBAL_NAV_ITEMS: NavItem[] = [
 /** Project sub-nav items — paths are relative to /projects/:id/ */
 export const PROJECT_NAV_ITEMS: NavItem[] = [
   { label: 'Chat', path: 'chat', icon: <MessageSquare size={18} /> },
-  { label: 'Tasks', path: 'tasks', icon: <ClipboardList size={18} /> },
+  { label: 'Ideas', path: 'ideas', icon: <Lightbulb size={18} /> },
   { label: 'Overview', path: 'overview', icon: <LayoutDashboard size={18} /> },
   { label: 'Activity', path: 'activity', icon: <Activity size={18} /> },
   { label: 'Sessions', path: 'sessions', icon: <Radio size={18} /> },
