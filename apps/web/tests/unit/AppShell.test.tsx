@@ -128,9 +128,8 @@ describe('AppShell (project context)', () => {
     expect(screen.getByRole('navigation', { name: 'Project navigation' })).toBeInTheDocument();
     expect(screen.getByText('Chat')).toBeInTheDocument();
     expect(screen.getByText('Ideas')).toBeInTheDocument();
-    expect(screen.getByText('Overview')).toBeInTheDocument();
     expect(screen.getByText('Activity')).toBeInTheDocument();
-    expect(screen.getByText('Sessions')).toBeInTheDocument();
+    expect(screen.getByText('Settings')).toBeInTheDocument();
   });
 
   it('shows Back to Projects link when inside a project', () => {
@@ -209,7 +208,7 @@ describe('AppShell (mobile)', () => {
     expect(drawer).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Chat' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Ideas' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Overview' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Activity' })).toBeInTheDocument();
   });
 
   it('renders icons alongside labels in mobile drawer nav items', () => {

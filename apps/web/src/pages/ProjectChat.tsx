@@ -656,7 +656,7 @@ export function ProjectChat() {
         {showNewChatInput ? (
           /* New chat / empty state */
           <div className="flex-1 flex flex-col min-h-0">
-            <div className={`flex-1 flex flex-col items-center justify-center gap-3 ${isMobile ? 'p-4' : 'p-8'}`}>
+            <div className={`flex-1 flex flex-col items-center gap-3 ${isMobile ? 'p-4 justify-end pb-8' : 'p-8 justify-center'}`}>
               {provisioning ? (
                 <ProvisioningIndicator state={provisioning} />
               ) : (
@@ -1301,9 +1301,11 @@ function ChatInput({
           {submitting ? 'Sending...' : 'Send'}
         </button>
       </div>
-      <div className="sam-type-caption text-fg-muted mt-1">
-        Press Ctrl+Enter to send, Enter for new line
-      </div>
+      {!isMobile && (
+        <div className="sam-type-caption text-fg-muted mt-1">
+          Press Ctrl+Enter to send, Enter for new line
+        </div>
+      )}
     </div>
   );
 }

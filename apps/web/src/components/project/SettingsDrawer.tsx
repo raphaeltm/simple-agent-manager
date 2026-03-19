@@ -625,7 +625,6 @@ export const SettingsDrawer: FC<SettingsDrawerProps> = ({ open, onClose }) => {
               </div>
               <div className="grid gap-1">
                 {[
-                  { label: 'Overview', description: 'Workspaces & launch controls', path: `/projects/${projectId}/overview` },
                   { label: 'Tasks', description: 'Task list & management', path: `/projects/${projectId}/tasks` },
                   { label: 'Activity', description: 'Project event feed', path: `/projects/${projectId}/activity` },
                 ].map((link) => (

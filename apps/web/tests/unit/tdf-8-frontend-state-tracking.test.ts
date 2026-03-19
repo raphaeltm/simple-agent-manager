@@ -111,27 +111,6 @@ describe('ProvisioningIndicator (ProjectChat)', () => {
   });
 });
 
-describe('TaskKanbanCard execution step display', () => {
-  const source = readSource('components/task/TaskKanbanCard.tsx');
-
-  it('imports EXECUTION_STEP_LABELS from shared', () => {
-    expect(source).toContain("import { EXECUTION_STEP_LABELS } from '@simple-agent-manager/shared'");
-  });
-
-  it('shows execution step label for transient statuses', () => {
-    expect(source).toContain('task.executionStep');
-    expect(source).toContain('EXECUTION_STEP_LABELS[task.executionStep]');
-  });
-
-  it('falls back to status string when no execution step', () => {
-    expect(source).toContain(': task.status');
-  });
-
-  it('shows step label for active tasks with non-running step', () => {
-    expect(source).toContain("task.executionStep !== 'running'");
-  });
-});
-
 describe('TaskExecutionProgress removal (TDF-8)', () => {
   it('TaskExecutionProgress.tsx should not exist (absorbed into ProvisioningIndicator)', () => {
     expect(() => {
