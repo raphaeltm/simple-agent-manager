@@ -1,8 +1,11 @@
 # Fix Chat Message UI Re-rendering Loop
 
 **Created**: 2026-02-27
+**Completed**: 2026-02-27
 **Priority**: High
 **Classification**: `ui-change`, `cross-component-change`
+
+> **Archive Note**: Resolved in PR #211 (commit d4c306c7, Feb 27 2026). All fixes landed same day: React.memo on conversation items, hoisted Markdown components prop, fingerprint-based polling dedup, guarded auto-scroll. Enhanced in PR #240 (commit e81c6545, Mar 3 2026) with syntax highlighting stability. All acceptance criteria verified in code as of 2026-03-19.
 
 ## Symptoms
 
