@@ -64,6 +64,75 @@ These are the reasons this was previously deferred:
 - [Open WebUI Performance Discussion #13787](https://github.com/open-webui/open-webui/discussions/13787)
 - [Virtual Scrolling: Rendering millions of messages (Kreya)](https://kreya.app/blog/using-virtual-scrolling/)
 
+## Research Findings
+
+### Current Implementation Details (2026-03-19)
+
+**ProjectMessageView** (`apps/web/src/components/chat/ProjectMessageView.tsx`):
+- Two-source rendering: ACP items during prompting + 3s grace, then DO-backed `chatMessagesToConversationItems()` output
+- **Manual scroll tracking** via `isStuckToBottomRef` + scroll listener (NOT using useAutoScroll hook)
+- Auto-scroll uses `lastMessageId` (not `.length`) to detect genuine new messages
+- Load-more: captures `scrollHeight`/`scrollTop` before fetch, restores position in RAF after prepend
+- ACP→DO transition: captures scroll geometry pre-transition, restores in RAF
+- Rendering: `convertedItems.map()` or `acpItems.map()` inside an overflow-y-auto div
+
+**AgentPanel** (`packages/acp-client/src/components/AgentPanel.tsx`):
+- Uses `useAutoScroll` hook (ResizeObserver + MutationObserver + RAF coalescing)
+- Simpler rendering: `messages.items.map()` inside `scrollRef` div
+- No load-more pagination (ACP streams are session-scoped)
+- Scroll-to-bottom FAB with `isAtBottom` state
+
+**Key Hooks**:
+- `useAutoScroll` (acp-client): Smart auto-scroll with 50px threshold, RAF-coalesced
+- `useChatWebSocket`: 4 message update paths (append, replace, replace, prepend)
+- `useProjectAgentSession`: ACP WebSocket lifecycle, agent session ULID
+
+**Test Coverage**:
+- `chatMessagesToConversationItems.test.ts`: 80 tests (conversion logic)
+- `chat-components.test.ts`: 68 source-contract tests (limited value)
+- `project-chat.test.tsx`: Page-level integration tests
+
+### Library Decision: react-virtuoso
+
+Confirmed `react-virtuoso` as the right choice based on code analysis:
+1. `followOutput` directly replaces `isStuckToBottomRef` + RAF scroll pattern
+2. `startReached` callback replaces manual scroll geometry preservation for load-more
+3. Dynamic height measurement is built-in (no `measureElement` wiring)
+4. Streaming message growth handled via `followOutput="smooth"` + automatic re-measurement
+5. Well-maintained, 5k+ GitHub stars, purpose-built for chat UIs
+
+## Implementation Checklist
+
+### Phase A: Install & Setup
+- [ ] Install `react-virtuoso` in `apps/web` and `packages/acp-client`
+- [ ] Create shared `VirtualizedMessageList` wrapper component
+
+### Phase B: ProjectMessageView Virtualization
+- [ ] Replace `convertedItems.map()` / `acpItems.map()` with `<Virtuoso>` component
+- [ ] Implement `itemContent` renderer using existing `ConversationItemView` (from ProjectMessageView)
+- [ ] Wire `followOutput` to replace `isStuckToBottomRef` + auto-scroll effect
+- [ ] Wire `startReached` callback to replace load-more scroll preservation
+- [ ] Handle ACP→DO transition: key the Virtuoso by source or reset state
+- [ ] Update scroll-to-bottom FAB to use Virtuoso's `scrollToIndex` API
+- [ ] Remove old manual scroll tracking code (isStuckToBottomRef, handleScroll, messagesEndRef)
+
+### Phase C: AgentPanel Virtualization
+- [ ] Replace `messages.items.map()` with `<Virtuoso>` in AgentPanel
+- [ ] Wire `followOutput` to replace `useAutoScroll` hook usage
+- [ ] Update scroll-to-bottom FAB to use Virtuoso API
+- [ ] Handle replay/clear edge case (items [] → populated)
+
+### Phase D: Testing
+- [ ] Update existing chat tests for virtualized rendering (mock Virtuoso or use JSDOM workarounds)
+- [ ] Add behavioral test: verify DOM node count stays constant with 1000+ items
+- [ ] Add behavioral test: scroll-to-bottom works after new messages
+- [ ] Add behavioral test: load-more pagination triggers at scroll top
+
+### Phase E: Cleanup
+- [ ] Remove unused scroll preservation code from ProjectMessageView
+- [ ] Remove useAutoScroll hook usage from AgentPanel (if fully replaced)
+- [ ] Update task file acceptance criteria
+
 ## Acceptance Criteria
 
 - [ ] Chat with 1000+ messages renders only visible items (± overscan buffer)
