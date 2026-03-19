@@ -1253,4 +1253,134 @@ describe('ProjectData Durable Object', () => {
       expect(sessions).toBeDefined();
     });
   });
+
+  // =========================================================================
+  // Message Materialization & FTS5 Search
+  // =========================================================================
+
+  describe('message materialization and FTS5 search', () => {
+    it('materializes session on stop and enables FTS5 search', async () => {
+      const stub = getStub('project-fts5-basic');
+      const sessionId = await stub.createSession(null, 'FTS5 test');
+
+      // Persist tokens that span a search term across boundaries
+      await stub.persistMessage(sessionId, 'user', 'Fix the authentication middleware', null);
+      await stub.persistMessage(sessionId, 'assistant', 'I will fix the auth', null);
+      await stub.persistMessage(sessionId, 'assistant', 'entication middleware now.', null);
+      await stub.persistMessage(sessionId, 'assistant', ' Let me look at the code.', null);
+
+      // Before stop: search should use LIKE on raw tokens
+      const beforeResults = stub.searchMessages('authentication middleware');
+      // LIKE on individual tokens may or may not find this — the user message has it
+      expect(beforeResults.length).toBeGreaterThanOrEqual(1);
+
+      // Stop session — triggers materialization
+      await stub.stopSession(sessionId);
+
+      // After stop: session should be materialized
+      const session = await stub.getSession(sessionId);
+      expect(session!.status).toBe('stopped');
+
+      // FTS5 search should find "authentication middleware" even though it spans tokens
+      const afterResults = stub.searchMessages('authentication middleware');
+      expect(afterResults.length).toBeGreaterThanOrEqual(1);
+      // The grouped assistant message should contain the full phrase
+      const assistantResult = afterResults.find((r) => r.role === 'assistant');
+      expect(assistantResult).toBeDefined();
+      expect(assistantResult!.snippet).toContain('auth');
+    });
+
+    it('materializeSession is idempotent', async () => {
+      const stub = getStub('project-fts5-idempotent');
+      const sessionId = await stub.createSession(null, 'Idempotent test');
+
+      await stub.persistMessage(sessionId, 'user', 'Hello world', null);
+      await stub.persistMessage(sessionId, 'assistant', 'Hi there!', null);
+
+      await stub.stopSession(sessionId);
+
+      // Calling materializeSession again should be a no-op (no error)
+      stub.materializeSession(sessionId);
+
+      // Search should still work
+      const results = stub.searchMessages('Hello');
+      expect(results.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('materializeAllStopped backfills existing sessions', async () => {
+      const stub = getStub('project-fts5-backfill');
+
+      // Create and stop multiple sessions
+      const s1 = await stub.createSession(null, 'Session one');
+      await stub.persistMessage(s1, 'user', 'First session content', null);
+      await stub.stopSession(s1); // auto-materializes
+
+      const s2 = await stub.createSession(null, 'Session two');
+      await stub.persistMessage(s2, 'user', 'Second session unique text', null);
+      await stub.stopSession(s2); // auto-materializes
+
+      // Create an active session (should NOT be materialized)
+      const s3 = await stub.createSession(null, 'Active session');
+      await stub.persistMessage(s3, 'user', 'Active session content', null);
+
+      // materializeAllStopped should report already-materialized sessions as no-ops
+      const result = stub.materializeAllStopped();
+      expect(result.errors).toBe(0);
+
+      // Both stopped sessions should be searchable
+      const r1 = stub.searchMessages('First session');
+      expect(r1.length).toBeGreaterThanOrEqual(1);
+      const r2 = stub.searchMessages('unique text');
+      expect(r2.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('active sessions fall back to LIKE search', async () => {
+      const stub = getStub('project-fts5-fallback');
+
+      const sessionId = await stub.createSession(null, 'Active search test');
+      await stub.persistMessage(sessionId, 'user', 'searchable keyword here', null);
+
+      // Session is still active — should fall back to LIKE
+      const results = stub.searchMessages('searchable');
+      expect(results.length).toBeGreaterThanOrEqual(1);
+      expect(results[0]!.snippet).toContain('searchable');
+    });
+
+    it('FTS5 search with role filtering', async () => {
+      const stub = getStub('project-fts5-roles');
+      const sessionId = await stub.createSession(null, 'Role filter test');
+
+      await stub.persistMessage(sessionId, 'user', 'Please fix the database query', null);
+      await stub.persistMessage(sessionId, 'assistant', 'I will fix the database query now', null);
+
+      await stub.stopSession(sessionId);
+
+      // Search with role filter — only user messages
+      const userResults = stub.searchMessages('database query', null, ['user']);
+      expect(userResults.length).toBe(1);
+      expect(userResults[0]!.role).toBe('user');
+
+      // Search with role filter — only assistant messages
+      const assistantResults = stub.searchMessages('database query', null, ['assistant']);
+      expect(assistantResults.length).toBe(1);
+      expect(assistantResults[0]!.role).toBe('assistant');
+    });
+
+    it('groups consecutive assistant tokens into single message', async () => {
+      const stub = getStub('project-fts5-grouping');
+      const sessionId = await stub.createSession(null, 'Grouping test');
+
+      // Simulate streaming tokens
+      await stub.persistMessage(sessionId, 'assistant', 'Let me', null);
+      await stub.persistMessage(sessionId, 'assistant', ' analyze', null);
+      await stub.persistMessage(sessionId, 'assistant', ' the code.', null);
+
+      await stub.stopSession(sessionId);
+
+      // Search for a term that spans token boundaries
+      const results = stub.searchMessages('analyze the');
+      expect(results.length).toBe(1);
+      expect(results[0]!.snippet).toContain('analyze');
+    });
+  });
 });
