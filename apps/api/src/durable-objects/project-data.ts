@@ -955,6 +955,89 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   // =========================================================================
+  // Session–Idea Linking (many-to-many)
+  // =========================================================================
+
+  /**
+   * Link a chat session to an idea (task). Idempotent — duplicate links are ignored.
+   */
+  async linkSessionIdea(sessionId: string, taskId: string, context: string | null): Promise<void> {
+    // Verify session exists in this DO
+    const session = this.sql
+      .exec('SELECT id FROM chat_sessions WHERE id = ?', sessionId)
+      .toArray()[0];
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    this.sql.exec(
+      `INSERT OR IGNORE INTO chat_session_ideas (session_id, task_id, context, created_at)
+       VALUES (?, ?, ?, ?)`,
+      sessionId,
+      taskId,
+      context,
+      Date.now()
+    );
+  }
+
+  /**
+   * Remove a link between a chat session and an idea. No-op if the link doesn't exist.
+   */
+  async unlinkSessionIdea(sessionId: string, taskId: string): Promise<void> {
+    this.sql.exec(
+      'DELETE FROM chat_session_ideas WHERE session_id = ? AND task_id = ?',
+      sessionId,
+      taskId
+    );
+  }
+
+  /**
+   * Get all idea (task) IDs linked to a session, with link metadata.
+   */
+  getIdeasForSession(sessionId: string): Array<{ taskId: string; context: string | null; createdAt: number }> {
+    const rows = this.sql
+      .exec(
+        'SELECT task_id, context, created_at FROM chat_session_ideas WHERE session_id = ? ORDER BY created_at ASC',
+        sessionId
+      )
+      .toArray();
+    return rows.map((r) => ({
+      taskId: r.task_id as string,
+      context: r.context as string | null,
+      createdAt: r.created_at as number,
+    }));
+  }
+
+  /**
+   * Get all sessions linked to a given idea (task ID), with link metadata.
+   */
+  getSessionsForIdea(taskId: string): Array<{
+    sessionId: string;
+    topic: string | null;
+    status: string;
+    context: string | null;
+    linkedAt: number;
+  }> {
+    const rows = this.sql
+      .exec(
+        `SELECT csi.session_id, cs.topic, cs.status, csi.context, csi.created_at
+         FROM chat_session_ideas csi
+         JOIN chat_sessions cs ON cs.id = csi.session_id
+         WHERE csi.task_id = ?
+         ORDER BY csi.created_at ASC`,
+        taskId
+      )
+      .toArray();
+    return rows.map((r) => ({
+      sessionId: r.session_id as string,
+      topic: r.topic as string | null,
+      status: r.status as string,
+      context: r.context as string | null,
+      linkedAt: r.created_at as number,
+    }));
+  }
+
+  // =========================================================================
   // Activity Events
   // =========================================================================
 

@@ -1383,4 +1383,152 @@ describe('ProjectData Durable Object', () => {
       expect(results[0]!.snippet).toContain('analyze');
     });
   });
+
+  // =========================================================================
+  // Session–Idea Linking (many-to-many)
+  // =========================================================================
+
+  describe('session-idea linking', () => {
+    it('links a session to an idea', async () => {
+      const stub = getStub('project-idea-link');
+      const sessionId = await stub.createSession(null, 'Idea discussion');
+
+      stub.linkSessionIdea(sessionId, 'task-001', 'discussing auth flow');
+
+      const ideas = stub.getIdeasForSession(sessionId);
+      expect(ideas).toHaveLength(1);
+      expect(ideas[0]!.taskId).toBe('task-001');
+      expect(ideas[0]!.context).toBe('discussing auth flow');
+      expect(ideas[0]!.createdAt).toBeGreaterThan(0);
+    });
+
+    it('links multiple ideas to a single session', async () => {
+      const stub = getStub('project-idea-multi-link');
+      const sessionId = await stub.createSession(null, 'Multi-idea session');
+
+      stub.linkSessionIdea(sessionId, 'task-a', 'first idea');
+      stub.linkSessionIdea(sessionId, 'task-b', 'second idea');
+      stub.linkSessionIdea(sessionId, 'task-c', null);
+
+      const ideas = stub.getIdeasForSession(sessionId);
+      expect(ideas).toHaveLength(3);
+      expect(ideas.map((i: { taskId: string }) => i.taskId)).toEqual(['task-a', 'task-b', 'task-c']);
+    });
+
+    it('is idempotent — duplicate links are silently ignored', async () => {
+      const stub = getStub('project-idea-idempotent');
+      const sessionId = await stub.createSession(null, 'Idempotent test');
+
+      stub.linkSessionIdea(sessionId, 'task-dup', 'first link');
+      stub.linkSessionIdea(sessionId, 'task-dup', 'second link attempt');
+
+      const ideas = stub.getIdeasForSession(sessionId);
+      expect(ideas).toHaveLength(1);
+      // First context wins (INSERT OR IGNORE)
+      expect(ideas[0]!.context).toBe('first link');
+    });
+
+    it('unlinks a session from an idea', async () => {
+      const stub = getStub('project-idea-unlink');
+      const sessionId = await stub.createSession(null, 'Unlink test');
+
+      stub.linkSessionIdea(sessionId, 'task-rm', 'to be removed');
+      stub.unlinkSessionIdea(sessionId, 'task-rm');
+
+      const ideas = stub.getIdeasForSession(sessionId);
+      expect(ideas).toHaveLength(0);
+    });
+
+    it('unlinking non-existent link is a no-op', async () => {
+      const stub = getStub('project-idea-unlink-noop');
+      const sessionId = await stub.createSession(null, 'No-op test');
+
+      // Should not throw
+      stub.unlinkSessionIdea(sessionId, 'nonexistent-task');
+
+      const ideas = stub.getIdeasForSession(sessionId);
+      expect(ideas).toHaveLength(0);
+    });
+
+    it('returns sessions linked to an idea (reverse lookup)', async () => {
+      const stub = getStub('project-idea-reverse');
+      const s1 = await stub.createSession(null, 'Session one');
+      const s2 = await stub.createSession(null, 'Session two');
+
+      stub.linkSessionIdea(s1, 'shared-task', 'context 1');
+      stub.linkSessionIdea(s2, 'shared-task', 'context 2');
+
+      const sessions = stub.getSessionsForIdea('shared-task');
+      expect(sessions).toHaveLength(2);
+      expect(sessions[0]!.sessionId).toBe(s1);
+      expect(sessions[0]!.topic).toBe('Session one');
+      expect(sessions[0]!.status).toBe('active');
+      expect(sessions[0]!.context).toBe('context 1');
+      expect(sessions[1]!.sessionId).toBe(s2);
+    });
+
+    it('returns empty array for idea with no linked sessions', async () => {
+      const stub = getStub('project-idea-no-sessions');
+
+      const sessions = stub.getSessionsForIdea('orphan-task');
+      expect(sessions).toHaveLength(0);
+    });
+
+    it('throws when linking to a non-existent session', async () => {
+      const stub = getStub('project-idea-bad-session');
+      await stub.ensureProjectId('project-idea-bad-session');
+
+      expect(() => {
+        stub.linkSessionIdea('nonexistent-session', 'task-x', null);
+      }).toThrow('Session not found: nonexistent-session');
+    });
+
+    it('cascade deletes links when session is deleted', async () => {
+      const stub = getStub('project-idea-cascade');
+      const sessionId = await stub.createSession(null, 'Cascade test');
+
+      stub.linkSessionIdea(sessionId, 'task-cascade', 'will be deleted');
+
+      // Verify link exists
+      expect(stub.getIdeasForSession(sessionId)).toHaveLength(1);
+
+      // Stop session (does not delete in current schema, just changes status)
+      await stub.stopSession(sessionId);
+
+      // Links should still exist since session is stopped, not deleted
+      expect(stub.getIdeasForSession(sessionId)).toHaveLength(1);
+    });
+
+    it('returns empty ideas for a session with no links', async () => {
+      const stub = getStub('project-idea-empty-session');
+      const sessionId = await stub.createSession(null, 'No links');
+
+      const ideas = stub.getIdeasForSession(sessionId);
+      expect(ideas).toHaveLength(0);
+      expect(ideas).toEqual([]);
+    });
+
+    it('round-trips null context correctly', async () => {
+      const stub = getStub('project-idea-null-ctx');
+      const sessionId = await stub.createSession(null, 'Null context');
+
+      stub.linkSessionIdea(sessionId, 'task-null', null);
+
+      const ideas = stub.getIdeasForSession(sessionId);
+      expect(ideas).toHaveLength(1);
+      expect(ideas[0]!.context).toBeNull();
+    });
+
+    it('getSessionsForIdea returns linkedAt as a positive number', async () => {
+      const stub = getStub('project-idea-linked-at');
+      const sessionId = await stub.createSession(null, 'LinkedAt test');
+
+      stub.linkSessionIdea(sessionId, 'task-la', 'test');
+
+      const sessions = stub.getSessionsForIdea('task-la');
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]!.linkedAt).toBeGreaterThan(0);
+      expect(typeof sessions[0]!.linkedAt).toBe('number');
+    });
+  });
 });

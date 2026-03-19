@@ -205,6 +205,55 @@ export async function markAgentCompleted(
 }
 
 // =========================================================================
+// Session–Idea Linking (many-to-many)
+// =========================================================================
+
+export async function linkSessionIdea(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  taskId: string,
+  context: string | null = null
+): Promise<void> {
+  const stub = await getStub(env, projectId);
+  return stub.linkSessionIdea(sessionId, taskId, context);
+}
+
+export async function unlinkSessionIdea(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  taskId: string
+): Promise<void> {
+  const stub = await getStub(env, projectId);
+  return stub.unlinkSessionIdea(sessionId, taskId);
+}
+
+export async function getIdeasForSession(
+  env: Env,
+  projectId: string,
+  sessionId: string
+): Promise<Array<{ taskId: string; context: string | null; createdAt: number }>> {
+  const stub = await getStub(env, projectId);
+  return stub.getIdeasForSession(sessionId);
+}
+
+export async function getSessionsForIdea(
+  env: Env,
+  projectId: string,
+  taskId: string
+): Promise<Array<{
+  sessionId: string;
+  topic: string | null;
+  status: string;
+  context: string | null;
+  linkedAt: number;
+}>> {
+  const stub = await getStub(env, projectId);
+  return stub.getSessionsForIdea(taskId);
+}
+
+// =========================================================================
 // Idle Cleanup Schedule
 // =========================================================================
 
