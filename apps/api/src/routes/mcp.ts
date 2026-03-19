@@ -16,6 +16,9 @@
  * Task dispatch (agent-to-agent):
  * - dispatch_task: Spawn a new task in the current project (with recursion depth + rate limiting)
  *
+ * Idea capture:
+ * - create_idea: Capture a draft task without spinning up an agent
+ *
  * Project awareness (read-only):
  * - list_tasks: List other tasks in the same project
  * - get_task_details: Get full details of a specific task
@@ -121,6 +124,10 @@ const DEFAULT_MCP_MESSAGE_SEARCH_MAX = 20;
 const DEFAULT_MCP_TASK_DESCRIPTION_SNIPPET_LENGTH = 200;
 /** Max length for idea link context string. Override via MCP_IDEA_CONTEXT_MAX_LENGTH env var. */
 const DEFAULT_MCP_IDEA_CONTEXT_MAX_LENGTH = 500;
+/** Max length for idea title. Override via MCP_IDEA_TITLE_MAX_LENGTH env var. */
+const DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH = 200;
+/** Max length for idea description. Override via MCP_IDEA_DESCRIPTION_MAX_LENGTH env var. */
+const DEFAULT_MCP_IDEA_DESCRIPTION_MAX_LENGTH = 32_000;
 
 function getMcpLimits(env: Env) {
   return {
@@ -147,6 +154,8 @@ function getMcpLimits(env: Env) {
     dispatchMaxReferenceLength: parsePositiveInt(env.MCP_DISPATCH_MAX_REFERENCE_LENGTH as string, DEFAULT_MCP_DISPATCH_MAX_REFERENCE_LENGTH),
     dispatchMaxPriority: parsePositiveInt(env.MCP_DISPATCH_MAX_PRIORITY as string, DEFAULT_MCP_DISPATCH_MAX_PRIORITY),
     ideaContextMaxLength: parsePositiveInt(env.MCP_IDEA_CONTEXT_MAX_LENGTH as string, DEFAULT_MCP_IDEA_CONTEXT_MAX_LENGTH),
+    ideaTitleMaxLength: parsePositiveInt(env.MCP_IDEA_TITLE_MAX_LENGTH as string, DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH),
+    ideaDescriptionMaxLength: parsePositiveInt(env.MCP_IDEA_DESCRIPTION_MAX_LENGTH as string, DEFAULT_MCP_IDEA_DESCRIPTION_MAX_LENGTH),
   };
 }
 
@@ -408,6 +417,31 @@ const MCP_TOOLS = [
         },
       },
       required: ['query'],
+      additionalProperties: false,
+    },
+  },
+  // ─── Idea creation ─────────────────────────────────────────────────────
+  {
+    name: 'create_idea',
+    description:
+      'Capture an idea as a draft task. Unlike dispatch_task, this does NOT spin up an agent — it just records the idea for later refinement or promotion. The idea is automatically linked to the current chat session.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Short title for the idea (max 200 chars)',
+        },
+        description: {
+          type: 'string',
+          description: 'Full description of the idea',
+        },
+        priority: {
+          type: 'number',
+          description: 'Priority level (0 = default). Higher values = higher priority.',
+        },
+      },
+      required: ['title', 'description'],
       additionalProperties: false,
     },
   },
@@ -1891,6 +1925,104 @@ async function handleSearchMessages(
   });
 }
 
+// ─── Idea creation handler ──────────────────────────────────────────────────
+
+async function handleCreateIdea(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const limits = getMcpLimits(env);
+
+  // Validate title
+  const rawTitle = typeof params.title === 'string' ? params.title.trim() : '';
+  if (!rawTitle) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'title is required');
+  }
+  const title = sanitizeUserInput(rawTitle).slice(0, limits.ideaTitleMaxLength);
+
+  // Validate description
+  const rawDescription = typeof params.description === 'string' ? params.description.trim() : '';
+  if (!rawDescription) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'description is required');
+  }
+  const description = sanitizeUserInput(rawDescription).slice(0, limits.ideaDescriptionMaxLength);
+
+  // Validate priority
+  const priority = typeof params.priority === 'number' && Number.isFinite(params.priority)
+    ? Math.max(0, Math.floor(params.priority))
+    : 0;
+
+  // Generate AI title if the provided title is too long or generic
+  const titleConfig = getTaskTitleConfig(env);
+  let finalTitle = title;
+  if (title.length > limits.ideaTitleMaxLength) {
+    const aiTitle = await generateTaskTitle(env.AI, description, titleConfig);
+    if (aiTitle) finalTitle = aiTitle;
+  }
+
+  const taskId = ulid();
+  const now = new Date().toISOString();
+
+  // Insert as draft task — no TaskRunner DO, no workspace provisioning
+  await env.DATABASE.prepare(
+    `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
+     status, priority, dispatch_depth, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, 0, ?, ?, ?)`,
+  ).bind(
+    taskId,
+    tokenData.projectId,
+    tokenData.userId,
+    tokenData.taskId, // parentTaskId — tracks which conversation spawned the idea
+    finalTitle,
+    description,
+    priority,
+    tokenData.userId,
+    now,
+    now,
+  ).run();
+
+  // Auto-link to the current chat session (best-effort)
+  const sessionId = await resolveSessionId(env, tokenData.workspaceId);
+  let linked = false;
+  if (sessionId) {
+    try {
+      await projectDataService.linkSessionIdea(env, tokenData.projectId, sessionId, taskId, null);
+      linked = true;
+    } catch (e) {
+      log.warn('mcp.create_idea.link_failed', {
+        taskId,
+        sessionId,
+        projectId: tokenData.projectId,
+        error: String(e),
+      });
+    }
+  }
+
+  log.info('mcp.create_idea.created', {
+    taskId,
+    projectId: tokenData.projectId,
+    parentTaskId: tokenData.taskId,
+    linked,
+    sessionId: sessionId ?? undefined,
+  });
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        id: taskId,
+        title: finalTitle,
+        status: 'draft',
+        parentTaskId: tokenData.taskId,
+        linked,
+        sessionId: sessionId ?? undefined,
+      }, null, 2),
+    }],
+  });
+}
+
 // ─── Session–Idea linking handlers ────────────────────────────────────────────
 
 /**
@@ -2183,6 +2315,8 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleGetSessionMessages(requestId, toolArgs, tokenData, c.env));
         case 'search_messages':
           return c.json(await handleSearchMessages(requestId, toolArgs, tokenData, c.env));
+        case 'create_idea':
+          return c.json(await handleCreateIdea(requestId, toolArgs, tokenData, c.env));
         case 'link_idea':
           return c.json(await handleLinkIdea(requestId, toolArgs, tokenData, c.env));
         case 'unlink_idea':

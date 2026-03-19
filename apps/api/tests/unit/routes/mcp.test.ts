@@ -277,12 +277,14 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('dispatch_task');
       // Agent-initiated notifications
       expect(toolNames).toContain('request_human_input');
+      // Idea creation
+      expect(toolNames).toContain('create_idea');
       // Session–Idea linking tools
       expect(toolNames).toContain('link_idea');
       expect(toolNames).toContain('unlink_idea');
       expect(toolNames).toContain('list_linked_ideas');
       expect(toolNames).toContain('find_related_ideas');
-      expect(body.result.tools).toHaveLength(15);
+      expect(body.result.tools).toHaveLength(16);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
@@ -1950,6 +1952,172 @@ describe('MCP Routes', () => {
   });
 
   // ─── Session–Idea linking tools ──────────────────────────────────────
+
+  describe('create_idea', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should reject missing title', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'create_idea',
+        arguments: { description: 'Some idea description' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('title is required');
+    });
+
+    it('should reject empty title', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'create_idea',
+        arguments: { title: '  ', description: 'Some idea description' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('title is required');
+    });
+
+    it('should reject missing description', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'create_idea',
+        arguments: { title: 'My Idea' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('description is required');
+    });
+
+    it('should create a draft task with correct fields', async () => {
+      // resolveSessionId returns a session for auto-linking
+      mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'sess-1' });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'create_idea',
+        arguments: {
+          title: 'Add dark mode support',
+          description: 'Users want a dark mode toggle in settings',
+          priority: 2,
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.title).toBe('Add dark mode support');
+      expect(data.status).toBe('draft');
+      expect(data.parentTaskId).toBe('task-123'); // from validTokenData
+      expect(data.linked).toBe(true);
+      expect(data.id).toBeDefined();
+
+      // Verify D1 insert was called with 'draft' status
+      expect(mockD1.prepare).toHaveBeenCalledWith(
+        expect.stringContaining("'draft'"),
+      );
+
+      // Verify auto-link was called
+      expect(mockDoStub.linkSessionIdea).toHaveBeenCalledWith(
+        'sess-1',
+        data.id,
+        null,
+      );
+    });
+
+    it('should NOT spawn a TaskRunner DO', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'sess-1' });
+
+      await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'create_idea',
+        arguments: {
+          title: 'Some idea',
+          description: 'Details about the idea',
+        },
+      }));
+
+      // TaskRunner DO should never be touched
+      expect(mockTaskRunner.idFromName).not.toHaveBeenCalled();
+      expect(mockTaskRunner.get).not.toHaveBeenCalled();
+      expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
+    });
+
+    it('should truncate title to max length', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'sess-1' });
+      const longTitle = 'a'.repeat(300);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'create_idea',
+        arguments: {
+          title: longTitle,
+          description: 'Some description',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+
+      const data = JSON.parse(body.result.content[0].text);
+      // Title should be truncated to the default max (200 chars)
+      expect(data.title.length).toBeLessThanOrEqual(200);
+    });
+
+    it('should default priority to 0 when not provided', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'sess-1' });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'create_idea',
+        arguments: {
+          title: 'Quick idea',
+          description: 'Just a thought',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+
+      // Check that the D1 prepare was called with priority=0
+      const prepareCall = mockD1.prepare.mock.calls.find(
+        (c: string[]) => typeof c[0] === 'string' && c[0].includes('INSERT INTO tasks'),
+      );
+      expect(prepareCall).toBeDefined();
+    });
+
+    it('should succeed even if no chat session exists (linked=false)', async () => {
+      // resolveSessionId returns null (no session for workspace)
+      mockD1._stmt.first.mockResolvedValueOnce(null);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'create_idea',
+        arguments: {
+          title: 'Orphan idea',
+          description: 'Created without a session',
+        },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.linked).toBe(false);
+      expect(data.status).toBe('draft');
+
+      // linkSessionIdea should not have been called
+      expect(mockDoStub.linkSessionIdea).not.toHaveBeenCalled();
+    });
+  });
 
   describe('link_idea', () => {
     beforeEach(() => {
