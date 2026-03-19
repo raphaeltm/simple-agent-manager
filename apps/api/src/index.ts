@@ -253,6 +253,8 @@ export interface Env {
   MAX_AGENT_CREDENTIAL_SYNC_BYTES?: string;
   MCP_TASK_DESCRIPTION_SNIPPET_LENGTH?: string;
   MCP_IDEA_CONTEXT_MAX_LENGTH?: string;            // Max length for idea link context string (default: 500)
+  MCP_IDEA_TITLE_MAX_LENGTH?: string;              // Max length for idea title (default: 200)
+  MCP_IDEA_DESCRIPTION_MAX_LENGTH?: string;        // Max length for idea description (default: 32000)
   // Text-to-speech (Workers AI)
   TTS_MODEL?: string;
   TTS_SPEAKER?: string;
