@@ -263,7 +263,7 @@ describe('Notification Service', () => {
   });
 
   describe('notifyPrCreated', () => {
-    it('should create pr_created notification with metadata including projectName', async () => {
+    it('should create pr_created notification with correct actionUrl, body, and metadata', async () => {
       await notifyPrCreated(env, 'user-123', {
         projectId: 'proj-1',
         projectName: 'My Project',
@@ -277,12 +277,16 @@ describe('Notification Service', () => {
         type: 'pr_created',
         urgency: 'medium',
         title: 'PR created: Add tests',
+        body: 'Pull request is ready for review',
+        actionUrl: '/projects/proj-1',
         metadata: {
           projectName: 'My Project',
           prUrl: 'https://github.com/org/repo/pull/99',
           branchName: 'sam/add-tests',
         },
       }));
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(call.sessionId).toBeUndefined();
     });
   });
 
@@ -617,6 +621,16 @@ describe('Notification Service', () => {
       }));
       const sessionId = await getChatSessionId(env, 'ws-error');
       expect(sessionId).toBeNull();
+    });
+
+    it('should return empty string as-is when chat_session_id is empty string', async () => {
+      env.DATABASE.prepare = vi.fn(() => ({
+        bind: vi.fn(() => ({
+          first: vi.fn().mockResolvedValue({ chat_session_id: '' }),
+        })),
+      }));
+      const sessionId = await getChatSessionId(env, 'ws-empty');
+      expect(sessionId).toBe('');
     });
   });
 
