@@ -91,7 +91,7 @@ vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
 // Mock react-virtuoso — JSDOM has no layout engine, so Virtuoso can't measure items.
 // Uses vi.hoisted to ensure the mock factory runs before imports.
 const virtuosoMock = vi.hoisted(() => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-explicit-any
   const React = require('react') as typeof import('react');
   return {
     Virtuoso: React.forwardRef(function MockVirtuoso(
