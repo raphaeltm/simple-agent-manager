@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { AppShell } from '../../src/components/AppShell';
@@ -210,5 +210,120 @@ describe('AppShell (mobile)', () => {
     expect(screen.getByRole('button', { name: 'Chat' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Tasks' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Overview' })).toBeInTheDocument();
+  });
+
+  it('renders icons alongside labels in mobile drawer nav items', () => {
+    renderAppShell();
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+
+    const drawer = screen.getByRole('dialog', { name: 'Navigation menu' });
+    // Lucide icons render as <svg> elements — each nav item button should contain an SVG icon
+    const navButtons = drawer.querySelectorAll('nav button');
+    for (const btn of navButtons) {
+      expect(btn.querySelector('svg')).toBeTruthy();
+    }
+  });
+
+  it('renders icons in mobile drawer project nav items', () => {
+    renderAppShell('/projects/proj-123/chat');
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+
+    const drawer = screen.getByRole('dialog', { name: 'Navigation menu' });
+    const navButtons = drawer.querySelectorAll('nav button');
+    expect(navButtons.length).toBeGreaterThan(0);
+    for (const btn of navButtons) {
+      expect(btn.querySelector('svg')).toBeTruthy();
+    }
+  });
+
+  it('shows project name header in mobile drawer when in project context', () => {
+    renderAppShell('/projects/proj-123/chat');
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+
+    const drawer = screen.getByRole('dialog', { name: 'Navigation menu' });
+    expect(within(drawer).getByText('Project')).toBeInTheDocument();
+  });
+
+  it('shows Infrastructure section in mobile drawer for superadmins', () => {
+    mockAuthState = { ...mockAuthState, isSuperadmin: true };
+    renderAppShell();
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+
+    expect(screen.getByText('Infrastructure')).toBeInTheDocument();
+  });
+
+  it('expands Infrastructure to show Nodes and Workspaces in mobile drawer', () => {
+    mockAuthState = { ...mockAuthState, isSuperadmin: true };
+    renderAppShell();
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+    fireEvent.click(screen.getByText('Infrastructure'));
+
+    expect(screen.getByRole('button', { name: 'Nodes' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Workspaces' })).toBeInTheDocument();
+  });
+
+  it('does not show Infrastructure in mobile drawer for non-superadmins', () => {
+    mockAuthState = { ...mockAuthState, isSuperadmin: false };
+    renderAppShell();
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+
+    expect(screen.queryByText('Infrastructure')).not.toBeInTheDocument();
+  });
+
+  it('renders sign out with icon in mobile drawer', () => {
+    renderAppShell();
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+
+    const signOutBtn = screen.getByRole('button', { name: 'Sign out' });
+    expect(signOutBtn.querySelector('svg')).toBeTruthy();
+  });
+
+  it('closes the mobile drawer when Escape is pressed', () => {
+    renderAppShell();
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+    expect(screen.getByRole('dialog', { name: 'Navigation menu' })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.queryByRole('dialog', { name: 'Navigation menu' })).not.toBeInTheDocument();
+  });
+
+  it('closes the drawer after navigating to a nav item', () => {
+    renderAppShell();
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+    expect(screen.getByRole('dialog', { name: 'Navigation menu' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Home' }));
+
+    expect(screen.queryByRole('dialog', { name: 'Navigation menu' })).not.toBeInTheDocument();
+  });
+
+  it('does not show Infrastructure in mobile drawer when superadmin is inside a project', () => {
+    mockAuthState = { ...mockAuthState, isSuperadmin: true };
+    renderAppShell('/projects/proj-123/chat');
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+
+    expect(screen.queryByText('Infrastructure')).not.toBeInTheDocument();
+  });
+
+  it('closes the drawer when backdrop is clicked', () => {
+    renderAppShell();
+
+    fireEvent.click(screen.getByLabelText('Open navigation menu'));
+    expect(screen.getByRole('dialog', { name: 'Navigation menu' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mobile-nav-backdrop'));
+
+    expect(screen.queryByRole('dialog', { name: 'Navigation menu' })).not.toBeInTheDocument();
   });
 });

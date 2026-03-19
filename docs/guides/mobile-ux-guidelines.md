@@ -115,6 +115,26 @@ Use Chrome DevTools at width `320px` and confirm:
 - no clipped CTA labels
 - no overflowing fixed-width panels
 
+## Navigation Drawer (`MobileNavDrawer`)
+
+The mobile navigation drawer (`apps/web/src/components/MobileNavDrawer.tsx`) is the primary navigation surface on mobile (< 768px). It mirrors the desktop sidebar (`NavSidebar.tsx`) and must maintain parity per `.claude/rules/15-nav-parity.md`.
+
+### Structure
+- **User header**: Avatar, name, email, close button
+- **Project name header**: Shown when navigating inside a project (uppercase, truncated)
+- **Nav items**: Each item has a Lucide icon (18px) + label, with active state highlighting (accent color + left border)
+- **Infrastructure section**: Collapsible accordion for superadmins only (Nodes, Workspaces) — hidden when inside a project context
+- **Sign out**: At bottom with LogOut icon
+
+### Key Behaviors
+- Opens from hamburger menu in mobile header, slides in from right
+- Closes on: backdrop click, Escape key, or navigation to a new route
+- Icons are required on all nav items — text-only labels are not acceptable
+- Superadmin items (Admin, Infrastructure) follow the same visibility rules as desktop
+
+### Parity Rule
+Any change to the desktop sidebar nav items, icons, or sections must be applied to the mobile drawer as well. See `.claude/rules/15-nav-parity.md` for the enforcement checklist.
+
 ## Common Mistakes to Avoid
 
 1. **Fixed large font sizes** - Always use responsive sizing
