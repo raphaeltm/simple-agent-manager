@@ -11,20 +11,12 @@ import type { Task, TaskStatus } from '@simple-agent-manager/shared';
 const mocks = vi.hoisted(() => ({
   listProjectTasks: vi.fn(),
   listChatSessions: vi.fn(),
-  createProjectTask: vi.fn(),
-  updateProjectTaskStatus: vi.fn(),
-  deleteProjectTask: vi.fn(),
-  runProjectTask: vi.fn(),
   navigate: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
   listProjectTasks: mocks.listProjectTasks,
   listChatSessions: mocks.listChatSessions,
-  createProjectTask: mocks.createProjectTask,
-  updateProjectTaskStatus: mocks.updateProjectTaskStatus,
-  deleteProjectTask: mocks.deleteProjectTask,
-  runProjectTask: mocks.runProjectTask,
 }));
 
 vi.mock('react-router-dom', async () => {
@@ -102,15 +94,31 @@ describe('IdeasPage', () => {
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
   });
 
-  it('renders the Ideas heading and New Idea button', async () => {
+  it('renders the Ideas heading', async () => {
     renderIdeasPage();
     expect(await screen.findByRole('heading', { name: 'Ideas' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /New Idea/i })).toBeInTheDocument();
+  });
+
+  it('does not render any write-action buttons', async () => {
+    mocks.listProjectTasks.mockResolvedValue({
+      tasks: [makeTask({ id: '1', title: 'Some idea', status: 'draft' })],
+      nextCursor: null,
+    });
+
+    renderIdeasPage();
+    await screen.findByText('Some idea');
+
+    expect(screen.queryByRole('button', { name: /New Idea/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Brainstorm/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Execute/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Delete idea/i })).not.toBeInTheDocument();
   });
 
   it('shows empty state when no ideas exist', async () => {
     renderIdeasPage();
-    expect(await screen.findByText(/No ideas yet/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText('Ideas emerge from your conversations. Start chatting to explore new ideas.'),
+    ).toBeInTheDocument();
   });
 
   it('displays ideas grouped by status', async () => {
@@ -124,12 +132,9 @@ describe('IdeasPage', () => {
 
     renderIdeasPage();
 
-    // Wait for ideas to load
     expect(await screen.findByText('Explore caching')).toBeInTheDocument();
     expect(screen.getByText('Build auth flow')).toBeInTheDocument();
 
-    // Status group headers are visible (Done/Parked groups are collapsed by default)
-    // "Exploring" appears in both badges and group headers, so just check count
     expect(screen.getAllByText('Exploring').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Executing').length).toBeGreaterThan(0);
   });
@@ -174,34 +179,6 @@ describe('IdeasPage', () => {
     expect(screen.getByText('Running idea')).toBeInTheDocument();
   });
 
-  it('opens new idea dialog and creates an idea', async () => {
-    const user = userEvent.setup();
-    mocks.createProjectTask.mockResolvedValue(
-      makeTask({ id: 'new-1', title: 'My new idea' }),
-    );
-
-    renderIdeasPage();
-    await screen.findByRole('heading', { name: 'Ideas' });
-
-    // Open dialog
-    await user.click(screen.getByRole('button', { name: /New Idea/i }));
-
-    // Fill form
-    const titleInput = screen.getByLabelText('Title');
-    await user.type(titleInput, 'My new idea');
-
-    const descInput = screen.getByLabelText(/Description/);
-    await user.type(descInput, 'Some description');
-
-    // Submit
-    await user.click(screen.getByRole('button', { name: /Create Idea/i }));
-
-    expect(mocks.createProjectTask).toHaveBeenCalledWith('proj-test', {
-      title: 'My new idea',
-      description: 'Some description',
-    });
-  });
-
   it('shows session count per idea', async () => {
     mocks.listProjectTasks.mockResolvedValue({
       tasks: [makeTask({ id: 'task-1', title: 'Idea with sessions', status: 'draft' })],
@@ -216,57 +193,8 @@ describe('IdeasPage', () => {
     });
 
     renderIdeasPage();
-    expect(await screen.findByText('2 sessions')).toBeInTheDocument();
-  });
-
-  it('navigates to chat on brainstorm action', async () => {
-    const user = userEvent.setup();
-    mocks.listProjectTasks.mockResolvedValue({
-      tasks: [makeTask({ id: 'idea-1', title: 'Brainstorm me', status: 'draft' })],
-      nextCursor: null,
-    });
-
-    renderIdeasPage();
-    await screen.findByText('Brainstorm me');
-
-    // Hover to show actions (simulate by finding the button)
-    const brainstormBtn = screen.getByRole('button', { name: 'Brainstorm' });
-    await user.click(brainstormBtn);
-
-    expect(mocks.navigate).toHaveBeenCalledWith(
-      '/projects/proj-test/chat',
-      expect.objectContaining({
-        state: expect.objectContaining({
-          brainstormIdea: expect.objectContaining({
-            taskId: 'idea-1',
-            title: 'Brainstorm me',
-          }),
-        }),
-      }),
-    );
-  });
-
-  it('executes an idea by promoting to ready and running', async () => {
-    const user = userEvent.setup();
-    mocks.listProjectTasks.mockResolvedValue({
-      tasks: [makeTask({ id: 'idea-2', title: 'Execute me', status: 'draft' })],
-      nextCursor: null,
-    });
-    mocks.updateProjectTaskStatus.mockResolvedValue({});
-    mocks.runProjectTask.mockResolvedValue({ taskId: 'idea-2', status: 'queued' });
-
-    renderIdeasPage();
-    await screen.findByText('Execute me');
-
-    const executeBtn = screen.getByRole('button', { name: 'Execute' });
-    await user.click(executeBtn);
-
-    // Should transition draft → ready, then run
-    expect(mocks.updateProjectTaskStatus).toHaveBeenCalledWith('proj-test', 'idea-2', {
-      toStatus: 'ready',
-    });
-    expect(mocks.runProjectTask).toHaveBeenCalledWith('proj-test', 'idea-2');
-    expect(mocks.navigate).toHaveBeenCalledWith('/projects/proj-test/chat');
+    const ideaCard = await screen.findByRole('button', { name: /View idea: Idea with sessions/i });
+    expect(ideaCard).toHaveTextContent('2');
   });
 
   it('navigates to idea detail on card click', async () => {
@@ -279,47 +207,10 @@ describe('IdeasPage', () => {
     renderIdeasPage();
     await screen.findByText('Click me');
 
-    // Click on the card navigation button
     const cardBtn = screen.getByRole('button', { name: /View idea: Click me/i });
     await user.click(cardBtn);
 
     expect(mocks.navigate).toHaveBeenCalledWith('/projects/proj-test/ideas/idea-3');
-  });
-
-  it('deletes an idea', async () => {
-    const user = userEvent.setup();
-    mocks.listProjectTasks.mockResolvedValue({
-      tasks: [makeTask({ id: 'idea-4', title: 'Delete me', status: 'draft' })],
-      nextCursor: null,
-    });
-    mocks.deleteProjectTask.mockResolvedValue({ success: true });
-
-    renderIdeasPage();
-    await screen.findByText('Delete me');
-
-    const deleteBtn = screen.getByRole('button', { name: 'Delete idea' });
-    await user.click(deleteBtn);
-
-    expect(mocks.deleteProjectTask).toHaveBeenCalledWith('proj-test', 'idea-4');
-  });
-
-  it('executes a ready-status idea without transitioning status', async () => {
-    const user = userEvent.setup();
-    mocks.listProjectTasks.mockResolvedValue({
-      tasks: [makeTask({ id: 'idea-r', title: 'Ready idea', status: 'ready' })],
-      nextCursor: null,
-    });
-    mocks.runProjectTask.mockResolvedValue({ taskId: 'idea-r', status: 'queued' });
-
-    renderIdeasPage();
-    await screen.findByText('Ready idea');
-
-    const executeBtn = screen.getByRole('button', { name: 'Execute' });
-    await user.click(executeBtn);
-
-    // Should NOT call updateProjectTaskStatus for ready ideas
-    expect(mocks.updateProjectTaskStatus).not.toHaveBeenCalled();
-    expect(mocks.runProjectTask).toHaveBeenCalledWith('proj-test', 'idea-r');
   });
 
   it('expands a collapsed group when clicked', async () => {
@@ -331,14 +222,11 @@ describe('IdeasPage', () => {
 
     renderIdeasPage();
 
-    // Done group is collapsed by default — idea should not be visible
     const doneBtn = await screen.findByRole('button', { name: /Done/i });
     expect(screen.queryByText('Completed idea')).not.toBeInTheDocument();
 
-    // Click group header to expand
     await user.click(doneBtn);
 
-    // Now the idea should be visible
     expect(screen.getByText('Completed idea')).toBeInTheDocument();
   });
 
@@ -358,32 +246,28 @@ describe('IdeasPage', () => {
     expect(screen.getByText('No ideas match your search.')).toBeInTheDocument();
   });
 
-  it('cancel button closes the new idea dialog', async () => {
-    const user = userEvent.setup();
+  it('displays idea creation time', async () => {
+    mocks.listProjectTasks.mockResolvedValue({
+      tasks: [makeTask({ id: '1', title: 'Timed idea', status: 'draft', createdAt: new Date().toISOString() })],
+      nextCursor: null,
+    });
+
     renderIdeasPage();
-    await screen.findByRole('heading', { name: 'Ideas' });
-
-    // Open dialog
-    await user.click(screen.getByRole('button', { name: /New Idea/i }));
-    expect(screen.getByRole('heading', { name: 'New Idea' })).toBeInTheDocument();
-
-    // Cancel
-    await user.click(screen.getByRole('button', { name: 'Cancel' }));
-
-    // Dialog should be gone (the form heading disappears)
-    expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
-    expect(mocks.createProjectTask).not.toHaveBeenCalled();
+    const card = await screen.findByRole('button', { name: /View idea: Timed idea/i });
+    expect(card).toHaveTextContent('just now');
   });
 
-  it('does not submit when title is empty', async () => {
-    const user = userEvent.setup();
+  it('shows timeline accent border for status groups', async () => {
+    mocks.listProjectTasks.mockResolvedValue({
+      tasks: [makeTask({ id: '1', title: 'My idea', status: 'draft' })],
+      nextCursor: null,
+    });
+
     renderIdeasPage();
-    await screen.findByRole('heading', { name: 'Ideas' });
+    await screen.findByText('My idea');
 
-    await user.click(screen.getByRole('button', { name: /New Idea/i }));
-
-    // Submit button should be disabled with empty title
-    const submitBtn = screen.getByRole('button', { name: /Create Idea/i });
-    expect(submitBtn).toBeDisabled();
+    const section = screen.getByText('My idea').closest('button')?.parentElement;
+    expect(section).toBeTruthy();
+    expect(section?.className).toContain('border-l-2');
   });
 });
