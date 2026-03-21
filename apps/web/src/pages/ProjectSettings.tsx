@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { ProjectRuntimeConfigResponse, ProviderCatalog, VMSize, CredentialProvider } from '@simple-agent-manager/shared';
 import {
   AGENT_CATALOG,
@@ -16,6 +17,7 @@ import {
   getProviderCatalog,
   listCredentials,
   updateProject,
+  deleteProject,
   upsertProjectRuntimeEnvVar,
   deleteProjectRuntimeEnvVar,
   upsertProjectRuntimeFile,
@@ -32,7 +34,17 @@ const FALLBACK_VM_SIZES: { value: VMSize; label: string; description: string }[]
 
 export function ProjectSettings() {
   const toast = useToast();
+  const navigate = useNavigate();
   const { projectId, project, reload } = useProjectContext();
+
+  // Project name editing
+  const [projectName, setProjectName] = useState(project?.name ?? '');
+  const [savingName, setSavingName] = useState(false);
+
+  // Delete project
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   const [defaultVmSize, setDefaultVmSize] = useState<VMSize | null>(project?.defaultVmSize ?? null);
   const [savingVmSize, setSavingVmSize] = useState(false);
@@ -97,6 +109,7 @@ export function ProjectSettings() {
   // Sync from project when it reloads
   useEffect(() => {
     if (project) {
+      setProjectName(project.name);
       setDefaultVmSize(project.defaultVmSize ?? null);
       setDefaultAgentType(project.defaultAgentType ?? null);
       setDefaultProvider(project.defaultProvider ?? null);
@@ -104,6 +117,35 @@ export function ProjectSettings() {
       setNodeIdleTimeoutMs(project.nodeIdleTimeoutMs ?? DEFAULT_NODE_WARM_TIMEOUT_MS);
     }
   }, [project]);
+
+  const handleSaveName = async () => {
+    const trimmed = projectName.trim();
+    if (!trimmed || trimmed === project?.name) return;
+    setSavingName(true);
+    try {
+      await updateProject(projectId, { name: trimmed });
+      await reload();
+      toast.success('Project renamed');
+    } catch (err) {
+      setProjectName(project?.name ?? '');
+      toast.error(err instanceof Error ? err.message : 'Failed to rename project');
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  const handleDeleteProject = async () => {
+    setDeleting(true);
+    try {
+      await deleteProject(projectId);
+      toast.success('Project deleted');
+      navigate('/');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete project');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const handleSaveVmSize = async (size: VMSize) => {
     // If clicking the already-selected size, clear to platform default
@@ -274,6 +316,36 @@ export function ProjectSettings() {
 
   return (
     <div className="grid gap-4">
+      {/* Project Name */}
+      <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
+        <div>
+          <h2 className="sam-type-section-heading m-0 text-fg-primary">
+            Project Name
+          </h2>
+          <p className="m-0 mt-1 text-xs text-fg-muted">
+            The display name for this project.
+          </p>
+        </div>
+        <div className="flex gap-2 items-end">
+          <input
+            type="text"
+            aria-label="Project name"
+            value={projectName}
+            onChange={(e) => setProjectName(e.currentTarget.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveName(); }}
+            className="flex-1 py-1.5 px-2.5 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
+          />
+          <Button
+            size="sm"
+            loading={savingName}
+            disabled={savingName || !projectName.trim() || projectName.trim() === project?.name}
+            onClick={() => void handleSaveName()}
+          >
+            Rename
+          </Button>
+        </div>
+      </section>
+
       {/* Default VM Size */}
       <section className="border border-border-default rounded-md bg-surface p-4 grid gap-3">
         <div>
@@ -681,6 +753,62 @@ export function ProjectSettings() {
         </div>
       )}
     </section>
+
+      {/* Danger Zone */}
+      <section className="border border-danger rounded-md bg-surface p-4 grid gap-3">
+        <div>
+          <h2 className="sam-type-section-heading m-0 text-danger">
+            Danger Zone
+          </h2>
+          <p className="m-0 mt-1 text-xs text-fg-muted">
+            Permanently delete this project and all associated data. This action cannot be undone.
+          </p>
+        </div>
+        {!showDeleteConfirm ? (
+          <div>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => setShowDeleteConfirm(true)}
+            >
+              Delete Project
+            </Button>
+          </div>
+        ) : (
+          <div className="grid gap-2">
+            <p className="m-0 text-sm text-fg-primary">
+              Type <strong>{project?.name}</strong> to confirm deletion:
+            </p>
+            <input
+              type="text"
+              aria-label="Confirm project name"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.currentTarget.value)}
+              placeholder={project?.name ?? ''}
+              className="py-1.5 px-2.5 min-h-9 border border-danger rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-[inherit] box-border"
+            />
+            <div className="flex gap-2">
+              <Button
+                variant="danger"
+                size="sm"
+                loading={deleting}
+                disabled={deleting || deleteConfirmText !== project?.name}
+                onClick={() => void handleDeleteProject()}
+              >
+                Permanently Delete
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={deleting}
+                onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(''); }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
