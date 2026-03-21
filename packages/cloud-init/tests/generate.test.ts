@@ -312,6 +312,136 @@ describe('generateCloudInit', () => {
     });
   });
 
+  describe('OS-level firewall configuration', () => {
+    it('includes firewall setup script in write_files', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      expect(firewallScript).toBeDefined();
+      expect(firewallScript.permissions).toBe('0755');
+      expect(firewallScript.content).toContain('#!/bin/bash');
+      expect(firewallScript.content).toContain('iptables -P INPUT DROP');
+      expect(firewallScript.content).toContain('ip6tables -P INPUT DROP');
+    });
+
+    it('firewall script contains correct VM agent port (TLS mode)', () => {
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+      }));
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      expect(firewallScript.content).toContain('VM_AGENT_PORT="8443"');
+    });
+
+    it('firewall script contains correct VM agent port (no TLS mode)', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      expect(firewallScript.content).toContain('VM_AGENT_PORT="8080"');
+    });
+
+    it('firewall script allows loopback, established, and Docker bridge traffic', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content = firewallScript.content;
+      expect(content).toContain('iptables -A INPUT -i lo -j ACCEPT');
+      expect(content).toContain('iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT');
+      expect(content).toContain('iptables -A INPUT -i docker0 -j ACCEPT');
+      expect(content).toContain('iptables -A INPUT -i br-+ -j ACCEPT');
+    });
+
+    it('firewall script fetches Cloudflare IPs with fallback defaults', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content = firewallScript.content;
+      // Dynamic fetch URLs
+      expect(content).toContain('https://www.cloudflare.com/ips-v4');
+      expect(content).toContain('https://www.cloudflare.com/ips-v6');
+      // Fallback IPv4 ranges
+      expect(content).toContain('173.245.48.0/20');
+      expect(content).toContain('104.16.0.0/13');
+      // Fallback IPv6 ranges
+      expect(content).toContain('2400:cb00::/32');
+      expect(content).toContain('2606:4700::/32');
+    });
+
+    it('firewall script persists rules across reboots', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      expect(firewallScript.content).toContain('iptables-save > /etc/iptables/rules.v4');
+      expect(firewallScript.content).toContain('ip6tables-save > /etc/iptables/rules.v6');
+    });
+
+    it('includes daily cron job for Cloudflare IP refresh', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const cronJob = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/cron.daily/update-cloudflare-firewall'
+      );
+      expect(cronJob).toBeDefined();
+      expect(cronJob.permissions).toBe('0755');
+      expect(cronJob.content).toContain('/etc/sam/firewall/setup-firewall.sh');
+    });
+
+    it('runcmd includes iptables-persistent install and firewall setup', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const runcmd: string[] = parsed.runcmd;
+      const runcmdStr = runcmd.join('\n');
+      expect(runcmdStr).toContain('iptables-persistent');
+      expect(runcmdStr).toContain('/etc/sam/firewall/setup-firewall.sh');
+    });
+
+    it('firewall setup runs before VM agent start in runcmd order', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const runcmd: string[] = parsed.runcmd;
+      const runcmdStr = runcmd.join('\n---\n');
+      const firewallIdx = runcmdStr.indexOf('setup-firewall.sh');
+      const agentIdx = runcmdStr.indexOf('vm-agent.service');
+      expect(firewallIdx).toBeGreaterThan(-1);
+      expect(agentIdx).toBeGreaterThan(-1);
+      expect(firewallIdx).toBeLessThan(agentIdx);
+    });
+
+    it('config with firewall stays within 32KB Hetzner limit', () => {
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+        projectId: 'proj-123',
+        chatSessionId: 'sess-456',
+        taskId: 'task-789',
+      }));
+
+      expect(validateCloudInitSize(config)).toBe(true);
+    });
+  });
+
   describe('no template placeholders remain', () => {
     it('all {{ ... }} placeholders are replaced', () => {
       const config = generateCloudInit(baseVariables({
