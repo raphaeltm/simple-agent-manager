@@ -253,20 +253,20 @@ describe('POST /api/tts/synthesize', () => {
     expect(body.error).toBe('INTERNAL_ERROR');
   });
 
-  it('does not expose internal error details to the client', async () => {
-    vi.mocked(synthesizeSpeech).mockRejectedValue(new Error('Sensitive internal detail'));
+  it('surfaces error details to the client for debugging', async () => {
+    vi.mocked(synthesizeSpeech).mockRejectedValue(new Error('TTS model returned 503: Service Unavailable'));
 
     const res = await app.request('/api/tts/synthesize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'Hello', storageId: 'msg-secret' }),
+      body: JSON.stringify({ text: 'Hello', storageId: 'msg-error' }),
     }, createEnv());
 
     expect(res.status).toBe(500);
     const body = await res.json() as { message: string };
-    // The raw internal error message must not leak to the caller
-    expect(body.message).not.toContain('Sensitive internal detail');
-    expect(body.message).toContain('Failed to generate audio');
+    // Error details are surfaced to help users understand TTS failures
+    expect(body.message).toContain('TTS synthesis failed');
+    expect(body.message).toContain('TTS model returned 503');
   });
 });
 
