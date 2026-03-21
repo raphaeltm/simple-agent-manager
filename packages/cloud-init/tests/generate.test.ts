@@ -360,8 +360,8 @@ describe('generateCloudInit', () => {
       const content = firewallScript.content;
       expect(content).toContain('iptables -A INPUT -i lo -j ACCEPT');
       expect(content).toContain('iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT');
-      expect(content).toContain('iptables -A INPUT -i docker0 -j ACCEPT');
-      expect(content).toContain('iptables -A INPUT -i br-+ -j ACCEPT');
+      expect(content).toContain('iptables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      expect(content).toContain('iptables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
     });
 
     it('firewall script fetches Cloudflare IPs with fallback defaults', () => {
@@ -468,12 +468,12 @@ describe('generateCloudInit', () => {
       const content: string = firewallScript.content;
       expect(content).toContain('ip6tables -A INPUT -i lo -j ACCEPT');
       expect(content).toContain('ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT');
-      expect(content).toContain('ip6tables -A INPUT -i docker0 -j ACCEPT');
-      expect(content).toContain('ip6tables -A INPUT -i br-+ -j ACCEPT');
+      expect(content).toContain('ip6tables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      expect(content).toContain('ip6tables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
       expect(content).toContain('ip6tables -P INPUT DROP');
     });
 
-    it('firewall script uses set -euo pipefail for strict error handling', () => {
+    it('firewall script uses set -euo pipefail with EXIT trap for DROP policy', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
@@ -481,6 +481,9 @@ describe('generateCloudInit', () => {
         (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
       );
       expect(firewallScript.content).toContain('set -euo pipefail');
+      // EXIT trap ensures DROP policy even if script aborts mid-execution
+      expect(firewallScript.content).toContain("trap 'iptables -P INPUT DROP");
+      expect(firewallScript.content).toContain('ip6tables -P INPUT DROP');
     });
 
     it('runcmd includes debconf preseed before iptables-persistent install', () => {

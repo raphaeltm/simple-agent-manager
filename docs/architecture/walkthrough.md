@@ -649,7 +649,7 @@ VMs are provisioned with an iptables firewall via cloud-init (`packages/cloud-in
 |------|---------|
 | Allow loopback (`lo`) | Local process communication |
 | Allow `ESTABLISHED,RELATED` | Responses to outbound connections (apt, API callbacks, heartbeats) |
-| Allow `docker0` and `br-+` interfaces | Container-to-host communication |
+| Allow `docker0` and `br-+` interfaces → VM agent port | Container-to-host communication (scoped to agent port only) |
 | Allow Cloudflare IPs → VM agent port | Legitimate proxied traffic from Cloudflare edge |
 | Default policy: `DROP` | Block all other inbound traffic (including SSH port 22) |
 

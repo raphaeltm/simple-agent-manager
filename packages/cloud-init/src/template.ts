@@ -128,11 +128,16 @@ write_files:
       # and daily via /etc/cron.daily/update-cloudflare-firewall.
       set -euo pipefail
 
+      # Ensure DROP policy is always applied, even if the script exits early
+      # due to a malformed CIDR or unexpected error mid-execution.
+      trap 'iptables -P INPUT DROP 2>/dev/null; ip6tables -P INPUT DROP 2>/dev/null' EXIT
+
       VM_AGENT_PORT="{{ vm_agent_port }}"
       CF_IPV4_URL="https://www.cloudflare.com/ips-v4"
       CF_IPV6_URL="https://www.cloudflare.com/ips-v6"
 
       # Embedded fallback Cloudflare IP ranges (updated 2025-05)
+      # Source: https://www.cloudflare.com/ips/
       FALLBACK_IPV4="173.245.48.0/20
       103.21.244.0/22
       103.22.200.0/22
@@ -158,8 +163,14 @@ write_files:
       2c0f:f248::/32"
 
       # Fetch Cloudflare IPs (with fallback to embedded defaults)
-      CF_IPV4=$(curl -sf --max-time {{ cf_ip_fetch_timeout }} "$CF_IPV4_URL" 2>/dev/null || echo "$FALLBACK_IPV4")
-      CF_IPV6=$(curl -sf --max-time {{ cf_ip_fetch_timeout }} "$CF_IPV6_URL" 2>/dev/null || echo "$FALLBACK_IPV6")
+      CF_IPV4=$(curl -sf --max-time {{ cf_ip_fetch_timeout }} "$CF_IPV4_URL" 2>/dev/null) || {
+        logger -t sam-firewall "WARNING: Failed to fetch CF IPv4 ranges, using fallback"
+        CF_IPV4="$FALLBACK_IPV4"
+      }
+      CF_IPV6=$(curl -sf --max-time {{ cf_ip_fetch_timeout }} "$CF_IPV6_URL" 2>/dev/null) || {
+        logger -t sam-firewall "WARNING: Failed to fetch CF IPv6 ranges, using fallback"
+        CF_IPV6="$FALLBACK_IPV6"
+      }
 
       # --- IPv4 rules ---
       # Flush INPUT chain only (preserves Docker FORWARD/NAT chains)
@@ -171,9 +182,9 @@ write_files:
       # Allow established/related connections (outbound traffic responses)
       iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
-      # Allow Docker bridge traffic (container-to-host communication)
-      iptables -A INPUT -i docker0 -j ACCEPT
-      iptables -A INPUT -i br-+ -j ACCEPT
+      # Allow Docker bridge traffic to VM agent port (container-to-host communication)
+      iptables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+      iptables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
 
       # Allow Cloudflare IPs on VM agent port
       while IFS= read -r cidr; do
@@ -187,8 +198,8 @@ write_files:
       ip6tables -F INPUT
       ip6tables -A INPUT -i lo -j ACCEPT
       ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-      ip6tables -A INPUT -i docker0 -j ACCEPT
-      ip6tables -A INPUT -i br-+ -j ACCEPT
+      ip6tables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+      ip6tables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
 
       while IFS= read -r cidr; do
         [ -n "$cidr" ] && ip6tables -A INPUT -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
