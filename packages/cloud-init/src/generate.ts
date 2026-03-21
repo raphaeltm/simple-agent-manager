@@ -31,6 +31,8 @@ export interface CloudInitVariables {
   originCaKey?: string;
   /** VM agent port override (default: 8443 with TLS, 8080 without) */
   vmAgentPort?: string;
+  /** Timeout in seconds for fetching Cloudflare IP ranges at boot (default: 10) */
+  cfIpFetchTimeout?: string;
 }
 
 /**
@@ -59,6 +61,7 @@ export function generateCloudInit(variables: CloudInitVariables): string {
     '{{ vm_agent_port }}': variables.vmAgentPort ?? (variables.originCaCert ? '8443' : '8080'),
     '{{ tls_cert_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca.pem' : '',
     '{{ tls_key_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca-key.pem' : '',
+    '{{ cf_ip_fetch_timeout }}': variables.cfIpFetchTimeout ?? '10',
   };
 
   for (const [placeholder, value] of Object.entries(replacements)) {

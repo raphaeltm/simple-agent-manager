@@ -30,6 +30,12 @@ runcmd:
   - systemctl start docker
   - usermod -aG docker workspace
 
+  # Set up OS-level firewall before VM agent starts
+  - echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
+  - echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
+  - /etc/sam/firewall/setup-firewall.sh
+
   - |
     ARCH=$(uname -m)
     case $ARCH in
@@ -111,6 +117,109 @@ write_files:
         "control_plane_url": "{{ control_plane_url }}"
       }
     permissions: '0644'
+
+  - path: /etc/sam/firewall/setup-firewall.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # SAM Firewall — restricts VM agent port to Cloudflare IPs only.
+      # Fetches current Cloudflare IP ranges dynamically; falls back to
+      # embedded defaults if the fetch fails. Run at boot via cloud-init
+      # and daily via /etc/cron.daily/update-cloudflare-firewall.
+      set -euo pipefail
+
+      # Ensure DROP policy is always applied, even if the script exits early
+      # due to a malformed CIDR or unexpected error mid-execution.
+      trap 'iptables -P INPUT DROP 2>/dev/null; ip6tables -P INPUT DROP 2>/dev/null' EXIT
+
+      VM_AGENT_PORT="{{ vm_agent_port }}"
+      CF_IPV4_URL="https://www.cloudflare.com/ips-v4"
+      CF_IPV6_URL="https://www.cloudflare.com/ips-v6"
+
+      # Embedded fallback Cloudflare IP ranges (updated 2025-05)
+      # Source: https://www.cloudflare.com/ips/
+      FALLBACK_IPV4="173.245.48.0/20
+      103.21.244.0/22
+      103.22.200.0/22
+      103.31.4.0/22
+      141.101.64.0/18
+      108.162.192.0/18
+      190.93.240.0/20
+      188.114.96.0/20
+      197.234.240.0/22
+      198.41.128.0/17
+      162.158.0.0/15
+      104.16.0.0/13
+      104.24.0.0/14
+      172.64.0.0/13
+      131.0.72.0/22"
+
+      FALLBACK_IPV6="2400:cb00::/32
+      2606:4700::/32
+      2803:f800::/32
+      2405:b500::/32
+      2405:8100::/32
+      2a06:98c0::/29
+      2c0f:f248::/32"
+
+      # Fetch Cloudflare IPs (with fallback to embedded defaults)
+      CF_IPV4=$(curl -sf --max-time {{ cf_ip_fetch_timeout }} "$CF_IPV4_URL" 2>/dev/null) || {
+        logger -t sam-firewall "WARNING: Failed to fetch CF IPv4 ranges, using fallback"
+        CF_IPV4="$FALLBACK_IPV4"
+      }
+      CF_IPV6=$(curl -sf --max-time {{ cf_ip_fetch_timeout }} "$CF_IPV6_URL" 2>/dev/null) || {
+        logger -t sam-firewall "WARNING: Failed to fetch CF IPv6 ranges, using fallback"
+        CF_IPV6="$FALLBACK_IPV6"
+      }
+
+      # --- IPv4 rules ---
+      # Flush INPUT chain only (preserves Docker FORWARD/NAT chains)
+      iptables -F INPUT
+
+      # Allow loopback
+      iptables -A INPUT -i lo -j ACCEPT
+
+      # Allow established/related connections (outbound traffic responses)
+      iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+      # Allow Docker bridge traffic to VM agent port (container-to-host communication)
+      iptables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+      iptables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+
+      # Allow Cloudflare IPs on VM agent port
+      while IFS= read -r cidr; do
+        [ -n "$cidr" ] && iptables -A INPUT -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+      done <<< "$CF_IPV4"
+
+      # Drop all other inbound traffic (blocks SSH, direct IP access, etc.)
+      iptables -P INPUT DROP
+
+      # --- IPv6 rules ---
+      ip6tables -F INPUT
+      ip6tables -A INPUT -i lo -j ACCEPT
+      ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+      ip6tables -A INPUT -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+      ip6tables -A INPUT -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+
+      while IFS= read -r cidr; do
+        [ -n "$cidr" ] && ip6tables -A INPUT -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
+      done <<< "$CF_IPV6"
+
+      ip6tables -P INPUT DROP
+
+      # Persist rules across reboots
+      mkdir -p /etc/iptables
+      iptables-save > /etc/iptables/rules.v4
+      ip6tables-save > /etc/iptables/rules.v6
+
+      logger -t sam-firewall "Firewall configured: port $VM_AGENT_PORT restricted to Cloudflare IPs"
+
+  - path: /etc/cron.daily/update-cloudflare-firewall
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Daily refresh of Cloudflare IP ranges for the SAM firewall.
+      /etc/sam/firewall/setup-firewall.sh 2>&1 | logger -t sam-firewall-update
 
   - path: /etc/sam/tls/origin-ca.pem
     content: |

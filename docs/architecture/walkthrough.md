@@ -639,6 +639,24 @@ graph LR
 | **Bootstrap token** | 5 minutes | One-time VM credential injection | API Worker |
 | **Callback token** | Minutes | VM Agent → API callbacks | API Worker |
 
+### OS-Level Firewall (iptables)
+
+VMs are provisioned with an iptables firewall via cloud-init (`packages/cloud-init/src/template.ts`) that restricts inbound traffic to the VM agent port (`VM_AGENT_PORT`, default 8443) from Cloudflare IP ranges only. This provides defense-in-depth: even if someone discovers the VM's public IP, they cannot reach the VM agent directly — traffic must flow through Cloudflare's edge.
+
+**Firewall rules (INPUT chain):**
+
+| Rule | Purpose |
+|------|---------|
+| Allow loopback (`lo`) | Local process communication |
+| Allow `ESTABLISHED,RELATED` | Responses to outbound connections (apt, API callbacks, heartbeats) |
+| Allow `docker0` and `br-+` interfaces → VM agent port | Container-to-host communication (scoped to agent port only) |
+| Allow Cloudflare IPs → VM agent port | Legitimate proxied traffic from Cloudflare edge |
+| Default policy: `DROP` | Block all other inbound traffic (including SSH port 22) |
+
+**Cloudflare IP updates:** The firewall setup script (`/etc/sam/firewall/setup-firewall.sh`) fetches current Cloudflare IP ranges from `https://www.cloudflare.com/ips-v4` and `https://www.cloudflare.com/ips-v6` at boot time, with hardcoded fallback defaults if the fetch fails. A daily cron job (`/etc/cron.daily/update-cloudflare-firewall`) refreshes the rules automatically.
+
+**Docker compatibility:** Only the INPUT chain is modified. Docker's FORWARD and NAT chains (used for container networking, port publishing, and masquerading) are left untouched.
+
 ---
 
 ## VM Provisioning
@@ -658,6 +676,7 @@ sequenceDiagram
 
     Note over VM: Cloud-init executes:
     VM->>VM: Install Docker, git, curl
+    VM->>VM: Configure iptables firewall (Cloudflare IPs only)
     VM->>VM: Download VM Agent from R2
     VM->>VM: Create systemd service
     VM->>VM: Install Node.js + devcontainer CLI
@@ -688,6 +707,7 @@ The cloud-init template (`packages/cloud-init/src/template.ts`) creates a fully 
 3. **Systemd service** — Auto-restart, environment injection (NODE_ID, CONTROL_PLANE_URL, CALLBACK_TOKEN)
 4. **Node.js + devcontainer CLI** — For building devcontainer images
 5. **Config file** — Written to `/etc/workspace/config.json`
+6. **OS-level firewall** — iptables rules restricting VM agent port to Cloudflare IPs, persisted via iptables-persistent and refreshed daily
 
 > **No credentials are embedded in cloud-init.** The VM Agent uses a one-time callback token to fetch credentials from the control plane during bootstrap.
 
