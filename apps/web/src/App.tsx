@@ -21,6 +21,7 @@ import { UiStandards } from './pages/UiStandards';
 import { Projects } from './pages/Projects';
 import { Project } from './pages/Project';
 import { IdeasPage } from './pages/IdeasPage';
+import { IdeaDetailPage } from './pages/IdeaDetailPage';
 import { ProjectSettings } from './pages/ProjectSettings';
 import { ProjectActivity } from './pages/ProjectActivity';
 import { TaskDetail } from './pages/TaskDetail';
@@ -65,7 +66,7 @@ export default function App() {
               <Route path="chat" element={<ProjectChat />} />
               <Route path="chat/:sessionId" element={<ProjectChat />} />
               <Route path="ideas" element={<IdeasPage />} />
-              <Route path="ideas/:taskId" element={<TaskDetail />} />
+              <Route path="ideas/:taskId" element={<IdeaDetailPage />} />
               <Route path="tasks" element={<Navigate to="../ideas" replace />} />
               <Route path="tasks/:taskId" element={<TaskDetail />} />
               <Route path="settings" element={<ProjectSettings />} />

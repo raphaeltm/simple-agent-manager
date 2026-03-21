@@ -531,6 +531,26 @@ export async function listTaskEvents(
   return request<ListTaskEventsResponse>(endpoint);
 }
 
+export interface TaskSessionLink {
+  sessionId: string;
+  topic: string | null;
+  status: string;
+  context: string | null;
+  linkedAt: number;
+}
+
+export interface TaskSessionsResponse {
+  sessions: TaskSessionLink[];
+  count: number;
+}
+
+export async function getTaskSessions(
+  projectId: string,
+  taskId: string
+): Promise<TaskSessionsResponse> {
+  return request<TaskSessionsResponse>(`/api/projects/${projectId}/tasks/${taskId}/sessions`);
+}
+
 // =============================================================================
 // Chat Sessions (Project DO)
 // =============================================================================
