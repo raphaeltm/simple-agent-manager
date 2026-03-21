@@ -129,7 +129,7 @@ export const ProjectInfoPanel: FC<ProjectInfoPanelProps> = ({ projectId, open, o
             type="button"
             onClick={onClose}
             aria-label="Close project status"
-            className="bg-transparent border-none cursor-pointer text-fg-muted p-1 rounded-sm flex items-center"
+            className="bg-transparent border-none cursor-pointer text-fg-muted p-2 min-h-11 min-w-11 rounded-sm flex items-center justify-center"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />

@@ -200,6 +200,12 @@ function makeWorkspace(overrides: { id: string; name?: string; displayName?: str
     nodeId: 'node-1',
     projectId: 'proj-test-1',
     userId: 'user-test-1',
+    repository: 'testuser/test-repo',
+    vmSize: 'cx22',
+    vmLocation: 'nbg1',
+    vmIp: '10.0.0.1',
+    lastActivityAt: '2026-03-20T10:00:00Z',
+    errorMessage: null,
     createdAt: '2026-03-20T10:00:00Z',
     updatedAt: '2026-03-20T10:00:00Z',
   };
@@ -756,8 +762,36 @@ test.describe('ProjectInfoPanel - Mobile Audit', () => {
     // Verify workspace items render
     await expect(page.getByText('Auth Feature')).toBeVisible();
     await expect(page.getByText('Bug Fix')).toBeVisible();
+    // Verify "Open" button renders for running workspaces
+    await expect(page.getByRole('link', { name: 'Open' })).toBeVisible();
     // Verify task items render
     await expect(page.getByText('Recent Tasks')).toBeVisible();
+  });
+
+  test('close via button', async ({ page }) => {
+    await setupApiMocks(page, { tasks: [], sessions: [], workspaces: [] });
+    await openInfoPanel(page);
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    // Click the close button
+    await page.getByLabel('Close project status').click();
+    await page.waitForTimeout(300);
+
+    // Dialog should be removed from DOM
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+  });
+
+  test('close via Escape key', async ({ page }) => {
+    await setupApiMocks(page, { tasks: [], sessions: [], workspaces: [] });
+    await openInfoPanel(page);
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    // Press Escape
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+
+    // Dialog should be removed from DOM
+    await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
   test('many items with long titles', async ({ page }) => {
@@ -812,5 +846,21 @@ test.describe('Touch Target Size - Bounding Box', () => {
     const box = await groupHeader.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.height).toBeGreaterThanOrEqual(44);
+  });
+
+  test('info panel close button meets 44px minimum touch target', async ({ page }) => {
+    await setupApiMocks(page, { tasks: [], sessions: [], workspaces: [] });
+    await page.goto('/projects/proj-test-1/ideas');
+    await page.waitForSelector('text=Ideas');
+    await page.getByLabel('Project status').click();
+    await page.waitForTimeout(500);
+
+    const closeButton = page.getByLabel('Close project status');
+    await expect(closeButton).toBeVisible();
+    const box = await closeButton.boundingBox();
+    expect(box).not.toBeNull();
+    // Close button uses min-h-11 min-w-11 (44px each) for touch target compliance
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.width).toBeGreaterThanOrEqual(44);
   });
 });
