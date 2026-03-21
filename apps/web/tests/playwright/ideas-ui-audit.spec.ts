@@ -190,6 +190,36 @@ const MOCK_PROJECTS = [
   { id: 'proj-test-2', name: 'Another Project', repository: 'testuser/another-repo', createdAt: '2026-02-01T00:00:00Z', updatedAt: '2026-03-18T00:00:00Z', taskCounts: { active: 0, total: 5 }, lastActivityAt: '2026-03-18T15:00:00Z' },
 ];
 
+function makeWorkspace(overrides: { id: string; name?: string; displayName?: string; status?: string; branch?: string }) {
+  return {
+    id: overrides.id,
+    name: overrides.name ?? `ws-${overrides.id}`,
+    displayName: overrides.displayName ?? null,
+    status: overrides.status ?? 'running',
+    branch: overrides.branch ?? 'main',
+    nodeId: 'node-1',
+    projectId: 'proj-test-1',
+    userId: 'user-test-1',
+    createdAt: '2026-03-20T10:00:00Z',
+    updatedAt: '2026-03-20T10:00:00Z',
+  };
+}
+
+const MOCK_WORKSPACES_NORMAL = [
+  makeWorkspace({ id: 'ws-1', displayName: 'Auth Feature', status: 'running', branch: 'sam/auth-feature' }),
+  makeWorkspace({ id: 'ws-2', displayName: 'Bug Fix', status: 'stopped', branch: 'sam/fix-login-bug' }),
+];
+
+const MOCK_WORKSPACES_MANY = [
+  makeWorkspace({ id: 'ws-m1', displayName: 'This is a workspace with a very long name that should be truncated on mobile', status: 'running', branch: 'sam/very-long-branch-name-that-exceeds-panel-width' }),
+  makeWorkspace({ id: 'ws-m2', displayName: 'Deployer', status: 'running', branch: 'main' }),
+  makeWorkspace({ id: 'ws-m3', displayName: 'Test Runner', status: 'creating', branch: 'sam/test-runner' }),
+  makeWorkspace({ id: 'ws-m4', status: 'stopped', branch: 'sam/old-feature' }),
+  makeWorkspace({ id: 'ws-m5', displayName: 'Refactor', status: 'stopped', branch: 'sam/refactor-auth' }),
+  makeWorkspace({ id: 'ws-m6', displayName: 'Extra workspace', status: 'stopped', branch: 'sam/extra' }),
+  makeWorkspace({ id: 'ws-m7', displayName: 'Another extra workspace', status: 'stopped', branch: 'sam/another' }),
+];
+
 // ---------------------------------------------------------------------------
 // API Mock Setup
 // ---------------------------------------------------------------------------
@@ -201,6 +231,7 @@ async function setupApiMocks(page: Page, options: {
   taskDetail?: ReturnType<typeof makeDetailTask> | null;
   events?: typeof MOCK_EVENTS;
   projects?: typeof MOCK_PROJECTS;
+  workspaces?: Array<Record<string, unknown>>;
   projectError?: boolean;
   tasksError?: boolean;
 } = {}) {
@@ -211,6 +242,7 @@ async function setupApiMocks(page: Page, options: {
     taskDetail = null,
     events = [],
     projects = MOCK_PROJECTS,
+    workspaces = [],
     projectError = false,
     tasksError = false,
   } = options;
@@ -256,7 +288,7 @@ async function setupApiMocks(page: Page, options: {
 
     // Workspaces
     if (path.startsWith('/api/workspaces')) {
-      return respond(200, []);
+      return respond(200, workspaces);
     }
 
     // Project-scoped routes
@@ -682,5 +714,103 @@ test.describe('TaskSubmitForm - Mobile Audit', () => {
     await page.goto('/projects/proj-test-1/chat');
     await page.waitForTimeout(1500);
     await takeScreenshot(page, 'chat-project-error');
+  });
+});
+
+// ===========================================================================
+// PROJECT INFO PANEL TESTS
+// ===========================================================================
+
+test.describe('ProjectInfoPanel - Mobile Audit', () => {
+  async function openInfoPanel(page: Page) {
+    // Navigate to a non-chat project route where the info button is in the header
+    await page.goto('/projects/proj-test-1/ideas');
+    await page.waitForSelector('text=Ideas');
+    // Click the "Project status" button to open the panel
+    await page.getByLabel('Project status').click();
+    await page.waitForTimeout(500);
+  }
+
+  test('empty state', async ({ page }) => {
+    await setupApiMocks(page, { tasks: [], sessions: [], workspaces: [] });
+    await openInfoPanel(page);
+    await takeScreenshot(page, 'info-panel-empty');
+
+    // Verify panel is open with expected headings
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByText('Project Status')).toBeVisible();
+    await expect(page.getByText('No workspaces for this project.')).toBeVisible();
+    await expect(page.getByText('No tasks yet.')).toBeVisible();
+  });
+
+  test('normal data with workspaces and tasks', async ({ page }) => {
+    await setupApiMocks(page, {
+      tasks: NORMAL_TASKS,
+      sessions: MOCK_SESSIONS,
+      workspaces: MOCK_WORKSPACES_NORMAL,
+    });
+    await openInfoPanel(page);
+    await takeScreenshot(page, 'info-panel-normal');
+
+    await expect(page.getByRole('dialog')).toBeVisible();
+    // Verify workspace items render
+    await expect(page.getByText('Auth Feature')).toBeVisible();
+    await expect(page.getByText('Bug Fix')).toBeVisible();
+    // Verify task items render
+    await expect(page.getByText('Recent Tasks')).toBeVisible();
+  });
+
+  test('many items with long titles', async ({ page }) => {
+    const manyTasks = Array.from({ length: 7 }, (_, i) =>
+      makeTask({
+        id: `panel-t${i}`,
+        title: `Task ${i + 1}: ${i === 0 ? 'This is an extremely long task title that should be truncated inside the info panel without causing layout overflow on narrow mobile screens' : `Normal task ${i + 1}`}`,
+        status: ['draft', 'in_progress', 'completed', 'failed'][i % 4],
+      }),
+    );
+    await setupApiMocks(page, {
+      tasks: manyTasks,
+      sessions: [],
+      workspaces: MOCK_WORKSPACES_MANY,
+    });
+    await openInfoPanel(page);
+    await takeScreenshot(page, 'info-panel-many-items');
+
+    await expect(page.getByRole('dialog')).toBeVisible();
+    // Verify overflow indicator for workspaces (7 workspaces, max 5 shown)
+    await expect(page.getByText('+2 more workspaces')).toBeVisible();
+  });
+});
+
+// ===========================================================================
+// TOUCH TARGET BOUNDING BOX ASSERTIONS
+// ===========================================================================
+
+test.describe('Touch Target Size - Bounding Box', () => {
+  test('idea cards meet 44px minimum touch target height', async ({ page }) => {
+    await setupApiMocks(page, { tasks: NORMAL_TASKS, sessions: MOCK_SESSIONS });
+    await page.goto('/projects/proj-test-1/ideas');
+    await page.waitForSelector('text=Implement user authentication');
+
+    // Find the first idea card button element and measure its bounding box
+    const firstCard = page.getByRole('button', { name: /Implement user authentication/i });
+    await expect(firstCard).toBeVisible();
+    const box = await firstCard.boundingBox();
+    expect(box).not.toBeNull();
+    // Cards use min-h-[56px] — verify the rendered height meets the 44px WCAG minimum
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  });
+
+  test('group headers meet 44px minimum touch target height', async ({ page }) => {
+    await setupApiMocks(page, { tasks: NORMAL_TASKS, sessions: MOCK_SESSIONS });
+    await page.goto('/projects/proj-test-1/ideas');
+    await page.waitForSelector('text=Implement user authentication');
+
+    // Group headers (e.g., "Exploring") have min-h-[44px]
+    const groupHeader = page.getByRole('button', { name: /Exploring/i });
+    await expect(groupHeader).toBeVisible();
+    const box = await groupHeader.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
   });
 });
