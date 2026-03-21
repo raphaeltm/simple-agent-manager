@@ -158,8 +158,8 @@ write_files:
       2c0f:f248::/32"
 
       # Fetch Cloudflare IPs (with fallback to embedded defaults)
-      CF_IPV4=$(curl -sf --max-time 10 "$CF_IPV4_URL" 2>/dev/null || echo "$FALLBACK_IPV4")
-      CF_IPV6=$(curl -sf --max-time 10 "$CF_IPV6_URL" 2>/dev/null || echo "$FALLBACK_IPV6")
+      CF_IPV4=$(curl -sf --max-time {{ cf_ip_fetch_timeout }} "$CF_IPV4_URL" 2>/dev/null || echo "$FALLBACK_IPV4")
+      CF_IPV6=$(curl -sf --max-time {{ cf_ip_fetch_timeout }} "$CF_IPV6_URL" 2>/dev/null || echo "$FALLBACK_IPV6")
 
       # --- IPv4 rules ---
       # Flush INPUT chain only (preserves Docker FORWARD/NAT chains)
