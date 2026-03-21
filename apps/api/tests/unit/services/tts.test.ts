@@ -176,6 +176,16 @@ describe('cleanTextForSpeech', () => {
     expect(result).not.toContain('**');
   });
 
+  it('falls back to regex stripping when LLM returns empty string', async () => {
+    // Specifically test the empty-string guard: generate resolves but text is empty
+    mockGenerate.mockResolvedValue({ text: '' });
+    const ai = createMockAi();
+    const result = await cleanTextForSpeech('## Heading\n**bold**', ai, { retryAttempts: 1 });
+    expect(result.length).toBeGreaterThan(0);
+    expect(result).not.toContain('##');
+    expect(result).not.toContain('**');
+  });
+
   it('falls back to regex stripping when LLM throws after all retries', async () => {
     mockGenerate.mockRejectedValue(new Error('AI service unavailable'));
     const ai = createMockAi();
@@ -412,6 +422,18 @@ describe('generateSpeechAudioChunk', () => {
     expect(ai.run).toHaveBeenCalledTimes(2);
   });
 
+  it('throws timeout error when AI call takes too long', async () => {
+    const ai = createMockAi();
+    // Mock ai.run to never resolve, triggering the timeout
+    (ai.run as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise(() => {/* never resolves */}),
+    );
+
+    await expect(
+      generateSpeechAudioChunk('Hello', ai, { timeoutMs: 50, retryAttempts: 1 }),
+    ).rejects.toThrow('TTS generation timed out after 50ms');
+  });
+
   it('retries on empty audio buffer', async () => {
     const fakeAudio = new ArrayBuffer(256);
     const ai = createMockAi();
@@ -533,6 +555,12 @@ describe('generateSpeechAudio', () => {
     expect(result.cached).toBe(false);
     // R2 put should have been called for the non-cached chunks + final audio
     expect(r2.put).toHaveBeenCalled();
+    // The cached chunk should have reduced the number of AI TTS calls.
+    // Total chunks depends on text + chunkSize, but ai.run should be called
+    // fewer times than r2.get chunk checks (minus the final audio cache check).
+    const totalAiCalls = (ai.run as ReturnType<typeof vi.fn>).mock.calls.length;
+    const totalChunkGetCalls = chunkGetCalls - 1; // subtract the final audio cache check
+    expect(totalAiCalls).toBeLessThan(totalChunkGetCalls);
   });
 });
 
