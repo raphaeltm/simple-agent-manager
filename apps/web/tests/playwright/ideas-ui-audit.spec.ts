@@ -84,10 +84,10 @@ function makeTask(overrides: TaskOverrides) {
   };
 }
 
-function makeDetailTask(overrides: TaskOverrides) {
+function makeDetailTask(overrides: TaskOverrides & { dependencies?: Array<{ id: string; title: string; status: string }> }) {
   return {
     ...makeTask(overrides),
-    dependencies: [],
+    dependencies: overrides.dependencies ?? [],
   };
 }
 
@@ -433,6 +433,13 @@ test.describe('IdeasPage - Mobile Audit', () => {
     await page.waitForTimeout(300);
     await takeScreenshot(page, 'ideas-all-groups-expanded');
   });
+
+  test('API error state', async ({ page }) => {
+    await setupApiMocks(page, { tasksError: true });
+    await page.goto('/projects/proj-test-1/ideas');
+    await page.waitForTimeout(1000);
+    await takeScreenshot(page, 'ideas-api-error');
+  });
 });
 
 // ===========================================================================
@@ -544,6 +551,24 @@ test.describe('TaskDetail - Mobile Audit', () => {
     await page.waitForSelector('text=Task with extensive activity');
     await takeScreenshot(page, 'task-detail-many-events');
   });
+
+  test('task with dependencies', async ({ page }) => {
+    const task = makeDetailTask({
+      id: 'detail-deps',
+      title: 'Build notification UI',
+      status: 'ready',
+      description: 'Create the notification center component.',
+      dependencies: [
+        { id: 't-dep-1', title: 'Implement notification API endpoints', status: 'completed' },
+        { id: 't-dep-2', title: 'Design notification data model and migration', status: 'in_progress' },
+        { id: 't-dep-3', title: 'Set up WebSocket push channel for real-time delivery', status: 'draft' },
+      ],
+    });
+    await setupApiMocks(page, { taskDetail: task, tasks: NORMAL_TASKS });
+    await page.goto('/projects/proj-test-1/ideas/detail-deps');
+    await page.waitForSelector('text=Build notification UI');
+    await takeScreenshot(page, 'task-detail-with-dependencies');
+  });
 });
 
 // ===========================================================================
@@ -653,5 +678,12 @@ test.describe('TaskSubmitForm - Mobile Audit', () => {
       // If input isn't visible, still take screenshot to document the state
     }
     await takeScreenshot(page, 'chat-task-submit-long-input');
+  });
+
+  test('project error state', async ({ page }) => {
+    await setupApiMocks(page, { projectError: true, tasks: [], sessions: [] });
+    await page.goto('/projects/proj-test-1/chat');
+    await page.waitForTimeout(1500);
+    await takeScreenshot(page, 'chat-project-error');
   });
 });
