@@ -196,17 +196,19 @@ export async function cleanTextForSpeech(
   }
 
   try {
+    // Construct the agent once outside the retry loop to avoid
+    // re-instantiating the Workers AI binding wrapper on each attempt
+    const workersAi = createWorkersAI({ binding: ai });
+    const model = workersAi(cleanupModel as Parameters<typeof workersAi>[0]);
+    const agent = new Agent({
+      id: 'tts-text-cleanup',
+      name: 'TTS Text Cleanup',
+      instructions: CLEANUP_INSTRUCTIONS,
+      model,
+    });
+
     const cleaned = await retryWithBackoff(
       async () => {
-        const workersAi = createWorkersAI({ binding: ai });
-        const model = workersAi(cleanupModel as Parameters<typeof workersAi>[0]);
-        const agent = new Agent({
-          id: 'tts-text-cleanup',
-          name: 'TTS Text Cleanup',
-          instructions: CLEANUP_INSTRUCTIONS,
-          model,
-        });
-
         const result = await agent.generate(text, {
           abortSignal: AbortSignal.timeout(cleanupTimeoutMs),
           modelSettings: {
@@ -260,17 +262,19 @@ export async function summarizeTextForSpeech(
   const retryBaseDelayMs = config.retryBaseDelayMs ?? DEFAULT_TTS_RETRY_BASE_DELAY_MS;
 
   try {
+    // Construct the agent once outside the retry loop to avoid
+    // re-instantiating the Workers AI binding wrapper on each attempt
+    const workersAi = createWorkersAI({ binding: ai });
+    const model = workersAi(cleanupModel as Parameters<typeof workersAi>[0]);
+    const agent = new Agent({
+      id: 'tts-text-summarize',
+      name: 'TTS Text Summarize',
+      instructions: SUMMARY_INSTRUCTIONS,
+      model,
+    });
+
     const summary = await retryWithBackoff(
       async () => {
-        const workersAi = createWorkersAI({ binding: ai });
-        const model = workersAi(cleanupModel as Parameters<typeof workersAi>[0]);
-        const agent = new Agent({
-          id: 'tts-text-summarize',
-          name: 'TTS Text Summarize',
-          instructions: SUMMARY_INSTRUCTIONS,
-          model,
-        });
-
         const result = await agent.generate(text, {
           abortSignal: AbortSignal.timeout(cleanupTimeoutMs),
           modelSettings: {
@@ -419,16 +423,24 @@ export async function generateSpeechAudioChunk(
   const audioBuffer = await retryWithBackoff(
     async () => {
       // Use returnRawResponse to get streaming audio bytes
+      // Save timeout handle so we can clear it on the winning path to avoid timer leaks
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(
+          () => reject(new Error(`TTS generation timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      });
+
       const response = await Promise.race([
         ai.run(
           model as Parameters<typeof ai.run>[0],
           { text, speaker, encoding } as never,
           { returnRawResponse: true },
         ),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`TTS generation timed out after ${timeoutMs}ms`)), timeoutMs),
-        ),
+        timeoutPromise,
       ]);
+      clearTimeout(timeoutHandle);
 
       // The response is a standard Response object when returnRawResponse is true
       const rawResponse = response as unknown as Response;
@@ -556,6 +568,18 @@ export async function generateSpeechAudio(
 
   // Concatenate all audio buffers
   const concatenated = concatenateArrayBuffers(audioBuffers);
+
+  // Best-effort cleanup of per-chunk R2 objects now that final audio will be stored.
+  // Chunks are only needed for retry recovery during generation; the final concatenated
+  // audio is what getAudioFromR2 serves.
+  if (r2 && storageId && userId) {
+    const chunkKeys = chunks.map((chunkText, i) =>
+      buildChunkR2Key(storageId, userId, i, chunkText, config),
+    );
+    await Promise.allSettled(chunkKeys.map((key) => r2.delete(key))).catch(() => {
+      // Non-fatal: cleanup failure doesn't affect the result
+    });
+  }
 
   log.info('tts.chunked_generation_complete', {
     totalLength: text.length,
