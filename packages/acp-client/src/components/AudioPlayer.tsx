@@ -14,6 +14,8 @@ export interface AudioPlayerProps {
   onSkipForward: (seconds: number) => void;
   onSkipBackward: (seconds: number) => void;
   onPlaybackRateChange: (rate: number) => void;
+  /** Error message to display when TTS fails. */
+  error?: string | null;
 }
 
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -46,6 +48,7 @@ export const AudioPlayer = React.memo(function AudioPlayer({
   onSkipForward,
   onSkipBackward,
   onPlaybackRateChange,
+  error,
 }: AudioPlayerProps) {
   const handleSeek = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -214,6 +217,17 @@ export const AudioPlayer = React.memo(function AudioPlayer({
           ))}
         </select>
       </div>
+
+      {/* Error message */}
+      {error && (
+        <div
+          className="text-[11px] px-1 py-0.5 rounded"
+          style={{ color: '#dc2626', backgroundColor: 'rgba(220, 38, 38, 0.08)' }}
+          role="alert"
+        >
+          {error}
+        </div>
+      )}
     </div>
   );
 });

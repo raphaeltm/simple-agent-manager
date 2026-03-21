@@ -39,6 +39,10 @@ export interface UseAudioPlaybackReturn {
   hasServerTTS: boolean;
   /** Whether the audio was generated from a summary (not verbatim text). */
   summarized: boolean;
+  /** Current error message (null when no error). Cleared on next play attempt. */
+  error: string | null;
+  /** Last error message. Persists after state returns to idle until next successful play. */
+  lastError: string | null;
 }
 
 /**
@@ -47,6 +51,7 @@ export interface UseAudioPlaybackReturn {
  * - Re-entrance guard to prevent double playback
  * - Blob URL caching across play/stop cycles
  * - Full playback controls (seek, speed, skip)
+ * - Error surfacing (error + lastError fields)
  */
 export function useAudioPlayback({
   text,
@@ -58,6 +63,8 @@ export function useAudioPlayback({
   const [duration, setDuration] = useState(0);
   const [playbackRate, setPlaybackRateState] = useState(1);
   const [summarized, setSummarized] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const blobUrlRef = useRef<string | null>(null);
@@ -176,6 +183,9 @@ export function useAudioPlayback({
     if (playbackLockRef.current) return;
     playbackLockRef.current = true;
 
+    // Clear error on new play attempt
+    setError(null);
+
     // If we have a cached blob URL for this storageId, reuse it
     if (blobUrlRef.current && cachedStorageIdRef.current === ttsStorageId) {
       const audio = createAudioElement(blobUrlRef.current);
@@ -184,6 +194,8 @@ export function useAudioPlayback({
         await audio.play();
         setState('playing');
         startTimeInterval();
+        // Clear lastError on successful play
+        setLastError(null);
       } catch {
         setState('idle');
         playbackLockRef.current = false;
@@ -209,7 +221,7 @@ export function useAudioPlayback({
       });
 
       if (!synthesizeRes.ok) {
-        const errData = await synthesizeRes.json().catch(() => null);
+        const errData = await synthesizeRes.json().catch(() => null) as { message?: string } | null;
         throw new Error(errData?.message || `Synthesis failed: ${synthesizeRes.status}`);
       }
 
@@ -256,6 +268,8 @@ export function useAudioPlayback({
       await audio.play();
       setState('playing');
       startTimeInterval();
+      // Clear lastError on successful play
+      setLastError(null);
     } catch (err) {
       // Don't log abort errors — they're intentional
       if (err instanceof DOMException && err.name === 'AbortError') {
@@ -264,7 +278,10 @@ export function useAudioPlayback({
         return;
       }
 
-      console.error('TTS playback error:', err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error('TTS playback error:', errorMessage);
+      setError(errorMessage);
+      setLastError(errorMessage);
       setState('idle');
       playbackLockRef.current = false;
 
@@ -297,6 +314,9 @@ export function useAudioPlayback({
     if (!window.speechSynthesis) return;
     if (playbackLockRef.current) return;
     playbackLockRef.current = true;
+
+    // Clear error on new play attempt
+    setError(null);
 
     window.speechSynthesis.cancel();
     const plain = text
@@ -418,5 +438,7 @@ export function useAudioPlayback({
     skipBackward,
     hasServerTTS,
     summarized,
+    error,
+    lastError,
   };
 }

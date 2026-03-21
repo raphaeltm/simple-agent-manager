@@ -435,6 +435,12 @@ export const DEFAULT_TTS_MAX_CHUNKS = 8;
  * engages before the chunk cap fires. Override via TTS_SUMMARY_THRESHOLD env var. */
 export const DEFAULT_TTS_SUMMARY_THRESHOLD = 30000;
 
+/** Default number of retry attempts per TTS chunk generation. Override via TTS_RETRY_ATTEMPTS env var. */
+export const DEFAULT_TTS_RETRY_ATTEMPTS = 3;
+
+/** Default base delay (ms) for exponential backoff between TTS retries. Override via TTS_RETRY_BASE_DELAY_MS env var. */
+export const DEFAULT_TTS_RETRY_BASE_DELAY_MS = 500;
+
 // =============================================================================
 // Agent Settings
 // =============================================================================
