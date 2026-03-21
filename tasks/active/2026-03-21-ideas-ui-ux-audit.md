@@ -40,23 +40,23 @@ Audit all ideas/tasks-related UI pages by rendering them with mock data on mobil
 
 ## Implementation Checklist
 
-- [ ] Set up Playwright config and test infrastructure
-- [ ] Create comprehensive mock data factory for all scenarios
-- [ ] Write IdeasPage audit tests (empty, normal, long text, many items, filtered)
-- [ ] Write TaskDetail audit tests (normal, long text, error state, with output, with dependencies)
-- [ ] Write Dashboard/ActiveTaskCard audit tests (empty, normal, many tasks, long titles)
-- [ ] Write TaskSubmitForm audit tests (default, advanced options, error state, submitting state)
-- [ ] Run all tests on mobile viewport and capture screenshots
-- [ ] Evaluate screenshots and document findings
-- [ ] Fix any rendering issues found
-- [ ] Re-run and confirm fixes
+- [x] Set up Playwright config and test infrastructure
+- [x] Create comprehensive mock data factory for all scenarios
+- [x] Write IdeasPage audit tests (8 tests: empty, normal, long text, many items, search filter, no results, status filter, collapsed groups)
+- [x] Write TaskDetail audit tests (7 tests: normal, error with long message, completed with output, long title, no description, blocked, many activity events)
+- [x] Write Dashboard/ActiveTaskCard audit tests (4 tests: empty, active tasks, many tasks, long names)
+- [x] Write TaskSubmitForm audit tests (3 tests: default state, advanced options, long input)
+- [x] Run all tests on mobile viewport and capture screenshots (22/22 pass)
+- [x] Evaluate screenshots and document findings
+- [x] Fix rendering issues: IdeasPage card overflow (added overflow-hidden), Breadcrumb mobile wrapping (added flex-wrap, truncation)
+- [x] Re-run and confirm fixes (22/22 pass, screenshots verified)
 
 ## Acceptance Criteria
 
-- [ ] Every ideas/tasks page rendered on mobile (375px) with screenshots
-- [ ] Long text content does not overflow or break layout
-- [ ] Empty states display correctly with helpful messages
-- [ ] Error states are clearly visible and don't break layout
-- [ ] All interactive elements are at least 44px touch targets
-- [ ] Text is readable (no truncation hiding critical info without ellipsis)
-- [ ] Evaluation report with findings and fixes documented
+- [x] Every ideas/tasks page rendered on mobile (375px) with screenshots — 22 screenshots across IdeasPage, TaskDetail, Dashboard, TaskSubmitForm
+- [x] Long text content does not overflow or break layout — fixed IdeasPage overflow-hidden, Breadcrumb truncation
+- [x] Empty states display correctly with helpful messages — verified lightbulb icon + guidance text
+- [x] Error states are clearly visible and don't break layout — red-bordered error card with long error message wraps correctly
+- [x] All interactive elements are at least 44px touch targets — group headers have min-h-[44px], cards have min-h-[56px]
+- [x] Text is readable (no truncation hiding critical info without ellipsis) — line-clamp-1 with ellipsis on cards, full text visible on detail pages
+- [x] Evaluation report with findings and fixes documented — see PR description
