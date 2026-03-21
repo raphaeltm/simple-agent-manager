@@ -668,14 +668,11 @@ test.describe('TaskSubmitForm - Mobile Audit', () => {
     await page.goto('/projects/proj-test-1/chat');
     await page.waitForTimeout(1500);
 
-    // Type a long task description — the input may take time to render
-    const input = page.getByPlaceholder('Describe the task for the agent...');
-    try {
-      await input.waitFor({ state: 'visible', timeout: 5000 });
+    // Type a long task description
+    const input = page.getByPlaceholder('Describe what you want the agent to do...');
+    if (await input.isVisible()) {
       await input.fill('This is a very long task description that the user is typing to test how the input field handles long text on mobile screens without breaking or overflowing the layout');
       await page.waitForTimeout(300);
-    } catch {
-      // If input isn't visible, still take screenshot to document the state
     }
     await takeScreenshot(page, 'chat-task-submit-long-input');
   });

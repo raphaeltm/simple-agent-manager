@@ -86,7 +86,7 @@ function IdeaCard({ idea, sessionCount, onClick }: IdeaCardProps) {
   return (
     <button
       onClick={onClick}
-      className="flex items-start gap-3 px-3 py-2.5 min-h-[56px] rounded-lg border border-border-default bg-surface hover:border-accent/40 transition-colors cursor-pointer text-left w-full overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="flex items-start gap-3 px-3 py-2.5 min-h-[56px] rounded-lg border border-border-default bg-surface hover:border-accent/40 transition-colors cursor-pointer text-left w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       aria-label={`View idea: ${idea.title}`}
     >
       {/* Content */}
@@ -240,7 +240,7 @@ export function IdeasPage() {
   }
 
   return (
-    <div className={`flex flex-col gap-4 overflow-hidden ${isMobile ? 'px-4 py-3' : 'px-6 py-4'}`}>
+    <div className={`flex flex-col gap-4 overflow-x-hidden ${isMobile ? 'px-4 py-3' : 'px-6 py-4'}`}>
       {/* Header */}
       <h1 className="text-xl font-semibold text-fg-primary m-0">Ideas</h1>
 
