@@ -421,12 +421,77 @@ describe('generateCloudInit', () => {
       const parsed = YAML.parse(config);
 
       const runcmd: string[] = parsed.runcmd;
-      const runcmdStr = runcmd.join('\n---\n');
-      const firewallIdx = runcmdStr.indexOf('setup-firewall.sh');
-      const agentIdx = runcmdStr.indexOf('vm-agent.service');
-      expect(firewallIdx).toBeGreaterThan(-1);
-      expect(agentIdx).toBeGreaterThan(-1);
-      expect(firewallIdx).toBeLessThan(agentIdx);
+      const firewallCmdIdx = runcmd.findIndex((cmd: string) =>
+        typeof cmd === 'string' && cmd.includes('setup-firewall.sh')
+      );
+      const agentStartIdx = runcmd.findIndex((cmd: string) =>
+        typeof cmd === 'string' && cmd.includes('systemctl start vm-agent')
+      );
+      expect(firewallCmdIdx).toBeGreaterThan(-1);
+      expect(agentStartIdx).toBeGreaterThan(-1);
+      expect(firewallCmdIdx).toBeLessThan(agentStartIdx);
+    });
+
+    it('firewall script uses custom vmAgentPort override', () => {
+      const config = generateCloudInit(baseVariables({ vmAgentPort: '9999' }));
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      expect(firewallScript.content).toContain('VM_AGENT_PORT="9999"');
+    });
+
+    it('firewall script does not allow SSH or unrestricted inbound access', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content: string = firewallScript.content;
+      // No unrestricted ACCEPT rules
+      expect(content).not.toMatch(/iptables -A INPUT -j ACCEPT/);
+      expect(content).not.toMatch(/ip6tables -A INPUT -j ACCEPT/);
+      // No explicit SSH allowance
+      expect(content).not.toMatch(/--dport 22\b/);
+      expect(content).not.toMatch(/--dport ssh\b/);
+    });
+
+    it('IPv6 firewall rules mirror IPv4 structure', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content: string = firewallScript.content;
+      expect(content).toContain('ip6tables -A INPUT -i lo -j ACCEPT');
+      expect(content).toContain('ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT');
+      expect(content).toContain('ip6tables -A INPUT -i docker0 -j ACCEPT');
+      expect(content).toContain('ip6tables -A INPUT -i br-+ -j ACCEPT');
+      expect(content).toContain('ip6tables -P INPUT DROP');
+    });
+
+    it('firewall script uses set -euo pipefail for strict error handling', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      expect(firewallScript.content).toContain('set -euo pipefail');
+    });
+
+    it('runcmd includes debconf preseed before iptables-persistent install', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const runcmd: string[] = parsed.runcmd;
+      const runcmdStr = runcmd.map(String).join('\n');
+      expect(runcmdStr).toContain('debconf-set-selections');
+      expect(runcmdStr).toContain('iptables-persistent/autosave_v4');
+      expect(runcmdStr).toContain('iptables-persistent/autosave_v6');
     });
 
     it('config with firewall stays within 32KB Hetzner limit', () => {
