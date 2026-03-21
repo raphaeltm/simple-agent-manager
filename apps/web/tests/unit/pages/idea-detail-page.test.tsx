@@ -206,7 +206,7 @@ describe('IdeaDetailPage', () => {
     expect(
       await screen.findByText('No conversations linked yet. Start chatting to discuss this idea.'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Conversations (0)')).toBeInTheDocument();
+    expect(screen.getByText('Conversations')).toBeInTheDocument();
   });
 
   it('displays linked sessions with status badges', async () => {

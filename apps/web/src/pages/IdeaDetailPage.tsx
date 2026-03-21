@@ -5,6 +5,10 @@ import {
   MessageSquare,
   Clock,
   Lightbulb,
+  RefreshCw,
+  Play,
+  Check,
+  Archive,
 } from 'lucide-react';
 import type { TaskDetailResponse, TaskStatus } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
@@ -30,12 +34,12 @@ const STATUS_FROM_TASK: Record<TaskStatus, IdeaStatus> = {
   cancelled: 'parked',
 };
 
-const STATUS_CONFIG: Record<IdeaStatus, { label: string; color: string }> = {
-  exploring: { label: 'Exploring', color: 'var(--sam-color-accent-primary)' },
-  ready: { label: 'Ready', color: 'var(--sam-color-warning)' },
-  executing: { label: 'Executing', color: 'var(--sam-color-info)' },
-  done: { label: 'Done', color: 'var(--sam-color-success)' },
-  parked: { label: 'Parked', color: 'var(--sam-color-fg-muted)' },
+const STATUS_CONFIG: Record<IdeaStatus, { label: string; color: string; icon: React.ReactNode }> = {
+  exploring: { label: 'Exploring', color: 'var(--sam-color-accent-primary)', icon: <Lightbulb size={12} aria-hidden="true" /> },
+  ready: { label: 'Ready', color: 'var(--sam-color-warning)', icon: <Play size={12} aria-hidden="true" /> },
+  executing: { label: 'Executing', color: 'var(--sam-color-info)', icon: <span aria-hidden="true"><Spinner size="sm" /></span> },
+  done: { label: 'Done', color: 'var(--sam-color-success)', icon: <Check size={12} aria-hidden="true" /> },
+  parked: { label: 'Parked', color: 'var(--sam-color-fg-muted)', icon: <Archive size={12} aria-hidden="true" /> },
 };
 
 // ---------------------------------------------------------------------------
@@ -175,7 +179,7 @@ export function IdeaDetailPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
+      <div className="flex items-center justify-center py-12" aria-label="Loading idea details" role="status">
         <Spinner size="lg" />
       </div>
     );
@@ -186,15 +190,24 @@ export function IdeaDetailPage() {
       <div className={`flex flex-col gap-4 ${isMobile ? 'px-4 py-3' : 'px-6 py-4'}`}>
         <button
           onClick={handleBack}
-          className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg-primary transition-colors bg-transparent border-none cursor-pointer p-0"
+          className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg-primary transition-colors bg-transparent border-none cursor-pointer py-3 pr-3 pl-0 -ml-1 self-start min-h-[44px]"
         >
-          <ArrowLeft size={16} />
+          <ArrowLeft size={16} aria-hidden="true" />
           Back to Ideas
         </button>
-        <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="flex flex-col items-center justify-center py-16 text-center gap-4">
           <p className="text-sm text-fg-muted m-0">
             {error || 'Idea not found.'}
           </p>
+          {error && (
+            <button
+              onClick={loadData}
+              className="inline-flex items-center gap-1.5 text-sm text-fg-primary border border-border-default rounded-lg px-3 py-2 min-h-[44px] bg-surface hover:border-accent/40 transition-colors cursor-pointer"
+            >
+              <RefreshCw size={14} aria-hidden="true" />
+              Try again
+            </button>
+          )}
         </div>
       </div>
     );
@@ -205,12 +218,12 @@ export function IdeaDetailPage() {
 
   return (
     <div className={`flex flex-col gap-5 overflow-x-hidden ${isMobile ? 'px-4 py-3' : 'px-6 py-4'}`}>
-      {/* Back link */}
+      {/* Back link — min-h-[44px] satisfies touch target requirement */}
       <button
         onClick={handleBack}
-        className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg-primary transition-colors bg-transparent border-none cursor-pointer p-0 self-start"
+        className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg-primary transition-colors bg-transparent border-none cursor-pointer py-3 pr-3 pl-0 -ml-1 self-start min-h-[44px]"
       >
-        <ArrowLeft size={16} />
+        <ArrowLeft size={16} aria-hidden="true" />
         Back to Ideas
       </button>
 
@@ -238,6 +251,7 @@ export function IdeaDetailPage() {
               color: statusConfig.color,
             }}
           >
+            {statusConfig.icon}
             {statusConfig.label}
           </span>
           <span className="inline-flex items-center gap-1">
@@ -248,30 +262,31 @@ export function IdeaDetailPage() {
       </div>
 
       {/* Conversations section */}
-      <div className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-fg-secondary m-0 uppercase tracking-wider">
-          Conversations ({sessions.length})
+      <section aria-labelledby="conversations-heading" className="flex flex-col gap-3">
+        <h2 id="conversations-heading" className="text-sm font-semibold text-fg-secondary m-0 uppercase tracking-wider">
+          {sessions.length > 0 ? `Conversations (${sessions.length})` : 'Conversations'}
         </h2>
 
         {sessions.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <Lightbulb size={32} className="text-fg-muted mb-3 opacity-30" />
+            <Lightbulb size={32} className="text-fg-muted mb-3 opacity-30" aria-hidden="true" />
             <p className="text-sm text-fg-muted m-0 max-w-xs">
               No conversations linked yet. Start chatting to discuss this idea.
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1.5" role="list" aria-label="Linked conversations">
             {sessions.map((session) => (
-              <SessionRow
-                key={session.sessionId}
-                session={session}
-                onClick={() => handleSessionClick(session.sessionId)}
-              />
+              <div key={session.sessionId} role="listitem">
+                <SessionRow
+                  session={session}
+                  onClick={() => handleSessionClick(session.sessionId)}
+                />
+              </div>
             ))}
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }
