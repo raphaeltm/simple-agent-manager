@@ -481,7 +481,7 @@ test.describe('IdeasPage - Mobile Audit', () => {
 });
 
 // ===========================================================================
-// TASK DETAIL PAGE TESTS
+// TASK DETAIL PAGE TESTS (accessed via /tasks/:taskId route)
 // ===========================================================================
 
 test.describe('TaskDetail - Mobile Audit', () => {
@@ -495,14 +495,14 @@ test.describe('TaskDetail - Mobile Audit', () => {
       startedAt: '2026-03-20T09:00:00Z',
     });
     await setupApiMocks(page, { taskDetail: task, events: MOCK_EVENTS, tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-test-1/ideas/detail-1');
+    await page.goto('/projects/proj-test-1/tasks/detail-1');
     await page.waitForSelector('text=Implement user authentication');
     await takeScreenshot(page, 'task-detail-normal');
   });
 
   test('failed task with long error message', async ({ page }) => {
     await setupApiMocks(page, { taskDetail: ERROR_TASK, events: MOCK_EVENTS, tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-test-1/ideas/err-1');
+    await page.goto('/projects/proj-test-1/tasks/err-1');
     await page.waitForSelector('text=Failed deployment task');
     await takeScreenshot(page, 'task-detail-error');
 
@@ -513,7 +513,7 @@ test.describe('TaskDetail - Mobile Audit', () => {
 
   test('completed task with output', async ({ page }) => {
     await setupApiMocks(page, { taskDetail: COMPLETED_TASK_WITH_OUTPUT, events: MOCK_EVENTS, tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-test-1/ideas/out-1');
+    await page.goto('/projects/proj-test-1/tasks/out-1');
     await page.waitForSelector('text=Implement notification system');
     await takeScreenshot(page, 'task-detail-with-output');
 
@@ -531,7 +531,7 @@ test.describe('TaskDetail - Mobile Audit', () => {
       priority: 0,
     });
     await setupApiMocks(page, { taskDetail: longTitleTask, events: [], tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-test-1/ideas/long-title-1');
+    await page.goto('/projects/proj-test-1/tasks/long-title-1');
     await page.waitForSelector('text=This is an extremely long task title');
     await takeScreenshot(page, 'task-detail-long-title');
   });
@@ -544,7 +544,7 @@ test.describe('TaskDetail - Mobile Audit', () => {
       description: null,
     });
     await setupApiMocks(page, { taskDetail: noDescTask, events: [], tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-test-1/ideas/no-desc-1');
+    await page.goto('/projects/proj-test-1/tasks/no-desc-1');
     await page.waitForSelector('text=Task without description');
     await takeScreenshot(page, 'task-detail-no-description');
 
@@ -561,7 +561,7 @@ test.describe('TaskDetail - Mobile Audit', () => {
       priority: 10,
     });
     await setupApiMocks(page, { taskDetail: blockedTask, events: [], tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-test-1/ideas/blocked-1');
+    await page.goto('/projects/proj-test-1/tasks/blocked-1');
     await page.waitForSelector('text=Blocked task waiting on dependency');
     await takeScreenshot(page, 'task-detail-blocked');
 
@@ -585,7 +585,7 @@ test.describe('TaskDetail - Mobile Audit', () => {
       description: 'This task has many status transitions.',
     });
     await setupApiMocks(page, { taskDetail: task, events: manyEvents, tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-test-1/ideas/detail-many-ev');
+    await page.goto('/projects/proj-test-1/tasks/detail-many-ev');
     await page.waitForSelector('text=Task with extensive activity');
     await takeScreenshot(page, 'task-detail-many-events');
   });
@@ -603,7 +603,7 @@ test.describe('TaskDetail - Mobile Audit', () => {
       ],
     });
     await setupApiMocks(page, { taskDetail: task, tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-test-1/ideas/detail-deps');
+    await page.goto('/projects/proj-test-1/tasks/detail-deps');
     await page.waitForSelector('text=Build notification UI');
     await takeScreenshot(page, 'task-detail-with-dependencies');
   });
