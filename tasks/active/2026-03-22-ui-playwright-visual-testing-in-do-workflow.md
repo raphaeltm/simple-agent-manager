@@ -42,12 +42,12 @@ The user wants a testing pipeline addition where:
 
 ## Implementation Checklist
 
-- [ ] Create `.claude/rules/17-ui-visual-testing.md` defining the mandatory Playwright visual testing requirements for UI changes
-- [ ] Update `.codex/prompts/do.md` Phase 3 to include a UI visual testing step when UI files are touched
-- [ ] Update `apps/web/playwright.config.ts` to add a desktop viewport project (1280x800)
-- [ ] Update `.claude/agents/ui-ux-specialist/UI_UX_SPECIALIST.md` to reference the new testing rule
-- [ ] Update `.agents/skills/do/SKILL.md` quick summary to mention the UI visual testing requirement
-- [ ] Update `CLAUDE.md` if needed to reference the new rule
+- [x] Create `.claude/rules/17-ui-visual-testing.md` defining the mandatory Playwright visual testing requirements for UI changes
+- [x] Update `.codex/prompts/do.md` Phase 3 to include a UI visual testing step when UI files are touched
+- [x] Update `apps/web/playwright.config.ts` to add a desktop viewport project (1280x800)
+- [x] Update `.claude/agents/ui-ux-specialist/UI_UX_SPECIALIST.md` to reference the new testing rule
+- [x] Update `.agents/skills/do/SKILL.md` quick summary to mention the UI visual testing requirement
+- [x] Update `CLAUDE.md` if needed to reference the new rule
 
 ## Acceptance Criteria
 
