@@ -246,7 +246,7 @@ describe('summarizeTextForSpeech', () => {
     const longText = 'A'.repeat(10000);
     const result = await summarizeTextForSpeech(longText, ai, { retryAttempts: 1 });
     expect(result.length).toBeGreaterThan(0);
-    expect(result.length).toBeLessThanOrEqual(4000);
+    expect(result.length).toBeLessThanOrEqual(1800);
   });
 
   it('falls back to truncated regex-stripped text when LLM throws after all retries', async () => {
@@ -255,7 +255,7 @@ describe('summarizeTextForSpeech', () => {
     const longText = 'B'.repeat(10000);
     const result = await summarizeTextForSpeech(longText, ai, { retryAttempts: 1 });
     expect(result.length).toBeGreaterThan(0);
-    expect(result.length).toBeLessThanOrEqual(4000);
+    expect(result.length).toBeLessThanOrEqual(1800);
   });
 
   it('retries before falling back on LLM failure', async () => {
@@ -338,6 +338,26 @@ describe('splitTextIntoChunks', () => {
     const reassembled = chunks.join(' ');
     for (const sentence of sentences) {
       expect(reassembled).toContain(`Sentence number ${sentence.match(/\d+/)![0]}`);
+    }
+  });
+
+  it('never produces chunks exceeding the configured max size', () => {
+    // Generate realistic long text with varied sentence lengths
+    const sentences = [
+      'This is a short sentence.',
+      'Here is a much longer sentence that contains significantly more words and should help test the chunking behavior with realistic text content.',
+      'Another sentence.',
+      'The quick brown fox jumps over the lazy dog, and this sentence keeps going with additional clauses to make it longer than usual for testing purposes.',
+      'Short one.',
+      'Medium length sentence with some words in it.',
+    ];
+    const text = Array.from({ length: 50 }, (_, i) => sentences[i % sentences.length]).join(' ');
+
+    for (const maxSize of [100, 500, 1800, 2000]) {
+      const chunks = splitTextIntoChunks(text, maxSize);
+      for (const chunk of chunks) {
+        expect(chunk.length).toBeLessThanOrEqual(maxSize);
+      }
     }
   });
 });
@@ -464,7 +484,7 @@ describe('generateSpeechAudio', () => {
       arrayBuffer: () => Promise.resolve(fakeAudio),
     });
 
-    const result = await generateSpeechAudio('Short text.', ai, { chunkSize: 4000, retryAttempts: 1 });
+    const result = await generateSpeechAudio('Short text.', ai, { chunkSize: 1800, retryAttempts: 1 });
     expect(ai.run).toHaveBeenCalledTimes(1);
     expect(result.byteLength).toBe(1024);
   });
@@ -803,9 +823,9 @@ describe('getTTSConfig', () => {
     expect(config.cleanupTimeoutMs).toBe(15000);
     expect(config.r2Prefix).toBe('tts');
     expect(config.enabled).toBe(true);
-    expect(config.chunkSize).toBe(4000);
+    expect(config.chunkSize).toBe(1800);
     expect(config.maxChunks).toBe(8);
-    expect(config.summaryThreshold).toBe(30000);
+    expect(config.summaryThreshold).toBe(14400);
     expect(config.retryAttempts).toBe(3);
     expect(config.retryBaseDelayMs).toBe(500);
   });
