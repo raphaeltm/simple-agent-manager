@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, count, desc, eq, isNotNull, lt, ne, sql } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNotNull, lt, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type {
   CreateProjectRequest,
@@ -657,9 +657,68 @@ crudRoutes.delete('/:id', async (c) => {
 
   await requireOwnedProject(db, projectId, userId);
 
+  // Explicitly delete child records instead of relying on D1 CASCADE.
+  // SQLite ignores REFERENCES constraints added via ALTER TABLE, so
+  // workspaces.project_id ON DELETE SET NULL never fires. Complex CASCADE
+  // chains (projects → tasks → task_dependencies/task_status_events) can
+  // also fail silently in D1.
+
+  // 1. Find all task IDs for this project (needed for grandchild cleanup)
+  const projectTasks = await db
+    .select({ id: schema.tasks.id })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.projectId, projectId));
+  const taskIds = projectTasks.map((t) => t.id);
+
+  // 2. Delete grandchild records (task_status_events, task_dependencies)
+  if (taskIds.length > 0) {
+    await db
+      .delete(schema.taskStatusEvents)
+      .where(inArray(schema.taskStatusEvents.taskId, taskIds));
+    await db
+      .delete(schema.taskDependencies)
+      .where(inArray(schema.taskDependencies.taskId, taskIds));
+    // Also clean up dependencies referencing these tasks from other projects
+    await db
+      .delete(schema.taskDependencies)
+      .where(inArray(schema.taskDependencies.dependsOnTaskId, taskIds));
+  }
+
+  // 3. Delete direct child records
+  await db
+    .delete(schema.tasks)
+    .where(eq(schema.tasks.projectId, projectId));
+  await db
+    .delete(schema.projectRuntimeEnvVars)
+    .where(eq(schema.projectRuntimeEnvVars.projectId, projectId));
+  await db
+    .delete(schema.projectRuntimeFiles)
+    .where(eq(schema.projectRuntimeFiles.projectId, projectId));
+  await db
+    .delete(schema.agentProfiles)
+    .where(eq(schema.agentProfiles.projectId, projectId));
+
+  // 4. Detach workspaces (ALTER TABLE FK ON DELETE SET NULL is not enforced)
+  await db
+    .update(schema.workspaces)
+    .set({ projectId: null, updatedAt: new Date().toISOString() })
+    .where(eq(schema.workspaces.projectId, projectId));
+
+  // 5. Delete the project itself
   await db
     .delete(schema.projects)
     .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)));
+
+  // 6. Verify deletion succeeded
+  const remaining = await db
+    .select({ id: schema.projects.id })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId))
+    .limit(1);
+
+  if (remaining.length > 0) {
+    throw errors.internal('Project deletion failed — the record still exists after delete');
+  }
 
   return c.json({ success: true });
 });
