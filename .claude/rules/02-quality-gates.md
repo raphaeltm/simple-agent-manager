@@ -30,6 +30,7 @@ Before marking feature work complete:
 - [ ] Local test run passes for impacted packages
 - [ ] CI test checks are expected to pass with the changes
 - [ ] Staging deployment succeeded and live app verified via Playwright (see `13-staging-verification.md`)
+- [ ] Playwright visual audit passed for all changed UI surfaces — mobile + desktop, overflow asserted (see `.claude/rules/17-ui-visual-testing.md`; required when `apps/web/`, `packages/ui/`, or `packages/terminal/` are modified)
 
 ### Test Locations
 

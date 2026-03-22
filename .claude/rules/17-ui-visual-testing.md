@@ -69,7 +69,7 @@ npx playwright test tests/playwright/<component>-audit.spec.ts
 
 ### Test File Pattern
 
-Follow the established pattern from `ideas-ui-audit.spec.ts`:
+Follow the established pattern from `apps/web/tests/playwright/ideas-ui-audit.spec.ts`:
 
 ```typescript
 import { test, expect, type Page, type Route } from '@playwright/test';

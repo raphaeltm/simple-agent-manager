@@ -13,6 +13,7 @@ Use this agent for any change that touches:
 - `apps/web/**`
 - `packages/vm-agent/ui/**`
 - `packages/ui/**`
+- `packages/terminal/**`
 
 ## Required Workflow
 
