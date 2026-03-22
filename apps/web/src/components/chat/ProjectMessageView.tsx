@@ -972,7 +972,10 @@ function SessionHeader({
         await deleteWorkspace(session.workspaceId);
       }
 
-      // Refresh session list via callback instead of full page reload
+      // Refresh session list via callback instead of full page reload.
+      // Reset completing before the callback so the button is not stuck in
+      // "Completing..." if the parent's refresh is slower than expected.
+      setCompleting(false);
       onSessionMutated?.();
     } catch (err) {
       console.error('Failed to mark task complete:', err);
