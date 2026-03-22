@@ -246,7 +246,7 @@ describe('summarizeTextForSpeech', () => {
     const longText = 'A'.repeat(10000);
     const result = await summarizeTextForSpeech(longText, ai, { retryAttempts: 1 });
     expect(result.length).toBeGreaterThan(0);
-    expect(result.length).toBeLessThanOrEqual(4000);
+    expect(result.length).toBeLessThanOrEqual(1800);
   });
 
   it('falls back to truncated regex-stripped text when LLM throws after all retries', async () => {
@@ -255,7 +255,7 @@ describe('summarizeTextForSpeech', () => {
     const longText = 'B'.repeat(10000);
     const result = await summarizeTextForSpeech(longText, ai, { retryAttempts: 1 });
     expect(result.length).toBeGreaterThan(0);
-    expect(result.length).toBeLessThanOrEqual(4000);
+    expect(result.length).toBeLessThanOrEqual(1800);
   });
 
   it('retries before falling back on LLM failure', async () => {
@@ -338,6 +338,26 @@ describe('splitTextIntoChunks', () => {
     const reassembled = chunks.join(' ');
     for (const sentence of sentences) {
       expect(reassembled).toContain(`Sentence number ${sentence.match(/\d+/)![0]}`);
+    }
+  });
+
+  it('never produces chunks exceeding the configured max size', () => {
+    // Generate realistic long text with varied sentence lengths
+    const sentences = [
+      'This is a short sentence.',
+      'Here is a much longer sentence that contains significantly more words and should help test the chunking behavior with realistic text content.',
+      'Another sentence.',
+      'The quick brown fox jumps over the lazy dog, and this sentence keeps going with additional clauses to make it longer than usual for testing purposes.',
+      'Short one.',
+      'Medium length sentence with some words in it.',
+    ];
+    const text = Array.from({ length: 50 }, (_, i) => sentences[i % sentences.length]).join(' ');
+
+    for (const maxSize of [100, 500, 1800, 2000]) {
+      const chunks = splitTextIntoChunks(text, maxSize);
+      for (const chunk of chunks) {
+        expect(chunk.length).toBeLessThanOrEqual(maxSize);
+      }
     }
   });
 });
@@ -464,7 +484,7 @@ describe('generateSpeechAudio', () => {
       arrayBuffer: () => Promise.resolve(fakeAudio),
     });
 
-    const result = await generateSpeechAudio('Short text.', ai, { chunkSize: 4000, retryAttempts: 1 });
+    const result = await generateSpeechAudio('Short text.', ai, { chunkSize: 1800, retryAttempts: 1 });
     expect(ai.run).toHaveBeenCalledTimes(1);
     expect(result.byteLength).toBe(1024);
   });
@@ -510,6 +530,33 @@ describe('generateSpeechAudio', () => {
 
     // Should not have called AI at all
     expect(ai.run).not.toHaveBeenCalled();
+  });
+
+  it('with default config, never sends text exceeding 2000 chars to ai.run (Deepgram Aura 2 limit)', async () => {
+    const ai = createMockAi();
+    const capturedTexts: string[] = [];
+    (ai.run as ReturnType<typeof vi.fn>).mockImplementation((_model: unknown, args: { text: string }) => {
+      capturedTexts.push(args.text);
+      return Promise.resolve({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)),
+      });
+    });
+
+    // Generate text longer than 2000 chars — with the old default (4000) this
+    // would have been sent as a single chunk exceeding Deepgram's 2000-char limit
+    const sentences = Array.from({ length: 60 }, (_, i) =>
+      `Sentence number ${i + 1} with enough words to build up realistic length.`
+    );
+    const text = sentences.join(' '); // ~4200 chars
+
+    // No explicit chunkSize — uses DEFAULT_TTS_CHUNK_SIZE (1800)
+    await generateSpeechAudio(text, ai, { retryAttempts: 1 });
+
+    expect(capturedTexts.length).toBeGreaterThan(1);
+    for (const t of capturedTexts) {
+      expect(t.length).toBeLessThanOrEqual(2000);
+    }
   });
 
   it('uses per-chunk R2 cache when R2 bucket is provided', async () => {
@@ -803,9 +850,9 @@ describe('getTTSConfig', () => {
     expect(config.cleanupTimeoutMs).toBe(15000);
     expect(config.r2Prefix).toBe('tts');
     expect(config.enabled).toBe(true);
-    expect(config.chunkSize).toBe(4000);
+    expect(config.chunkSize).toBe(1800);
     expect(config.maxChunks).toBe(8);
-    expect(config.summaryThreshold).toBe(30000);
+    expect(config.summaryThreshold).toBe(14400);
     expect(config.retryAttempts).toBe(3);
     expect(config.retryBaseDelayMs).toBe(500);
   });

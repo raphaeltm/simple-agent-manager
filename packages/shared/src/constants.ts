@@ -423,17 +423,18 @@ export const DEFAULT_TTS_CLEANUP_TIMEOUT_MS = 15000;
 export const DEFAULT_TTS_R2_PREFIX = 'tts';
 
 /** Default max characters per TTS chunk. Text is split at sentence boundaries.
+ * Deepgram Aura 2 enforces a hard 2000-character limit; 1800 provides a safe margin.
  * Override via TTS_CHUNK_SIZE env var. */
-export const DEFAULT_TTS_CHUNK_SIZE = 4000;
+export const DEFAULT_TTS_CHUNK_SIZE = 1800;
 
 /** Default max number of TTS chunks per request. Prevents CPU time exhaustion
  * on Workers runtime. Override via TTS_MAX_CHUNKS env var. */
 export const DEFAULT_TTS_MAX_CHUNKS = 8;
 
 /** Default character threshold above which text is summarized instead of read verbatim.
- * Aligned to DEFAULT_TTS_MAX_CHUNKS × DEFAULT_TTS_CHUNK_SIZE to ensure summary mode
- * engages before the chunk cap fires. Override via TTS_SUMMARY_THRESHOLD env var. */
-export const DEFAULT_TTS_SUMMARY_THRESHOLD = 30000;
+ * Aligned to DEFAULT_TTS_MAX_CHUNKS × DEFAULT_TTS_CHUNK_SIZE (8 × 1800 = 14400) to ensure
+ * summary mode engages before the chunk cap fires. Override via TTS_SUMMARY_THRESHOLD env var. */
+export const DEFAULT_TTS_SUMMARY_THRESHOLD = 14400;
 
 /** Default number of retry attempts per TTS chunk generation. Override via TTS_RETRY_ATTEMPTS env var. */
 export const DEFAULT_TTS_RETRY_ATTEMPTS = 3;
