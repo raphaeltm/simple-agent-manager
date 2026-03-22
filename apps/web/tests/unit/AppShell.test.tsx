@@ -89,7 +89,7 @@ describe('AppShell (global context)', () => {
 
   it('renders SAM branding', () => {
     renderAppShell();
-    expect(screen.getByText('SAM')).toBeInTheDocument();
+    expect(screen.getByAltText('SAM')).toBeInTheDocument();
   });
 
   it('renders user name', () => {
