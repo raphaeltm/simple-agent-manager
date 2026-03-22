@@ -8,10 +8,13 @@ import {
   splitTextIntoChunks,
   concatenateArrayBuffers,
   buildR2Key,
+  buildChunkR2Key,
+  simpleHash,
   getAudioFromR2,
   storeAudioInR2,
   synthesizeSpeech,
   getTTSConfig,
+  retryWithBackoff,
 } from '../../../src/services/tts';
 
 // Mock @mastra/core/agent — factory must not reference outer variables
@@ -47,6 +50,41 @@ function createMockR2(): R2Bucket {
     resumeMultipartUpload: vi.fn(),
   } as unknown as R2Bucket;
 }
+
+// ─── retryWithBackoff ────────────────────────────────────────────────────────
+
+describe('retryWithBackoff', () => {
+  it('returns result on first success', async () => {
+    const fn = vi.fn().mockResolvedValue('success');
+    const result = await retryWithBackoff(fn, 3, 10, 'test');
+    expect(result).toBe('success');
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries and succeeds on Nth attempt', async () => {
+    const fn = vi.fn()
+      .mockRejectedValueOnce(new Error('fail 1'))
+      .mockRejectedValueOnce(new Error('fail 2'))
+      .mockResolvedValue('success');
+
+    const result = await retryWithBackoff(fn, 3, 10, 'test');
+    expect(result).toBe('success');
+    expect(fn).toHaveBeenCalledTimes(3);
+  });
+
+  it('throws last error after exhausting all attempts', async () => {
+    const fn = vi.fn().mockRejectedValue(new Error('persistent failure'));
+
+    await expect(retryWithBackoff(fn, 3, 10, 'test')).rejects.toThrow('persistent failure');
+    expect(fn).toHaveBeenCalledTimes(3);
+  });
+
+  it('converts non-Error throws to Error', async () => {
+    const fn = vi.fn().mockRejectedValue('string error');
+
+    await expect(retryWithBackoff(fn, 1, 10, 'test')).rejects.toThrow('string error');
+  });
+});
 
 // ─── fallbackStripMarkdown ───────────────────────────────────────────────────
 
@@ -128,22 +166,42 @@ describe('cleanTextForSpeech', () => {
     expect(mockGenerate).toHaveBeenCalledOnce();
   });
 
-  it('falls back to regex stripping when LLM returns empty', async () => {
-    mockGenerate.mockResolvedValue({ text: '' });
+  it('falls back to regex stripping when LLM returns empty after all retries', async () => {
+    mockGenerate.mockRejectedValue(new Error('LLM returned empty cleanup result'));
     const ai = createMockAi();
-    const result = await cleanTextForSpeech('## Heading\n**bold**', ai);
+    const result = await cleanTextForSpeech('## Heading\n**bold**', ai, { retryAttempts: 1 });
     // Should use fallback, not return empty
     expect(result.length).toBeGreaterThan(0);
     expect(result).not.toContain('##');
     expect(result).not.toContain('**');
   });
 
-  it('falls back to regex stripping when LLM throws', async () => {
-    mockGenerate.mockRejectedValue(new Error('AI service unavailable'));
+  it('falls back to regex stripping when LLM returns empty string', async () => {
+    // Specifically test the empty-string guard: generate resolves but text is empty
+    mockGenerate.mockResolvedValue({ text: '' });
     const ai = createMockAi();
-    const result = await cleanTextForSpeech('## Heading\n**bold** text', ai);
+    const result = await cleanTextForSpeech('## Heading\n**bold**', ai, { retryAttempts: 1 });
     expect(result.length).toBeGreaterThan(0);
     expect(result).not.toContain('##');
+    expect(result).not.toContain('**');
+  });
+
+  it('falls back to regex stripping when LLM throws after all retries', async () => {
+    mockGenerate.mockRejectedValue(new Error('AI service unavailable'));
+    const ai = createMockAi();
+    const result = await cleanTextForSpeech('## Heading\n**bold** text', ai, { retryAttempts: 1 });
+    expect(result.length).toBeGreaterThan(0);
+    expect(result).not.toContain('##');
+  });
+
+  it('retries before falling back to regex on LLM failure', async () => {
+    mockGenerate
+      .mockRejectedValueOnce(new Error('fail 1'))
+      .mockResolvedValue({ text: 'Cleaned text after retry.' });
+    const ai = createMockAi();
+    const result = await cleanTextForSpeech('## Heading', ai, { retryAttempts: 2, retryBaseDelayMs: 10 });
+    expect(result).toBe('Cleaned text after retry.');
+    expect(mockGenerate).toHaveBeenCalledTimes(2);
   });
 
   it('passes maxOutputTokens to agent.generate() via modelSettings', async () => {
@@ -182,22 +240,32 @@ describe('summarizeTextForSpeech', () => {
     expect(mockGenerate).toHaveBeenCalledOnce();
   });
 
-  it('falls back to truncated regex-stripped text when LLM returns empty', async () => {
-    mockGenerate.mockResolvedValue({ text: '' });
+  it('falls back to truncated regex-stripped text when LLM fails after all retries', async () => {
+    mockGenerate.mockRejectedValue(new Error('LLM returned empty summary result'));
     const ai = createMockAi();
     const longText = 'A'.repeat(10000);
-    const result = await summarizeTextForSpeech(longText, ai);
+    const result = await summarizeTextForSpeech(longText, ai, { retryAttempts: 1 });
     expect(result.length).toBeGreaterThan(0);
     expect(result.length).toBeLessThanOrEqual(4000);
   });
 
-  it('falls back to truncated regex-stripped text when LLM throws', async () => {
+  it('falls back to truncated regex-stripped text when LLM throws after all retries', async () => {
     mockGenerate.mockRejectedValue(new Error('AI unavailable'));
     const ai = createMockAi();
     const longText = 'B'.repeat(10000);
-    const result = await summarizeTextForSpeech(longText, ai);
+    const result = await summarizeTextForSpeech(longText, ai, { retryAttempts: 1 });
     expect(result.length).toBeGreaterThan(0);
     expect(result.length).toBeLessThanOrEqual(4000);
+  });
+
+  it('retries before falling back on LLM failure', async () => {
+    mockGenerate
+      .mockRejectedValueOnce(new Error('fail'))
+      .mockResolvedValue({ text: 'Summary after retry.' });
+    const ai = createMockAi();
+    const result = await summarizeTextForSpeech('Some text', ai, { retryAttempts: 2, retryBaseDelayMs: 10 });
+    expect(result).toBe('Summary after retry.');
+    expect(mockGenerate).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -313,6 +381,7 @@ describe('generateSpeechAudioChunk', () => {
       model: '@cf/deepgram/aura-2-en',
       speaker: 'luna',
       encoding: 'mp3',
+      retryAttempts: 1,
     });
 
     expect(ai.run).toHaveBeenCalledWith(
@@ -323,7 +392,7 @@ describe('generateSpeechAudioChunk', () => {
     expect(result.byteLength).toBe(1024);
   });
 
-  it('throws when response is not ok', async () => {
+  it('throws when response is not ok after all retries', async () => {
     const ai = createMockAi();
     (ai.run as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: false,
@@ -331,7 +400,56 @@ describe('generateSpeechAudioChunk', () => {
       text: () => Promise.resolve('Internal Server Error'),
     });
 
-    await expect(generateSpeechAudioChunk('Hello', ai)).rejects.toThrow('TTS model returned 500');
+    await expect(generateSpeechAudioChunk('Hello', ai, { retryAttempts: 1 })).rejects.toThrow('TTS model returned 500');
+  });
+
+  it('retries and succeeds on second attempt', async () => {
+    const fakeAudio = new ArrayBuffer(512);
+    const ai = createMockAi();
+    (ai.run as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        text: () => Promise.resolve('Service Unavailable'),
+      })
+      .mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(fakeAudio),
+      });
+
+    const result = await generateSpeechAudioChunk('Hello', ai, { retryAttempts: 2, retryBaseDelayMs: 10 });
+    expect(result.byteLength).toBe(512);
+    expect(ai.run).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws timeout error when AI call takes too long', async () => {
+    const ai = createMockAi();
+    // Mock ai.run to never resolve, triggering the timeout
+    (ai.run as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise(() => {/* never resolves */}),
+    );
+
+    await expect(
+      generateSpeechAudioChunk('Hello', ai, { timeoutMs: 50, retryAttempts: 1 }),
+    ).rejects.toThrow('TTS generation timed out after 50ms');
+  });
+
+  it('retries on empty audio buffer', async () => {
+    const fakeAudio = new ArrayBuffer(256);
+    const ai = createMockAi();
+    (ai.run as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+      })
+      .mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(fakeAudio),
+      });
+
+    const result = await generateSpeechAudioChunk('Hello', ai, { retryAttempts: 2, retryBaseDelayMs: 10 });
+    expect(result.byteLength).toBe(256);
+    expect(ai.run).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -346,7 +464,7 @@ describe('generateSpeechAudio', () => {
       arrayBuffer: () => Promise.resolve(fakeAudio),
     });
 
-    const result = await generateSpeechAudio('Short text.', ai, { chunkSize: 4000 });
+    const result = await generateSpeechAudio('Short text.', ai, { chunkSize: 4000, retryAttempts: 1 });
     expect(ai.run).toHaveBeenCalledTimes(1);
     expect(result.byteLength).toBe(1024);
   });
@@ -367,7 +485,7 @@ describe('generateSpeechAudio', () => {
     const sentences = Array.from({ length: 10 }, (_, i) => `Sentence ${i + 1} with content.`);
     const text = sentences.join(' ');
 
-    const result = await generateSpeechAudio(text, ai, { chunkSize: 50, maxChunks: 20 });
+    const result = await generateSpeechAudio(text, ai, { chunkSize: 50, maxChunks: 20, retryAttempts: 1 });
 
     // Should have made multiple AI calls
     expect(callCount).toBeGreaterThan(1);
@@ -393,6 +511,57 @@ describe('generateSpeechAudio', () => {
     // Should not have called AI at all
     expect(ai.run).not.toHaveBeenCalled();
   });
+
+  it('uses per-chunk R2 cache when R2 bucket is provided', async () => {
+    const ai = createMockAi();
+    const r2 = createMockR2();
+    const cachedChunkAudio = new ArrayBuffer(100);
+    const freshChunkAudio = new ArrayBuffer(200);
+
+    // First R2 get is for the final audio cache check (returns null — not cached).
+    // Then per-chunk R2 gets: first chunk is cached, rest are not.
+    let chunkGetCalls = 0;
+    (r2.get as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      chunkGetCalls++;
+      if (chunkGetCalls === 1) {
+        // Final audio cache miss
+        return Promise.resolve(null);
+      }
+      if (chunkGetCalls === 2) {
+        // First chunk cache hit
+        return Promise.resolve({
+          arrayBuffer: () => Promise.resolve(cachedChunkAudio),
+        });
+      }
+      // All other chunk cache misses
+      return Promise.resolve(null);
+    });
+
+    (ai.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(freshChunkAudio),
+    });
+
+    // Use synthesizeSpeech to trigger the full pipeline (which checks final cache then per-chunk)
+    mockGenerate.mockResolvedValue({ text: 'First sentence is here. Second sentence is here.' });
+    const result = await synthesizeSpeech(
+      '## First sentence is here. Second sentence is here.',
+      'test-storage', ai, r2,
+      { chunkSize: 30, maxChunks: 10, retryAttempts: 1 },
+      'user-1',
+    );
+
+    // At least one chunk came from cache (reducing AI calls)
+    expect(result.cached).toBe(false);
+    // R2 put should have been called for the non-cached chunks + final audio
+    expect(r2.put).toHaveBeenCalled();
+    // The cached chunk should have reduced the number of AI TTS calls.
+    // Total chunks depends on text + chunkSize, but ai.run should be called
+    // fewer times than r2.get chunk checks (minus the final audio cache check).
+    const totalAiCalls = (ai.run as ReturnType<typeof vi.fn>).mock.calls.length;
+    const totalChunkGetCalls = chunkGetCalls - 1; // subtract the final audio cache check
+    expect(totalAiCalls).toBeLessThan(totalChunkGetCalls);
+  });
 });
 
 // ─── R2 Storage ──────────────────────────────────────────────────────────────
@@ -404,6 +573,40 @@ describe('buildR2Key', () => {
 
   it('respects custom prefix and encoding', () => {
     expect(buildR2Key('msg-456', 'user-2', { r2Prefix: 'audio', encoding: 'wav' })).toBe('audio/user-2/msg-456.wav');
+  });
+});
+
+describe('buildChunkR2Key', () => {
+  it('builds chunk key with index and text hash', () => {
+    const key = buildChunkR2Key('msg-123', 'user-1', 0, 'Hello world');
+    expect(key).toMatch(/^tts\/user-1\/msg-123_chunk_0_[a-z0-9]+\.mp3$/);
+  });
+
+  it('produces different keys for different chunk text', () => {
+    const key1 = buildChunkR2Key('msg-123', 'user-1', 0, 'Hello');
+    const key2 = buildChunkR2Key('msg-123', 'user-1', 0, 'World');
+    expect(key1).not.toBe(key2);
+  });
+
+  it('produces different keys for different chunk indexes', () => {
+    const key1 = buildChunkR2Key('msg-123', 'user-1', 0, 'Hello');
+    const key2 = buildChunkR2Key('msg-123', 'user-1', 1, 'Hello');
+    expect(key1).not.toBe(key2);
+  });
+});
+
+describe('simpleHash', () => {
+  it('produces consistent hash for same input', () => {
+    expect(simpleHash('hello')).toBe(simpleHash('hello'));
+  });
+
+  it('produces different hashes for different inputs', () => {
+    expect(simpleHash('hello')).not.toBe(simpleHash('world'));
+  });
+
+  it('returns a base36 string', () => {
+    const hash = simpleHash('test');
+    expect(hash).toMatch(/^[a-z0-9]+$/);
   });
 });
 
@@ -481,7 +684,7 @@ describe('synthesizeSpeech', () => {
       arrayBuffer: () => Promise.resolve(fakeAudio),
     });
 
-    const result = await synthesizeSpeech('## Hello **world**', 'new-id', ai, r2, {}, 'user-1');
+    const result = await synthesizeSpeech('## Hello **world**', 'new-id', ai, r2, { retryAttempts: 1 }, 'user-1');
 
     expect(result.cached).toBe(false);
     expect(result.summarized).toBe(false);
@@ -505,7 +708,7 @@ describe('synthesizeSpeech', () => {
 
     // Use markdown text so LLM cleanup path is triggered
     const longText = '## ' + 'a'.repeat(10000);
-    await synthesizeSpeech(longText, 'long-id', ai, r2, { maxTextLength: 100 }, 'user-1');
+    await synthesizeSpeech(longText, 'long-id', ai, r2, { maxTextLength: 100, retryAttempts: 1 }, 'user-1');
 
     // The LLM cleanup should have been called with the truncated text
     expect(mockGenerate).toHaveBeenCalled();
@@ -513,7 +716,7 @@ describe('synthesizeSpeech', () => {
     expect(callArg.length).toBeLessThanOrEqual(100);
   });
 
-  it('throws when TTS model returns empty audio', async () => {
+  it('throws when TTS model returns empty audio after retries', async () => {
     const r2 = createMockR2();
     const ai = createMockAi();
 
@@ -522,8 +725,8 @@ describe('synthesizeSpeech', () => {
       arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
     });
 
-    await expect(synthesizeSpeech('Hello', 'empty-id', ai, r2, {}, 'user-1'))
-      .rejects.toThrow('TTS model returned empty audio');
+    await expect(synthesizeSpeech('Hello', 'empty-id', ai, r2, { retryAttempts: 1 }, 'user-1'))
+      .rejects.toThrow('TTS model returned empty audio buffer');
   });
 
   it('uses summary mode when text exceeds summary threshold', async () => {
@@ -541,6 +744,7 @@ describe('synthesizeSpeech', () => {
     const longText = 'x'.repeat(60000);
     const result = await synthesizeSpeech(longText, 'summary-id', ai, r2, {
       summaryThreshold: 50000,
+      retryAttempts: 1,
     }, 'user-1');
 
     expect(result.summarized).toBe(true);
@@ -559,6 +763,7 @@ describe('synthesizeSpeech', () => {
 
     const result = await synthesizeSpeech('Short text.', 'full-id', ai, r2, {
       summaryThreshold: 50000,
+      retryAttempts: 1,
     }, 'user-1');
 
     expect(result.summarized).toBe(false);
@@ -577,7 +782,7 @@ describe('synthesizeSpeech', () => {
     });
 
     // Force summary mode even for short text
-    const result = await synthesizeSpeech('Short text.', 'force-summary-id', ai, r2, {}, 'user-1', 'summary');
+    const result = await synthesizeSpeech('Short text.', 'force-summary-id', ai, r2, { retryAttempts: 1 }, 'user-1', 'summary');
 
     expect(result.summarized).toBe(true);
   });
@@ -601,6 +806,8 @@ describe('getTTSConfig', () => {
     expect(config.chunkSize).toBe(4000);
     expect(config.maxChunks).toBe(8);
     expect(config.summaryThreshold).toBe(30000);
+    expect(config.retryAttempts).toBe(3);
+    expect(config.retryBaseDelayMs).toBe(500);
   });
 
   it('reads overrides from env vars', () => {
@@ -617,6 +824,8 @@ describe('getTTSConfig', () => {
       TTS_CHUNK_SIZE: '8000',
       TTS_MAX_CHUNKS: '12',
       TTS_SUMMARY_THRESHOLD: '100000',
+      TTS_RETRY_ATTEMPTS: '5',
+      TTS_RETRY_BASE_DELAY_MS: '1000',
     });
     expect(config.model).toBe('@cf/myshell-ai/melotts');
     expect(config.speaker).toBe('asteria');
@@ -630,6 +839,8 @@ describe('getTTSConfig', () => {
     expect(config.chunkSize).toBe(8000);
     expect(config.maxChunks).toBe(12);
     expect(config.summaryThreshold).toBe(100000);
+    expect(config.retryAttempts).toBe(5);
+    expect(config.retryBaseDelayMs).toBe(1000);
   });
 
   it('disables TTS when TTS_ENABLED is false', () => {

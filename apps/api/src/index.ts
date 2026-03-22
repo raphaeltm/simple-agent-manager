@@ -264,6 +264,11 @@ export interface Env {
   TTS_CLEANUP_MAX_TOKENS?: string;
   TTS_R2_PREFIX?: string;
   TTS_ENABLED?: string;
+  TTS_CHUNK_SIZE?: string;
+  TTS_MAX_CHUNKS?: string;
+  TTS_SUMMARY_THRESHOLD?: string;
+  TTS_RETRY_ATTEMPTS?: string;
+  TTS_RETRY_BASE_DELAY_MS?: string;
   // VM agent TLS configuration
   VM_AGENT_PROTOCOL?: string;  // "https" (default) or "http"
   VM_AGENT_PORT?: string;      // "8443" (default) or custom port

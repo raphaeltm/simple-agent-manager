@@ -66,7 +66,7 @@ export const MessageActions = React.memo(function MessageActions({
   const words = plain ? plain.split(/\s+/).filter(Boolean).length : 0;
   const chars = plain.length;
 
-  const showPlayer = audio.state !== 'idle';
+  const showPlayer = audio.state !== 'idle' || !!audio.lastError;
   const showSpeaker = audio.hasServerTTS || (typeof window !== 'undefined' && !!window.speechSynthesis);
 
   // Close metadata popover on outside click or Escape key
@@ -290,6 +290,7 @@ export const MessageActions = React.memo(function MessageActions({
           onSkipForward={audio.skipForward}
           onSkipBackward={audio.skipBackward}
           onPlaybackRateChange={audio.setPlaybackRate}
+          error={audio.lastError}
         />
       )}
 

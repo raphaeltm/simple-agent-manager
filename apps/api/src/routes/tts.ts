@@ -69,7 +69,8 @@ ttsRoutes.post('/synthesize', async (c) => {
       textLength: text.length,
       mode,
     });
-    throw errors.internal('Failed to generate audio');
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    throw errors.internal(`TTS synthesis failed: ${errorMessage}`);
   }
 });
 

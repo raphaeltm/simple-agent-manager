@@ -2,10 +2,10 @@
  * Text-to-Speech Service
  *
  * Reusable TTS pipeline using Cloudflare Workers AI:
- *   1. Clean markdown/code from text via LLM
+ *   1. Clean markdown/code from text via LLM (with retry)
  *   2. Split long text into chunks at sentence boundaries
- *   3. Generate speech audio per chunk via TTS model
- *   4. Concatenate chunks and cache in R2
+ *   3. Generate speech audio per chunk via TTS model (with retry + per-chunk R2 caching)
+ *   4. Concatenate chunks and cache final audio in R2
  *
  * Architecture:
  *   Text (markdown) → LLM cleanup → plain text → chunk → TTS model × N → concat → R2 storage
@@ -33,6 +33,8 @@ import {
   DEFAULT_TTS_CHUNK_SIZE,
   DEFAULT_TTS_MAX_CHUNKS,
   DEFAULT_TTS_SUMMARY_THRESHOLD,
+  DEFAULT_TTS_RETRY_ATTEMPTS,
+  DEFAULT_TTS_RETRY_BASE_DELAY_MS,
 } from '@simple-agent-manager/shared';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
@@ -53,6 +55,8 @@ export interface TTSConfig {
   chunkSize?: number;
   maxChunks?: number;
   summaryThreshold?: number;
+  retryAttempts?: number;
+  retryBaseDelayMs?: number;
 }
 
 export interface TTSEnvVars {
@@ -69,6 +73,8 @@ export interface TTSEnvVars {
   TTS_CHUNK_SIZE?: string;
   TTS_MAX_CHUNKS?: string;
   TTS_SUMMARY_THRESHOLD?: string;
+  TTS_RETRY_ATTEMPTS?: string;
+  TTS_RETRY_BASE_DELAY_MS?: string;
 }
 
 export function getTTSConfig(env: TTSEnvVars): TTSConfig {
@@ -86,7 +92,59 @@ export function getTTSConfig(env: TTSEnvVars): TTSConfig {
     chunkSize: parsePositiveInt(env.TTS_CHUNK_SIZE, DEFAULT_TTS_CHUNK_SIZE),
     maxChunks: parsePositiveInt(env.TTS_MAX_CHUNKS, DEFAULT_TTS_MAX_CHUNKS),
     summaryThreshold: parsePositiveInt(env.TTS_SUMMARY_THRESHOLD, DEFAULT_TTS_SUMMARY_THRESHOLD),
+    retryAttempts: parsePositiveInt(env.TTS_RETRY_ATTEMPTS, DEFAULT_TTS_RETRY_ATTEMPTS),
+    retryBaseDelayMs: parsePositiveInt(env.TTS_RETRY_BASE_DELAY_MS, DEFAULT_TTS_RETRY_BASE_DELAY_MS),
   };
+}
+
+// ─── Retry Utility ──────────────────────────────────────────────────────────
+
+/**
+ * Retry an async function with exponential backoff and jitter.
+ * Throws the last error if all attempts fail.
+ */
+export async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxAttempts: number,
+  baseDelayMs: number,
+  label: string,
+): Promise<T> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+
+      if (attempt === maxAttempts) {
+        log.warn('tts.retry_exhausted', {
+          label,
+          attempts: maxAttempts,
+          error: lastError.message,
+        });
+        throw lastError;
+      }
+
+      // Exponential backoff: baseDelay * 2^(attempt-1) with ±25% jitter
+      const exponentialDelay = baseDelayMs * Math.pow(2, attempt - 1);
+      const jitter = exponentialDelay * 0.25 * (2 * Math.random() - 1);
+      const delay = Math.max(0, Math.round(exponentialDelay + jitter));
+
+      log.warn('tts.retry_attempt', {
+        label,
+        attempt,
+        maxAttempts,
+        error: lastError.message,
+        delayMs: delay,
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+
+  // Should never reach here, but TypeScript needs this
+  throw lastError ?? new Error('retryWithBackoff: no attempts made');
 }
 
 // ─── Markdown Cleanup ────────────────────────────────────────────────────────
@@ -119,7 +177,7 @@ Rules:
 
 /**
  * Use an LLM to clean markdown/code from text, producing natural spoken text.
- * Falls back to basic regex stripping if the LLM call fails.
+ * Retries on failure before falling back to basic regex stripping.
  */
 export async function cleanTextForSpeech(
   text: string,
@@ -129,6 +187,8 @@ export async function cleanTextForSpeech(
   const cleanupModel = config.cleanupModel ?? DEFAULT_TTS_CLEANUP_MODEL;
   const cleanupTimeoutMs = config.cleanupTimeoutMs ?? DEFAULT_TTS_CLEANUP_TIMEOUT_MS;
   const cleanupMaxTokens = config.cleanupMaxTokens ?? DEFAULT_TTS_CLEANUP_MAX_TOKENS;
+  const retryAttempts = config.retryAttempts ?? DEFAULT_TTS_RETRY_ATTEMPTS;
+  const retryBaseDelayMs = config.retryBaseDelayMs ?? DEFAULT_TTS_RETRY_BASE_DELAY_MS;
 
   // If text has no markdown indicators, skip LLM cleanup
   if (!hasMarkdown(text)) {
@@ -136,6 +196,8 @@ export async function cleanTextForSpeech(
   }
 
   try {
+    // Construct the agent once outside the retry loop to avoid
+    // re-instantiating the Workers AI binding wrapper on each attempt
     const workersAi = createWorkersAI({ binding: ai });
     const model = workersAi(cleanupModel as Parameters<typeof workersAi>[0]);
     const agent = new Agent({
@@ -145,18 +207,25 @@ export async function cleanTextForSpeech(
       model,
     });
 
-    const result = await agent.generate(text, {
-      abortSignal: AbortSignal.timeout(cleanupTimeoutMs),
-      modelSettings: {
-        maxOutputTokens: cleanupMaxTokens,
-      },
-    });
+    const cleaned = await retryWithBackoff(
+      async () => {
+        const result = await agent.generate(text, {
+          abortSignal: AbortSignal.timeout(cleanupTimeoutMs),
+          modelSettings: {
+            maxOutputTokens: cleanupMaxTokens,
+          },
+        });
 
-    const cleaned = result.text?.trim();
-    if (!cleaned) {
-      log.warn('tts.cleanup_empty', { textLength: text.length, cleanupModel });
-      return fallbackStripMarkdown(text);
-    }
+        const resultText = result.text?.trim();
+        if (!resultText) {
+          throw new Error('LLM returned empty cleanup result');
+        }
+        return resultText;
+      },
+      retryAttempts,
+      retryBaseDelayMs,
+      'cleanup',
+    );
 
     log.info('tts.cleanup_complete', {
       inputLength: text.length,
@@ -179,7 +248,7 @@ export async function cleanTextForSpeech(
 
 /**
  * Use an LLM to summarize long text for TTS.
- * Falls back to truncation + regex stripping if the LLM call fails.
+ * Retries on failure before falling back to truncation + regex stripping.
  */
 export async function summarizeTextForSpeech(
   text: string,
@@ -189,8 +258,12 @@ export async function summarizeTextForSpeech(
   const cleanupModel = config.cleanupModel ?? DEFAULT_TTS_CLEANUP_MODEL;
   const cleanupTimeoutMs = config.cleanupTimeoutMs ?? DEFAULT_TTS_CLEANUP_TIMEOUT_MS;
   const cleanupMaxTokens = config.cleanupMaxTokens ?? DEFAULT_TTS_CLEANUP_MAX_TOKENS;
+  const retryAttempts = config.retryAttempts ?? DEFAULT_TTS_RETRY_ATTEMPTS;
+  const retryBaseDelayMs = config.retryBaseDelayMs ?? DEFAULT_TTS_RETRY_BASE_DELAY_MS;
 
   try {
+    // Construct the agent once outside the retry loop to avoid
+    // re-instantiating the Workers AI binding wrapper on each attempt
     const workersAi = createWorkersAI({ binding: ai });
     const model = workersAi(cleanupModel as Parameters<typeof workersAi>[0]);
     const agent = new Agent({
@@ -200,19 +273,25 @@ export async function summarizeTextForSpeech(
       model,
     });
 
-    const result = await agent.generate(text, {
-      abortSignal: AbortSignal.timeout(cleanupTimeoutMs),
-      modelSettings: {
-        maxOutputTokens: cleanupMaxTokens,
-      },
-    });
+    const summary = await retryWithBackoff(
+      async () => {
+        const result = await agent.generate(text, {
+          abortSignal: AbortSignal.timeout(cleanupTimeoutMs),
+          modelSettings: {
+            maxOutputTokens: cleanupMaxTokens,
+          },
+        });
 
-    const summary = result.text?.trim();
-    if (!summary) {
-      log.warn('tts.summary_empty', { textLength: text.length, cleanupModel });
-      const effectiveChunkSize = config.chunkSize ?? DEFAULT_TTS_CHUNK_SIZE;
-      return fallbackStripMarkdown(text.slice(0, effectiveChunkSize));
-    }
+        const resultText = result.text?.trim();
+        if (!resultText) {
+          throw new Error('LLM returned empty summary result');
+        }
+        return resultText;
+      },
+      retryAttempts,
+      retryBaseDelayMs,
+      'summary',
+    );
 
     log.info('tts.summary_complete', {
       inputLength: text.length,
@@ -228,7 +307,8 @@ export async function summarizeTextForSpeech(
       textLength: text.length,
       cleanupModel,
     });
-    return fallbackStripMarkdown(text.slice(0, DEFAULT_TTS_CHUNK_SIZE));
+    const effectiveChunkSize = config.chunkSize ?? DEFAULT_TTS_CHUNK_SIZE;
+    return fallbackStripMarkdown(text.slice(0, effectiveChunkSize));
   }
 }
 
@@ -323,6 +403,7 @@ export function splitTextIntoChunks(text: string, maxChunkSize: number): string[
 
 /**
  * Generate speech audio for a single chunk of plain text using Workers AI TTS.
+ * Retries with exponential backoff on failure.
  * Returns raw audio bytes as an ArrayBuffer.
  */
 export async function generateSpeechAudioChunk(
@@ -334,32 +415,54 @@ export async function generateSpeechAudioChunk(
   const speaker = config.speaker ?? DEFAULT_TTS_SPEAKER;
   const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
   const timeoutMs = config.timeoutMs ?? DEFAULT_TTS_TIMEOUT_MS;
+  const retryAttempts = config.retryAttempts ?? DEFAULT_TTS_RETRY_ATTEMPTS;
+  const retryBaseDelayMs = config.retryBaseDelayMs ?? DEFAULT_TTS_RETRY_BASE_DELAY_MS;
 
   const startTime = Date.now();
 
-  // Use returnRawResponse to get streaming audio bytes
-  const response = await Promise.race([
-    ai.run(
-      model as Parameters<typeof ai.run>[0],
-      { text, speaker, encoding } as never,
-      { returnRawResponse: true },
-    ),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`TTS generation timed out after ${timeoutMs}ms`)), timeoutMs),
-    ),
-  ]);
+  const audioBuffer = await retryWithBackoff(
+    async () => {
+      // Use returnRawResponse to get streaming audio bytes
+      // Save timeout handle so we can clear it on the winning path to avoid timer leaks
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(
+          () => reject(new Error(`TTS generation timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      });
 
-  // The response is a standard Response object when returnRawResponse is true
-  const rawResponse = response as unknown as Response;
-  if (typeof rawResponse.ok !== 'boolean') {
-    throw new Error(`TTS model did not return a Response (got ${typeof response})`);
-  }
-  if (!rawResponse.ok) {
-    const errorText = await rawResponse.text().catch(() => 'unknown');
-    throw new Error(`TTS model returned ${rawResponse.status}: ${errorText}`);
-  }
+      const response = await Promise.race([
+        ai.run(
+          model as Parameters<typeof ai.run>[0],
+          { text, speaker, encoding } as never,
+          { returnRawResponse: true },
+        ),
+        timeoutPromise,
+      ]);
+      clearTimeout(timeoutHandle);
 
-  const audioBuffer = await rawResponse.arrayBuffer();
+      // The response is a standard Response object when returnRawResponse is true
+      const rawResponse = response as unknown as Response;
+      if (typeof rawResponse.ok !== 'boolean') {
+        throw new Error(`TTS model did not return a Response (got ${typeof response})`);
+      }
+      if (!rawResponse.ok) {
+        const errorText = await rawResponse.text().catch(() => 'unknown');
+        throw new Error(`TTS model returned ${rawResponse.status}: ${errorText}`);
+      }
+
+      const buffer = await rawResponse.arrayBuffer();
+      if (buffer.byteLength === 0) {
+        throw new Error('TTS model returned empty audio buffer');
+      }
+      return buffer;
+    },
+    retryAttempts,
+    retryBaseDelayMs,
+    'tts_chunk',
+  );
+
   const durationMs = Date.now() - startTime;
 
   log.info('tts.chunk_generated', {
@@ -376,12 +479,17 @@ export async function generateSpeechAudioChunk(
 
 /**
  * Generate speech audio from plain text, splitting into chunks if needed.
+ * Uses per-chunk R2 caching when an R2 bucket is provided — cached chunks
+ * are skipped, and only missing chunks are generated.
  * Concatenates chunk audio buffers into a single ArrayBuffer.
  */
 export async function generateSpeechAudio(
   text: string,
   ai: Ai,
   config: TTSConfig = {},
+  r2?: R2Bucket,
+  storageId?: string,
+  userId?: string,
 ): Promise<ArrayBuffer> {
   const chunkSize = config.chunkSize ?? DEFAULT_TTS_CHUNK_SIZE;
   const maxChunks = config.maxChunks ?? DEFAULT_TTS_MAX_CHUNKS;
@@ -413,19 +521,65 @@ export async function generateSpeechAudio(
   // Generate audio for each chunk sequentially to avoid rate limiting
   const audioBuffers: ArrayBuffer[] = [];
   for (let i = 0; i < chunks.length; i++) {
-    const buffer = await generateSpeechAudioChunk(chunks[i]!, ai, config);
+    const chunkText = chunks[i]!;
+
+    // Try per-chunk R2 cache first
+    if (r2 && storageId && userId) {
+      const chunkKey = buildChunkR2Key(storageId, userId, i, chunkText, config);
+      const cachedChunk = await r2.get(chunkKey);
+      if (cachedChunk) {
+        const cachedBuffer = await cachedChunk.arrayBuffer();
+        audioBuffers.push(cachedBuffer);
+        log.info('tts.chunk_cache_hit', {
+          chunkIndex: i + 1,
+          totalChunks: chunks.length,
+          chunkKey,
+          audioBytes: cachedBuffer.byteLength,
+        });
+        continue;
+      }
+    }
+
+    const buffer = await generateSpeechAudioChunk(chunkText, ai, config);
     audioBuffers.push(buffer);
+
+    // Store individual chunk in R2 for future partial recovery
+    if (r2 && storageId && userId) {
+      const chunkKey = buildChunkR2Key(storageId, userId, i, chunkText, config);
+      const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
+      await r2.put(chunkKey, buffer, {
+        httpMetadata: { contentType: audioContentType(encoding) },
+      }).catch((err) => {
+        // Non-fatal: chunk caching failure shouldn't abort generation
+        log.warn('tts.chunk_cache_store_failed', {
+          chunkKey,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
 
     log.info('tts.chunk_progress', {
       chunkIndex: i + 1,
       totalChunks: chunks.length,
-      chunkTextLength: chunks[i]!.length,
+      chunkTextLength: chunkText.length,
       chunkAudioBytes: buffer.byteLength,
     });
   }
 
   // Concatenate all audio buffers
   const concatenated = concatenateArrayBuffers(audioBuffers);
+
+  // Best-effort cleanup of per-chunk R2 objects now that final audio will be stored.
+  // Chunks are only needed for retry recovery during generation; the final concatenated
+  // audio is what getAudioFromR2 serves.
+  if (r2 && storageId && userId) {
+    const chunkKeys = chunks.map((chunkText, i) =>
+      buildChunkR2Key(storageId, userId, i, chunkText, config),
+    );
+    await Promise.allSettled(chunkKeys.map((key) => r2.delete(key))).catch(() => {
+      // Non-fatal: cleanup failure doesn't affect the result
+    });
+  }
 
   log.info('tts.chunked_generation_complete', {
     totalLength: text.length,
@@ -464,6 +618,32 @@ export function buildR2Key(storageId: string, userId: string, config: TTSConfig 
   const prefix = config.r2Prefix ?? DEFAULT_TTS_R2_PREFIX;
   const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
   return `${prefix}/${userId}/${storageId}.${encoding}`;
+}
+
+/** Build the R2 object key for an individual TTS chunk, keyed by text hash. */
+export function buildChunkR2Key(
+  storageId: string,
+  userId: string,
+  chunkIndex: number,
+  chunkText: string,
+  config: TTSConfig = {},
+): string {
+  const prefix = config.r2Prefix ?? DEFAULT_TTS_R2_PREFIX;
+  const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
+  const hash = simpleHash(chunkText);
+  return `${prefix}/${userId}/${storageId}_chunk_${chunkIndex}_${hash}.${encoding}`;
+}
+
+/**
+ * Simple non-cryptographic hash for chunk cache keys.
+ * Uses djb2 algorithm — fast and sufficient for cache key uniqueness.
+ */
+export function simpleHash(str: string): string {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
+  }
+  return (hash >>> 0).toString(36);
 }
 
 /** Content-Type mapping for audio encodings. */
@@ -590,14 +770,14 @@ export async function synthesizeSpeech(
     throw new Error('Text processing produced empty result');
   }
 
-  // 4. Generate audio (with automatic chunking for long text)
-  const audioBuffer = await generateSpeechAudio(processedText, ai, config);
+  // 4. Generate audio (with automatic chunking and per-chunk R2 caching)
+  const audioBuffer = await generateSpeechAudio(processedText, ai, config, r2, storageId, userId);
 
   if (audioBuffer.byteLength === 0) {
     throw new Error('TTS model returned empty audio');
   }
 
-  // 5. Store in R2
+  // 5. Store final concatenated audio in R2
   await storeAudioInR2(r2, storageId, userId, audioBuffer, config);
 
   return {
