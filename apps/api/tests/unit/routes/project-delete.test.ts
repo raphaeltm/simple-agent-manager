@@ -26,13 +26,15 @@ describe('DELETE /api/projects/:id', () => {
   /** Track every top-level db operation */
   let operations: string[];
   let selectResults: any[][];
+  /** Statements collected by db.batch() */
+  let batchedStatements: any[];
 
   function buildMockDB() {
     operations = [];
+    batchedStatements = [];
 
     // Each select().from().where() chain resolves to the next selectResults entry.
-    // Each delete().where() chain resolves to undefined.
-    // Each update().set().where() chain resolves to undefined.
+    // delete/update chains return query builder objects (collected by batch()).
     const mockDB: any = {
       select: vi.fn(() => {
         operations.push('select');
@@ -51,20 +53,22 @@ describe('DELETE /api/projects/:id', () => {
         return selectChain;
       }),
       delete: vi.fn((...args: any[]) => {
-        // Track which table is being deleted from
         const tableName = args[0]?.[Symbol.for('drizzle:Name')] ?? 'unknown';
         operations.push(`delete:${tableName}`);
-        const deleteChain: any = {};
-        deleteChain.where = vi.fn(() => Promise.resolve());
+        const deleteChain: any = { _op: `delete:${tableName}` };
+        deleteChain.where = vi.fn(() => deleteChain);
+        // Support both batch and direct await
+        deleteChain.then = (resolve: any) => Promise.resolve().then(resolve);
         return deleteChain;
       }),
       update: vi.fn((...args: any[]) => {
         const tableName = args[0]?.[Symbol.for('drizzle:Name')] ?? 'unknown';
         operations.push(`update:${tableName}`);
-        const updateChain: any = {};
+        const updateChain: any = { _op: `update:${tableName}` };
         updateChain.set = vi.fn(() => {
-          const setChain: any = {};
-          setChain.where = vi.fn(() => Promise.resolve());
+          const setChain: any = { _op: `update:${tableName}` };
+          setChain.where = vi.fn(() => setChain);
+          setChain.then = (resolve: any) => Promise.resolve().then(resolve);
           return setChain;
         });
         return updateChain;
@@ -74,6 +78,10 @@ describe('DELETE /api/projects/:id', () => {
         const insertChain: any = {};
         insertChain.values = vi.fn(() => Promise.resolve());
         return insertChain;
+      }),
+      batch: vi.fn((stmts: any[]) => {
+        batchedStatements = stmts;
+        return Promise.resolve(stmts.map(() => undefined));
       }),
     };
 
@@ -112,8 +120,6 @@ describe('DELETE /api/projects/:id', () => {
   it('returns 200 and success when project is deleted', async () => {
     // select: tasks for project → no tasks
     selectResults.push([]);
-    // select: verification → project is gone
-    selectResults.push([]);
 
     const response = await app.request('/api/projects/proj-1', {
       method: 'DELETE',
@@ -123,16 +129,13 @@ describe('DELETE /api/projects/:id', () => {
     const body = await response.json<{ success: boolean }>();
     expect(body.success).toBe(true);
 
-    // Verify verification select was actually called (both selects consumed)
-    const selectOps = operations.filter((o) => o === 'select');
-    expect(selectOps.length).toBe(2);
+    // All mutations should go through batch
+    expect(batchedStatements.length).toBeGreaterThan(0);
   });
 
   it('deletes child records before the project when tasks exist', async () => {
     // select: tasks for project → 2 task IDs
     selectResults.push([{ id: 'task-1' }, { id: 'task-2' }]);
-    // select: verification → project is gone
-    selectResults.push([]);
 
     const response = await app.request('/api/projects/proj-1', {
       method: 'DELETE',
@@ -140,18 +143,16 @@ describe('DELETE /api/projects/:id', () => {
 
     expect(response.status).toBe(200);
 
-    // Verify delete operations were called
+    // With tasks: taskStatusEvents(1) + taskDependencies(2) + tasks(1) +
+    // runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) + update:workspaces(1) + projects(1) = 9
+    // (9 statements because update is also in batch now)
     const deleteOps = operations.filter((o) => o.startsWith('delete:'));
-    // With tasks: taskStatusEvents, taskDependencies (x2), tasks,
-    // runtimeEnvVars, runtimeFiles, agentProfiles, projects = 8
     expect(deleteOps.length).toBe(8);
   });
 
   it('skips task grandchild cleanup when no tasks exist', async () => {
     // select: tasks for project → empty
     selectResults.push([]);
-    // select: verification → project is gone
-    selectResults.push([]);
 
     const response = await app.request('/api/projects/proj-1', {
       method: 'DELETE',
@@ -159,13 +160,12 @@ describe('DELETE /api/projects/:id', () => {
 
     expect(response.status).toBe(200);
 
-    // Without tasks: tasks, runtimeEnvVars, runtimeFiles, agentProfiles, projects = 5
+    // Without tasks: tasks(1) + runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) + projects(1) = 5
     const deleteOps = operations.filter((o) => o.startsWith('delete:'));
     expect(deleteOps.length).toBe(5);
   });
 
-  it('nullifies workspace project_id before deleting project', async () => {
-    selectResults.push([]);
+  it('nullifies workspace project_id in the batch', async () => {
     selectResults.push([]);
 
     const response = await app.request('/api/projects/proj-1', {
@@ -189,24 +189,21 @@ describe('DELETE /api/projects/:id', () => {
     expect(updateIndices[0]).toBeLessThan(lastDeleteIndex);
   });
 
-  it('returns 500 if project still exists after delete attempt', async () => {
-    // select: tasks for project → no tasks
-    selectResults.push([]);
-    // select: verification → project STILL EXISTS
-    selectResults.push([{ id: 'proj-1' }]);
+  it('executes all mutations via db.batch()', async () => {
+    selectResults.push([{ id: 'task-1' }]);
 
     const response = await app.request('/api/projects/proj-1', {
       method: 'DELETE',
     }, env);
 
-    expect(response.status).toBe(500);
-    const body = await response.json<{ error: string; message: string }>();
-    expect(body.error).toBe('INTERNAL_ERROR');
-    expect(body.message).toContain('still exists');
+    expect(response.status).toBe(200);
+
+    // All mutations should be collected and passed to batch
+    // With 1 task: 3 grandchild + 4 child + 1 update + 1 project = 9
+    expect(batchedStatements.length).toBe(9);
   });
 
   it('calls requireOwnedProject for authorization', async () => {
-    selectResults.push([]);
     selectResults.push([]);
 
     await app.request('/api/projects/proj-1', { method: 'DELETE' }, env);
@@ -242,7 +239,6 @@ describe('DELETE /api/projects/:id', () => {
     // 2. taskDependencies where taskId IN taskIds
     // 3. taskDependencies where dependsOnTaskId IN taskIds (cross-project)
     selectResults.push([{ id: 'task-1' }]);
-    selectResults.push([]);
 
     const response = await app.request('/api/projects/proj-1', {
       method: 'DELETE',

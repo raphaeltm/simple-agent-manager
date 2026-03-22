@@ -663,62 +663,72 @@ crudRoutes.delete('/:id', async (c) => {
   // chains (projects → tasks → task_dependencies/task_status_events) can
   // also fail silently in D1.
 
-  // 1. Find all task IDs for this project (needed for grandchild cleanup)
+  // 1. Find all task IDs for this project (needed for grandchild cleanup).
+  //    Task count is bounded by getRuntimeLimits().maxTasksPerProject.
   const projectTasks = await db
     .select({ id: schema.tasks.id })
     .from(schema.tasks)
     .where(eq(schema.tasks.projectId, projectId));
   const taskIds = projectTasks.map((t) => t.id);
 
-  // 2. Delete grandchild records (task_status_events, task_dependencies)
+  // 2. Build all mutation statements for a single atomic db.batch() call.
+  //    D1 limits bound parameters to 100 per statement, so chunk inArray.
+  const D1_PARAM_LIMIT = 100;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const statements: any[] = [];
+
+  // Grandchild cleanup: task_status_events and task_dependencies
   if (taskIds.length > 0) {
-    await db
-      .delete(schema.taskStatusEvents)
-      .where(inArray(schema.taskStatusEvents.taskId, taskIds));
-    await db
-      .delete(schema.taskDependencies)
-      .where(inArray(schema.taskDependencies.taskId, taskIds));
-    // Also clean up dependencies referencing these tasks from other projects
-    await db
-      .delete(schema.taskDependencies)
-      .where(inArray(schema.taskDependencies.dependsOnTaskId, taskIds));
+    for (let i = 0; i < taskIds.length; i += D1_PARAM_LIMIT) {
+      const chunk = taskIds.slice(i, i + D1_PARAM_LIMIT);
+      statements.push(
+        db.delete(schema.taskStatusEvents).where(inArray(schema.taskStatusEvents.taskId, chunk)),
+      );
+      statements.push(
+        db.delete(schema.taskDependencies).where(inArray(schema.taskDependencies.taskId, chunk)),
+      );
+      // Also clean up dependencies referencing these tasks from other projects
+      statements.push(
+        db
+          .delete(schema.taskDependencies)
+          .where(inArray(schema.taskDependencies.dependsOnTaskId, chunk)),
+      );
+    }
   }
 
-  // 3. Delete direct child records
-  await db
-    .delete(schema.tasks)
-    .where(eq(schema.tasks.projectId, projectId));
-  await db
-    .delete(schema.projectRuntimeEnvVars)
-    .where(eq(schema.projectRuntimeEnvVars.projectId, projectId));
-  await db
-    .delete(schema.projectRuntimeFiles)
-    .where(eq(schema.projectRuntimeFiles.projectId, projectId));
-  await db
-    .delete(schema.agentProfiles)
-    .where(eq(schema.agentProfiles.projectId, projectId));
+  // Direct child records
+  statements.push(db.delete(schema.tasks).where(eq(schema.tasks.projectId, projectId)));
+  statements.push(
+    db
+      .delete(schema.projectRuntimeEnvVars)
+      .where(eq(schema.projectRuntimeEnvVars.projectId, projectId)),
+  );
+  statements.push(
+    db
+      .delete(schema.projectRuntimeFiles)
+      .where(eq(schema.projectRuntimeFiles.projectId, projectId)),
+  );
+  statements.push(
+    db.delete(schema.agentProfiles).where(eq(schema.agentProfiles.projectId, projectId)),
+  );
 
-  // 4. Detach workspaces (ALTER TABLE FK ON DELETE SET NULL is not enforced)
-  await db
-    .update(schema.workspaces)
-    .set({ projectId: null, updatedAt: new Date().toISOString() })
-    .where(eq(schema.workspaces.projectId, projectId));
+  // Detach workspaces (ALTER TABLE FK ON DELETE SET NULL is not enforced)
+  statements.push(
+    db
+      .update(schema.workspaces)
+      .set({ projectId: null, updatedAt: new Date().toISOString() })
+      .where(eq(schema.workspaces.projectId, projectId)),
+  );
 
-  // 5. Delete the project itself
-  await db
-    .delete(schema.projects)
-    .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)));
+  // Delete the project itself
+  statements.push(
+    db
+      .delete(schema.projects)
+      .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId))),
+  );
 
-  // 6. Verify deletion succeeded
-  const remaining = await db
-    .select({ id: schema.projects.id })
-    .from(schema.projects)
-    .where(eq(schema.projects.id, projectId))
-    .limit(1);
-
-  if (remaining.length > 0) {
-    throw errors.internal('Project deletion failed — the record still exists after delete');
-  }
+  // 3. Execute all mutations atomically via D1 batch.
+  await db.batch(statements as [typeof statements[0]]);
 
   return c.json({ success: true });
 });
