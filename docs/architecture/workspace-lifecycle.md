@@ -404,13 +404,13 @@ The full workspace page (`apps/web/src/pages/Workspace.tsx:308-320`) polls every
 
 ### The "Mark Complete" Button
 
-**`handleMarkComplete()`** — `ProjectMessageView.tsx:966-987`
+**`handleMarkComplete()`** — `SessionHeader` in `ProjectMessageView.tsx`
 
 1. Calls `updateProjectTaskStatus(projectId, taskId, { toStatus: 'completed' })` — this stops the session server-side
 2. Calls `deleteWorkspace(workspaceId)` — hard-deletes the workspace
-3. `window.location.reload()` — forces full page refresh
+3. Calls `onSessionMutated?.()` — triggers `loadSessions()` in the parent to refresh the session list without a full page reload (see `.claude/rules/16-no-page-reload-on-mutation.md`)
 
-This is the button the user described as "the one that works" — it stops the session AND deletes the workspace AND reloads the page.
+This button stops the session AND deletes the workspace AND refreshes the session list via React state.
 
 ---
 
