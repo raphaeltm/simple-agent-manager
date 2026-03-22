@@ -532,6 +532,33 @@ describe('generateSpeechAudio', () => {
     expect(ai.run).not.toHaveBeenCalled();
   });
 
+  it('with default config, never sends text exceeding 2000 chars to ai.run (Deepgram Aura 2 limit)', async () => {
+    const ai = createMockAi();
+    const capturedTexts: string[] = [];
+    (ai.run as ReturnType<typeof vi.fn>).mockImplementation((_model: unknown, args: { text: string }) => {
+      capturedTexts.push(args.text);
+      return Promise.resolve({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)),
+      });
+    });
+
+    // Generate text longer than 2000 chars — with the old default (4000) this
+    // would have been sent as a single chunk exceeding Deepgram's 2000-char limit
+    const sentences = Array.from({ length: 60 }, (_, i) =>
+      `Sentence number ${i + 1} with enough words to build up realistic length.`
+    );
+    const text = sentences.join(' '); // ~4200 chars
+
+    // No explicit chunkSize — uses DEFAULT_TTS_CHUNK_SIZE (1800)
+    await generateSpeechAudio(text, ai, { retryAttempts: 1 });
+
+    expect(capturedTexts.length).toBeGreaterThan(1);
+    for (const t of capturedTexts) {
+      expect(t.length).toBeLessThanOrEqual(2000);
+    }
+  });
+
   it('uses per-chunk R2 cache when R2 bucket is provided', async () => {
     const ai = createMockAi();
     const r2 = createMockR2();
