@@ -2429,6 +2429,54 @@ describe('MCP Routes', () => {
       expect(data.updated).toBe(true);
       expect(data.updatedFields).toContain('title');
     });
+
+    it('should update priority only', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        title: 'Idea',
+        description: 'Some content',
+        status: 'draft',
+        priority: 0,
+      });
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_idea',
+        arguments: { ideaId: 'idea-1', priority: 7 },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.updated).toBe(true);
+      expect(data.updatedFields).toContain('priority');
+    });
+
+    it('should append content to idea with null description', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        title: 'Idea with no content',
+        description: null,
+        status: 'draft',
+        priority: 0,
+      });
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_idea',
+        arguments: { ideaId: 'idea-1', content: 'First content' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.updated).toBe(true);
+
+      // When existing description is null, content is stored directly (not appended with separator)
+      const bindCalls = mockD1._stmt.bind.mock.calls;
+      const lastBind = bindCalls[bindCalls.length - 1];
+      expect(lastBind[0]).toBe('First content');
+    });
   });
 
   describe('get_idea', () => {
@@ -2487,6 +2535,29 @@ describe('MCP Routes', () => {
       expect(data.contentLength).toBe(42);
       expect(data.priority).toBe(3);
       expect(data.status).toBe('draft');
+    });
+
+    it('should return null content and contentLength 0 for idea with no description', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-2',
+        title: 'Minimal idea',
+        description: null,
+        status: 'draft',
+        priority: 0,
+        created_at: '2026-03-22T00:00:00Z',
+        updated_at: '2026-03-22T00:00:00Z',
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_idea',
+        arguments: { ideaId: 'idea-2' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.content).toBeNull();
+      expect(data.contentLength).toBe(0);
     });
   });
 
