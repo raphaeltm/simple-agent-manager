@@ -122,6 +122,10 @@ describe('DELETE /api/projects/:id', () => {
     expect(response.status).toBe(200);
     const body = await response.json<{ success: boolean }>();
     expect(body.success).toBe(true);
+
+    // Verify verification select was actually called (both selects consumed)
+    const selectOps = operations.filter((o) => o === 'select');
+    expect(selectOps.length).toBe(2);
   });
 
   it('deletes child records before the project when tasks exist', async () => {
@@ -174,10 +178,15 @@ describe('DELETE /api/projects/:id', () => {
     const updateOps = operations.filter((o) => o.startsWith('update:'));
     expect(updateOps.length).toBeGreaterThanOrEqual(1);
 
-    // Update should come before the last delete (project delete)
-    const lastDelete = operations.lastIndexOf(operations.filter((o) => o.startsWith('delete:')).pop()!);
-    const firstUpdate = operations.indexOf(updateOps[0]);
-    expect(firstUpdate).toBeLessThan(lastDelete);
+    // Update should come before the last delete (project delete) — use index-based tracking
+    const deleteIndices = operations
+      .map((op, i) => (op.startsWith('delete:') ? i : -1))
+      .filter((i) => i >= 0);
+    const lastDeleteIndex = deleteIndices[deleteIndices.length - 1];
+    const updateIndices = operations
+      .map((op, i) => (op.startsWith('update:') ? i : -1))
+      .filter((i) => i >= 0);
+    expect(updateIndices[0]).toBeLessThan(lastDeleteIndex);
   });
 
   it('returns 500 if project still exists after delete attempt', async () => {
@@ -203,5 +212,47 @@ describe('DELETE /api/projects/:id', () => {
     await app.request('/api/projects/proj-1', { method: 'DELETE' }, env);
 
     expect(mocks.requireOwnedProject).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns error when requireOwnedProject rejects (not owner)', async () => {
+    mocks.requireOwnedProject.mockRejectedValueOnce(
+      Object.assign(new Error('Project not found'), {
+        statusCode: 404,
+        error: 'NOT_FOUND',
+        message: 'Project not found',
+      })
+    );
+
+    const response = await app.request('/api/projects/proj-1', {
+      method: 'DELETE',
+    }, env);
+
+    expect(response.status).toBe(404);
+    const body = await response.json<{ error: string }>();
+    expect(body.error).toBe('NOT_FOUND');
+
+    // No delete operations should have been attempted
+    const deleteOps = operations.filter((o) => o.startsWith('delete:'));
+    expect(deleteOps.length).toBe(0);
+  });
+
+  it('performs 3 task_dependencies deletes with tasks (including cross-project)', async () => {
+    // Tasks exist → should trigger 3 dependency-related deletes:
+    // 1. taskStatusEvents for taskIds
+    // 2. taskDependencies where taskId IN taskIds
+    // 3. taskDependencies where dependsOnTaskId IN taskIds (cross-project)
+    selectResults.push([{ id: 'task-1' }]);
+    selectResults.push([]);
+
+    const response = await app.request('/api/projects/proj-1', {
+      method: 'DELETE',
+    }, env);
+
+    expect(response.status).toBe(200);
+
+    // With 1 task: taskStatusEvents(1) + taskDependencies(2) + tasks(1) +
+    // runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) + projects(1) = 8
+    const deleteOps = operations.filter((o) => o.startsWith('delete:'));
+    expect(deleteOps.length).toBe(8);
   });
 });
