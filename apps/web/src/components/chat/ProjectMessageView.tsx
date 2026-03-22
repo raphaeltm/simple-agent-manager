@@ -741,6 +741,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           workspace={workspace}
           node={node}
           detectedPorts={detectedPorts}
+          onSessionMutated={onSessionMutated}
         />
       )}
 
@@ -924,6 +925,7 @@ function SessionHeader({
   workspace,
   node,
   detectedPorts,
+  onSessionMutated,
 }: {
   projectId: string;
   session: ChatSessionResponse;
@@ -934,6 +936,7 @@ function SessionHeader({
   workspace: WorkspaceResponse | null;
   node: NodeResponse | null;
   detectedPorts: DetectedPort[];
+  onSessionMutated?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [completing, setCompleting] = useState(false);
