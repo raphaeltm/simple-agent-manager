@@ -2313,14 +2313,9 @@ describe('MCP Routes', () => {
       expect(body.error.message).toContain('Idea not found');
     });
 
-    it('should reject non-draft task', async () => {
-      mockD1._stmt.first.mockResolvedValueOnce({
-        id: 'task-1',
-        title: 'Running task',
-        description: 'some content',
-        status: 'in_progress',
-        priority: 0,
-      });
+    it('should reject non-draft task (filtered out by SQL status check)', async () => {
+      // When status != 'draft', the SQL query with AND status = 'draft' returns null
+      mockD1._stmt.first.mockResolvedValueOnce(null);
 
       const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
         name: 'update_idea',
@@ -2330,7 +2325,7 @@ describe('MCP Routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.error).toBeDefined();
-      expect(body.error.message).toContain('only draft ideas');
+      expect(body.error.message).toContain('Idea not found or not in draft status');
     });
 
     it('should append content by default', async () => {
@@ -2354,12 +2349,15 @@ describe('MCP Routes', () => {
       expect(data.updated).toBe(true);
       expect(data.updatedFields).toContain('description');
 
-      // Verify the bound value contains both original and appended content
+      // With atomic SQL append, the UPDATE SQL uses a CASE expression
+      // and binds the new content twice (for NULL and non-NULL branches)
+      const updateSql = mockD1.prepare.mock.calls[mockD1.prepare.mock.calls.length - 1][0];
+      expect(updateSql).toContain('CASE WHEN description IS NULL');
       const bindCalls = mockD1._stmt.bind.mock.calls;
       const lastBind = bindCalls[bindCalls.length - 1];
-      // The combined content should contain both parts
-      expect(lastBind[0]).toContain('Original content');
-      expect(lastBind[0]).toContain('Appended content');
+      // The new content appears in the bind args (twice for the CASE branches)
+      expect(lastBind[0]).toBe('Appended content');
+      expect(lastBind[1]).toBe('Appended content');
     });
 
     it('should replace content when append=false', async () => {
@@ -2472,10 +2470,13 @@ describe('MCP Routes', () => {
       const data = JSON.parse(body.result.content[0].text);
       expect(data.updated).toBe(true);
 
-      // When existing description is null, content is stored directly (not appended with separator)
+      // With atomic SQL CASE, both NULL and non-NULL branches receive the new content
+      const updateSql = mockD1.prepare.mock.calls[mockD1.prepare.mock.calls.length - 1][0];
+      expect(updateSql).toContain('CASE WHEN description IS NULL');
       const bindCalls = mockD1._stmt.bind.mock.calls;
       const lastBind = bindCalls[bindCalls.length - 1];
       expect(lastBind[0]).toBe('First content');
+      expect(lastBind[1]).toBe('First content');
     });
   });
 

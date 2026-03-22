@@ -2257,8 +2257,8 @@ async function handleCreateIdea(
 
   await env.DATABASE.prepare(
     `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority, task_mode, dispatch_depth, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'draft', ?, 'task', 0, 'mcp', ?, ?)`,
-  ).bind(ideaId, tokenData.projectId, tokenData.userId, title, content, priority, now, now).run();
+     VALUES (?, ?, ?, ?, ?, 'draft', ?, 'task', 0, ?, ?, ?)`,
+  ).bind(ideaId, tokenData.projectId, tokenData.userId, title, content, priority, tokenData.userId, now, now).run();
 
   log.info('mcp.create_idea', {
     ideaId,
@@ -2298,14 +2298,11 @@ async function handleUpdateIdea(
 
   // Fetch the existing idea — must be draft status and in this project
   const existing = await env.DATABASE.prepare(
-    'SELECT id, title, description, status, priority FROM tasks WHERE id = ? AND project_id = ?',
-  ).bind(ideaId, tokenData.projectId).first<{ id: string; title: string; description: string | null; status: string; priority: number }>();
+    'SELECT id, title, description, status, priority FROM tasks WHERE id = ? AND project_id = ? AND status = ?',
+  ).bind(ideaId, tokenData.projectId, 'draft').first<{ id: string; title: string; description: string | null; status: string; priority: number }>();
 
   if (!existing) {
-    return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found in this project: ${ideaId}`);
-  }
-  if (existing.status !== 'draft') {
-    return jsonRpcError(requestId, INVALID_PARAMS, `Cannot update: task ${ideaId} has status '${existing.status}' (only draft ideas can be updated via this tool)`);
+    return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found or not in draft status: ${ideaId}`);
   }
 
   // Build update fields
@@ -2321,15 +2318,15 @@ async function handleUpdateIdea(
     }
   }
 
-  // Content update (append or replace)
+  // Content update (append or replace) — uses atomic SQL CASE for append to avoid race conditions
   if (typeof params.content === 'string') {
     const newContent = sanitizeUserInput(params.content).slice(0, limits.ideaContentMaxLength);
     const append = params.append !== false; // default true
 
-    if (append && existing.description) {
-      const combined = (existing.description + '\n\n' + newContent).slice(0, limits.ideaContentMaxLength);
-      updates.push('description = ?');
-      bindValues.push(combined);
+    if (append) {
+      // Atomic append: concatenates in SQL to avoid read-then-write races
+      updates.push('description = CASE WHEN description IS NULL THEN ? ELSE substr(description || char(10) || char(10) || ?, 1, ?) END');
+      bindValues.push(newContent, newContent, limits.ideaContentMaxLength);
     } else {
       updates.push('description = ?');
       bindValues.push(newContent);
@@ -2350,10 +2347,10 @@ async function handleUpdateIdea(
   updates.push('updated_at = ?');
   const now = new Date().toISOString();
   bindValues.push(now);
-  bindValues.push(ideaId, tokenData.projectId);
+  bindValues.push(ideaId, tokenData.projectId, 'draft');
 
   await env.DATABASE.prepare(
-    `UPDATE tasks SET ${updates.join(', ')} WHERE id = ? AND project_id = ?`,
+    `UPDATE tasks SET ${updates.join(', ')} WHERE id = ? AND project_id = ? AND status = ?`,
   ).bind(...bindValues).run();
 
   log.info('mcp.update_idea', {
