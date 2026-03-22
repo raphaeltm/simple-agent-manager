@@ -516,11 +516,11 @@ const MCP_TOOLS = [
       properties: {
         title: {
           type: 'string',
-          description: 'Short title for the idea (max 200 chars)',
+          description: 'Short title for the idea',
         },
         content: {
           type: 'string',
-          description: 'Detailed content — supports checklists, notes, research findings, etc. (max 64KB)',
+          description: 'Detailed content — supports checklists, notes, research findings, etc.',
         },
         priority: {
           type: 'number',
@@ -588,7 +588,7 @@ const MCP_TOOLS = [
       properties: {
         limit: {
           type: 'number',
-          description: 'Max results to return (default: 20, max: 100)',
+          description: 'Max results to return',
         },
       },
       additionalProperties: false,
@@ -607,7 +607,7 @@ const MCP_TOOLS = [
         },
         limit: {
           type: 'number',
-          description: 'Max results to return (default: 10, max: 20)',
+          description: 'Max results to return',
         },
       },
       required: ['query'],
@@ -2476,7 +2476,7 @@ async function handleSearchIdeas(
   }
 
   const limits = getMcpLimits(env);
-  const requestedLimit = typeof params.limit === 'number' ? params.limit : 10;
+  const requestedLimit = typeof params.limit === 'number' ? params.limit : limits.ideaSearchMax;
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.ideaSearchMax);
   const snippetLength = limits.taskDescriptionSnippetLength;
 
