@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, count, desc, eq, isNotNull, lt, ne, sql } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNotNull, lt, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type {
   CreateProjectRequest,
@@ -657,9 +657,78 @@ crudRoutes.delete('/:id', async (c) => {
 
   await requireOwnedProject(db, projectId, userId);
 
-  await db
-    .delete(schema.projects)
-    .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)));
+  // Explicitly delete child records instead of relying on D1 CASCADE.
+  // SQLite ignores REFERENCES constraints added via ALTER TABLE, so
+  // workspaces.project_id ON DELETE SET NULL never fires. Complex CASCADE
+  // chains (projects → tasks → task_dependencies/task_status_events) can
+  // also fail silently in D1.
+
+  // 1. Find all task IDs for this project (needed for grandchild cleanup).
+  //    Task count is bounded by getRuntimeLimits().maxTasksPerProject.
+  const projectTasks = await db
+    .select({ id: schema.tasks.id })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.projectId, projectId));
+  const taskIds = projectTasks.map((t) => t.id);
+
+  // 2. Build all mutation statements for a single atomic db.batch() call.
+  //    D1 limits bound parameters to 100 per statement, so chunk inArray.
+  const D1_PARAM_LIMIT = 100;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const statements: any[] = [];
+
+  // Grandchild cleanup: task_status_events and task_dependencies
+  if (taskIds.length > 0) {
+    for (let i = 0; i < taskIds.length; i += D1_PARAM_LIMIT) {
+      const chunk = taskIds.slice(i, i + D1_PARAM_LIMIT);
+      statements.push(
+        db.delete(schema.taskStatusEvents).where(inArray(schema.taskStatusEvents.taskId, chunk)),
+      );
+      statements.push(
+        db.delete(schema.taskDependencies).where(inArray(schema.taskDependencies.taskId, chunk)),
+      );
+      // Also clean up dependencies referencing these tasks from other projects
+      statements.push(
+        db
+          .delete(schema.taskDependencies)
+          .where(inArray(schema.taskDependencies.dependsOnTaskId, chunk)),
+      );
+    }
+  }
+
+  // Direct child records
+  statements.push(db.delete(schema.tasks).where(eq(schema.tasks.projectId, projectId)));
+  statements.push(
+    db
+      .delete(schema.projectRuntimeEnvVars)
+      .where(eq(schema.projectRuntimeEnvVars.projectId, projectId)),
+  );
+  statements.push(
+    db
+      .delete(schema.projectRuntimeFiles)
+      .where(eq(schema.projectRuntimeFiles.projectId, projectId)),
+  );
+  statements.push(
+    db.delete(schema.agentProfiles).where(eq(schema.agentProfiles.projectId, projectId)),
+  );
+
+  // Detach workspaces (ALTER TABLE FK ON DELETE SET NULL is not enforced)
+  statements.push(
+    db
+      .update(schema.workspaces)
+      .set({ projectId: null, updatedAt: new Date().toISOString() })
+      .where(eq(schema.workspaces.projectId, projectId)),
+  );
+
+  // Delete the project itself
+  statements.push(
+    db
+      .delete(schema.projects)
+      .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId))),
+  );
+
+  // 3. Execute all mutations atomically via D1 batch.
+  await db.batch(statements as [typeof statements[0]]);
 
   return c.json({ success: true });
 });
