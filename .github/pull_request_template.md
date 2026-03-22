@@ -31,6 +31,7 @@ All checkboxes below are mandatory for any PR that changes runtime code (`.ts`, 
 - [ ] Mobile-first layout verified
 - [ ] Accessibility checks completed
 - [ ] Shared UI components used or exception documented
+- [ ] Playwright visual audit run locally — mock data scenarios (normal, long text, empty, many items, error, special chars) tested at mobile (375x667) and desktop (1280x800); no horizontal overflow; screenshots in `.codex/tmp/playwright-screenshots/` (see `.claude/rules/17-ui-visual-testing.md`)
 
 ## End-to-End Verification (Required for multi-component changes)
 

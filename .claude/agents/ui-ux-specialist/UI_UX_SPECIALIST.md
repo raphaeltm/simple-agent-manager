@@ -13,6 +13,7 @@ Use this agent for any change that touches:
 - `apps/web/**`
 - `packages/vm-agent/ui/**`
 - `packages/ui/**`
+- `packages/terminal/**`
 
 ## Required Workflow
 
@@ -62,10 +63,19 @@ Store development screenshots in `.codex/tmp/playwright-screenshots/`.
 
 ## Playwright Validation
 
+Follow the full Playwright visual testing requirements in `.claude/rules/17-ui-visual-testing.md`. Key points:
+
 1. Start local dev server.
-2. Capture at least one mobile screenshot and one desktop screenshot for changed surfaces.
-3. Verify no clipping, overflow, overlap, or unreadable controls.
-4. If auth-gated, use a mock harness or authenticated flow as applicable.
+2. Use **mock data** covering all scenarios: normal data, long text (200+ chars), empty states, many items (30+), error states, and special characters (unicode, emoji, HTML entities, XSS payloads).
+3. Capture screenshots at **both mobile (375x667) and desktop (1280x800)** viewports for every changed surface.
+4. Assert **no horizontal overflow**: `document.documentElement.scrollWidth <= window.innerWidth`.
+5. Verify no clipping, overlap, off-screen elements, or unreadable controls.
+6. Check that long content wraps properly and doesn't break layouts.
+7. Verify touch targets are at least 44px on mobile (56px preferred for primary actions).
+8. If auth-gated, use a mock harness or authenticated flow as applicable.
+9. Store screenshots in `.codex/tmp/playwright-screenshots/` with descriptive names.
+
+Follow the test file pattern established in `apps/web/tests/playwright/ideas-ui-audit.spec.ts`.
 
 ## Effect Collision Check (Required for Interactive Changes)
 

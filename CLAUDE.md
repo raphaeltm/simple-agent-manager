@@ -130,6 +130,7 @@ Environment-specific `[env.*]` sections are NOT checked into the repository. The
 - **Diagrams in markdown** — use Mermaid (`\`\`\`mermaid`) for all diagrams in `.md` files. The markdown renderer supports Mermaid natively.
 - **Subagents** live in `.claude/agents/`; Codex skills in `.agents/skills/`
 - **Playwright screenshots** go in `.codex/tmp/playwright-screenshots/` (gitignored)
+- **Playwright visual audit required for UI changes** — any PR touching `apps/web/`, `packages/ui/`, or `packages/terminal/` must run Playwright visual tests with diverse mock data on mobile (375px) and desktop (1280px) viewports. See `.claude/rules/17-ui-visual-testing.md`.
 
 ## Agent Authentication
 

@@ -42,22 +42,22 @@ The user wants a testing pipeline addition where:
 
 ## Implementation Checklist
 
-- [ ] Create `.claude/rules/17-ui-visual-testing.md` defining the mandatory Playwright visual testing requirements for UI changes
-- [ ] Update `.codex/prompts/do.md` Phase 3 to include a UI visual testing step when UI files are touched
-- [ ] Update `apps/web/playwright.config.ts` to add a desktop viewport project (1280x800)
-- [ ] Update `.claude/agents/ui-ux-specialist/UI_UX_SPECIALIST.md` to reference the new testing rule
-- [ ] Update `.agents/skills/do/SKILL.md` quick summary to mention the UI visual testing requirement
-- [ ] Update `CLAUDE.md` if needed to reference the new rule
+- [x] Create `.claude/rules/17-ui-visual-testing.md` defining the mandatory Playwright visual testing requirements for UI changes
+- [x] Update `.codex/prompts/do.md` Phase 3 to include a UI visual testing step when UI files are touched
+- [x] Update `apps/web/playwright.config.ts` to add a desktop viewport project (1280x800)
+- [x] Update `.claude/agents/ui-ux-specialist/UI_UX_SPECIALIST.md` to reference the new testing rule
+- [x] Update `.agents/skills/do/SKILL.md` quick summary to mention the UI visual testing requirement
+- [x] Update `CLAUDE.md` if needed to reference the new rule
 
 ## Acceptance Criteria
 
-- [ ] The `/do` workflow has a clear, mandatory step in Phase 3 that triggers when UI files are touched
-- [ ] The step requires running Playwright tests with mock data covering: normal data, long text, empty states, many items, error states, special characters
-- [ ] Tests must run on both mobile (375px) and desktop (1280px) viewports
-- [ ] Screenshots must be captured and visually inspected for overflow, clipping, and style consistency
-- [ ] A dedicated rule file exists documenting the requirements
-- [ ] Playwright config includes a desktop viewport project
-- [ ] The UI/UX specialist agent references the new rule
+- [x] The `/do` workflow has a clear, mandatory step in Phase 3 that triggers when UI files are touched
+- [x] The step requires running Playwright tests with mock data covering: normal data, long text, empty states, many items, error states, special characters
+- [x] Tests must run on both mobile (375px) and desktop (1280px) viewports
+- [x] Screenshots must be captured and visually inspected for overflow, clipping, and style consistency
+- [x] A dedicated rule file exists documenting the requirements
+- [x] Playwright config includes a desktop viewport project
+- [x] The UI/UX specialist agent references the new rule
 
 ## References
 
