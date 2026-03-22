@@ -51,13 +51,13 @@ The user wants a testing pipeline addition where:
 
 ## Acceptance Criteria
 
-- [ ] The `/do` workflow has a clear, mandatory step in Phase 3 that triggers when UI files are touched
-- [ ] The step requires running Playwright tests with mock data covering: normal data, long text, empty states, many items, error states, special characters
-- [ ] Tests must run on both mobile (375px) and desktop (1280px) viewports
-- [ ] Screenshots must be captured and visually inspected for overflow, clipping, and style consistency
-- [ ] A dedicated rule file exists documenting the requirements
-- [ ] Playwright config includes a desktop viewport project
-- [ ] The UI/UX specialist agent references the new rule
+- [x] The `/do` workflow has a clear, mandatory step in Phase 3 that triggers when UI files are touched
+- [x] The step requires running Playwright tests with mock data covering: normal data, long text, empty states, many items, error states, special characters
+- [x] Tests must run on both mobile (375px) and desktop (1280px) viewports
+- [x] Screenshots must be captured and visually inspected for overflow, clipping, and style consistency
+- [x] A dedicated rule file exists documenting the requirements
+- [x] Playwright config includes a desktop viewport project
+- [x] The UI/UX specialist agent references the new rule
 
 ## References
 
