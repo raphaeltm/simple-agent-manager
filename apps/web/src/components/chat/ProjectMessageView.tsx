@@ -30,6 +30,8 @@ interface ProjectMessageViewProps {
   sessionId: string;
   /** When true, workspace is still provisioning — suppress "agent offline" banner. */
   isProvisioning?: boolean;
+  /** Called after a mutation (e.g. mark complete) so the parent can refresh session list. */
+  onSessionMutated?: () => void;
 }
 
 /** Default idle timeout in ms — matches the server-side default (NODE_WARM_TIMEOUT_MS). */
@@ -318,6 +320,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   projectId,
   sessionId,
   isProvisioning = false,
+  onSessionMutated,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -966,14 +969,14 @@ function SessionHeader({
         await deleteWorkspace(session.workspaceId);
       }
 
-      // Force a page reload to reflect the new state
-      window.location.reload();
+      // Refresh session list via callback instead of full page reload
+      onSessionMutated?.();
     } catch (err) {
       console.error('Failed to mark task complete:', err);
       setCompleteError(err instanceof Error ? err.message : 'Failed to complete task');
       setCompleting(false);
     }
-  }, [projectId, taskEmbed?.id, session.workspaceId, completing]);
+  }, [projectId, taskEmbed?.id, session.workspaceId, completing, onSessionMutated]);
 
   return (
     <div className="border-b border-border-default shrink-0">
