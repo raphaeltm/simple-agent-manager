@@ -112,7 +112,31 @@ Execute the checklist from the task file. Follow these rules:
    - `pnpm lint` after any code changes
    - `pnpm test` after adding/modifying tests
 
-5. **Update `.do-state.md`** after every commit — check off completed implementation items and add notes. This is your insurance against context loss.
+5. **Playwright visual audit (MANDATORY for UI changes).** If this PR touches any files in `apps/web/`, `packages/ui/`, or `packages/terminal/`, you MUST run a local Playwright visual audit before proceeding to Phase 4. See `.claude/rules/17-ui-visual-testing.md` for full requirements.
+
+   **What to do:**
+   1. Write (or run existing) Playwright audit tests for every changed UI surface
+   2. Use mock data covering: normal data, long text (200+ char titles), empty states, many items (30+), error states, and special characters (unicode, emoji, HTML entities)
+   3. Capture screenshots at both mobile (375x667) and desktop (1280x800) viewports
+   4. Store screenshots in `.codex/tmp/playwright-screenshots/` with descriptive names
+   5. Visually inspect every screenshot for:
+      - No horizontal overflow (assert `scrollWidth <= innerWidth`)
+      - No content clipping or off-screen elements
+      - Proper text wrapping with long content
+      - Consistent spacing and typography
+      - Touch targets ≥44px on mobile
+   6. Fix any issues found before continuing
+
+   **Run from `apps/web/`:**
+   ```bash
+   npx playwright test --project="iPhone SE (375x667)" --project="Desktop (1280x800)"
+   ```
+
+   **If no audit test exists** for a changed component, write one following the pattern in `apps/web/tests/playwright/ideas-ui-audit.spec.ts`. Every new or significantly modified UI surface needs its own audit spec.
+
+   **Failures block Phase 4.** Do not proceed until all visual issues are resolved.
+
+6. **Update `.do-state.md`** after every commit — check off completed implementation items and add notes. This is your insurance against context loss.
 
 ---
 

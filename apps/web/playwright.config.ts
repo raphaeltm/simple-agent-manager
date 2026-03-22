@@ -34,6 +34,15 @@ export default defineConfig({
         viewport: { width: 390, height: 844 },
       },
     },
+    {
+      name: 'Desktop (1280x800)',
+      use: {
+        ...sharedUse,
+        viewport: { width: 1280, height: 800 },
+        isMobile: false,
+        hasTouch: false,
+      },
+    },
   ],
   webServer: {
     command: 'VITE_API_URL=http://localhost:4173 npx vite build && npx vite preview --port 4173',
