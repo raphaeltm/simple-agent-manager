@@ -13,7 +13,7 @@ export default defineConfig({
       description:
         'Documentation for Simple Agent Manager — ephemeral AI coding environments on Cloudflare Workers + multi-cloud VMs.',
       logo: {
-        src: './src/assets/logo.svg',
+        src: './src/assets/logo.png',
         replacesTitle: false,
       },
       social: [

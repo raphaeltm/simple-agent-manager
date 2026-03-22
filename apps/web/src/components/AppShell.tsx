@@ -88,9 +88,7 @@ export function AppShell({ children }: AppShellProps) {
       <div className="flex flex-col bg-canvas h-screen">
         <header className="flex items-center justify-between px-4 py-2 border-b border-border-default bg-surface">
           {/* Title on the left */}
-          <span className="text-lg font-semibold text-fg-primary">
-            SAM
-          </span>
+          <img src="/favicon.png" alt="SAM" className="h-7 w-7 rounded" />
           {/* Search + Notifications + Hamburger on the right */}
           <div className="flex items-center gap-1">
             <button
@@ -139,7 +137,7 @@ export function AppShell({ children }: AppShellProps) {
     <div className="grid bg-canvas h-screen" style={{ gridTemplateColumns: '220px 1fr' }}>
       <aside className="flex flex-col border-r border-border-default bg-surface sticky top-0 h-screen overflow-y-auto">
         <div className="p-4 text-lg font-semibold text-fg-primary border-b border-border-default flex items-center justify-between">
-          <span>SAM</span>
+          <img src="/favicon.png" alt="SAM" className="h-6 w-6 rounded" />
           <NotificationCenter />
         </div>
         {/* Command palette trigger */}
