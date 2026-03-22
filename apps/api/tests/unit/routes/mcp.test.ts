@@ -282,7 +282,13 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('unlink_idea');
       expect(toolNames).toContain('list_linked_ideas');
       expect(toolNames).toContain('find_related_ideas');
-      expect(body.result.tools).toHaveLength(15);
+      // Idea management tools
+      expect(toolNames).toContain('create_idea');
+      expect(toolNames).toContain('update_idea');
+      expect(toolNames).toContain('get_idea');
+      expect(toolNames).toContain('list_ideas');
+      expect(toolNames).toContain('search_ideas');
+      expect(body.result.tools).toHaveLength(20);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
@@ -2168,6 +2174,542 @@ describe('MCP Routes', () => {
       expect(data.ideas[0].taskId).toBe('task-found');
       expect(data.ideas[0].title).toBe('Improve authentication');
       expect(data.query).toBe('authentication');
+    });
+
+    it('should default to draft status filter', async () => {
+      mockD1._stmt.all.mockResolvedValueOnce({ results: [] });
+
+      await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'find_related_ideas',
+        arguments: { query: 'test query' },
+      }));
+
+      // Verify the SQL includes a status filter for 'draft'
+      const prepareCall = mockD1.prepare.mock.calls.find(
+        (call) => typeof call[0] === 'string' && call[0].includes('LIKE') && call[0].includes('status'),
+      );
+      expect(prepareCall).toBeDefined();
+      // The bind should include 'draft' as status filter
+      const bindCall = mockD1._stmt.bind.mock.calls[mockD1._stmt.bind.mock.calls.length - 1];
+      expect(bindCall).toContain('draft');
+    });
+  });
+
+  // ─── Idea management tools ─────────────────────────────────────────
+
+  describe('create_idea', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should reject missing title', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'create_idea',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('title is required');
+    });
+
+    it('should reject empty title', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'create_idea',
+        arguments: { title: '   ' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+    });
+
+    it('should create an idea with title only', async () => {
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'create_idea',
+        arguments: { title: 'New feature idea' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.ideaId).toBeDefined();
+      expect(data.title).toBe('New feature idea');
+      expect(data.status).toBe('draft');
+      expect(data.contentLength).toBe(0);
+
+      // Verify INSERT was called with status='draft'
+      const sql = mockD1.prepare.mock.calls[0][0];
+      expect(sql).toContain("'draft'");
+      expect(sql).toContain('INSERT INTO tasks');
+    });
+
+    it('should create an idea with title and content', async () => {
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'create_idea',
+        arguments: { title: 'Auth improvements', content: 'We should add SSO support.\n\n## Checklist\n- [ ] Research providers' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.ideaId).toBeDefined();
+      expect(data.contentLength).toBeGreaterThan(0);
+      expect(data.message).toContain('link_idea');
+    });
+
+    it('should create an idea with priority', async () => {
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'create_idea',
+        arguments: { title: 'High priority idea', priority: 5 },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.priority).toBe(5);
+    });
+  });
+
+  describe('update_idea', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should reject missing ideaId', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_idea',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('ideaId is required');
+    });
+
+    it('should reject idea not found', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce(null);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_idea',
+        arguments: { ideaId: 'nonexistent', content: 'New content' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Idea not found');
+    });
+
+    it('should reject non-draft task (filtered out by SQL status check)', async () => {
+      // When status != 'draft', the SQL query with AND status = 'draft' returns null
+      mockD1._stmt.first.mockResolvedValueOnce(null);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_idea',
+        arguments: { ideaId: 'task-1', content: 'New content' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Idea not found or not in draft status');
+    });
+
+    it('should append content by default', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        title: 'Existing idea',
+        description: 'Original content',
+        status: 'draft',
+        priority: 0,
+      });
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_idea',
+        arguments: { ideaId: 'idea-1', content: 'Appended content' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.updated).toBe(true);
+      expect(data.updatedFields).toContain('description');
+
+      // With atomic SQL append, the UPDATE SQL uses a CASE expression
+      // and binds the new content twice (for NULL and non-NULL branches)
+      const updateSql = mockD1.prepare.mock.calls[mockD1.prepare.mock.calls.length - 1][0];
+      expect(updateSql).toContain('CASE WHEN description IS NULL');
+      const bindCalls = mockD1._stmt.bind.mock.calls;
+      const lastBind = bindCalls[bindCalls.length - 1];
+      // The new content appears in the bind args (twice for the CASE branches)
+      expect(lastBind[0]).toBe('Appended content');
+      expect(lastBind[1]).toBe('Appended content');
+    });
+
+    it('should replace content when append=false', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        title: 'Existing idea',
+        description: 'Original content',
+        status: 'draft',
+        priority: 0,
+      });
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_idea',
+        arguments: { ideaId: 'idea-1', content: 'Replacement content', append: false },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.updated).toBe(true);
+
+      // Verify bound value is only replacement (no original)
+      const bindCalls = mockD1._stmt.bind.mock.calls;
+      const lastBind = bindCalls[bindCalls.length - 1];
+      expect(lastBind[0]).toBe('Replacement content');
+    });
+
+    it('should reject update with no fields', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        title: 'Existing idea',
+        description: 'Original content',
+        status: 'draft',
+        priority: 0,
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_idea',
+        arguments: { ideaId: 'idea-1' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('No fields to update');
+    });
+
+    it('should update title only', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        title: 'Old title',
+        description: null,
+        status: 'draft',
+        priority: 0,
+      });
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_idea',
+        arguments: { ideaId: 'idea-1', title: 'New title' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.updated).toBe(true);
+      expect(data.updatedFields).toContain('title');
+    });
+
+    it('should update priority only', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        title: 'Idea',
+        description: 'Some content',
+        status: 'draft',
+        priority: 0,
+      });
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_idea',
+        arguments: { ideaId: 'idea-1', priority: 7 },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.updated).toBe(true);
+      expect(data.updatedFields).toContain('priority');
+    });
+
+    it('should append content to idea with null description', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        title: 'Idea with no content',
+        description: null,
+        status: 'draft',
+        priority: 0,
+      });
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'update_idea',
+        arguments: { ideaId: 'idea-1', content: 'First content' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.updated).toBe(true);
+
+      // With atomic SQL CASE, both NULL and non-NULL branches receive the new content
+      const updateSql = mockD1.prepare.mock.calls[mockD1.prepare.mock.calls.length - 1][0];
+      expect(updateSql).toContain('CASE WHEN description IS NULL');
+      const bindCalls = mockD1._stmt.bind.mock.calls;
+      const lastBind = bindCalls[bindCalls.length - 1];
+      expect(lastBind[0]).toBe('First content');
+      expect(lastBind[1]).toBe('First content');
+    });
+  });
+
+  describe('get_idea', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should reject missing ideaId', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_idea',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+    });
+
+    it('should return idea not found for non-draft task', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce(null);
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_idea',
+        arguments: { ideaId: 'task-completed' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Idea not found');
+    });
+
+    it('should return full idea details', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        title: 'Great idea',
+        description: 'Detailed content with checklists and notes',
+        status: 'draft',
+        priority: 3,
+        created_at: '2026-03-22T00:00:00Z',
+        updated_at: '2026-03-22T01:00:00Z',
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_idea',
+        arguments: { ideaId: 'idea-1' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.ideaId).toBe('idea-1');
+      expect(data.title).toBe('Great idea');
+      expect(data.content).toBe('Detailed content with checklists and notes');
+      expect(data.contentLength).toBe(42);
+      expect(data.priority).toBe(3);
+      expect(data.status).toBe('draft');
+    });
+
+    it('should return null content and contentLength 0 for idea with no description', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-2',
+        title: 'Minimal idea',
+        description: null,
+        status: 'draft',
+        priority: 0,
+        created_at: '2026-03-22T00:00:00Z',
+        updated_at: '2026-03-22T00:00:00Z',
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'get_idea',
+        arguments: { ideaId: 'idea-2' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.content).toBeNull();
+      expect(data.contentLength).toBe(0);
+    });
+  });
+
+  describe('list_ideas', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should return empty list when no ideas exist', async () => {
+      mockD1._stmt.all.mockResolvedValueOnce({ results: [] });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'list_ideas',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.ideas).toEqual([]);
+      expect(data.count).toBe(0);
+    });
+
+    it('should return ideas with content snippets', async () => {
+      mockD1._stmt.all.mockResolvedValueOnce({
+        results: [
+          {
+            id: 'idea-1',
+            title: 'First idea',
+            description: 'Short content',
+            priority: 0,
+            created_at: '2026-03-22T00:00:00Z',
+            updated_at: '2026-03-22T01:00:00Z',
+          },
+          {
+            id: 'idea-2',
+            title: 'Second idea',
+            description: 'A'.repeat(300),
+            priority: 5,
+            created_at: '2026-03-22T00:00:00Z',
+            updated_at: '2026-03-22T02:00:00Z',
+          },
+        ],
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'list_ideas',
+        arguments: {},
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.ideas).toHaveLength(2);
+      expect(data.ideas[0].ideaId).toBe('idea-1');
+      expect(data.ideas[0].contentSnippet).toBe('Short content');
+      // Second idea has truncated snippet
+      expect(data.ideas[1].contentSnippet).toContain('...');
+      expect(data.count).toBe(2);
+    });
+
+    it('should respect limit parameter', async () => {
+      mockD1._stmt.all.mockResolvedValueOnce({ results: [] });
+
+      await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'list_ideas',
+        arguments: { limit: 5 },
+      }));
+
+      // Verify the SQL includes the limit
+      const bindCalls = mockD1._stmt.bind.mock.calls;
+      const lastBind = bindCalls[bindCalls.length - 1];
+      expect(lastBind).toContain(5);
+    });
+
+    it('should filter by draft status', async () => {
+      mockD1._stmt.all.mockResolvedValueOnce({ results: [] });
+
+      await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'list_ideas',
+        arguments: {},
+      }));
+
+      // Verify SQL includes status = 'draft'
+      const sql = mockD1.prepare.mock.calls[0][0];
+      expect(sql).toContain("status = ?");
+      const bindCalls = mockD1._stmt.bind.mock.calls;
+      const lastBind = bindCalls[bindCalls.length - 1];
+      expect(lastBind).toContain('draft');
+    });
+  });
+
+  describe('search_ideas', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    it('should reject empty query', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'search_ideas',
+        arguments: { query: '' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+    });
+
+    it('should reject query shorter than 2 characters', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'search_ideas',
+        arguments: { query: 'x' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+    });
+
+    it('should search ideas with draft filter', async () => {
+      mockD1._stmt.all.mockResolvedValueOnce({
+        results: [{
+          id: 'idea-match',
+          title: 'SSO integration idea',
+          description: 'Add SAML support for enterprise',
+          priority: 2,
+          created_at: '2026-03-22T00:00:00Z',
+          updated_at: '2026-03-22T01:00:00Z',
+        }],
+      });
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'search_ideas',
+        arguments: { query: 'SSO' },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.ideas).toHaveLength(1);
+      expect(data.ideas[0].ideaId).toBe('idea-match');
+      expect(data.ideas[0].title).toBe('SSO integration idea');
+      expect(data.query).toBe('SSO');
+
+      // Verify status='draft' filter was applied
+      const sql = mockD1.prepare.mock.calls[0][0];
+      expect(sql).toContain('status = ?');
+      const bindCalls = mockD1._stmt.bind.mock.calls;
+      expect(bindCalls[0]).toContain('draft');
     });
   });
 });

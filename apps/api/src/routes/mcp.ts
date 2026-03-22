@@ -24,6 +24,13 @@
  * - get_session_messages: Read messages from a specific session
  * - search_messages: Search messages across sessions by keyword
  *
+ * Idea management:
+ * - create_idea: Create a new idea (draft task) without triggering execution
+ * - update_idea: Update an idea's title, content, or priority (append or replace)
+ * - get_idea: Get full details of a specific idea
+ * - list_ideas: List all ideas (draft tasks) in the project
+ * - search_ideas: Search ideas by keyword in title and content
+ *
  * Auth: task-scoped opaque token stored in KV, passed as Bearer token.
  */
 
@@ -121,6 +128,16 @@ const DEFAULT_MCP_MESSAGE_SEARCH_MAX = 20;
 const DEFAULT_MCP_TASK_DESCRIPTION_SNIPPET_LENGTH = 200;
 /** Max length for idea link context string. Override via MCP_IDEA_CONTEXT_MAX_LENGTH env var. */
 const DEFAULT_MCP_IDEA_CONTEXT_MAX_LENGTH = 500;
+/** Max length for idea content (description). Override via MCP_IDEA_CONTENT_MAX_LENGTH env var. */
+const DEFAULT_MCP_IDEA_CONTENT_MAX_LENGTH = 65_536;
+/** Default page size for list_ideas. Override via MCP_IDEA_LIST_LIMIT env var. */
+const DEFAULT_MCP_IDEA_LIST_LIMIT = 20;
+/** Max page size for list_ideas. Override via MCP_IDEA_LIST_MAX env var. */
+const DEFAULT_MCP_IDEA_LIST_MAX = 100;
+/** Max results for search_ideas. Override via MCP_IDEA_SEARCH_MAX env var. */
+const DEFAULT_MCP_IDEA_SEARCH_MAX = 20;
+/** Max length for idea title. Override via MCP_IDEA_TITLE_MAX_LENGTH env var. */
+const DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH = 200;
 
 function getMcpLimits(env: Env) {
   return {
@@ -147,6 +164,11 @@ function getMcpLimits(env: Env) {
     dispatchMaxReferenceLength: parsePositiveInt(env.MCP_DISPATCH_MAX_REFERENCE_LENGTH as string, DEFAULT_MCP_DISPATCH_MAX_REFERENCE_LENGTH),
     dispatchMaxPriority: parsePositiveInt(env.MCP_DISPATCH_MAX_PRIORITY as string, DEFAULT_MCP_DISPATCH_MAX_PRIORITY),
     ideaContextMaxLength: parsePositiveInt(env.MCP_IDEA_CONTEXT_MAX_LENGTH as string, DEFAULT_MCP_IDEA_CONTEXT_MAX_LENGTH),
+    ideaContentMaxLength: parsePositiveInt(env.MCP_IDEA_CONTENT_MAX_LENGTH as string, DEFAULT_MCP_IDEA_CONTENT_MAX_LENGTH),
+    ideaListLimit: parsePositiveInt(env.MCP_IDEA_LIST_LIMIT as string, DEFAULT_MCP_IDEA_LIST_LIMIT),
+    ideaListMax: parsePositiveInt(env.MCP_IDEA_LIST_MAX as string, DEFAULT_MCP_IDEA_LIST_MAX),
+    ideaSearchMax: parsePositiveInt(env.MCP_IDEA_SEARCH_MAX as string, DEFAULT_MCP_IDEA_SEARCH_MAX),
+    ideaTitleMaxLength: parsePositiveInt(env.MCP_IDEA_TITLE_MAX_LENGTH as string, DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH),
   };
 }
 
@@ -461,7 +483,7 @@ const MCP_TOOLS = [
   {
     name: 'find_related_ideas',
     description:
-      'Search existing ideas (tasks) in your project by keyword. Use this to find ideas that might relate to the current conversation before creating a new one.',
+      'Search existing ideas in your project by keyword. Defaults to searching draft (idea) tasks only. Use this to find ideas that might relate to the current conversation before creating a new one.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -477,6 +499,115 @@ const MCP_TOOLS = [
         limit: {
           type: 'number',
           description: 'Max results to return (default: 10, max: 20)',
+        },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    },
+  },
+  // ─── Idea management tools ───────────────────────────────────────────
+  {
+    name: 'create_idea',
+    description:
+      'Create a new idea in the current project. Ideas are lightweight notes for future consideration — they are NOT dispatched for execution. ' +
+      'Use this to capture ideas, feature requests, or anything worth tracking. Returns the idea ID so you can link it to the current session via link_idea.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Short title for the idea',
+        },
+        content: {
+          type: 'string',
+          description: 'Detailed content — supports checklists, notes, research findings, etc.',
+        },
+        priority: {
+          type: 'number',
+          description: 'Priority (0 = default). Higher = more important.',
+        },
+      },
+      required: ['title'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'update_idea',
+    description:
+      'Update an existing idea. By default, new content is appended to the existing content (great for adding notes from multiple conversations). Set append=false to replace content entirely.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        ideaId: {
+          type: 'string',
+          description: 'The idea ID to update',
+        },
+        title: {
+          type: 'string',
+          description: 'New title (optional — only updates if provided)',
+        },
+        content: {
+          type: 'string',
+          description: 'Content to append (or replace if append=false)',
+        },
+        append: {
+          type: 'boolean',
+          description: 'If true (default), append content to existing description. If false, replace it.',
+        },
+        priority: {
+          type: 'number',
+          description: 'New priority (optional — only updates if provided)',
+        },
+      },
+      required: ['ideaId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_idea',
+    description:
+      'Get full details of a specific idea, including its complete content. Use this to read the full text of an idea before updating it.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        ideaId: {
+          type: 'string',
+          description: 'The idea ID to retrieve',
+        },
+      },
+      required: ['ideaId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_ideas',
+    description:
+      'List all ideas (draft tasks) in your project, ordered by most recently updated. Use this to see what ideas exist before creating duplicates.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        limit: {
+          type: 'number',
+          description: 'Max results to return',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'search_ideas',
+    description:
+      'Search ideas in your project by keyword. Searches both title and content fields. Only returns ideas (draft tasks), not executed tasks.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search keyword to find in idea titles and content',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max results to return',
         },
       },
       required: ['query'],
@@ -2051,17 +2182,16 @@ async function handleFindRelatedIdeas(
   const limits = getMcpLimits(env);
   const requestedLimit = typeof params.limit === 'number' ? params.limit : 10;
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.taskSearchMax);
-  const statusFilter = typeof params.status === 'string' ? params.status.trim() : null;
+  // Default to 'draft' status (ideas) when no explicit status filter is provided
+  const statusFilter = typeof params.status === 'string' ? params.status.trim() : 'draft';
 
   const searchPattern = `%${query}%`;
 
   let queryStr = `SELECT id, title, description, status, priority, updated_at FROM tasks WHERE project_id = ? AND (title LIKE ? OR description LIKE ?)`;
   const bindParams: unknown[] = [tokenData.projectId, searchPattern, searchPattern];
 
-  if (statusFilter) {
-    queryStr += ' AND status = ?';
-    bindParams.push(statusFilter);
-  }
+  queryStr += ' AND status = ?';
+  bindParams.push(statusFilter);
 
   queryStr += ' ORDER BY updated_at DESC LIMIT ?';
   bindParams.push(limit);
@@ -2091,6 +2221,288 @@ async function handleFindRelatedIdeas(
             ? t.description.slice(0, snippetLength) + (t.description.length > snippetLength ? '...' : '')
             : null,
           updatedAt: t.updated_at,
+        })),
+        count: results.results?.length ?? 0,
+        query,
+      }, null, 2),
+    }],
+  });
+}
+
+// ─── Idea management handlers ────────────────────────────────────────────────
+
+async function handleCreateIdea(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const limits = getMcpLimits(env);
+
+  const title = typeof params.title === 'string' ? sanitizeUserInput(params.title.trim()).slice(0, limits.ideaTitleMaxLength) : '';
+  if (!title) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'title is required and must be a non-empty string');
+  }
+
+  const content = typeof params.content === 'string'
+    ? sanitizeUserInput(params.content).slice(0, limits.ideaContentMaxLength)
+    : null;
+
+  const priority = typeof params.priority === 'number'
+    ? Math.min(Math.max(0, Math.round(params.priority)), limits.dispatchMaxPriority)
+    : 0;
+
+  const ideaId = ulid();
+  const now = new Date().toISOString();
+
+  await env.DATABASE.prepare(
+    `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority, task_mode, dispatch_depth, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'draft', ?, 'task', 0, ?, ?, ?)`,
+  ).bind(ideaId, tokenData.projectId, tokenData.userId, title, content, priority, tokenData.userId, now, now).run();
+
+  log.info('mcp.create_idea', {
+    ideaId,
+    projectId: tokenData.projectId,
+    userId: tokenData.userId,
+    titleLength: title.length,
+    contentLength: content?.length ?? 0,
+  });
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        ideaId,
+        title,
+        contentLength: content?.length ?? 0,
+        priority,
+        status: 'draft',
+        message: 'Idea created. Use link_idea to associate it with the current session.',
+      }, null, 2),
+    }],
+  });
+}
+
+async function handleUpdateIdea(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const limits = getMcpLimits(env);
+
+  const ideaId = typeof params.ideaId === 'string' ? params.ideaId.trim() : '';
+  if (!ideaId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'ideaId is required');
+  }
+
+  // Fetch the existing idea — must be draft status and in this project
+  const existing = await env.DATABASE.prepare(
+    'SELECT id, title, description, status, priority FROM tasks WHERE id = ? AND project_id = ? AND status = ?',
+  ).bind(ideaId, tokenData.projectId, 'draft').first<{ id: string; title: string; description: string | null; status: string; priority: number }>();
+
+  if (!existing) {
+    return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found or not in draft status: ${ideaId}`);
+  }
+
+  // Build update fields
+  const updates: string[] = [];
+  const bindValues: unknown[] = [];
+
+  // Title update
+  if (typeof params.title === 'string') {
+    const newTitle = sanitizeUserInput(params.title.trim()).slice(0, limits.ideaTitleMaxLength);
+    if (newTitle) {
+      updates.push('title = ?');
+      bindValues.push(newTitle);
+    }
+  }
+
+  // Content update (append or replace) — uses atomic SQL CASE for append to avoid race conditions
+  if (typeof params.content === 'string') {
+    const newContent = sanitizeUserInput(params.content).slice(0, limits.ideaContentMaxLength);
+    const append = params.append !== false; // default true
+
+    if (append) {
+      // Atomic append: concatenates in SQL to avoid read-then-write races
+      updates.push('description = CASE WHEN description IS NULL THEN ? ELSE substr(description || char(10) || char(10) || ?, 1, ?) END');
+      bindValues.push(newContent, newContent, limits.ideaContentMaxLength);
+    } else {
+      updates.push('description = ?');
+      bindValues.push(newContent);
+    }
+  }
+
+  // Priority update
+  if (typeof params.priority === 'number') {
+    const newPriority = Math.min(Math.max(0, Math.round(params.priority)), limits.dispatchMaxPriority);
+    updates.push('priority = ?');
+    bindValues.push(newPriority);
+  }
+
+  if (updates.length === 0) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'No fields to update. Provide at least one of: title, content, priority.');
+  }
+
+  updates.push('updated_at = ?');
+  const now = new Date().toISOString();
+  bindValues.push(now);
+  bindValues.push(ideaId, tokenData.projectId, 'draft');
+
+  await env.DATABASE.prepare(
+    `UPDATE tasks SET ${updates.join(', ')} WHERE id = ? AND project_id = ? AND status = ?`,
+  ).bind(...bindValues).run();
+
+  log.info('mcp.update_idea', {
+    ideaId,
+    projectId: tokenData.projectId,
+    updatedFields: updates.filter((u) => !u.startsWith('updated_at')).map((u) => u.split(' = ')[0]),
+  });
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        updated: true,
+        ideaId,
+        updatedFields: updates.filter((u) => !u.startsWith('updated_at')).map((u) => u.split(' = ')[0]),
+      }, null, 2),
+    }],
+  });
+}
+
+async function handleGetIdea(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const ideaId = typeof params.ideaId === 'string' ? params.ideaId.trim() : '';
+  if (!ideaId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'ideaId is required');
+  }
+
+  const idea = await env.DATABASE.prepare(
+    'SELECT id, title, description, status, priority, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ? AND status = ?',
+  ).bind(ideaId, tokenData.projectId, 'draft').first<{
+    id: string;
+    title: string;
+    description: string | null;
+    status: string;
+    priority: number;
+    created_at: string;
+    updated_at: string;
+  }>();
+
+  if (!idea) {
+    return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found in this project: ${ideaId}. Note: only draft tasks are returned by this tool — use get_task_details for non-draft tasks.`);
+  }
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        ideaId: idea.id,
+        title: idea.title,
+        content: idea.description,
+        contentLength: idea.description?.length ?? 0,
+        priority: idea.priority,
+        status: idea.status,
+        createdAt: idea.created_at,
+        updatedAt: idea.updated_at,
+      }, null, 2),
+    }],
+  });
+}
+
+async function handleListIdeas(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const limits = getMcpLimits(env);
+  const requestedLimit = typeof params.limit === 'number' ? params.limit : limits.ideaListLimit;
+  const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.ideaListMax);
+
+  const snippetLength = limits.taskDescriptionSnippetLength;
+
+  const results = await env.DATABASE.prepare(
+    'SELECT id, title, description, priority, created_at, updated_at FROM tasks WHERE project_id = ? AND status = ? ORDER BY updated_at DESC LIMIT ?',
+  ).bind(tokenData.projectId, 'draft', limit).all<{
+    id: string;
+    title: string;
+    description: string | null;
+    priority: number;
+    created_at: string;
+    updated_at: string;
+  }>();
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        ideas: (results.results ?? []).map((idea) => ({
+          ideaId: idea.id,
+          title: idea.title,
+          contentSnippet: idea.description
+            ? idea.description.slice(0, snippetLength) + (idea.description.length > snippetLength ? '...' : '')
+            : null,
+          priority: idea.priority,
+          createdAt: idea.created_at,
+          updatedAt: idea.updated_at,
+        })),
+        count: results.results?.length ?? 0,
+      }, null, 2),
+    }],
+  });
+}
+
+async function handleSearchIdeas(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const query = typeof params.query === 'string' ? params.query.trim() : '';
+  if (!query) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'query is required');
+  }
+  if (query.length < 2) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'query must be at least 2 characters');
+  }
+
+  const limits = getMcpLimits(env);
+  const requestedLimit = typeof params.limit === 'number' ? params.limit : limits.ideaSearchMax;
+  const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.ideaSearchMax);
+  const snippetLength = limits.taskDescriptionSnippetLength;
+
+  const searchPattern = `%${query}%`;
+
+  const results = await env.DATABASE.prepare(
+    'SELECT id, title, description, priority, created_at, updated_at FROM tasks WHERE project_id = ? AND status = ? AND (title LIKE ? OR description LIKE ?) ORDER BY updated_at DESC LIMIT ?',
+  ).bind(tokenData.projectId, 'draft', searchPattern, searchPattern, limit).all<{
+    id: string;
+    title: string;
+    description: string | null;
+    priority: number;
+    created_at: string;
+    updated_at: string;
+  }>();
+
+  return jsonRpcSuccess(requestId, {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        ideas: (results.results ?? []).map((idea) => ({
+          ideaId: idea.id,
+          title: idea.title,
+          contentSnippet: idea.description
+            ? idea.description.slice(0, snippetLength) + (idea.description.length > snippetLength ? '...' : '')
+            : null,
+          priority: idea.priority,
+          createdAt: idea.created_at,
+          updatedAt: idea.updated_at,
         })),
         count: results.results?.length ?? 0,
         query,
@@ -2191,6 +2603,16 @@ mcpRoutes.post('/', async (c) => {
           return c.json(await handleListLinkedIdeas(requestId, toolArgs, tokenData, c.env));
         case 'find_related_ideas':
           return c.json(await handleFindRelatedIdeas(requestId, toolArgs, tokenData, c.env));
+        case 'create_idea':
+          return c.json(await handleCreateIdea(requestId, toolArgs, tokenData, c.env));
+        case 'update_idea':
+          return c.json(await handleUpdateIdea(requestId, toolArgs, tokenData, c.env));
+        case 'get_idea':
+          return c.json(await handleGetIdea(requestId, toolArgs, tokenData, c.env));
+        case 'list_ideas':
+          return c.json(await handleListIdeas(requestId, toolArgs, tokenData, c.env));
+        case 'search_ideas':
+          return c.json(await handleSearchIdeas(requestId, toolArgs, tokenData, c.env));
         default:
           return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
       }
