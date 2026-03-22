@@ -30,6 +30,8 @@ interface ProjectMessageViewProps {
   sessionId: string;
   /** When true, workspace is still provisioning — suppress "agent offline" banner. */
   isProvisioning?: boolean;
+  /** Called after a mutation (e.g. mark complete) so the parent can refresh session list. */
+  onSessionMutated?: () => void;
 }
 
 /** Default idle timeout in ms — matches the server-side default (NODE_WARM_TIMEOUT_MS). */
@@ -318,6 +320,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   projectId,
   sessionId,
   isProvisioning = false,
+  onSessionMutated,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -738,6 +741,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           workspace={workspace}
           node={node}
           detectedPorts={detectedPorts}
+          onSessionMutated={onSessionMutated}
         />
       )}
 
@@ -921,6 +925,7 @@ function SessionHeader({
   workspace,
   node,
   detectedPorts,
+  onSessionMutated,
 }: {
   projectId: string;
   session: ChatSessionResponse;
@@ -931,6 +936,7 @@ function SessionHeader({
   workspace: WorkspaceResponse | null;
   node: NodeResponse | null;
   detectedPorts: DetectedPort[];
+  onSessionMutated?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -966,14 +972,17 @@ function SessionHeader({
         await deleteWorkspace(session.workspaceId);
       }
 
-      // Force a page reload to reflect the new state
-      window.location.reload();
+      // Refresh session list via callback instead of full page reload.
+      // Reset completing before the callback so the button is not stuck in
+      // "Completing..." if the parent's refresh is slower than expected.
+      setCompleting(false);
+      onSessionMutated?.();
     } catch (err) {
       console.error('Failed to mark task complete:', err);
       setCompleteError(err instanceof Error ? err.message : 'Failed to complete task');
       setCompleting(false);
     }
-  }, [projectId, taskEmbed?.id, session.workspaceId, completing]);
+  }, [projectId, taskEmbed?.id, session.workspaceId, completing, onSessionMutated]);
 
   return (
     <div className="border-b border-border-default shrink-0">

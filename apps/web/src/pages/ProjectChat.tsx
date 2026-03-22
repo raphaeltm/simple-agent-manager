@@ -698,6 +698,7 @@ export function ProjectChat() {
               projectId={projectId}
               sessionId={sessionId!}
               isProvisioning={!!(provisioning && sessionId === provisioning.sessionId && !isTerminal(provisioning.status))}
+              onSessionMutated={() => { void loadSessions(); }}
             />
             {/* Close conversation button — shown for idle sessions with a task */}
             {(() => {
