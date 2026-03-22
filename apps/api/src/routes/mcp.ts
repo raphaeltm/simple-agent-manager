@@ -1481,7 +1481,7 @@ async function handleDispatchTask(
   });
 
   const appDomain = `app.${env.BASE_DOMAIN}`;
-  const taskUrl = `https://${appDomain}/projects/${tokenData.projectId}?task=${taskId}`;
+  const taskUrl = `https://${appDomain}/projects/${tokenData.projectId}/chat/${sessionId}`;
 
   return jsonRpcSuccess(requestId, {
     content: [{
