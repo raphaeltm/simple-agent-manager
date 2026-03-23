@@ -773,11 +773,11 @@ func (s *Server) getOrCreateReporter(workspaceID, projectID, chatSessionID strin
 	}
 	s.messageReportersMu.RUnlock()
 
-	// Read callback token before any lock — avoids nested lock acquisition
-	// with callbackTokenMu (lock order: callbackTokenMu before messageReportersMu).
-	s.callbackTokenMu.RLock()
-	token := s.callbackToken
-	s.callbackTokenMu.RUnlock()
+	// Prefer workspace-scoped callback token (set when workspace is created
+	// on this node) over the node-level fallback. The node-level token has
+	// scope=node which is rejected by POST /api/workspaces/:id/messages
+	// after the callback-token-scoping security change.
+	token := s.callbackTokenForWorkspace(workspaceID)
 
 	// Slow path: create reporter outside the lock (disk I/O).
 	cfg := messagereport.LoadConfigFromEnv()
