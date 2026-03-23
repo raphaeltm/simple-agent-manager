@@ -1956,7 +1956,7 @@ func buildProjectRuntimeEnvScript(envVars []ProjectRuntimeEnvVar) (string, error
 		if !projectEnvKeyPattern.MatchString(key) {
 			return "", fmt.Errorf("invalid project env var key %q", envVar.Key)
 		}
-		sb.WriteString(fmt.Sprintf("export %s=%q\n", key, envVar.Value))
+		sb.WriteString(fmt.Sprintf("export %s=%s\n", key, shellSingleQuote(envVar.Value)))
 	}
 
 	return sb.String(), nil

