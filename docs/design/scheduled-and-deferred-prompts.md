@@ -41,7 +41,7 @@ The good news: SAM's existing architecture already has most of the primitives ne
 | **Warm Node Pooling** | NodeLifecycle DO | Warm nodes can be claimed instantly for scheduled tasks, avoiding cold-start provisioning delays. Critical for time-sensitive scheduled execution. |
 | **Task Submission API** | `POST /api/projects/:projectId/tasks/submit` | Atomic task creation + TaskRunner DO instantiation. A scheduler can call this internally. |
 | **MCP dispatch_task** | `apps/api/src/routes/mcp.ts` | Agents can already spawn child tasks. A scheduled prompt could dispatch a graph of tasks. |
-| **task_dependencies table** | D1 schema | Dependency edges exist in the schema. Combined with `task-graph.ts` utilities (`isTaskBlocked`, `wouldCreateTaskDependencyCycle`), DAG scheduling is partially implemented. |
+| **task_dependencies table** | D1 schema | Dependency edges exist in the schema. Combined with `apps/api/src/services/task-graph.ts` utilities (`isTaskBlocked`, `wouldCreateTaskDependencyCycle`), DAG scheduling is partially implemented. |
 
 ### What's Missing
 
