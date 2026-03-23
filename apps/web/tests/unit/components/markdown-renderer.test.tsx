@@ -101,4 +101,125 @@ describe('RenderedMarkdown', () => {
     expect(screen.getByText('A')).toBeInTheDocument();
     expect(screen.getByText('1')).toBeInTheDocument();
   });
+
+  describe('Mermaid XSS sanitization', () => {
+    const MERMAID_BLOCK = '```mermaid\ngraph TD\n  A-->B\n```';
+
+    it('strips <script> tags from SVG output', async () => {
+      const maliciousSvg = '<svg><text>Diagram</text><script>alert("xss")</script></svg>';
+      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
+
+      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
+
+      await waitFor(() => {
+        const diagram = screen.getByTestId('mermaid-diagram');
+        expect(diagram.innerHTML).not.toBe('');
+        expect(diagram.innerHTML).toContain('Diagram');
+        expect(diagram.innerHTML).not.toContain('<script>');
+        expect(diagram.innerHTML).not.toContain('alert');
+      });
+    });
+
+    it('strips event handler attributes from SVG output', async () => {
+      const maliciousSvg = '<svg><rect onclick="alert(1)" onerror="alert(2)" width="100" height="100"/><text>Safe</text></svg>';
+      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
+
+      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
+
+      await waitFor(() => {
+        const diagram = screen.getByTestId('mermaid-diagram');
+        expect(diagram.innerHTML).not.toBe('');
+        expect(diagram.innerHTML).toContain('Safe');
+        expect(diagram.innerHTML).not.toContain('onclick');
+        expect(diagram.innerHTML).not.toContain('onerror');
+        expect(diagram.innerHTML).not.toContain('alert');
+      });
+    });
+
+    it('strips javascript: URIs from SVG output', async () => {
+      const maliciousSvg = '<svg><a href="javascript:alert(1)"><text>Click me</text></a></svg>';
+      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
+
+      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
+
+      await waitFor(() => {
+        const diagram = screen.getByTestId('mermaid-diagram');
+        expect(diagram.innerHTML).not.toBe('');
+        expect(diagram.innerHTML).toContain('Click me');
+        expect(diagram.innerHTML).not.toContain('javascript:');
+      });
+    });
+
+    it('strips <use> elements with external references', async () => {
+      const maliciousSvg = '<svg><use href="http://evil.com/evil.svg#xss"/><text>Safe</text></svg>';
+      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
+
+      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
+
+      await waitFor(() => {
+        const diagram = screen.getByTestId('mermaid-diagram');
+        expect(diagram.innerHTML).not.toBe('');
+        expect(diagram.innerHTML).toContain('Safe');
+        expect(diagram.innerHTML).not.toContain('evil.com');
+      });
+    });
+
+    it('strips foreignObject elements (DOMPurify blocks by default)', async () => {
+      const maliciousSvg = '<svg><foreignObject><div><img src="x" onerror="alert(1)"/></div></foreignObject><text>Safe</text></svg>';
+      mocks.mermaidRender.mockResolvedValue({ svg: maliciousSvg });
+
+      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
+
+      await waitFor(() => {
+        const diagram = screen.getByTestId('mermaid-diagram');
+        expect(diagram.innerHTML).not.toBe('');
+        expect(diagram.innerHTML).toContain('Safe');
+        expect(diagram.innerHTML).not.toContain('foreignObject');
+        expect(diagram.innerHTML).not.toContain('onerror');
+      });
+    });
+
+    it('preserves valid SVG content through sanitization', async () => {
+      const validSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="10" y="10" width="80" height="80" fill="#1a3a32" stroke="#29423b"/><text x="50" y="55" text-anchor="middle" fill="#e6f2ee">Node A</text></svg>';
+      mocks.mermaidRender.mockResolvedValue({ svg: validSvg });
+
+      render(<RenderedMarkdown content={MERMAID_BLOCK} />);
+
+      await waitFor(() => {
+        const diagram = screen.getByTestId('mermaid-diagram');
+        expect(diagram.innerHTML).not.toBe('');
+        expect(diagram.innerHTML).toContain('Node A');
+        expect(diagram.innerHTML).toContain('<rect');
+        expect(diagram.innerHTML).toContain('<text');
+        expect(diagram.innerHTML).toContain('fill="#1a3a32"');
+      });
+    });
+
+    it('calls mermaid.initialize with securityLevel strict', async () => {
+      // ensureMermaidInit() is called during the first mermaid render in this
+      // test suite. We check all recorded calls to mermaid.initialize across
+      // the entire module lifetime to verify securityLevel was set to 'strict'.
+      const allCalls = mocks.mermaidInitialize.mock.calls;
+      const hasStrictCall = allCalls.some(
+        (args: unknown[]) =>
+          args[0] &&
+          typeof args[0] === 'object' &&
+          (args[0] as Record<string, unknown>).securityLevel === 'strict',
+      );
+      // If no calls recorded (singleton already initialized in a prior test),
+      // fall back to verifying the source doesn't contain 'loose'.
+      if (allCalls.length === 0) {
+        const fs = await import('fs');
+        const path = await import('path');
+        const src = fs.readFileSync(
+          path.resolve(__dirname, '../../../src/components/MarkdownRenderer.tsx'),
+          'utf-8',
+        );
+        expect(src).toContain("securityLevel: 'strict'");
+        expect(src).not.toContain("securityLevel: 'loose'");
+      } else {
+        expect(hasStrictCall).toBe(true);
+      }
+    });
+  });
 });

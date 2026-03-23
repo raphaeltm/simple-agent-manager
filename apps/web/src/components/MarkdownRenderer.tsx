@@ -8,6 +8,7 @@ import {
   useState,
 } from 'react';
 import { Highlight, themes } from 'prism-react-renderer';
+import DOMPurify from 'dompurify';
 import mermaid from 'mermaid';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -40,7 +41,7 @@ function ensureMermaidInit() {
       nodeTextColor: '#e6f2ee',
     },
     fontFamily: 'monospace',
-    securityLevel: 'loose',
+    securityLevel: 'strict',
     logLevel: 5,
   });
   mermaidInitialized = true;
@@ -64,7 +65,9 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
       try {
         const { svg } = await mermaid.render(diagramId, code);
         if (!cancelled && containerRef.current) {
-          containerRef.current.innerHTML = svg;
+          containerRef.current.innerHTML = DOMPurify.sanitize(svg, {
+            USE_PROFILES: { svg: true, svgFilters: true },
+          });
         }
       } catch (err) {
         if (!cancelled) {
