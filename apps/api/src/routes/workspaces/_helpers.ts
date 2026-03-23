@@ -5,8 +5,7 @@ import type { Env } from '../../index';
 import { errors } from '../../middleware/error';
 import * as schema from '../../db/schema';
 import type { WorkspaceRuntimeAssetsResponse } from '@simple-agent-manager/shared';
-import { verifyCallbackToken } from '../../services/jwt';
-import { signCallbackToken } from '../../services/jwt';
+import { verifyCallbackToken, signCallbackToken } from '../../services/jwt';
 import { createWorkspaceOnNode } from '../../services/node-agent';
 import { decrypt } from '../../services/encryption';
 

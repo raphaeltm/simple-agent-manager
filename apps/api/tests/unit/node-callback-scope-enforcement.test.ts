@@ -132,7 +132,7 @@ describe('node callback auth — scope enforcement', () => {
       body: JSON.stringify({}),
     });
 
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
     const body = await res.json();
     expect(body.message).toBe('Workspace-scoped tokens cannot access node endpoints');
   });
@@ -153,8 +153,8 @@ describe('node callback auth — scope enforcement', () => {
       body: JSON.stringify({}),
     });
 
-    // Should not be 401 — the heartbeat may fail for other reasons (DB mocks) but auth passes
-    expect(res.status).not.toBe(401);
+    // Should not be 403 — the heartbeat may fail for other reasons (DB mocks) but auth passes
+    expect(res.status).not.toBe(403);
   });
 
   it('ACCEPTS legacy tokens (no scope) on node heartbeat endpoint', async () => {
@@ -192,7 +192,7 @@ describe('node callback auth — scope enforcement', () => {
       body: JSON.stringify({}),
     });
 
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
     const body = await res.json();
     expect(body.message).toBe('Workspace-scoped tokens cannot access node endpoints');
   });
@@ -213,7 +213,7 @@ describe('node callback auth — scope enforcement', () => {
       body: JSON.stringify({ errors: [] }),
     });
 
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
     const body = await res.json();
     expect(body.message).toBe('Workspace-scoped tokens cannot access node endpoints');
   });
