@@ -1,14 +1,8 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Terminal, MultiTerminal } from '@simple-agent-manager/terminal';
-import type {
-  MultiTerminalHandle,
-  MultiTerminalSessionSnapshot,
-} from '@simple-agent-manager/terminal';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
+import type { MultiTerminalHandle, MultiTerminalSessionSnapshot } from '@simple-agent-manager/terminal';
 import { useFeatureFlags } from '../config/features';
-import { Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
-import { UserMenu } from '../components/UserMenu';
-import { ChatSession } from '../components/ChatSession';
+import { Button, Spinner } from '@simple-agent-manager/ui';
 import type { ChatSessionHandle } from '../components/ChatSession';
 import { CommandPalette } from '../components/CommandPalette';
 import { KeyboardShortcutsHelp } from '../components/KeyboardShortcutsHelp';
@@ -18,2258 +12,432 @@ import { useTabOrder } from '../hooks/useTabOrder';
 import { useTokenRefresh } from '../hooks/useTokenRefresh';
 import { useBootLogStream } from '../hooks/useBootLogStream';
 import { useWorkspacePorts } from '../hooks/useWorkspacePorts';
+import { useWorkspaceNavigation } from '../hooks/useWorkspaceNavigation';
+import { useTerminalConnection } from '../hooks/useTerminalConnection';
+import { useGitStatusPolling } from '../hooks/useGitStatusPolling';
+import { useWorkspaceSessions } from '../hooks/useWorkspaceSessions';
+import { useWorkspaceTabs, type WorkspaceTab } from '../hooks/useWorkspaceTabs';
+import { useWorkspaceWorktrees } from '../hooks/useWorkspaceWorktrees';
 import { WorkspaceTabStrip, type WorkspaceTabItem } from '../components/WorkspaceTabStrip';
-import { WorktreeSelector } from '../components/WorktreeSelector';
-import { MoreVertical, X } from 'lucide-react';
-import { GitChangesButton } from '../components/GitChangesButton';
-import { CommandPaletteButton } from '../components/CommandPaletteButton';
+import { X } from 'lucide-react';
 import { GitChangesPanel } from '../components/GitChangesPanel';
 import { GitDiffView } from '../components/GitDiffView';
-import { FileBrowserButton } from '../components/FileBrowserButton';
 import { FileBrowserPanel } from '../components/FileBrowserPanel';
 import { FileViewerPanel } from '../components/FileViewerPanel';
 import { WorkspaceSidebar } from '../components/WorkspaceSidebar';
-import type { SessionTokenUsage, SidebarTab } from '../components/WorkspaceSidebar';
+import type { SidebarTab, SessionTokenUsage } from '../components/WorkspaceSidebar';
+import { WorkspaceHeader } from '../components/workspace/WorkspaceHeader';
+import { WorkspaceTerminal } from '../components/workspace/WorkspaceTerminal';
+import { WorkspaceStatusContent, Toolbar, CenteredStatus } from '../components/workspace/WorkspaceControls';
+import { WorkspaceAgentPanel } from '../components/workspace/WorkspaceAgentPanel';
+import { WorkspaceCreateMenu } from '../components/workspace/WorkspaceCreateMenu';
 import {
-  createAgentSession,
-  createWorktree,
-  getFileIndex,
-  getGitBranches,
-  getGitStatus,
-  getWorktrees,
-  getTerminalToken,
-  getWorkspace,
-  listAgents,
-  listAgentSessions,
-  listAgentSessionsLive,
-  listWorkspaceEvents,
-  rebuildWorkspace,
-  removeWorktree,
-  renameAgentSession,
-  resumeAgentSession,
-  restartWorkspace,
-  stopAgentSession,
-  stopWorkspace,
-  updateWorkspace,
+  getFileIndex, getTerminalToken, getWorkspace,
+  listAgentSessions, listAgentSessionsLive, listWorkspaceEvents,
+  rebuildWorkspace, renameAgentSession, restartWorkspace, stopWorkspace, updateWorkspace,
 } from '../lib/api';
-import { isSessionActive, isOrphanedSession } from '../lib/session-utils';
+import { isSessionActive } from '../lib/session-utils';
 import { OrphanedSessionsBanner } from '../components/OrphanedSessionsBanner';
-import type { GitStatusData } from '../lib/api';
 import type { TokenUsage } from '@simple-agent-manager/acp-client';
-import type {
-  AgentHostStatus,
-  AgentInfo,
-  AgentSession,
-  Event,
-  WorktreeInfo,
-  WorkspaceResponse,
-  BootLogEntry,
-} from '@simple-agent-manager/shared';
+import type { AgentInfo, AgentSession, Event, WorkspaceResponse } from '@simple-agent-manager/shared';
 import '../styles/acp-chat.css';
 
-/** View modes */
 type ViewMode = 'terminal' | 'conversation';
 
-type WorkspaceTab =
-  | {
-      id: string;
-      kind: 'terminal';
-      sessionId: string;
-      title: string;
-      status: MultiTerminalSessionSnapshot['status'];
-      badge?: string;
-    }
-  | {
-      id: string;
-      kind: 'chat';
-      sessionId: string;
-      title: string;
-      status: AgentSession['status'];
-      hostStatus?: AgentHostStatus | null;
-      viewerCount?: number | null;
-      badge?: string;
-    };
-
-const GIT_STATUS_POLL_INTERVAL_MS = 30_000;
-const GIT_STATUS_RETRY_DELAYS_MS = [750, 1500];
-
-function countGitChanges(status: GitStatusData): number {
-  return status.staged.length + status.unstaged.length + status.untracked.length;
-}
-
-function workspaceTabStatusColor(tab: WorkspaceTab): string {
-  if (tab.kind === 'terminal') {
-    switch (tab.status) {
-      case 'connecting':
-        return 'var(--sam-color-tn-yellow)';
-      case 'connected':
-        return 'var(--sam-color-tn-green)';
-      case 'error':
-        return 'var(--sam-color-tn-red)';
-      default:
-        return 'var(--sam-color-tn-fg-muted)';
-    }
-  }
-
-  // Use live hostStatus when available for finer-grained colors
-  if (tab.hostStatus) {
-    switch (tab.hostStatus) {
-      case 'prompting':
-        return 'var(--sam-color-tn-purple)'; // purple — actively working
-      case 'ready':
-        return 'var(--sam-color-tn-green)'; // green — ready for prompts
-      case 'starting':
-        return 'var(--sam-color-tn-yellow)'; // amber — initializing
-      case 'idle':
-        return 'var(--sam-color-tn-fg-muted)'; // dim — no agent selected
-      case 'stopped':
-        return 'var(--sam-color-tn-fg-dimmer)'; // dimmer — stopped
-      case 'error':
-        return 'var(--sam-color-tn-red)'; // red
-    }
-  }
-
-  // Fallback to DB status when hostStatus is not available
-  switch (tab.status) {
-    case 'running':
-      return 'var(--sam-color-tn-green)';
-    case 'suspended':
-      return 'var(--sam-color-tn-yellow)';
-    case 'error':
-      return 'var(--sam-color-tn-red)';
-    default:
-      return 'var(--sam-color-tn-fg-muted)';
-  }
-}
-
-function deriveWorktreeBadge(
-  path: string | null | undefined,
-  worktrees: WorktreeInfo[]
-): string | undefined {
-  if (!path) return undefined;
-  const found = worktrees.find((wt) => wt.path === path);
-  if (found?.branch) {
-    return found.branch;
-  }
-  const parts = path.split('/');
-  return parts[parts.length - 1] || undefined;
-}
-
-/**
- * Workspace detail page — unified layout for desktop and mobile.
- * Tab strip at top, terminal/chat content below, sidebar on desktop only.
- */
 export function Workspace() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const featureFlags = useFeatureFlags();
   const isMobile = useIsMobile();
-  const viewParam = searchParams.get('view');
   const sessionIdParam = searchParams.get('sessionId');
-  const viewOverride: ViewMode | null =
-    viewParam === 'terminal' || viewParam === 'conversation' ? viewParam : null;
+  const viewOverride: ViewMode | null = (() => {
+    const v = searchParams.get('view');
+    return v === 'terminal' || v === 'conversation' ? v : null;
+  })();
 
-  // Git changes panel state (URL-driven for browser back/forward support)
-  const gitParam = searchParams.get('git'); // 'changes' | 'diff' | null
-  const gitFileParam = searchParams.get('file');
-  const gitStagedParam = searchParams.get('staged');
+  const nav = useWorkspaceNavigation(id);
 
-  // File browser state (URL-driven, mutually exclusive with git overlay)
-  const filesParam = searchParams.get('files'); // 'browse' | 'view' | null
-  const filesPathParam = searchParams.get('path');
-  const worktreeParam = searchParams.get('worktree');
-
+  // ── Core state ──
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
-  const [wsUrl, setWsUrl] = useState<string | null>(null);
-  const [terminalError, setTerminalError] = useState<string | null>(null);
-  const [gitChangeCount, setGitChangeCount] = useState(0);
-  const [gitStatus, setGitStatus] = useState<GitStatusData | null>(null);
-  const [gitStatusStale, setGitStatusStale] = useState(false);
   const [sessionTokenUsages, setSessionTokenUsages] = useState<SessionTokenUsage[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>(viewOverride ?? 'terminal');
   const [workspaceEvents, setWorkspaceEvents] = useState<Event[]>([]);
   const [agentSessions, setAgentSessions] = useState<AgentSession[]>([]);
-  const [sessionsLoading, setSessionsLoading] = useState(false);
-  const [renaming, setRenaming] = useState(false);
-  const [displayNameInput, setDisplayNameInput] = useState('');
-  const [agentOptions, setAgentOptions] = useState<AgentInfo[]>([]);
-  const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [terminalTabs, setTerminalTabs] = useState<MultiTerminalSessionSnapshot[]>([]);
   const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<string | null>(null);
-  const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
-  const [worktreeLoading, setWorktreeLoading] = useState(false);
-  const [remoteBranches, setRemoteBranches] = useState<Array<{ name: string }>>([]);
-  const [remoteBranchesLoading, setRemoteBranchesLoading] = useState(false);
-  const [preferredAgentsBySession, setPreferredAgentsBySession] = useState<
-    Record<string, AgentInfo['id']>
-  >({});
+  const [renaming, setRenaming] = useState(false);
+  const [displayNameInput, setDisplayNameInput] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const multiTerminalRef = useRef<MultiTerminalHandle | null>(null);
-  const createMenuRef = useRef<HTMLDivElement | null>(null);
-  const chatSessionRefs = useRef<Map<string, ChatSessionHandle>>(new Map());
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [dismissedOrphans, setDismissedOrphans] = useState(false);
-  const [recentlyStopped, setRecentlyStopped] = useState<Set<string>>(new Set());
   const [paletteFileIndex, setPaletteFileIndex] = useState<string[]>([]);
   const [paletteFileIndexLoading, setPaletteFileIndexLoading] = useState(false);
   const paletteFileIndexLoaded = useRef(false);
-  const terminalWsUrlCacheRef = useRef<{ url: string; resolvedAt: number } | null>(null);
+  const multiTerminalRef = useRef<MultiTerminalHandle | null>(null);
+  const chatSessionRefs = useRef<Map<string, ChatSessionHandle>>(new Map());
 
   const tabOrder = useTabOrder<WorkspaceTab>(id);
-
   const isRunning = workspace?.status === 'running' || workspace?.status === 'recovery';
-  const activeWorktree = worktreeParam || null;
 
-  // Proactive token refresh (R3 fix): fetches token on mount and schedules
-  // refresh 5 minutes before expiry. On 401 during reconnection, call refresh().
-  const tokenRefreshFetchToken = useCallback(async () => {
+  // ── Token refresh ──
+  const tokenFetch = useCallback(async () => {
     if (!id) throw new Error('No workspace ID');
     return getTerminalToken(id);
   }, [id]);
+  const { token: terminalToken, loading: terminalLoading, error: tokenRefreshError, refresh: refreshTerminalToken } =
+    useTokenRefresh({ fetchToken: tokenFetch, enabled: isRunning && !!id });
 
-  const {
-    token: terminalToken,
-    loading: terminalLoading,
-    error: tokenRefreshError,
-    refresh: refreshTerminalToken,
-  } = useTokenRefresh({
-    fetchToken: tokenRefreshFetchToken,
-    enabled: isRunning && !!id,
+  // ── Terminal connection ──
+  const { wsUrl, terminalError, setTerminalError, resolveTerminalWsUrl, clearWsUrlCache } =
+    useTerminalConnection({ workspaceId: id, workspaceUrl: workspace?.url, isRunning, multiTerminal: featureFlags.multiTerminal, terminalToken, terminalLoading });
+  useEffect(() => { if (tokenRefreshError) setTerminalError(tokenRefreshError); }, [tokenRefreshError, setTerminalError]);
+
+  // ── Git status ──
+  const { gitStatus, gitChangeCount, gitStatusStale, applyGitStatus, markGitStatusStale } =
+    useGitStatusPolling({ workspaceUrl: workspace?.url, workspaceId: id, terminalToken, isRunning, activeWorktree: nav.activeWorktree });
+
+  const { logs: streamedBootLogs } = useBootLogStream(id, workspace?.url, workspace?.status);
+  const { ports: detectedPorts } = useWorkspacePorts(workspace?.url ?? undefined, id, terminalToken ?? undefined, isRunning);
+
+  // ── Worktrees ──
+  const wt = useWorkspaceWorktrees({
+    workspaceId: id, workspaceUrl: workspace?.url, terminalToken, isRunning,
+    activeWorktree: nav.activeWorktree, searchParams: nav.searchParams, navigate: nav.navigate,
+    handleSelectWorktree: nav.handleSelectWorktree,
   });
 
-  // Propagate token refresh errors to the terminal error display
-  useEffect(() => {
-    if (tokenRefreshError) {
-      setTerminalError(tokenRefreshError);
-    }
-  }, [tokenRefreshError]);
-
-  // Real-time boot log streaming via WebSocket during workspace creation
-  const { logs: streamedBootLogs } = useBootLogStream(
-    id,
-    workspace?.url,
-    workspace?.status
-  );
-
+  // ── Load workspace state ──
   const loadWorkspaceState = useCallback(async () => {
-    if (!id) {
-      return;
-    }
-
+    if (!id) return;
     try {
       setError(null);
-      const workspaceData = await getWorkspace(id);
-      setWorkspace(workspaceData);
-      setDisplayNameInput(workspaceData.displayName || workspaceData.name);
-
-      // Try live session data from VM Agent when workspace is running and token is available
-      const wsRunning =
-        workspaceData.status === 'running' || workspaceData.status === 'recovery';
+      const ws = await getWorkspace(id);
+      setWorkspace(ws);
+      setDisplayNameInput(ws.displayName || ws.name);
+      const wsRunning = ws.status === 'running' || ws.status === 'recovery';
       let sessionsData: AgentSession[] = [];
-      if (wsRunning && workspaceData.url && terminalToken) {
+      if (wsRunning && ws.url && terminalToken) {
         try {
-          // Fetch live sessions (hostStatus/viewerCount) and control plane sessions
-          // (agentType) in parallel, then merge.
-          const [liveSessions, cpSessions] = await Promise.all([
-            listAgentSessionsLive(workspaceData.url, id, terminalToken),
+          const [live, cp] = await Promise.all([
+            listAgentSessionsLive(ws.url, id, terminalToken),
             listAgentSessions(id).catch(() => [] as AgentSession[]),
           ]);
-          const cpMap = new Map(cpSessions.map((s) => [s.id, s]));
-          sessionsData = liveSessions.map((s) => ({
-            ...s,
-            agentType: s.agentType ?? cpMap.get(s.id)?.agentType ?? null,
-          }));
-        } catch {
-          // Fall back to control plane API (no live hostStatus/viewerCount)
-          sessionsData = await listAgentSessions(id);
-        }
-      } else {
-        sessionsData = await listAgentSessions(id);
-      }
+          const cpMap = new Map(cp.map((s) => [s.id, s]));
+          sessionsData = live.map((s) => ({ ...s, agentType: s.agentType ?? cpMap.get(s.id)?.agentType ?? null }));
+        } catch { sessionsData = await listAgentSessions(id); }
+      } else { sessionsData = await listAgentSessions(id); }
       setAgentSessions(sessionsData || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load workspace');
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to load workspace'); }
+    finally { setLoading(false); }
   }, [id, terminalToken]);
 
-  // Load workspace
+  // ── Sessions ──
+  const sessions = useWorkspaceSessions({
+    workspaceId: id, isRunning, activeWorktree: nav.activeWorktree,
+    searchParams: nav.searchParams, navigate: nav.navigate, sessionIdParam,
+    tabOrderAssign: tabOrder.assignOrder, agentSessions, setAgentSessions, loadWorkspaceState,
+  });
+
+  // ── Polling ──
   useEffect(() => {
     if (!id) return;
-
     void loadWorkspaceState();
-
     const interval = setInterval(() => {
-      if (
-        workspace?.status === 'creating' ||
-        workspace?.status === 'stopping' ||
-        workspace?.status === 'running' ||
-        workspace?.status === 'recovery'
-      ) {
-        void loadWorkspaceState();
-      }
+      if (['creating', 'stopping', 'running', 'recovery'].includes(workspace?.status ?? '')) void loadWorkspaceState();
     }, 5000);
-
     return () => clearInterval(interval);
   }, [id, workspace?.status, loadWorkspaceState]);
 
-  const buildTerminalWsUrl = useCallback(
-    (token: string): string | null => {
-      if (!workspace?.url) return null;
-      try {
-        const url = new URL(workspace.url);
-        const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsPath = featureFlags.multiTerminal ? '/terminal/ws/multi' : '/terminal/ws';
-        return `${wsProtocol}//${url.host}${wsPath}?token=${encodeURIComponent(token)}`;
-      } catch {
-        return null;
-      }
-    },
-    [workspace?.url, featureFlags.multiTerminal]
-  );
-
+  // ── Workspace events ──
   useEffect(() => {
-    terminalWsUrlCacheRef.current = null;
-  }, [workspace?.url, id, featureFlags.multiTerminal]);
-
-  const resolveTerminalWsUrl = useCallback(async (): Promise<string | null> => {
-    if (!id) return null;
-
-    const cached = terminalWsUrlCacheRef.current;
-    if (cached && Date.now() - cached.resolvedAt < 15_000) {
-      return cached.url;
-    }
-
-    const { token } = await getTerminalToken(id);
-    const resolvedUrl = buildTerminalWsUrl(token);
-    if (!resolvedUrl) {
-      throw new Error('Invalid workspace URL');
-    }
-    terminalWsUrlCacheRef.current = { url: resolvedUrl, resolvedAt: Date.now() };
-    return resolvedUrl;
-  }, [id, buildTerminalWsUrl]);
-
-  // Derive WebSocket URL from the terminal token.
-  // Only update wsUrl on the INITIAL token fetch or when the workspace URL
-  // changes — NOT on proactive token refreshes. Changing wsUrl tears down
-  // the WebSocket and triggers a full reconnect, which re-triggers replay
-  // and can cause jumbled messages (Bug 5). Reconnect paths resolve a fresh
-  // URL/token via resolveTerminalWsUrl without resetting the live socket.
-  const wsUrlSetRef = useRef(false);
-  useEffect(() => {
-    if (!workspace?.url || !terminalToken || !isRunning) {
-      setWsUrl(null);
-      wsUrlSetRef.current = false;
-      return;
-    }
-
-    // Skip if we already have a wsUrl — proactive refresh should not
-    // cause a reconnect while the connection is still alive.
-    if (wsUrlSetRef.current) return;
-
-    const nextUrl = buildTerminalWsUrl(terminalToken);
-    if (!nextUrl) {
-      setWsUrl(null);
-      setTerminalError('Invalid workspace URL');
-      return;
-    }
-
-    setWsUrl(nextUrl);
-    terminalWsUrlCacheRef.current = { url: nextUrl, resolvedAt: Date.now() };
-    setTerminalError(null);
-    wsUrlSetRef.current = true;
-  }, [workspace?.url, terminalToken, isRunning, buildTerminalWsUrl]);
-
-  // Poll detected ports from VM Agent
-  const { ports: detectedPorts } = useWorkspacePorts(
-    workspace?.url ?? undefined,
-    id,
-    terminalToken ?? undefined,
-    isRunning
-  );
-
-  // Fetch workspace events directly from the VM Agent (not proxied through control plane)
-  useEffect(() => {
-    if (!id || !workspace?.url || !terminalToken || !isRunning) {
-      return;
-    }
-
-    const fetchEvents = async () => {
-      try {
-        const data = await listWorkspaceEvents(workspace.url!, id, terminalToken, 50);
-        setWorkspaceEvents(data.events || []);
-      } catch {
-        // Events are a secondary concern — don't overwrite primary workspace errors.
-        // The sidebar will show an empty events list; polling will retry on next tick.
-      }
-    };
-
-    void fetchEvents();
-    const interval = setInterval(() => void fetchEvents(), 10000);
+    if (!id || !workspace?.url || !terminalToken || !isRunning) return;
+    const fetch = async () => { try { const d = await listWorkspaceEvents(workspace.url!, id, terminalToken, 50); setWorkspaceEvents(d.events || []); } catch { /* ignore polling errors */ } };
+    void fetch();
+    const interval = setInterval(() => void fetch(), 10000);
     return () => clearInterval(interval);
   }, [id, workspace?.url, isRunning, terminalToken]);
 
-  // Load agent options when running
-  useEffect(() => {
-    if (!isRunning) {
-      setAgentOptions([]);
-      return;
-    }
-
-    let cancelled = false;
-    void (async () => {
-      try {
-        const data = await listAgents();
-        if (!cancelled) {
-          setAgentOptions(data.agents || []);
-        }
-      } catch {
-        if (!cancelled) {
-          setAgentOptions([]);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isRunning]);
-
-  const refreshWorktrees = useCallback(async () => {
-    if (!id || !workspace?.url || !terminalToken || !isRunning) return;
-    try {
-      setWorktreeLoading(true);
-      const response = await getWorktrees(workspace.url, id, terminalToken);
-      setWorktrees(response.worktrees ?? []);
-    } catch {
-      setWorktrees([]);
-    } finally {
-      setWorktreeLoading(false);
-    }
-  }, [id, workspace?.url, terminalToken, isRunning]);
-
-  const fetchRemoteBranches = useCallback(async () => {
-    if (!id || !workspace?.url || !terminalToken || !isRunning) return;
-    try {
-      setRemoteBranchesLoading(true);
-      const response = await getGitBranches(workspace.url, id, terminalToken);
-      setRemoteBranches(response.branches ?? []);
-    } catch {
-      setRemoteBranches([]);
-    } finally {
-      setRemoteBranchesLoading(false);
-    }
-  }, [id, workspace?.url, terminalToken, isRunning]);
-
-  useEffect(() => {
-    void refreshWorktrees();
-  }, [refreshWorktrees]);
-
-  useEffect(() => {
-    if (!id) return;
-    if (!activeWorktree) return;
-    if (worktrees.length === 0) return;
-    if (worktrees.some((wt) => wt.path === activeWorktree)) return;
-
-    const params = new URLSearchParams(searchParams);
-    params.delete('worktree');
-    navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
-  }, [activeWorktree, id, navigate, searchParams, worktrees]);
-
-  // Close create menu on outside click
-  useEffect(() => {
-    if (!createMenuOpen) {
-      return;
-    }
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!createMenuRef.current) {
-        return;
-      }
-      const target = event.target as Node | null;
-      if (target && !createMenuRef.current.contains(target)) {
-        setCreateMenuOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handlePointerDown);
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-    };
-  }, [createMenuOpen]);
-
-  // Close mobile menu on Escape key
+  // ── Close mobile menu on Escape ──
   useEffect(() => {
     if (!mobileMenuOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setMobileMenuOpen(false);
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobileMenuOpen(false); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
   }, [mobileMenuOpen]);
 
-  // Auto-select session from URL on reload
-  useEffect(() => {
-    if (sessionIdParam && viewMode !== 'conversation') {
-      setViewMode('conversation');
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Auto-switch to an active chat session on initial load when the URL has
-  // no explicit view preference. Without this, opening a workspace always
-  // lands on the terminal even when chat sessions are already running.
+  // ── Auto-select session ──
+  useEffect(() => { if (sessionIdParam && viewMode !== 'conversation') setViewMode('conversation'); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const initialViewResolvedRef = useRef(false);
   useEffect(() => {
-    // Only run once, on the first time sessions are loaded
     if (initialViewResolvedRef.current) return;
-    // Don't override an explicit URL view preference
-    if (viewOverride) {
-      initialViewResolvedRef.current = true;
-      return;
-    }
-    // Don't override when a specific sessionId is already in the URL
-    if (sessionIdParam) {
-      initialViewResolvedRef.current = true;
-      return;
-    }
-    // Wait until sessions have been loaded at least once
+    if (viewOverride || sessionIdParam) { initialViewResolvedRef.current = true; return; }
     if (agentSessions.length === 0) return;
-
-    const firstActive = agentSessions.find(
-      (session) => isSessionActive(session) && !recentlyStopped.has(session.id)
-    );
-    if (firstActive) {
-      initialViewResolvedRef.current = true;
-      const params = new URLSearchParams(searchParams);
-      params.set('view', 'conversation');
-      params.set('sessionId', firstActive.id);
-      navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
+    const first = agentSessions.find((s) => isSessionActive(s) && !sessions.recentlyStopped.has(s.id));
+    initialViewResolvedRef.current = true;
+    if (first) {
+      const p = new URLSearchParams(nav.searchParams);
+      p.set('view', 'conversation'); p.set('sessionId', first.id);
+      nav.navigate(`/workspaces/${id}?${p.toString()}`, { replace: true });
       setViewMode('conversation');
-    } else {
-      // No active chat sessions — terminal is the right default
-      initialViewResolvedRef.current = true;
     }
-  }, [agentSessions, viewOverride, sessionIdParam, id, navigate, searchParams, recentlyStopped]);
+  }, [agentSessions, viewOverride, sessionIdParam, id, nav, sessions.recentlyStopped]);
 
-  // Throttle terminal activity handling to avoid excessive API calls.
-  // Without this, every keystroke in the terminal triggers a full workspace
-  // state reload (API call to getWorkspace + listAgentSessions), which both
-  // wastes bandwidth and creates memory pressure from rapid state updates.
-  const activityThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const ACTIVITY_THROTTLE_MS = 10_000;
+  // ── Activity throttle ──
+  const activityRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleTerminalActivity = useCallback(() => {
-    if (!id) return;
-    if (activityThrottleRef.current) return; // Already scheduled
-    activityThrottleRef.current = setTimeout(() => {
-      activityThrottleRef.current = null;
-    }, ACTIVITY_THROTTLE_MS);
+    if (!id || activityRef.current) return;
+    activityRef.current = setTimeout(() => { activityRef.current = null; }, 10_000);
     void loadWorkspaceState();
   }, [id, loadWorkspaceState]);
+  useEffect(() => () => { if (activityRef.current) clearTimeout(activityRef.current); }, []);
 
-  // Clean up throttle timer on unmount
-  useEffect(() => {
-    return () => {
-      if (activityThrottleRef.current) {
-        clearTimeout(activityThrottleRef.current);
-      }
-    };
-  }, []);
+  const handleUsageChange = useCallback((sessionId: string, usage: TokenUsage) => {
+    setSessionTokenUsages((prev) => {
+      const idx = prev.findIndex((s) => s.sessionId === sessionId);
+      const session = agentSessions.find((s) => s.id === sessionId);
+      const entry: SessionTokenUsage = { sessionId, label: session?.label ?? `Chat ${sessionId.slice(-4)}`, usage };
+      if (idx >= 0) { const next = [...prev]; next[idx] = entry; return next; }
+      return [...prev, entry];
+    });
+  }, [agentSessions]);
 
-  const handleUsageChange = useCallback(
-    (sessionId: string, usage: TokenUsage) => {
-      setSessionTokenUsages((prev) => {
-        const idx = prev.findIndex((s) => s.sessionId === sessionId);
-        // Find a label from agentSessions
-        const session = agentSessions.find((s) => s.id === sessionId);
-        const label = session?.label ?? `Chat ${sessionId.slice(-4)}`;
-        const entry: SessionTokenUsage = { sessionId, label, usage };
-        if (idx >= 0) {
-          const next = [...prev];
-          next[idx] = entry;
-          return next;
-        }
-        return [...prev, entry];
-      });
-    },
-    [agentSessions]
-  );
-
+  // ── Workspace actions ──
   const handleStop = async () => {
     if (!id) return;
-    try {
-      setActionLoading(true);
-      await stopWorkspace(id);
-      setWorkspace((prev) => (prev ? { ...prev, status: 'stopping' } : null));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to stop workspace');
-    } finally {
-      setActionLoading(false);
-    }
+    try { setActionLoading(true); await stopWorkspace(id); setWorkspace((p) => p ? { ...p, status: 'stopping' } : null); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Failed to stop'); } finally { setActionLoading(false); }
   };
-
   const handleRestart = async () => {
     if (!id) return;
-    try {
-      setActionLoading(true);
-      await restartWorkspace(id);
-      // Clear previous error state and boot logs for a fresh provisioning view
-      setWorkspace((prev) => (prev ? { ...prev, status: 'creating', errorMessage: null, bootLogs: [] } : null));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to restart workspace');
-    } finally {
-      setActionLoading(false);
-    }
+    try { setActionLoading(true); await restartWorkspace(id); setWorkspace((p) => p ? { ...p, status: 'creating', errorMessage: null, bootLogs: [] } : null); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Failed to restart'); } finally { setActionLoading(false); }
   };
-
   const handleRebuild = async () => {
     if (!id) return;
-    const confirmed = window.confirm(
-      'This will rebuild the devcontainer from scratch. Any unsaved terminal state will be lost. Continue?'
-    );
-    if (!confirmed) return;
-    try {
-      setActionLoading(true);
-      await rebuildWorkspace(id);
-      // Clear previous error state and boot logs for a fresh provisioning view
-      setWorkspace((prev) => (prev ? { ...prev, status: 'creating', errorMessage: null, bootLogs: [] } : null));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to rebuild workspace');
-    } finally {
-      setActionLoading(false);
-    }
+    if (!window.confirm('This will rebuild the devcontainer from scratch. Any unsaved terminal state will be lost. Continue?')) return;
+    try { setActionLoading(true); await rebuildWorkspace(id); setWorkspace((p) => p ? { ...p, status: 'creating', errorMessage: null, bootLogs: [] } : null); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Failed to rebuild'); } finally { setActionLoading(false); }
   };
-
   const handleRename = async () => {
-    if (!id || !displayNameInput.trim()) {
-      return;
-    }
-    try {
-      setRenaming(true);
-      const updated = await updateWorkspace(id, { displayName: displayNameInput.trim() });
-      setWorkspace(updated);
-      setDisplayNameInput(updated.displayName || updated.name);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to rename workspace');
-    } finally {
-      setRenaming(false);
-    }
+    if (!id || !displayNameInput.trim()) return;
+    try { setRenaming(true); const u = await updateWorkspace(id, { displayName: displayNameInput.trim() }); setWorkspace(u); setDisplayNameInput(u.displayName || u.name); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Failed to rename'); } finally { setRenaming(false); }
   };
 
-  // ── Git changes panel navigation ──
-  const handleOpenGitChanges = useCallback(() => {
-    const params = new URLSearchParams(searchParams);
-    // Clear file browser params (mutually exclusive)
-    params.delete('files');
-    params.delete('path');
-    params.set('git', 'changes');
-    params.delete('file');
-    params.delete('staged');
-    navigate(`/workspaces/${id}?${params.toString()}`);
-  }, [id, navigate, searchParams]);
+  // ── Session wrappers ──
+  const activeChatSessionId = viewMode === 'conversation'
+    ? sessionIdParam || agentSessions.find((s) => isSessionActive(s) && !sessions.recentlyStopped.has(s.id))?.id || null
+    : null;
 
-  const handleCloseGitPanel = useCallback(() => {
-    const params = new URLSearchParams(searchParams);
-    params.delete('git');
-    params.delete('file');
-    params.delete('staged');
-    navigate(`/workspaces/${id}?${params.toString()}`);
-  }, [id, navigate, searchParams]);
-
-  const handleNavigateToGitDiff = useCallback(
-    (filePath: string, staged: boolean) => {
-      const params = new URLSearchParams(searchParams);
-      params.set('git', 'diff');
-      params.set('file', filePath);
-      params.set('staged', String(staged));
-      navigate(`/workspaces/${id}?${params.toString()}`);
-    },
-    [id, navigate, searchParams]
-  );
-
-  const handleBackFromGitDiff = useCallback(() => {
-    const params = new URLSearchParams(searchParams);
-    params.set('git', 'changes');
-    params.delete('file');
-    params.delete('staged');
-    navigate(`/workspaces/${id}?${params.toString()}`);
-  }, [id, navigate, searchParams]);
-
-  const handleGitDiffToFileBrowser = useCallback(
-    (filePath: string) => {
-      const params = new URLSearchParams(searchParams);
-      params.delete('git');
-      params.delete('file');
-      params.delete('staged');
-      params.set('files', 'view');
-      params.set('path', filePath);
-      navigate(`/workspaces/${id}?${params.toString()}`);
-    },
-    [id, navigate, searchParams]
-  );
-
-  // ── File browser navigation ──
-  const handleOpenFileBrowser = useCallback(() => {
-    const params = new URLSearchParams(searchParams);
-    // Clear git params (mutually exclusive)
-    params.delete('git');
-    params.delete('file');
-    params.delete('staged');
-    params.set('files', 'browse');
-    params.delete('path');
-    navigate(`/workspaces/${id}?${params.toString()}`);
-  }, [id, navigate, searchParams]);
-
-  const handleFileBrowserNavigate = useCallback(
-    (dirPath: string) => {
-      const params = new URLSearchParams(searchParams);
-      params.delete('git');
-      params.delete('file');
-      params.delete('staged');
-      params.set('files', 'browse');
-      if (dirPath && dirPath !== '.') {
-        params.set('path', dirPath);
-      } else {
-        params.delete('path');
-      }
-      navigate(`/workspaces/${id}?${params.toString()}`);
-    },
-    [id, navigate, searchParams]
-  );
-
-  const handleFileViewerOpen = useCallback(
-    (filePath: string) => {
-      const params = new URLSearchParams(searchParams);
-      params.delete('git');
-      params.delete('file');
-      params.delete('staged');
-      params.set('files', 'view');
-      params.set('path', filePath);
-      navigate(`/workspaces/${id}?${params.toString()}`);
-    },
-    [id, navigate, searchParams]
-  );
-
-  const handleFileViewerBack = useCallback(() => {
-    const params = new URLSearchParams(searchParams);
-    params.set('files', 'browse');
-    // Navigate to the parent directory of the current file
-    const currentPath = params.get('path') ?? '';
-    const lastSlash = currentPath.lastIndexOf('/');
-    if (lastSlash > 0) {
-      params.set('path', currentPath.slice(0, lastSlash));
-    } else {
-      params.delete('path');
-    }
-    navigate(`/workspaces/${id}?${params.toString()}`);
-  }, [id, navigate, searchParams]);
-
-  const handleCloseFileBrowser = useCallback(() => {
-    const params = new URLSearchParams(searchParams);
-    params.delete('files');
-    params.delete('path');
-    navigate(`/workspaces/${id}?${params.toString()}`);
-  }, [id, navigate, searchParams]);
-
-  const handleFileViewerToDiff = useCallback(
-    (filePath: string, staged: boolean) => {
-      const params = new URLSearchParams(searchParams);
-      params.delete('files');
-      params.delete('path');
-      params.set('git', 'diff');
-      params.set('file', filePath);
-      params.set('staged', String(staged));
-      navigate(`/workspaces/${id}?${params.toString()}`);
-    },
-    [id, navigate, searchParams]
-  );
-
-  const handleSelectWorktree = useCallback(
-    (worktreePath: string | null) => {
-      if (!id) return;
-      const params = new URLSearchParams(searchParams);
-      if (worktreePath) params.set('worktree', worktreePath);
-      else params.delete('worktree');
-
-      // Switching worktree resets stale side panels/query context.
-      params.delete('git');
-      params.delete('file');
-      params.delete('staged');
-      params.delete('files');
-      params.delete('path');
-
-      navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
-    },
-    [id, navigate, searchParams]
-  );
-
-  const handleCreateWorktree = useCallback(
-    async (request: { branch: string; createBranch: boolean; baseBranch?: string }) => {
-      if (!id || !workspace?.url || !terminalToken) return;
-      await createWorktree(workspace.url, id, terminalToken, request);
-      await refreshWorktrees();
-    },
-    [id, workspace?.url, terminalToken, refreshWorktrees]
-  );
-
-  const handleRemoveWorktree = useCallback(
-    async (path: string, force: boolean) => {
-      if (!id || !workspace?.url || !terminalToken) return;
-      await removeWorktree(workspace.url, id, terminalToken, path, force);
-      if (activeWorktree === path) {
-        handleSelectWorktree(null);
-      }
-      await refreshWorktrees();
-    },
-    [id, workspace?.url, terminalToken, activeWorktree, handleSelectWorktree, refreshWorktrees]
-  );
-
-  const applyGitStatus = useCallback((status: GitStatusData) => {
-    setGitStatus(status);
-    setGitChangeCount(countGitChanges(status));
-    setGitStatusStale(false);
-  }, []);
-
-  const markGitStatusStale = useCallback(() => {
-    setGitStatusStale(true);
-  }, []);
-
-  // Keep git status badge fresh: retry initial load and poll periodically.
-  useEffect(() => {
-    if (!workspace?.url || !terminalToken || !id || !isRunning) {
-      setGitStatus(null);
-      setGitChangeCount(0);
-      setGitStatusStale(false);
-      return;
-    }
-
-    const workspaceId = id;
-    const workspaceUrl = workspace.url;
-    let disposed = false;
-
-    const fetchGitStatus = async (retryOnFailure: boolean) => {
-      const delays = retryOnFailure ? GIT_STATUS_RETRY_DELAYS_MS : [];
-      const attempts = delays.length + 1;
-      for (let attempt = 0; attempt < attempts; attempt += 1) {
-        try {
-          const status = await getGitStatus(
-            workspaceUrl,
-            workspaceId,
-            terminalToken,
-            activeWorktree ?? undefined
-          );
-          if (!disposed) applyGitStatus(status);
-          return;
-        } catch {
-          if (attempt === attempts - 1) {
-            if (!disposed) markGitStatusStale();
-            return;
-          }
-          const delay = delays[attempt] ?? 0;
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-      }
-    };
-
-    void fetchGitStatus(true);
-    const interval = setInterval(() => {
-      void fetchGitStatus(false);
-    }, GIT_STATUS_POLL_INTERVAL_MS);
-
-    return () => {
-      disposed = true;
-      clearInterval(interval);
-    };
-  }, [
-    workspace?.url,
-    terminalToken,
-    id,
-    isRunning,
-    activeWorktree,
-    applyGitStatus,
-    markGitStatusStale,
-  ]);
-
-  const configuredAgents = useMemo(
-    () => agentOptions.filter((agent) => agent.configured && agent.supportsAcp),
-    [agentOptions]
-  );
-
-  const agentNameById = useMemo(
-    () => new Map(configuredAgents.map((agent) => [agent.id, agent.name])),
-    [configuredAgents]
-  );
-
-  const activeChatSessionId =
-    viewMode === 'conversation'
-      ? sessionIdParam ||
-        agentSessions.find(
-          (session) => isSessionActive(session) && !recentlyStopped.has(session.id)
-        )?.id ||
-        null
-      : null;
-
-  const handleCreateSession = async (preferredAgentId?: AgentInfo['id']) => {
-    if (!id) {
-      return;
-    }
-
-    try {
-      setSessionsLoading(true);
-      const preferredAgent = preferredAgentId
-        ? configuredAgents.find((agent) => agent.id === preferredAgentId)
-        : undefined;
-
-      // Generate a numbered label: count existing running sessions + 1
-      const runningCount = agentSessions.filter((s) => s.status === 'running').length;
-      const nextNumber = runningCount + 1;
-      const label = preferredAgent ? `${preferredAgent.name} ${nextNumber}` : `Chat ${nextNumber}`;
-
-      const created = await createAgentSession(id, {
-        label,
-        agentType: preferredAgentId,
-        worktreePath: activeWorktree ?? undefined,
-      });
-
-      setAgentSessions((prev) => {
-        const remaining = prev.filter((session) => session.id !== created.id);
-        return [...remaining, created];
-      });
-
-      tabOrder.assignOrder(`chat:${created.id}`);
-
-      if (preferredAgentId) {
-        setPreferredAgentsBySession((prev) => ({ ...prev, [created.id]: preferredAgentId }));
-      }
-
-      const params = new URLSearchParams(searchParams);
-      params.set('view', 'conversation');
-      params.set('sessionId', created.id);
-      navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
-      setViewMode('conversation');
-      setCreateMenuOpen(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create session');
-    } finally {
-      setSessionsLoading(false);
-    }
-  };
-
-  const handleStopSession = async (sessionId: string) => {
-    if (!id) {
-      return;
-    }
-
-    try {
-      setSessionsLoading(true);
-      await stopAgentSession(id, sessionId);
-      const sessions = await listAgentSessions(id);
-      setAgentSessions(sessions);
-      // Clean up refs to prevent leaked ChatSession handles
-      chatSessionRefs.current.delete(sessionId);
-      setPreferredAgentsBySession((prev) => {
-        if (!prev[sessionId]) {
-          return prev;
-        }
-        const next = { ...prev };
-        delete next[sessionId];
-        return next;
-      });
-      // Clean up stale token usage entry
-      setSessionTokenUsages((prev) => prev.filter((s) => s.sessionId !== sessionId));
-
-      if (sessionIdParam === sessionId) {
-        const params = new URLSearchParams(searchParams);
-        params.set('view', 'terminal');
-        params.delete('sessionId');
-        navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
-        setViewMode('terminal');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to stop session');
-    } finally {
-      setSessionsLoading(false);
-    }
-  };
-
-  const handleAttachSession = (sessionId: string) => {
-    if (!id) {
-      return;
-    }
-    const params = new URLSearchParams(searchParams);
-    params.set('view', 'conversation');
-    params.set('sessionId', sessionId);
-    navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
-    setViewMode('conversation');
-  };
-
-  const handleResumeSession = async (sessionId: string) => {
+  const handleAttachSession = (sid: string) => {
     if (!id) return;
-    try {
-      setSessionsLoading(true);
-      await resumeAgentSession(id, sessionId);
-      const sessions = await listAgentSessions(id);
-      setAgentSessions(sessions);
-      // Navigate to the resumed session
-      handleAttachSession(sessionId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to resume session');
-    } finally {
-      setSessionsLoading(false);
-    }
+    const p = new URLSearchParams(nav.searchParams); p.set('view', 'conversation'); p.set('sessionId', sid);
+    nav.navigate(`/workspaces/${id}?${p.toString()}`, { replace: true }); setViewMode('conversation');
   };
-
-  const handleDeleteHistorySession = async (sessionId: string) => {
-    if (!id) return;
+  const handleStopSession = async (sid: string) => {
     try {
-      setSessionsLoading(true);
-      await stopAgentSession(id, sessionId);
-      const sessions = await listAgentSessions(id);
-      setAgentSessions(sessions);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete session');
-    } finally {
-      setSessionsLoading(false);
-    }
+      const r = await sessions.handleStopSession(sid);
+      chatSessionRefs.current.delete(sid);
+      setSessionTokenUsages((prev) => prev.filter((s) => s.sessionId !== sid));
+      if (r?.wasActive) { const p = new URLSearchParams(nav.searchParams); p.set('view', 'terminal'); p.delete('sessionId'); nav.navigate(`/workspaces/${id}?${p.toString()}`, { replace: true }); setViewMode('terminal'); }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed to stop session'); }
   };
-
+  const handleResumeSession = async (sid: string) => {
+    try { await sessions.handleResumeSession(sid); handleAttachSession(sid); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Failed to resume session'); }
+  };
+  const handleDeleteHistorySession = async (sid: string) => {
+    try { await sessions.handleDeleteHistorySession(sid); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Failed to delete session'); }
+  };
   const handleCreateTerminalTab = () => {
     setViewMode('terminal');
-    const params = new URLSearchParams(searchParams);
-    params.set('view', 'terminal');
-    params.delete('sessionId');
-    navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
-    const sessionId = multiTerminalRef.current?.createSession();
-    if (sessionId) {
-      tabOrder.assignOrder(`terminal:${sessionId}`);
-      setActiveTerminalSessionId(sessionId);
-      multiTerminalRef.current?.activateSession(sessionId);
-    }
-    setCreateMenuOpen(false);
+    const p = new URLSearchParams(nav.searchParams); p.set('view', 'terminal'); p.delete('sessionId');
+    nav.navigate(`/workspaces/${id}?${p.toString()}`, { replace: true });
+    const sid = multiTerminalRef.current?.createSession();
+    if (sid) { tabOrder.assignOrder(`terminal:${sid}`); setActiveTerminalSessionId(sid); multiTerminalRef.current?.activateSession(sid); }
+  };
+  const handleCreateSession = async (agentId?: AgentInfo['id']) => {
+    try { await sessions.handleCreateSession(agentId, setViewMode as (m: 'conversation') => void); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Failed to create session'); }
   };
 
+  // ── Tabs ──
+  const tabs = useWorkspaceTabs({
+    isRunning, multiTerminal: featureFlags.multiTerminal, terminalTabs,
+    agentSessions, agentNameById: sessions.agentNameById, preferredAgentsBySession: sessions.preferredAgentsBySession,
+    recentlyStopped: sessions.recentlyStopped, worktrees: wt.worktrees, tabOrder, viewMode, activeTerminalSessionId, activeChatSessionId,
+  });
   const handleSelectWorkspaceTab = (tab: WorkspaceTab) => {
     if (tab.kind === 'terminal') {
-      setViewMode('terminal');
-      const params = new URLSearchParams(searchParams);
-      params.set('view', 'terminal');
-      params.delete('sessionId');
-      navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
-      multiTerminalRef.current?.activateSession(tab.sessionId);
-      return;
+      setViewMode('terminal'); const p = new URLSearchParams(nav.searchParams); p.set('view', 'terminal'); p.delete('sessionId');
+      nav.navigate(`/workspaces/${id}?${p.toString()}`, { replace: true }); multiTerminalRef.current?.activateSession(tab.sessionId); return;
     }
-
-    // Auto-resume suspended sessions when their tab is clicked.
-    if (tab.status === 'suspended') {
-      void handleResumeSession(tab.sessionId);
-      return;
-    }
-
+    if (tab.status === 'suspended') { void handleResumeSession(tab.sessionId); return; }
     handleAttachSession(tab.sessionId);
   };
-
   const handleCloseWorkspaceTab = (tab: WorkspaceTab) => {
-    if (activeTabId === tab.id) {
-      const closeIndex = workspaceTabs.findIndex((candidate) => candidate.id === tab.id);
-      const remainingTabs = workspaceTabs.filter((candidate) => candidate.id !== tab.id);
-      if (remainingTabs.length > 0) {
-        const fallbackIndex = closeIndex >= 0 ? Math.min(closeIndex, remainingTabs.length - 1) : 0;
-        handleSelectWorkspaceTab(remainingTabs[fallbackIndex]!);
-      } else {
-        setViewMode('terminal');
-        setActiveTerminalSessionId(null);
-        const params = new URLSearchParams(searchParams);
-        params.set('view', 'terminal');
-        params.delete('sessionId');
-        navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
-      }
+    if (tabs.activeTabId === tab.id) {
+      const ci = tabs.workspaceTabs.findIndex((c) => c.id === tab.id);
+      const rem = tabs.workspaceTabs.filter((c) => c.id !== tab.id);
+      if (rem.length > 0) handleSelectWorkspaceTab(rem[Math.min(ci, rem.length - 1)]!);
+      else { setViewMode('terminal'); setActiveTerminalSessionId(null); const p = new URLSearchParams(nav.searchParams); p.set('view', 'terminal'); p.delete('sessionId'); nav.navigate(`/workspaces/${id}?${p.toString()}`, { replace: true }); }
     }
-
     tabOrder.removeTab(tab.id);
-
-    if (tab.kind === 'terminal') {
-      multiTerminalRef.current?.closeSession(tab.sessionId);
-      return;
-    }
-
+    if (tab.kind === 'terminal') { multiTerminalRef.current?.closeSession(tab.sessionId); return; }
     void handleStopSession(tab.sessionId);
   };
-
-  const defaultAgentId = configuredAgents.length === 1 ? configuredAgents[0]!.id : null;
-  const defaultAgentName = defaultAgentId ? (agentNameById.get(defaultAgentId) ?? null) : null;
-
-  const visibleTerminalTabs = useMemo<MultiTerminalSessionSnapshot[]>(() => {
-    if (!isRunning || !featureFlags.multiTerminal) return [];
-    return terminalTabs;
-  }, [featureFlags.multiTerminal, isRunning, terminalTabs]);
-
-  const workspaceTabs = useMemo<WorkspaceTab[]>(() => {
-    const terminalSessionTabs: WorkspaceTab[] = visibleTerminalTabs.map((session) => ({
-      id: `terminal:${session.id}`,
-      kind: 'terminal',
-      sessionId: session.id,
-      title: session.name,
-      status: session.status,
-      badge: deriveWorktreeBadge(session.workingDirectory, worktrees),
-    }));
-
-    const chatSessionTabs: WorkspaceTab[] = agentSessions
-      .filter(
-        (session) =>
-          (isSessionActive(session) || session.status === 'suspended') &&
-          !recentlyStopped.has(session.id)
-      )
-      .map((session) => {
-        const preferredAgent = preferredAgentsBySession[session.id];
-        const preferredName = preferredAgent ? agentNameById.get(preferredAgent) : undefined;
-        const title =
-          session.label?.trim() ||
-          (preferredName ? `${preferredName} Chat` : `Chat ${session.id.slice(-4)}`);
-
-        return {
-          id: `chat:${session.id}`,
-          kind: 'chat' as const,
-          sessionId: session.id,
-          title,
-          status: session.status,
-          hostStatus: session.hostStatus,
-          viewerCount: session.viewerCount,
-          badge: deriveWorktreeBadge(session.worktreePath ?? undefined, worktrees),
-        };
-      });
-
-    return tabOrder.getSortedTabs([...terminalSessionTabs, ...chatSessionTabs]);
-  }, [
-    agentNameById,
-    agentSessions,
-    preferredAgentsBySession,
-    recentlyStopped,
-    tabOrder,
-    visibleTerminalTabs,
-    worktrees,
-  ]);
-
-  const handleRenameWorkspaceTab = useCallback(
-    (tabItem: WorkspaceTabItem, newName: string) => {
-      const tab = workspaceTabs.find((t) => t.id === tabItem.id);
-      if (!tab) return;
-
-      if (tab.kind === 'terminal') {
-        multiTerminalRef.current?.renameSession(tab.sessionId, newName);
-      } else if (tab.kind === 'chat' && id) {
-        // Update local state immediately for responsiveness
-        setAgentSessions((prev) =>
-          prev.map((s) => (s.id === tab.sessionId ? { ...s, label: newName } : s))
-        );
-        // Persist via API (fire-and-forget; local state is already updated)
-        void renameAgentSession(id, tab.sessionId, newName).catch(() => {
-          // Revert on failure — reload sessions from server
-          void listAgentSessions(id).then(setAgentSessions);
-        });
-      }
-    },
-    [id, workspaceTabs]
-  );
-
-  const activeTabId = useMemo(() => {
-    if (viewMode === 'terminal') {
-      if (activeTerminalSessionId) {
-        return `terminal:${activeTerminalSessionId}`;
-      }
-      if (visibleTerminalTabs.length > 0) {
-        return `terminal:${visibleTerminalTabs[0]!.id}`;
-      }
-      return null;
+  const handleRenameWorkspaceTab = useCallback((ti: WorkspaceTabItem, name: string) => {
+    const tab = tabs.workspaceTabs.find((t) => t.id === ti.id);
+    if (!tab) return;
+    if (tab.kind === 'terminal') multiTerminalRef.current?.renameSession(tab.sessionId, name);
+    else if (tab.kind === 'chat' && id) {
+      setAgentSessions((prev) => prev.map((s) => s.id === tab.sessionId ? { ...s, label: name } : s));
+      void renameAgentSession(id, tab.sessionId, name).catch(() => { void listAgentSessions(id).then(setAgentSessions); });
     }
-    return activeChatSessionId ? `chat:${activeChatSessionId}` : null;
-  }, [activeChatSessionId, activeTerminalSessionId, viewMode, visibleTerminalTabs]);
-
-  const handleSelectTabItem = useCallback(
-    (tabItem: WorkspaceTabItem) => {
-      const tab = workspaceTabs.find((t) => t.id === tabItem.id);
-      if (tab) handleSelectWorkspaceTab(tab);
-    },
-    [workspaceTabs] // eslint-disable-line react-hooks/exhaustive-deps
-  );
-
-  const handleCloseTabItem = useCallback(
-    (tabItem: WorkspaceTabItem) => {
-      const tab = workspaceTabs.find((t) => t.id === tabItem.id);
-      if (tab) handleCloseWorkspaceTab(tab);
-    },
-    [workspaceTabs] // eslint-disable-line react-hooks/exhaustive-deps
-  );
-
-  const tabStripItems = useMemo<WorkspaceTabItem[]>(
-    () =>
-      workspaceTabs.map((tab) => ({
-        id: tab.id,
-        kind: tab.kind,
-        sessionId: tab.sessionId,
-        title: tab.title,
-        statusColor: workspaceTabStatusColor(tab),
-        badge: tab.badge,
-        dimmed: tab.kind === 'chat' && tab.status === 'suspended',
-      })),
-    [workspaceTabs]
-  );
-
-  // Active chat sessions (for rendering ChatSession components) — includes orphans
-  const runningChatSessions = useMemo(
-    () => agentSessions.filter((s) => isSessionActive(s) && !recentlyStopped.has(s.id)),
-    [agentSessions, recentlyStopped]
-  );
-
-  // Orphaned sessions: alive on VM but DB status is not 'running'
-  const orphanedSessions = useMemo(
-    () => agentSessions.filter((s) => isOrphanedSession(s) && !recentlyStopped.has(s.id)),
-    [agentSessions, recentlyStopped]
-  );
-
-  // Session history: stopped sessions for the sidebar history panel.
-  // Suspended sessions are now shown as dimmed tabs in the tab strip
-  // (with click-to-resume), so they no longer appear here.
-  const historySessions = useMemo(
-    () =>
-      agentSessions
-        .filter((s) => s.status === 'stopped' && !recentlyStopped.has(s.id))
-        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-    [agentSessions, recentlyStopped]
-  );
-
-  // Auto-resume orphans: sync DB status to 'running' so control plane stays consistent
-  useEffect(() => {
-    if (!id || orphanedSessions.length === 0) return;
-    for (const session of orphanedSessions) {
-      void resumeAgentSession(id, session.id).catch(() => {
-        // Best effort DB sync — UI already shows the session via hostStatus
-      });
-    }
-  }, [id, orphanedSessions]);
-
-  const handleStopAllOrphans = useCallback(async () => {
-    if (!id) return;
-    const orphanIds = orphanedSessions.map((s) => s.id);
-    setRecentlyStopped((prev) => new Set([...prev, ...orphanIds]));
-
-    for (const session of orphanedSessions) {
-      try {
-        await stopAgentSession(id, session.id);
-      } catch {
-        // Best effort
-      }
-    }
-
-    void loadWorkspaceState();
-
-    setTimeout(() => {
-      setRecentlyStopped((prev) => {
-        const next = new Set(prev);
-        for (const oid of orphanIds) next.delete(oid);
-        return next;
-      });
-    }, 10_000);
-  }, [id, orphanedSessions, loadWorkspaceState]);
-
-  // Reset dismissed state when orphan count drops to zero
-  useEffect(() => {
-    if (orphanedSessions.length === 0) {
-      setDismissedOrphans(false);
-    }
-  }, [orphanedSessions.length]);
+  }, [id, tabs.workspaceTabs]);
 
   // ── Keyboard shortcuts ──
-  // The hook stores handlers via a ref internally, so it's safe to pass an
-  // inline object here — no useMemo needed, and no stale closure issues.
-  // Extracted into a variable so the same handlers can be shared with CommandPalette.
   const shortcutHandlers = {
-    'toggle-file-browser': () => {
-      if (!isRunning || !terminalToken) return;
-      if (filesParam) handleCloseFileBrowser();
-      else handleOpenFileBrowser();
-    },
-    'toggle-git-changes': () => {
-      if (!isRunning || !terminalToken) return;
-      if (gitParam) handleCloseGitPanel();
-      else handleOpenGitChanges();
-    },
-    'focus-chat': () => {
-      if (activeChatSessionId) {
-        if (viewMode !== 'conversation') {
-          handleAttachSession(activeChatSessionId);
-        }
-        // Small delay to let the view switch render before focusing
-        requestAnimationFrame(() => {
-          chatSessionRefs.current.get(activeChatSessionId)?.focusInput();
-        });
-      }
-    },
-    'focus-terminal': () => {
-      if (viewMode !== 'terminal') {
-        const firstTermTab = workspaceTabs.find((t) => t.kind === 'terminal');
-        if (firstTermTab) handleSelectWorkspaceTab(firstTermTab);
-      }
-      requestAnimationFrame(() => {
-        multiTerminalRef.current?.focus();
-      });
-    },
-    'switch-worktree': () => {
-      if (!isRunning || worktrees.length === 0) return;
-      const trigger = document.getElementById('worktree-selector-trigger');
-      trigger?.click();
-    },
-    'next-tab': () => {
-      if (workspaceTabs.length <= 1) return;
-      const currentIdx = workspaceTabs.findIndex((t) => t.id === activeTabId);
-      const nextIdx = currentIdx < 0 ? 0 : (currentIdx + 1) % workspaceTabs.length;
-      handleSelectWorkspaceTab(workspaceTabs[nextIdx]!);
-    },
-    'prev-tab': () => {
-      if (workspaceTabs.length <= 1) return;
-      const currentIdx = workspaceTabs.findIndex((t) => t.id === activeTabId);
-      const prevIdx = currentIdx <= 0 ? workspaceTabs.length - 1 : currentIdx - 1;
-      handleSelectWorkspaceTab(workspaceTabs[prevIdx]!);
-    },
-    ...Object.fromEntries(
-      Array.from({ length: 9 }, (_, i) => [
-        `tab-${i + 1}`,
-        () => {
-          if (i < workspaceTabs.length) {
-            handleSelectWorkspaceTab(workspaceTabs[i]!);
-          }
-        },
-      ])
-    ),
-    'new-chat': () => {
-      if (!isRunning) return;
-      void handleCreateSession(defaultAgentId ?? undefined);
-    },
-    'new-terminal': () => {
-      if (!isRunning) return;
-      handleCreateTerminalTab();
-    },
-    'command-palette': () => {
-      setShowCommandPalette((prev) => !prev);
-      setShowShortcutsHelp(false);
-    },
-    'show-shortcuts': () => {
-      setShowShortcutsHelp((prev) => !prev);
-    },
+    'toggle-file-browser': () => { if (isRunning && terminalToken) nav.filesParam ? nav.handleCloseFileBrowser() : nav.handleOpenFileBrowser(); },
+    'toggle-git-changes': () => { if (isRunning && terminalToken) nav.gitParam ? nav.handleCloseGitPanel() : nav.handleOpenGitChanges(); },
+    'focus-chat': () => { if (activeChatSessionId) { if (viewMode !== 'conversation') handleAttachSession(activeChatSessionId); requestAnimationFrame(() => chatSessionRefs.current.get(activeChatSessionId)?.focusInput()); } },
+    'focus-terminal': () => { if (viewMode !== 'terminal') { const t = tabs.workspaceTabs.find((t) => t.kind === 'terminal'); if (t) handleSelectWorkspaceTab(t); } requestAnimationFrame(() => multiTerminalRef.current?.focus()); },
+    'switch-worktree': () => { if (isRunning && wt.worktrees.length > 0) document.getElementById('worktree-selector-trigger')?.click(); },
+    'next-tab': () => { if (tabs.workspaceTabs.length > 1) { const i = tabs.workspaceTabs.findIndex((t) => t.id === tabs.activeTabId); handleSelectWorkspaceTab(tabs.workspaceTabs[(i < 0 ? 0 : i + 1) % tabs.workspaceTabs.length]!); } },
+    'prev-tab': () => { if (tabs.workspaceTabs.length > 1) { const i = tabs.workspaceTabs.findIndex((t) => t.id === tabs.activeTabId); handleSelectWorkspaceTab(tabs.workspaceTabs[i <= 0 ? tabs.workspaceTabs.length - 1 : i - 1]!); } },
+    ...Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`tab-${i + 1}`, () => { if (i < tabs.workspaceTabs.length) handleSelectWorkspaceTab(tabs.workspaceTabs[i]!); }])),
+    'new-chat': () => { if (isRunning) void handleCreateSession(sessions.defaultAgentId ?? undefined); },
+    'new-terminal': () => { if (isRunning) handleCreateTerminalTab(); },
+    'command-palette': () => { setShowCommandPalette((p) => !p); setShowShortcutsHelp(false); },
+    'show-shortcuts': () => setShowShortcutsHelp((p) => !p),
   };
   useKeyboardShortcuts(shortcutHandlers, isRunning);
 
-  // ── Palette: lazy-load file index when palette opens ──
+  // ── Command palette file index ──
   useEffect(() => {
-    if (!showCommandPalette || paletteFileIndexLoaded.current) return;
-    if (!workspace?.url || !terminalToken || !id || !isRunning) return;
-
+    if (!showCommandPalette || paletteFileIndexLoaded.current || !workspace?.url || !terminalToken || !id || !isRunning) return;
     paletteFileIndexLoaded.current = true;
     setPaletteFileIndexLoading(true);
-    getFileIndex(workspace.url, id, terminalToken, activeWorktree ?? undefined)
-      .then((files) => setPaletteFileIndex(files))
-      .catch((err) => console.warn('[palette] Failed to load file index:', err))
-      .finally(() => setPaletteFileIndexLoading(false));
-  }, [showCommandPalette, workspace?.url, terminalToken, id, isRunning, activeWorktree]);
+    getFileIndex(workspace.url, id, terminalToken, nav.activeWorktree ?? undefined)
+      .then((f) => setPaletteFileIndex(f)).catch((e) => console.warn('[palette] file index:', e)).finally(() => setPaletteFileIndexLoading(false));
+  }, [showCommandPalette, workspace?.url, terminalToken, id, isRunning, nav.activeWorktree]);
 
-  const handlePaletteSelectTab = useCallback(
-    (tab: WorkspaceTabItem) => {
-      // Find the matching WorkspaceTab and select it
-      const wsTab = workspaceTabs.find((t) => t.id === tab.id);
-      if (wsTab) {
-        handleSelectWorkspaceTab(wsTab);
-        // Focus the selected tab content
-        if (wsTab.kind === 'terminal') {
-          multiTerminalRef.current?.focus?.();
-        } else if (wsTab.kind === 'chat') {
-          const chatRef = chatSessionRefs.current.get(wsTab.sessionId);
-          chatRef?.focusInput?.();
-        }
-      }
-    },
-    [workspaceTabs, handleSelectWorkspaceTab]
-  );
+  const handlePaletteSelectTab = useCallback((tab: WorkspaceTabItem) => {
+    const t = tabs.workspaceTabs.find((w) => w.id === tab.id);
+    if (t) { handleSelectWorkspaceTab(t); if (t.kind === 'terminal') multiTerminalRef.current?.focus?.(); else if (t.kind === 'chat') chatSessionRefs.current.get(t.sessionId)?.focusInput?.(); }
+  }, [tabs.workspaceTabs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handlePaletteSelectFile = useCallback(
-    (filePath: string) => {
-      handleFileViewerOpen(filePath);
-    },
-    [handleFileViewerOpen]
-  );
-
-  // ── Loading state (only show spinner on initial load when no data yet) ──
-  if (loading && !workspace) {
-    return (
-      <div
-        className="flex items-center justify-center bg-tn-bg"
-        style={{ height: 'var(--sam-app-height)' }}
-      >
-        <Spinner size="lg" />
-      </div>
-    );
-  }
-
-  // ── Fatal error (no workspace loaded) ──
-  if (error && !workspace) {
-    return (
-      <div
-        className="flex flex-col bg-tn-bg"
-        style={{ height: 'var(--sam-app-height)' }}
-      >
-        <Toolbar onBack={() => navigate('/dashboard')} />
-        <CenteredStatus
-          color="var(--sam-color-danger-fg)"
-          title="Failed to Load Workspace"
-          subtitle={error}
-          action={
-            <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>
-              Back to Dashboard
-            </Button>
-          }
-        />
-      </div>
-    );
-  }
-
-  // ── Terminal content (always rendered when running, hidden when chat is active) ──
-  const terminalContent = (
-    <div className="h-full" style={{ display: viewMode === 'terminal' ? 'block' : 'none' }}>
-      {wsUrl ? (
-        featureFlags.multiTerminal ? (
-          <MultiTerminal
-            ref={multiTerminalRef}
-            wsUrl={wsUrl}
-            resolveWsUrl={resolveTerminalWsUrl}
-            defaultWorkDir={activeWorktree ?? undefined}
-            onActivity={handleTerminalActivity}
-            className="h-full"
-            persistenceKey={id ? `sam-terminal-sessions-${id}` : undefined}
-            hideTabBar
-            onSessionsChange={(sessions: MultiTerminalSessionSnapshot[], activeSessionId: string | null) => {
-              setTerminalTabs(sessions);
-              setActiveTerminalSessionId(activeSessionId);
-            }}
-          />
-        ) : (
-          <Terminal
-            wsUrl={wsUrl}
-            resolveWsUrl={resolveTerminalWsUrl}
-            onActivity={handleTerminalActivity}
-            className="h-full"
-          />
-        )
-      ) : terminalLoading ? (
-        <CenteredStatus
-          color="var(--sam-color-info)"
-          title="Connecting to Terminal..."
-          subtitle="Establishing secure connection"
-          loading
-        />
-      ) : (
-        <CenteredStatus
-          color="var(--sam-color-danger-fg)"
-          title="Connection Failed"
-          subtitle={terminalError || 'Unable to connect to terminal'}
-          action={
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                terminalWsUrlCacheRef.current = null;
-                void refreshTerminalToken();
-              }}
-              disabled={terminalLoading}
-            >
-              Retry Connection
-            </Button>
-          }
-        />
-      )}
+  // ══ RENDER ══
+  if (loading && !workspace) return <div className="flex items-center justify-center bg-tn-bg" style={{ height: 'var(--sam-app-height)' }}><Spinner size="lg" /></div>;
+  if (error && !workspace) return (
+    <div className="flex flex-col bg-tn-bg" style={{ height: 'var(--sam-app-height)' }}>
+      <Toolbar onBack={() => nav.navigate('/dashboard')} />
+      <CenteredStatus color="var(--sam-color-danger-fg)" title="Failed to Load Workspace" subtitle={error}
+        action={<Button variant="ghost" size="sm" onClick={() => nav.navigate('/dashboard')}>Back to Dashboard</Button>} />
     </div>
   );
 
-  // ── Non-running states content ──
-  const statusContent = !isRunning ? (
-    workspace?.status === 'creating' ? (
-      <BootProgress logs={streamedBootLogs.length > 0 ? streamedBootLogs : workspace.bootLogs} />
-    ) : workspace?.status === 'stopping' ? (
-      <CenteredStatus color="var(--sam-color-warning-fg)" title="Stopping Workspace" loading />
-    ) : workspace?.status === 'stopped' ? (
-      <CenteredStatus
-        color="var(--sam-color-fg-muted)"
-        title="Workspace Stopped"
-        subtitle="Restart to access the terminal."
-        action={
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleRestart}
-            disabled={actionLoading}
-            loading={actionLoading}
-          >
-            Restart Workspace
-          </Button>
-        }
-      />
-    ) : workspace?.status === 'error' ? (
-      <CenteredStatus
-        color="var(--sam-color-danger-fg)"
-        title="Workspace Error"
-        subtitle={workspace?.errorMessage || 'An unexpected error occurred.'}
-        action={
-          <div className="flex gap-2 flex-wrap justify-center">
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={handleRebuild}
-              disabled={actionLoading}
-              loading={actionLoading}
-            >
-              Rebuild Container
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleRestart}
-              disabled={actionLoading}
-              loading={actionLoading}
-            >
-              Restart Workspace
-            </Button>
-          </div>
-        }
-      />
-    ) : null
-  ) : null;
-
-  // ── Tab strip (shown on both desktop and mobile when running) ──
-  const createMenuContent = (
-    <div ref={createMenuRef} className="relative shrink-0">
-      <button
-        onClick={() => setCreateMenuOpen((prev) => !prev)}
-        disabled={sessionsLoading}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: isMobile ? 42 : 36,
-          height: '100%',
-          background: 'none',
-          border: 'none',
-          borderLeft: '1px solid var(--sam-color-border-default)',
-          color: 'var(--sam-color-tn-fg-muted)',
-          cursor: sessionsLoading ? 'not-allowed' : 'pointer',
-          fontSize: 18,
-          fontWeight: 300,
-          padding: 0,
-          opacity: sessionsLoading ? 0.6 : 1,
-        }}
-        aria-label="Create terminal or chat session"
-        aria-expanded={createMenuOpen}
-      >
-        +
-      </button>
-
-      {createMenuOpen && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            right: 0,
-            minWidth: 220,
-            borderRadius: 'var(--sam-radius-md)',
-            border: '1px solid var(--sam-color-border-default)',
-            background: 'var(--sam-color-bg-surface)',
-            boxShadow: '0 10px 30px var(--sam-shadow-overlay)',
-            zIndex: 'var(--sam-z-dropdown)' as unknown as number,
-            overflow: 'hidden',
-          }}
-        >
-          <button
-            onClick={handleCreateTerminalTab}
-            disabled={sessionsLoading}
-            style={{
-              width: '100%',
-              textAlign: 'left',
-              border: 'none',
-              background: 'transparent',
-              color: 'var(--sam-color-fg-primary)',
-              padding: isMobile ? '14px 16px' : '10px 12px',
-              fontSize: isMobile ? 'var(--sam-type-secondary-size)' : 'var(--sam-type-caption-size)',
-              cursor: sessionsLoading ? 'not-allowed' : 'pointer',
-              opacity: sessionsLoading ? 0.65 : 1,
-            }}
-          >
-            Terminal
-          </button>
-
-          {configuredAgents.length <= 1 ? (
-            <button
-              onClick={() => {
-                void handleCreateSession(defaultAgentId ?? undefined);
-              }}
-              disabled={configuredAgents.length === 0 || sessionsLoading}
-              style={{
-                width: '100%',
-                textAlign: 'left',
-                border: 'none',
-                background: 'transparent',
-                color:
-                  configuredAgents.length === 0 || sessionsLoading
-                    ? 'var(--sam-color-fg-muted)'
-                    : 'var(--sam-color-fg-primary)',
-                padding: isMobile ? '14px 16px' : '10px 12px',
-                fontSize: isMobile ? 'var(--sam-type-secondary-size)' : 'var(--sam-type-caption-size)',
-                cursor:
-                  configuredAgents.length === 0 || sessionsLoading ? 'not-allowed' : 'pointer',
-                opacity: configuredAgents.length === 0 || sessionsLoading ? 0.65 : 1,
-              }}
-            >
-              {defaultAgentName ?? 'Chat'}
-            </button>
-          ) : (
-            configuredAgents.map((agent) => (
-              <button
-                key={agent.id}
-                onClick={() => {
-                  void handleCreateSession(agent.id);
-                }}
-                disabled={sessionsLoading}
-                style={{
-                  width: '100%',
-                  textAlign: 'left',
-                  border: 'none',
-                  background: 'transparent',
-                  color: 'var(--sam-color-fg-primary)',
-                  padding: isMobile ? '14px 16px' : '10px 12px',
-                  fontSize: isMobile ? 'var(--sam-type-secondary-size)' : 'var(--sam-type-caption-size)',
-                  cursor: sessionsLoading ? 'not-allowed' : 'pointer',
-                  opacity: sessionsLoading ? 0.65 : 1,
-                }}
-              >
-                {agent.name}
-              </button>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-
-  const workspaceTabStrip = isRunning ? (
-    <WorkspaceTabStrip
-      tabs={tabStripItems}
-      activeTabId={activeTabId}
-      isMobile={isMobile}
-      onSelect={handleSelectTabItem}
-      onClose={handleCloseTabItem}
-      onRename={handleRenameWorkspaceTab}
-      onReorder={tabOrder.reorderTab}
-      createMenuSlot={createMenuContent}
-    />
-  ) : null;
-
-  // ── Sidebar content (shared between desktop sidebar and mobile overlay) ──
   const sidebarContent = (
-    <WorkspaceSidebar
-      workspace={workspace}
-      isRunning={isRunning}
-      isMobile={isMobile}
-      actionLoading={actionLoading}
-      onStop={handleStop}
-      onRestart={handleRestart}
-      onRebuild={handleRebuild}
-      displayNameInput={displayNameInput}
-      onDisplayNameChange={setDisplayNameInput}
-      onRename={handleRename}
-      renaming={renaming}
-      workspaceTabs={workspaceTabs}
-      activeTabId={activeTabId}
-      onSelectTab={(tab: SidebarTab) => {
-        const found = workspaceTabs.find((t) => t.id === tab.id);
-        if (found) handleSelectWorkspaceTab(found);
-      }}
-      onStopSession={handleStopSession}
-      historySessions={historySessions}
-      onResumeSession={handleResumeSession}
-      onDeleteSession={handleDeleteHistorySession}
-      gitStatus={gitStatus}
-      onOpenGitChanges={handleOpenGitChanges}
-      sessionTokenUsages={sessionTokenUsages}
-      detectedPorts={detectedPorts}
-      workspaceEvents={workspaceEvents}
-    />
+    <WorkspaceSidebar workspace={workspace} isRunning={isRunning} isMobile={isMobile} actionLoading={actionLoading}
+      onStop={handleStop} onRestart={handleRestart} onRebuild={handleRebuild}
+      displayNameInput={displayNameInput} onDisplayNameChange={setDisplayNameInput} onRename={handleRename} renaming={renaming}
+      workspaceTabs={tabs.workspaceTabs} activeTabId={tabs.activeTabId}
+      onSelectTab={(t: SidebarTab) => { const f = tabs.workspaceTabs.find((w) => w.id === t.id); if (f) handleSelectWorkspaceTab(f); }}
+      onStopSession={handleStopSession} historySessions={sessions.historySessions}
+      onResumeSession={handleResumeSession} onDeleteSession={handleDeleteHistorySession}
+      gitStatus={gitStatus} onOpenGitChanges={nav.handleOpenGitChanges}
+      sessionTokenUsages={sessionTokenUsages} detectedPorts={detectedPorts} workspaceEvents={workspaceEvents} />
   );
 
-  // ══════════════════════════════════════════════════════════════
-  // UNIFIED LAYOUT (responsive for desktop and mobile)
-  // ══════════════════════════════════════════════════════════════
   return (
-    <div
-      className="flex flex-col bg-tn-bg overflow-hidden"
-      style={{ height: 'var(--sam-app-height)' }}
-    >
-      {/* ── Header ── */}
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          padding: isMobile ? '0 2px' : '0 12px',
-          height: isMobile ? '44px' : '40px',
-          backgroundColor: 'var(--sam-color-bg-surface)',
-          borderBottom: '1px solid var(--sam-color-border-default)',
-          gap: isMobile ? '2px' : '10px',
-          flexShrink: 0,
-        }}
-      >
-        {/* Back */}
-        <button
-          onClick={() => workspace?.projectId ? navigate(`/projects/${workspace.projectId}`) : navigate('/dashboard')}
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--sam-color-fg-muted)',
-            padding: isMobile ? '8px' : '4px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            minWidth: isMobile ? 44 : undefined,
-            minHeight: isMobile ? 44 : undefined,
-          }}
-          aria-label={workspace?.projectId ? 'Back to project' : 'Back to dashboard'}
-        >
-          <svg
-            style={{ height: isMobile ? 18 : 16, width: isMobile ? 18 : 16 }}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 19l-7-7 7-7"
-            />
-          </svg>
-        </button>
+    <div className="flex flex-col bg-tn-bg overflow-hidden" style={{ height: 'var(--sam-app-height)' }}>
+      <WorkspaceHeader workspace={workspace} isRunning={isRunning} isMobile={isMobile} error={error} terminalToken={terminalToken} workspaceId={id}
+        worktrees={wt.worktrees} activeWorktree={nav.activeWorktree} worktreeLoading={wt.worktreeLoading}
+        remoteBranches={wt.remoteBranches} remoteBranchesLoading={wt.remoteBranchesLoading}
+        gitChangeCount={gitChangeCount} gitStatusStale={gitStatusStale}
+        onBack={() => workspace?.projectId ? nav.navigate(`/projects/${workspace.projectId}`) : nav.navigate('/dashboard')}
+        onClearError={() => setError(null)} onOpenFileBrowser={nav.handleOpenFileBrowser} onOpenGitChanges={nav.handleOpenGitChanges}
+        onOpenCommandPalette={() => setShowCommandPalette(true)} onOpenMobileMenu={() => setMobileMenuOpen(true)}
+        onSelectWorktree={nav.handleSelectWorktree} onCreateWorktree={wt.handleCreateWorktree}
+        onRemoveWorktree={wt.handleRemoveWorktree} onRequestBranches={wt.fetchRemoteBranches} />
 
-        {/* Workspace name + status */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: isMobile ? '4px' : '8px',
-            minWidth: 0,
-            flex: isMobile ? 1 : undefined,
-          }}
-        >
-          <span
-            style={{
-              fontWeight: 600,
-              fontSize: 'var(--sam-type-secondary-size)',
-              color: 'var(--sam-color-fg-primary)',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              // No maxWidth needed — flex: 1 + minWidth: 0 on parent + overflow: hidden
-              // handles truncation correctly at any viewport width.
-            }}
-          >
-            {workspace?.displayName || workspace?.name}
-          </span>
-          {workspace && <StatusBadge status={workspace.status} />}
-        </div>
-
-        {/* Project link + Repo@branch (desktop only) */}
-        {!isMobile && (
-          <>
-            <div
-              style={{
-                width: '1px',
-                height: '16px',
-                backgroundColor: 'var(--sam-color-border-default)',
-                flexShrink: 0,
-              }}
-            />
-            {workspace?.projectId && (
-              <button
-                onClick={() => navigate(`/projects/${workspace.projectId}`)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontSize: 'var(--sam-type-caption-size)',
-                  color: 'var(--sam-color-accent-primary)',
-                  whiteSpace: 'nowrap',
-                  padding: 0,
-                  textDecoration: 'none',
-                }}
-                title="Go to project"
-              >
-                Project
-              </button>
-            )}
-            <span
-              style={{
-                fontSize: 'var(--sam-type-caption-size)',
-                color: 'var(--sam-color-fg-muted)',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                minWidth: 0,
-              }}
-            >
-              {workspace?.repository}
-              {workspace?.branch ? `@${workspace.branch}` : ''}
-            </span>
-          </>
-        )}
-
-        {/* Spacer */}
-        <div style={{ flex: isMobile ? undefined : 1 }} />
-
-        {/* Worktree selector */}
-        {isRunning && terminalToken && workspace?.url && id && (
-          <WorktreeSelector
-            worktrees={worktrees}
-            activeWorktree={activeWorktree}
-            loading={worktreeLoading}
-            isMobile={isMobile}
-            remoteBranches={remoteBranches}
-            remoteBranchesLoading={remoteBranchesLoading}
-            onSelect={handleSelectWorktree}
-            onCreate={handleCreateWorktree}
-            onRemove={handleRemoveWorktree}
-            onRequestBranches={fetchRemoteBranches}
-          />
-        )}
-
-        {/* Error inline (desktop only — too noisy on mobile) */}
-        {!isMobile && error && (
-          <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-danger-fg)', whiteSpace: 'nowrap' }}>
-            {error}
-            <button
-              onClick={() => setError(null)}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--sam-color-danger-fg)',
-                cursor: 'pointer',
-                marginLeft: '4px',
-                fontSize: 'var(--sam-type-caption-size)',
-              }}
-            >
-              x
-            </button>
-          </span>
-        )}
-
-        {/* File browser button */}
-        {isRunning && terminalToken && (
-          <FileBrowserButton
-            onClick={handleOpenFileBrowser}
-            isMobile={isMobile}
-            compactMobile={isMobile}
-          />
-        )}
-
-        {/* Git changes button */}
-        {isRunning && terminalToken && (
-          <GitChangesButton
-            onClick={handleOpenGitChanges}
-            changeCount={gitChangeCount}
-            isMobile={isMobile}
-            compactMobile={isMobile}
-            isStale={gitStatusStale}
-          />
-        )}
-
-        {/* Mobile command palette access */}
-        {isRunning && terminalToken && isMobile && (
-          <CommandPaletteButton
-            onClick={() => setShowCommandPalette(true)}
-            isMobile
-            compactMobile
-          />
-        )}
-
-        {/* Mobile sidebar menu button */}
-        {isMobile && (
-          <button
-            onClick={() => setMobileMenuOpen(true)}
-            aria-label="Open workspace menu"
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              color: 'var(--sam-color-fg-muted)',
-              padding: '6px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minWidth: 36,
-              minHeight: 36,
-              flexShrink: 0,
-            }}
-          >
-            <MoreVertical size={16} />
-          </button>
-        )}
-
-        {/* User menu */}
-        <UserMenu compact />
-      </header>
-
-      {/* ── Mobile error banner ── */}
       {isMobile && error && (
-        <div
-          style={{
-            padding: '6px 12px',
-            backgroundColor: 'var(--sam-color-danger-tint)',
-            borderBottom: '1px solid rgba(248, 113, 113, 0.3)',
-            fontSize: 'var(--sam-type-caption-size)',
-            color: 'var(--sam-color-danger-fg)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexShrink: 0,
-          }}
-        >
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {error}
-          </span>
-          <button
-            onClick={() => setError(null)}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--sam-color-danger-fg)',
-              cursor: 'pointer',
-              padding: '4px 8px',
-              fontSize: 'var(--sam-type-secondary-size)',
-              flexShrink: 0,
-            }}
-          >
-            ×
-          </button>
+        <div style={{ padding: '6px 12px', backgroundColor: 'var(--sam-color-danger-tint)', borderBottom: '1px solid rgba(248, 113, 113, 0.3)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-danger-fg)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{error}</span>
+          <button onClick={() => setError(null)} style={{ background: 'none', border: 'none', color: 'var(--sam-color-danger-fg)', cursor: 'pointer', padding: '4px 8px', fontSize: 'var(--sam-type-secondary-size)', flexShrink: 0 }}>×</button>
         </div>
       )}
-
-      {/* ── Orphaned sessions banner ── */}
-      {isRunning && orphanedSessions.length > 0 && !dismissedOrphans && (
-        <OrphanedSessionsBanner
-          orphanedSessions={orphanedSessions}
-          onStopAll={handleStopAllOrphans}
-          onDismiss={() => setDismissedOrphans(true)}
-        />
+      {isRunning && sessions.orphanedSessions.length > 0 && !sessions.dismissedOrphans && (
+        <OrphanedSessionsBanner orphanedSessions={sessions.orphanedSessions} onStopAll={sessions.handleStopAllOrphans} onDismiss={() => sessions.setDismissedOrphans(true)} />
       )}
 
-      {/* ── Content area ── */}
       <div className="flex flex-1 min-h-0">
         <div className="flex flex-col flex-1 min-w-0 min-h-0">
-          {workspaceTabStrip}
+          {isRunning && (
+            <WorkspaceTabStrip tabs={tabs.tabStripItems} activeTabId={tabs.activeTabId} isMobile={isMobile}
+              onSelect={(i) => tabs.handleSelectTabItem(i, handleSelectWorkspaceTab)}
+              onClose={(i) => tabs.handleCloseTabItem(i, handleCloseWorkspaceTab)}
+              onRename={handleRenameWorkspaceTab} onReorder={tabOrder.reorderTab}
+              createMenuSlot={
+                <WorkspaceCreateMenu isMobile={isMobile} sessionsLoading={sessions.sessionsLoading}
+                  configuredAgents={sessions.configuredAgents} defaultAgentId={sessions.defaultAgentId} defaultAgentName={sessions.defaultAgentName}
+                  onCreateTerminalTab={handleCreateTerminalTab} onCreateSession={(a) => void handleCreateSession(a)} />
+              } />
+          )}
           <div className="flex flex-col flex-1 min-h-0 relative">
             {isRunning ? (
               <>
-                {/* Terminal content — always mounted, shown/hidden */}
-                {terminalContent}
-
-                {/* Chat sessions — each has its own independent ACP WebSocket */}
-                {id &&
-                  workspace?.url &&
-                  runningChatSessions.map((session) => (
-                    <ChatSession
-                      key={session.id}
-                      ref={(handle) => {
-                        if (handle) chatSessionRefs.current.set(session.id, handle);
-                        else chatSessionRefs.current.delete(session.id);
-                      }}
-                      workspaceId={id}
-                      workspaceUrl={workspace.url!}
-                      sessionId={session.id}
-                      worktreePath={session.worktreePath}
-                      preferredAgentId={
-                        session.agentType ||
-                        preferredAgentsBySession[session.id] ||
-                        (configuredAgents.length > 0 ? configuredAgents[0]!.id : undefined)
-                      }
-                      configuredAgents={configuredAgents}
-                      active={viewMode === 'conversation' && activeChatSessionId === session.id}
-                      onActivity={handleTerminalActivity}
-                      onUsageChange={handleUsageChange}
-                    />
-                  ))}
+                <WorkspaceTerminal wsUrl={wsUrl} resolveWsUrl={resolveTerminalWsUrl} multiTerminal={featureFlags.multiTerminal} viewMode={viewMode}
+                  activeWorktree={nav.activeWorktree} workspaceId={id} terminalLoading={terminalLoading} terminalError={terminalError}
+                  multiTerminalRef={multiTerminalRef} onActivity={handleTerminalActivity}
+                  onSessionsChange={(s, a) => { setTerminalTabs(s); setActiveTerminalSessionId(a); }}
+                  onRetryConnection={() => { clearWsUrlCache(); void refreshTerminalToken(); }} />
+                {id && workspace?.url && (
+                  <WorkspaceAgentPanel workspaceId={id} workspaceUrl={workspace.url} sessions={sessions.runningChatSessions} viewMode={viewMode}
+                    activeChatSessionId={activeChatSessionId} configuredAgents={sessions.configuredAgents}
+                    preferredAgentsBySession={sessions.preferredAgentsBySession} chatSessionRefs={chatSessionRefs}
+                    onActivity={handleTerminalActivity} onUsageChange={handleUsageChange} />
+                )}
               </>
             ) : (
-              statusContent
+              <WorkspaceStatusContent workspace={workspace} bootLogs={streamedBootLogs} actionLoading={actionLoading} onRestart={handleRestart} onRebuild={handleRebuild} />
             )}
           </div>
         </div>
-
-        {/* ── Sidebar (desktop only) ── */}
-        {!isMobile && (
-          <aside className="flex flex-col w-80 min-w-80 border-l border-border-default bg-surface">
-            {sidebarContent}
-          </aside>
-        )}
+        {!isMobile && <aside className="flex flex-col w-80 min-w-80 border-l border-border-default bg-surface">{sidebarContent}</aside>}
       </div>
 
-      {/* ── Mobile sidebar overlay ── */}
       {isMobile && mobileMenuOpen && (
         <>
-          {/* Backdrop */}
-          <div
-            data-testid="mobile-menu-backdrop"
-            onClick={() => setMobileMenuOpen(false)}
-            className="fixed inset-0 bg-overlay z-drawer-backdrop"
-          />
-          {/* Panel (slides from right) */}
-          <div
-            role="dialog"
-            aria-label="Workspace menu"
-            data-testid="mobile-menu-panel"
-            className="fixed top-0 right-0 bottom-0 w-[85vw] max-w-[360px] bg-surface border-l border-border-default z-drawer flex flex-col overflow-hidden"
-          >
-            {/* Close button header */}
+          <div data-testid="mobile-menu-backdrop" onClick={() => setMobileMenuOpen(false)} className="fixed inset-0 bg-overlay z-drawer-backdrop" />
+          <div role="dialog" aria-label="Workspace menu" data-testid="mobile-menu-panel" className="fixed top-0 right-0 bottom-0 w-[85vw] max-w-[360px] bg-surface border-l border-border-default z-drawer flex flex-col overflow-hidden">
             <div className="flex items-center justify-between border-b border-border-default shrink-0" style={{ padding: 'var(--sam-space-3) var(--sam-space-4)' }}>
-              <span className="font-semibold text-fg-primary" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
-                Workspace
-              </span>
-              <button
-                onClick={() => setMobileMenuOpen(false)}
-                aria-label="Close workspace menu"
-                className="bg-transparent border-none cursor-pointer text-fg-muted p-2 flex items-center justify-center min-w-[44px] min-h-[44px]"
-              >
-                <X size={18} />
-              </button>
+              <span className="font-semibold text-fg-primary" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Workspace</span>
+              <button onClick={() => setMobileMenuOpen(false)} aria-label="Close workspace menu" className="bg-transparent border-none cursor-pointer text-fg-muted p-2 flex items-center justify-center min-w-[44px] min-h-[44px]"><X size={18} /></button>
             </div>
-            {/* Scrollable sidebar content */}
-            <div className="flex flex-col flex-1 overflow-auto">
-              {sidebarContent}
-            </div>
+            <div className="flex flex-col flex-1 overflow-auto">{sidebarContent}</div>
           </div>
         </>
       )}
 
-      {/* ── Git changes overlay ── */}
-      {gitParam === 'changes' && terminalToken && workspace?.url && id && (
-        <GitChangesPanel
-          workspaceUrl={workspace.url}
-          workspaceId={id}
-          token={terminalToken}
-          worktree={activeWorktree}
-          isMobile={isMobile}
-          onClose={handleCloseGitPanel}
-          onSelectFile={handleNavigateToGitDiff}
-          onStatusChange={applyGitStatus}
-          onStatusFetchError={markGitStatusStale}
-        />
+      {nav.gitParam === 'changes' && terminalToken && workspace?.url && id && (
+        <GitChangesPanel workspaceUrl={workspace.url} workspaceId={id} token={terminalToken} worktree={nav.activeWorktree} isMobile={isMobile} onClose={nav.handleCloseGitPanel} onSelectFile={nav.handleNavigateToGitDiff} onStatusChange={applyGitStatus} onStatusFetchError={markGitStatusStale} />
       )}
-      {gitParam === 'diff' && gitFileParam && terminalToken && workspace?.url && id && (
-        <GitDiffView
-          workspaceUrl={workspace.url}
-          workspaceId={id}
-          token={terminalToken}
-          worktree={activeWorktree}
-          filePath={gitFileParam}
-          staged={gitStagedParam === 'true'}
-          isMobile={isMobile}
-          onBack={handleBackFromGitDiff}
-          onClose={handleCloseGitPanel}
-          onViewInFileBrowser={handleGitDiffToFileBrowser}
-        />
+      {nav.gitParam === 'diff' && nav.gitFileParam && terminalToken && workspace?.url && id && (
+        <GitDiffView workspaceUrl={workspace.url} workspaceId={id} token={terminalToken} worktree={nav.activeWorktree} filePath={nav.gitFileParam} staged={nav.gitStagedParam === 'true'} isMobile={isMobile} onBack={nav.handleBackFromGitDiff} onClose={nav.handleCloseGitPanel} onViewInFileBrowser={nav.handleGitDiffToFileBrowser} />
       )}
-
-      {/* ── File browser overlay ── */}
-      {filesParam === 'browse' && terminalToken && workspace?.url && id && (
-        <FileBrowserPanel
-          workspaceUrl={workspace.url}
-          workspaceId={id}
-          token={terminalToken}
-          worktree={activeWorktree}
-          initialPath={filesPathParam ?? '.'}
-          isMobile={isMobile}
-          onClose={handleCloseFileBrowser}
-          onSelectFile={handleFileViewerOpen}
-          onNavigate={handleFileBrowserNavigate}
-        />
+      {nav.filesParam === 'browse' && terminalToken && workspace?.url && id && (
+        <FileBrowserPanel workspaceUrl={workspace.url} workspaceId={id} token={terminalToken} worktree={nav.activeWorktree} initialPath={nav.filesPathParam ?? '.'} isMobile={isMobile} onClose={nav.handleCloseFileBrowser} onSelectFile={nav.handleFileViewerOpen} onNavigate={nav.handleFileBrowserNavigate} />
       )}
-      {filesParam === 'view' && filesPathParam && terminalToken && workspace?.url && id && (
-        <FileViewerPanel
-          workspaceUrl={workspace.url}
-          workspaceId={id}
-          token={terminalToken}
-          worktree={activeWorktree}
-          filePath={filesPathParam}
-          isMobile={isMobile}
-          onBack={handleFileViewerBack}
-          onClose={handleCloseFileBrowser}
-          onViewDiff={handleFileViewerToDiff}
-        />
+      {nav.filesParam === 'view' && nav.filesPathParam && terminalToken && workspace?.url && id && (
+        <FileViewerPanel workspaceUrl={workspace.url} workspaceId={id} token={terminalToken} worktree={nav.activeWorktree} filePath={nav.filesPathParam} isMobile={isMobile} onBack={nav.handleFileViewerBack} onClose={nav.handleCloseFileBrowser} onViewDiff={nav.handleFileViewerToDiff} />
       )}
-
-      {/* ── Keyboard shortcuts help overlay ── */}
       {showShortcutsHelp && <KeyboardShortcutsHelp onClose={() => setShowShortcutsHelp(false)} />}
-
-      {/* ── Command palette overlay ── */}
-      {showCommandPalette && (
-        <CommandPalette
-          onClose={() => setShowCommandPalette(false)}
-          handlers={shortcutHandlers}
-          tabs={tabStripItems}
-          fileIndex={paletteFileIndex}
-          fileIndexLoading={paletteFileIndexLoading}
-          onSelectTab={handlePaletteSelectTab}
-          onSelectFile={handlePaletteSelectFile}
-        />
-      )}
-    </div>
-  );
-}
-
-// ── Minimal sub-components ──
-
-function Toolbar({ onBack }: { onBack: () => void }) {
-  return (
-    <header className="flex items-center px-3 h-10 bg-surface border-b border-border-default gap-2.5 shrink-0">
-      <button
-        onClick={onBack}
-        className="bg-transparent border-none cursor-pointer text-fg-muted p-1 flex"
-      >
-        <svg
-          style={{ height: 16, width: 16 }}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-        </svg>
-      </button>
-      <span className="font-semibold text-fg-primary" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
-        Workspace
-      </span>
-    </header>
-  );
-}
-
-function CenteredStatus({
-  color,
-  title,
-  subtitle,
-  action,
-  loading: isLoading,
-}: {
-  color: string;
-  title: string;
-  subtitle?: string | null;
-  action?: React.ReactNode;
-  loading?: boolean;
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center h-full gap-3 bg-tn-bg text-tn-fg">
-      {isLoading && <Spinner size="lg" />}
-      <h3 className="font-semibold m-0" style={{ fontSize: 'var(--sam-type-card-title-size)', color }}>{title}</h3>
-      {subtitle && (
-        <p
-          className="m-0 max-w-[400px] text-center text-tn-fg-muted"
-          style={{ fontSize: 'var(--sam-type-secondary-size)' }}
-        >
-          {subtitle}
-        </p>
-      )}
-      {action && <div className="mt-1">{action}</div>}
-    </div>
-  );
-}
-
-function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
-  if (!logs || logs.length === 0) {
-    return (
-      <CenteredStatus
-        color="var(--sam-color-info)"
-        title="Creating Workspace"
-        subtitle="Initializing..."
-        loading
-      />
-    );
-  }
-
-  // Deduplicate: show latest status per step
-  const stepMap = new Map<string, BootLogEntry>();
-  for (const log of logs) {
-    stepMap.set(log.step, log);
-  }
-  const steps = Array.from(stepMap.values());
-
-  const statusIcon = (status: BootLogEntry['status']) => {
-    switch (status) {
-      case 'completed':
-        return (
-          <span className="text-success-fg mr-2" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>&#10003;</span>
-        );
-      case 'failed':
-        return (
-          <span className="text-danger-fg mr-2" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>&#10007;</span>
-        );
-      case 'started':
-      default:
-        return (
-          <span className="mr-2 inline-flex">
-            <Spinner size="sm" />
-          </span>
-        );
-    }
-  };
-
-  const lastStep = steps[steps.length - 1];
-  const hasFailed = lastStep?.status === 'failed';
-
-  return (
-    <div className="flex flex-col items-center justify-center h-full bg-tn-bg text-tn-fg p-6">
-      <h3
-        className="font-semibold mb-4"
-        style={{
-          fontSize: 'var(--sam-type-card-title-size)',
-          color: hasFailed ? 'var(--sam-color-danger-fg)' : 'var(--sam-color-info)',
-        }}
-      >
-        {hasFailed ? 'Provisioning Failed' : 'Creating Workspace'}
-      </h3>
-      <div className="flex flex-col gap-1.5 max-w-[400px] w-full">
-        {steps.map((entry, i) => (
-          <div
-            key={i}
-            className="flex items-center"
-            style={{
-              fontSize: 'var(--sam-type-caption-size)',
-              color:
-                entry.status === 'failed'
-                  ? 'var(--sam-color-danger-fg)'
-                  : entry.status === 'completed'
-                    ? 'var(--sam-color-tn-fg-muted)'
-                    : 'var(--sam-color-tn-fg)',
-            }}
-          >
-            {statusIcon(entry.status)}
-            <span>{entry.message}</span>
-          </div>
-        ))}
-      </div>
-      {lastStep?.status === 'failed' && lastStep.detail && (
-        <p
-          className="mt-3 mb-0 max-w-[400px] text-center break-words text-tn-fg-muted"
-          style={{ fontSize: 'var(--sam-type-caption-size)' }}
-        >
-          {lastStep.detail}
-        </p>
-      )}
+      {showCommandPalette && <CommandPalette onClose={() => setShowCommandPalette(false)} handlers={shortcutHandlers} tabs={tabs.tabStripItems} fileIndex={paletteFileIndex} fileIndexLoading={paletteFileIndexLoading} onSelectTab={handlePaletteSelectTab} onSelectFile={(f) => nav.handleFileViewerOpen(f)} />}
     </div>
   );
 }
