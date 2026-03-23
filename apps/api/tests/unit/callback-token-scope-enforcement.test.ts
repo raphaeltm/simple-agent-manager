@@ -9,7 +9,7 @@
  * could fetch API keys for any co-tenant workspace.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { CallbackTokenPayload, CallbackTokenScope } from '../../src/services/jwt';
+import type { CallbackTokenPayload } from '../../src/services/jwt';
 
 // Mock drizzle to return workspace with nodeId
 const mockDbSelect = vi.fn();
@@ -44,7 +44,6 @@ vi.mock('../../src/services/jwt', () => ({
 
 // Import after mocks
 import { verifyWorkspaceCallbackAuth } from '../../src/routes/workspaces/_helpers';
-import { AppError } from '../../src/middleware/error';
 
 function makeContext(token: string) {
   return {
