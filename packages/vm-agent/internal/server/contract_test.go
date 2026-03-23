@@ -83,25 +83,13 @@ func TestHealthResponseContract(t *testing.T) {
 	if _, ok := resp["activeWorkspaces"]; !ok {
 		t.Fatal("missing activeWorkspaces field")
 	}
-	workspaces, ok := resp["workspaces"].([]interface{})
-	if !ok {
-		t.Fatal("workspaces must be an array")
-	}
 	if _, ok := resp["sessions"]; !ok {
 		t.Fatal("missing sessions field")
 	}
 
-	// Verify workspace summary shape
-	for _, ws := range workspaces {
-		wsMap, ok := ws.(map[string]interface{})
-		if !ok {
-			t.Fatal("workspace entry must be an object")
-		}
-		for _, required := range []string{"id", "status", "sessions"} {
-			if _, ok := wsMap[required]; !ok {
-				t.Fatalf("workspace summary missing field: %s", required)
-			}
-		}
+	// Verify workspace IDs are NOT exposed (security: unauthenticated endpoint)
+	if _, ok := resp["workspaces"]; ok {
+		t.Fatal("health endpoint must NOT expose workspace details")
 	}
 }
 

@@ -39,18 +39,13 @@ export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 // =============================================================================
 // Control Plane -> VM Agent: GET /health
 // =============================================================================
-
-export const HealthWorkspaceSummarySchema = z.object({
-  id: z.string(),
-  status: z.string(),
-  sessions: z.number(),
-});
+// This endpoint is unauthenticated (used for monitoring/liveness checks),
+// so it MUST NOT expose workspace IDs or other sensitive data.
 
 export const HealthResponseSchema = z.object({
   status: z.literal('healthy'),
   nodeId: z.string(),
   activeWorkspaces: z.number(),
-  workspaces: z.array(HealthWorkspaceSummarySchema),
   sessions: z.number(),
 });
 

@@ -4,33 +4,16 @@ package server
 import (
 	"encoding/json"
 	"net/http"
-	"sort"
 )
 
 // handleHealth handles the health check endpoint.
+// This endpoint is unauthenticated (used for monitoring/liveness checks),
+// so it MUST NOT expose workspace IDs or other sensitive data.
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	s.workspaceMu.RLock()
-	workspaceSummaries := make([]map[string]interface{}, 0, len(s.workspaces))
-	for _, runtime := range s.workspaces {
-		workspaceSummaries = append(workspaceSummaries, map[string]interface{}{
-			"id":       runtime.ID,
-			"status":   runtime.Status,
-			"sessions": runtime.PTY.SessionCount(),
-		})
-	}
-	s.workspaceMu.RUnlock()
-
-	sort.Slice(workspaceSummaries, func(i, j int) bool {
-		left, _ := workspaceSummaries[i]["id"].(string)
-		right, _ := workspaceSummaries[j]["id"].(string)
-		return left < right
-	})
-
 	response := map[string]interface{}{
 		"status":           "healthy",
 		"nodeId":           s.config.NodeID,
 		"activeWorkspaces": s.activeWorkspaceCount(),
-		"workspaces":       workspaceSummaries,
 		"sessions":         s.ptyManager.SessionCount(),
 	}
 	writeJSON(w, http.StatusOK, response)

@@ -57,10 +57,6 @@ describe('Contract schemas: Control Plane -> VM Agent', () => {
         status: 'healthy',
         nodeId: 'node-abc123',
         activeWorkspaces: 2,
-        workspaces: [
-          { id: 'ws-1', status: 'running', sessions: 1 },
-          { id: 'ws-2', status: 'creating', sessions: 0 },
-        ],
         sessions: 3,
       };
       const result = HealthResponseSchema.safeParse(response);
@@ -72,7 +68,6 @@ describe('Contract schemas: Control Plane -> VM Agent', () => {
         status: 'unhealthy',
         nodeId: 'node-abc',
         activeWorkspaces: 0,
-        workspaces: [],
         sessions: 0,
       };
       const result = HealthResponseSchema.safeParse(response);
@@ -83,7 +78,6 @@ describe('Contract schemas: Control Plane -> VM Agent', () => {
       const response = {
         status: 'healthy',
         activeWorkspaces: 0,
-        workspaces: [],
         sessions: 0,
       };
       const result = HealthResponseSchema.safeParse(response);
