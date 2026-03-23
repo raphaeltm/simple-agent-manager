@@ -53,6 +53,8 @@ describe('workspace lifecycle synchronization', () => {
     it('linkSessionToWorkspace creates workspace_activity row', () => {
       // Implementation split across sessions.ts (SQL) and index.ts (delegation)
       expect(doFile).toContain('INSERT OR IGNORE INTO workspace_activity');
+      expect(doFile).toContain('workspace_id');
+      expect(doFile).toContain('session_id');
     });
 
     it('linkSessionToWorkspace calls recalculateAlarm', () => {
