@@ -10,6 +10,7 @@ import { createProvider } from '@simple-agent-manager/providers';
 import { CredentialValidator } from '../services/validation';
 import * as schema from '../db/schema';
 import type { CredentialResponse, AgentCredentialInfo, SaveAgentCredentialRequest, CredentialKind, AgentType, CredentialProvider, CreateCredentialRequest } from '@simple-agent-manager/shared';
+import { getCredentialEncryptionKey } from '../lib/secrets';
 import { isValidAgentType, getAgentDefinition, CREDENTIAL_PROVIDERS } from '@simple-agent-manager/shared';
 import { serializeCredentialToken, buildProviderConfig } from '../services/provider-credentials';
 
@@ -119,7 +120,7 @@ credentialsRoutes.post('/', async (c) => {
   }
 
   // Encrypt the serialized credential token
-  const { ciphertext, iv } = await encrypt(tokenToEncrypt, c.env.ENCRYPTION_KEY);
+  const { ciphertext, iv } = await encrypt(tokenToEncrypt, getCredentialEncryptionKey(c.env));
 
   // Check if credential already exists for this provider
   const existing = await db
@@ -241,7 +242,7 @@ credentialsRoutes.get('/agent', async (c) => {
       .filter((cred) => cred.agentType != null)
       .map(async (cred) => {
         // Decrypt to get last 4 chars for masking
-        const plaintext = await decrypt(cred.encryptedToken, cred.iv, c.env.ENCRYPTION_KEY);
+        const plaintext = await decrypt(cred.encryptedToken, cred.iv, getCredentialEncryptionKey(c.env));
         const maskedKey = `...${plaintext.slice(-4)}`;
 
         // Determine label based on credential kind
@@ -307,7 +308,7 @@ credentialsRoutes.put('/agent', async (c) => {
   }
 
   // Encrypt the credential
-  const { ciphertext, iv } = await encrypt(credential, c.env.ENCRYPTION_KEY);
+  const { ciphertext, iv } = await encrypt(credential, getCredentialEncryptionKey(c.env));
 
   // Check if a credential of this type already exists
   const existing = await db

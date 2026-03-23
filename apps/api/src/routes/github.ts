@@ -15,6 +15,7 @@ import {
 } from '../services/github-app';
 import * as schema from '../db/schema';
 import type { GitHubInstallation, Repository } from '@simple-agent-manager/shared';
+import { getWebhookSecret } from '../lib/secrets';
 
 const githubRoutes = new Hono<{ Bindings: Env }>();
 
@@ -204,8 +205,7 @@ githubRoutes.post('/webhook', async (c) => {
     throw errors.unauthorized('Missing webhook signature');
   }
 
-  // Verify signature (use a dedicated webhook secret in production)
-  const webhookSecret = c.env.ENCRYPTION_KEY;
+  const webhookSecret = getWebhookSecret(c.env);
   const isValid = await verifyWebhookSignature(payload, signature, webhookSecret);
   if (!isValid) {
     throw errors.unauthorized('Invalid webhook signature');

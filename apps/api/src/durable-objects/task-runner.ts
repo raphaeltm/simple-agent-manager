@@ -60,6 +60,7 @@ type TaskRunnerEnv = {
   // Env vars passed through for services
   BASE_DOMAIN: string;
   ENCRYPTION_KEY: string;
+  CREDENTIAL_ENCRYPTION_KEY?: string;
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
   MAX_NODES_PER_USER?: string;

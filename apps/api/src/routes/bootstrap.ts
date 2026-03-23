@@ -11,6 +11,7 @@ import type { BootstrapResponse } from '@simple-agent-manager/shared';
 import { redeemBootstrapToken } from '../services/bootstrap';
 import { decrypt } from '../services/encryption';
 import { rateLimit } from '../middleware/rate-limit';
+import { getCredentialEncryptionKey } from '../lib/secrets';
 
 export const bootstrapRoutes = new Hono<{ Bindings: Env }>();
 
@@ -84,7 +85,7 @@ bootstrapRoutes.post('/:token', bootstrapRateLimit, async (c) => {
   const hetznerToken = await decrypt(
     tokenData.encryptedHetznerToken,
     tokenData.hetznerTokenIv,
-    c.env.ENCRYPTION_KEY
+    getCredentialEncryptionKey(c.env)
   );
 
   // Decrypt GitHub token if present
@@ -93,7 +94,7 @@ bootstrapRoutes.post('/:token', bootstrapRateLimit, async (c) => {
     githubToken = await decrypt(
       tokenData.encryptedGithubToken,
       tokenData.githubTokenIv,
-      c.env.ENCRYPTION_KEY
+      getCredentialEncryptionKey(c.env)
     );
   }
 

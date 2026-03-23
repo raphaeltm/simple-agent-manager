@@ -11,6 +11,7 @@ import { signCallbackToken } from './jwt';
 import { createProviderForUser } from './provider-credentials';
 import { log } from '../lib/logger';
 import { persistError } from './observability';
+import { getCredentialEncryptionKey } from '../lib/secrets';
 
 export interface CreateNodeInput {
   userId: string;
@@ -104,7 +105,7 @@ export async function provisionNode(
   const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
 
   try {
-    const providerResult = await createProviderForUser(db, node.userId, env.ENCRYPTION_KEY, env, targetProvider);
+    const providerResult = await createProviderForUser(db, node.userId, getCredentialEncryptionKey(env), env, targetProvider);
     if (!providerResult) {
       throw new Error(
         targetProvider
@@ -263,7 +264,7 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
   // Delete the cloud provider server since stopped nodes cannot be restarted
   if (node.providerInstanceId) {
     const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
-    const providerResult = await createProviderForUser(db, userId, env.ENCRYPTION_KEY, env, targetProvider);
+    const providerResult = await createProviderForUser(db, userId, getCredentialEncryptionKey(env), env, targetProvider);
     if (providerResult) {
       try {
         await providerResult.provider.deleteVM(node.providerInstanceId);
@@ -332,7 +333,7 @@ export async function deleteNodeResources(nodeId: string, userId: string, env: E
 
   if (node.providerInstanceId) {
     const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
-    const providerResult2 = await createProviderForUser(db, userId, env.ENCRYPTION_KEY, env, targetProvider);
+    const providerResult2 = await createProviderForUser(db, userId, getCredentialEncryptionKey(env), env, targetProvider);
     if (providerResult2) {
       try {
         await providerResult2.provider.deleteVM(node.providerInstanceId);

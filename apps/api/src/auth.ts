@@ -3,6 +3,7 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from './db/schema';
 import type { Env } from './index';
+import { getBetterAuthSecret } from './lib/secrets';
 
 interface GitHubUserResponse {
   id: number | string;
@@ -77,7 +78,7 @@ export function createAuth(env: Env) {
     }),
     basePath: '/api/auth',
     baseURL: `https://api.${env.BASE_DOMAIN}`,
-    secret: env.ENCRYPTION_KEY,
+    secret: getBetterAuthSecret(env),
     trustedOrigins: [
       `https://app.${env.BASE_DOMAIN}`,
       `https://api.${env.BASE_DOMAIN}`,

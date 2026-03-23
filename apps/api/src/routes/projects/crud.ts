@@ -28,6 +28,7 @@ import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { getRuntimeLimits } from '../../services/limits';
 import { encrypt } from '../../services/encryption';
+import { getCredentialEncryptionKey } from '../../lib/secrets';
 import * as projectDataService from '../../services/project-data';
 import { toProjectResponse, toProjectSummaryResponse } from '../../lib/mappers';
 import { parsePositiveInt } from '../../lib/route-helpers';
@@ -361,7 +362,7 @@ crudRoutes.post('/:id/runtime/env-vars', async (c) => {
   }
 
   const stored = isSecret
-    ? await encrypt(body.value, c.env.ENCRYPTION_KEY)
+    ? await encrypt(body.value, getCredentialEncryptionKey(c.env))
     : { ciphertext: body.value, iv: null };
 
   const now = new Date().toISOString();
@@ -475,7 +476,7 @@ crudRoutes.post('/:id/runtime/files', async (c) => {
   }
 
   const stored = isSecret
-    ? await encrypt(body.content, c.env.ENCRYPTION_KEY)
+    ? await encrypt(body.content, getCredentialEncryptionKey(c.env))
     : { ciphertext: body.content, iv: null };
   const now = new Date().toISOString();
 

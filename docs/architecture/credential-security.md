@@ -62,10 +62,10 @@ CREATE TABLE credentials (
 // 1. Generate unique IV for this credential
 const iv = crypto.getRandomValues(new Uint8Array(12));
 
-// 2. Import the platform's ENCRYPTION_KEY
+// 2. Import the credential encryption key (CREDENTIAL_ENCRYPTION_KEY or ENCRYPTION_KEY fallback)
 const key = await crypto.subtle.importKey(
   'raw',
-  base64Decode(env.ENCRYPTION_KEY),
+  base64Decode(getCredentialEncryptionKey(env)),
   { name: 'AES-GCM' },
   false,
   ['encrypt']
@@ -113,7 +113,7 @@ Runtime flow:
 1. VM agent calls `GET /api/workspaces/:id/runtime-assets` with workspace callback token
 2. Control plane loads workspace `project_id`
 3. Control plane loads `project_runtime_env_vars` and `project_runtime_files`
-4. Secret rows are decrypted in-memory using `ENCRYPTION_KEY`
+4. Secret rows are decrypted in-memory using `CREDENTIAL_ENCRYPTION_KEY` (or `ENCRYPTION_KEY` fallback)
 5. Decrypted payload is returned over HTTPS for immediate VM injection
 
 ## What This Means
@@ -124,7 +124,10 @@ These are set once during deployment and managed by the platform operator:
 
 | Secret | Purpose | Who Sets It |
 |--------|---------|-------------|
-| `ENCRYPTION_KEY` | Encrypt user credentials | Platform operator |
+| `ENCRYPTION_KEY` | Shared fallback key | Platform operator |
+| `CREDENTIAL_ENCRYPTION_KEY` | Encrypt user credentials (overrides `ENCRYPTION_KEY`) | Platform operator |
+| `BETTER_AUTH_SECRET` | BetterAuth session management (overrides `ENCRYPTION_KEY`) | Platform operator |
+| `GITHUB_WEBHOOK_SECRET` | Webhook HMAC verification (overrides `ENCRYPTION_KEY`) | Platform operator |
 | `JWT_PRIVATE_KEY` | Sign authentication tokens | Platform operator |
 | `JWT_PUBLIC_KEY` | Verify authentication tokens | Platform operator |
 | `CF_API_TOKEN` | DNS operations for workspaces | Platform operator |
@@ -165,7 +168,7 @@ Secret values are masked in project runtime-config list responses and only decry
 | Threat | Mitigation |
 |--------|------------|
 | Database breach | Credentials encrypted with AES-GCM |
-| ENCRYPTION_KEY leak | Rotate key, re-encrypt all credentials |
+| Encryption key leak | Rotate the affected key, re-encrypt all credentials |
 | Token in logs | Never log decrypted tokens |
 | Cross-user access | Always filter by `user_id` in queries |
 | Replay attacks | Unique IV per credential |
@@ -180,7 +183,7 @@ Secret values are masked in project runtime-config list responses and only decry
 
 ## Key Rotation
 
-If `ENCRYPTION_KEY` needs to be rotated:
+If `CREDENTIAL_ENCRYPTION_KEY` (or `ENCRYPTION_KEY`) needs to be rotated:
 
 1. Deploy new key alongside old key
 2. Re-encrypt all credentials with new key
@@ -203,7 +206,7 @@ The following fields in the `accounts` table are encrypted at rest:
 
 ### How It Works
 
-- BetterAuth uses the `secret` value (our `ENCRYPTION_KEY`) to encrypt these token fields before writing them to D1.
+- BetterAuth uses the `secret` value (`BETTER_AUTH_SECRET`, falling back to `ENCRYPTION_KEY`) to encrypt these token fields before writing them to D1.
 - Decryption happens transparently when BetterAuth reads account records.
 - No application code changes are needed beyond enabling the flag — BetterAuth handles encryption/decryption internally.
 

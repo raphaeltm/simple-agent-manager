@@ -9,6 +9,7 @@ import * as schema from '../db/schema';
 import { decrypt } from '../services/encryption';
 import { buildProviderConfig, parseGcpCredential } from '../services/provider-credentials';
 import { log } from '../lib/logger';
+import { getCredentialEncryptionKey } from '../lib/secrets';
 
 const providersRoutes = new Hono<{ Bindings: Env }>();
 
@@ -42,7 +43,7 @@ providersRoutes.get('/catalog', async (c) => {
   const results = await Promise.allSettled(
     creds.map(async (cred) => {
       const providerName = cred.provider as CredentialProvider;
-      const decryptedToken = await decrypt(cred.encryptedToken, cred.iv, c.env.ENCRYPTION_KEY);
+      const decryptedToken = await decrypt(cred.encryptedToken, cred.iv, getCredentialEncryptionKey(c.env));
 
       // GCP uses OIDC token exchange, not static API tokens — construct its provider differently
       let provider;

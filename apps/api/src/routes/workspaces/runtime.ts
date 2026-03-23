@@ -13,6 +13,7 @@ import { appendBootLog } from '../../services/boot-log';
 import { decrypt, encrypt } from '../../services/encryption';
 import * as projectDataService from '../../services/project-data';
 import { persistError } from '../../services/observability';
+import { getCredentialEncryptionKey } from '../../lib/secrets';
 import {
   verifyWorkspaceCallbackAuth,
   getWorkspaceRuntimeAssets,
@@ -48,7 +49,7 @@ runtimeRoutes.post('/:id/agent-key', async (c) => {
     db,
     workspace.userId,
     body.agentType,
-    c.env.ENCRYPTION_KEY
+    getCredentialEncryptionKey(c.env)
   );
 
   if (!credentialData) {
@@ -142,7 +143,7 @@ runtimeRoutes.post('/:id/agent-credential-sync', async (c) => {
   const currentCredential = await decrypt(
     existing.encryptedToken,
     existing.iv,
-    c.env.ENCRYPTION_KEY
+    getCredentialEncryptionKey(c.env)
   );
 
   // Only update if the credential has actually changed.
@@ -151,7 +152,7 @@ runtimeRoutes.post('/:id/agent-credential-sync', async (c) => {
   }
 
   // Re-encrypt with a fresh IV and update.
-  const { ciphertext, iv } = await encrypt(body.credential, c.env.ENCRYPTION_KEY);
+  const { ciphertext, iv } = await encrypt(body.credential, getCredentialEncryptionKey(c.env));
   await db
     .update(schema.credentials)
     .set({
@@ -261,7 +262,7 @@ runtimeRoutes.get('/:id/runtime-assets', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
   const db = drizzle(c.env.DATABASE, { schema });
-  const assets = await getWorkspaceRuntimeAssets(db, workspaceId, c.env.ENCRYPTION_KEY);
+  const assets = await getWorkspaceRuntimeAssets(db, workspaceId, getCredentialEncryptionKey(c.env));
   return c.json(assets);
 });
 

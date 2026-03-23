@@ -81,6 +81,10 @@ export interface Env {
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
   ENCRYPTION_KEY: string;
+  // Purpose-specific secret overrides (fall back to ENCRYPTION_KEY when unset)
+  BETTER_AUTH_SECRET?: string;           // BetterAuth session management
+  CREDENTIAL_ENCRYPTION_KEY?: string;    // AES-GCM user credential encryption
+  GITHUB_WEBHOOK_SECRET?: string;        // GitHub webhook HMAC verification
   // Pages project name for proxying app.* requests
   PAGES_PROJECT_NAME?: string;
   // Pages project name for proxying www.* requests (marketing site)

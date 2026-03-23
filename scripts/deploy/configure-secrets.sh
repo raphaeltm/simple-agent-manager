@@ -88,6 +88,12 @@ set_worker_secret "ENCRYPTION_KEY" "$ENCRYPTION_KEY" "$ENVIRONMENT" "true" || FA
 set_worker_secret "JWT_PRIVATE_KEY" "$JWT_PRIVATE_KEY" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "JWT_PUBLIC_KEY" "$JWT_PUBLIC_KEY" "$ENVIRONMENT" "true" || FAILED=true
 
+# Configure purpose-specific secret overrides (optional — fall back to ENCRYPTION_KEY)
+# When set, these isolate each security domain so compromise of one doesn't affect the others.
+set_worker_secret "BETTER_AUTH_SECRET" "${BETTER_AUTH_SECRET:-}" "$ENVIRONMENT" "false"
+set_worker_secret "CREDENTIAL_ENCRYPTION_KEY" "${CREDENTIAL_ENCRYPTION_KEY:-}" "$ENVIRONMENT" "false"
+set_worker_secret "GITHUB_WEBHOOK_SECRET" "${GITHUB_WEBHOOK_SECRET:-}" "$ENVIRONMENT" "false"
+
 # Configure Cloudflare secrets (required for DNS and observability operations)
 set_worker_secret "CF_API_TOKEN" "${CF_API_TOKEN:-}" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "CF_ZONE_ID" "${CF_ZONE_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
