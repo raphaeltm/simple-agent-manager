@@ -981,6 +981,47 @@ func TestSessionHost_AutoSuspendDisabledWhenTimeoutZero(t *testing.T) {
 	}
 }
 
+// --- phaseTimeout tests ---
+
+func TestPhaseTimeout_UsesPerPhaseWhenSet(t *testing.T) {
+	t.Parallel()
+
+	fallback := 30 * time.Second
+
+	if got := phaseTimeout(45000, fallback); got != 45*time.Second {
+		t.Fatalf("InitializeTimeout: got %v, want 45s", got)
+	}
+	if got := phaseTimeout(60000, fallback); got != 60*time.Second {
+		t.Fatalf("NewSessionTimeout: got %v, want 60s", got)
+	}
+	if got := phaseTimeout(15000, fallback); got != 15*time.Second {
+		t.Fatalf("LoadSessionTimeout: got %v, want 15s", got)
+	}
+}
+
+func TestPhaseTimeout_FallsBackWhenZero(t *testing.T) {
+	t.Parallel()
+
+	fallback := 30 * time.Second
+
+	if got := phaseTimeout(0, fallback); got != fallback {
+		t.Fatalf("phaseTimeout(0, 30s): got %v, want %v", got, fallback)
+	}
+}
+
+func TestPhaseTimeout_FallsBackWhenNegative(t *testing.T) {
+	t.Parallel()
+
+	fallback := 30 * time.Second
+
+	if got := phaseTimeout(-1, fallback); got != fallback {
+		t.Fatalf("phaseTimeout(-1, 30s): got %v, want %v", got, fallback)
+	}
+	if got := phaseTimeout(-99999, fallback); got != fallback {
+		t.Fatalf("phaseTimeout(-99999, 30s): got %v, want %v", got, fallback)
+	}
+}
+
 // --- Message reporter integration tests (T025) ---
 
 // mockMessageReporter captures enqueued messages for testing.

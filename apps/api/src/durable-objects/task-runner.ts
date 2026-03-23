@@ -36,6 +36,7 @@ import {
   DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS,
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
+  DEFAULT_MAX_WORKSPACES_PER_NODE,
   DEFAULT_WORKSPACE_PROFILE,
 } from '@simple-agent-manager/shared';
 import { log } from '../lib/logger';
@@ -69,6 +70,7 @@ type TaskRunnerEnv = {
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
   MAX_NODES_PER_USER?: string;
+  MAX_WORKSPACES_PER_NODE?: string;
   TASK_RUN_NODE_CPU_THRESHOLD_PERCENT?: string;
   TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;
   NODE_AGENT_READY_TIMEOUT_MS?: string;
@@ -1325,6 +1327,16 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
         const result = await stub.tryClaim(state.taskId) as { claimed: boolean };
 
         if (result.claimed) {
+          // Defense-in-depth: verify workspace count even for warm nodes
+          const wsCount = await this.env.DATABASE.prepare(
+            `SELECT COUNT(*) as c FROM workspaces WHERE node_id = ? AND status IN ('running', 'creating', 'recovery')`
+          ).bind(warmNode.id).first<{ c: number }>();
+          const maxWorkspaces = parseEnvInt(
+            this.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE,
+          );
+          if ((wsCount?.c ?? 0) >= maxWorkspaces) {
+            continue; // At capacity despite being warm — skip
+          }
           log.info('task_runner_do.warm_node_claimed', {
             taskId: state.taskId,
             nodeId: warmNode.id,
@@ -1346,6 +1358,9 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
     const memThreshold = parseEnvInt(
       this.env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT, DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
     );
+    const maxWorkspaces = parseEnvInt(
+      this.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE,
+    );
 
     const nodes = await this.env.DATABASE.prepare(
       `SELECT id, vm_size, vm_location, health_status, last_metrics FROM nodes
@@ -1360,6 +1375,17 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
 
     if (!nodes.results.length) return null;
 
+    // Batch workspace count query to avoid N+1 D1 round-trips
+    const nodeIds = nodes.results.map(n => n.id);
+    const placeholders = nodeIds.map(() => '?').join(',');
+    const wsCounts = await this.env.DATABASE.prepare(
+      `SELECT node_id, COUNT(*) as c FROM workspaces
+       WHERE node_id IN (${placeholders})
+       AND status IN ('running', 'creating', 'recovery')
+       GROUP BY node_id`
+    ).bind(...nodeIds).all<{ node_id: string; c: number }>();
+    const countByNode = new Map((wsCounts.results ?? []).map(r => [r.node_id, r.c]));
+
     type ScoredNode = {
       id: string;
       vmSize: string;
@@ -1369,9 +1395,9 @@ export class TaskRunner extends DurableObject<TaskRunnerEnv> {
 
     const candidates: ScoredNode[] = [];
 
-    // Node capacity is determined by resource usage (CPU/memory thresholds),
-    // not by a hard workspace count limit.
     for (const node of nodes.results) {
+      // Hard workspace count limit — reject node regardless of CPU/memory metrics
+      if ((countByNode.get(node.id) ?? 0) >= maxWorkspaces) continue;
       let metrics: { cpuLoadAvg1?: number; memoryPercent?: number } | null = null;
       if (node.last_metrics) {
         try { metrics = JSON.parse(node.last_metrics); } catch { /* ignore */ }

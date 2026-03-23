@@ -279,4 +279,20 @@ describe('capacity scoring consistency', () => {
     );
     expect(trSection).toContain("health_status != 'unhealthy'");
   });
+
+  it('both enforce hard workspace count limit (MAX_WORKSPACES_PER_NODE)', () => {
+    // node-selector.ts
+    expect(selectorSource).toContain('activeCount >= maxWorkspacesPerNode');
+
+    // task-runner.ts
+    const trSection = taskRunnerSource.slice(
+      taskRunnerSource.indexOf('private async findNodeWithCapacity(')
+    );
+    expect(trSection).toContain('>= maxWorkspaces');
+  });
+
+  it('both use DEFAULT_MAX_WORKSPACES_PER_NODE as fallback', () => {
+    expect(selectorSource).toContain('DEFAULT_MAX_WORKSPACES_PER_NODE');
+    expect(taskRunnerSource).toContain('DEFAULT_MAX_WORKSPACES_PER_NODE');
+  });
 });

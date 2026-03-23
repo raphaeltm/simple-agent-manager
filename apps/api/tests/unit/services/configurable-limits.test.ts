@@ -331,8 +331,8 @@ describe('Env interface — new configurable limit env vars', () => {
     expect(indexSource).toContain('MAX_AGENT_SESSION_LABEL_LENGTH');
   });
 
-  it('no longer declares MAX_WORKSPACES_PER_NODE in Env', () => {
-    expect(indexSource).not.toContain('MAX_WORKSPACES_PER_NODE');
+  it('declares MAX_WORKSPACES_PER_NODE in Env', () => {
+    expect(indexSource).toContain('MAX_WORKSPACES_PER_NODE');
   });
 });
 
@@ -362,21 +362,21 @@ describe('workspace create — count limit removed', () => {
 });
 
 // =============================================================================
-// Source contract: task-runner DO no longer uses workspace count limit
+// Source contract: task-runner DO enforces workspace count limit
 // =============================================================================
 
-describe('task-runner DO — workspace count limit removed', () => {
+describe('task-runner DO — workspace count limit', () => {
   const doSource = readFileSync(
     resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),
     'utf8'
   );
 
-  it('no longer references MAX_WORKSPACES_PER_NODE env var', () => {
-    expect(doSource).not.toContain('MAX_WORKSPACES_PER_NODE');
+  it('references MAX_WORKSPACES_PER_NODE env var', () => {
+    expect(doSource).toContain('MAX_WORKSPACES_PER_NODE');
   });
 
-  it('no longer references DEFAULT_MAX_WORKSPACES_PER_NODE constant', () => {
-    expect(doSource).not.toContain('DEFAULT_MAX_WORKSPACES_PER_NODE');
+  it('references DEFAULT_MAX_WORKSPACES_PER_NODE constant', () => {
+    expect(doSource).toContain('DEFAULT_MAX_WORKSPACES_PER_NODE');
   });
 
   it('still reads CPU and memory thresholds from env', () => {
@@ -384,12 +384,8 @@ describe('task-runner DO — workspace count limit removed', () => {
     expect(doSource).toContain('TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT');
   });
 
-  it('no longer has wsCount in candidate objects', () => {
-    // wsCount was removed from the ScoredNode type
-    expect(doSource).not.toContain('wsCount:');
-  });
-
-  it('comment explains resource-based capacity model', () => {
-    expect(doSource).toContain('resource usage');
+  it('queries workspace count per node for limit enforcement', () => {
+    const section = doSource.slice(doSource.indexOf('findNodeWithCapacity'));
+    expect(section).toContain('>= maxWorkspaces');
   });
 });

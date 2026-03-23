@@ -1,6 +1,7 @@
 import { and, eq, inArray, count, isNotNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import {
+  DEFAULT_MAX_WORKSPACES_PER_NODE,
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
 } from '@simple-agent-manager/shared';
@@ -26,6 +27,7 @@ export interface NodeSelectionResult {
 export interface NodeSelectorEnv {
   TASK_RUN_NODE_CPU_THRESHOLD_PERCENT?: string;
   TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;
+  MAX_WORKSPACES_PER_NODE?: string;
   NODE_LIFECYCLE?: DurableObjectNamespace;
 }
 
@@ -33,6 +35,13 @@ function parseThreshold(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) return fallback;
+  return parsed;
+}
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
   return parsed;
 }
 
@@ -72,7 +81,8 @@ export function scoreNodeLoad(metrics: NodeMetrics | null): number | null {
 
 /**
  * Determine if a node has capacity for another workspace based on resource thresholds.
- * Capacity is determined purely by CPU/memory usage — no hard workspace count limit.
+ * This checks CPU/memory metrics only. The hard workspace count limit is enforced
+ * separately in selectNodeForTaskRun() after computing activeCount.
  */
 export function nodeHasCapacity(
   metrics: NodeMetrics | null,
@@ -117,6 +127,10 @@ export async function selectNodeForTaskRun(
   const memoryThreshold = parseThreshold(
     env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
     DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT
+  );
+  const maxWorkspacesPerNode = parsePositiveInt(
+    env.MAX_WORKSPACES_PER_NODE,
+    DEFAULT_MAX_WORKSPACES_PER_NODE
   );
 
   // Step 0: Try to claim a warm node (fast startup for sequential tasks)
@@ -170,6 +184,21 @@ export async function selectNodeForTaskRun(
           taskId
         );
         if (result.claimed) {
+          // Defense-in-depth: verify workspace count even for warm nodes
+          const [wsCountRow] = await db
+            .select({ count: count() })
+            .from(schema.workspaces)
+            .where(
+              and(
+                eq(schema.workspaces.nodeId, warmNode.id),
+                eq(schema.workspaces.userId, userId),
+                inArray(schema.workspaces.status, ['running', 'creating', 'recovery'])
+              )
+            );
+          const warmActiveCount = wsCountRow?.count ?? 0;
+          if (warmActiveCount >= maxWorkspacesPerNode) {
+            continue; // At capacity despite being warm — skip
+          }
           return {
             id: warmNode.id,
             status: warmNode.status,
@@ -177,7 +206,7 @@ export async function selectNodeForTaskRun(
             vmSize: warmNode.vmSize,
             vmLocation: warmNode.vmLocation,
             lastMetrics: parseMetrics(warmNode.lastMetrics),
-            activeWorkspaceCount: 0,
+            activeWorkspaceCount: warmActiveCount,
           };
         }
       } catch {
@@ -221,6 +250,12 @@ export async function selectNodeForTaskRun(
       );
 
     const activeCount = wsCountRow?.count ?? 0;
+
+    // Hard workspace count limit — reject node regardless of CPU/memory metrics
+    if (activeCount >= maxWorkspacesPerNode) {
+      continue;
+    }
+
     const metrics = parseMetrics(node.lastMetrics);
 
     const candidate: NodeCandidate = {
