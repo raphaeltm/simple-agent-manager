@@ -11,6 +11,7 @@ import { resolve } from 'node:path';
 import { nodeHasCapacity, scoreNodeLoad } from '../../src/services/node-selector';
 import type { NodeMetrics } from '@simple-agent-manager/shared';
 import {
+  DEFAULT_MAX_WORKSPACES_PER_NODE,
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
 } from '@simple-agent-manager/shared';
@@ -370,5 +371,73 @@ describe('selectNodeForTaskRun edge cases', () => {
 
   it('function signature accepts optional taskId', () => {
     expect(selectorSource).toContain('taskId?: string');
+  });
+});
+
+// =============================================================================
+// Workspace count limit — behavioral + structural
+// =============================================================================
+
+describe('workspace count limit (MAX_WORKSPACES_PER_NODE)', () => {
+  it('DEFAULT_MAX_WORKSPACES_PER_NODE is 3', () => {
+    expect(DEFAULT_MAX_WORKSPACES_PER_NODE).toBe(3);
+  });
+
+  it('NodeSelectorEnv includes MAX_WORKSPACES_PER_NODE', () => {
+    expect(selectorSource).toContain("MAX_WORKSPACES_PER_NODE?: string");
+  });
+
+  it('reads MAX_WORKSPACES_PER_NODE from env with fallback to default', () => {
+    expect(selectorSource).toContain('env.MAX_WORKSPACES_PER_NODE');
+    expect(selectorSource).toContain('DEFAULT_MAX_WORKSPACES_PER_NODE');
+  });
+
+  it('rejects nodes where activeCount >= maxWorkspacesPerNode before checking metrics', () => {
+    const capacitySection = selectorSource.slice(
+      selectorSource.indexOf('Get all running nodes')
+    );
+    // The workspace count check must appear before nodeHasCapacity
+    const wsCheckIdx = capacitySection.indexOf('activeCount >= maxWorkspacesPerNode');
+    const metricsCheckIdx = capacitySection.indexOf('nodeHasCapacity(');
+    expect(wsCheckIdx).toBeGreaterThan(-1);
+    expect(metricsCheckIdx).toBeGreaterThan(wsCheckIdx);
+  });
+
+  it('continues to next node when workspace count limit is reached', () => {
+    // The workspace count check block includes a continue statement
+    const wsCheckStart = selectorSource.indexOf('activeCount >= maxWorkspacesPerNode');
+    // Get the next ~100 chars after the check to capture the continue
+    const wsCheckBlock = selectorSource.slice(wsCheckStart, wsCheckStart + 100);
+    expect(wsCheckBlock).toContain('continue');
+  });
+});
+
+// =============================================================================
+// TaskRunner workspace count limit consistency
+// =============================================================================
+
+const taskRunnerSource = readFileSync(
+  resolve(process.cwd(), 'src/durable-objects/task-runner.ts'),
+  'utf8'
+);
+
+describe('TaskRunner findNodeWithCapacity workspace count limit', () => {
+  it('imports DEFAULT_MAX_WORKSPACES_PER_NODE', () => {
+    expect(taskRunnerSource).toContain('DEFAULT_MAX_WORKSPACES_PER_NODE');
+  });
+
+  it('reads MAX_WORKSPACES_PER_NODE from env', () => {
+    const section = taskRunnerSource.slice(
+      taskRunnerSource.indexOf('findNodeWithCapacity')
+    );
+    expect(section).toContain('MAX_WORKSPACES_PER_NODE');
+  });
+
+  it('queries workspace count per node and rejects at capacity', () => {
+    const section = taskRunnerSource.slice(
+      taskRunnerSource.indexOf('findNodeWithCapacity')
+    );
+    expect(section).toContain("status IN ('running', 'creating', 'recovery')");
+    expect(section).toContain('>= maxWorkspaces');
   });
 });

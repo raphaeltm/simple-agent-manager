@@ -981,6 +981,60 @@ func TestSessionHost_AutoSuspendDisabledWhenTimeoutZero(t *testing.T) {
 	}
 }
 
+// --- phaseTimeout tests ---
+
+func TestSessionHost_PhaseTimeout_UsesPerPhaseWhenSet(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:            "test-session",
+			WorkspaceID:          "test-workspace",
+			InitTimeoutMs:        30000,
+			InitializeTimeoutMs:  45000,
+			NewSessionTimeoutMs:  60000,
+			LoadSessionTimeoutMs: 15000,
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	fallback := 30 * time.Second
+
+	if got := host.phaseTimeout(45000, fallback); got != 45*time.Second {
+		t.Fatalf("InitializeTimeout: got %v, want 45s", got)
+	}
+	if got := host.phaseTimeout(60000, fallback); got != 60*time.Second {
+		t.Fatalf("NewSessionTimeout: got %v, want 60s", got)
+	}
+	if got := host.phaseTimeout(15000, fallback); got != 15*time.Second {
+		t.Fatalf("LoadSessionTimeout: got %v, want 15s", got)
+	}
+}
+
+func TestSessionHost_PhaseTimeout_FallsBackWhenZero(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:   "test-session",
+			WorkspaceID: "test-workspace",
+			InitTimeoutMs: 30000,
+			// Per-phase values default to 0
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	fallback := 30 * time.Second
+
+	if got := host.phaseTimeout(0, fallback); got != fallback {
+		t.Fatalf("phaseTimeout(0, 30s): got %v, want %v", got, fallback)
+	}
+}
+
 // --- Message reporter integration tests (T025) ---
 
 // mockMessageReporter captures enqueued messages for testing.

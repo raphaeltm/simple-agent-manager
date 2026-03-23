@@ -394,6 +394,52 @@ func TestVMAgentPortOverride(t *testing.T) {
 	}
 }
 
+func TestACPPhaseTimeoutsDefault(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	// Per-phase defaults are 0 (use fallback InitTimeoutMs)
+	if cfg.ACPInitializeTimeoutMs != 0 {
+		t.Fatalf("ACPInitializeTimeoutMs=%d, want 0", cfg.ACPInitializeTimeoutMs)
+	}
+	if cfg.ACPNewSessionTimeoutMs != 0 {
+		t.Fatalf("ACPNewSessionTimeoutMs=%d, want 0", cfg.ACPNewSessionTimeoutMs)
+	}
+	if cfg.ACPLoadSessionTimeoutMs != 0 {
+		t.Fatalf("ACPLoadSessionTimeoutMs=%d, want 0", cfg.ACPLoadSessionTimeoutMs)
+	}
+	// Fallback still defaults to 30s
+	if cfg.ACPInitTimeoutMs != 30000 {
+		t.Fatalf("ACPInitTimeoutMs=%d, want 30000", cfg.ACPInitTimeoutMs)
+	}
+}
+
+func TestACPPhaseTimeoutsOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("ACP_INITIALIZE_TIMEOUT_MS", "45000")
+	t.Setenv("ACP_NEW_SESSION_TIMEOUT_MS", "60000")
+	t.Setenv("ACP_LOAD_SESSION_TIMEOUT_MS", "20000")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.ACPInitializeTimeoutMs != 45000 {
+		t.Fatalf("ACPInitializeTimeoutMs=%d, want 45000", cfg.ACPInitializeTimeoutMs)
+	}
+	if cfg.ACPNewSessionTimeoutMs != 60000 {
+		t.Fatalf("ACPNewSessionTimeoutMs=%d, want 60000", cfg.ACPNewSessionTimeoutMs)
+	}
+	if cfg.ACPLoadSessionTimeoutMs != 20000 {
+		t.Fatalf("ACPLoadSessionTimeoutMs=%d, want 20000", cfg.ACPLoadSessionTimeoutMs)
+	}
+}
+
 // splitFirst splits s on the first occurrence of sep.
 func splitFirst(s, sep string) []string {
 	idx := len(sep)
