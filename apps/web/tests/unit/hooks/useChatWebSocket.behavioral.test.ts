@@ -262,13 +262,13 @@ describe('useChatWebSocket (behavioral)', () => {
     const onCatchUp = vi.fn();
     renderHook(() => useChatWebSocket({ ...defaultProps, onCatchUp }));
 
-    // First connect — catch-up fires (always catches up now)
+    // First connect — catch-up should NOT fire (loadSession handles initial load)
     await act(async () => {
       MockWebSocket.instances[0]!.simulateOpen();
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(onCatchUp).toHaveBeenCalledTimes(1);
+    expect(onCatchUp).toHaveBeenCalledTimes(0);
 
     // Disconnect
     act(() => {
@@ -280,7 +280,7 @@ describe('useChatWebSocket (behavioral)', () => {
       vi.advanceTimersByTime(1000);
     });
 
-    // Reconnect — should trigger catch-up again
+    // Reconnect — should trigger catch-up to fetch missed messages
     await act(async () => {
       MockWebSocket.instances[1]!.simulateOpen();
       // Flush the getChatSession promise
@@ -288,7 +288,7 @@ describe('useChatWebSocket (behavioral)', () => {
       await Promise.resolve();
     });
 
-    expect(onCatchUp).toHaveBeenCalledTimes(2);
+    expect(onCatchUp).toHaveBeenCalledTimes(1);
     expect(onCatchUp).toHaveBeenLastCalledWith(
       expect.arrayContaining([expect.objectContaining({ id: 'msg-catchup-1' })]),
       expect.any(Object),
@@ -365,20 +365,20 @@ describe('useChatWebSocket (behavioral)', () => {
     const onCatchUp = vi.fn();
     const { result } = renderHook(() => useChatWebSocket({ ...defaultProps, onCatchUp }));
 
-    // First connect — catch-up fires (always catches up now)
+    // First connect — catch-up should NOT fire (initial load handles it)
     await act(async () => {
       MockWebSocket.instances[0]!.simulateOpen();
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(onCatchUp).toHaveBeenCalledTimes(1);
+    expect(onCatchUp).toHaveBeenCalledTimes(0);
 
     // Disconnect
     act(() => {
       MockWebSocket.instances[0]!.simulateClose(1006);
     });
 
-    // Retry (manual) — should trigger catch-up again
+    // Retry (manual) — should trigger catch-up to fetch missed messages
     act(() => {
       result.current.retry();
     });
@@ -389,7 +389,7 @@ describe('useChatWebSocket (behavioral)', () => {
       await Promise.resolve();
     });
 
-    expect(onCatchUp).toHaveBeenCalledTimes(2);
+    expect(onCatchUp).toHaveBeenCalledTimes(1);
   });
 
   it('sends ping every 30 seconds when connected', () => {
@@ -647,25 +647,23 @@ describe('useChatWebSocket (behavioral)', () => {
   });
 
   // ===========================================================================
-  // Catch-up on first connect (TDF fix — not just reconnects)
+  // No catch-up on first connect — loadSession handles initial message load.
+  // Catch-up on first connect was introduced in c64ee4c7 and caused messages
+  // to briefly appear then disappear due to a race with loadSession's
+  // 'replace' merge strategy.
   // ===========================================================================
 
-  it('triggers catch-up on first connect (not just reconnect)', async () => {
+  it('does NOT trigger catch-up on first connect (only on reconnect)', async () => {
     const onCatchUp = vi.fn();
     renderHook(() => useChatWebSocket({ ...defaultProps, onCatchUp }));
 
-    // First connect — catch-up should fire now (changed behavior)
+    // First connect — catch-up should NOT fire
     await act(async () => {
       MockWebSocket.instances[0]!.simulateOpen();
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    expect(onCatchUp).toHaveBeenCalledOnce();
-    expect(onCatchUp).toHaveBeenCalledWith(
-      expect.arrayContaining([expect.objectContaining({ id: 'msg-catchup-1' })]),
-      expect.any(Object),
-      false,
-    );
+    expect(onCatchUp).not.toHaveBeenCalled();
   });
 });
