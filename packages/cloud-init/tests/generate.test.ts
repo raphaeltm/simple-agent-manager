@@ -510,6 +510,93 @@ describe('generateCloudInit', () => {
     });
   });
 
+  describe('cloud metadata API blocking', () => {
+    it('firewall script blocks container access to metadata API via DOCKER-USER chain', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content: string = firewallScript.content;
+      expect(content).toContain('iptables -I DOCKER-USER 1 -d "$METADATA_IP" -j DROP');
+      expect(content).toContain('ip6tables -I DOCKER-USER 1 -d "$METADATA_IP" -j DROP');
+    });
+
+    it('metadata blocking uses delete-then-insert for idempotency', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content: string = firewallScript.content;
+      // Delete existing rule first (idempotent — ignores error if rule doesn't exist)
+      expect(content).toContain('iptables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true');
+      expect(content).toContain('ip6tables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true');
+    });
+
+    it('metadata blocking uses METADATA_IP variable for the well-known endpoint', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      expect(firewallScript.content).toContain('METADATA_IP="169.254.169.254"');
+    });
+
+    it('metadata blocking appears before iptables-save (rules are persisted)', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      const content: string = firewallScript.content;
+      const metadataIdx = content.indexOf('DOCKER-USER');
+      const saveIdx = content.indexOf('iptables-save');
+      expect(metadataIdx).toBeGreaterThan(-1);
+      expect(saveIdx).toBeGreaterThan(-1);
+      expect(metadataIdx).toBeLessThan(saveIdx);
+    });
+
+    it('log message mentions metadata API blocking', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const firewallScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
+      );
+      expect(firewallScript.content).toContain('metadata API blocked');
+    });
+  });
+
+  describe('TLS key permission hardening', () => {
+    it('runcmd includes chmod/chown for TLS key as defense-in-depth', () => {
+      const config = generateCloudInit(baseVariables({
+        originCaCert: REALISTIC_CERT,
+        originCaKey: REALISTIC_KEY,
+      }));
+      const parsed = YAML.parse(config);
+
+      const runcmd: string[] = parsed.runcmd;
+      const runcmdStr = runcmd.map(String).join('\n');
+      expect(runcmdStr).toContain('chmod 600 /etc/sam/tls/origin-ca-key.pem');
+      expect(runcmdStr).toContain('chown root:root /etc/sam/tls/origin-ca-key.pem');
+    });
+
+    it('TLS key hardening is conditional on file existence', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config);
+
+      const runcmd: string[] = parsed.runcmd;
+      const runcmdStr = runcmd.map(String).join('\n');
+      // The command uses test -f ... && ... || true, so it's a no-op if file doesn't exist
+      expect(runcmdStr).toContain('test -f /etc/sam/tls/origin-ca-key.pem');
+    });
+  });
+
   describe('no template placeholders remain', () => {
     it('all {{ ... }} placeholders are replaced', () => {
       const config = generateCloudInit(baseVariables({

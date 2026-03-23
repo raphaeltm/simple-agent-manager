@@ -88,6 +88,9 @@ runcmd:
   # Restart Docker to pick up journald log driver and DNS configuration
   - systemctl restart docker
 
+  # Defense-in-depth: enforce TLS key permissions (belt-and-suspenders with write_files)
+  - test -f /etc/sam/tls/origin-ca-key.pem && chmod 600 /etc/sam/tls/origin-ca-key.pem && chown root:root /etc/sam/tls/origin-ca-key.pem || true
+
 write_files:
   - path: /etc/systemd/journald.conf.d/sam.conf
     content: |
@@ -207,12 +210,24 @@ write_files:
 
       ip6tables -P INPUT DROP
 
+      # --- Block container access to cloud metadata API ---
+      # Prevents containers from reading cloud-init user-data (which contains
+      # TLS private key and callback tokens) via the metadata endpoint.
+      # DOCKER-USER chain is in the FORWARD path — only affects container traffic,
+      # not host-level access (cloud-init itself still works).
+      # Delete-then-insert pattern ensures idempotency on daily cron refresh.
+      METADATA_IP="169.254.169.254"
+      iptables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true
+      iptables -I DOCKER-USER 1 -d "$METADATA_IP" -j DROP
+      ip6tables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true
+      ip6tables -I DOCKER-USER 1 -d "$METADATA_IP" -j DROP
+
       # Persist rules across reboots
       mkdir -p /etc/iptables
       iptables-save > /etc/iptables/rules.v4
       ip6tables-save > /etc/iptables/rules.v6
 
-      logger -t sam-firewall "Firewall configured: port $VM_AGENT_PORT restricted to Cloudflare IPs"
+      logger -t sam-firewall "Firewall configured: port $VM_AGENT_PORT restricted to Cloudflare IPs, metadata API blocked"
 
   - path: /etc/cron.daily/update-cloudflare-firewall
     permissions: '0755'
